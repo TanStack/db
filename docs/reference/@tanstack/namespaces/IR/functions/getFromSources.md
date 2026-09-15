@@ -3,8 +3,6 @@ id: getFromSources
 title: getFromSources
 ---
 
-# Function: getFromSources()
-
 ```ts
 function getFromSources(from): (
   | CollectionRef

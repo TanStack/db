@@ -3,8 +3,6 @@ id: SubQueryMustHaveFromClauseError
 title: SubQueryMustHaveFromClauseError
 ---
 
-# Class: SubQueryMustHaveFromClauseError
-
 Defined in: [packages/db/src/errors.ts:386](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L386)
 
 ## Extends

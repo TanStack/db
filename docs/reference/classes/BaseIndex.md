@@ -3,8 +3,6 @@ id: BaseIndex
 title: BaseIndex
 ---
 
-# Abstract Class: BaseIndex\<TKey\>
-
 Defined in: [packages/db/src/indexes/base-index.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L115)
 
 Base abstract class that all index types extend

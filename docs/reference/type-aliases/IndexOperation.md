@@ -3,8 +3,6 @@ id: IndexOperation
 title: IndexOperation
 ---
 
-# Type Alias: IndexOperation
-
 ```ts
 type IndexOperation = readonly ["eq", "gt", "gte", "lt", "lte", "in", "like", "ilike"];
 ```

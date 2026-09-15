@@ -3,13 +3,11 @@ id: NamespacedAndKeyedStream
 title: NamespacedAndKeyedStream
 ---
 
-# Type Alias: NamespacedAndKeyedStream
-
 ```ts
 type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>;
 ```
 
-Defined in: [packages/db/src/types.ts:909](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L909)
+Defined in: [packages/db/src/types.ts:913](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L913)
 
 A namespaced and keyed stream is a stream of rows
 This is used throughout a query pipeline and as the output from a query without

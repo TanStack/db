@@ -3,8 +3,6 @@ id: LoadSubsetRequestResult
 title: LoadSubsetRequestResult
 ---
 
-# Type Alias: LoadSubsetRequestResult
-
 ```ts
 type LoadSubsetRequestResult = true | Promise<void>;
 ```

@@ -3,8 +3,6 @@ id: stripRxdbFields
 title: stripRxdbFields
 ---
 
-# Function: stripRxdbFields()
-
 ```ts
 function stripRxdbFields<T>(obj): T;
 ```

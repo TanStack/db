@@ -3,8 +3,6 @@ id: BaseQueryBuilder
 title: BaseQueryBuilder
 ---
 
-# Class: BaseQueryBuilder\<TContext\>
-
 Defined in: [packages/db/src/query/builder/index.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L136)
 
 ## Type Parameters

@@ -3,8 +3,6 @@ id: DbProviderProps
 title: DbProviderProps
 ---
 
-# Type Alias: DbProviderProps
-
 ```ts
 type DbProviderProps = object;
 ```

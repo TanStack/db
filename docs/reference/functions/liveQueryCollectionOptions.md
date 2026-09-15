@@ -3,8 +3,6 @@ id: liveQueryCollectionOptions
 title: liveQueryCollectionOptions
 ---
 
-# Function: liveQueryCollectionOptions()
-
 ```ts
 function liveQueryCollectionOptions<TQuery, TContext, TResult>(config): CollectionConfigForContext<TContext, TResult, {
 }> & object;

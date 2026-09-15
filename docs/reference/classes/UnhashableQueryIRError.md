@@ -3,8 +3,6 @@ id: UnhashableQueryIRError
 title: UnhashableQueryIRError
 ---
 
-# Class: UnhashableQueryIRError
-
 Defined in: [packages/db/src/query/ir-stable-identity.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L54)
 
 ## Extends

@@ -3,8 +3,6 @@ id: DeltaEvent
 title: DeltaEvent
 ---
 
-# Type Alias: DeltaEvent\<TRow, TKey\>
-
 ```ts
 type DeltaEvent<TRow, TKey> = 
   | {

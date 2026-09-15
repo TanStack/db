@@ -3,8 +3,6 @@ id: InferSchemaOutput
 title: InferSchemaOutput
 ---
 
-# Type Alias: InferSchemaOutput\<T\>
-
 ```ts
 type InferSchemaOutput<T> = T extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<T> extends object ? StandardSchemaV1.InferOutput<T> : Record<string, unknown> : Record<string, unknown>;
 ```

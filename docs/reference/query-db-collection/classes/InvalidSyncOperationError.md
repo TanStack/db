@@ -3,8 +3,6 @@ id: InvalidSyncOperationError
 title: InvalidSyncOperationError
 ---
 
-# Class: InvalidSyncOperationError
-
 Defined in: [packages/query-db-collection/src/errors.ts:92](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L92)
 
 ## Extends

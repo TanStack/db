@@ -3,8 +3,6 @@ id: shouldPreserveLiveQueryWindowPageCount
 title: shouldPreserveLiveQueryWindowPageCount
 ---
 
-# Function: shouldPreserveLiveQueryWindowPageCount()
-
 ```ts
 function shouldPreserveLiveQueryWindowPageCount(options): boolean;
 ```

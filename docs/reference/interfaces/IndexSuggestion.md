@@ -3,8 +3,6 @@ id: IndexSuggestion
 title: IndexSuggestion
 ---
 
-# Interface: IndexSuggestion
-
 Defined in: [packages/db/src/indexes/index-registry.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-registry.ts#L26)
 
 ## Properties

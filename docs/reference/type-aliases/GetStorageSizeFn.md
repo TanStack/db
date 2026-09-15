@@ -3,8 +3,6 @@ id: GetStorageSizeFn
 title: GetStorageSizeFn
 ---
 
-# Type Alias: GetStorageSizeFn()
-
 ```ts
 type GetStorageSizeFn = () => number;
 ```

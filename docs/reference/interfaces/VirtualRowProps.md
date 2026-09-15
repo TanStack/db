@@ -3,8 +3,6 @@ id: VirtualRowProps
 title: VirtualRowProps
 ---
 
-# Interface: VirtualRowProps\<TKey\>
-
 Defined in: [packages/db/src/virtual-props.ts:57](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L57)
 
 Virtual properties available on every row in TanStack DB collections.

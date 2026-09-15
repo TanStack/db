@@ -3,8 +3,6 @@ id: TanStackDBError
 title: TanStackDBError
 ---
 
-# Class: TanStackDBError
-
 Defined in: [packages/db/src/errors.ts:2](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L2)
 
 ## Extends

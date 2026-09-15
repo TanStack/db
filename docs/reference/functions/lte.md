@@ -3,8 +3,6 @@ id: lte
 title: lte
 ---
 
-# Function: lte()
-
 ## Call Signature
 
 ```ts

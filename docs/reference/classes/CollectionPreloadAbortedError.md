@@ -3,8 +3,6 @@ id: CollectionPreloadAbortedError
 title: CollectionPreloadAbortedError
 ---
 
-# Class: CollectionPreloadAbortedError
-
 Defined in: [packages/db/src/errors.ts:741](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L741)
 
 A collection was cleaned up before its initial preload became ready.

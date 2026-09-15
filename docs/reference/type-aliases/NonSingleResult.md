@@ -3,13 +3,11 @@ id: NonSingleResult
 title: NonSingleResult
 ---
 
-# Type Alias: NonSingleResult
-
 ```ts
 type NonSingleResult = object;
 ```
 
-Defined in: [packages/db/src/types.ts:852](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L852)
+Defined in: [packages/db/src/types.ts:856](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L856)
 
 ## Properties
 
@@ -19,4 +17,4 @@ Defined in: [packages/db/src/types.ts:852](https://github.com/TanStack/db/blob/m
 optional singleResult: never;
 ```
 
-Defined in: [packages/db/src/types.ts:853](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L853)
+Defined in: [packages/db/src/types.ts:857](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L857)

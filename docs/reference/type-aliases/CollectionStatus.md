@@ -3,8 +3,6 @@ id: CollectionStatus
 title: CollectionStatus
 ---
 
-# Type Alias: CollectionStatus
-
 ```ts
 type CollectionStatus = "idle" | "loading" | "ready" | "error" | "cleaned-up";
 ```

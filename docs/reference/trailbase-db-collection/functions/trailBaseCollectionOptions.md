@@ -3,8 +3,6 @@ id: trailBaseCollectionOptions
 title: trailBaseCollectionOptions
 ---
 
-# Function: trailBaseCollectionOptions()
-
 ```ts
 function trailBaseCollectionOptions<TItem, TRecord, TKey>(config): CollectionConfig<TItem, TKey, never, TrailBaseCollectionUtils> & object;
 ```

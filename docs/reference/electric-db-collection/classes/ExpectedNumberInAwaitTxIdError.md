@@ -3,8 +3,6 @@ id: ExpectedNumberInAwaitTxIdError
 title: ExpectedNumberInAwaitTxIdError
 ---
 
-# Class: ExpectedNumberInAwaitTxIdError
-
 Defined in: [packages/electric-db-collection/src/errors.ts:11](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L11)
 
 ## Extends

@@ -3,8 +3,6 @@ id: LiveQueryWindowController
 title: LiveQueryWindowController
 ---
 
-# Interface: LiveQueryWindowController\<T, TKey\>
-
 Defined in: [packages/db/src/live-query-window-controller.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L514)
 
 **`Internal`**

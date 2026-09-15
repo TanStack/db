@@ -3,8 +3,6 @@ id: length
 title: length
 ---
 
-# Function: length()
-
 ```ts
 function length<T>(arg): NumericFunctionReturnType<T>;
 ```

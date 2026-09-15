@@ -3,8 +3,6 @@ id: not
 title: not
 ---
 
-# Function: not()
-
 ```ts
 function not(value): BasicExpression<boolean>;
 ```

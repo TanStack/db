@@ -3,8 +3,6 @@ id: GetKeyRequiredError
 title: GetKeyRequiredError
 ---
 
-# Class: GetKeyRequiredError
-
 Defined in: [packages/query-db-collection/src/errors.ts:32](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L32)
 
 ## Extends

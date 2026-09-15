@@ -3,8 +3,6 @@ id: DehydratedCollectionChunk
 title: DehydratedCollectionChunk
 ---
 
-# Type Alias: DehydratedCollectionChunk\<T, TKey\>
-
 ```ts
 type DehydratedCollectionChunk<T, TKey> = object;
 ```

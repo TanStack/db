@@ -3,8 +3,6 @@ id: MergeContextForJoinCallback
 title: MergeContextForJoinCallback
 ---
 
-# Type Alias: MergeContextForJoinCallback\<TContext, TNewSchema\>
-
 ```ts
 type MergeContextForJoinCallback<TContext, TNewSchema> = object & PreserveHasResultFlag<TContext["hasResult"]> & PreserveUnionFromFlag<TContext["hasUnionFrom"]> & PreserveFromSourceNames<TContext["fromSourceNames"]>;
 ```

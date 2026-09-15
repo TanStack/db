@@ -3,8 +3,6 @@ id: GetResult
 title: GetResult
 ---
 
-# Type Alias: GetResult\<TContext\>
-
 ```ts
 type GetResult<TContext> = Prettify<ResultValue<TContext>>;
 ```

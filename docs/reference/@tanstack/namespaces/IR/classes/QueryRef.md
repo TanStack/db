@@ -3,8 +3,6 @@ id: QueryRef
 title: QueryRef
 ---
 
-# Class: QueryRef
-
 Defined in: [packages/db/src/query/ir.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L103)
 
 ## Extends

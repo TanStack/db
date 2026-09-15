@@ -3,8 +3,6 @@ id: OptimisticChangeMessage
 title: OptimisticChangeMessage
 ---
 
-# Type Alias: OptimisticChangeMessage\<T, TKey\>
-
 ```ts
 type OptimisticChangeMessage<T, TKey> = 
   | ChangeMessage<T> & object
