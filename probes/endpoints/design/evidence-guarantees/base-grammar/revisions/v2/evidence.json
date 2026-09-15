@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "scope": "Repair evidence, not a repeated Design Grammar or independent range validation.",
+  "red": [
+    {
+      "finding": "F1",
+      "result": "New generated route-completion oracle failed: Assessment must retain argument alternatives."
+    },
+    {
+      "finding": "F2/H1",
+      "result": "New generated repair-lifetime oracle failed: supported instead of contradicted after stale repair."
+    },
+    {
+      "finding": "H2",
+      "result": "New generated delivery-permutation oracle failed: earlier run accepted as replay."
+    }
+  ],
+  "green": "The same three new oracle tests pass after the repairs; all 13 tests and strict typecheck pass. Seven fault controls detect injected assertion-level failures.",
+  "oracleRepairs": [
+    "Public route expression is interpreted independently and compared with forward saturation over 60 generated clause sets and eight future-fact sets.",
+    "Historical failure obligations and their resolution epochs remain in the lifecycle model; original/unrelated cases are generated separately.",
+    "Thirty generated delivery permutations and both batch orders test causal replay eligibility."
+  ],
+  "preserved": [
+    "Six base primitives; domain rules remain trusted.",
+    "Observation history, policy separation, exact claim identity and explicit epoch changes.",
+    "No production Endpoints or PG integration."
+  ],
+  "range": "Independent range remains untested."
+}

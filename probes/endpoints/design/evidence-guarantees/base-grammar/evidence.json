@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "reconstruction": [
+    {
+      "id": "X1",
+      "text": "Reconstruct L1: goal with separate effect, completion and reconciliation premises; each premise admits rule alternatives.",
+      "basis": "C1/C3/C4; E1/E2; R1/R2",
+      "result": "accounted for as conceptual relations, not an executed optimization proof"
+    },
+    {
+      "id": "X2",
+      "text": "Reconstruct L2: immutable observation with separate applicability checks for two consumers.",
+      "basis": "C2/C5; E3/E4; R3/R5",
+      "result": "accounted for; discovering full relevant context remains unresolved"
+    },
+    {
+      "id": "X3",
+      "text": "Reconstruct L3: derive one unresolved helper claim shared by callers, with per-rule missing premises.",
+      "basis": "C1/C4; E2; R8",
+      "result": "accounted for; priority and claim equivalence are not solved"
+    },
+    {
+      "id": "X4",
+      "text": "Reconstruct L4: attach scoped mismatch, retain it, link resolution to original failing law/case.",
+      "basis": "C6; E5; R4/R6/R7",
+      "result": "accounted for; automatic affected-use matching remains package responsibility"
+    },
+    {
+      "id": "X5",
+      "text": "Reconstruct L5: traverse shared observation/premise dependencies; add objection to asserted independence.",
+      "basis": "C2/C4/C6; E3/E5",
+      "result": "partial: explicit dependencies survive; hidden semantic assumptions are not discovered"
+    },
+    {
+      "id": "X6",
+      "text": "Reconstruct L6: one run holds several observations whose uses differ.",
+      "basis": "C2/C5; R10",
+      "result": "accounted for; no empirical run performed"
+    },
+    {
+      "id": "X7",
+      "text": "Reconstruct L7: origin distinct from proposed argument and consumer permission.",
+      "basis": "C2/C4; R1/R9",
+      "result": "accounted for as contract; process isolation/security unproved"
+    },
+    {
+      "id": "X8",
+      "text": "Reconstruct L8: keep requested goal while supporting narrower claims and generating remaining work.",
+      "basis": "C1; R8",
+      "result": "accounted for; numerical prioritization remains absent"
+    }
+  ],
+  "range": {
+    "status": "untested",
+    "reason": "No independent marginal case supplied. Endpoints examples were used in extraction and cannot be range evidence. The separately authorized shadcn study is not a blind evaluator."
+  },
+  "exclusion": [
+    {
+      "id": "N1",
+      "text": "Agent attaches an arbitrary green observation to a conclusion with no registered admission rule.",
+      "basis": "R1/R2",
+      "result": "excluded by construction; not executed"
+    },
+    {
+      "id": "N2",
+      "text": "Value agreement is used as a proof of measured latency improvement.",
+      "basis": "R10",
+      "result": "excluded unless a domain rule itself makes the unsound inference; illustrates trust boundary"
+    },
+    {
+      "id": "N3",
+      "text": "A newer unrelated green campaign clears a known mismatch.",
+      "basis": "R6/R7",
+      "result": "excluded by construction; not executed"
+    }
+  ],
+  "losses": [
+    {
+      "id": "D1",
+      "text": "No automatic discovery of all requirements, context dependencies or shared reasoning.",
+      "basis": "U2/U5"
+    },
+    {
+      "id": "D2",
+      "text": "Source details about endpoint refresh and human policy remain in domain rules, not erased as solved.",
+      "basis": "U1/U4"
+    },
+    {
+      "id": "D3",
+      "text": "Dependency-graph framing may underrepresent human judgment and rule-authoring cost.",
+      "basis": "source distortion and P9"
+    },
+    {
+      "id": "D4",
+      "text": "Local record integrity does not enforce direct reporting against an agent controlling the host.",
+      "basis": "U6"
+    }
+  ],
+  "controlKind": "Same-analyst conceptual reconstruction and ablation, not independent validation or runtime tests."
+}

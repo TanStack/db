@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "instrument": "design-grammar",
+  "authorization": "yup, ok, that's our work I think — first design grammar on the base system and then prototype that & then create the workflows for creating claims/checkers that are packaged with the base system — then Endpoints uses the base system + N claims/checks",
+  "observationInference": "Source statements remain research/user requirements. C3/C4 representation, finite support rule and exact-identity prototype boundary are inferences, not observed runtime behavior.",
+  "ablations": [
+    {
+      "id": "A-C1",
+      "target": "C1",
+      "removedEffect": "Without it evidence can be attached but no exact obligation or remainder is identifiable.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-C2",
+      "target": "C2",
+      "removedEffect": "Without it arguments collapse the recorded event into a current interpretation; one run cannot preserve distinct outcomes.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-C3",
+      "target": "C3",
+      "removedEffect": "Without it every proposed edge could grant support or all domain logic moves into the base.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-C4",
+      "target": "C4",
+      "removedEffect": "Without it alternative methods and conjunctive obligations flatten into a bag of attachments.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-C5",
+      "target": "C5",
+      "removedEffect": "Without it one observation can silently gain provider scope or stale evidence can regain support.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-C6",
+      "target": "C6",
+      "removedEffect": "Without it monotone accumulation of green observations conceals compatible failures.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-E1",
+      "target": "E1",
+      "removedEffect": "Loses checkable meaning of support.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-E2",
+      "target": "E2",
+      "removedEffect": "Loses AND/OR distinction; allows one strong premise to replace another.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-E3",
+      "target": "E3",
+      "removedEffect": "Loses measured outcomes and visible shared blind spots.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-E4",
+      "target": "E4",
+      "removedEffect": "Loses compatible reuse or admits invalid cross-scope transfer.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-E5",
+      "target": "E5",
+      "removedEffect": "Loses original-failure identity or lets arbitrary newer passes clear a contradiction.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R1",
+      "target": "R1",
+      "removedEffect": "An agent can add a support edge that certifies itself.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R2",
+      "target": "R2",
+      "removedEffect": "Conjunction, alternatives or finite grounding become unsound.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R3",
+      "target": "R3",
+      "removedEffect": "Admits stub-to-provider or cross-configuration transfer.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R4",
+      "target": "R4",
+      "removedEffect": "History and present interpretation collapse.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R5",
+      "target": "R5",
+      "removedEffect": "Code reversion silently reinstates stale authority.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R6",
+      "target": "R6",
+      "removedEffect": "A green alternative or agent dismissal bypasses a recorded counterexample.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R7",
+      "target": "R7",
+      "removedEffect": "A different test can replace the failing obligation.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R8",
+      "target": "R8",
+      "removedEffect": "Duplicates caller tasks or closes broad obligations after narrow findings.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R9",
+      "target": "R9",
+      "removedEffect": "Unknown is silently turned into unconditional optimization veto or permission.",
+      "disposition": "retain"
+    },
+    {
+      "id": "A-R10",
+      "target": "R10",
+      "removedEffect": "Claims latency from read counts or records infrastructure failure as correctness evidence.",
+      "disposition": "retain"
+    }
+  ],
+  "demotions": [
+    {
+      "id": "A-run",
+      "text": "Run is shared provenance metadata of observations, not an additional logical primitive.",
+      "basis": "L6"
+    },
+    {
+      "id": "A-task",
+      "text": "Task is a projection of a requested claim and uncovered rule premises, not an authority-bearing primitive.",
+      "basis": "L3"
+    },
+    {
+      "id": "A-score",
+      "text": "No universal evidence confidence score survives; retain claim-specific reasons.",
+      "basis": "L5"
+    },
+    {
+      "id": "A-package",
+      "text": "Package is a distribution boundary for rules/claims/workflows, not an independently proved runtime module.",
+      "basis": "user direction"
+    },
+    {
+      "id": "A-policy",
+      "text": "Policy is a consumer input, outside proof support; no policy order selected.",
+      "basis": "L7"
+    }
+  ],
+  "modularity": "No existing interface/integration test establishes independent implementation modules. Adjacent forms use rule combination, not modular operator claims.",
+  "freezeSequence": [
+    "source snapshot",
+    "provisional preservation and extraction",
+    "reconstruction and all component ablations",
+    "range untested and nearby negative exclusions",
+    "three distinct rule-combination forms",
+    "freeze Model/Evidence/Process before human brief"
+  ],
+  "briefSupport": {
+    "central": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "R1",
+      "U1"
+    ],
+    "alternatives": [
+      "E2",
+      "R2",
+      "X1"
+    ],
+    "gaps": [
+      "R8",
+      "X3"
+    ],
+    "history": [
+      "R4",
+      "R6",
+      "R7",
+      "X4"
+    ],
+    "trust": [
+      "R9",
+      "U1",
+      "U6"
+    ],
+    "forms": [
+      "F1",
+      "F2",
+      "F3"
+    ],
+    "limits": [
+      "U2",
+      "U3",
+      "U4",
+      "U5",
+      "U6",
+      "U7",
+      "D1",
+      "D2",
+      "D3",
+      "D4"
+    ]
+  }
+}

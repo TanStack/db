@@ -1,0 +1,46 @@
+{
+  "status": "frozen-before-audits",
+  "files": [
+    {
+      "original": "probes/evidence-base/kernel.ts",
+      "snapshot": "snapshot/kernel.ts",
+      "sha256": "68fddefa66c7a8aba7f1da85e902437b59462d25673c03a4efa4c94ccbfc26c6"
+    },
+    {
+      "original": "probes/evidence-base/endpoints.ts",
+      "snapshot": "snapshot/endpoints.ts",
+      "sha256": "add7403d217cc32ee546344a9f250e595dd7a1eefc8e835a29be9bbc5f6728c0"
+    },
+    {
+      "original": "probes/evidence-base/kernel.test.mjs",
+      "snapshot": "snapshot/kernel.test.mjs",
+      "sha256": "627e49bbdd7dde197c43c88ab70568d566868ac4e2ec7807de9f3240d3b943a6"
+    },
+    {
+      "original": "probes/evidence-base/README.md",
+      "snapshot": "snapshot/README.md",
+      "sha256": "94130b211ca7905a8bbdd96e8e65827d8432e140e56c3876dde4a3c5fc194813"
+    },
+    {
+      "original": "probes/evidence-base/workflows/README.md",
+      "snapshot": "snapshot/workflows/README.md",
+      "sha256": "7cb9c9dcd533066de1268a9cdf22d124f35043487050fb55d3dba2c1d3d00260"
+    },
+    {
+      "original": "probes/evidence-base/workflows/design-check.md",
+      "snapshot": "snapshot/workflows/design-check.md",
+      "sha256": "c80c7bbbb73218e3cccb728b479d62a862570a7a3de3845422a8241def4f65fb"
+    },
+    {
+      "original": "probes/evidence-base/workflows/maintain-evidence.md",
+      "snapshot": "snapshot/workflows/maintain-evidence.md",
+      "sha256": "37aefd033053a1c965baf69a17dc68e5e128f6b92cef7f241762403813ca3c20"
+    },
+    {
+      "original": "probes/evidence-base/workflows/repair-rule.md",
+      "snapshot": "snapshot/workflows/repair-rule.md",
+      "sha256": "8b88be4d52099a2caa6126a7d85c35c8901ec94ea745917adb9602bdbdf3b2a8"
+    }
+  ],
+  "contractNote": "Extracted base contract; adjacent forms omitted from blind auditor packet. Original grammar remains unchanged."
+}

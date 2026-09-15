@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "kind": "User-authorized design/prototype repair",
+  "preservedInputs": [
+    "../../freeze.json",
+    "../../../base-stress/manifest.json"
+  ],
+  "changes": [
+    "E2",
+    "E5",
+    "R6",
+    "R7",
+    "R8"
+  ],
+  "control": "Three red assertions captured before implementation; same tests green afterward. Temporary production-code mutations test sensitivity. Original frozen source/model/evidence/process and audit snapshots remain unchanged.",
+  "noClaim": "No new full Design Grammar, independent post-repair hostile audit, or agent-workflow effectiveness measurement was run."
+}

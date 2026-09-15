@@ -1,0 +1,367 @@
+{
+  "version": 2,
+  "mode": "repair-specification after Fracture Scan and Hostile Assay; not a new full instrument run",
+  "source": {
+    "path": "source.md",
+    "sha256": "57e1d062d9159344d86d01149ba41fcbd3761380c98daac6a2e020d56ae3d6b9"
+  },
+  "target": "Reusable evidence base with domain-owned claim/check rules; authoring workflows are packaged separately, Endpoints is a consumer.",
+  "preservationStatus": "Provisional; normalized from the source and explicit user requirements, not user-confirmed exact equivalence.",
+  "preservation": [
+    {
+      "id": "P1",
+      "text": "Reusable base mechanisms are separate from domain semantic rules and authoring workflows.",
+      "basis": "user-required: base-system direction"
+    },
+    {
+      "id": "P2",
+      "text": "A requirement remains visible without evidence; useful partial evidence does not close its remainder.",
+      "basis": "source: L1/L8"
+    },
+    {
+      "id": "P3",
+      "text": "Alternatives may establish one premise; every conjunctive premise must hold.",
+      "basis": "source: L1"
+    },
+    {
+      "id": "P4",
+      "text": "Evidence applies to named claims and contexts, with shared compatible uses and explicit freshness.",
+      "basis": "source: L2/L3; R22 as captured in source"
+    },
+    {
+      "id": "P5",
+      "text": "A directly reported relevant counterexample cannot be erased by newer unrelated passes; repair exercises the same failure.",
+      "basis": "source: L4"
+    },
+    {
+      "id": "P6",
+      "text": "Run identity, individual observations, agent interpretation and consumer permission remain distinct.",
+      "basis": "source: L6/L7"
+    },
+    {
+      "id": "P7",
+      "text": "Unknown support does not secretly choose a strictness policy; actual contradiction stays visible.",
+      "basis": "source: L7; user-reviewed policy deferred"
+    },
+    {
+      "id": "P8",
+      "text": "Evidence inputs include code, data, environment, configuration, methods and external dependencies; recorded context is not proof of capture completeness.",
+      "basis": "source: P23/L2"
+    },
+    {
+      "id": "P9",
+      "text": "Shared tasks and shared semantic blind spots can be explained without turning counts into confidence.",
+      "basis": "source: L3/L5"
+    },
+    {
+      "id": "P10",
+      "text": "Checks and inference rules have a declared trust boundary; empirical passes do not silently become universal proofs.",
+      "basis": "user-required: claim-specific proof systems; analyst inference about admission boundary"
+    },
+    {
+      "id": "P11",
+      "text": "No code reversion renews an old test; rubric-only reassessment is distinct; check startup failure stays a CI error.",
+      "basis": "source: L2/L6 and captured R9/R19/R22"
+    },
+    {
+      "id": "P12",
+      "text": "The base does not require a graph product, theorem prover, authentication rewrite or live-client recovery.",
+      "basis": "source: arrangements and rejected recombinations; user base target"
+    },
+    {
+      "id": "P13",
+      "text": "Public explanations preserve completion alternatives; resolution applicability and replay causality are explicit and separately testable.",
+      "basis": "audit findings and user-authorized repair"
+    }
+  ],
+  "primitives": [
+    {
+      "id": "C1",
+      "text": "Claim: a versioned predicate about a subject under explicit conditions. A requested claim exists before support.",
+      "basis": "L1/L2/L8",
+      "job": "States both goals and intermediate premises; carries the uncovered requirement.",
+      "ablation": "Without it evidence can be attached but no exact obligation or remainder is identifiable."
+    },
+    {
+      "id": "C2",
+      "text": "Observation: an immutable reported result tied to one execution, method, origin and captured context.",
+      "basis": "L6/L7/P23",
+      "job": "Separates observed outcome from inferred conclusion. Run metadata can be shared.",
+      "ablation": "Without it arguments collapse the recorded event into a current interpretation; one run cannot preserve distinct outcomes."
+    },
+    {
+      "id": "C3",
+      "text": "Rule: a versioned, registered acceptance or inference procedure declaring its premises and side conditions.",
+      "basis": "L1 plus user base/package split",
+      "status": "inferred representation",
+      "job": "Separates domain semantics from generic argument traversal.",
+      "ablation": "Without it every proposed edge could grant support or all domain logic moves into the base."
+    },
+    {
+      "id": "C4",
+      "text": "Argument: a proposed application of a rule to observations and/or premise arguments for a claim.",
+      "basis": "L1/L5; user proof-system direction",
+      "status": "inferred representation",
+      "job": "Retains alternative support routes and their actual dependency paths.",
+      "ablation": "Without it alternative methods and conjunctive obligations flatten into a bag of attachments."
+    },
+    {
+      "id": "C5",
+      "text": "Applicability condition: a rule-owned relation between captured and requested context, with explicit unknown results.",
+      "basis": "L2/P23/P24",
+      "job": "Supports compatible reuse, expiry and incomplete capture without equating hash equality with fresh observation.",
+      "ablation": "Without it one observation can silently gain provider scope or stale evidence can regain support."
+    },
+    {
+      "id": "C6",
+      "text": "Challenge: a targeted objection or reported counterexample plus its unresolved/resolution history.",
+      "basis": "L4/L5/L7",
+      "job": "Separates speculative critique from an observed mismatch and prevents unrelated green results erasing it.",
+      "ablation": "Without it monotone accumulation of green observations conceals compatible failures."
+    }
+  ],
+  "relations": [
+    {
+      "id": "E1",
+      "text": "An argument concludes one claim using a named rule.",
+      "basis": "L1",
+      "ablation": "Loses checkable meaning of support."
+    },
+    {
+      "id": "E2",
+      "text": "Each required premise is a claim needing support; arguments for the same claim are alternatives. The public explanation preserves this AND/OR structure, including each route and its jointly required premise assessments; a flat gap inventory is a convenience view only.",
+      "basis": "L1",
+      "ablation": "Loses AND/OR distinction; allows one strong premise to replace another.",
+      "repairBasis": "base-stress F1/F2/H1/H2; user requested repair",
+      "status": "chosen bounded implementation contract"
+    },
+    {
+      "id": "E3",
+      "text": "An argument cites observations with their run and semantic dependencies.",
+      "basis": "L5/L6",
+      "ablation": "Loses measured outcomes and visible shared blind spots."
+    },
+    {
+      "id": "E4",
+      "text": "Each use of evidence is assessed against the requested context and rule.",
+      "basis": "L2",
+      "ablation": "Loses compatible reuse or admits invalid cross-scope transfer."
+    },
+    {
+      "id": "E5",
+      "text": "A challenge targets a claim/use/inference. Resolution records link to replay evidence; history persists while current applicability is assessed on every use.",
+      "basis": "L4/L5",
+      "ablation": "Loses original-failure identity or lets arbitrary newer passes clear a contradiction.",
+      "repairBasis": "base-stress F1/F2/H1/H2; user requested repair",
+      "status": "chosen bounded implementation contract"
+    }
+  ],
+  "rules": [
+    {
+      "id": "R1",
+      "text": "Only registered rules can admit arguments; registered code remains a trusted semantic extension, not a theorem proved by the base.",
+      "basis": "user split; L7",
+      "ablation": "An agent can add a support edge that certifies itself."
+    },
+    {
+      "id": "R2",
+      "text": "A rule application must establish every declared premise and side condition; any acceptable alternative argument may establish one premise. Cyclic support without independent grounding is insufficient.",
+      "basis": "L1; cycle exclusion inferred",
+      "ablation": "Conjunction, alternatives or finite grounding become unsound."
+    },
+    {
+      "id": "R3",
+      "text": "Applicability is checked for each use. Unknown matching is unresolved rather than an invented proof of compatibility.",
+      "basis": "L2",
+      "ablation": "Admits stub-to-provider or cross-configuration transfer."
+    },
+    {
+      "id": "R4",
+      "text": "Original observations are not overwritten; new assessments/rules cannot rewrite what happened.",
+      "basis": "L4/L6",
+      "ablation": "History and present interpretation collapse."
+    },
+    {
+      "id": "R5",
+      "text": "Code/context transitions can stale results; returning to prior bytes does not itself renew test evidence. Reassessment cannot renew stale observations.",
+      "basis": "L2/R22",
+      "ablation": "Code reversion silently reinstates stale authority."
+    },
+    {
+      "id": "R6",
+      "text": "A relevant counterexample defeats affected support until an applicable resolution. In the coarse epoch prototype, a resolution expires when its replay epoch is no longer current. Historical resolutions remain append-only; expired ones may receive new applicable replay records.",
+      "basis": "L4/L5; user instrument clarification",
+      "ablation": "A green alternative or agent dismissal bypasses a recorded counterexample.",
+      "repairBasis": "base-stress F1/F2/H1/H2; user requested repair",
+      "status": "chosen bounded implementation contract"
+    },
+    {
+      "id": "R7",
+      "text": "Repair resolution must re-exercise the original law and full case in a fresh check invoked after the failure was recorded. The runner records the last committed observation at check invocation. Completion order, run-ID magnitude and array order cannot establish causality. Checks must execute fresh measurements rather than return cached earlier results. Same-run repair is conservatively rejected.",
+      "basis": "L4",
+      "ablation": "A different test can replace the failing obligation.",
+      "repairBasis": "base-stress F1/F2/H1/H2; user requested repair",
+      "status": "chosen bounded implementation contract"
+    },
+    {
+      "id": "R8",
+      "text": "Derive investigation work from uncovered premises while preserving the alternative route around each set of jointly required premises. Shared claim identity deduplicates work without merging its logical roles. Notes, task closure and flat gap arrays do not establish support.",
+      "basis": "L3/L8",
+      "ablation": "Duplicates caller tasks or closes broad obligations after narrow findings.",
+      "repairBasis": "base-stress F1/F2/H1/H2; user requested repair",
+      "status": "chosen bounded implementation contract"
+    },
+    {
+      "id": "R9",
+      "text": "Return support, gaps and challenges independently of consumer permission and check severity.",
+      "basis": "L7",
+      "ablation": "Unknown is silently turned into unconditional optimization veto or permission."
+    },
+    {
+      "id": "R10",
+      "text": "Record each observation under its own measured law; neither origin nor a green aggregate grants unmeasured claims. A check unable to run yields an operational error outside the evidence history.",
+      "basis": "L6/L7",
+      "ablation": "Claims latency from read counts or records infrastructure failure as correctness evidence."
+    }
+  ],
+  "overlaps": [
+    {
+      "id": "O1",
+      "text": "A shared premise belongs to several argument paths; its gap and contradiction affect every applicable dependent use.",
+      "basis": "L1/L3/L4"
+    },
+    {
+      "id": "O2",
+      "text": "One observation/run may support multiple claims without merging their laws or acceptance rules.",
+      "basis": "L2/L6"
+    },
+    {
+      "id": "O3",
+      "text": "Method/comparator/context dependencies overlap several checks; shared dependency is inspectable but not proof of a shared blind spot.",
+      "basis": "L5"
+    }
+  ],
+  "forms": [
+    {
+      "id": "F1",
+      "text": "Deterministic certificate admission",
+      "basis": "L1/L2; user compiler-check requirements",
+      "route": "rule combination",
+      "change": "A compiler/certificate checker supplies observations accepted by a registered leaf rule.",
+      "preserves": [
+        "P1",
+        "P2",
+        "P3",
+        "P4",
+        "P6",
+        "P10"
+      ],
+      "newStructure": "An explicit semantic trust root for an acceptance rule.",
+      "loss": "Completeness of compiler analysis and certificate checker are external obligations."
+    },
+    {
+      "id": "F2",
+      "text": "Scoped empirical admission",
+      "basis": "L4/L6; user oracle requirements",
+      "route": "rule combination",
+      "change": "A generated run supplies agreement and work observations; a rule admits only the declared campaign scope.",
+      "preserves": [
+        "P2",
+        "P4",
+        "P5",
+        "P6",
+        "P8",
+        "P10",
+        "P11"
+      ],
+      "newStructure": "Campaign/case/law identity and repair linkage.",
+      "loss": "No generalization beyond the admitted scope; false-green oracles remain possible."
+    },
+    {
+      "id": "F3",
+      "text": "Rubric-assessed source inspection",
+      "basis": "L2/L7; reviewed same-agent assessments",
+      "route": "rule combination",
+      "change": "An agent attaches source passages and a rule assesses them under a declared rubric.",
+      "preserves": [
+        "P2",
+        "P4",
+        "P6",
+        "P7",
+        "P9",
+        "P10"
+      ],
+      "newStructure": "A review procedure with explicit limits and provenance.",
+      "loss": "Interpretive validity depends on the rubric and reviewer; it is not deterministic source-semantic proof."
+    }
+  ],
+  "unresolved": [
+    {
+      "id": "U1",
+      "text": "Rule validity: the base can validate a declared procedure was used, not prove arbitrary plugin code sound.",
+      "basis": "P10"
+    },
+    {
+      "id": "U2",
+      "text": "Applicability/claim equivalence: exact identity is implementable; subsumption and semantic equivalence require domain rules.",
+      "basis": "L2/L3"
+    },
+    {
+      "id": "U3",
+      "text": "Counterexample mapping across changed versions or strategies needs domain judgments; neither newest-wins nor global blocking is justified.",
+      "basis": "L4"
+    },
+    {
+      "id": "U4",
+      "text": "Missing-support severity and permission policy are deferred; support assessment must not choose them.",
+      "basis": "L7"
+    },
+    {
+      "id": "U5",
+      "text": "Complete context capture and hidden semantic dependency detection remain unsolved.",
+      "basis": "L2/L5"
+    },
+    {
+      "id": "U6",
+      "text": "No proved hostile-process boundary is supplied by local APIs. Agents allowed to edit the runner can subvert it.",
+      "basis": "L7"
+    },
+    {
+      "id": "U7",
+      "text": "No total automatic investigation-priority order or generic proof search is derived.",
+      "basis": "L3"
+    }
+  ],
+  "dynamics": [
+    "R1",
+    "R2",
+    "R4",
+    "R5",
+    "R6",
+    "R7",
+    "R8"
+  ],
+  "constraints": [
+    "R3",
+    "R9",
+    "R10"
+  ],
+  "boundaryConditions": [
+    "Local trusted tooling; not a hostile-process security design.",
+    "Finite proposed arguments; no arbitrary theorem search.",
+    "Prototype may use exact identity and explicit context epochs, marking richer matching unsupported.",
+    "Source is a research arrangement, not a deployed evidence implementation.",
+    "Epoch changes conservatively reactivate same-claim failures until current replays resolve them.",
+    "Only a separate check started after the recorded failure can resolve it. Trusted checker invocation must execute the check; the base cannot prove the callback did not return cached values.",
+    "Recursive route reports can be large; no compression or general logical-equivalence claim is made."
+  ],
+  "parentFreeze": {
+    "version": 1,
+    "files": {
+      "source.md": "57e1d062d9159344d86d01149ba41fcbd3761380c98daac6a2e020d56ae3d6b9",
+      "model.json": "68f48b955fc1b0cd02d39c88ffefdc3152573cd689cfc59db876c1c4d55c8f64",
+      "evidence.json": "79c1eaf24d50cc152e9180ff27221bec3d4a26b9756cb493fef304e8831648cb",
+      "process.json": "938e8265b1bea2a5121690b3debdaa6eebaecaa232552fa7206e7cad12c50f88"
+    }
+  }
+}
