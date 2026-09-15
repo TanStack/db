@@ -23,6 +23,24 @@ export type VirtualPropsRefProxy<
 }
 
 /**
+ * Resolves the ref type for a single field of a row. Optionality and
+ * nullability are hoisted out of the field type before the object check, so
+ * an optional nested object (`Foo | undefined`) still produces a traversable
+ * branch proxy instead of collapsing to an opaque leaf. The nullish part is
+ * re-added to the union so optional chaining (`row.a?.b`) type-checks the
+ * same way it does on the query builder's `Ref` type.
+ */
+type SingleRowField<V, TKey extends string | number> = [
+  NonNullable<V>,
+] extends [never]
+  ? RefLeaf<V>
+  : NonNullable<V> extends Record<string, any>
+    ?
+        | (SingleRowRefProxy<NonNullable<V>, TKey> & RefProxy<NonNullable<V>>)
+        | Extract<V, null | undefined>
+    : RefLeaf<V>
+
+/**
  * Type for creating a RefProxy for a single row/type without namespacing
  * Used in collection indexes and where clauses
  *
@@ -35,9 +53,7 @@ export type SingleRowRefProxy<
 > =
   T extends Record<string, any>
     ? {
-        [K in keyof T]: T[K] extends Record<string, any>
-          ? SingleRowRefProxy<T[K], TKey> & RefProxy<T[K]>
-          : RefLeaf<T[K]>
+        [K in keyof T]: SingleRowField<T[K], TKey>
       } & RefProxy<T> &
         VirtualPropsRefProxy<TKey>
     : RefProxy<T> & VirtualPropsRefProxy<TKey>
