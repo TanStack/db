@@ -252,7 +252,8 @@ export type RefetchFn = (opts?: {
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
- * Direct writes bypass the normal query/mutation flow and write directly to the synced data store.
+ * Direct writes bypass optimistic mutations and write to the synced data store.
+ * Eager collections patch Query cache; on-demand collections revalidate scoped entries.
  * @template TItem - The type of items stored in the collection
  * @template TKey - The type of the item keys
  * @template TInsertInput - The type accepted for insert operations
@@ -266,15 +267,15 @@ export interface QueryCollectionUtils<
 > extends UtilsRecord {
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
-  /** Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update */
+  /** Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
   writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
-  /** Update one or more items directly in the synced data store without triggering a query refetch or optimistic update */
+  /** Update items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
   writeUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
-  /** Delete one or more items directly from the synced data store without triggering a query refetch or optimistic update */
+  /** Delete items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
   writeDelete: (keys: TKey | Array<TKey>) => void
-  /** Insert or update one or more items directly in the synced data store without triggering a query refetch or optimistic update */
+  /** Insert or update items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
   writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
-  /** Execute multiple write operations as a single atomic batch to the synced data store */
+  /** Execute direct writes as one atomic batch, then update or revalidate the Query cache */
   writeBatch: (callback: () => void) => void
 
   // Query Observer State (getters)
@@ -804,6 +805,10 @@ export function queryCollectionOptions(
   // queryKey → QueryObserver's unsubscribe function
   const unsubscribes = new Map<string, () => void>()
   const pendingReadyUnsubscribes = new Map<string, Set<() => void>>()
+  const manualWriteSnapshots = new Map<
+    string,
+    { data: unknown; dataUpdateCount: number }
+  >()
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -1736,6 +1741,21 @@ export function queryCollectionOptions(
             return
           }
 
+          const manualWriteSnapshot = manualWriteSnapshots.get(hashedQueryKey)
+          if (manualWriteSnapshot) {
+            const currentQuery = state.observers
+              .get(hashedQueryKey)
+              ?.getCurrentQuery()
+            if (
+              currentQuery?.state.dataUpdateCount ===
+                manualWriteSnapshot.dataUpdateCount &&
+              currentQuery.state.data === manualWriteSnapshot.data
+            ) {
+              return
+            }
+            manualWriteSnapshots.delete(hashedQueryKey)
+          }
+
           if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
             const query = queryClient.getQueryCache().find({
               queryKey,
@@ -1770,7 +1790,14 @@ export function queryCollectionOptions(
               applySuccessfulResult(queryKey, result, undefined, signal),
             )
           }
-        } else if (result.isError) {
+        } else {
+          // A reset/recreation can reuse a dataUpdateCount. Retire the old
+          // snapshot marker on the intervening non-success notification so a
+          // fresh authoritative result cannot be mistaken for stale data.
+          manualWriteSnapshots.delete(hashedQueryKey)
+        }
+
+        if (result.isError) {
           const isNewError =
             result.errorUpdatedAt !== state.lastErrorUpdatedAt ||
             result.error !== state.lastError
@@ -1909,6 +1936,7 @@ export function queryCollectionOptions(
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
       invalidatePendingResultApplication(hashedQueryKey)
+      manualWriteSnapshots.delete(hashedQueryKey)
 
       const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
       const rowsToDelete: Array<any> = []
@@ -2001,6 +2029,7 @@ export function queryCollectionOptions(
         persistedMetadata?.row.scanPersisted
       ) {
         invalidatePendingResultApplication(hashedQueryKey)
+        manualWriteSnapshots.delete(hashedQueryKey)
         begin()
         metadata.collection.set(
           `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
@@ -2254,19 +2283,61 @@ export function queryCollectionOptions(
   }
 
   /**
-   * Updates the query cache with new items for ALL query keys matching this collection,
-   * including stale/inactive cache entries from destroyed observers.
+   * Updates Query cache state after a manual write.
    *
-   * This prevents ghost items: when an observer is destroyed but gcTime > 0, TanStack Query
-   * keeps the cached data. If syncedData changes (via writeDelete/writeInsert/writeUpdate)
-   * after the observer is destroyed, the stale cache becomes inconsistent. When a new observer
-   * later picks up this stale cache, makeQueryResultHandler would create spurious sync
-   * operations (re-inserting deleted items, reverting updated values, etc).
-   *
-   * By updating all cache entries (active and stale), we ensure the cache always reflects
-   * the current syncedData state.
+   * An on-demand cache entry belongs to one exact queryFn result and may be
+   * predicate-, order-, or window-scoped. A normalized collection snapshot
+   * cannot preserve that shape. Revalidate actively owned, enabled observers
+   * and remove every other scoped entry so a later owner fetches it again.
+   * Eager collections retain their single full-result cache patch.
    */
   const updateCacheData = (items: Array<any>): void => {
+    if (syncMode === `on-demand`) {
+      const revalidatingQueries = new Set<string>()
+
+      for (const [hashedQueryKey, observer] of state.observers) {
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) <= 0) {
+          continue
+        }
+
+        const query = observer.getCurrentQuery()
+        if (query.isDisabled()) {
+          continue
+        }
+
+        revalidatingQueries.add(hashedQueryKey)
+        manualWriteSnapshots.set(hashedQueryKey, {
+          data: query.state.data,
+          dataUpdateCount: query.state.dataUpdateCount,
+        })
+
+        const refetchObserver = () => {
+          if (
+            state.observers.get(hashedQueryKey) !== observer ||
+            (queryRefCounts.get(hashedQueryKey) ?? 0) <= 0
+          ) {
+            return
+          }
+          observer.refetch().catch(() => {
+            // The query result handler owns error publication.
+          })
+        }
+
+        const deferredRefresh = writeContext?.collection.deferDataRefresh
+        if (deferredRefresh) {
+          void deferredRefresh.then(refetchObserver, refetchObserver)
+        } else {
+          refetchObserver()
+        }
+      }
+
+      queryClient.removeQueries({
+        queryKey: baseKey,
+        predicate: (query) => !revalidatingQueries.has(hashKey(query.queryKey)),
+      })
+      return
+    }
+
     const allCached = queryClient.getQueryCache().findAll({ queryKey: baseKey })
 
     if (allCached.length > 0) {

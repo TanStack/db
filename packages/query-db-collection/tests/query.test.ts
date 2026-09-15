@@ -8232,10 +8232,10 @@ describe(`QueryCollection`, () => {
     })
   })
 
-  describe(`On-demand collection directWrite cache update`, () => {
-    it(`should update query cache for all active query keys when using writeUpdate with computed queryKey`, async () => {
-      // Ensures writeUpdate on on-demand collections with computed query keys
-      // updates all active cache keys to prevent data loss on remount
+  describe(`On-demand collection directWrite cache revalidation`, () => {
+    it(`should revalidate an active computed queryKey after writeUpdate`, async () => {
+      // Ensures writeUpdate on on-demand collections revalidates the active
+      // computed query key so the authoritative result survives a remount.
 
       const items: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
@@ -8290,11 +8290,13 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Perform a direct write update
+      items[0] = { ...items[0]!, name: `Updated Item 1` }
       collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
       // Verify the collection reflects the update
       expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
       // IMPORTANT: Simulate remount by cleaning up and recreating the live query
       // This is where the bug manifests - the updated data should persist
@@ -8317,9 +8319,7 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // BUG ASSERTION: After remount, the updated data should persist
-      // With the bug, this will fail because writeUpdate updated the wrong cache key
-      // and on remount, the stale cached data is loaded instead
+      // After remount, the authoritative updated data should persist.
       expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
       // Cleanup
@@ -8327,7 +8327,7 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
 
-    it(`should update query cache for static queryKey with where clause in on-demand mode`, async () => {
+    it(`should revalidate a scoped static queryKey after writeUpdate`, async () => {
       // Scenario: static queryKey + on-demand mode + where clause
       // The where clause causes a computed query key to be generated
 
@@ -8376,10 +8376,12 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Perform a direct write update
+      items[0] = { ...items[0]!, name: `Updated Item 1` }
       collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
       expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
       // Simulate remount
       await query1.cleanup()
@@ -8406,7 +8408,7 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
 
-    it(`should update query cache for function queryKey that returns constant value in on-demand mode`, async () => {
+    it(`should revalidate a constant function queryKey after writeUpdate`, async () => {
       // Scenario: function queryKey that returns same value
       // This creates an undefined entry in the cache
 
@@ -8450,10 +8452,12 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Perform a direct write update
+      items[0] = { ...items[0]!, name: `Updated Item 1` }
       collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
       expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
       // Simulate remount
       await query1.cleanup()
@@ -8475,6 +8479,381 @@ describe(`QueryCollection`, () => {
       await query2.cleanup()
       customQueryClient.clear()
     })
+
+    it.each([false, true])(
+      `keeps a manual update visible until an active scoped refetch settles with custom hash %s`,
+      async (customHash) => {
+        const initial = { id: `1`, name: `Initial`, category: `A` }
+        const authoritative = {
+          id: `1`,
+          name: `Authoritative`,
+          category: `A`,
+        }
+        const refetchResult = createDeferred<Array<CategorisedItem>>()
+        const customQueryClient = new QueryClient({
+          defaultOptions: {
+            queries: {
+              gcTime: Number.POSITIVE_INFINITY,
+              staleTime: Number.POSITIVE_INFINITY,
+              retry: false,
+              queryKeyHashFn: customHash
+                ? (key) => `custom:${hashKey(key)}`
+                : undefined,
+            },
+          },
+        })
+        const queryFn = vi
+          .fn<() => Promise<Array<CategorisedItem>>>()
+          .mockResolvedValueOnce([initial])
+          .mockImplementationOnce(() => refetchResult.promise)
+        const collection = createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id: `active-scoped-manual-write-${customHash}`,
+            queryClient: customQueryClient,
+            queryKey: [`active-scoped-manual-write`],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }),
+        )
+        const active = createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`)),
+        })
+
+        try {
+          await active.preload()
+          const scopedQuery = customQueryClient.getQueryCache().getAll()[0]!
+          expect(scopedQuery.state.dataUpdateCount).toBe(1)
+
+          collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+          expect(collection.get(`1`)?.name).toBe(`Manual`)
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+          expect(collection.get(`1`)?.name).toBe(`Manual`)
+          expect(scopedQuery.state.data).toEqual([initial])
+
+          refetchResult.resolve([authoritative])
+          await vi.waitFor(() => {
+            expect(collection.get(`1`)?.name).toBe(`Authoritative`)
+            expect(scopedQuery.state.dataUpdateCount).toBe(2)
+          })
+        } finally {
+          refetchResult.resolve([authoritative])
+          await active.cleanup()
+          await collection.cleanup()
+          customQueryClient.clear()
+        }
+      },
+    )
+
+    it.each([undefined, `static`] as const)(
+      `replenishes an active limited query after a manual delete with staleTime %s`,
+      async (staleTime) => {
+        let serverRows: Array<CategorisedItem> = [
+          { id: `1`, name: `First`, category: `A` },
+          { id: `2`, name: `Second`, category: `A` },
+          { id: `3`, name: `Third`, category: `A` },
+        ]
+        const customQueryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })
+        const queryFn = vi.fn((context: QueryFunctionContext) => {
+          const limit = context.meta?.loadSubsetOptions?.limit
+          return Promise.resolve(
+            serverRows.slice(0, limit).map((row) => structuredClone(row)),
+          )
+        })
+        const collection = createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id: `limited-manual-write-${String(staleTime)}`,
+            queryClient: customQueryClient,
+            queryKey: [`limited-manual-write-${String(staleTime)}`],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            staleTime,
+            autoIndex: `eager`,
+            defaultIndexType: BTreeIndex,
+          }),
+        )
+        const active = createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ item: collection })
+              .orderBy(({ item }) => item.id, `asc`)
+              .limit(2),
+        })
+
+        try {
+          await active.preload()
+          expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+
+          serverRows = serverRows.filter((row) => row.id !== `1`)
+          collection.utils.writeDelete(`1`)
+
+          await vi.waitFor(() => {
+            expect(queryFn.mock.calls.length).toBeGreaterThan(1)
+            expect(active.toArray.map((row) => row.id)).toEqual([`2`, `3`])
+          })
+        } finally {
+          await active.cleanup()
+          await collection.cleanup()
+          customQueryClient.clear()
+        }
+      },
+    )
+
+    it(`does not settle an in-flight initial scope from a manual write`, async () => {
+      const initialResult = createDeferred<Array<CategorisedItem>>()
+      const customQueryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const queryFn = vi.fn(() => initialResult.promise)
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `in-flight-manual-write`,
+          queryClient: customQueryClient,
+          queryKey: [`in-flight-manual-write`],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+      let preloadSettled = false
+
+      try {
+        const preload = active.preload().then(() => {
+          preloadSettled = true
+        })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+        await flushPromises()
+
+        expect(preloadSettled).toBe(false)
+        expect(
+          customQueryClient.getQueryCache().getAll()[0]?.state.data,
+        ).toBeUndefined()
+
+        initialResult.resolve([{ id: `1`, name: `First`, category: `A` }])
+        await preload
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`])
+      } finally {
+        initialResult.resolve([])
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`removes a disabled cache entry and permits explicit recovery`, async () => {
+      const queryKey = [`disabled-manual-write`]
+      const customQueryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      customQueryClient.setQueryData(queryKey, [
+        { id: `1`, name: `First`, category: `A` },
+      ])
+      const queryFn = vi.fn(() =>
+        Promise.resolve([{ id: `1`, name: `First`, category: `A` }]),
+      )
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `disabled-manual-write`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn,
+          enabled: false,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+
+      try {
+        await active.preload()
+        expect(queryFn).not.toHaveBeenCalled()
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+        expect(customQueryClient.getQueryCache().findAll({ queryKey })).toEqual(
+          [],
+        )
+
+        await collection.utils.refetch({ throwOnError: true })
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`])
+      } finally {
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`accepts a fresh result whose update count repeats after reset`, async () => {
+      const heldRefetch = createDeferred<Array<CategorisedItem>>()
+      const replacement = [
+        { id: `1`, name: `First`, category: `A` },
+        { id: `2`, name: `Second`, category: `A` },
+      ]
+      const queryKey = [`reset-manual-write`]
+      const customQueryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const queryFn = vi
+        .fn<() => Promise<Array<CategorisedItem>>>()
+        .mockResolvedValueOnce([replacement[0]!])
+        .mockImplementationOnce(() => heldRefetch.promise)
+        .mockResolvedValueOnce(replacement)
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `reset-manual-write`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+
+      try {
+        await active.preload()
+        expect(
+          customQueryClient.getQueryCache().find({ queryKey, exact: true })
+            ?.state.dataUpdateCount,
+        ).toBe(1)
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+        await customQueryClient.resetQueries({ queryKey, exact: true })
+        expect(queryFn).toHaveBeenCalledTimes(3)
+        expect(
+          customQueryClient.getQueryCache().find({ queryKey, exact: true })
+            ?.state.dataUpdateCount,
+        ).toBe(1)
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+
+        heldRefetch.resolve([
+          { id: `obsolete`, name: `Obsolete`, category: `A` },
+        ])
+        await flushPromises()
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+      } finally {
+        heldRefetch.resolve([])
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it.each([`resolve`, `reject`] as const)(
+      `revalidates after a deferred refresh barrier %s`,
+      async (outcome) => {
+        const barrier = createDeferred<void>()
+        const failure = new Error(`deferred refresh failed`)
+        const serverRows: Array<CategorisedItem> = [
+          { id: `1`, name: `First`, category: `A` },
+        ]
+        const customQueryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })
+        const queryFn = vi.fn(() =>
+          Promise.resolve(serverRows.map((row) => structuredClone(row))),
+        )
+        const collection = createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id: `deferred-manual-write-${outcome}`,
+            queryClient: customQueryClient,
+            queryKey: [`deferred-manual-write-${outcome}`],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }),
+        )
+        const active = createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`)),
+        })
+        let observedFailure: unknown
+        const barrierSettlement = barrier.promise.then(
+          () => {
+            collection.deferDataRefresh = null
+          },
+          (error: unknown) => {
+            observedFailure = error
+            collection.deferDataRefresh = null
+          },
+        )
+
+        try {
+          await active.preload()
+          collection.deferDataRefresh = barrier.promise
+          serverRows.push({ id: `2`, name: `Second`, category: `A` })
+          collection.utils.writeInsert({
+            id: `outside`,
+            name: `Outside`,
+            category: `B`,
+          })
+          await flushPromises()
+          expect(queryFn).toHaveBeenCalledTimes(1)
+
+          if (outcome === `resolve`) barrier.resolve()
+          else barrier.reject(failure)
+          await barrierSettlement
+
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(2)
+            expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+          })
+          if (outcome === `reject`) expect(observedFailure).toBe(failure)
+        } finally {
+          barrier.resolve()
+          collection.deferDataRefresh = null
+          await active.cleanup()
+          await collection.cleanup()
+          customQueryClient.clear()
+        }
+      },
+    )
   })
 
   describe(`rows from external sync sources`, () => {

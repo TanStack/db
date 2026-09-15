@@ -1,5 +1,11 @@
 import { QueryClient, hashKey, isCancelledError } from '@tanstack/query-core'
-import { IR, createCollection, eq, getLoadSubsetDemandKey } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  getLoadSubsetDemandKey,
+} from '@tanstack/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src/index.js'
@@ -797,6 +803,129 @@ describe(`query collection ownership lifecycle`, () => {
 
     collection._sync.unloadSubset(subset)
     expect(rows(collection)).toEqual([])
+  })
+
+  it(`keeps an inactive scoped cache isolated from another scope's manual write`, async () => {
+    const id = `inactive-scoped-cache-isolation`
+    const queryClient = createQueryClient()
+    const sourceRows = new Map<string, Item>([
+      [`1`, { id: `1`, category: `A`, name: `Category A` }],
+      [`2`, { id: `2`, category: `B`, name: `Category B` }],
+    ])
+    const expectedByCategory = new Map<string, Array<string>>()
+    const providerCalls: Array<string> = []
+    let manualWrites = 0
+    let remountReached = false
+    let comparisonCount = 0
+
+    const recomputeCategory = (category: string): Array<string> =>
+      Array.from(sourceRows.values())
+        .filter((row) => row.category === category)
+        .map((row) => row.id)
+        .sort()
+
+    expectedByCategory.set(`A`, recomputeCategory(`A`))
+    expectedByCategory.set(`B`, recomputeCategory(`B`))
+
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      const where = context.meta?.loadSubsetOptions?.where
+      const operands = where?.type === `func` ? where.args : []
+      const categoryRef = operands.find(
+        (operand) =>
+          operand.type === `ref` &&
+          operand.path.length === 1 &&
+          operand.path[0] === `category`,
+      )
+      const categoryValue = operands.find(
+        (operand) =>
+          operand.type === `val` && typeof operand.value === `string`,
+      )
+      if (
+        where?.type !== `func` ||
+        where.name !== `eq` ||
+        operands.length !== 2 ||
+        categoryRef?.type !== `ref` ||
+        categoryValue?.type !== `val` ||
+        typeof categoryValue.value !== `string`
+      ) {
+        throw new Error(`Category fixture received an unsupported request`)
+      }
+
+      const category = categoryValue.value
+      providerCalls.push(category)
+      return Promise.resolve(
+        Array.from(sourceRows.values(), (row) => structuredClone(row)).filter(
+          (row) => row.category === category,
+        ),
+      )
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    const createCategoryQuery = (category: string) =>
+      createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, category)),
+      })
+
+    type CategoryQuery = ReturnType<typeof createCategoryQuery>
+    let inactiveCategoryA: CategoryQuery | undefined
+    let activeCategoryB: CategoryQuery | undefined
+    let remountedCategoryA: CategoryQuery | undefined
+
+    try {
+      inactiveCategoryA = createCategoryQuery(`A`)
+      await inactiveCategoryA.preload()
+      expect(rows(inactiveCategoryA)).toEqual(expectedByCategory.get(`A`))
+      await inactiveCategoryA.cleanup()
+      inactiveCategoryA = undefined
+
+      activeCategoryB = createCategoryQuery(`B`)
+      await activeCategoryB.preload()
+      expect(rows(activeCategoryB)).toEqual(expectedByCategory.get(`B`))
+
+      const added = { id: `3`, category: `B`, name: `New category B` }
+      sourceRows.set(added.id, structuredClone(added))
+      expectedByCategory.set(`B`, recomputeCategory(`B`))
+      manualWrites++
+      collection.utils.writeUpsert(structuredClone(added))
+      const cacheEntriesAfterManualWrite = queryClient
+        .getQueryCache()
+        .findAll({ queryKey: [id] }).length
+
+      remountedCategoryA = createCategoryQuery(`A`)
+      await remountedCategoryA.preload()
+      remountReached = true
+
+      expect(providerCalls.slice(0, 2)).toEqual([`A`, `B`])
+      expect(manualWrites).toBe(1)
+      expect(remountReached).toBe(true)
+      comparisonCount++
+      expect(rows(remountedCategoryA)).toEqual(expectedByCategory.get(`A`))
+      expect(comparisonCount).toBe(1)
+      expect(cacheEntriesAfterManualWrite).toBe(1)
+      expect(providerCalls.filter((category) => category === `A`)).toHaveLength(
+        2,
+      )
+    } finally {
+      await remountedCategoryA?.cleanup()
+      await activeCategoryB?.cleanup()
+      await inactiveCategoryA?.cleanup()
+    }
   })
 
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
