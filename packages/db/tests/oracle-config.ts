@@ -3,6 +3,14 @@ import { oracleReplayReporter } from './oracle-replay-witness.js'
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `cursor-pagination.no-peek`,
+  `cursor-pagination.history`,
+  `cursor-pagination.cache`,
+  `cursor-pagination.defaults`,
+  `cursor-pagination.cancellation`,
+  `cursor-pagination.partition`,
+  `cursor-pagination.reset`,
+  `cursor-pagination.failure`,
   `oracle-replay.calibration`,
   `trailbase.lifecycle`,
   `electric.bound-descriptor-history`,
