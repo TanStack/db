@@ -2,10 +2,10 @@
 type: field-log
 format: field-log/v1
 event-stream: ./field_log.jsonl
-generated-through: 789
+generated-through: 790
 title: "Endpoints: optimistic coherence and update delivery"
 opened-at: 2026-09-11T16:54:36.780Z
-updated-at: 2026-09-15T21:43:08.927Z
+updated-at: 2026-09-15T21:44:29.885Z
 ---
 
 # Endpoints: optimistic coherence and update delivery
@@ -6327,3 +6327,11 @@ The committed [handoff](../../../evidence-base/HANDOFF.md) records current files
 The [portable-source manifest](../evidence-guarantees/portable-sources/manifest.json) preserves the externally stored RFC and six instrument cards with hashes. Frozen historical absolute paths remain provenance; their contents are now available in the checkout. Process Grammar already embeds selected Kitchen passages. The chronological user-text archive and entry 103 supersede earlier selective comment recovery. Read Markdown/JSONL directly; append only with the Field Lab event writer.
 
 Suggested next work: define checked-in storage/import verification and explicit evidence dependencies; extend the oracle to reload and selective invalidation with shrinking; connect one real Endpoints claim while retaining partial knowledge and keeping policy separate; then exercise and audit the packaged authoring workflow. Still open: semantic rule assurance, source-inspection/rubric admission, speculative challenges, dependency-specific expiry, cross-version case mapping, scope exclusions, alternative-strategy repair, durable runner delivery and check levels. The current global epoch, exact claim identity and same-claim failure retention are conservative prototype boundaries. Git commit and push outcomes will be recorded after they are observed.
+
+### GitHub handoff: research, repair and complete log pushed
+
+_2026-09-15T21:44:29.885Z_
+
+Four normal commits were created on `codex/component-endpoints-prototype`: `0189f0b1e` preserves research and reviewed Process Grammars; `fc42b8cac` preserves original design/audits and the v2 repair specification; `846b5aa07` adds the repaired prototype, generated oracle checks, fault controls, workflows and handoff; `a1c7b4fb0` adds the complete Field Log, historical user-request archive and portable source copies. `git push origin codex/component-endpoints-prototype` succeeded, advancing GitHub from `a47242b25` to `a1c7b4fb0`. No published history was rewritten.
+
+A copy of the tracked handoff was also saved to the normal local session-summary directory. The repository copy is the portable authority. This receipt is a follow-up documentation commit; its own final commit ID will be reported after push. Resume from [HANDOFF.md](../../../evidence-base/HANDOFF.md).
