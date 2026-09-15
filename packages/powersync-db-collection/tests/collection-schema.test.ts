@@ -243,6 +243,65 @@ describePowerSyncSchema(`PowerSync Schema Integration`, () => {
       }
     })
 
+    it(`invokes compare with the schema's transformed output type`, async () => {
+      const db = await createDatabase()
+
+      const schema = z.object({
+        id: z.string(),
+        name: z.string().nullable(),
+        archived: z.number().nullable(),
+        author: z.string().nullable(),
+        created_at: z
+          .string()
+          .nullable()
+          .transform((val) => (val ? new Date(val) : null)),
+      })
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.documents,
+          schema,
+          onDeserializationError: () => {},
+          // `created_at` is a `Date` in the output type, not the SQLite string.
+          // Calling `.getTime()` here would throw `TypeError` if `compare` were
+          // (incorrectly) invoked with the raw SQLite row.
+          compare: (left, right) =>
+            (left.created_at?.getTime() ?? 0) -
+            (right.created_at?.getTime() ?? 0),
+        }),
+      )
+      try {
+        const older = randomUUID()
+        const newer = randomUUID()
+        const newerResult = collection.insert({
+          id: newer,
+          name: `newer`,
+          author: `author`,
+          created_at: `2024-06-01T00:00:00.000Z`,
+          archived: 0,
+        })
+        const olderResult = collection.insert({
+          id: older,
+          name: `older`,
+          author: `author`,
+          created_at: `2024-01-01T00:00:00.000Z`,
+          archived: 0,
+        })
+
+        // Wait for both mutations to be synced back through the diff trigger,
+        // since `compare` only orders the synced (non-optimistic) state.
+        await Promise.all([
+          newerResult.isPersisted.promise,
+          olderResult.isPersisted.promise,
+        ])
+
+        expect([...collection.keys()]).toEqual([older, newer])
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
     /**
      * In this example the TInput and TOutput types are different.
      * In this example we use custom types for TInput. This requires an additional schema for validating

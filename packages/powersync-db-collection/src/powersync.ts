@@ -225,11 +225,12 @@ export function powerSyncCollectionOptions<
   TTable extends Table,
   TSchema extends StandardSchemaV1<any> = never,
 >(
-  config: PowerSyncCollectionConfig<TTable, TSchema>,
+  config: unknown,
 ): ReturnType<typeof createPowerSyncCollectionConfig<TTable, TSchema>> {
-  const outputConfig = createPowerSyncCollectionConfig(config)
+  const typedConfig = config as PowerSyncCollectionConfig<TTable, TSchema>
+  const outputConfig = createPowerSyncCollectionConfig(typedConfig)
   return withCollectionConfigFactory(outputConfig, () =>
-    createPowerSyncCollectionConfig(config),
+    createPowerSyncCollectionConfig(typedConfig),
   )
 }
 
@@ -950,9 +951,7 @@ function createPowerSyncCollectionConfig<
     OutputType,
     TSchema
   > = {
-    ...(restConfig as Partial<
-      EnhancedPowerSyncCollectionConfig<TTable, OutputType, TSchema>
-    >),
+    ...restConfig,
     schema,
     getKey,
     // Syncing should start immediately since we need to monitor the changes for mutations
