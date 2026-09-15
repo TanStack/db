@@ -1,0 +1,11 @@
+{
+  "name": "evidence-base-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test kernel.test.mjs",
+    "test:faults": "node fault-controls.mjs",
+    "demo": "node --experimental-strip-types demo.mjs",
+    "typecheck": "tsc --project tsconfig.json"
+  }
+}
