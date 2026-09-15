@@ -11,6 +11,13 @@ export {
 
 export * from './errors'
 
+export { createCursorPager } from './cursor-pagination'
+export type {
+  CursorPage,
+  CursorPager,
+  CursorPagerOptions,
+} from './cursor-pagination'
+
 // Re-export expression helpers from @tanstack/db
 export {
   parseWhereExpression,

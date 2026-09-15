@@ -2248,8 +2248,11 @@ export function queryCollectionOptions(
         return oldData
       })
     } else {
-      // No select - cache contains raw array, just set it directly
-      queryClient.setQueryData(key, items)
+      // Raw row writes must not overwrite a different cache format. Avoid even
+      // a no-op setQueryData: it marks unrelated data fresh and clears invalidation.
+      const previous = queryClient.getQueryData(key)
+      if (previous === undefined || Array.isArray(previous))
+        queryClient.setQueryData(key, items)
     }
   }
 
