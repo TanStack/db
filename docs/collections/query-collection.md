@@ -890,8 +890,10 @@ tenant or other value that changes the endpoint's result. Use a dedicated key:
 an infinite-query page record cannot share a key with a QueryCollection's row
 array. Keep the page key outside the row collection's prefix: in the example,
 `['posts', 'rows']` and `['posts', 'cursor-pages', request]` are siblings.
-Manual collection writes update every cache entry under the row prefix, so
-nesting pages beneath that prefix would overwrite their infinite-query record.
+Manual collection writes target cache entries under the row prefix. The raw-row
+writer defensively skips existing non-array records, but that is not a general
+mixed-cache contract: selected responses have separate write rules. Keep row and
+page prefixes separate.
 The helper does not translate predicates, change ordering, or infer a
 unique tie-breaker; the endpoint must honor a deterministic total order and
 provide a consistent cursor sequence while it is read.

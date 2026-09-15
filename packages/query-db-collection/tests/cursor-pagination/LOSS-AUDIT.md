@@ -173,3 +173,26 @@ cached continuations instead of looping, and the example normalizes an endpoint'
 omitted terminal cursor. Full-prefix stale refresh and independent cache GC are
 retained Query semantics. No-peek experiments remain valuable tests, not shipping
 features. The maintainer's patch-release and partial-closeout decisions stand.
+
+## Follow-up: defensive cache writes and queued refresh
+
+The manual-write oracle now varies raw versus selected responses, sibling versus
+nested page keys for raw responses, and generated insert/update/delete histories.
+It checks exact collection rows, row-cache contents, selected wrapper metadata,
+seeding an empty raw cache, and the full untouched page-query state. The reference
+is still an independent array; no Query cache state machine was added.
+
+The nested raw-cache cell failed before the guard, shrinking to one insert and
+two initial rows (seed -441317402, path 0:0:0:0). A deliberate guard mutant which
+called setQueryData with the unchanged page object also failed: that call clears
+invalidation and changes freshness despite preserving the rows. The final guard
+does not call setQueryData for an existing non-array record in the raw write path.
+Selected response writes are unchanged. Mixed selected/page caches under one
+prefix remain unsupported; the guide still prescribes sibling prefixes.
+
+The existing forced-refresh oracle now crosses new-per-call and retained pagers.
+With a retained pager, the old growth can finish before a queued read observes
+invalidation. Cancel-then-invalidate passes both paths. Invalidation alone remains
+a negative control in both; the scratch cancelRefetch-on-invalidated candidate
+repairs only the new-pager path. Automatic invalidation repair would require a
+separate contract decision, not merely that one-line option change.

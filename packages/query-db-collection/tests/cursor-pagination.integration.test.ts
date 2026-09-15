@@ -153,72 +153,120 @@ const observeRows = (rows: ReadonlyArray<Row>) =>
   rows.map(({ id, rank, group }) => ({ id, rank, group }))
 
 describe(`cursor adapter through production pagination`, () => {
-  it(`manual row writes preserve the separate page cache`, async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.constantFrom(`insert`, `update`, `delete`),
-        fc.integer({ min: 2, max: 6 }),
-        async (operation, count) => {
-          const client = new QueryClient({
-            defaultOptions: {
-              queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
-            },
-          })
-          const rows = Array.from({ length: count }, (_, id) => ({
-            id,
-            rank: id,
-            group: 0,
-          }))
-          const pageKey = [`manual`, `pages`]
-          const pager = createCursorPager({
-            queryClient: client,
-            queryKey: pageKey,
-            fetchPage: () => Promise.resolve({ rows, nextCursor: null }),
-          })
-          const source = createCollection(
-            queryCollectionOptions({
-              queryClient: client,
-              queryKey: [`manual`, `rows`],
-              getKey: (row: Row) => row.id,
-              queryFn: () => pager.read({}),
+  it.each([
+    { wrapped: false, nested: false },
+    { wrapped: false, nested: true },
+    { wrapped: true, nested: false },
+  ])(
+    `manual writes preserve cache shapes: $wrapped/$nested`,
+    async ({ wrapped, nested }) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(
+            fc.record({
+              kind: fc.constantFrom(`insert`, `update`, `delete`),
+              position: fc.nat({ max: 10 }),
             }),
-          )
-          try {
-            await source.preload()
-            const previous = client.getQueryData(pageKey)
-            const expected = rows.map((row) => ({ ...row }))
-            if (operation === `insert`) {
-              const row = { id: count, rank: count, group: 0 }
-              source.utils.writeInsert(row)
-              expected.push(row)
-            } else if (operation === `update`) {
-              source.utils.writeUpdate({ id: 0, group: 1 })
-              expected[0]!.group = 1
-            } else {
-              source.utils.writeDelete(0)
-              expected.shift()
+            { minLength: 1, maxLength: 8 },
+          ),
+          fc.integer({ min: 2, max: 6 }),
+          async (operations, count) => {
+            const client = new QueryClient({
+              defaultOptions: {
+                queries: {
+                  retry: false,
+                  staleTime: Infinity,
+                  gcTime: Infinity,
+                },
+              },
+            })
+            const rows = Array.from({ length: count }, (_, id) => ({
+              id,
+              rank: id,
+              group: 0,
+            }))
+            const pageKey = [`manual`, `pages`]
+            const rowKey = nested ? [`manual`] : [`manual`, `rows`]
+            const pager = createCursorPager({
+              queryClient: client,
+              queryKey: pageKey,
+              fetchPage: () => Promise.resolve({ rows, nextCursor: null }),
+            })
+            const common = {
+              queryClient: client,
+              queryKey: rowKey,
+              getKey: (row: Row) => row.id,
             }
-            expect(
-              [...source.values()].map(({ id, rank, group }) => ({
-                id,
-                rank,
-                group,
-              })),
-            ).toEqual(expected)
-            expect(
-              client.getQueryData(pageKey),
-              `manual writes cannot overwrite page records`,
-            ).toBe(previous)
-            expect(await pager.read({})).toEqual(rows)
-          } finally {
-            await source.cleanup()
-            client.clear()
-          }
-        },
-      ),
-      oraclePropertyOptions(50, `cursor-pagination.manual-write`),
-    )
-  })
+            const source = createCollection(
+              wrapped
+                ? queryCollectionOptions({
+                    ...common,
+                    queryFn: async () => ({
+                      items: await pager.read({}),
+                      label: `keep`,
+                    }),
+                    select: (response) => response.items,
+                  })
+                : queryCollectionOptions({
+                    ...common,
+                    queryFn: () => pager.read({}),
+                  }),
+            )
+            try {
+              await source.preload()
+              // Raw row caches with no data must still be seeded by manual writes.
+              const emptyKey = [...rowKey, `unloaded`]
+              if (!wrapped)
+                client.getQueryCache().build(client, { queryKey: emptyKey })
+              const expected = rows.map((row) => ({ ...row }))
+              let nextId = count
+              for (const [step, operation] of operations.entries()) {
+                await client.invalidateQueries({
+                  queryKey: pageKey,
+                  exact: true,
+                  refetchType: `none`,
+                })
+                const previous = client.getQueryState(pageKey)
+                const position =
+                  operation.position % Math.max(1, expected.length)
+                if (operation.kind === `insert` || !expected.length) {
+                  const row = { id: nextId, rank: nextId++, group: 0 }
+                  source.utils.writeInsert({ ...row })
+                  expected.push(row)
+                } else if (operation.kind === `update`) {
+                  source.utils.writeUpdate({
+                    id: expected[position]!.id,
+                    group: step + 1,
+                  })
+                  expected[position]!.group = step + 1
+                } else {
+                  source.utils.writeDelete(expected[position]!.id)
+                  expected.splice(position, 1)
+                }
+                expect(observeRows([...source.values()])).toEqual(expected)
+                expect(client.getQueryData(rowKey)).toEqual(
+                  wrapped ? { items: expected, label: `keep` } : expected,
+                )
+                if (!wrapped)
+                  expect(client.getQueryData(emptyKey)).toEqual(expected)
+                // Preserving the object alone is insufficient: a no-op setQueryData
+                // also clears invalidation and marks an unrelated sequence fresh.
+                expect(
+                  client.getQueryState(pageKey),
+                  `manual writes must not touch page state`,
+                ).toBe(previous)
+                expect(await pager.read({})).toEqual(rows)
+              }
+            } finally {
+              await source.cleanup()
+              client.clear()
+            }
+          },
+        ),
+        oraclePropertyOptions(50, `cursor-pagination.manual-write`),
+      )
+    },
+  )
   it.each(
     [false, true].flatMap((descending) =>
       [2, 5].map((backendSize) => ({ descending, backendSize })),

@@ -21,9 +21,13 @@ const createClient = () =>
 // The reference remains a whole relation. These laws add publication and
 // next-use observations, not a model of Query's retryer or page cache.
 describe(`cursor cache publication`, () => {
-  it.each([true, false])(
-    `force refresh requires cancellation of held growth: %s`,
-    async (cancel) => {
+  it.each(
+    [true, false].flatMap((cancel) =>
+      [false, true].map((sharedPager) => ({ cancel, sharedPager })),
+    ),
+  )(
+    `force refresh requires cancellation of held growth: $cancel/$sharedPager`,
+    async ({ cancel, sharedPager }) => {
       await fc.assert(
         fc.asyncProperty(
           fc.integer({ min: 1, max: 4 }),
@@ -67,16 +71,24 @@ describe(`cursor cache publication`, () => {
                 return { rows: page.rows, nextCursor }
               },
             }
+            const retained = createCursorPager(options)
+            const reader = () =>
+              sharedPager ? retained : createCursorPager(options)
+            let refreshEntered:
+              | ReturnType<typeof createDeferred<void>>
+              | undefined
             const outer = new QueryObserver(client, {
               queryKey: [`posts`, `rows`],
-              queryFn: () =>
-                createCursorPager(options).read({ limit: size * depth }),
+              queryFn: () => {
+                refreshEntered?.resolve()
+                return reader().read({ limit: size * depth })
+              },
             })
             const unsubscribe = outer.subscribe(() => {})
             try {
               await outer.refetch({ cancelRefetch: false, throwOnError: true })
               holdAt = calls + 1
-              const growth = createCursorPager(options)
+              const growth = reader()
                 .read({})
                 .catch((error: unknown) => error)
               await entered.promise
@@ -96,8 +108,14 @@ describe(`cursor cache publication`, () => {
               // Follow the guide's force-refresh recipe through a real active
               // outer query. Observe its acquisition before releasing old data.
               if (cancel) await client.cancelQueries({ queryKey: [`posts`] })
+              refreshEntered = createDeferred<void>()
               const refresh = client.invalidateQueries({ queryKey: [`posts`] })
-              await joined.promise
+              await refreshEntered.promise
+              if (sharedPager && !cancel) {
+                // This read is behind the old growth in the same queue. That
+                // success clears invalidation before the queued read can see it.
+                expect(witness).not.toHaveBeenCalled()
+              } else await joined.promise
               witness.mockRestore()
               release.resolve()
               await refresh

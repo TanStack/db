@@ -27,7 +27,8 @@ cursor experiment or the existing production controller.
 - Query owns cache expiry, garbage collection and invalidation. Use a distinct
   infinite-query key for each source/filter/order, beside the row prefix under
   a shared resource prefix. Never put pages inside the row collection's prefix:
-  manual row writes update every query beneath it.
+  manual row writes target queries beneath it. Raw-array writes defensively skip
+  other cache formats; selected response formats still require separate prefixes.
   For forced refresh, cancel the shared prefix before invalidating both caches;
   invalidation alone can join an old in-flight append. Collection refetch alone may reuse
   fresh pages. Reset removes pages, but does not refresh collection rows.
@@ -139,7 +140,7 @@ The new five-cell suite retains an invalidation-only fault control and covers
 shared readers, retries, malformed final tokens, recovery and bounded slice work.
 See LOSS-AUDIT.md for the distinct generator and observation gaps.
 
-Verification for the latest review fixes on base head `3f43deeb6`:
+Verification for the acquisition-boundary review fixes on base head `3f43deeb6`:
 
 - Full Query DB package: **370 tests in 14 files**, default random-seed lane,
   exit 0, 7.82 seconds.
@@ -177,6 +178,27 @@ Full-package command: `../../node_modules/.bin/vitest run --typecheck.enabled=fa
 Types are checked separately with `tsc --noEmit -p packages/query-db-collection/tsconfig.json`
 from the repository root. The installed local binaries avoid pnpm's unrelated
 attempt to replace this checkout's existing node_modules.
+
+## Cache-guard follow-up verification
+
+Against base head `37dc8057c`, the manual-write oracle now crosses raw/selected
+responses and raw nested/sibling page keys over generated operation histories.
+It checks cache state as well as data, including empty raw-cache seeding. A
+no-op cache-write mutant fails because it clears the page query's invalidation.
+The refresh oracle also crosses new-per-call and retained pagers, including reads
+queued behind growth. See LOSS-AUDIT.md for RED/GREEN evidence and scope.
+
+- Full package: **374 tests / 14 files**, exit 0, 8.98 seconds.
+- Stress: **120 tests / seven files**, multiplier 100, seed 863, exit 0,
+  83.62 seconds. **174,000 generated histories**: 154,000 from the preceding
+  boundary suite plus 10,000 additional manual-write and 10,000 retained-pager
+  refresh histories. The stress command above is unchanged.
+- Package types, Vite build and formatting pass. ESLint reports no errors and
+  two pre-existing `no-shadow` warnings in unchanged parts of `query.ts`.
+- Same ES2020 browser diagnostic imports: `queryCollectionOptions` alone
+  **46,655 minified / 15,000 gzip**; with `createCursorPager`, **52,079 / 17,017**.
+  The guard adds 65 minified bytes and 15/18 gzip bytes respectively over the
+  base head. No full-prefix refresh or automatic invalidation policy changed.
 
 ## Historical experiment verification receipts
 
