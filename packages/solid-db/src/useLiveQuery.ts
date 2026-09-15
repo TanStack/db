@@ -336,6 +336,7 @@ export function useLiveQuery(
     string | number,
     { value: any; update: (value: any) => void }
   >()
+  let rowsCollection: Collection<any, any, any> | undefined
   const [data, setData] = createStore<Array<any>>([], {
     name: `TanstackDBData`,
   })
@@ -426,8 +427,14 @@ export function useLiveQuery(
       setStatus(`disabled` as const)
       state.clear()
       rowsByKey.clear()
+      rowsCollection = undefined
       setData([])
       return
+    }
+
+    if (rowsCollection !== currentCollection) {
+      rowsByKey.clear()
+      rowsCollection = currentCollection
     }
 
     // The shared observer owns subscription, the ready-race, and status; Solid

@@ -117,6 +117,69 @@ describe(`Query Collections`, () => {
     })
   })
 
+  it(`remounts overlapping row keys when switching collection identity`, async () => {
+    type SwitchItem = { id: string; label: string }
+    const first = createCollection(
+      mockSyncCollectionOptions<SwitchItem>({
+        id: `solid-overlapping-switch-first`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `shared`, label: `First` }],
+      }),
+    )
+    const second = createCollection(
+      mockSyncCollectionOptions<SwitchItem>({
+        id: `solid-overlapping-switch-second`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `shared`, label: `Second` }],
+      }),
+    )
+    first.startSyncImmediate()
+    second.startSyncImmediate()
+
+    const [current, setCurrent] = createSignal<typeof first | typeof second>(
+      first,
+    )
+    let mount = 0
+    const rendered = render(() => {
+      const result = useLiveQuery(current)
+      return (
+        <ol data-testid="overlapping-switch-list">
+          <For each={result()}>
+            {(item) => {
+              const token = `mount-${++mount}`
+              return (
+                <li data-token={token} data-row-key={item.id}>
+                  {item.label}
+                </li>
+              )
+            }}
+          </For>
+        </ol>
+      )
+    })
+    const row = () =>
+      rendered.getByTestId(`overlapping-switch-list`).children[0] as
+        | HTMLLIElement
+        | undefined
+
+    try {
+      await waitFor(() => expect(row()?.textContent).toBe(`First`))
+      const firstNode = row()
+      const firstToken = firstNode?.dataset.token
+
+      setCurrent(second)
+
+      await waitFor(() => expect(row()?.textContent).toBe(`Second`))
+      expect(row()).not.toBe(firstNode)
+      expect(row()?.dataset.token).not.toBe(firstToken)
+      expect(mount).toBe(2)
+    } finally {
+      rendered.unmount()
+      await first.cleanup()
+      await second.cleanup()
+    }
+  })
+
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
@@ -2338,10 +2401,16 @@ describe(`Query Collections`, () => {
                 renderedKeys.push(item.$key)
                 const keyAtCreation = item._id
                 const token = `mapper-${++tokenSequence}`
-                initialTokens.set(keyAtCreation, token)
+                if (!initialTokens.has(keyAtCreation)) {
+                  initialTokens.set(keyAtCreation, token)
+                }
                 return (
                   <li
-                    ref={(node) => initialNodes.set(keyAtCreation, node)}
+                    ref={(node) => {
+                      if (!initialNodes.has(keyAtCreation)) {
+                        initialNodes.set(keyAtCreation, node)
+                      }
+                    }}
                     data-row-key={item.$key}
                     data-token={token}
                   >
@@ -2439,10 +2508,16 @@ describe(`Query Collections`, () => {
               {(item) => {
                 const labelAtCreation = item.label
                 const token = `mapper-${++tokenSequence}`
-                initialTokens.set(labelAtCreation, token)
+                if (!initialTokens.has(labelAtCreation)) {
+                  initialTokens.set(labelAtCreation, token)
+                }
                 return (
                   <li
-                    ref={(node) => initialNodes.set(labelAtCreation, node)}
+                    ref={(node) => {
+                      if (!initialNodes.has(labelAtCreation)) {
+                        initialNodes.set(labelAtCreation, node)
+                      }
+                    }}
                     data-label={item.label}
                     data-token={token}
                     data-upstream-key={item.$key}
