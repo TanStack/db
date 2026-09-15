@@ -1,0 +1,1947 @@
+{
+  "R": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/evidence-guarantees/evidence-store-stress/08-content-review.md",
+    "sha256": "082d40b9f625a386c490775933551bc083cfea79ad7f54db5c9e2ab77b2d76e8",
+    "excerpt": "# Guide-word content review\n\nStatus: in progress. Kyle supplies the design judgments; Codex records them.\nThe original [worksheet](04-guide-word-worksheet.md) remains a frozen preparation\nartifact. These answers qualify individual cases; they do not close whole rows\nor establish production facts without further review.\n\n## R1 \u2014 Authorization not visible in the endpoint\n\nRelated node: N1, requirement discovery. Related worksheet questions: W01-1,\nW01-4 and W01-6. This is one concrete applicability case within those questions.\n\nQuestion: \u201cSuppose an endpoint has no authorization checks and no declaration\nthat it is public. What should its assessment report: intentionally public, or\nunresolved whether access should be restricted?\u201d\n\nKyle's answer:\n\n> unresolved \u2014 we don't know if it's wrapped w/ auth somewhere else\n\nRecorded judgment: missing local authorization checks leave authorization\nunresolved. They do not establish intentional public access or absent enforcement;\na wrapper or another entry layer may supply it. The question of what evidence\ncloses that uncertainty remains open. No wrapper has been inspected or certified\nby this answer, and no code change has been authorized or made by it.\n\n## R2 \u2014 Proposed scope: identity consistency rather than auth implementation\n\nKyle's clarification/question:\n\n> exactly how auth happens is outside of our scope I think \u2014 the main thing we\n> want to ensure is perhaps if auth is consistent across calls so we can trace\n> client identity consistently \u2014 that seem right?\n\nWorking scope, supported by the assistant's response: check consistent identity\ncontext across query calls, mutation calls, mutation-triggered reads and collection\nlifetimes. Do not make this check an audit of how authentication works or whether\nthe application's permission policy is correct. R1's absence of local auth code\ntherefore leaves identity derivation/propagation unresolved; it does not itself\ncreate a task to add authorization.\n\nAssistant-proposed refinement: the context may include a tenant or impersonation\nscope when it changes the meaning or ownership of cached results. A client-supplied\nscope string alone does not establish the server-resolved identity. Token renewal\nneed not change logical identity; a real context change must not reuse collections\nunder an incompatible context. Exact context fields and checks remain to be designed.\n\nThis is a scope refinement during review, not a certificate that any current app\nmeets the consistency rule or a silent change to the frozen lifecycle candidate.\n\n## R3 \u2014 Identity consistency is an application prerequisite\n\nKyle accepted the identity-consistency scope, then clarified:\n\n> I think we can assume it is there \u2014 this is API 101 \u2014 no app could ship w/o\n> identity consistency\n\nRecorded decision: assume standard application identity consistency; do not\nrequire routine evidence or block normal collection use until an agent proves\nit. This supersedes the proposed default identity-investigation task in R1/R2.\nEndpoints still owns correct propagation of supplied identity context and its\nown collection isolation. This is a declared prerequisite, not inspected evidence\nabout every application. No full application auth audit is added.\n\n## R4 \u2014 Preserve partial SQL knowledge\n\nQuestion: \u201cwhen a helper\u2019s effects are unknown, should the report keep the SQL\neffects we can establish while clearly marking the overall effect set incomplete?\u201d\n\nKyle's answer: \u201cyes\u201d.\n\nRecorded decision: retain known SQL effects and explicitly mark the complete\nhandler effect set unresolved. Known partial effects do not become a complete\nbound for excluding potentially affected collections. The assistant described\nconservative refresh selection as the consequence; no production change was made.\nRelated cases: W03-3 and W03-4. This answer establishes intended behavior, not a\nfull credibility/consequence/action disposition for those rows.\n\n## R5 \u2014 Reuse compatible shared-helper evidence\n\nQuestion: \u201cshould one piece of evidence about a shared helper be reusable across\nevery endpoint that calls it, provided its version, configuration and input\nconditions match?\u201d\n\nKyle's answer: \u201cyes\u201d.\n\nRecorded decision: shared-helper evidence can support multiple endpoint callers\nwhen those applicability conditions match. Each use retains the actual claim's\nscope; this does not transfer support to unrelated endpoint requirements.\nRelated cases: N1 subject identity and N4 support composition. Invalidation and\ncontradictory-result behavior still need their own review.\n\n## R6 \u2014 Helper evidence validity and direct oracle failure reporting\n\nKyle's refinement:\n\n> I think helper evidence should be time bound too? Or perhaps better the compiler\n> can extract it (though that's not necessarily easy?) and hash it and force new\n> evidence when its changed.\n\nRecorded proposal: prefer change-bound validity when the compiler can identify\nand hash the relevant helper implementation/dependencies. Time bounds remain a\npossible way to require rechecking dependencies whose changes cannot be detected.\nThe exact captured dependency closure and expiry policy are not decided. A hash\nof a call site alone does not establish unchanged remote or configured behavior.\n\nQuestion: \u201cif an oracle finds a mismatch that contradicts a previously accepted\noptimization, should we immediately fall back while the agent investigates\nwhether the bug is in the optimization or the test?\u201d\n\nKyle's answer:\n\n> yes oracles should immediately report to the system when something breaks\n> (w/o the coding agent being able to control it so automatic) \u2014 this report can\n> be superseded of course once it's fixed or a different safer optimization is\n> picked\n\nRecorded decision: a failing oracle directly and automatically reports to the\nsystem, independently of the coding agent's choice to disclose it. A contradiction\nto an admitted optimization triggers fallback for the affected use while the\nissue is investigated. A later fix or different safer optimization can supersede\nthe report; the original result remains part of history. The exact evidence for\nrestoring admission and the handling of already-affected client state remain open.\nRelated cases: N3 result capture, N4 contradictory support, N5 consumer authority,\nN7 invalidation, and hostile finding H1. No reporting mechanism is implemented by\nthis review answer.\n\n## R7 \u2014 Restoration must exercise the original failure\n\nQuestion: \u201cshould restoring the affected optimization require a passing rerun\nthat includes the original failing case?\u201d\n\nKyle's answer: \u201cyes\u201d.\n\nRecorded decision: restoring the affected optimization requires a passing rerun\nthat includes the original failing case. An unrelated green run or an agent's\nassertion that the issue is fixed does not meet that criterion. The original\ncase, violated law and observation must remain identifiable in the new result;\nthe broader check retains its scope. This supplies a restoration condition for\nR6, not evidence that a particular optimization has been repaired. Treatment of\nalready-affected retained collections remains the next review question.\n\n## R8 \u2014 No connection to live clients\n\nAfter clarification of the proposed recovery of previously stale client data,\nKyle answered:\n\n> yeah there's no way to connect to live clients\n\nRecorded scope: this evidence system affects subsequent executions/deployments;\nit does not contact already-open clients or perform retrospective client recovery.\nDisabling an optimization must not be described as repairing those clients.\nThis narrows hostile finding H2 to honest scope/reporting, rather than introducing\na live-client repair mechanism or task. No new sync or push channel is proposed.\n\n## R9 \u2014 A check that cannot run is a CI error, not evidence\n\nQuestion: \u201cif an oracle cannot finish because its test environment is unavailable,\nshould we record \u2018check error\u2019 separately from a correctness failure and retain\nany prior evidence that is still valid?\u201d\n\nKyle's answer:\n\n> if a test can't run the CI check reports an error. We don't need to record that\n> in the evidence log though\n\nRecorded decision: test execution/environment failures are reported by CI and\ndo not need entries in the evidence log. This supersedes the draft's proposal\nto retain check-error receipts there. Such a failure is not a semantic\ncounterexample or a new passing result. Existing evidence applicability remains\nsubject to its own version/expiry rules; the answer does not renew stale evidence.\nCI diagnostic storage remains CI's concern, not a second evidence history.\n\n## R10 \u2014 External evidence expiry and application-supplied checks\n\nQuestion: \u201cFor an external API whose implementation we can\u2019t fingerprint, should\nits evidence expire after a set interval and require a fresh check?\u201d\n\nKyle's answer:\n\n> yes \u2014 perhaps also the user could supply their own check\n\nRecorded decision: evidence about such external behavior has time-based expiry\nand requires rechecking. Applications may supply their own check. The check's\ninterface and which result permits renewing evidence remain open: detecting an\nunchanged relevant version/contract and rerunning a behavioral assertion are\ndifferent methods. Neither a generic availability check nor an unspecified\nsuccessful response has been accepted here as evidence of unchanged behavior.\nRelated cases: R6, N3 check methods and N7 external dependency revalidation.\n\n## R11 \u2014 Custom checks use the common claim/evidence model\n\nThe assistant asked whether a custom check should support returning a\nversion/fingerprint and running a behavioral test as separate modes.\n\nKyle's correction:\n\n> well those are both types of evidence that could settle the claim\n\nRecorded decision: both methods fit the common model of evidence supporting a\nclaim. Do not introduce a separate custom-check taxonomy or interface decision\njust to accommodate them. The claim and its acceptance conditions determine\nwhether the supplied evidence settles it. Preserve the method and what it\nestablishes without confusing that distinction with separate product modes.\n\n## R12 \u2014 One shared task for a shared unresolved claim\n\nQuestion: \u201cif an unresolved claim about one helper affects ten endpoints, should\nwe show one shared todo, listing all ten affected endpoints?\u201d\n\nKyle's answer: \u201cYes\u201d.\n\nRecorded decision: show one task for the shared unresolved claim and link all\naffected endpoints. Each endpoint assessment can point to that task. This follows\nR5's reuse of compatible evidence; resolving the shared claim does not resolve\nunrelated requirements on its callers. Related node: N6, assessment and work order.\n\n## R13 \u2014 Investigate consequential completion uncertainty first\n\nQuestion: \u201ca helper might return before its database writes finish, risking stale\nclient data. Another endpoint definitely performs an unnecessary refetch. Should\ninvestigating the possible correctness bug come first, even though only the\nperformance issue is confirmed?\u201d\n\nKyle's answer:\n\n> yeah this is a big potential correctness issue \u2014 ideally we can statically\n> follow it ourselves & when not agents need to provide proof\n\nRecorded decision: prioritize this potential correctness failure over the\nconfirmed unnecessary refetch. Establish write completion through static tracing\nwhere possible; otherwise require agent-provided evidence that settles the\ncompletion claim. Uncertainty about completion remains distinct from a confirmed\nearly return. The exact acceptance checks and diagnostic severity remain open.\nRelated nodes: N2, N4 and N6.\n\n## R14 \u2014 Diagnostic severity follows configured check strictness\n\nQuestion: \u201cUntil that completion claim is established, should the linter report\nan error, requiring code changes or evidence before CI passes?\u201d\n\nKyle's correction:\n\n> well remember it's not necessarily an error \u2014 it depends on the level of\n> strictness of checks that are set \u2014 but yes, emit something\n\nRecorded decision: emit a diagnostic for the unresolved completion claim. Its\nseverity and effect on CI follow the configured check strictness; do not impose\nan unconditional error. An unresolved claim remains distinct from a demonstrated\nbug. Related nodes: N5 diagnostic policy and N6 assessment.\n\n## R15 \u2014 Missing evidence does not unconditionally disable optimization\n\nQuestion: \u201cFor an optional optimization, should lowering that severity leave its\nevidence requirement unchanged\u2014so accepting a warning doesn't enable an\nunsupported optimization?\u201d\n\nKyle's correction:\n\n> a warning wouldn't necessarily disable an optimization e.g. a human might know\n> a call is safe but not want to take time to provide evidence at that moment\n\nRecorded decision: a warning about missing evidence need not disable an\noptimization. The system must allow a human to proceed without supplying evidence\nat that moment. This supersedes the assistant's proposed unconditional veto in\nthe question and qualifies the frozen draft's missing-support fallback rule.\nPermission to use the optimization does not itself supply the missing evidence;\nthe claim can remain unresolved while the optimization is enabled. Whether\nconfigured strictness alone grants that permission or a specific override is\nneeded remains open. This answer concerns missing evidence, not a fresh oracle\ncounterexample governed by R6. Related nodes: N4 and N5.\n\n## R16 \u2014 Defer the permission mechanism to check-level design\n\nQuestion: \u201cShould choosing a permissive check level be enough to allow that, or\nshould the human explicitly override the particular claim?\u201d\n\nKyle's answer:\n\n> we haven't figured out exactly how check levels work so I'll defer this question\n\nRecorded disposition: deferred. Neither permissive-level authorization nor a\nclaim-specific override has been selected. Preserve R14/R15 without choosing a\npermission mechanism or treating this question as closed. Revisit when designing\ncheck levels.\n\n## R17 \u2014 Claim-specific rubrics distinguish evidence strength\n\nQuestion: \u201can agent traces a library's source and concludes that its promise\ncovers all database writes. What should validate that analysis before the system\ntreats the claim as established?\u201d\n\nKyle's answer:\n\n> it should probably have a rubric it scores against for specific claims \u2014\n> ideally there's e2e oracle tests which establish things much more conclusively \u2014\n> so weaker -> stronger evidence\n\nRecorded direction: assess evidence against a rubric for the specific claim and\nrepresent weaker-to-stronger support. Prefer end-to-end oracle tests that establish\nthe relevant behavior more conclusively where practical. Do not flatten source\nanalysis and direct behavioral checks into an undifferentiated passing result.\nThis is a proposed assessment approach, not a selected rubric, scoring algorithm,\nor universal guarantee from an end-to-end test. Who applies the rubric and how\nits assessment feeds the deferred check-level policy remain open. Related nodes:\nN3 evidence production and N4 support evaluation.\n\n## R18 \u2014 The producing agent may assess its own evidence\n\nQuestion: \u201cShould a separate agent apply that rubric to source-analysis evidence,\nor may the agent that produced the analysis also score it?\u201d\n\nKyle's answer:\n\n> yeah same agent \u2014 we can't enforce that anyways (though we could suggest a\n> specific audit by a fresh agent if that we can show that raises certainty)\n\nRecorded decision: the agent producing evidence may score it against the\nclaim-specific rubric. Do not require or claim to enforce separate-agent review.\nA specific fresh-agent audit may be suggested if we can demonstrate that it\nimproves confidence; no such improvement has been measured in this review.\nThis does not replace R6's automatic runner reporting with agent-controlled\ndisclosure. Related nodes: N3 and N4.\n\n## R19 \u2014 Reassess stored evidence when a rubric changes\n\nQuestion: \u201cwhen a rubric changes, should we reassess stored evidence first and\nrequest new work only where that evidence no longer suffices?\u201d\n\nKyle's answer: \u201cyes\u201d.\n\nRecorded decision: reassess existing evidence against the changed rubric before\nrequesting new evidence. Request additional work only for the remaining gaps;\na rubric change does not automatically require rerunning every check. This does\nnot renew evidence invalidated by source changes or expiry. Related nodes: N4\nand N7.\n\n## R20 \u2014 An inconclusive investigation can receive a note\n\nQuestion: \u201cif an agent completes an investigation but cannot settle the claim,\nshould that investigation task close while the claim remains unresolved, or\nshould the task stay open until the claim is settled?\u201d\n\nKyle's answer:\n\n> yeah, it can add a note which doesn't change the investigation\n\nRecorded decision: the agent can add a note without changing the investigation.\nDo not infer closure or claim settlement from an inconclusive attempt. Kyle also\nsupplied [Beads](https://github.com/gastownhall/beads) as a possible API fit or\ninspiration. The bounded [source reading](09-beads-api-reading.md) records the\nrelevant interfaces and open fit questions; it does not select a dependency.\n\n## R21 \u2014 Borrow API ideas, not Beads itself\n\nKyle's clarification:\n\n> yeah we wouldn't use Bead itself\n\nRecorded decision: use Beads only as API inspiration. Do not adopt Beads or its\nbackend. This resolves the adoption-versus-inspiration question in the source\nreading; the specific interface ideas to borrow remain to be designed.\n",
+    "selection": "Full source"
+  },
+  "A0": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/README.md",
+    "sha256": "f4340470aa4b7add47c658205785c5260147247c9618acd815ec1c4a9c7265cc",
+    "excerpt": "# Phase 3: analyze the integrated Todo source\n\nThe source adapter now accepts the actual integrated Todo's full TSX module while checking only `listTodos`. The SQL checker from phase 2 remains unchanged. Four adapter tests, four evidence tests and one CLI contract test pass. Running-app correspondence evidence is recorded separately from these fixture tests.\n\n## Reproduce the bounded tests\n\nFrom the repository root, with the pinned Track A dependencies installed:\n\n```sh\nPHASE3_BASELINE=1 node --test probes/endpoints/track-a-analysis/phase3/adapter.test.mjs\nPHASE3_BASELINE=1 node --test probes/endpoints/track-a-analysis/phase3/evidence.test.mjs\nnode --test probes/endpoints/track-a-analysis/phase3/adapter.test.mjs\nnode --test probes/endpoints/track-a-analysis/phase3/evidence.test.mjs\nnode --test probes/endpoints/track-a-analysis/phase3/cli.test.mjs\n```\n\nBoth baseline commands are expected to fail. The first retains phase 2's adapter: full TSX fails its parser/grammar. The second creates a separate disposable database instead of checking the supplied running-app receipt, so all four provenance assertions fail. These are distinct failure classes. The passing CLI test uses an explicitly **synthetic snapshot**, not a running app.\n\nVersions remain Node v22.13.1, Drizzle 0.45.1, PGlite 0.3.14, Babel parser 7.28.5 and pgsql-ast-parser 12.0.1. No dependency/configuration changes were made outside this phase3 directory. Phase 1/2 files and evidence were preserved.\n\n## Supported source and tests\n\n`adapter.mjs` parses TSX, selects the named `listTodos` variable, checks exact imported query/db/table/auth/operator/zod bindings against a declared contract, and requires `query({ input:z.object({}), async handler(req,res){...} })`. It isolates the handler without evaluating the module and reuses the earlier narrow recognizer. It translates recognized spans back to the original source offsets.\n\nThis permits sibling mutation declarations, their `onMutate` callback and the React component to coexist in the authored module. It does **not** check their effects, validate the optimistic lifecycle, certify module side effects, or infer arbitrary helper behavior. Computed/spread options, imported operator changes and response transforms remain not checked.\n\nThe fixture includes orderBy decoys in a comment, sibling mutation and JSX attribute. Tests prove the repair changes the actual query order only, preserves the entire mutation/UI suffix, reparses and clears the SQL order violation. `integrated-source-adapter.json` records a separate parse of the actual app source, including exact handler/field/predicate/response source spans and SQL/parameters; it alone is not runtime evidence.\n\n## Schema and running-source evidence\n\n`make-contract.mjs` binds this reviewed specimen to the known five-column schema and SHA-256 hashes of its schema, runtime and compiler files. It reads those files; it does not evaluate arbitrary app modules or claim to discover arbitrary schemas. The schema contract is explicitly the shared disposable Todo schema. Default expressions, auth, RLS, triggers, deployment identity and live migration freshness remain outside the checker.\n\n`evidence.mjs` consumes a snapshot from the actual app's `/probe-control` endpoint. It requires:\n\n- Local database instance ID, capture time and PostgreSQL version.\n- A compiler-supplied original endpoint source hash matching the current file.\n- Runtime Drizzle schema facts matching the declared column contract, and actual PostgreSQL column/index observations.\n- Current schema/runtime/compiler file hashes matching declared dependencies.\n\nThe CLI additionally compares its exact lowered SQL and parameter values with the handler's logged query. It reports `RUNTIME_QUERY_MISMATCH` if the trace is missing or differs. It never creates a replacement database to satisfy the integrated check.\n\nThe snapshot is caller-captured evidence from a local test process, not remote attestation. The compiler's source receipt, schema snapshot and query log establish a bounded local correspondence. They do not prove an arbitrary deployment or eliminate every concurrent-change race. After repairing the source, the old snapshot must fail `STALE_RUNTIME_SOURCE` until the app rebuilds, executes the new list query and supplies a fresh snapshot. Updating only the source receipt while retaining an old query fails the independent SQL comparison.\n\n## CLI for the full repair loop\n\n```sh\nnode /ABS/phase3/make-contract.mjs /ABS/integrated-todo /ABS/contract.json\nnode /ABS/phase3/cli.mjs check --file /ABS/integrated-todo/src/endpoint.tsx --contract /ABS/contract.json --snapshot /ABS/snapshot.json\nnode /ABS/phase3/cli.mjs apply --file /ABS/integrated-todo/src/endpoint.tsx --diagnostic /ABS/diagnostic.json\n```\n\nAfter apply: wait for rebuild, execute listTodos, capture a new `/probe-control` snapshot, then run the supplied absolute `rerun` argv. Rebuilding also requires updating the binding contract if a hashed dependency changed; regenerating a contract is an explicit trust operation for the reviewed local files, not evidence that arbitrary changes remain correct.\n\nProtocol `endpoints-probe/v2` retains full-set diagnostics, absolute file URI/hash, 0-based UTF-16 source ranges and hash-guarded absolute edit offsets. It adds endpoint identity, runtime comparison, source correspondence and snapshot provenance. Exit 0 means supported/clear, 1 means an order violation, and 2 means not checked or tool error. Unsupported/stale evidence is never represented as an empty successful result.\n\nTrack A initially owned no integrated app files. The coordinator then explicitly extended ownership to the query order only for the live repair exercise below. Runtime, compilation, app behavior and collection lifecycle remain the integrated Todo worker's scope.\n\n## Actual local app receipt\n\n`integrated-snapshot.json` was captured by a read-only GET to `http://127.0.0.1:4191/probe-control` after the real browser list query ran. It reports database instance `dfb3fd8e-198e-46a3-b842-96065167e7a6`, PostgreSQL 17.5, actual expected/observed schema and index evidence, and the executed query for `alice`.\n\n`integrated-check.json` records **supported**, `SQL_KEY_ORDER_SUPPORTED`, and an exact SQL/parameter match. The compiler-reported source hash and current file hash are both `a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4`. This is a real app-source \u2192 generated handler receipt \u2192 logged SQL \u2192 actual app PostgreSQL schema \u2192 shared checker path, bounded by the stated local specimen assumptions. That first capture already included `createdAt,id`; the separately authorized live repair exercise below then tested the bad and repaired actual app revisions.\n\nA real concurrent dependency edit was detected during this capture: the runtime file changed between contract creation and the first check. `integrated-stale-dependency.json` records `STALE_DEPENDENCY`; `stale-integration-contract.json` preserves the old hash. Regenerating the reviewed binding contract produced the successful check. These receipts describe their capture revisions; future file changes should invalidate them.\n\nFor a fresh local capture (only while that app process is running):\n\n```sh\ncurl --fail --silent http://127.0.0.1:4191/probe-control --output /ABS/new-snapshot.json\n```\n\nThe initial snapshot capture performed no POST, reset, source edit or app mutation. The later explicitly authorized exercise edited only query order. Localhost/browser access required scoped sandbox escalation; no credentials were used.\n\n## Actual app source \u2192 agent repair \u2192 live clear: PASS\n\nThe coordinator authorized a live exercise and the Todo worker froze source/runtime/compiler during it. `live-repair.mjs` changed only listTodos' order, launched a separate Chrome 152.0.7977.83 client and used actual collection preload plus read-only GET snapshots. It performed no control POST, reset or mutation.\n\n1. Removed the authored `id` tie-breaker. The browser executed the changed handler; its original-source receipt and SQL trace matched the bad file. The shared checker emitted the actual source-located `ENDPOINT_ORDER_NOT_TOTAL` diagnostic (`live-diagnostic.json`).\n2. Applied that diagnostic with the hash-guarded CLI. The same agent performed the repair using its known protocol; this was not a blinded fresh-agent test.\n3. Rechecking the old snapshot failed `STALE_RUNTIME_SOURCE` (`live-stale-snapshot-check.json`). Merely editing source did not count as clearing the live issue.\n4. Reloaded/preloaded the actual repaired app and captured a new database/source/query snapshot. The checker returned supported, empty diagnostics and exact runtime SQL/parameter match (`live-cleared.json`).\n5. Restored the original argument whitespace, making the endpoint file byte-identical to its starting value. Reloaded/preloaded once more and captured a final supported check with the original source SHA-256 (`live-final-check.json`). The original bytes are preserved in `live-original-endpoint.tsx`.\n\n`live-repair-results.json` records all executed Node argv, source hashes, instance receipts and step results. `live-repair-output.txt` records process success. Captured snapshots are `live-bad-snapshot.json`, `live-fixed-snapshot.json` and `live-final-snapshot.json`; compiler hot reload recreated the disposable database between some revisions, so instance IDs are retained rather than treating them as one persistent database. No claim of persistence across a server reload is made.\n\nRerun only while the local specimen is running and its worker has agreed to the same source freeze:\n\n```sh\nnode probes/endpoints/track-a-analysis/phase3/live-repair.mjs\n```\n\nThe script requires the known starting query spelling, changes only that occurrence, and restores the original endpoint bytes in `finally`, including on failure. Its success result requires a final actual running-app check after restoration. This completes the requested local source-located diagnostic/repair/rerun loop; it does not broaden the static analysis grammar or establish production deployment behavior.\n\n## Final current frozen-runtime receipt\n\nAfter the Todo worker's runtime cleanup fix and final dev browser tests, a separate read-only capture at `2026-09-10T20:20:00.562Z` passed against the final frozen files. Use `final-current-contract.json`, `final-current-snapshot.json` and `final-current-check.json` for this revision. Result: **supported**, `SQL_KEY_ORDER_SUPPORTED`, exact runtime query match, database instance `fb858858-c6ab-4c37-80fc-0e1173400d5c`, original endpoint hash `a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4`.\n\nHistorical `integrated-*` and `live-*` receipts remain unchanged; their dependency hashes intentionally refer to earlier runtime revisions. This final check concerns source/SQL/schema correspondence. The integrated Todo worker separately owns the cleanup, lifecycle and UI test results.\n",
+    "selection": "Full source"
+  },
+  "A1": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-repair-results.json",
+    "sha256": "2983136b6c7289befa188f4e4c1c2a083dfeeb6570103e2208b30affde999416",
+    "excerpt": "{\n  \"url\": \"http://127.0.0.1:4191\",\n  \"source\": \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n  \"originalHash\": \"a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4\",\n  \"commands\": [\n    [\n      \"/usr/local/bin/node\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/make-contract.mjs\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\"\n    ],\n    [\n      \"/usr/local/bin/node\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n      \"check\",\n      \"--file\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n      \"--contract\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\",\n      \"--snapshot\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-bad-snapshot.json\"\n    ],\n    [\n      \"/usr/local/bin/node\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n      \"apply\",\n      \"--file\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n      \"--diagnostic\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-diagnostic.json\"\n    ],\n    [\n      \"/usr/local/bin/node\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n      \"check\",\n      \"--file\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n      \"--contract\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\",\n      \"--snapshot\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-bad-snapshot.json\"\n    ],\n    [\n      \"/usr/local/bin/node\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n      \"check\",\n      \"--file\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n      \"--contract\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\",\n      \"--snapshot\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-fixed-snapshot.json\"\n    ],\n    [\n      \"/usr/local/bin/node\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n      \"check\",\n      \"--file\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n      \"--contract\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\",\n      \"--snapshot\",\n      \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-final-snapshot.json\"\n    ]\n  ],\n  \"steps\": [\n    {\n      \"name\": \"introduce missing tie-breaker\",\n      \"sourceHash\": \"211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401\"\n    },\n    {\n      \"name\": \"actual bad handler SQL and schema yield source-located diagnostic\",\n      \"sourceHash\": \"211e9e86a54be47ade9ca4463915deb93554cb9cd095b1990cc6770d33690401\",\n      \"range\": {\n        \"start\": {\n          \"line\": 12,\n          \"character\": 46\n        },\n        \"end\": {\n          \"line\": 12,\n          \"character\": 74\n        }\n      },\n      \"instanceId\": \"67d7212d-3d4b-454b-bd74-05aa80f195f3\"\n    },\n    {\n      \"name\": \"guarded repair applied; old running snapshot refused\",\n      \"sourceHash\": \"98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b\",\n      \"code\": \"STALE_RUNTIME_SOURCE\"\n    },\n    {\n      \"name\": \"new real handler query and snapshot clear diagnostic\",\n      \"sourceHash\": \"98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b\",\n      \"instanceId\": \"29d365f0-8164-448a-a139-bb17d3b5b378\"\n    },\n    {\n      \"name\": \"original bytes restored and actual current app rechecked\",\n      \"sourceHash\": \"a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4\",\n      \"instanceId\": \"6ae26fa5-ee03-426c-a2a6-5a8bc51eadae\"\n    }\n  ],\n  \"assumptions\": [\n    \"Read-only browser list query and GET evidence; no mutation/control POST\",\n    \"Actual local app receipt only; no deployment claim\"\n  ],\n  \"browserVersion\": \"152.0.7977.83\",\n  \"status\": \"PASS\"\n}\n",
+    "selection": "Full source"
+  },
+  "A2": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-stale-snapshot-check.json",
+    "sha256": "8f23ae5074672b0c57f0582abcddd406fc82abafb265a9833b1f18a3cdf4c330",
+    "excerpt": "{\n  \"protocol\": \"endpoints-probe/v2\",\n  \"endpoint\": \"listTodos\",\n  \"status\": \"not checked\",\n  \"source\": {\n    \"uri\": \"file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n    \"sha256\": \"98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b\"\n  },\n  \"diagnostics\": [\n    {\n      \"code\": \"STALE_RUNTIME_SOURCE\",\n      \"message\": \"current source differs from the running app compiler receipt; rebuild and capture a new snapshot\",\n      \"range\": {\n        \"start\": {\n          \"line\": 0,\n          \"character\": 0\n        },\n        \"end\": {\n          \"line\": 48,\n          \"character\": 0\n        }\n      }\n    }\n  ],\n  \"rerun\": [\n    \"/usr/local/bin/node\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n    \"check\",\n    \"--file\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n    \"--contract\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\",\n    \"--snapshot\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-bad-snapshot.json\"\n  ],\n  \"check\": {\n    \"status\": \"not checked\",\n    \"code\": \"STALE_RUNTIME_SOURCE\",\n    \"reason\": \"current source differs from the running app compiler receipt; rebuild and capture a new snapshot\"\n  },\n  \"provenance\": null,\n  \"runtimeComparison\": {\n    \"status\": \"not checked\"\n  },\n  \"correspondence\": null,\n  \"assumptions\": [\n    \"Caller-captured local integrated Todo instance snapshot; not deployment attestation\",\n    \"Named handler only; sibling mutation/UI/module side effects are not analyzed\",\n    \"SQL result key/order only; no auth, wire or UI order proof\"\n  ],\n  \"nextStep\": null\n}\n",
+    "selection": "Full source"
+  },
+  "A3": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-cleared.json",
+    "sha256": "120b2a00a6bd80b305918d6ad42c5b91a2942a857dd4758188a0aafcfb422af7",
+    "excerpt": "{\n  \"protocol\": \"endpoints-probe/v2\",\n  \"endpoint\": \"listTodos\",\n  \"status\": \"supported\",\n  \"source\": {\n    \"uri\": \"file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n    \"sha256\": \"98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b\"\n  },\n  \"diagnostics\": [],\n  \"rerun\": [\n    \"/usr/local/bin/node\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n    \"check\",\n    \"--file\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n    \"--contract\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\",\n    \"--snapshot\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-fixed-snapshot.json\"\n  ],\n  \"check\": {\n    \"status\": \"supported\",\n    \"code\": \"SQL_KEY_ORDER_SUPPORTED\",\n    \"key\": \"id\",\n    \"totalSqlOrder\": true,\n    \"evidence\": {\n      \"schemaIdentity\": \"integrated-todo-local-disposable\",\n      \"schemaFingerprint\": \"b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c\",\n      \"keyIndex\": \"CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)\"\n    }\n  },\n  \"provenance\": {\n    \"instanceId\": \"29d365f0-8164-448a-a139-bb17d3b5b378\",\n    \"capturedAt\": \"2026-09-10T20:18:02.902Z\",\n    \"databaseVersion\": {\n      \"version\": \"PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit\"\n    },\n    \"endpointSourceHash\": \"98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b\",\n    \"snapshotHash\": \"7231b88b20bdfed5d862bc68baf619745db018622392fd97637ed6f02dc0f622\",\n    \"dependencies\": [\n      {\n        \"role\": \"schema\",\n        \"path\": \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/database.server.ts\",\n        \"sha256\": \"cf3ebb0457706cddfee8919f7b26b9fc611ac4f5caa060ffda4b0f6fe7a9b9eb\"\n      },\n      {\n        \"role\": \"runtime\",\n        \"path\": \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts\",\n        \"sha256\": \"9fd3b05746ea82d8202b8312628af07061762641a4740b27823a599e34984525\"\n      },\n      {\n        \"role\": \"compiler\",\n        \"path\": \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/transform.mjs\",\n        \"sha256\": \"1a37bef295df877fa0ddb356e4e66c41ccaccd0978be96792d98e933eb45f239\"\n      }\n    ]\n  },\n  \"runtimeComparison\": {\n    \"status\": \"matched\",\n    \"analyzed\": {\n      \"sql\": \"select \\\"id\\\", \\\"text\\\", \\\"completed\\\", \\\"created_at\\\" from \\\"todo\\\" where \\\"todo\\\".\\\"user_id\\\" = $1 order by \\\"todo\\\".\\\"created_at\\\" asc, \\\"todo\\\".\\\"id\\\" asc\",\n      \"params\": [\n        \"alice\"\n      ],\n      \"parameterTypes\": [\n        \"text\"\n      ]\n    },\n    \"observed\": {\n      \"sql\": \"select \\\"id\\\", \\\"text\\\", \\\"completed\\\", \\\"created_at\\\" from \\\"todo\\\" where \\\"todo\\\".\\\"user_id\\\" = $1 order by \\\"todo\\\".\\\"created_at\\\" asc, \\\"todo\\\".\\\"id\\\" asc\",\n      \"params\": [\n        \"alice\"\n      ]\n    }\n  },\n  \"correspondence\": {\n    \"sourceHash\": \"98226fb0f995ff55785c1fff5a27052bd72f884fb172da73095d72baafa6742b\",\n    \"handler\": {\n      \"range\": [\n        385,\n        670\n      ],\n      \"location\": {\n        \"line\": 10,\n        \"column\": 2\n      }\n    },\n    \"fields\": [\n      {\n        \"name\": \"id\",\n        \"range\": [\n          476,\n          486\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 32\n        }\n      },\n      {\n        \"name\": \"text\",\n        \"range\": [\n          487,\n          501\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 43\n        }\n      },\n      {\n        \"name\": \"completed\",\n        \"range\": [\n          502,\n          526\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 58\n        }\n      },\n      {\n        \"name\": \"createdAt\",\n        \"range\": [\n          527,\n          551\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 83\n        }\n      }\n    ],\n    \"predicate\": {\n      \"range\": [\n        569,\n        599\n      ],\n      \"location\": {\n        \"line\": 13,\n        \"column\": 16\n      }\n    },\n    \"response\": {\n      \"range\": [\n        652,\n        667\n      ],\n      \"location\": {\n        \"line\": 14,\n        \"column\": 10\n      }\n    },\n    \"method\": \"AST selected handler \u2192 bounded Drizzle lowering; source offset translation\",\n    \"unchecked\": [\n      \"sibling mutation/UI/module side effects\",\n      \"auth/input validation/serialization semantics\"\n    ]\n  },\n  \"assumptions\": [\n    \"Caller-captured local integrated Todo instance snapshot; not deployment attestation\",\n    \"Named handler only; sibling mutation/UI/module side effects are not analyzed\",\n    \"SQL result key/order only; no auth, wire or UI order proof\"\n  ],\n  \"nextStep\": null\n}\n",
+    "selection": "Full source"
+  },
+  "A4": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-final-check.json",
+    "sha256": "638be87e0d304c8d2364f0585579eb436874a9c7d6dcd0d180d3ae690d6b9c42",
+    "excerpt": "{\n  \"protocol\": \"endpoints-probe/v2\",\n  \"endpoint\": \"listTodos\",\n  \"status\": \"supported\",\n  \"source\": {\n    \"uri\": \"file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n    \"sha256\": \"a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4\"\n  },\n  \"diagnostics\": [],\n  \"rerun\": [\n    \"/usr/local/bin/node\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs\",\n    \"check\",\n    \"--file\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx\",\n    \"--contract\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-contract.json\",\n    \"--snapshot\",\n    \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/live-final-snapshot.json\"\n  ],\n  \"check\": {\n    \"status\": \"supported\",\n    \"code\": \"SQL_KEY_ORDER_SUPPORTED\",\n    \"key\": \"id\",\n    \"totalSqlOrder\": true,\n    \"evidence\": {\n      \"schemaIdentity\": \"integrated-todo-local-disposable\",\n      \"schemaFingerprint\": \"b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c\",\n      \"keyIndex\": \"CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)\"\n    }\n  },\n  \"provenance\": {\n    \"instanceId\": \"6ae26fa5-ee03-426c-a2a6-5a8bc51eadae\",\n    \"capturedAt\": \"2026-09-10T20:18:03.671Z\",\n    \"databaseVersion\": {\n      \"version\": \"PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit\"\n    },\n    \"endpointSourceHash\": \"a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4\",\n    \"snapshotHash\": \"c639805fc5ef501b964f58325143a380be589a2ff2b01bcff058a3baaf88e06b\",\n    \"dependencies\": [\n      {\n        \"role\": \"schema\",\n        \"path\": \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/database.server.ts\",\n        \"sha256\": \"cf3ebb0457706cddfee8919f7b26b9fc611ac4f5caa060ffda4b0f6fe7a9b9eb\"\n      },\n      {\n        \"role\": \"runtime\",\n        \"path\": \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts\",\n        \"sha256\": \"9fd3b05746ea82d8202b8312628af07061762641a4740b27823a599e34984525\"\n      },\n      {\n        \"role\": \"compiler\",\n        \"path\": \"/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/transform.mjs\",\n        \"sha256\": \"1a37bef295df877fa0ddb356e4e66c41ccaccd0978be96792d98e933eb45f239\"\n      }\n    ]\n  },\n  \"runtimeComparison\": {\n    \"status\": \"matched\",\n    \"analyzed\": {\n      \"sql\": \"select \\\"id\\\", \\\"text\\\", \\\"completed\\\", \\\"created_at\\\" from \\\"todo\\\" where \\\"todo\\\".\\\"user_id\\\" = $1 order by \\\"todo\\\".\\\"created_at\\\" asc, \\\"todo\\\".\\\"id\\\" asc\",\n      \"params\": [\n        \"alice\"\n      ],\n      \"parameterTypes\": [\n        \"text\"\n      ]\n    },\n    \"observed\": {\n      \"sql\": \"select \\\"id\\\", \\\"text\\\", \\\"completed\\\", \\\"created_at\\\" from \\\"todo\\\" where \\\"todo\\\".\\\"user_id\\\" = $1 order by \\\"todo\\\".\\\"created_at\\\" asc, \\\"todo\\\".\\\"id\\\" asc\",\n      \"params\": [\n        \"alice\"\n      ]\n    }\n  },\n  \"correspondence\": {\n    \"sourceHash\": \"a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4\",\n    \"handler\": {\n      \"range\": [\n        385,\n        669\n      ],\n      \"location\": {\n        \"line\": 10,\n        \"column\": 2\n      }\n    },\n    \"fields\": [\n      {\n        \"name\": \"id\",\n        \"range\": [\n          476,\n          486\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 32\n        }\n      },\n      {\n        \"name\": \"text\",\n        \"range\": [\n          487,\n          501\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 43\n        }\n      },\n      {\n        \"name\": \"completed\",\n        \"range\": [\n          502,\n          526\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 58\n        }\n      },\n      {\n        \"name\": \"createdAt\",\n        \"range\": [\n          527,\n          551\n        ],\n        \"location\": {\n          \"line\": 12,\n          \"column\": 83\n        }\n      }\n    ],\n    \"predicate\": {\n      \"range\": [\n        569,\n        599\n      ],\n      \"location\": {\n        \"line\": 13,\n        \"column\": 16\n      }\n    },\n    \"response\": {\n      \"range\": [\n        651,\n        666\n      ],\n      \"location\": {\n        \"line\": 14,\n        \"column\": 10\n      }\n    },\n    \"method\": \"AST selected handler \u2192 bounded Drizzle lowering; source offset translation\",\n    \"unchecked\": [\n      \"sibling mutation/UI/module side effects\",\n      \"auth/input validation/serialization semantics\"\n    ]\n  },\n  \"assumptions\": [\n    \"Caller-captured local integrated Todo instance snapshot; not deployment attestation\",\n    \"Named handler only; sibling mutation/UI/module side effects are not analyzed\",\n    \"SQL result key/order only; no auth, wire or UI order proof\"\n  ],\n  \"nextStep\": null\n}\n",
+    "selection": "Full source"
+  },
+  "A5": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/evidence.mjs",
+    "sha256": "e6d58f4a6f6666f5e65a24f9f4a7148160f0d83cd6767655f4f0ae17aaa3b20f",
+    "excerpt": "import {createHash} from 'node:crypto'\nimport {readFile} from 'node:fs/promises'\nimport {isAbsolute} from 'node:path'\nconst hash=value=>createHash('sha256').update(value).digest('hex')\nconst gap=(code,reason)=>({status:'not checked',code,reason})\nconst columns=value=>JSON.stringify([...value].sort((a,b)=>a.name.localeCompare(b.name)))\n\n// Consumes a caller-captured snapshot of the actual local specimen database.\n// No application module is imported, and no second database is created here.\nexport async function verifyEvidence(source,contract,snapshot) {\n if(!snapshot?.instanceId||!snapshot.capturedAt||!snapshot.databaseVersion||!snapshot.endpointSourceHash||!Array.isArray(snapshot.schema)||!Array.isArray(snapshot.expectedSchema)||!Array.isArray(snapshot.indexes)) return gap('SNAPSHOT_NOT_CHECKED','running-app source/schema snapshot provenance is required')\n if(snapshot.endpointSourceHash!==hash(source)) return gap('STALE_RUNTIME_SOURCE','current source differs from the running app compiler receipt; rebuild and capture a new snapshot')\n if(!contract.schema?.identity||!Array.isArray(contract.schema.columns)||!Array.isArray(contract.dependencies)||!contract.dependencies.some(d=>d.role==='schema')) return gap('CONTRACT_NOT_CHECKED','declared schema and source dependency hashes are required')\n for(const dependency of contract.dependencies) {\n  if(!isAbsolute(dependency.path)||typeof dependency.sha256!=='string') return gap('CONTRACT_NOT_CHECKED','dependency path must be absolute with SHA-256')\n  let content\n  try{content=await readFile(dependency.path)}catch{return gap('STALE_DEPENDENCY',`dependency unavailable: ${dependency.role}`)}\n  if(hash(content)!==dependency.sha256)return gap('STALE_DEPENDENCY',`dependency changed: ${dependency.role}`)\n }\n if(columns(contract.schema.columns)!==columns(snapshot.expectedSchema)) return gap('SCHEMA_CONTRACT_MISMATCH','runtime Drizzle schema facts differ from the declared contract')\n return {status:'checked',context:{schemaIdentity:contract.schema.identity,expectedSchema:contract.schema.columns,schema:snapshot.schema,indexes:snapshot.indexes},provenance:{instanceId:snapshot.instanceId,capturedAt:snapshot.capturedAt,databaseVersion:snapshot.databaseVersion,endpointSourceHash:snapshot.endpointSourceHash,snapshotHash:hash(JSON.stringify(snapshot)),dependencies:contract.dependencies},query:snapshot.query}\n}\n",
+    "selection": "Full source"
+  },
+  "B0": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/field_log.md",
+    "sha256": "fc2e9c7357196d51eae3a37ecd7dc3052092a172516a8c6c5f760c80b6595a70",
+    "excerpt": "### Kitchen inline SQL verified; support-rule design needs a stronger foundation\n\n_2026-09-14T15:36:52.386Z_\n\nMoved all ten Kitchen mutation paths into endpoint handlers. Removed unused service factories; AI and Trello helpers now return data without database access. Preserved ownership checks and transaction boundaries. Fixed a compiler rejection of ordinary console logging with a red/green boundary test. Added direct-statement/inline-transaction dependency extraction with explicit diagnostics for uninspected calls. Build snapshots recognize native enums/JSON/defaults and some built-in expression indexes. These passing cases do not resolve Kyle's criticism of table-wide readable/writable classifications.\n\nVerification: Kitchen browser oracle passed 232 collection comparisons, including real auth and rollback. A companion compiled Kitchen test exercised all ten actions with stubbed external services and 96 PG comparisons; ingredient edits refreshed one of eight collections and recipe deletion refreshed four. Production build and type checks passed; 34 client JS artifacts contained none of the checked server markers. Disposable test server/database were stopped; no production app database was changed.\n\nSQL dependency oracle: 495 operations, 3,975 optimistic and 3,975 authority comparisons, 1,057 skipped reads. Removing a write dependency fails on stale join results. Latest compiled generator: 258 operations, 715 authority comparisons, 328 skipped reads, zero runtime catalog queries. Generator variation includes auth prefixes, transactions, native defaults/types, built-in vs custom expression indexes, triggers, FK actions, and CRUD histories; it is still template-based rather than broad PostgreSQL grammar generation.\n\n[Proposed deterministic rule checker](../../SQL-EFFECT-RULES-PLAN.md) separates table dependency pruning from client expression evaluation and row-patch proofs. It calls for metamorphic laws that fail on needless support restrictions as well as mutants that fail on missing effects. No new Field Lab instrument ran; the next recommendation is a focused research survey followed by a grounded design grammar. Evidence: [Kitchen compiled paths](../../integrated-todo/evidence/kitchen-inline-sql/report.json), [SQL oracle](../../integrated-todo/evidence/sql-dependencies-final/report.json), [compiled oracle](../../integrated-todo/evidence/sql-rules-final/r",
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "B1": {
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/lib/services/shopping-list.server.ts",
+    "sha256": "07028d644c46a36d747b0df80b5747a117edd46e248591084ba853b456e45f88",
+    "excerpt": {
+      "import": "import { ServiceError } from \"./context.server\"",
+      "request_dispatch": "  const response = await fetch(fullUrl, options)\n\n  if (!response.ok) {\n    throw new ServiceError({\n      code: `INTERNAL_SERVER_ERROR`,\n      message: `Trello API error: ${response.status}`,\n    })\n  }\n\n  return response.json() as Promise<T>\n}\n\n",
+      "export": "export async function addShoppingCard(input: {\n  url?: string\n  checklists: Record<string, string[]>\n}) {\n  const listId = process.env.TRELLO_LIST_ID || `5c01a492714a091d514fde21`\n  return createOrUpdateCardWithChecklists(listId, {\n    cardName: getDateString(),\n    url: input.url,\n    checklists: input.checklists,\n  })\n}\n"
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "B2": {
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints/src/lib/services/ai.server.ts",
+    "sha256": "6ed83e360501e7fd01e40d6daea4c8c92b7205ca33d9f2584ad1833ee75c70d3",
+    "excerpt": {
+      "imports": "import { z } from \"zod\"\n\nimport { grocerySectionSchema } from \"@/db/zod-schemas\"\nimport OpenAI from \"openai\"\nimport { zodFunction } from \"openai/helpers/zod\"\nimport { getOpenAIClient } from \"@/lib/openai\"\n\n",
+      "export": "// Extract recipe data and embeddings without accessing the database.\nexport async function extractRecipe(\n  pastedText: string,\n  url: string | undefined\n) {\n",
+      "result": "  const parsed = await extractRecipeWithRetry(initialMessages)\n\n  // Get embeddings for each ingredient\n  const ingredientsWithEmbeddings = await Promise.all(\n    parsed.ingredients.map(async (ingredient) => {\n      const embedding = await getEmbedding(ingredient.extracted_name)\n      return {\n        ...ingredient,\n        embedding: JSON.stringify(embedding),\n      }\n    })\n  )\n\n  const durationInSeconds = (Date.now() - startTime) / 1000\n  console.log(`Recipe extracted in ${durationInSeconds} seconds`)\n  return { ...parsed, ingredients: ingredientsWithEmbeddings }\n}\n"
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "B3": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/kitchen-inline-sql/report.json",
+    "sha256": "14732b34d3e5a81769113473ee3106e102e50b0795d0f4dd8bbfff4e8d2004e1",
+    "excerpt": {
+      "ok": true,
+      "comparisons": 88,
+      "dependencies": [
+        {
+          "name": "usersCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"users\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "ingredientsCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"ingredients\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "recipesCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipes\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "recipeIngredientsCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_ingredients\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "recipeCommentsCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_comments\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "tagsCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"tags\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "recipeTagsCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_tags\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "ingredientTagsCollection",
+          "kind": "query",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"ingredient_tags\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "saveIngredient",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"ingredients\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "saveComment",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_comments\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "deleteIngredient",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"ingredient_events\"]",
+            "b314175043d7:[\"public\",\"ingredient_tags\"]",
+            "b314175043d7:[\"public\",\"ingredients\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "deleteRecipe",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_comments\"]",
+            "b314175043d7:[\"public\",\"recipe_ingredients\"]",
+            "b314175043d7:[\"public\",\"recipe_tags\"]",
+            "b314175043d7:[\"public\",\"recipes\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "deleteComment",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_comments\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "insertComment",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_comments\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "createIngredientAction",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"ingredient_tags\"]",
+            "b314175043d7:[\"public\",\"ingredients\"]",
+            "b314175043d7:[\"public\",\"tags\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: describeIngredient, requireUser"
+        },
+        {
+          "name": "createRecipeAction",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"recipe_ingredients\"]",
+            "b314175043d7:[\"public\",\"recipe_tags\"]",
+            "b314175043d7:[\"public\",\"recipes\"]",
+            "b314175043d7:[\"public\",\"tags\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: extractRecipe, requireUser"
+        },
+        {
+          "name": "changeTagAssignmentsAction",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"ingredient_tags\"]",
+            "b314175043d7:[\"public\",\"recipe_tags\"]",
+            "b314175043d7:[\"public\",\"tags\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: requireUser"
+        },
+        {
+          "name": "addToShoppingList",
+          "kind": "mutation",
+          "dependencies": [
+            "b314175043d7:[\"public\",\"ingredients\"]"
+          ],
+          "reason": "SQL-only analysis; calls not inspected: addShoppingCard, requireUser"
+        }
+      ]
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "C0": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/field_log.md",
+    "sha256": "fc2e9c7357196d51eae3a37ecd7dc3052092a172516a8c6c5f760c80b6595a70",
+    "excerpt": "### Audit fixes: red/green results and restored contracts\n\n_2026-09-11T19:50:54.485Z_\n\n# Audit fixes and restored design constraints\n\nThis revision implements the accepted fixes from the fracture scan, hostile audit and loss audit. The frozen grammar and audit receipts remain historical evidence. This document adds the revised contracts and restores distinctions the first draft compressed away; it is not a new Design Grammar run.\n\n## Handler outcome and authority are separate\n\nA handler is not a database transaction. It can commit one statement and fail on the next. The response now carries a handler outcome independently of its reconciliation outcome. Unknown effects still require every retained, non-GCed query to be read, even when the handler throws. Only reads retry, with three retries at 1/2/4 seconds.\n\n| Handler | Reconciliation | Client behavior |\n| --- | --- | --- |\n| Completed | Complete snapshots | Install authority, then resolve persistence and retire the overlay. |\n| Failed | Complete snapshots | Install authority, then reject persistence with the handler error and retire the overlay. Committed data remains. |\n| Either | Exhausted reads | Surface a read error for every requested collection, preserve the handler outcome in the response, and reject persistence. A later fresh read restores authority. No rollback claim is made. |\n| Either | Invalid response | Reject before installing any snapshot and mark the requested collections with a read error. |\n\nA malformed response includes missing, duplicate or unexpected query identities, duplicate row keys, invalid row values, or an invalid envelope. Validation precedes all collection writes. This does not promise atomic publication across otherwise valid snapshots.\n\nThe existing transaction overlay still owns whole optimistic row snapshots. Authoritative writes occur through ordinary collection sync utilities; failure retires the guess rather than undoing database commits. Actions still return a Transaction synchronously, with no mutation queue.\n\n",
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "C1": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/audit-fixes-red.tap",
+    "sha256": "a870c42e97c93bf46f1635884f31474b216edb873eef1f556f810d5e989ff1d3",
+    "excerpt": "# Subtest: a rejected handler is not retried and still reconciles reads\nnot ok 3 - a rejected handler is not retried and still reconciles reads\n  ---\n  duration_ms: 0.1175\n  location: '/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:52:1'\n  failureType: 'testCodeFailure'\n  error: 'write rejected'\n  code: 'ERR_TEST_FAILURE'\n  stack: |-\n    file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:56:36\n    refreshAfterMutation (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/refresh.server.ts:17:24)\n    TestContext.<anonymous> (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs:54:26)\n    Test.runInAsyncScope (node:async_hooks:211:14)\n    Test.run (node:internal/test_runner/test:931:25)\n    Test.processPendingSubtests (node:internal/test_runner/test:629:18)\n    Test.postRun (node:internal/test_runner/test:1042:19)\n    Test.run (node:internal/test_runner/test:970:12)\n    async Test.processPendingSubtests (node:internal/test_runner/test:629:7)\n  ...\n# (node:37929) ExperimentalWarning: Type Stripping is an experimental feature and might change at any time\n# (Use `node --trace-warnings ...` to show where the warning was created)\n# TAP version 13\n# \\# Subtest: authority is installed before a post-commit handler error retires the overlay\n# not ok 1 - authority is installed before a post-commit handler error retires the overlay\n#   ---\n#   duration_ms: 10.762709\n#   location: '/private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27373:1'\n#   failureType: 'testCodeFailure'\n#   error: |-\n#     Expected values to be strictly deep-equal:\n#     + actual - expected\n#     \n#     + []\n#     - [\n#     -   {\n#     -     completed: false,\n#     -     createdAt: 2026-01-01T00:00:00.000Z,\n#     -     id: 'committed',\n#     -     text: 'server correction'\n#     -   }\n#     - ]\n#     \n#   code: 'ERR_ASSERTION'\n#   name: 'AssertionError'\n#   expected:\n#     0:\n#       id: 'committed'\n#       text: 'server correction'\n#       completed: false\n#       createdAt: 2026-01-01T00:00:00.000Z\n#   actual:\n#   operator: 'deepStrictEqual'\n#   stack: |-\n#     TestContext.<anonymous> (file:///private/var/folders/m3/r413t_qj4kxg1mdnmk1zb8q80000gn/T/endpoint-runtime-tests-rwUzKF/runtime.mjs:27390:12)\n#     async Test.run (node:internal/test_runner/test:932:9)\n#     async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n#   ...\n",
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "C2": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/audit-fixes-green.tap",
+    "sha256": "5c265ac859c3c47531b52bf06d7e91468720ad32f160a567a66b04b9e2c38b35",
+    "excerpt": "\u2714 unknown and duplicate read identities reject before the write (0.741667ms)\n\u2714 opaque writes still refresh every requested read after the handler completes (0.548834ms)\n\u2714 a rejected handler is not retried and still reconciles reads (0.134125ms)\n\u2714 a later SQL failure preserves committed effects in the reconciliation response (1115.206875ms)\n\u2714 exhausted reads retain handler success or failure without repeating the handler (7004.201167ms)\n\u2714 authority is installed before a post-commit handler error retires the overlay (12.96325ms)\n\u2714 client ordering and optimistic inserts match PostgreSQL C order for Unicode IDs (2.329625ms)\n\u2714 malformed authority rejects before installing any collection snapshot (11.294291ms)\n\u2139 tests 3\n\u2139 suites 0\n\u2139 pass 3\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 30.870625\n\u2714 actual collection runtime regressions against PostgreSQL order (1274.450041ms)\n\u2714 component declarations carry server order in priority order (152.48525ms)\n\u2714 sort columns must be selected (6.57975ms)\n\u2714 unsupported direction cannot silently lose client ordering (11.768917ms)\n\u2714 transformed responses cannot borrow intermediate query ordering (25.142125ms)\n\u2714 server handler cannot capture the bound client (6.189042ms)\n\u2714 server handler cannot capture component state (7.059625ms)\n\u2714 input validator cannot capture component state (5.082083ms)\n\u2714 optimistic callback stays within the component while RPCs move to module scope (10.264125ms)\n\u2714 a row predicate is carried as data without the server auth expression (11.099083ms)\n\u2714 unsupported query arguments fail before generating an incorrectly scoped request (7.373666ms)\n\u2714 same local names in separate lexical scopes have distinct stable identities (8.305292ms)\n\u2139 tests 17\n\u2139 suites 0\n\u2139 pass 17\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 8213.279375\n",
+    "selection": "Full source"
+  },
+  "C3": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/audit-fixes-final/report.json",
+    "sha256": "79b733610cbff9cd8b1b86008f1a68f81bda358952111d3a712ca8f4bb8f9320",
+    "excerpt": {
+      "settings": {
+        "N": 2,
+        "X": 3,
+        "maxSteps": 3,
+        "mutant": null
+      },
+      "campaigns": [
+        {
+          "name": "controls",
+          "failed": false,
+          "seed": 1405820744,
+          "path": null,
+          "runs": 2,
+          "shrinks": 0,
+          "error": null
+        },
+        {
+          "name": "read-retry",
+          "failed": false,
+          "seed": -768175031,
+          "path": null,
+          "runs": 2,
+          "shrinks": 0,
+          "error": null
+        },
+        {
+          "name": "coherence",
+          "failed": false,
+          "seed": 1162897198,
+          "path": null,
+          "runs": 2,
+          "shrinks": 0,
+          "error": null
+        },
+        {
+          "name": "read-failure",
+          "failed": false,
+          "seed": -263612214,
+          "path": null,
+          "runs": 2,
+          "shrinks": 0,
+          "error": null
+        }
+      ],
+      "limits": [
+        "Todo schema, full-row queries with all/completed predicates, ascending createdAt/id order",
+        "Sequential operations within each sequence; no same-row concurrent scheduling contract",
+        "Dev browser execution with production client artifact inspection; no production browser execution yet",
+        "Server exclusion: live canaries, client dependency maps, raw/module request rejection and retained-server-import rejection; not proof against all possible leakage"
+      ],
+      "independentEffectsWitness": "passed server membership changes, other-row writes, no-op, post-commit errors, Unicode IDs and repeated lexical names",
+      "coherenceWitness": "passed filter entry/exit, server correction, rollback, zero-subscriber retention and GC exclusion",
+      "fixedWitness": "passed CRUD/rollback/ordering/settlement and server boundary checks"
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "C4": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/refresh.test.mjs",
+    "sha256": "1c1557469a35a6d9c0473c739043f57203e4c022f140156d6ac9f8efebd9b6cc",
+    "excerpt": "test('a later SQL failure preserves committed effects in the reconciliation response', async () => {\n  const { PGlite } = await import('@electric-sql/pglite')\n  const pg = new PGlite()\n  try {\n    await pg.exec('CREATE TABLE effects(id integer PRIMARY KEY)')\n    let writes = 0\n    const response = await refreshAfterMutation(\n      [{ id: 'effects' }],\n      {\n        effects: async () =>\n          (await pg.query('SELECT id FROM effects ORDER BY id')).rows,\n      },\n      async () => {\n        writes++\n        await pg.exec('INSERT INTO effects VALUES (1)')\n        await pg.exec('INSERT INTO effects VALUES (1)')\n      },\n    )\n    assert.equal(response.handler.kind, 'error')\n    assert.match(response.handler.message, /duplicate key/)\n    assert.equal(response.kind, 'confirmed')\n    assert.deepEqual(response.snapshots, [{ id: 'effects', rows: [{ id: 1 }] }])\n    assert.equal(writes, 1)\n  } finally {\n    await pg.close()\n  }\n})\n\n",
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "C5": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/e2e.mjs",
+    "sha256": "d66531af8ac0d5b9c3a3c4c584cb1caf46f9c1a0922bd3647c14ed828fb2a21c",
+    "excerpt": "      const divergence = {\n        ...coverage,\n        repeatedNames: true,\n        initial: [\n          ...coverage.initial,\n          {\n            id: '\\uE000',\n            text: 'private',\n            completed: true,\n            createdAt: '2026-01-01T00:00:00.000Z',\n            scope: 'alice',\n          },\n          {\n            id: '\\u{10000}',\n            text: 'astral',\n            completed: false,\n            createdAt: '2026-01-01T00:00:00.000Z',\n            scope: 'alice',\n          },\n        ],\n      }\n      await driver.prepare(divergence)\n      await driver.run(\n        divergence,\n        [\n          { kind: 'insert', actualEffect: 'flip' },\n          { kind: 'edit', actualEffect: 'other' },\n          { kind: 'delete', actualEffect: 'noop' },\n          { kind: 'insert', actualEffect: 'flip', failAfterCommit: true },\n          { kind: 'complete', actualEffect: 'other', failAfterCommit: true },\n        ].map((step) => ({\n          slot: 0,\n          rank: 0,\n          target: 1,\n          text: 'independent effect',\n          outcome: 'success',\n          ...step,\n        })),\n      )\n      report.independentEffectsWitness =\n        'passed server membership changes, other-row writes, no-op, post-commit errors, Unicode IDs and repeated lexical names'\n",
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "D0": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/SQL-EFFECT-RULES-RESULTS.md",
+    "sha256": "f2109cd6f18d3ecaa37367026ce1078309a1baf93350c3d9ee22cc2e159dfa60",
+    "excerpt": "# SQL effect kernel: initial executable evidence\n\nThe first implementation passes separate value and refetch-obligation checks.\nThe old analyzer reaches settlement with correct values but fails the precision\nlaw: a SQL function that writes one table causes unrelated collections to read.\nThe new checker follows that function's body and keeps the specific write set.\n\nThis is an **initial kernel and integration oracle**, not the compiler rollout.\n`sql-effects.mjs` supplies facts and judgments; the oracle sends its footprints\nthrough the real registry, JSON response envelope, and EndpointRuntime client\ncollections. Existing endpoint compiler consumers still use the legacy schema\nsnapshot/analyzer. This turn changes no application auth or handler execution.\n\n## What is implemented\n\n- One build-time catalog snapshot of table events, expressions, foreign keys,\n  routines, and the binding environment. Requests perform no catalog inspection.\n- SQL body/call closure, including terminating recursive calls. Body effects do\n  not disappear because a user routine has an IMMUTABLE or STABLE label. A pure\n  SQL body declared VOLATILE need not invent writes.\n- A complete conservative union of candidate routine overloads in the recorded\n  search path, rather than an assumed exact type binding.\n- Separate read/write facts and unresolved effects, with relation/event/routine\n  derivations and schema/statement hashes. Defaults, generated expressions,\n  checks, indexes and FK actions are considered at their applicable events.\n- A named skip-refetch judgment with baseline, optimism and repair gates. These\n  kernel gates are also tested separately from the runtime's existing gates.\n\nPostgreSQL documents why labels alone are insufficient: functions can read\ntables even when marked IMMUTABLE, and calls resolve through overload and search\npath rules. See [volatility](https://www.postgresql.org/docs/current/xfunc-volatility.html)\nand [function resolution](https://www.postgresql.org/docs/current/typeconv-func.html).\n\n## Oracle contract and independence\n\n`tests/oracles/sql-effect-rules.mjs` creates N schema/function programs and runs\nX histories per program. Each history starts with fresh clients and reset\ndatabases. One PGlite executes the actual SQL and user function bodies. A second\nPGlite computes expected rows using separate SQL: an explicit join replaces a\nhidden-read function, and direct updates replace write functions. Only base DDL\nis shared. Expected dependency sets come from the fixture's relational meaning,\nnever from the analyzer. Expected optimistic rows start from the independent\nreference baseline, never from client rows.\n\nThe generated dimensions are four index variants, three pure-function volatility\nlabels, call-chain depths 0\u20133, four mutation families, signed values, and direct\noptimistic edits to any of five retained collections. The fixed index variants\nrun the same history. Assertions observe baseline rows, captured same-turn\noptimism, settled rows, exact result-read counts, and each kernel judgment.\n\nAll five collections are preloaded. Wrong guesses can target a collection outside\nthe actual write set. Cold baselines and repair obligations are kernel controls;\nthis runner does not claim to exercise those client lifecycle transitions.\nThe generated tables contain one row each, so this is no new evidence about SQL\nbags, multirow ordering, windows, pagination or publication atomicity.\n\n## Receipts\n\nSeed `9142601`, Node `v24.5.0`, fast-check `3.23.2`, PGlite `0.3.14`.\nEach new report records source hashes, dependency versions, per-law witnesses,\nactual writes and delivered envelopes. Counts include fixed controls where noted.\n\n| Run | Observed result |\n| --- | --- |\n| [Legacy red](evidence/sql-effect-rules-red/report.json) | Two writes and responses reached; settled rows agreed; refetch obligation failed on the function write. |\n| [Green campaign](evidence/sql-effect-rules-green/report.json) | 12 generated programs \u00d7 3 histories plus four fixed histories: 40 histories, 137 mutations. 137 immediate, 137 settled, 137 refetch-count comparisons; 371 result reads and 314 skips. 16 build catalog calls, zero runtime catalog calls. |\n| [Hidden-read mutant](evidence/sql-effect-rules-mutant-read/report.json) | Removing the called body's table dependency reaches a stale-value mismatch after a function write. |\n| [Needless-fallback mutant](evidence/sql-effect-rules-mutant-fallback/report.json) | Forcing unknown writes for an expression-index variant preserves values but fails the exact read-count law. |\n| [Generated shrinking](evidence/sql-effect-rules-shrink/report.json) | The first generated case fails on stale values; ten successful shrinks retain that law/checkpoint/collection/operation family. Six attempted drifts into a read-count failure are rejected. Original and reduced histories are saved. |\n| [Fault replay](evidence/sql-effect-rules-replay-red/report.json) | The saved reduced history reproduces the same stale-value violation with the fault enabled. |\n| [Repair replay](evidence/sql-effect-rules-replay-green/report.json) | The same reduced history passes without the fault, including all three subsequent operation checks. |\n| [Contract suite](evidence/sql-effect-rules-contracts.tap) | 17 tests pass: six new boundary tests plus existing schema, compiler-dependency and matcher contracts. |\n\nThe six boundary tests execute PG routines and schema events: recursion with a\nhidden read, default selection including positional omission and upsert DEFAULT,\nFK cascade/set-null/set-default on update versus delete, a zero-row statement\ntrigger, stored generated/check/index expressions, and overload unions. Their\nfault/failure sensitivity is not separately measured; the executed mutants cover\nhidden-read omission and needless fallback through the client path.\n\nCommands run from this directory:\n\n```sh\nnpm run test:oracles:sql-effects\nENDPOINT_EFFECT_CHECKER=legacy ENDPOINT_ORACLE_OUTPUT=evidence/sql-effect-rules-red node tests/oracles/sql-effect-rules.mjs\nENDPOINT_EFFECT_MUTANT=omit-body-read ENDPOINT_ORACLE_OUTPUT=evidence/sql-effect-rules-mutant-read node tests/oracles/sql-effect-rules.mjs\nENDPOINT_EFFECT_MUTANT=needless-index-fallback ENDPOINT_ORACLE_OUTPUT=evidence/sql-effect-rules-mutant-fallback node tests/oracles/sql-effect-rules.mjs\nENDPOINT_EFFECT_MUTANT=omit-body-read ENDPOINT_ORACLE_SCENARIOS=3 ENDPOINT_ORACLE_SEQUENCES=1 ENDPOINT_ORACLE_OUTPUT=evidence/sql-effect-rules-shrink node tests/oracles/sql-effect-rules.mjs --generated-only\nENDPOINT_EFFECT_MUTANT=omit-body-read ENDPOINT_ORACLE_OUTPUT=evidence/sql-effect-rules-replay-red node tests/oracles/sql-effect-rules.mjs --replay evidence/sql-effect-rules-shrink/replay.json\nENDPOINT_ORACLE_OUTPUT=evidence/sql-effect-rules-replay-green node tests/oracles/sql-effect-rules.mjs --replay evidence/sql-effect-rules-shrink/replay.json\nnode --test --test-reporter=tap tests/sql-effects.test.mjs tests/schema-snapshot.test.mjs tests/compiled-dependencies.test.mjs tests/dependencies.test.mjs\n```\n\n## Audit disposition\n\nThis table records the disposition at the first kernel run. The subsequent\n[older-oracle repair](ORACLE-REPAIR-RESULTS.md) implements the listed harness\nrepairs and supplies their red/green receipts; it states the remaining observation\nlimits separately.\n\nThe [fresh loss audit](../design/field-trip-optimistic-coherence/oracle-guide-loss-audit/AUDIT.md)\nis frozen separately from these implementation decisions. It found test gaps,\nnot demonstrated production bugs.\n\n| Loss | This implementation | Remaining portfolio work |\n| --- | --- | --- |\n| LA-01: failure drift | New runner preserves failure identity; an actual drifting shrink was rejected and the retained failure replayed. | Older runners still need this change. |\n| LA-02: teardown evidence | New runner freezes mismatch evidence, attempts every release, retains cleanup diagnostics, and writes its final report after cleanup. | Inject cleanup faults to test those branches; repair older runner teardown. |\n| LA-03: borrowed optimism | New baseline and optimistic expectations come from separate reference PG state. | Fix the older compiled/dependency runners using independent admitted baselines. |\n| LA-04: discarded immediate snapshot | New runner captures and compares same-turn values before awaiting. | The existing concurrent browser runner still discards its invocation snapshot. |\n| LA-05: IDs-only consumers | No browser consumer claim is made for this new runner. | Add rendered values and define render checkpoints in the browser oracle. |\n| LA-06: generic mutant red | Reports retain named comparisons, cells, fault applications, actual execution/delivery counts, failure classification and replay verdicts. | Extend these receipts to other laws and older runners. |\n\n## Boundaries before rollout\n\nThe parser remains `pgsql-ast-parser`, not PostgreSQL's binder. Valid PostgreSQL\nsyntax can remain unknown: for example its lexer rejects the compact recursive\nargument `$1-1`, while the spaced `$1 - 1` form passes. No text rewrite hides\nthat limitation. Routine defaults, variadics, SQL-standard parsed bodies,\nPL/pgSQL/dynamic SQL, trigger record bodies, views/rules/RLS, inheritance,\ncustom type/operator/cast bindings, and changed execution contexts remain open.\nThe checker reports an unresolved operation instead of an empty effect set.\n\nSome unknowns are intentionally broader than the desired final binder: native\ncolumn types are the initial fragment, and an application-defined cast currently\nleaves expression binding unresolved. These are implementation gaps, not claims\nthat relational algebra forbids optimization. They must not become permanent\ntable eligibility rules. The new checker has not replaced Kitchen's compiler\npath on this evidence alone.\n\nDerivations identify statements, relations, events and routine OIDs; exact AST\nsource spans remain to be added. Evidence assumes matching schema/search path\nand application scope at execution. Deployment agreement and richer non-table\ncontext summaries are not established by these tests. A constant query's kernel\nproof against unknown writes is tested directly; that refinement is not wired\ninto the legacy registry's null-footprint matching.\n\nThis campaign measures read counts, not latency or wire compression. It adds no\nnew HTTP/browser, client bundle exclusion, overlapping-response, or full\nPostgreSQL-generation evidence. Existing tests for those promises retain only\ntheir own coverage credit.\n",
+    "selection": "Full source"
+  },
+  "D1": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/sql-effect-rules-red/report.json",
+    "sha256": "3c3dc1ec0935dd575fada85c945dc766b8db02b8afb6f554089cdacc7dc81112",
+    "excerpt": {
+      "ok": false,
+      "checker": "legacy",
+      "mutant": null,
+      "operations": 1,
+      "histories": 1,
+      "comparisons": {
+        "values/baseline": 1,
+        "values/same-turn-optimism": 2,
+        "values/settled": 2,
+        "read-obligation/settled": 2
+      },
+      "writesExecuted": 2,
+      "envelopesDelivered": 2,
+      "resultReads": 3,
+      "skippedReads": 2,
+      "outcome": "semantic-rejection",
+      "error": "AssertionError [ERR_ASSERTION]: read-obligation/settled\n+ actual - expected\n\n  [\n-   0,\n    1,\n    1,\n    1,\n+   1,\n+   1\n-   0\n  ]\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:93:12)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:331:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:367:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:463:9",
+      "rejectedShrinkFailures": []
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "D2": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/sql-effect-rules-green/report.json",
+    "sha256": "06b5b92ea42e3bf228a0622d77bcfade88987f228c25c4f57baac3e41c1f127a",
+    "excerpt": {
+      "ok": true,
+      "checker": "effects",
+      "mutant": null,
+      "operations": 137,
+      "histories": 40,
+      "comparisons": {
+        "values/baseline": 40,
+        "independence/compiled-judgment": 137,
+        "authority/compiled-judgment": 274,
+        "values/same-turn-optimism": 137,
+        "values/settled": 137,
+        "read-obligation/settled": 137,
+        "reach/campaign": 1,
+        "catalog-boundary/campaign": 1
+      },
+      "writesExecuted": 137,
+      "envelopesDelivered": 137,
+      "resultReads": 371,
+      "skippedReads": 314,
+      "fastCheck": {
+        "runs": 12,
+        "shrinks": 0,
+        "seed": 9142601,
+        "path": null
+      },
+      "rejectedShrinkFailures": []
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "D3": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/sql-effect-rules-mutant-read/report.json",
+    "sha256": "04ddaa868caba5d98460c69a6c20cc906362238ad7b6ab71fd2bb18dc4b2c521",
+    "excerpt": {
+      "ok": false,
+      "checker": "effects",
+      "mutant": "omit-body-read",
+      "operations": 1,
+      "histories": 1,
+      "comparisons": {
+        "values/baseline": 1,
+        "independence/compiled-judgment": 2,
+        "authority/compiled-judgment": 4,
+        "values/same-turn-optimism": 2,
+        "values/settled": 2,
+        "read-obligation/settled": 1
+      },
+      "writesExecuted": 2,
+      "envelopesDelivered": 2,
+      "resultReads": 3,
+      "skippedReads": 2,
+      "outcome": "semantic-rejection",
+      "error": "AssertionError [ERR_ASSERTION]: values/settled\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        id: 'row',\n        value: 7\n...\n        id: 'row',\n+       value: 9\n-       value: 4\n      }\n    ],\n    [\n      {\n        id: 'row',\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:93:12)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:325:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:367:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:463:9",
+      "rejectedShrinkFailures": []
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "D4": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/sql-effect-rules-mutant-fallback/report.json",
+    "sha256": "5e119db340ff8b341ca41df4d48562778a9132af1125662d4f2f903e99531342",
+    "excerpt": {
+      "ok": false,
+      "checker": "effects",
+      "mutant": "needless-index-fallback",
+      "operations": 4,
+      "histories": 2,
+      "comparisons": {
+        "values/baseline": 2,
+        "independence/compiled-judgment": 5,
+        "authority/compiled-judgment": 10,
+        "values/same-turn-optimism": 5,
+        "values/settled": 5,
+        "read-obligation/settled": 5
+      },
+      "writesExecuted": 5,
+      "envelopesDelivered": 5,
+      "resultReads": 11,
+      "skippedReads": 9,
+      "outcome": "semantic-rejection",
+      "error": "AssertionError [ERR_ASSERTION]: read-obligation/settled\n+ actual - expected\n\n  [\n    1,\n    1,\n-   0,\n-   0,\n    1,\n+   1,\n+   1\n  ]\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:93:12)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:331:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:367:5)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:463:9",
+      "rejectedShrinkFailures": []
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "D5": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/sql-effect-rules-shrink/report.json",
+    "sha256": "463b396acb1d988b96e3f52cca1dbe761cffa3cb9f879f15dfaf73b083677634",
+    "excerpt": {
+      "ok": false,
+      "checker": "effects",
+      "mutant": "omit-body-read",
+      "operations": 35,
+      "histories": 30,
+      "comparisons": {
+        "values/baseline": 30,
+        "independence/compiled-judgment": 52,
+        "authority/compiled-judgment": 104,
+        "values/same-turn-optimism": 52,
+        "values/settled": 52,
+        "read-obligation/settled": 41
+      },
+      "writesExecuted": 52,
+      "envelopesDelivered": 52,
+      "resultReads": 112,
+      "skippedReads": 63,
+      "outcome": "semantic-rejection",
+      "fastCheck": {
+        "runs": 1,
+        "shrinks": 10,
+        "seed": 9142601,
+        "path": "0:0:0:3:2:2:2:2:2:2:2"
+      },
+      "error": "AssertionError [ERR_ASSERTION]: values/settled\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        id: 'row',\n        value: 1\n...\n        id: 'row',\n+       value: 3\n-       value: 1\n      }\n    ],\n    [\n      {\n        id: 'row',\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:54:16)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:155:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:179:9)\n    at async AsyncProperty.run (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/property/AsyncProperty.generic.js:46:28)\n    at async asyncRunIt (file:///Users/kylemathews/programs/tanstack-db/node_modules/.pnpm/fast-check@3.23.2/node_modules/fast-check/lib/esm/check/runner/Runner.js:33:21)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:214:20",
+      "rejectedShrinkFailures": [
+        {
+          "program": {
+            "index": "none",
+            "volatility": "IMMUTABLE",
+            "depth": 0
+          },
+          "histories": [
+            [
+              {
+                "kind": "function",
+                "value": 2,
+                "optimistic": 2
+              },
+              {
+                "kind": "function",
+                "value": 4,
+                "optimistic": 2
+              },
+              {
+                "kind": "direct",
+                "value": 7,
+                "optimistic": 2
+              },
+              {
+                "kind": "read-write",
+                "value": -9,
+                "optimistic": 1
+              }
+            ]
+          ],
+          "failure": {
+            "law": "read-obligation",
+            "checkpoint": "settled",
+            "actual": [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            "expected": [
+              0,
+              1,
+              1,
+              0,
+              0
+            ],
+            "cell": "none/IMMUTABLE/depth-0",
+            "step": {
+              "kind": "function",
+              "value": 2,
+              "optimistic": 2
+            },
+            "summaries": [
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]",
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16409"
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "routine:16409",
+                    "target": "routine:16407"
+                  },
+                  {
+                    "rule": "relation-event",
+                    "source": "routine:16407",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t2\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t2\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16406"
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              }
+            ],
+            "summary": {
+              "reads": [
+                "[\"app\",\"t1\"]"
+              ],
+              "writes": [
+                "[\"app\",\"t1\"]"
+              ],
+              "unknown": [],
+              "derivation": [
+                {
+                  "rule": "routine-call",
+                  "source": "endpoint",
+                  "target": "routine:16408"
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "update",
+                  "details": {
+                    "columns": [
+                      "value"
+                    ],
+                    "defaults": []
+                  }
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "select",
+                  "details": {}
+                }
+              ],
+              "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+            }
+          }
+        },
+        {
+          "program": {
+            "index": "none",
+            "volatility": "IMMUTABLE",
+            "depth": 0
+          },
+          "histories": [
+            [
+              {
+                "kind": "direct",
+                "value": -2,
+                "optimistic": 3
+              },
+              {
+                "kind": "function",
+                "value": 2,
+                "optimistic": 2
+              },
+              {
+                "kind": "function",
+                "value": 4,
+                "optimistic": 2
+              },
+              {
+                "kind": "direct",
+                "value": 7,
+                "optimistic": 2
+              },
+              {
+                "kind": "read-write",
+                "value": -9,
+                "optimistic": 1
+              }
+            ]
+          ],
+          "failure": {
+            "law": "read-obligation",
+            "checkpoint": "settled",
+            "actual": [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            "expected": [
+              0,
+              1,
+              1,
+              0,
+              0
+            ],
+            "cell": "none/IMMUTABLE/depth-0",
+            "step": {
+              "kind": "function",
+              "value": 2,
+              "optimistic": 2
+            },
+            "summaries": [
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]",
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16409"
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "routine:16409",
+                    "target": "routine:16407"
+                  },
+                  {
+                    "rule": "relation-event",
+                    "source": "routine:16407",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t2\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t2\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16406"
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              }
+            ],
+            "summary": {
+              "reads": [
+                "[\"app\",\"t1\"]"
+              ],
+              "writes": [
+                "[\"app\",\"t1\"]"
+              ],
+              "unknown": [],
+              "derivation": [
+                {
+                  "rule": "routine-call",
+                  "source": "endpoint",
+                  "target": "routine:16408"
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "update",
+                  "details": {
+                    "columns": [
+                      "value"
+                    ],
+                    "defaults": []
+                  }
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "select",
+                  "details": {}
+                }
+              ],
+              "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+            }
+          }
+        },
+        {
+          "program": {
+            "index": "none",
+            "volatility": "IMMUTABLE",
+            "depth": 0
+          },
+          "histories": [
+            [
+              {
+                "kind": "function",
+                "value": 2,
+                "optimistic": 2
+              },
+              {
+                "kind": "function",
+                "value": 4,
+                "optimistic": 2
+              },
+              {
+                "kind": "direct",
+                "value": 7,
+                "optimistic": 2
+              },
+              {
+                "kind": "read-write",
+                "value": -9,
+                "optimistic": 1
+              }
+            ]
+          ],
+          "failure": {
+            "law": "read-obligation",
+            "checkpoint": "settled",
+            "actual": [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            "expected": [
+              0,
+              1,
+              1,
+              0,
+              0
+            ],
+            "cell": "none/IMMUTABLE/depth-0",
+            "step": {
+              "kind": "function",
+              "value": 2,
+              "optimistic": 2
+            },
+            "summaries": [
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]",
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16409"
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "routine:16409",
+                    "target": "routine:16407"
+                  },
+                  {
+                    "rule": "relation-event",
+                    "source": "routine:16407",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t2\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t2\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16406"
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              }
+            ],
+            "summary": {
+              "reads": [
+                "[\"app\",\"t1\"]"
+              ],
+              "writes": [
+                "[\"app\",\"t1\"]"
+              ],
+              "unknown": [],
+              "derivation": [
+                {
+                  "rule": "routine-call",
+                  "source": "endpoint",
+                  "target": "routine:16408"
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "update",
+                  "details": {
+                    "columns": [
+                      "value"
+                    ],
+                    "defaults": []
+                  }
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "select",
+                  "details": {}
+                }
+              ],
+              "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+            }
+          }
+        },
+        {
+          "program": {
+            "index": "none",
+            "volatility": "IMMUTABLE",
+            "depth": 0
+          },
+          "histories": [
+            [
+              {
+                "kind": "direct",
+                "value": 0,
+                "optimistic": 3
+              },
+              {
+                "kind": "function",
+                "value": 2,
+                "optimistic": 2
+              },
+              {
+                "kind": "function",
+                "value": 4,
+                "optimistic": 2
+              },
+              {
+                "kind": "direct",
+                "value": 7,
+                "optimistic": 2
+              },
+              {
+                "kind": "read-write",
+                "value": -9,
+                "optimistic": 1
+              }
+            ]
+          ],
+          "failure": {
+            "law": "read-obligation",
+            "checkpoint": "settled",
+            "actual": [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            "expected": [
+              0,
+              1,
+              1,
+              0,
+              0
+            ],
+            "cell": "none/IMMUTABLE/depth-0",
+            "step": {
+              "kind": "function",
+              "value": 2,
+              "optimistic": 2
+            },
+            "summaries": [
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]",
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16409"
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "routine:16409",
+                    "target": "routine:16407"
+                  },
+                  {
+                    "rule": "relation-event",
+                    "source": "routine:16407",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t2\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t2\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16406"
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              }
+            ],
+            "summary": {
+              "reads": [
+                "[\"app\",\"t1\"]"
+              ],
+              "writes": [
+                "[\"app\",\"t1\"]"
+              ],
+              "unknown": [],
+              "derivation": [
+                {
+                  "rule": "routine-call",
+                  "source": "endpoint",
+                  "target": "routine:16408"
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "update",
+                  "details": {
+                    "columns": [
+                      "value"
+                    ],
+                    "defaults": []
+                  }
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "select",
+                  "details": {}
+                }
+              ],
+              "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+            }
+          }
+        },
+        {
+          "program": {
+            "index": "none",
+            "volatility": "IMMUTABLE",
+            "depth": 0
+          },
+          "histories": [
+            [
+              {
+                "kind": "function",
+                "value": 2,
+                "optimistic": 2
+              },
+              {
+                "kind": "function",
+                "value": 4,
+                "optimistic": 2
+              },
+              {
+                "kind": "direct",
+                "value": 7,
+                "optimistic": 2
+              },
+              {
+                "kind": "read-write",
+                "value": -9,
+                "optimistic": 1
+              }
+            ]
+          ],
+          "failure": {
+            "law": "read-obligation",
+            "checkpoint": "settled",
+            "actual": [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            "expected": [
+              0,
+              1,
+              1,
+              0,
+              0
+            ],
+            "cell": "none/IMMUTABLE/depth-0",
+            "step": {
+              "kind": "function",
+              "value": 2,
+              "optimistic": 2
+            },
+            "summaries": [
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]",
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16409"
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "routine:16409",
+                    "target": "routine:16407"
+                  },
+                  {
+                    "rule": "relation-event",
+                    "source": "routine:16407",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t2\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t2\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16406"
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              }
+            ],
+            "summary": {
+              "reads": [
+                "[\"app\",\"t1\"]"
+              ],
+              "writes": [
+                "[\"app\",\"t1\"]"
+              ],
+              "unknown": [],
+              "derivation": [
+                {
+                  "rule": "routine-call",
+                  "source": "endpoint",
+                  "target": "routine:16408"
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "update",
+                  "details": {
+                    "columns": [
+                      "value"
+                    ],
+                    "defaults": []
+                  }
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "select",
+                  "details": {}
+                }
+              ],
+              "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+            }
+          }
+        },
+        {
+          "program": {
+            "index": "none",
+            "volatility": "IMMUTABLE",
+            "depth": 0
+          },
+          "histories": [
+            [
+              {
+                "kind": "direct",
+                "value": 0,
+                "optimistic": 0
+              },
+              {
+                "kind": "function",
+                "value": 2,
+                "optimistic": 2
+              },
+              {
+                "kind": "function",
+                "value": 4,
+                "optimistic": 2
+              },
+              {
+                "kind": "direct",
+                "value": 7,
+                "optimistic": 2
+              },
+              {
+                "kind": "read-write",
+                "value": -9,
+                "optimistic": 1
+              }
+            ]
+          ],
+          "failure": {
+            "law": "read-obligation",
+            "checkpoint": "settled",
+            "actual": [
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            "expected": [
+              0,
+              1,
+              1,
+              0,
+              0
+            ],
+            "cell": "none/IMMUTABLE/depth-0",
+            "step": {
+              "kind": "function",
+              "value": 2,
+              "optimistic": 2
+            },
+            "summaries": [
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]",
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16409"
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "routine:16409",
+                    "target": "routine:16407"
+                  },
+                  {
+                    "rule": "relation-event",
+                    "source": "routine:16407",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t1\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t1\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t2\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t2\"]",
+                    "operation": "select",
+                    "details": {}
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              },
+              {
+                "reads": [
+                  "[\"app\",\"t0\"]"
+                ],
+                "writes": [],
+                "unknown": [],
+                "derivation": [
+                  {
+                    "rule": "relation-event",
+                    "source": "endpoint",
+                    "target": "[\"app\",\"t0\"]",
+                    "operation": "select",
+                    "details": {}
+                  },
+                  {
+                    "rule": "routine-call",
+                    "source": "endpoint",
+                    "target": "routine:16406"
+                  }
+                ],
+                "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+              }
+            ],
+            "summary": {
+              "reads": [
+                "[\"app\",\"t1\"]"
+              ],
+              "writes": [
+                "[\"app\",\"t1\"]"
+              ],
+              "unknown": [],
+              "derivation": [
+                {
+                  "rule": "routine-call",
+                  "source": "endpoint",
+                  "target": "routine:16408"
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "update",
+                  "details": {
+                    "columns": [
+                      "value"
+                    ],
+                    "defaults": []
+                  }
+                },
+                {
+                  "rule": "relation-event",
+                  "source": "routine:16408",
+                  "target": "[\"app\",\"t1\"]",
+                  "operation": "select",
+                  "details": {}
+                }
+              ],
+              "artifact": "2d687dc68cf272d481bbfeeb28fbb92d84abd418acbf5d8f7dec2c8f729593ca"
+            }
+          }
+        }
+      ]
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "D6": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/sql-effect-rules-replay-red/report.json",
+    "sha256": "51ecf8f474a5f5270e34587ffcb3b19c296a852bb4f9ebb1089ba076b3e17665",
+    "excerpt": {
+      "ok": false,
+      "checker": "effects",
+      "mutant": "omit-body-read",
+      "operations": 0,
+      "histories": 1,
+      "comparisons": {
+        "values/baseline": 1,
+        "independence/compiled-judgment": 1,
+        "authority/compiled-judgment": 2,
+        "values/same-turn-optimism": 1,
+        "values/settled": 1
+      },
+      "writesExecuted": 1,
+      "envelopesDelivered": 1,
+      "resultReads": 0,
+      "skippedReads": 0,
+      "replay": "same-violation",
+      "outcome": "semantic-rejection",
+      "error": "AssertionError [ERR_ASSERTION]: values/settled\n+ actual - expected\n... Skipped lines\n\n  [\n    [\n      {\n        id: 'row',\n        value: 1\n...\n        id: 'row',\n+       value: 3\n-       value: 1\n      }\n    ],\n    [\n      {\n        id: 'row',\n\n    at compare (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:54:16)\n    at run (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:155:9)\n    at async check (file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:179:9)\n    at async file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/tests/oracles/sql-effect-rules.mjs:203:11",
+      "rejectedShrinkFailures": []
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "D7": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/evidence/sql-effect-rules-replay-green/report.json",
+    "sha256": "cbb6407597afb9c9094e8bc6dba38ecad9a8d4dc504263b0d1f236603bf84cbd",
+    "excerpt": {
+      "ok": true,
+      "checker": "effects",
+      "mutant": null,
+      "operations": 3,
+      "histories": 1,
+      "comparisons": {
+        "values/baseline": 1,
+        "independence/compiled-judgment": 3,
+        "authority/compiled-judgment": 6,
+        "values/same-turn-optimism": 3,
+        "values/settled": 3,
+        "read-obligation/settled": 3,
+        "reach/campaign": 1,
+        "catalog-boundary/campaign": 1
+      },
+      "writesExecuted": 3,
+      "envelopesDelivered": 3,
+      "resultReads": 9,
+      "skippedReads": 6,
+      "replay": "passes",
+      "rejectedShrinkFailures": []
+    },
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "G": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/design/field-trip-optimistic-coherence/oracle-guidance-reaudit/GUIDE.md",
+    "sha256": "8460ba74a3eddbef29ba2a37a21b1716b63c1fae3f346b4bb5d1d6a191a69b0f",
+    "excerpt": "Independent code also needs independent reasoning. Calling production's comparator from this reference would make comparator defects invisible to this particular comparison. Reuse mundane test mechanics when useful, but name any semantic helper both sides trust. A small model is easier to inspect; it is not correct merely because it is small.\nWhen production fails, keep the original history and the first mismatching checkpoint. Reduce the history while requiring that same violation, then retain the small witness with the broader property. That gives us both a readable explanation and more ways to encounter the class of failure.\nThese results call for different conclusions. If deleting one clause leaves the same obligation enforced elsewhere, survival does not show the obligation unnecessary. If the test kills a compound change, it may not distinguish each part. Research on mutation testing does not supply a conversion from a score to the probability that this library is correct; the [reading notes](oracle-guide-notes-v1.md#research-and-further-reading) preserve those limits.\nKeep the original trace beside the reduction. Record which property ran and which checkpoint replay reached. \u201cRan, but did not reproduce the original mismatch\u201d and \u201cfailed before reaching the comparison\u201d are useful outcomes; neither should be labeled successful reproduction.",
+    "selection": "Selected fields or passage; original file hash retained"
+  },
+  "B4": {
+    "path": "/Users/kylemathews/programs/kitchen-ai/.worktrees/codex-db-endpoints",
+    "commit": "0fa8bf0d899229ff31aacd706f20b30e48112657",
+    "kind": "Historical git blob existence and byte comparison; not proof an audit ran",
+    "blobs": {
+      "src/lib/services/shopping-list.server.ts": {
+        "sha256": "07028d644c46a36d747b0df80b5747a117edd46e248591084ba853b456e45f88",
+        "current_bytes_match": true
+      },
+      "src/lib/services/ai.server.ts": {
+        "sha256": "6ed83e360501e7fd01e40d6daea4c8c92b7205ca33d9f2584ad1833ee75c70d3",
+        "current_bytes_match": true
+      }
+    }
+  },
+  "A6": {
+    "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/integrated-check.json",
+    "sha256": "078ea6c25b63d494f445c367f622ed09f49af0e5002a03398ce2dc0e14a648de",
+    "excerpt": {
+      "protocol": "endpoints-probe/v2",
+      "endpoint": "listTodos",
+      "status": "supported",
+      "source": {
+        "uri": "file:///Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+        "sha256": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4"
+      },
+      "diagnostics": [],
+      "rerun": [
+        "/usr/local/bin/node",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/cli.mjs",
+        "check",
+        "--file",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/endpoint.tsx",
+        "--contract",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/integration-contract.json",
+        "--snapshot",
+        "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/track-a-analysis/phase3/integrated-snapshot.json"
+      ],
+      "check": {
+        "status": "supported",
+        "code": "SQL_KEY_ORDER_SUPPORTED",
+        "key": "id",
+        "totalSqlOrder": true,
+        "evidence": {
+          "schemaIdentity": "integrated-todo-local-disposable",
+          "schemaFingerprint": "b489926566b7ad448726cd8fdff5c5fe1b03c297d81f7c3821ca9715f021589c",
+          "keyIndex": "CREATE UNIQUE INDEX todo_pkey ON public.todo USING btree (id)"
+        }
+      },
+      "provenance": {
+        "instanceId": "dfb3fd8e-198e-46a3-b842-96065167e7a6",
+        "capturedAt": "2026-09-10T20:12:44.698Z",
+        "databaseVersion": {
+          "version": "PostgreSQL 17.5 on aarch64-unknown-linux-gnu, compiled by emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5), 32-bit"
+        },
+        "endpointSourceHash": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+        "snapshotHash": "69e5f459c631d677f8d358e10c480f32eeb6dedd434efad8ce89a438c7d41a0c",
+        "dependencies": [
+          {
+            "role": "schema",
+            "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/database.server.ts",
+            "sha256": "cf3ebb0457706cddfee8919f7b26b9fc611ac4f5caa060ffda4b0f6fe7a9b9eb"
+          },
+          {
+            "role": "runtime",
+            "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/src/runtime.ts",
+            "sha256": "8473a107e6d6fc84b4eb129ef6e2af84c3f45fb821be6acbbb84ac7a9028c848"
+          },
+          {
+            "role": "compiler",
+            "path": "/Users/kylemathews/.codex/worktrees/e079/tanstack-db/probes/endpoints/integrated-todo/transform.mjs",
+            "sha256": "1a37bef295df877fa0ddb356e4e66c41ccaccd0978be96792d98e933eb45f239"
+          }
+        ]
+      },
+      "runtimeComparison": {
+        "status": "matched",
+        "analyzed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "alice"
+          ],
+          "parameterTypes": [
+            "text"
+          ]
+        },
+        "observed": {
+          "sql": "select \"id\", \"text\", \"completed\", \"created_at\" from \"todo\" where \"todo\".\"user_id\" = $1 order by \"todo\".\"created_at\" asc, \"todo\".\"id\" asc",
+          "params": [
+            "alice"
+          ]
+        }
+      },
+      "correspondence": {
+        "sourceHash": "a315c86b2f55d546909b414e17ba9144c6a1aba1130a72039943653a11fc33a4",
+        "handler": {
+          "range": [
+            385,
+            669
+          ],
+          "location": {
+            "line": 10,
+            "column": 2
+          }
+        },
+        "fields": [
+          {
+            "name": "id",
+            "range": [
+              476,
+              486
+            ],
+            "location": {
+              "line": 12,
+              "column": 32
+            }
+          },
+          {
+            "name": "text",
+            "range": [
+              487,
+              501
+            ],
+            "location": {
+              "line": 12,
+              "column": 43
+            }
+          },
+          {
+            "name": "completed",
+            "range": [
+              502,
+              526
+            ],
+            "location": {
+              "line": 12,
+              "column": 58
+            }
+          },
+          {
+            "name": "createdAt",
+            "range": [
+              527,
+              551
+            ],
+            "location": {
+              "line": 12,
+              "column": 83
+            }
+          }
+        ],
+        "predicate": {
+          "range": [
+            569,
+            599
+          ],
+          "location": {
+            "line": 13,
+            "column": 16
+          }
+        },
+        "response": {
+          "range": [
+            651,
+            666
+          ],
+          "location": {
+            "line": 14,
+            "column": 10
+          }
+        },
+        "method": "AST selected handler \u2192 bounded Drizzle lowering; source offset translation",
+        "unchecked": [
+          "sibling mutation/UI/module side effects",
+          "auth/input validation/serialization semantics"
+        ]
+      },
+      "assumptions": [
+        "Caller-captured local integrated Todo instance snapshot; not deployment attestation",
+        "Named handler only; sibling mutation/UI/module side effects are not analyzed",
+        "SQL result key/order only; no auth, wire or UI order proof"
+      ],
+      "nextStep": null
+    },
+    "selection": "Full source"
+  }
+}

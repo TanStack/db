@@ -15,6 +15,7 @@ so it does not silently change the candidate during its blind audit.
 | Hostile Assay | Complete: two narrow contract gaps, four declared open choices and six rejected attacks/controls | [Fresh audit](05-hostile-assay.md) |
 | New user requirement | Recorded after v0.1 freeze | [Authority boundary](06-authority-boundary.md) |
 | Authority challenge | Complete continuation by the same hostile auditor; four bounded attacks | [Follow-up](07-authority-challenge.md) |
+| Guide-word content review | In progress, one question at a time with Kyle; original preparation remains frozen | [Recorded judgments](08-content-review.md) |
 
 ## Bounded readings
 
@@ -62,3 +63,13 @@ audit IDs and local links. That validates the record, not the design's truth.
 The Guide-word card reserves credibility/consequence/safeguard/closure judgments
 for competent reviewers. The worksheet therefore awaits content review; no action
 owners or dates have been silently assigned and no automation was scheduled.
+
+During content review, Kyle supplied Beads as possible API inspiration. See the
+[bounded source reading](09-beads-api-reading.md) for observed interfaces and
+candidate mappings. No integration or dependency choice has been made.
+
+Kyle subsequently chose API inspiration only (R21), then selected four
+[Process Grammar studies](../process-grammars/README.md). Their first bounded
+passes preserve source histories, explicit prerequisite questions and deterministic
+replay. They do not close the original Guide-word worksheet or select a final
+evidence API.

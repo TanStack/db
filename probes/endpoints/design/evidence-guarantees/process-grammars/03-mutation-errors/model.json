@@ -1,0 +1,528 @@
+{
+  "id": "PG3",
+  "status": "Bounded replay complete; exact historical E2E trace identity not available in aggregate report",
+  "claim": "After a mutation reports failure, reconciliation preserves committed PG results and retires optimism under the tested contract.",
+  "initial": {
+    "fixture_available": true,
+    "counterexample": false,
+    "diagnosed": false,
+    "fixed": false,
+    "boundary_pass": false,
+    "counterexample_replayed": false,
+    "e2e_pass": false,
+    "reported": false,
+    "note": false
+  },
+  "actions": {
+    "record_red": {
+      "label": "Capture failing refresh/client boundary regressions",
+      "requires_any": [
+        {
+          "fixture_available": true
+        }
+      ],
+      "outcomes": {
+        "red": {
+          "counterexample": true
+        }
+      },
+      "source_refs": [
+        "C1"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "diagnose": {
+      "label": "Distinguish handler failure from committed database state",
+      "requires_any": [
+        {
+          "counterexample": true
+        }
+      ],
+      "outcomes": {
+        "understood": {
+          "diagnosed": true
+        }
+      },
+      "source_refs": [
+        "C0",
+        "C4"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "repair": {
+      "label": "Change refresh/error protocol and client settlement",
+      "requires_any": [
+        {
+          "diagnosed": true
+        }
+      ],
+      "outcomes": {
+        "changed": {
+          "fixed": true,
+          "boundary_pass": false,
+          "e2e_pass": false
+        }
+      },
+      "source_refs": [
+        "C0"
+      ],
+      "repeatable": true,
+      "depletes": [
+        "verify_boundary",
+        "verify_e2e",
+        "report_e2e"
+      ],
+      "unresolved": []
+    },
+    "verify_boundary": {
+      "label": "Record same-law boundary tests passing",
+      "requires_any": [
+        {
+          "fixed": true
+        }
+      ],
+      "outcomes": {
+        "green": {
+          "boundary_pass": true,
+          "counterexample_replayed": true
+        }
+      },
+      "source_refs": [
+        "C2",
+        "C4",
+        "R"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "verify_e2e": {
+      "label": "Record browser/PG campaign with post-commit error witness",
+      "requires_any": [
+        {
+          "fixed": true
+        }
+      ],
+      "outcomes": {
+        "green": {
+          "e2e_pass": true
+        }
+      },
+      "source_refs": [
+        "C3",
+        "C5"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "report_e2e": {
+      "label": "Report bounded repaired boundary and browser evidence",
+      "requires_any": [
+        {
+          "boundary_pass": true,
+          "counterexample_replayed": true,
+          "e2e_pass": true
+        }
+      ],
+      "outcomes": {
+        "reported": {
+          "reported": true
+        }
+      },
+      "source_refs": [
+        "C0",
+        "C2",
+        "C3",
+        "R"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "note": {
+      "label": "Keep investigation note without resolving law",
+      "requires_any": [
+        {
+          "counterexample": true
+        }
+      ],
+      "outcomes": {
+        "noted": {
+          "note": true
+        }
+      },
+      "source_refs": [
+        "R"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    }
+  },
+  "episodes": [
+    {
+      "id": "C-repair-and-full-stack-check",
+      "kind": "Recorded sequence assembled from named red/green boundary reports and later campaign; not one continuous network trace",
+      "events": [
+        {
+          "id": "C-E1",
+          "action": "record_red",
+          "outcome": "red",
+          "source_refs": [
+            "C1"
+          ],
+          "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E2",
+          "action": "diagnose",
+          "outcome": "understood",
+          "source_refs": [
+            "C0",
+            "C4"
+          ],
+          "detail": "A handler is not necessarily a database transaction.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E3",
+          "action": "repair",
+          "outcome": "changed",
+          "source_refs": [
+            "C0"
+          ],
+          "detail": "Return handler outcome separately from reconciliation result.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E4",
+          "action": "verify_boundary",
+          "outcome": "green",
+          "source_refs": [
+            "C2"
+          ],
+          "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E5",
+          "action": "verify_e2e",
+          "outcome": "green",
+          "source_refs": [
+            "C3",
+            "C5"
+          ],
+          "detail": "Recorded full-stack witness exercises failAfterCommit variants.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E6",
+          "action": "report_e2e",
+          "outcome": "reported",
+          "source_refs": [
+            "C0",
+            "C2",
+            "C3"
+          ],
+          "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "C-R1",
+      "question": "Does a rejected handler establish all writes rolled back?",
+      "answer": "no",
+      "reason": "Two real PG statements can leave the first committed when the next fails.",
+      "source_refs": [
+        "C4",
+        "C0"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "C-R2",
+      "question": "Can repaired evidence omit the original failing behavior?",
+      "answer": "no",
+      "reason": "R7 requires the original failure; named boundary tests retain that law.",
+      "source_refs": [
+        "R",
+        "C1",
+        "C2"
+      ],
+      "basis": "user-established",
+      "relation": "AND",
+      "respondent": "Kyle (prior review)",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "C-R3",
+      "question": "Does a boundary test pass alone establish browser-path execution?",
+      "answer": "no",
+      "reason": "The full-stack report has a separate post-commit witness.",
+      "source_refs": [
+        "C2",
+        "C3",
+        "C5"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "C-R4",
+      "question": "Must the boundary and E2E checks run in that temporal order?",
+      "answer": "no",
+      "reason": "Both require repaired code, neither consumes the other result.",
+      "source_refs": [
+        "C2",
+        "C3"
+      ],
+      "basis": "analyst-inferred from source",
+      "relation": "AND",
+      "respondent": "No new human answer",
+      "skip": "Provisional independence inference from distinct fixtures. Exposed for review; historical order alone is not proof."
+    },
+    {
+      "id": "C-R5",
+      "question": "Does a green aggregate prove an exact generated replay?",
+      "answer": "no",
+      "reason": "This historical report does not preserve a per-operation replay identity for the browser witness.",
+      "source_refs": [
+        "C3"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "unit-green-does-not-prove-browser",
+      "events": [
+        {
+          "id": "C-E1",
+          "action": "record_red",
+          "outcome": "red",
+          "source_refs": [
+            "C1"
+          ],
+          "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E2",
+          "action": "diagnose",
+          "outcome": "understood",
+          "source_refs": [
+            "C0",
+            "C4"
+          ],
+          "detail": "A handler is not necessarily a database transaction.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E3",
+          "action": "repair",
+          "outcome": "changed",
+          "source_refs": [
+            "C0"
+          ],
+          "detail": "Return handler outcome separately from reconciliation result.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E4",
+          "action": "verify_boundary",
+          "outcome": "green",
+          "source_refs": [
+            "C2"
+          ],
+          "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E6",
+          "action": "report_e2e",
+          "outcome": "reported",
+          "source_refs": [
+            "C0",
+            "C2",
+            "C3"
+          ],
+          "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    },
+    {
+      "id": "note-does-not-repair",
+      "events": [
+        {
+          "id": "C-E1",
+          "action": "record_red",
+          "outcome": "red",
+          "source_refs": [
+            "C1"
+          ],
+          "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-N",
+          "action": "note",
+          "outcome": "noted",
+          "source_refs": [
+            "R"
+          ],
+          "detail": "No status change.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E6",
+          "action": "report_e2e",
+          "outcome": "reported",
+          "source_refs": [
+            "C0",
+            "C2",
+            "C3"
+          ],
+          "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    }
+  ],
+  "repairs": [
+    {
+      "id": "C-require-observed-browser-path",
+      "action": "report_e2e",
+      "old_requires_any": [
+        {
+          "boundary_pass": true,
+          "counterexample_replayed": true
+        }
+      ],
+      "witness": [
+        {
+          "id": "C-E1",
+          "action": "record_red",
+          "outcome": "red",
+          "source_refs": [
+            "C1"
+          ],
+          "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E2",
+          "action": "diagnose",
+          "outcome": "understood",
+          "source_refs": [
+            "C0",
+            "C4"
+          ],
+          "detail": "A handler is not necessarily a database transaction.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E3",
+          "action": "repair",
+          "outcome": "changed",
+          "source_refs": [
+            "C0"
+          ],
+          "detail": "Return handler outcome separately from reconciliation result.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E4",
+          "action": "verify_boundary",
+          "outcome": "green",
+          "source_refs": [
+            "C2"
+          ],
+          "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E6",
+          "action": "report_e2e",
+          "outcome": "reported",
+          "source_refs": [
+            "C0",
+            "C2",
+            "C3"
+          ],
+          "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "old_valid": true,
+      "new_valid": false,
+      "basis": [
+        "C2",
+        "C3",
+        "C5"
+      ],
+      "disposition": "Evidence-scope correction to analyst countermodel; do not upgrade a boundary test to full-stack observation."
+    }
+  ],
+  "alternate_goal": {
+    "reported": true
+  },
+  "range": "Named boundary tests include pre-write rejection and a later SQL failure; browser record separately includes two post-commit variants. Not an independent fresh holdout.",
+  "limits": [
+    "Original red evidence is boundary-level; do not claim this bug was first discovered by the E2E oracle.",
+    "Aggregate browser witness does not preserve each failing/repair trace; no new browser run performed.",
+    "Later oracle repairs remain separate; historical green is not a current whole-framework certificate."
+  ],
+  "abstraction": "Evidence-work process; application execution is an observed check result, not simulated database behavior.",
+  "event_wording": "Action granularity and short names are analyst choices; observations retain source references.",
+  "state_semantics": "Guards are AND clauses, with OR across clauses. A replay event has enabled, occurring and accomplished-but-not-depleted phases. Phase expansion is a modeling convention, not measured timing. Repeated checks are new occurrences; evidence is reusable, not consumed by being read.",
+  "commutation_checks": [
+    {
+      "id": "PG3-commute",
+      "episode": 0,
+      "swap": [
+        3,
+        4
+      ],
+      "basis": "C-R4; provisional source-derived independence, not a real-world scheduling experiment"
+    }
+  ]
+}

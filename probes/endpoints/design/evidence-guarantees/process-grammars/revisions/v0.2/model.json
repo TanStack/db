@@ -1,0 +1,560 @@
+{
+  "id": "PG1",
+  "status": "Bounded replay complete; Q1 answered: no automatic historical reactivation",
+  "claim": "The selected query orders results by a unique key under the captured local source/schema correspondence contract.",
+  "initial": {
+    "bad": true,
+    "fixed": false,
+    "matching": false,
+    "diagnostic": false,
+    "supported": false,
+    "stale_rejected": false,
+    "original_good": false
+  },
+  "actions": {
+    "capture_bad": {
+      "label": "Capture matching bad-source runtime receipt",
+      "requires_any": [
+        {
+          "bad": true
+        }
+      ],
+      "outcomes": {
+        "captured": {
+          "matching": true
+        }
+      },
+      "source_refs": [
+        "A0",
+        "A1"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "diagnose": {
+      "label": "Record total-order diagnostic",
+      "requires_any": [
+        {
+          "bad": true,
+          "matching": true
+        }
+      ],
+      "outcomes": {
+        "violation": {
+          "diagnostic": true
+        }
+      },
+      "source_refs": [
+        "A1",
+        "A0"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "repair": {
+      "label": "Apply source-hash guarded edit",
+      "requires_any": [
+        {
+          "bad": true,
+          "diagnostic": true
+        }
+      ],
+      "outcomes": {
+        "edited": {
+          "bad": false,
+          "fixed": true,
+          "matching": false,
+          "diagnostic": false,
+          "supported": false
+        }
+      },
+      "source_refs": [
+        "A1",
+        "A0"
+      ],
+      "repeatable": true,
+      "depletes": [
+        "capture_bad",
+        "diagnose",
+        "clear"
+      ],
+      "unresolved": []
+    },
+    "reject_stale": {
+      "label": "Reject an old runtime receipt",
+      "requires_any": [
+        {
+          "fixed": true,
+          "matching": false
+        }
+      ],
+      "outcomes": {
+        "rejected": {
+          "stale_rejected": true
+        }
+      },
+      "source_refs": [
+        "A2"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "capture_fixed": {
+      "label": "Capture rebuilt handler SQL/schema receipt",
+      "requires_any": [
+        {
+          "fixed": true
+        }
+      ],
+      "outcomes": {
+        "captured": {
+          "matching": true
+        }
+      },
+      "source_refs": [
+        "A0",
+        "A1"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "clear": {
+      "label": "Record supported local check",
+      "requires_any": [
+        {
+          "fixed": true,
+          "matching": true
+        }
+      ],
+      "outcomes": {
+        "supported": {
+          "supported": true
+        }
+      },
+      "source_refs": [
+        "A3",
+        "A5"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "restore": {
+      "label": "Restore original endpoint bytes",
+      "requires_any": [
+        {
+          "fixed": true
+        }
+      ],
+      "outcomes": {
+        "restored": {
+          "fixed": false,
+          "matching": false,
+          "supported": false,
+          "original_good": true
+        }
+      },
+      "source_refs": [
+        "A1"
+      ],
+      "repeatable": true,
+      "depletes": [
+        "capture_fixed",
+        "clear"
+      ],
+      "unresolved": []
+    },
+    "capture_restored": {
+      "label": "Capture original-good source receipt (initial or restored)",
+      "requires_any": [
+        {
+          "original_good": true
+        }
+      ],
+      "outcomes": {
+        "captured": {
+          "matching": true
+        }
+      },
+      "source_refs": [
+        "A1"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "check_restored": {
+      "label": "Record supported check of original-good source",
+      "requires_any": [
+        {
+          "matching": true,
+          "original_good": true
+        }
+      ],
+      "outcomes": {
+        "supported": {
+          "supported": true
+        }
+      },
+      "source_refs": [
+        "A4",
+        "A6"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    }
+  },
+  "episodes": [
+    {
+      "id": "A-live-repair",
+      "kind": "Recorded local sequence",
+      "events": [
+        {
+          "id": "A-E1",
+          "action": "capture_bad",
+          "outcome": "captured",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Bad source and real executed SQL match.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E2",
+          "action": "diagnose",
+          "outcome": "violation",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "ENDPOINT_ORDER_NOT_TOTAL.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E3",
+          "action": "repair",
+          "outcome": "edited",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Current source changes; prior receipt no longer matches.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E4",
+          "action": "reject_stale",
+          "outcome": "rejected",
+          "source_refs": [
+            "A2"
+          ],
+          "detail": "STALE_RUNTIME_SOURCE is not a new query counterexample.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E5",
+          "action": "capture_fixed",
+          "outcome": "captured",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Rebuilt query executed and a new receipt captured.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E6",
+          "action": "clear",
+          "outcome": "supported",
+          "source_refs": [
+            "A3"
+          ],
+          "detail": "Bounded source/SQL/schema correspondence passes.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E7",
+          "action": "restore",
+          "outcome": "restored",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Original bytes restored.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E8",
+          "action": "capture_restored",
+          "outcome": "captured",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Real query rerun after restoration.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E9",
+          "action": "check_restored",
+          "outcome": "supported",
+          "source_refs": [
+            "A4"
+          ],
+          "detail": "Final current receipt passes.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ]
+    },
+    {
+      "id": "A-initially-supported",
+      "kind": "Separately recorded initial supported check, before the deliberate defect exercise",
+      "initial": {
+        "bad": false,
+        "original_good": true
+      },
+      "initial_source_refs": [
+        "A0",
+        "A6"
+      ],
+      "events": [
+        {
+          "id": "A-I1",
+          "action": "capture_restored",
+          "outcome": "captured",
+          "source_refs": [
+            "A0",
+            "A6"
+          ],
+          "detail": "Initial snapshot already included createdAt,id; no repair was needed."
+        },
+        {
+          "id": "A-I2",
+          "action": "check_restored",
+          "outcome": "supported",
+          "source_refs": [
+            "A6"
+          ],
+          "detail": "Recorded supported result before deliberately removing the tie-breaker."
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "A-R1",
+      "question": "Does applying this repair require a matching source diagnostic?",
+      "answer": "yes",
+      "reason": "The recorded edit uses source-hash guarded offsets.",
+      "source_refs": [
+        "A0",
+        "A1"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "A-R2",
+      "question": "Can the old runtime receipt clear the repaired source?",
+      "answer": "no",
+      "reason": "The actual checker rejects it before establishing correspondence.",
+      "source_refs": [
+        "A2",
+        "A5"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "A-R3",
+      "question": "Must a stale-receipt attempt happen before fresh capture?",
+      "answer": "no",
+      "reason": "Rejection is a witnessed detour, not an input to capture or validation.",
+      "source_refs": [
+        "A0",
+        "A5"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "A-R4",
+      "question": "Does restoring exact prior code require rerunning an unexpired fully matching check?",
+      "answer": "Fresh check required; no automatic reactivation",
+      "reason": "Kyle: no \u2014 code isn't the only thing used in tests",
+      "source_refs": [
+        "R22"
+      ],
+      "basis": "user-established",
+      "relation": "AND",
+      "respondent": "Kyle",
+      "skip": "Answered in current review; not inferred from the historical rerun"
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "clear-with-old-receipt",
+      "events": [
+        {
+          "id": "A-E1",
+          "action": "capture_bad",
+          "outcome": "captured",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Bad source and real executed SQL match.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E2",
+          "action": "diagnose",
+          "outcome": "violation",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "ENDPOINT_ORDER_NOT_TOTAL.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E3",
+          "action": "repair",
+          "outcome": "edited",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Current source changes; prior receipt no longer matches.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E6",
+          "action": "clear",
+          "outcome": "supported",
+          "source_refs": [
+            "A3"
+          ],
+          "detail": "Bounded source/SQL/schema correspondence passes.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    },
+    {
+      "id": "repair-without-diagnostic",
+      "events": [
+        {
+          "id": "A-E3",
+          "action": "repair",
+          "outcome": "edited",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Current source changes; prior receipt no longer matches.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    }
+  ],
+  "repairs": [
+    {
+      "id": "A-repair-current-binding",
+      "action": "clear",
+      "old_requires_any": [
+        {
+          "fixed": true
+        }
+      ],
+      "witness": [
+        {
+          "id": "A-E1",
+          "action": "capture_bad",
+          "outcome": "captured",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Bad source and real executed SQL match.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E2",
+          "action": "diagnose",
+          "outcome": "violation",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "ENDPOINT_ORDER_NOT_TOTAL.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E3",
+          "action": "repair",
+          "outcome": "edited",
+          "source_refs": [
+            "A1"
+          ],
+          "detail": "Current source changes; prior receipt no longer matches.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "A-E6",
+          "action": "clear",
+          "outcome": "supported",
+          "source_refs": [
+            "A3"
+          ],
+          "detail": "Bounded source/SQL/schema correspondence passes.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "old_valid": true,
+      "new_valid": false,
+      "basis": [
+        "A2",
+        "A5"
+      ],
+      "disposition": "Source-established correction to analyst countermodel: editing is insufficient; require matching receipt."
+    }
+  ],
+  "alternate_goal": {
+    "supported": true
+  },
+  "range": "Recorded initially-supported check plus full deliberate defect/repair/restoration episode. No prior failure is required to obtain support. No deployment universality.",
+  "limits": [
+    "This historical prototype used runtime correspondence snapshots; it does not require runtime catalog checks in the planned evidence system.",
+    "No deployment, auth, browser ordering, or whole-module effect claim."
+  ],
+  "abstraction": "Evidence-work process; application execution is an observed check result, not simulated database behavior.",
+  "event_wording": "Action granularity and short names are analyst choices; observations retain source references.",
+  "state_semantics": "Guards are AND clauses, with OR across clauses. A replay event has enabled, occurring and accomplished-but-not-depleted phases. Phase expansion is a modeling convention, not measured timing. Repeated checks are new occurrences; evidence is reusable, not consumed by being read.",
+  "version": "v0.2",
+  "decision": {
+    "id": "R22",
+    "quote": "no \u2014 code isn't the only thing used in tests",
+    "source": "../../../evidence-store-stress/08-content-review.md#r22--code-reversion-does-not-reactivate-old-test-evidence",
+    "scope": "Code reversion and test evidence; rubric-only reassessment remains R19."
+  }
+}

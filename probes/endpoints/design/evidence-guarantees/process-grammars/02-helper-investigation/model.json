@@ -1,0 +1,485 @@
+{
+  "id": "PG2",
+  "status": "Partial grammar: source observation and notes replay; rubric/whole-claim settlement unresolved",
+  "claim": "The selected helper introduces no PostgreSQL writes relevant to endpoint collection refresh. Local source observation and complete effect bound remain distinct.",
+  "initial": {
+    "source_available": true,
+    "calls_located": false,
+    "local_finding": false,
+    "scope_bounded": false,
+    "stubbed_pass": false,
+    "reported": false,
+    "has_note": false,
+    "scored": false,
+    "whole_claim_supported": false
+  },
+  "actions": {
+    "identify_calls": {
+      "label": "Identify opaque helper calls",
+      "requires_any": [
+        {
+          "source_available": true
+        }
+      ],
+      "outcomes": {
+        "located": {
+          "calls_located": true
+        }
+      },
+      "source_refs": [
+        "B0",
+        "B3"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "inspect_helper": {
+      "label": "Inspect a bounded local helper implementation",
+      "requires_any": [
+        {
+          "calls_located": true
+        }
+      ],
+      "outcomes": {
+        "local": {
+          "local_finding": true,
+          "scope_bounded": true
+        }
+      },
+      "source_refs": [
+        "B1",
+        "B2",
+        "B4"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "record_test": {
+      "label": "Record endpoint test with external services stubbed",
+      "requires_any": [
+        {
+          "source_available": true
+        }
+      ],
+      "outcomes": {
+        "stubbed": {
+          "stubbed_pass": true
+        }
+      },
+      "source_refs": [
+        "B0",
+        "B3"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "report_local": {
+      "label": "Report a bounded source observation",
+      "requires_any": [
+        {
+          "local_finding": true,
+          "scope_bounded": true
+        }
+      ],
+      "outcomes": {
+        "reported": {
+          "reported": true
+        }
+      },
+      "source_refs": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "note": {
+      "label": "Append an inconclusive investigation note",
+      "requires_any": [
+        {
+          "calls_located": true
+        }
+      ],
+      "outcomes": {
+        "noted": {
+          "has_note": true
+        }
+      },
+      "source_refs": [
+        "R"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "score": {
+      "label": "Assess evidence under a concrete claim rubric",
+      "requires_any": [
+        {
+          "local_finding": true
+        }
+      ],
+      "outcomes": {
+        "scored": {
+          "scored": true
+        }
+      },
+      "source_refs": [
+        "R"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": [
+        "No claim-specific rubric has been selected; R17/R18 authorize the approach and same-agent scoring, not invented scores."
+      ]
+    },
+    "settle_whole_effect_claim": {
+      "label": "Establish complete PostgreSQL effect bound",
+      "requires_any": [
+        {
+          "scored": true
+        }
+      ],
+      "outcomes": {
+        "supported": {
+          "whole_claim_supported": true
+        }
+      },
+      "source_refs": [
+        "R"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": [
+        "Acceptance conditions and external-service assumptions are not established by this episode."
+      ]
+    }
+  },
+  "episodes": [
+    {
+      "id": "B-shopping",
+      "kind": "Partially ordered reported episode; current/git source corroboration is a later observation, not a reconstructed audit log",
+      "events": [
+        {
+          "id": "B-E1",
+          "action": "identify_calls",
+          "outcome": "located",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E2",
+          "action": "inspect_helper",
+          "outcome": "local",
+          "source_refs": [
+            "B0",
+            "B1",
+            "B4"
+          ],
+          "detail": "Historical report says SQL was moved out; current and committed shopping helper issue Trello requests.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E3",
+          "action": "report_local",
+          "outcome": "reported",
+          "source_refs": [
+            "B0"
+          ],
+          "detail": "Report distinguishes endpoint SQL from helper work.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E4",
+          "action": "record_test",
+          "outcome": "stubbed",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Passing endpoint observations with stubbed services; source report currently records 88 comparisons.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ]
+    },
+    {
+      "id": "B-ai",
+      "kind": "Nearby second helper in the same aggregate report; not an independent assessment campaign",
+      "events": [
+        {
+          "id": "B-AI1",
+          "action": "identify_calls",
+          "outcome": "located",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "AI helper calls remain outside compiler inspection.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-AI2",
+          "action": "inspect_helper",
+          "outcome": "local",
+          "source_refs": [
+            "B0",
+            "B2",
+            "B4"
+          ],
+          "detail": "AI source returns extraction/embedding data; this is local source observation, not a provider audit.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-AI3",
+          "action": "report_local",
+          "outcome": "reported",
+          "source_refs": [
+            "B0"
+          ],
+          "detail": "Same bounded report covers the AI helper.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-AI4",
+          "action": "record_test",
+          "outcome": "stubbed",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Same aggregate endpoint test, not an independent second certification run.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "B-R1",
+      "question": "Does an uninspected call erase known SQL facts?",
+      "answer": "no",
+      "reason": "Keep partial effects and mark completeness unresolved.",
+      "source_refs": [
+        "R"
+      ],
+      "basis": "user-established",
+      "relation": "AND",
+      "respondent": "Kyle (prior review)",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "B-R2",
+      "question": "Can a note itself close an inconclusive investigation?",
+      "answer": "no",
+      "reason": "R20 explicitly leaves the investigation unchanged.",
+      "source_refs": [
+        "R"
+      ],
+      "basis": "user-established",
+      "relation": "AND",
+      "respondent": "Kyle (prior review)",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "B-R3",
+      "question": "Must source inspection precede the stubbed endpoint test?",
+      "answer": "no",
+      "reason": "The test has its own executable fixture; its result cannot establish provider behavior.",
+      "source_refs": [
+        "B0",
+        "B3"
+      ],
+      "basis": "analyst-inferred from source",
+      "relation": "AND",
+      "respondent": "No new human answer",
+      "skip": "Provisional independence inference from distinct fixtures. Exposed for review; historical order alone is not proof."
+    },
+    {
+      "id": "B-R4",
+      "question": "Must a separate agent score the evidence?",
+      "answer": "no",
+      "reason": "R18 allows the producing agent to use the rubric.",
+      "source_refs": [
+        "R"
+      ],
+      "basis": "user-established",
+      "relation": "AND",
+      "respondent": "Kyle (prior review)",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "B-R5",
+      "question": "What concrete rubric permits accepting the whole helper effect claim?",
+      "answer": "unresolved",
+      "reason": "No completed rubric or acceptance record exists in this source episode.",
+      "source_refs": [
+        "R"
+      ],
+      "basis": "open",
+      "relation": "AND",
+      "respondent": "Unanswered",
+      "skip": null
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "stubbed-test-is-not-complete-proof",
+      "events": [
+        {
+          "id": "B-E1",
+          "action": "identify_calls",
+          "outcome": "located",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E4",
+          "action": "record_test",
+          "outcome": "stubbed",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Passing endpoint observations with stubbed services; source report currently records 88 comparisons.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-X",
+          "action": "settle_whole_effect_claim",
+          "outcome": "supported",
+          "source_refs": [
+            "R"
+          ],
+          "detail": "Attempt to credit stubs as a complete real-helper effect proof.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    },
+    {
+      "id": "source-observation-before-inspection",
+      "events": [
+        {
+          "id": "B-E3",
+          "action": "report_local",
+          "outcome": "reported",
+          "source_refs": [
+            "B0"
+          ],
+          "detail": "Report distinguishes endpoint SQL from helper work.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    }
+  ],
+  "repairs": [
+    {
+      "id": "B-remove-unnecessary-test-prerequisite",
+      "action": "report_local",
+      "old_requires_any": [
+        {
+          "local_finding": true,
+          "scope_bounded": true,
+          "stubbed_pass": true
+        }
+      ],
+      "witness": [
+        {
+          "id": "B-E1",
+          "action": "identify_calls",
+          "outcome": "located",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E2",
+          "action": "inspect_helper",
+          "outcome": "local",
+          "source_refs": [
+            "B0",
+            "B1",
+            "B4"
+          ],
+          "detail": "Historical report says SQL was moved out; current and committed shopping helper issue Trello requests.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E3",
+          "action": "report_local",
+          "outcome": "reported",
+          "source_refs": [
+            "B0"
+          ],
+          "detail": "Report distinguishes endpoint SQL from helper work.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "old_valid": false,
+      "new_valid": true,
+      "basis": [
+        "B0",
+        "B1",
+        "B2"
+      ],
+      "disposition": "Source-supported scope correction: a local source observation does not require the later unrelated stubbed test. Does not settle whole claim."
+    }
+  ],
+  "alternate_goal": {
+    "reported": true,
+    "has_note": true
+  },
+  "range": "Two local helper subjects, one aggregate reported inspection/refactor/test episode. No repeatable whole-claim certification process established.",
+  "limits": [
+    "Absence of direct DB calls in selected source is not absence of effects in all callees or remote configuration.",
+    "Trello HTTP writes are real side effects; do not rename the claim to no side effects.",
+    "Historical report says 96 comparisons; saved report says 88. Preserve both provenance records and do not use the count as proof.",
+    "Authentication implementation audit is outside scope under R3."
+  ],
+  "abstraction": "Evidence-work process; application execution is an observed check result, not simulated database behavior.",
+  "event_wording": "Action granularity and short names are analyst choices; observations retain source references.",
+  "state_semantics": "Guards are AND clauses, with OR across clauses. A replay event has enabled, occurring and accomplished-but-not-depleted phases. Phase expansion is a modeling convention, not measured timing. Repeated checks are new occurrences; evidence is reusable, not consumed by being read.",
+  "commutation_checks": [
+    {
+      "id": "PG2-commute",
+      "episode": 0,
+      "swap": [
+        2,
+        3
+      ],
+      "basis": "B-R3; provisional source-derived independence, not a real-world scheduling experiment"
+    }
+  ]
+}

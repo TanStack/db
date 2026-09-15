@@ -1,0 +1,1462 @@
+{
+  "model": "PG3",
+  "episodes": [
+    {
+      "id": "C-repair-and-full-stack-check",
+      "kind": "Recorded sequence assembled from named red/green boundary reports and later campaign; not one continuous network trace",
+      "valid": true,
+      "state": {
+        "fixture_available": true,
+        "counterexample": true,
+        "diagnosed": true,
+        "fixed": true,
+        "boundary_pass": true,
+        "counterexample_replayed": true,
+        "e2e_pass": true,
+        "reported": true,
+        "note": false
+      },
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "C-E1",
+            "action": "record_red",
+            "outcome": "red",
+            "source_refs": [
+              "C1"
+            ],
+            "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": false,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red"
+          ],
+          "occurring": [
+            "record_red"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "C-E2",
+            "action": "diagnose",
+            "outcome": "understood",
+            "source_refs": [
+              "C0",
+              "C4"
+            ],
+            "detail": "A handler is not necessarily a database transaction.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "note"
+          ],
+          "occurring": [
+            "diagnose"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "C-E3",
+            "action": "repair",
+            "outcome": "changed",
+            "source_refs": [
+              "C0"
+            ],
+            "detail": "Return handler outcome separately from reconciliation result.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "repair",
+            "note"
+          ],
+          "occurring": [
+            "repair"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "C-E4",
+            "action": "verify_boundary",
+            "outcome": "green",
+            "source_refs": [
+              "C2"
+            ],
+            "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "repair",
+            "verify_boundary",
+            "verify_e2e",
+            "note"
+          ],
+          "occurring": [
+            "verify_boundary"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": true,
+            "counterexample_replayed": true,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3",
+            "verify_boundary": "C-E4"
+          }
+        },
+        {
+          "index": 4,
+          "event": {
+            "id": "C-E5",
+            "action": "verify_e2e",
+            "outcome": "green",
+            "source_refs": [
+              "C3",
+              "C5"
+            ],
+            "detail": "Recorded full-stack witness exercises failAfterCommit variants.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": true,
+            "counterexample_replayed": true,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "repair",
+            "verify_boundary",
+            "verify_e2e",
+            "note"
+          ],
+          "occurring": [
+            "verify_e2e"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3",
+            "verify_boundary": "C-E4"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": true,
+            "counterexample_replayed": true,
+            "e2e_pass": true,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3",
+            "verify_boundary": "C-E4",
+            "verify_e2e": "C-E5"
+          }
+        },
+        {
+          "index": 5,
+          "event": {
+            "id": "C-E6",
+            "action": "report_e2e",
+            "outcome": "reported",
+            "source_refs": [
+              "C0",
+              "C2",
+              "C3"
+            ],
+            "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": true,
+            "counterexample_replayed": true,
+            "e2e_pass": true,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "repair",
+            "verify_boundary",
+            "verify_e2e",
+            "report_e2e",
+            "note"
+          ],
+          "occurring": [
+            "report_e2e"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3",
+            "verify_boundary": "C-E4",
+            "verify_e2e": "C-E5"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": true,
+            "counterexample_replayed": true,
+            "e2e_pass": true,
+            "reported": true,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3",
+            "verify_boundary": "C-E4",
+            "verify_e2e": "C-E5",
+            "report_e2e": "C-E6"
+          }
+        }
+      ]
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "unit-green-does-not-prove-browser",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 4,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "C-E1",
+            "action": "record_red",
+            "outcome": "red",
+            "source_refs": [
+              "C1"
+            ],
+            "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": false,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red"
+          ],
+          "occurring": [
+            "record_red"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "C-E2",
+            "action": "diagnose",
+            "outcome": "understood",
+            "source_refs": [
+              "C0",
+              "C4"
+            ],
+            "detail": "A handler is not necessarily a database transaction.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "note"
+          ],
+          "occurring": [
+            "diagnose"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "C-E3",
+            "action": "repair",
+            "outcome": "changed",
+            "source_refs": [
+              "C0"
+            ],
+            "detail": "Return handler outcome separately from reconciliation result.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "repair",
+            "note"
+          ],
+          "occurring": [
+            "repair"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "C-E4",
+            "action": "verify_boundary",
+            "outcome": "green",
+            "source_refs": [
+              "C2"
+            ],
+            "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "repair",
+            "verify_boundary",
+            "verify_e2e",
+            "note"
+          ],
+          "occurring": [
+            "verify_boundary"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": true,
+            "counterexample_replayed": true,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3",
+            "verify_boundary": "C-E4"
+          }
+        },
+        {
+          "index": 4,
+          "event": {
+            "id": "C-E6",
+            "action": "report_e2e",
+            "outcome": "reported",
+            "source_refs": [
+              "C0",
+              "C2",
+              "C3"
+            ],
+            "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": true,
+            "fixed": true,
+            "boundary_pass": true,
+            "counterexample_replayed": true,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "repair",
+            "verify_boundary",
+            "verify_e2e",
+            "note"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "diagnose": "C-E2",
+            "repair": "C-E3",
+            "verify_boundary": "C-E4"
+          },
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "boundary_pass": true,
+              "counterexample_replayed": true,
+              "e2e_pass": true
+            }
+          ],
+          "unresolved": []
+        }
+      ]
+    },
+    {
+      "id": "note-does-not-repair",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 2,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "C-E1",
+            "action": "record_red",
+            "outcome": "red",
+            "source_refs": [
+              "C1"
+            ],
+            "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": false,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red"
+          ],
+          "occurring": [
+            "record_red"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "accomplished_after": {
+            "record_red": "C-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "C-N",
+            "action": "note",
+            "outcome": "noted",
+            "source_refs": [
+              "R"
+            ],
+            "detail": "No status change.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": false
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "note"
+          ],
+          "occurring": [
+            "note"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1"
+          },
+          "after": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": true
+          },
+          "accomplished_after": {
+            "record_red": "C-E1",
+            "note": "C-N"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "C-E6",
+            "action": "report_e2e",
+            "outcome": "reported",
+            "source_refs": [
+              "C0",
+              "C2",
+              "C3"
+            ],
+            "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "fixture_available": true,
+            "counterexample": true,
+            "diagnosed": false,
+            "fixed": false,
+            "boundary_pass": false,
+            "counterexample_replayed": false,
+            "e2e_pass": false,
+            "reported": false,
+            "note": true
+          },
+          "enabled": [
+            "record_red",
+            "diagnose",
+            "note"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {
+            "record_red": "C-E1",
+            "note": "C-N"
+          },
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "boundary_pass": true,
+              "counterexample_replayed": true,
+              "e2e_pass": true
+            }
+          ],
+          "unresolved": []
+        }
+      ]
+    }
+  ],
+  "countermodel_repairs": [
+    {
+      "id": "C-require-observed-browser-path",
+      "before": {
+        "valid": true,
+        "state": {
+          "fixture_available": true,
+          "counterexample": true,
+          "diagnosed": true,
+          "fixed": true,
+          "boundary_pass": true,
+          "counterexample_replayed": true,
+          "e2e_pass": false,
+          "reported": true,
+          "note": false
+        },
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "C-E1",
+              "action": "record_red",
+              "outcome": "red",
+              "source_refs": [
+                "C1"
+              ],
+              "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": false,
+              "diagnosed": false,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red"
+            ],
+            "occurring": [
+              "record_red"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": false,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "C-E2",
+              "action": "diagnose",
+              "outcome": "understood",
+              "source_refs": [
+                "C0",
+                "C4"
+              ],
+              "detail": "A handler is not necessarily a database transaction.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": false,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "note"
+            ],
+            "occurring": [
+              "diagnose"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1"
+            },
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2"
+            }
+          },
+          {
+            "index": 2,
+            "event": {
+              "id": "C-E3",
+              "action": "repair",
+              "outcome": "changed",
+              "source_refs": [
+                "C0"
+              ],
+              "detail": "Return handler outcome separately from reconciliation result.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "repair",
+              "note"
+            ],
+            "occurring": [
+              "repair"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2"
+            },
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3"
+            }
+          },
+          {
+            "index": 3,
+            "event": {
+              "id": "C-E4",
+              "action": "verify_boundary",
+              "outcome": "green",
+              "source_refs": [
+                "C2"
+              ],
+              "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "repair",
+              "verify_boundary",
+              "verify_e2e",
+              "note"
+            ],
+            "occurring": [
+              "verify_boundary"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3"
+            },
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": true,
+              "counterexample_replayed": true,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3",
+              "verify_boundary": "C-E4"
+            }
+          },
+          {
+            "index": 4,
+            "event": {
+              "id": "C-E6",
+              "action": "report_e2e",
+              "outcome": "reported",
+              "source_refs": [
+                "C0",
+                "C2",
+                "C3"
+              ],
+              "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": true,
+              "counterexample_replayed": true,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "repair",
+              "verify_boundary",
+              "verify_e2e",
+              "report_e2e",
+              "note"
+            ],
+            "occurring": [
+              "report_e2e"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3",
+              "verify_boundary": "C-E4"
+            },
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": true,
+              "counterexample_replayed": true,
+              "e2e_pass": false,
+              "reported": true,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3",
+              "verify_boundary": "C-E4",
+              "report_e2e": "C-E6"
+            }
+          }
+        ]
+      },
+      "after": {
+        "valid": false,
+        "violation": "unprimed",
+        "at": 4,
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "C-E1",
+              "action": "record_red",
+              "outcome": "red",
+              "source_refs": [
+                "C1"
+              ],
+              "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": false,
+              "diagnosed": false,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red"
+            ],
+            "occurring": [
+              "record_red"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": false,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "C-E2",
+              "action": "diagnose",
+              "outcome": "understood",
+              "source_refs": [
+                "C0",
+                "C4"
+              ],
+              "detail": "A handler is not necessarily a database transaction.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": false,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "note"
+            ],
+            "occurring": [
+              "diagnose"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1"
+            },
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2"
+            }
+          },
+          {
+            "index": 2,
+            "event": {
+              "id": "C-E3",
+              "action": "repair",
+              "outcome": "changed",
+              "source_refs": [
+                "C0"
+              ],
+              "detail": "Return handler outcome separately from reconciliation result.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": false,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "repair",
+              "note"
+            ],
+            "occurring": [
+              "repair"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2"
+            },
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3"
+            }
+          },
+          {
+            "index": 3,
+            "event": {
+              "id": "C-E4",
+              "action": "verify_boundary",
+              "outcome": "green",
+              "source_refs": [
+                "C2"
+              ],
+              "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": false,
+              "counterexample_replayed": false,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "repair",
+              "verify_boundary",
+              "verify_e2e",
+              "note"
+            ],
+            "occurring": [
+              "verify_boundary"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3"
+            },
+            "after": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": true,
+              "counterexample_replayed": true,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "accomplished_after": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3",
+              "verify_boundary": "C-E4"
+            }
+          },
+          {
+            "index": 4,
+            "event": {
+              "id": "C-E6",
+              "action": "report_e2e",
+              "outcome": "reported",
+              "source_refs": [
+                "C0",
+                "C2",
+                "C3"
+              ],
+              "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "fixture_available": true,
+              "counterexample": true,
+              "diagnosed": true,
+              "fixed": true,
+              "boundary_pass": true,
+              "counterexample_replayed": true,
+              "e2e_pass": false,
+              "reported": false,
+              "note": false
+            },
+            "enabled": [
+              "record_red",
+              "diagnose",
+              "repair",
+              "verify_boundary",
+              "verify_e2e",
+              "note"
+            ],
+            "occurring": [],
+            "accomplished_but_not_depleted": {
+              "record_red": "C-E1",
+              "diagnose": "C-E2",
+              "repair": "C-E3",
+              "verify_boundary": "C-E4"
+            },
+            "violation": "unprimed",
+            "requires_any": [
+              {
+                "boundary_pass": true,
+                "counterexample_replayed": true,
+                "e2e_pass": true
+              }
+            ],
+            "unresolved": []
+          }
+        ]
+      },
+      "full_episode_regressions": [
+        true
+      ]
+    }
+  ],
+  "alternates": [
+    [
+      {
+        "id": "alt-0",
+        "action": "record_red",
+        "outcome": "red"
+      },
+      {
+        "id": "alt-1",
+        "action": "diagnose",
+        "outcome": "understood"
+      },
+      {
+        "id": "alt-2",
+        "action": "repair",
+        "outcome": "changed"
+      },
+      {
+        "id": "alt-3",
+        "action": "verify_boundary",
+        "outcome": "green"
+      },
+      {
+        "id": "alt-4",
+        "action": "verify_e2e",
+        "outcome": "green"
+      },
+      {
+        "id": "alt-5",
+        "action": "report_e2e",
+        "outcome": "reported"
+      }
+    ]
+  ],
+  "limit": "Model replay only. Does not rerun the application or establish real-world validity.",
+  "commutation_checks": [
+    {
+      "id": "PG3-commute",
+      "events": [
+        {
+          "id": "C-E1",
+          "action": "record_red",
+          "outcome": "red",
+          "source_refs": [
+            "C1"
+          ],
+          "detail": "Rejected handler skips reconciliation; client post-commit-error test sees no committed row.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E2",
+          "action": "diagnose",
+          "outcome": "understood",
+          "source_refs": [
+            "C0",
+            "C4"
+          ],
+          "detail": "A handler is not necessarily a database transaction.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E3",
+          "action": "repair",
+          "outcome": "changed",
+          "source_refs": [
+            "C0"
+          ],
+          "detail": "Return handler outcome separately from reconciliation result.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E5",
+          "action": "verify_e2e",
+          "outcome": "green",
+          "source_refs": [
+            "C3",
+            "C5"
+          ],
+          "detail": "Recorded full-stack witness exercises failAfterCommit variants.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E4",
+          "action": "verify_boundary",
+          "outcome": "green",
+          "source_refs": [
+            "C2"
+          ],
+          "detail": "Previously failing named boundaries pass; PG duplicate insert test retains first commit.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "C-E6",
+          "action": "report_e2e",
+          "outcome": "reported",
+          "source_refs": [
+            "C0",
+            "C2",
+            "C3"
+          ],
+          "detail": "Record bounded checks, not universal transaction rollback or full coverage.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "same_final_state": true,
+      "basis": "C-R4; provisional source-derived independence, not a real-world scheduling experiment"
+    }
+  ]
+}

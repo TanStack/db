@@ -1,0 +1,34 @@
+[
+  {
+    "model": "PG1",
+    "episodes": 2,
+    "negative_sequences": 2,
+    "repairs": 1,
+    "alternates": 3,
+    "status": "Bounded replay complete; historical-evidence reuse relation open"
+  },
+  {
+    "model": "PG2",
+    "episodes": 2,
+    "negative_sequences": 2,
+    "repairs": 1,
+    "alternates": 2,
+    "status": "Partial grammar: source observation and notes replay; rubric/whole-claim settlement unresolved"
+  },
+  {
+    "model": "PG3",
+    "episodes": 1,
+    "negative_sequences": 2,
+    "repairs": 1,
+    "alternates": 1,
+    "status": "Bounded replay complete; exact historical E2E trace identity not available in aggregate report"
+  },
+  {
+    "model": "PG4",
+    "episodes": 2,
+    "negative_sequences": 2,
+    "repairs": 1,
+    "alternates": 1,
+    "status": "Bounded replay complete; measured claim is reads, not latency"
+  }
+]

@@ -1,0 +1,1782 @@
+{
+  "model": "PG4",
+  "episodes": [
+    {
+      "id": "D-precision-repair",
+      "kind": "Recorded legacy/kernel/control sequence",
+      "valid": true,
+      "state": {
+        "harness_ready": true,
+        "precision_failure": true,
+        "values_ok": true,
+        "precision_ok": true,
+        "kernel": true,
+        "campaign": true,
+        "value_control": true,
+        "precision_control": true,
+        "saved_failure": false,
+        "identity_preserved": false,
+        "fault_replayed": false,
+        "repair_replayed": false,
+        "quality_reported": true,
+        "replay_reported": false
+      },
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "D-E1",
+            "action": "record_precision_red",
+            "outcome": "red",
+            "source_refs": [
+              "D1"
+            ],
+            "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": false,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red"
+          ],
+          "occurring": [
+            "record_precision_red"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "D-E2",
+            "action": "implement_kernel",
+            "outcome": "changed",
+            "source_refs": [
+              "D0"
+            ],
+            "detail": "Analyze PG function bodies; change implementation, not expected relational obligations.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel"
+          ],
+          "occurring": [
+            "implement_kernel"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": true,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "D-E3",
+            "action": "record_green",
+            "outcome": "green",
+            "source_refs": [
+              "D2"
+            ],
+            "detail": "40 histories, 137 operations; separate values and read-obligation comparisons.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": true,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control"
+          ],
+          "occurring": [
+            "record_green"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "D-E4",
+            "action": "record_value_control",
+            "outcome": "caught",
+            "source_refs": [
+              "D3"
+            ],
+            "detail": "Omitted body read produces stale client values.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control"
+          ],
+          "occurring": [
+            "record_value_control"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4"
+          }
+        },
+        {
+          "index": 4,
+          "event": {
+            "id": "D-E5",
+            "action": "record_precision_control",
+            "outcome": "caught",
+            "source_refs": [
+              "D4"
+            ],
+            "detail": "Needless fallback preserves values but fails count law.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control",
+            "record_shrink"
+          ],
+          "occurring": [
+            "record_precision_control"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": true,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_precision_control": "D-E5"
+          }
+        },
+        {
+          "index": 5,
+          "event": {
+            "id": "D-E6",
+            "action": "report_quality",
+            "outcome": "reported",
+            "source_refs": [
+              "D0"
+            ],
+            "detail": "Both laws and their selected controls are supported within this scope.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": true,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control",
+            "record_shrink",
+            "report_quality"
+          ],
+          "occurring": [
+            "report_quality"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_precision_control": "D-E5"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": true,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": true,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_precision_control": "D-E5",
+            "report_quality": "D-E6"
+          }
+        }
+      ]
+    },
+    {
+      "id": "D-generated-failure-replay",
+      "kind": "Recorded later shrink and fault/repair replay with shared setup prefix",
+      "valid": true,
+      "state": {
+        "harness_ready": true,
+        "precision_failure": true,
+        "values_ok": true,
+        "precision_ok": true,
+        "kernel": true,
+        "campaign": true,
+        "value_control": true,
+        "precision_control": false,
+        "saved_failure": true,
+        "identity_preserved": true,
+        "fault_replayed": true,
+        "repair_replayed": true,
+        "quality_reported": false,
+        "replay_reported": true
+      },
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "D-E1",
+            "action": "record_precision_red",
+            "outcome": "red",
+            "source_refs": [
+              "D1"
+            ],
+            "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": false,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red"
+          ],
+          "occurring": [
+            "record_precision_red"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "D-E2",
+            "action": "implement_kernel",
+            "outcome": "changed",
+            "source_refs": [
+              "D0"
+            ],
+            "detail": "Analyze PG function bodies; change implementation, not expected relational obligations.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel"
+          ],
+          "occurring": [
+            "implement_kernel"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": true,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "D-E3",
+            "action": "record_green",
+            "outcome": "green",
+            "source_refs": [
+              "D2"
+            ],
+            "detail": "40 histories, 137 operations; separate values and read-obligation comparisons.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": true,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control"
+          ],
+          "occurring": [
+            "record_green"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "D-E4",
+            "action": "record_value_control",
+            "outcome": "caught",
+            "source_refs": [
+              "D3"
+            ],
+            "detail": "Omitted body read produces stale client values.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control"
+          ],
+          "occurring": [
+            "record_value_control"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4"
+          }
+        },
+        {
+          "index": 4,
+          "event": {
+            "id": "D-S1",
+            "action": "record_shrink",
+            "outcome": "retained",
+            "source_refs": [
+              "D5"
+            ],
+            "detail": "Ten accepted shrinks; six drifts into another law rejected.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control",
+            "record_shrink"
+          ],
+          "occurring": [
+            "record_shrink"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": true,
+            "identity_preserved": true,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_shrink": "D-S1"
+          }
+        },
+        {
+          "index": 5,
+          "event": {
+            "id": "D-S2",
+            "action": "record_fault_replay",
+            "outcome": "same_violation",
+            "source_refs": [
+              "D6"
+            ],
+            "detail": "Saved reduced history reproduces original value mismatch.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": true,
+            "identity_preserved": true,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control",
+            "record_shrink",
+            "record_fault_replay",
+            "record_repair_replay"
+          ],
+          "occurring": [
+            "record_fault_replay"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_shrink": "D-S1"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": true,
+            "identity_preserved": true,
+            "fault_replayed": true,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_shrink": "D-S1",
+            "record_fault_replay": "D-S2"
+          }
+        },
+        {
+          "index": 6,
+          "event": {
+            "id": "D-S3",
+            "action": "record_repair_replay",
+            "outcome": "passes",
+            "source_refs": [
+              "D7"
+            ],
+            "detail": "Same history passes with the injected fault removed; this is a control, not a new production fix.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": true,
+            "identity_preserved": true,
+            "fault_replayed": true,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control",
+            "record_shrink",
+            "record_fault_replay",
+            "record_repair_replay"
+          ],
+          "occurring": [
+            "record_repair_replay"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_shrink": "D-S1",
+            "record_fault_replay": "D-S2"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": true,
+            "identity_preserved": true,
+            "fault_replayed": true,
+            "repair_replayed": true,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_shrink": "D-S1",
+            "record_fault_replay": "D-S2",
+            "record_repair_replay": "D-S3"
+          }
+        },
+        {
+          "index": 7,
+          "event": {
+            "id": "D-S4",
+            "action": "report_replay",
+            "outcome": "reported",
+            "source_refs": [
+              "D0"
+            ],
+            "detail": "Retain original and reduced cases with fault/repair contrast.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": true,
+            "identity_preserved": true,
+            "fault_replayed": true,
+            "repair_replayed": true,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control",
+            "record_shrink",
+            "record_fault_replay",
+            "record_repair_replay",
+            "report_replay"
+          ],
+          "occurring": [
+            "report_replay"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_shrink": "D-S1",
+            "record_fault_replay": "D-S2",
+            "record_repair_replay": "D-S3"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": true,
+            "identity_preserved": true,
+            "fault_replayed": true,
+            "repair_replayed": true,
+            "quality_reported": false,
+            "replay_reported": true
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4",
+            "record_shrink": "D-S1",
+            "record_fault_replay": "D-S2",
+            "record_repair_replay": "D-S3",
+            "report_replay": "D-S4"
+          }
+        }
+      ]
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "values-only-not-optimization-quality",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 1,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "D-E1",
+            "action": "record_precision_red",
+            "outcome": "red",
+            "source_refs": [
+              "D1"
+            ],
+            "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": false,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red"
+          ],
+          "occurring": [
+            "record_precision_red"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "D-X",
+            "action": "report_quality",
+            "outcome": "reported",
+            "source_refs": [
+              "D1"
+            ],
+            "detail": "Wrongly upgrade correct values alone to optimization quality.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1"
+          },
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "values_ok": true,
+              "precision_ok": true,
+              "value_control": true,
+              "precision_control": true
+            }
+          ],
+          "unresolved": []
+        }
+      ]
+    },
+    {
+      "id": "replay-without-saved-failure",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 4,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "D-E1",
+            "action": "record_precision_red",
+            "outcome": "red",
+            "source_refs": [
+              "D1"
+            ],
+            "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": false,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red"
+          ],
+          "occurring": [
+            "record_precision_red"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "D-E2",
+            "action": "implement_kernel",
+            "outcome": "changed",
+            "source_refs": [
+              "D0"
+            ],
+            "detail": "Analyze PG function bodies; change implementation, not expected relational obligations.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": false,
+            "kernel": false,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel"
+          ],
+          "occurring": [
+            "implement_kernel"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": true,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "D-E3",
+            "action": "record_green",
+            "outcome": "green",
+            "source_refs": [
+              "D2"
+            ],
+            "detail": "40 histories, 137 operations; separate values and read-obligation comparisons.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": false,
+            "precision_ok": false,
+            "kernel": true,
+            "campaign": false,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control"
+          ],
+          "occurring": [
+            "record_green"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "D-E4",
+            "action": "record_value_control",
+            "outcome": "caught",
+            "source_refs": [
+              "D3"
+            ],
+            "detail": "Omitted body read produces stale client values.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": false,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control"
+          ],
+          "occurring": [
+            "record_value_control"
+          ],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3"
+          },
+          "after": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "accomplished_after": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4"
+          }
+        },
+        {
+          "index": 4,
+          "event": {
+            "id": "D-S2",
+            "action": "record_fault_replay",
+            "outcome": "same_violation",
+            "source_refs": [
+              "D6"
+            ],
+            "detail": "Saved reduced history reproduces original value mismatch.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "harness_ready": true,
+            "precision_failure": true,
+            "values_ok": true,
+            "precision_ok": true,
+            "kernel": true,
+            "campaign": true,
+            "value_control": true,
+            "precision_control": false,
+            "saved_failure": false,
+            "identity_preserved": false,
+            "fault_replayed": false,
+            "repair_replayed": false,
+            "quality_reported": false,
+            "replay_reported": false
+          },
+          "enabled": [
+            "record_precision_red",
+            "implement_kernel",
+            "record_green",
+            "record_value_control",
+            "record_precision_control",
+            "record_shrink"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {
+            "record_precision_red": "D-E1",
+            "implement_kernel": "D-E2",
+            "record_green": "D-E3",
+            "record_value_control": "D-E4"
+          },
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "saved_failure": true,
+              "identity_preserved": true
+            }
+          ],
+          "unresolved": []
+        }
+      ]
+    }
+  ],
+  "countermodel_repairs": [
+    {
+      "id": "D-separate-value-and-work-laws",
+      "before": {
+        "valid": true,
+        "state": {
+          "harness_ready": true,
+          "precision_failure": true,
+          "values_ok": true,
+          "precision_ok": false,
+          "kernel": false,
+          "campaign": false,
+          "value_control": false,
+          "precision_control": false,
+          "saved_failure": false,
+          "identity_preserved": false,
+          "fault_replayed": false,
+          "repair_replayed": false,
+          "quality_reported": true,
+          "replay_reported": false
+        },
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "D-E1",
+              "action": "record_precision_red",
+              "outcome": "red",
+              "source_refs": [
+                "D1"
+              ],
+              "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "harness_ready": true,
+              "precision_failure": false,
+              "values_ok": false,
+              "precision_ok": false,
+              "kernel": false,
+              "campaign": false,
+              "value_control": false,
+              "precision_control": false,
+              "saved_failure": false,
+              "identity_preserved": false,
+              "fault_replayed": false,
+              "repair_replayed": false,
+              "quality_reported": false,
+              "replay_reported": false
+            },
+            "enabled": [
+              "record_precision_red"
+            ],
+            "occurring": [
+              "record_precision_red"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "harness_ready": true,
+              "precision_failure": true,
+              "values_ok": true,
+              "precision_ok": false,
+              "kernel": false,
+              "campaign": false,
+              "value_control": false,
+              "precision_control": false,
+              "saved_failure": false,
+              "identity_preserved": false,
+              "fault_replayed": false,
+              "repair_replayed": false,
+              "quality_reported": false,
+              "replay_reported": false
+            },
+            "accomplished_after": {
+              "record_precision_red": "D-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "D-X",
+              "action": "report_quality",
+              "outcome": "reported",
+              "source_refs": [
+                "D1"
+              ],
+              "detail": "Wrongly upgrade correct values alone to optimization quality.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "harness_ready": true,
+              "precision_failure": true,
+              "values_ok": true,
+              "precision_ok": false,
+              "kernel": false,
+              "campaign": false,
+              "value_control": false,
+              "precision_control": false,
+              "saved_failure": false,
+              "identity_preserved": false,
+              "fault_replayed": false,
+              "repair_replayed": false,
+              "quality_reported": false,
+              "replay_reported": false
+            },
+            "enabled": [
+              "record_precision_red",
+              "implement_kernel",
+              "report_quality"
+            ],
+            "occurring": [
+              "report_quality"
+            ],
+            "accomplished_but_not_depleted": {
+              "record_precision_red": "D-E1"
+            },
+            "after": {
+              "harness_ready": true,
+              "precision_failure": true,
+              "values_ok": true,
+              "precision_ok": false,
+              "kernel": false,
+              "campaign": false,
+              "value_control": false,
+              "precision_control": false,
+              "saved_failure": false,
+              "identity_preserved": false,
+              "fault_replayed": false,
+              "repair_replayed": false,
+              "quality_reported": true,
+              "replay_reported": false
+            },
+            "accomplished_after": {
+              "record_precision_red": "D-E1",
+              "report_quality": "D-X"
+            }
+          }
+        ]
+      },
+      "after": {
+        "valid": false,
+        "violation": "unprimed",
+        "at": 1,
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "D-E1",
+              "action": "record_precision_red",
+              "outcome": "red",
+              "source_refs": [
+                "D1"
+              ],
+              "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "harness_ready": true,
+              "precision_failure": false,
+              "values_ok": false,
+              "precision_ok": false,
+              "kernel": false,
+              "campaign": false,
+              "value_control": false,
+              "precision_control": false,
+              "saved_failure": false,
+              "identity_preserved": false,
+              "fault_replayed": false,
+              "repair_replayed": false,
+              "quality_reported": false,
+              "replay_reported": false
+            },
+            "enabled": [
+              "record_precision_red"
+            ],
+            "occurring": [
+              "record_precision_red"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "harness_ready": true,
+              "precision_failure": true,
+              "values_ok": true,
+              "precision_ok": false,
+              "kernel": false,
+              "campaign": false,
+              "value_control": false,
+              "precision_control": false,
+              "saved_failure": false,
+              "identity_preserved": false,
+              "fault_replayed": false,
+              "repair_replayed": false,
+              "quality_reported": false,
+              "replay_reported": false
+            },
+            "accomplished_after": {
+              "record_precision_red": "D-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "D-X",
+              "action": "report_quality",
+              "outcome": "reported",
+              "source_refs": [
+                "D1"
+              ],
+              "detail": "Wrongly upgrade correct values alone to optimization quality.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "harness_ready": true,
+              "precision_failure": true,
+              "values_ok": true,
+              "precision_ok": false,
+              "kernel": false,
+              "campaign": false,
+              "value_control": false,
+              "precision_control": false,
+              "saved_failure": false,
+              "identity_preserved": false,
+              "fault_replayed": false,
+              "repair_replayed": false,
+              "quality_reported": false,
+              "replay_reported": false
+            },
+            "enabled": [
+              "record_precision_red",
+              "implement_kernel"
+            ],
+            "occurring": [],
+            "accomplished_but_not_depleted": {
+              "record_precision_red": "D-E1"
+            },
+            "violation": "unprimed",
+            "requires_any": [
+              {
+                "values_ok": true,
+                "precision_ok": true,
+                "value_control": true,
+                "precision_control": true
+              }
+            ],
+            "unresolved": []
+          }
+        ]
+      },
+      "full_episode_regressions": [
+        true,
+        true
+      ]
+    }
+  ],
+  "alternates": [
+    [
+      {
+        "id": "alt-0",
+        "action": "record_precision_red",
+        "outcome": "red"
+      },
+      {
+        "id": "alt-1",
+        "action": "implement_kernel",
+        "outcome": "changed"
+      },
+      {
+        "id": "alt-2",
+        "action": "record_green",
+        "outcome": "green"
+      },
+      {
+        "id": "alt-3",
+        "action": "record_value_control",
+        "outcome": "caught"
+      },
+      {
+        "id": "alt-4",
+        "action": "record_precision_control",
+        "outcome": "caught"
+      },
+      {
+        "id": "alt-5",
+        "action": "report_quality",
+        "outcome": "reported"
+      }
+    ]
+  ],
+  "limit": "Model replay only. Does not rerun the application or establish real-world validity.",
+  "commutation_checks": [
+    {
+      "id": "PG4-commute",
+      "events": [
+        {
+          "id": "D-E1",
+          "action": "record_precision_red",
+          "outcome": "red",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E2",
+          "action": "implement_kernel",
+          "outcome": "changed",
+          "source_refs": [
+            "D0"
+          ],
+          "detail": "Analyze PG function bodies; change implementation, not expected relational obligations.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E3",
+          "action": "record_green",
+          "outcome": "green",
+          "source_refs": [
+            "D2"
+          ],
+          "detail": "40 histories, 137 operations; separate values and read-obligation comparisons.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E5",
+          "action": "record_precision_control",
+          "outcome": "caught",
+          "source_refs": [
+            "D4"
+          ],
+          "detail": "Needless fallback preserves values but fails count law.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E4",
+          "action": "record_value_control",
+          "outcome": "caught",
+          "source_refs": [
+            "D3"
+          ],
+          "detail": "Omitted body read produces stale client values.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E6",
+          "action": "report_quality",
+          "outcome": "reported",
+          "source_refs": [
+            "D0"
+          ],
+          "detail": "Both laws and their selected controls are supported within this scope.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "same_final_state": true,
+      "basis": "D-R3; provisional source-derived independence, not a real-world scheduling experiment"
+    }
+  ]
+}

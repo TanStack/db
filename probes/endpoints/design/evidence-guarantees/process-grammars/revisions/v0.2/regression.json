@@ -1,0 +1,83 @@
+{
+  "model_sha256": "37f1436aa8b9136bb70b1b7afeb816494ff1b86e1b3c0cc7607f0b8e74e26d10",
+  "change": "Removed automatic historical-evidence reactivation candidate; retained fresh checks and historical records.",
+  "all_study_regressions": [
+    {
+      "model": "PG1",
+      "episode": "A-live-repair",
+      "valid": true
+    },
+    {
+      "model": "PG1",
+      "episode": "A-initially-supported",
+      "valid": true
+    },
+    {
+      "model": "PG1",
+      "negative": "clear-with-old-receipt",
+      "rejected": true
+    },
+    {
+      "model": "PG1",
+      "negative": "repair-without-diagnostic",
+      "rejected": true
+    },
+    {
+      "model": "PG2",
+      "episode": "B-shopping",
+      "valid": true
+    },
+    {
+      "model": "PG2",
+      "episode": "B-ai",
+      "valid": true
+    },
+    {
+      "model": "PG2",
+      "negative": "stubbed-test-is-not-complete-proof",
+      "rejected": true
+    },
+    {
+      "model": "PG2",
+      "negative": "source-observation-before-inspection",
+      "rejected": true
+    },
+    {
+      "model": "PG3",
+      "episode": "C-repair-and-full-stack-check",
+      "valid": true
+    },
+    {
+      "model": "PG3",
+      "negative": "unit-green-does-not-prove-browser",
+      "rejected": true
+    },
+    {
+      "model": "PG3",
+      "negative": "note-does-not-repair",
+      "rejected": true
+    },
+    {
+      "model": "PG4",
+      "episode": "D-precision-repair",
+      "valid": true
+    },
+    {
+      "model": "PG4",
+      "episode": "D-generated-failure-replay",
+      "valid": true
+    },
+    {
+      "model": "PG4",
+      "negative": "values-only-not-optimization-quality",
+      "rejected": true
+    },
+    {
+      "model": "PG4",
+      "negative": "replay-without-saved-failure",
+      "rejected": true
+    }
+  ],
+  "countermodel_regressions": 4,
+  "application_tests_run": false
+}

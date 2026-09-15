@@ -1,0 +1,1270 @@
+{
+  "model": "PG1",
+  "episodes": [
+    {
+      "id": "A-live-repair",
+      "kind": "Recorded local sequence",
+      "valid": true,
+      "state": {
+        "bad": false,
+        "fixed": false,
+        "matching": true,
+        "diagnostic": false,
+        "supported": true,
+        "stale_rejected": true,
+        "original_good": true
+      },
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "A-E1",
+            "action": "capture_bad",
+            "outcome": "captured",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Bad source and real executed SQL match.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": true,
+            "fixed": false,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_bad"
+          ],
+          "occurring": [
+            "capture_bad"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "capture_bad": "A-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "A-E2",
+            "action": "diagnose",
+            "outcome": "violation",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "ENDPOINT_ORDER_NOT_TOTAL.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_bad",
+            "diagnose"
+          ],
+          "occurring": [
+            "diagnose"
+          ],
+          "accomplished_but_not_depleted": {
+            "capture_bad": "A-E1"
+          },
+          "after": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": true,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "capture_bad": "A-E1",
+            "diagnose": "A-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "A-E3",
+            "action": "repair",
+            "outcome": "edited",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Current source changes; prior receipt no longer matches.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": true,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_bad",
+            "diagnose",
+            "repair"
+          ],
+          "occurring": [
+            "repair"
+          ],
+          "accomplished_but_not_depleted": {
+            "capture_bad": "A-E1",
+            "diagnose": "A-E2"
+          },
+          "after": {
+            "bad": false,
+            "fixed": true,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "repair": "A-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "A-E4",
+            "action": "reject_stale",
+            "outcome": "rejected",
+            "source_refs": [
+              "A2"
+            ],
+            "detail": "STALE_RUNTIME_SOURCE is not a new query counterexample.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": false,
+            "fixed": true,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "reject_stale",
+            "capture_fixed",
+            "restore"
+          ],
+          "occurring": [
+            "reject_stale"
+          ],
+          "accomplished_but_not_depleted": {
+            "repair": "A-E3"
+          },
+          "after": {
+            "bad": false,
+            "fixed": true,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4"
+          }
+        },
+        {
+          "index": 4,
+          "event": {
+            "id": "A-E5",
+            "action": "capture_fixed",
+            "outcome": "captured",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Rebuilt query executed and a new receipt captured.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": false,
+            "fixed": true,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": false
+          },
+          "enabled": [
+            "reject_stale",
+            "capture_fixed",
+            "restore"
+          ],
+          "occurring": [
+            "capture_fixed"
+          ],
+          "accomplished_but_not_depleted": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4"
+          },
+          "after": {
+            "bad": false,
+            "fixed": true,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "capture_fixed": "A-E5"
+          }
+        },
+        {
+          "index": 5,
+          "event": {
+            "id": "A-E6",
+            "action": "clear",
+            "outcome": "supported",
+            "source_refs": [
+              "A3"
+            ],
+            "detail": "Bounded source/SQL/schema correspondence passes.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": false,
+            "fixed": true,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_fixed",
+            "clear",
+            "restore"
+          ],
+          "occurring": [
+            "clear"
+          ],
+          "accomplished_but_not_depleted": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "capture_fixed": "A-E5"
+          },
+          "after": {
+            "bad": false,
+            "fixed": true,
+            "matching": true,
+            "diagnostic": false,
+            "supported": true,
+            "stale_rejected": true,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "capture_fixed": "A-E5",
+            "clear": "A-E6"
+          }
+        },
+        {
+          "index": 6,
+          "event": {
+            "id": "A-E7",
+            "action": "restore",
+            "outcome": "restored",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Original bytes restored.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": false,
+            "fixed": true,
+            "matching": true,
+            "diagnostic": false,
+            "supported": true,
+            "stale_rejected": true,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_fixed",
+            "clear",
+            "restore"
+          ],
+          "occurring": [
+            "restore"
+          ],
+          "accomplished_but_not_depleted": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "capture_fixed": "A-E5",
+            "clear": "A-E6"
+          },
+          "after": {
+            "bad": false,
+            "fixed": false,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": true
+          },
+          "accomplished_after": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "restore": "A-E7"
+          }
+        },
+        {
+          "index": 7,
+          "event": {
+            "id": "A-E8",
+            "action": "capture_restored",
+            "outcome": "captured",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Real query rerun after restoration.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": false,
+            "fixed": false,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": true
+          },
+          "enabled": [
+            "capture_restored"
+          ],
+          "occurring": [
+            "capture_restored"
+          ],
+          "accomplished_but_not_depleted": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "restore": "A-E7"
+          },
+          "after": {
+            "bad": false,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": true
+          },
+          "accomplished_after": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "restore": "A-E7",
+            "capture_restored": "A-E8"
+          }
+        },
+        {
+          "index": 8,
+          "event": {
+            "id": "A-E9",
+            "action": "check_restored",
+            "outcome": "supported",
+            "source_refs": [
+              "A4"
+            ],
+            "detail": "Final current receipt passes.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": false,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": true,
+            "original_good": true
+          },
+          "enabled": [
+            "capture_restored",
+            "check_restored"
+          ],
+          "occurring": [
+            "check_restored"
+          ],
+          "accomplished_but_not_depleted": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "restore": "A-E7",
+            "capture_restored": "A-E8"
+          },
+          "after": {
+            "bad": false,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": true,
+            "stale_rejected": true,
+            "original_good": true
+          },
+          "accomplished_after": {
+            "repair": "A-E3",
+            "reject_stale": "A-E4",
+            "restore": "A-E7",
+            "capture_restored": "A-E8",
+            "check_restored": "A-E9"
+          }
+        }
+      ]
+    },
+    {
+      "id": "A-initially-supported",
+      "kind": "Separately recorded initial supported check, before the deliberate defect exercise",
+      "valid": true,
+      "state": {
+        "bad": false,
+        "fixed": false,
+        "matching": true,
+        "diagnostic": false,
+        "supported": true,
+        "stale_rejected": false,
+        "original_good": true
+      },
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "A-I1",
+            "action": "capture_restored",
+            "outcome": "captured",
+            "source_refs": [
+              "A0",
+              "A6"
+            ],
+            "detail": "Initial snapshot already included createdAt,id; no repair was needed."
+          },
+          "before": {
+            "bad": false,
+            "fixed": false,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": true
+          },
+          "enabled": [
+            "capture_restored"
+          ],
+          "occurring": [
+            "capture_restored"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "bad": false,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": true
+          },
+          "accomplished_after": {
+            "capture_restored": "A-I1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "A-I2",
+            "action": "check_restored",
+            "outcome": "supported",
+            "source_refs": [
+              "A6"
+            ],
+            "detail": "Recorded supported result before deliberately removing the tie-breaker."
+          },
+          "before": {
+            "bad": false,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": true
+          },
+          "enabled": [
+            "capture_restored",
+            "check_restored"
+          ],
+          "occurring": [
+            "check_restored"
+          ],
+          "accomplished_but_not_depleted": {
+            "capture_restored": "A-I1"
+          },
+          "after": {
+            "bad": false,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": true,
+            "stale_rejected": false,
+            "original_good": true
+          },
+          "accomplished_after": {
+            "capture_restored": "A-I1",
+            "check_restored": "A-I2"
+          }
+        }
+      ]
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "clear-with-old-receipt",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 3,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "A-E1",
+            "action": "capture_bad",
+            "outcome": "captured",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Bad source and real executed SQL match.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": true,
+            "fixed": false,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_bad"
+          ],
+          "occurring": [
+            "capture_bad"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "capture_bad": "A-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "A-E2",
+            "action": "diagnose",
+            "outcome": "violation",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "ENDPOINT_ORDER_NOT_TOTAL.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_bad",
+            "diagnose"
+          ],
+          "occurring": [
+            "diagnose"
+          ],
+          "accomplished_but_not_depleted": {
+            "capture_bad": "A-E1"
+          },
+          "after": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": true,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "capture_bad": "A-E1",
+            "diagnose": "A-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "A-E3",
+            "action": "repair",
+            "outcome": "edited",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Current source changes; prior receipt no longer matches.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": true,
+            "fixed": false,
+            "matching": true,
+            "diagnostic": true,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_bad",
+            "diagnose",
+            "repair"
+          ],
+          "occurring": [
+            "repair"
+          ],
+          "accomplished_but_not_depleted": {
+            "capture_bad": "A-E1",
+            "diagnose": "A-E2"
+          },
+          "after": {
+            "bad": false,
+            "fixed": true,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "accomplished_after": {
+            "repair": "A-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "A-E6",
+            "action": "clear",
+            "outcome": "supported",
+            "source_refs": [
+              "A3"
+            ],
+            "detail": "Bounded source/SQL/schema correspondence passes.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": false,
+            "fixed": true,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "reject_stale",
+            "capture_fixed",
+            "restore"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {
+            "repair": "A-E3"
+          },
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "fixed": true,
+              "matching": true
+            }
+          ],
+          "unresolved": []
+        }
+      ]
+    },
+    {
+      "id": "repair-without-diagnostic",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 0,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "A-E3",
+            "action": "repair",
+            "outcome": "edited",
+            "source_refs": [
+              "A1"
+            ],
+            "detail": "Current source changes; prior receipt no longer matches.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "bad": true,
+            "fixed": false,
+            "matching": false,
+            "diagnostic": false,
+            "supported": false,
+            "stale_rejected": false,
+            "original_good": false
+          },
+          "enabled": [
+            "capture_bad"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {},
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "bad": true,
+              "diagnostic": true
+            }
+          ],
+          "unresolved": []
+        }
+      ]
+    }
+  ],
+  "countermodel_repairs": [
+    {
+      "id": "A-repair-current-binding",
+      "before": {
+        "valid": true,
+        "state": {
+          "bad": false,
+          "fixed": true,
+          "matching": false,
+          "diagnostic": false,
+          "supported": true,
+          "stale_rejected": false,
+          "original_good": false
+        },
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "A-E1",
+              "action": "capture_bad",
+              "outcome": "captured",
+              "source_refs": [
+                "A1"
+              ],
+              "detail": "Bad source and real executed SQL match.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": true,
+              "fixed": false,
+              "matching": false,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "capture_bad"
+            ],
+            "occurring": [
+              "capture_bad"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "accomplished_after": {
+              "capture_bad": "A-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "A-E2",
+              "action": "diagnose",
+              "outcome": "violation",
+              "source_refs": [
+                "A1"
+              ],
+              "detail": "ENDPOINT_ORDER_NOT_TOTAL.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "capture_bad",
+              "diagnose"
+            ],
+            "occurring": [
+              "diagnose"
+            ],
+            "accomplished_but_not_depleted": {
+              "capture_bad": "A-E1"
+            },
+            "after": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": true,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "accomplished_after": {
+              "capture_bad": "A-E1",
+              "diagnose": "A-E2"
+            }
+          },
+          {
+            "index": 2,
+            "event": {
+              "id": "A-E3",
+              "action": "repair",
+              "outcome": "edited",
+              "source_refs": [
+                "A1"
+              ],
+              "detail": "Current source changes; prior receipt no longer matches.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": true,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "capture_bad",
+              "diagnose",
+              "repair"
+            ],
+            "occurring": [
+              "repair"
+            ],
+            "accomplished_but_not_depleted": {
+              "capture_bad": "A-E1",
+              "diagnose": "A-E2"
+            },
+            "after": {
+              "bad": false,
+              "fixed": true,
+              "matching": false,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "accomplished_after": {
+              "repair": "A-E3"
+            }
+          },
+          {
+            "index": 3,
+            "event": {
+              "id": "A-E6",
+              "action": "clear",
+              "outcome": "supported",
+              "source_refs": [
+                "A3"
+              ],
+              "detail": "Bounded source/SQL/schema correspondence passes.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": false,
+              "fixed": true,
+              "matching": false,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "reject_stale",
+              "capture_fixed",
+              "clear",
+              "restore"
+            ],
+            "occurring": [
+              "clear"
+            ],
+            "accomplished_but_not_depleted": {
+              "repair": "A-E3"
+            },
+            "after": {
+              "bad": false,
+              "fixed": true,
+              "matching": false,
+              "diagnostic": false,
+              "supported": true,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "accomplished_after": {
+              "repair": "A-E3",
+              "clear": "A-E6"
+            }
+          }
+        ]
+      },
+      "after": {
+        "valid": false,
+        "violation": "unprimed",
+        "at": 3,
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "A-E1",
+              "action": "capture_bad",
+              "outcome": "captured",
+              "source_refs": [
+                "A1"
+              ],
+              "detail": "Bad source and real executed SQL match.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": true,
+              "fixed": false,
+              "matching": false,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "capture_bad"
+            ],
+            "occurring": [
+              "capture_bad"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "accomplished_after": {
+              "capture_bad": "A-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "A-E2",
+              "action": "diagnose",
+              "outcome": "violation",
+              "source_refs": [
+                "A1"
+              ],
+              "detail": "ENDPOINT_ORDER_NOT_TOTAL.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "capture_bad",
+              "diagnose"
+            ],
+            "occurring": [
+              "diagnose"
+            ],
+            "accomplished_but_not_depleted": {
+              "capture_bad": "A-E1"
+            },
+            "after": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": true,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "accomplished_after": {
+              "capture_bad": "A-E1",
+              "diagnose": "A-E2"
+            }
+          },
+          {
+            "index": 2,
+            "event": {
+              "id": "A-E3",
+              "action": "repair",
+              "outcome": "edited",
+              "source_refs": [
+                "A1"
+              ],
+              "detail": "Current source changes; prior receipt no longer matches.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": true,
+              "fixed": false,
+              "matching": true,
+              "diagnostic": true,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "capture_bad",
+              "diagnose",
+              "repair"
+            ],
+            "occurring": [
+              "repair"
+            ],
+            "accomplished_but_not_depleted": {
+              "capture_bad": "A-E1",
+              "diagnose": "A-E2"
+            },
+            "after": {
+              "bad": false,
+              "fixed": true,
+              "matching": false,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "accomplished_after": {
+              "repair": "A-E3"
+            }
+          },
+          {
+            "index": 3,
+            "event": {
+              "id": "A-E6",
+              "action": "clear",
+              "outcome": "supported",
+              "source_refs": [
+                "A3"
+              ],
+              "detail": "Bounded source/SQL/schema correspondence passes.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "bad": false,
+              "fixed": true,
+              "matching": false,
+              "diagnostic": false,
+              "supported": false,
+              "stale_rejected": false,
+              "original_good": false
+            },
+            "enabled": [
+              "reject_stale",
+              "capture_fixed",
+              "restore"
+            ],
+            "occurring": [],
+            "accomplished_but_not_depleted": {
+              "repair": "A-E3"
+            },
+            "violation": "unprimed",
+            "requires_any": [
+              {
+                "fixed": true,
+                "matching": true
+              }
+            ],
+            "unresolved": []
+          }
+        ]
+      },
+      "full_episode_regressions": [
+        true,
+        true
+      ]
+    }
+  ],
+  "alternates": [
+    [
+      {
+        "id": "alt-0",
+        "action": "capture_bad",
+        "outcome": "captured"
+      },
+      {
+        "id": "alt-1",
+        "action": "diagnose",
+        "outcome": "violation"
+      },
+      {
+        "id": "alt-2",
+        "action": "repair",
+        "outcome": "edited"
+      },
+      {
+        "id": "alt-3",
+        "action": "capture_fixed",
+        "outcome": "captured"
+      },
+      {
+        "id": "alt-4",
+        "action": "clear",
+        "outcome": "supported"
+      }
+    ],
+    [
+      {
+        "id": "alt-0",
+        "action": "capture_bad",
+        "outcome": "captured"
+      },
+      {
+        "id": "alt-1",
+        "action": "diagnose",
+        "outcome": "violation"
+      },
+      {
+        "id": "alt-2",
+        "action": "repair",
+        "outcome": "edited"
+      },
+      {
+        "id": "alt-3",
+        "action": "reject_stale",
+        "outcome": "rejected"
+      },
+      {
+        "id": "alt-4",
+        "action": "capture_fixed",
+        "outcome": "captured"
+      },
+      {
+        "id": "alt-5",
+        "action": "clear",
+        "outcome": "supported"
+      }
+    ],
+    [
+      {
+        "id": "alt-0",
+        "action": "capture_bad",
+        "outcome": "captured"
+      },
+      {
+        "id": "alt-1",
+        "action": "diagnose",
+        "outcome": "violation"
+      },
+      {
+        "id": "alt-2",
+        "action": "repair",
+        "outcome": "edited"
+      },
+      {
+        "id": "alt-3",
+        "action": "restore",
+        "outcome": "restored"
+      },
+      {
+        "id": "alt-4",
+        "action": "capture_restored",
+        "outcome": "captured"
+      },
+      {
+        "id": "alt-5",
+        "action": "check_restored",
+        "outcome": "supported"
+      }
+    ]
+  ],
+  "limit": "Model replay only. Does not rerun the application or establish real-world validity.",
+  "commutation_checks": []
+}

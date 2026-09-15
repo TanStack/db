@@ -1,0 +1,628 @@
+{
+  "id": "PG4",
+  "status": "Bounded replay complete; measured claim is reads, not latency",
+  "claim": "Within the captured SQL-function programs, selective refresh preserves expected values and meets independent result-read obligations.",
+  "initial": {
+    "harness_ready": true,
+    "precision_failure": false,
+    "values_ok": false,
+    "precision_ok": false,
+    "kernel": false,
+    "campaign": false,
+    "value_control": false,
+    "precision_control": false,
+    "saved_failure": false,
+    "identity_preserved": false,
+    "fault_replayed": false,
+    "repair_replayed": false,
+    "quality_reported": false,
+    "replay_reported": false
+  },
+  "actions": {
+    "record_precision_red": {
+      "label": "Capture legacy analyzer precision failure",
+      "requires_any": [
+        {
+          "harness_ready": true
+        }
+      ],
+      "outcomes": {
+        "red": {
+          "precision_failure": true,
+          "values_ok": true
+        }
+      },
+      "source_refs": [
+        "D1"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "implement_kernel": {
+      "label": "Change SQL routine-effect analysis",
+      "requires_any": [
+        {
+          "precision_failure": true
+        }
+      ],
+      "outcomes": {
+        "changed": {
+          "kernel": true,
+          "precision_ok": false,
+          "values_ok": false
+        }
+      },
+      "source_refs": [
+        "D0"
+      ],
+      "repeatable": true,
+      "depletes": [
+        "report_quality"
+      ],
+      "unresolved": []
+    },
+    "record_green": {
+      "label": "Record value and read-count campaign",
+      "requires_any": [
+        {
+          "kernel": true
+        }
+      ],
+      "outcomes": {
+        "green": {
+          "values_ok": true,
+          "precision_ok": true,
+          "campaign": true
+        }
+      },
+      "source_refs": [
+        "D2"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "record_value_control": {
+      "label": "Capture missing-effect fault at value comparison",
+      "requires_any": [
+        {
+          "kernel": true
+        }
+      ],
+      "outcomes": {
+        "caught": {
+          "value_control": true
+        }
+      },
+      "source_refs": [
+        "D3"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "record_precision_control": {
+      "label": "Capture needless-fallback fault at count comparison",
+      "requires_any": [
+        {
+          "kernel": true
+        }
+      ],
+      "outcomes": {
+        "caught": {
+          "precision_control": true
+        }
+      },
+      "source_refs": [
+        "D4"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "record_shrink": {
+      "label": "Retain reduced history with original violation identity",
+      "requires_any": [
+        {
+          "value_control": true
+        }
+      ],
+      "outcomes": {
+        "retained": {
+          "saved_failure": true,
+          "identity_preserved": true
+        }
+      },
+      "source_refs": [
+        "D5",
+        "G"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "record_fault_replay": {
+      "label": "Replay reduced case with the same injected fault",
+      "requires_any": [
+        {
+          "saved_failure": true,
+          "identity_preserved": true
+        }
+      ],
+      "outcomes": {
+        "same_violation": {
+          "fault_replayed": true
+        }
+      },
+      "source_refs": [
+        "D6"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "record_repair_replay": {
+      "label": "Replay reduced case without injected fault",
+      "requires_any": [
+        {
+          "saved_failure": true,
+          "identity_preserved": true
+        }
+      ],
+      "outcomes": {
+        "passes": {
+          "repair_replayed": true
+        }
+      },
+      "source_refs": [
+        "D7"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "report_quality": {
+      "label": "Report correctness plus precise-read evidence",
+      "requires_any": [
+        {
+          "values_ok": true,
+          "precision_ok": true,
+          "value_control": true,
+          "precision_control": true
+        }
+      ],
+      "outcomes": {
+        "reported": {
+          "quality_reported": true
+        }
+      },
+      "source_refs": [
+        "D0",
+        "D2",
+        "D3",
+        "D4"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    },
+    "report_replay": {
+      "label": "Report same-case fault/repair contrast",
+      "requires_any": [
+        {
+          "fault_replayed": true,
+          "repair_replayed": true
+        }
+      ],
+      "outcomes": {
+        "reported": {
+          "replay_reported": true
+        }
+      },
+      "source_refs": [
+        "D0",
+        "D6",
+        "D7"
+      ],
+      "repeatable": true,
+      "depletes": [],
+      "unresolved": []
+    }
+  },
+  "episodes": [
+    {
+      "id": "D-precision-repair",
+      "kind": "Recorded legacy/kernel/control sequence",
+      "events": [
+        {
+          "id": "D-E1",
+          "action": "record_precision_red",
+          "outcome": "red",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E2",
+          "action": "implement_kernel",
+          "outcome": "changed",
+          "source_refs": [
+            "D0"
+          ],
+          "detail": "Analyze PG function bodies; change implementation, not expected relational obligations.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E3",
+          "action": "record_green",
+          "outcome": "green",
+          "source_refs": [
+            "D2"
+          ],
+          "detail": "40 histories, 137 operations; separate values and read-obligation comparisons.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E4",
+          "action": "record_value_control",
+          "outcome": "caught",
+          "source_refs": [
+            "D3"
+          ],
+          "detail": "Omitted body read produces stale client values.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E5",
+          "action": "record_precision_control",
+          "outcome": "caught",
+          "source_refs": [
+            "D4"
+          ],
+          "detail": "Needless fallback preserves values but fails count law.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E6",
+          "action": "report_quality",
+          "outcome": "reported",
+          "source_refs": [
+            "D0"
+          ],
+          "detail": "Both laws and their selected controls are supported within this scope.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ]
+    },
+    {
+      "id": "D-generated-failure-replay",
+      "kind": "Recorded later shrink and fault/repair replay with shared setup prefix",
+      "events": [
+        {
+          "id": "D-E1",
+          "action": "record_precision_red",
+          "outcome": "red",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E2",
+          "action": "implement_kernel",
+          "outcome": "changed",
+          "source_refs": [
+            "D0"
+          ],
+          "detail": "Analyze PG function bodies; change implementation, not expected relational obligations.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E3",
+          "action": "record_green",
+          "outcome": "green",
+          "source_refs": [
+            "D2"
+          ],
+          "detail": "40 histories, 137 operations; separate values and read-obligation comparisons.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E4",
+          "action": "record_value_control",
+          "outcome": "caught",
+          "source_refs": [
+            "D3"
+          ],
+          "detail": "Omitted body read produces stale client values.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-S1",
+          "action": "record_shrink",
+          "outcome": "retained",
+          "source_refs": [
+            "D5"
+          ],
+          "detail": "Ten accepted shrinks; six drifts into another law rejected.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-S2",
+          "action": "record_fault_replay",
+          "outcome": "same_violation",
+          "source_refs": [
+            "D6"
+          ],
+          "detail": "Saved reduced history reproduces original value mismatch.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-S3",
+          "action": "record_repair_replay",
+          "outcome": "passes",
+          "source_refs": [
+            "D7"
+          ],
+          "detail": "Same history passes with the injected fault removed; this is a control, not a new production fix.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-S4",
+          "action": "report_replay",
+          "outcome": "reported",
+          "source_refs": [
+            "D0"
+          ],
+          "detail": "Retain original and reduced cases with fault/repair contrast.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "id": "D-R1",
+      "question": "Can passing values establish useful selective refresh?",
+      "answer": "no",
+      "reason": "Legacy red and needless-fallback control have correct values and wrong counts.",
+      "source_refs": [
+        "D1",
+        "D4"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "D-R2",
+      "question": "Can a smaller failure under another law replace the original?",
+      "answer": "no",
+      "reason": "Six drifting shrinks were rejected; original identity is retained.",
+      "source_refs": [
+        "D5",
+        "G"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "D-R3",
+      "question": "Must value and precision controls run in this order?",
+      "answer": "no",
+      "reason": "They use distinct fault variants and independently captured comparisons.",
+      "source_refs": [
+        "D3",
+        "D4"
+      ],
+      "basis": "analyst-inferred from source",
+      "relation": "AND",
+      "respondent": "No new human answer",
+      "skip": "Provisional independence inference from distinct fixtures. Exposed for review; historical order alone is not proof."
+    },
+    {
+      "id": "D-R4",
+      "question": "Does removing a deliberately injected fault count as a newly discovered production bug fix?",
+      "answer": "no",
+      "reason": "Reports label the injected fault and the normal checker separately.",
+      "source_refs": [
+        "D6",
+        "D7"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    },
+    {
+      "id": "D-R5",
+      "question": "Does read reduction establish a latency improvement?",
+      "answer": "no",
+      "reason": "The report measures reads; no latency campaign is claimed.",
+      "source_refs": [
+        "D0"
+      ],
+      "basis": "source-established",
+      "relation": "AND",
+      "respondent": "Source implementation/record",
+      "skip": "No repeated user question: cited source or prior answer supplies this relation"
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "values-only-not-optimization-quality",
+      "events": [
+        {
+          "id": "D-E1",
+          "action": "record_precision_red",
+          "outcome": "red",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-X",
+          "action": "report_quality",
+          "outcome": "reported",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Wrongly upgrade correct values alone to optimization quality.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    },
+    {
+      "id": "replay-without-saved-failure",
+      "events": [
+        {
+          "id": "D-E1",
+          "action": "record_precision_red",
+          "outcome": "red",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E2",
+          "action": "implement_kernel",
+          "outcome": "changed",
+          "source_refs": [
+            "D0"
+          ],
+          "detail": "Analyze PG function bodies; change implementation, not expected relational obligations.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E3",
+          "action": "record_green",
+          "outcome": "green",
+          "source_refs": [
+            "D2"
+          ],
+          "detail": "40 histories, 137 operations; separate values and read-obligation comparisons.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-E4",
+          "action": "record_value_control",
+          "outcome": "caught",
+          "source_refs": [
+            "D3"
+          ],
+          "detail": "Omitted body read produces stale client values.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-S2",
+          "action": "record_fault_replay",
+          "outcome": "same_violation",
+          "source_refs": [
+            "D6"
+          ],
+          "detail": "Saved reduced history reproduces original value mismatch.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "expected": "unprimed"
+    }
+  ],
+  "repairs": [
+    {
+      "id": "D-separate-value-and-work-laws",
+      "action": "report_quality",
+      "old_requires_any": [
+        {
+          "values_ok": true
+        }
+      ],
+      "witness": [
+        {
+          "id": "D-E1",
+          "action": "record_precision_red",
+          "outcome": "red",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Legacy analyzer reaches correct values but fails exact refetch obligation.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "D-X",
+          "action": "report_quality",
+          "outcome": "reported",
+          "source_refs": [
+            "D1"
+          ],
+          "detail": "Wrongly upgrade correct values alone to optimization quality.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "old_valid": true,
+      "new_valid": false,
+      "basis": [
+        "D1",
+        "D4"
+      ],
+      "disposition": "Source-established correction to analyst countermodel: require both law results and the named controls for this stronger report."
+    }
+  ],
+  "alternate_goal": {
+    "quality_reported": true
+  },
+  "range": "Legacy failure, generated failure/replay and two distinct controls; shared harness and fixtures, not independent holdouts.",
+  "limits": [
+    "In-process registry/JSON/runtime oracle, not a new HTTP/browser campaign.",
+    "No latency, full PG syntax, arbitrary row cardinality, or deployment claim.",
+    "R6 automatic failure reporting is a future evidence-system requirement, not something these saved reports already implement."
+  ],
+  "abstraction": "Evidence-work process; application execution is an observed check result, not simulated database behavior.",
+  "event_wording": "Action granularity and short names are analyst choices; observations retain source references.",
+  "state_semantics": "Guards are AND clauses, with OR across clauses. A replay event has enabled, occurring and accomplished-but-not-depleted phases. Phase expansion is a modeling convention, not measured timing. Repeated checks are new occurrences; evidence is reusable, not consumed by being read.",
+  "commutation_checks": [
+    {
+      "id": "PG4-commute",
+      "episode": 0,
+      "swap": [
+        3,
+        4
+      ],
+      "basis": "D-R3; provisional source-derived independence, not a real-world scheduling experiment"
+    }
+  ]
+}

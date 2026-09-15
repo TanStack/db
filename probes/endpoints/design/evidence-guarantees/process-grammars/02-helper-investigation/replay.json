@@ -1,0 +1,1121 @@
+{
+  "model": "PG2",
+  "episodes": [
+    {
+      "id": "B-shopping",
+      "kind": "Partially ordered reported episode; current/git source corroboration is a later observation, not a reconstructed audit log",
+      "valid": true,
+      "state": {
+        "source_available": true,
+        "calls_located": true,
+        "local_finding": true,
+        "scope_bounded": true,
+        "stubbed_pass": true,
+        "reported": true,
+        "has_note": false,
+        "scored": false,
+        "whole_claim_supported": false
+      },
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "B-E1",
+            "action": "identify_calls",
+            "outcome": "located",
+            "source_refs": [
+              "B0",
+              "B3"
+            ],
+            "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": false,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "record_test"
+          ],
+          "occurring": [
+            "identify_calls"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "B-E2",
+            "action": "inspect_helper",
+            "outcome": "local",
+            "source_refs": [
+              "B0",
+              "B1",
+              "B4"
+            ],
+            "detail": "Historical report says SQL was moved out; current and committed shopping helper issue Trello requests.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "note"
+          ],
+          "occurring": [
+            "inspect_helper"
+          ],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-E1"
+          },
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-E1",
+            "inspect_helper": "B-E2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "B-E3",
+            "action": "report_local",
+            "outcome": "reported",
+            "source_refs": [
+              "B0"
+            ],
+            "detail": "Report distinguishes endpoint SQL from helper work.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "report_local",
+            "note"
+          ],
+          "occurring": [
+            "report_local"
+          ],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-E1",
+            "inspect_helper": "B-E2"
+          },
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": true,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-E1",
+            "inspect_helper": "B-E2",
+            "report_local": "B-E3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "B-E4",
+            "action": "record_test",
+            "outcome": "stubbed",
+            "source_refs": [
+              "B0",
+              "B3"
+            ],
+            "detail": "Passing endpoint observations with stubbed services; source report currently records 88 comparisons.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": true,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "report_local",
+            "note"
+          ],
+          "occurring": [
+            "record_test"
+          ],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-E1",
+            "inspect_helper": "B-E2",
+            "report_local": "B-E3"
+          },
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": true,
+            "reported": true,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-E1",
+            "inspect_helper": "B-E2",
+            "report_local": "B-E3",
+            "record_test": "B-E4"
+          }
+        }
+      ]
+    },
+    {
+      "id": "B-ai",
+      "kind": "Nearby second helper in the same aggregate report; not an independent assessment campaign",
+      "valid": true,
+      "state": {
+        "source_available": true,
+        "calls_located": true,
+        "local_finding": true,
+        "scope_bounded": true,
+        "stubbed_pass": true,
+        "reported": true,
+        "has_note": false,
+        "scored": false,
+        "whole_claim_supported": false
+      },
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "B-AI1",
+            "action": "identify_calls",
+            "outcome": "located",
+            "source_refs": [
+              "B0",
+              "B3"
+            ],
+            "detail": "AI helper calls remain outside compiler inspection.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": false,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "record_test"
+          ],
+          "occurring": [
+            "identify_calls"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-AI1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "B-AI2",
+            "action": "inspect_helper",
+            "outcome": "local",
+            "source_refs": [
+              "B0",
+              "B2",
+              "B4"
+            ],
+            "detail": "AI source returns extraction/embedding data; this is local source observation, not a provider audit.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "note"
+          ],
+          "occurring": [
+            "inspect_helper"
+          ],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-AI1"
+          },
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-AI1",
+            "inspect_helper": "B-AI2"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "B-AI3",
+            "action": "report_local",
+            "outcome": "reported",
+            "source_refs": [
+              "B0"
+            ],
+            "detail": "Same bounded report covers the AI helper.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "report_local",
+            "note"
+          ],
+          "occurring": [
+            "report_local"
+          ],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-AI1",
+            "inspect_helper": "B-AI2"
+          },
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": true,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-AI1",
+            "inspect_helper": "B-AI2",
+            "report_local": "B-AI3"
+          }
+        },
+        {
+          "index": 3,
+          "event": {
+            "id": "B-AI4",
+            "action": "record_test",
+            "outcome": "stubbed",
+            "source_refs": [
+              "B0",
+              "B3"
+            ],
+            "detail": "Same aggregate endpoint test, not an independent second certification run.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": false,
+            "reported": true,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "report_local",
+            "note"
+          ],
+          "occurring": [
+            "record_test"
+          ],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-AI1",
+            "inspect_helper": "B-AI2",
+            "report_local": "B-AI3"
+          },
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": true,
+            "scope_bounded": true,
+            "stubbed_pass": true,
+            "reported": true,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-AI1",
+            "inspect_helper": "B-AI2",
+            "report_local": "B-AI3",
+            "record_test": "B-AI4"
+          }
+        }
+      ]
+    }
+  ],
+  "negative_sequences": [
+    {
+      "id": "stubbed-test-is-not-complete-proof",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 2,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "B-E1",
+            "action": "identify_calls",
+            "outcome": "located",
+            "source_refs": [
+              "B0",
+              "B3"
+            ],
+            "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": false,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "record_test"
+          ],
+          "occurring": [
+            "identify_calls"
+          ],
+          "accomplished_but_not_depleted": {},
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-E1"
+          }
+        },
+        {
+          "index": 1,
+          "event": {
+            "id": "B-E4",
+            "action": "record_test",
+            "outcome": "stubbed",
+            "source_refs": [
+              "B0",
+              "B3"
+            ],
+            "detail": "Passing endpoint observations with stubbed services; source report currently records 88 comparisons.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "note"
+          ],
+          "occurring": [
+            "record_test"
+          ],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-E1"
+          },
+          "after": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": true,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "accomplished_after": {
+            "identify_calls": "B-E1",
+            "record_test": "B-E4"
+          }
+        },
+        {
+          "index": 2,
+          "event": {
+            "id": "B-X",
+            "action": "settle_whole_effect_claim",
+            "outcome": "supported",
+            "source_refs": [
+              "R"
+            ],
+            "detail": "Attempt to credit stubs as a complete real-helper effect proof.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": true,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": true,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "inspect_helper",
+            "record_test",
+            "note"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {
+            "identify_calls": "B-E1",
+            "record_test": "B-E4"
+          },
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "scored": true
+            }
+          ],
+          "unresolved": [
+            "Acceptance conditions and external-service assumptions are not established by this episode."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "source-observation-before-inspection",
+      "kind": "constructed exclusion",
+      "valid": false,
+      "violation": "unprimed",
+      "at": 0,
+      "trace": [
+        {
+          "index": 0,
+          "event": {
+            "id": "B-E3",
+            "action": "report_local",
+            "outcome": "reported",
+            "source_refs": [
+              "B0"
+            ],
+            "detail": "Report distinguishes endpoint SQL from helper work.",
+            "timing": "Relative order from the cited record; wall-clock time not inferred",
+            "actor": "Recorded checker/agent/runner as described in source"
+          },
+          "before": {
+            "source_available": true,
+            "calls_located": false,
+            "local_finding": false,
+            "scope_bounded": false,
+            "stubbed_pass": false,
+            "reported": false,
+            "has_note": false,
+            "scored": false,
+            "whole_claim_supported": false
+          },
+          "enabled": [
+            "identify_calls",
+            "record_test"
+          ],
+          "occurring": [],
+          "accomplished_but_not_depleted": {},
+          "violation": "unprimed",
+          "requires_any": [
+            {
+              "local_finding": true,
+              "scope_bounded": true
+            }
+          ],
+          "unresolved": []
+        }
+      ]
+    }
+  ],
+  "countermodel_repairs": [
+    {
+      "id": "B-remove-unnecessary-test-prerequisite",
+      "before": {
+        "valid": false,
+        "violation": "unprimed",
+        "at": 2,
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "B-E1",
+              "action": "identify_calls",
+              "outcome": "located",
+              "source_refs": [
+                "B0",
+                "B3"
+              ],
+              "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "source_available": true,
+              "calls_located": false,
+              "local_finding": false,
+              "scope_bounded": false,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "enabled": [
+              "identify_calls",
+              "record_test"
+            ],
+            "occurring": [
+              "identify_calls"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": false,
+              "scope_bounded": false,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "accomplished_after": {
+              "identify_calls": "B-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "B-E2",
+              "action": "inspect_helper",
+              "outcome": "local",
+              "source_refs": [
+                "B0",
+                "B1",
+                "B4"
+              ],
+              "detail": "Historical report says SQL was moved out; current and committed shopping helper issue Trello requests.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": false,
+              "scope_bounded": false,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "enabled": [
+              "identify_calls",
+              "inspect_helper",
+              "record_test",
+              "note"
+            ],
+            "occurring": [
+              "inspect_helper"
+            ],
+            "accomplished_but_not_depleted": {
+              "identify_calls": "B-E1"
+            },
+            "after": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": true,
+              "scope_bounded": true,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "accomplished_after": {
+              "identify_calls": "B-E1",
+              "inspect_helper": "B-E2"
+            }
+          },
+          {
+            "index": 2,
+            "event": {
+              "id": "B-E3",
+              "action": "report_local",
+              "outcome": "reported",
+              "source_refs": [
+                "B0"
+              ],
+              "detail": "Report distinguishes endpoint SQL from helper work.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": true,
+              "scope_bounded": true,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "enabled": [
+              "identify_calls",
+              "inspect_helper",
+              "record_test",
+              "note"
+            ],
+            "occurring": [],
+            "accomplished_but_not_depleted": {
+              "identify_calls": "B-E1",
+              "inspect_helper": "B-E2"
+            },
+            "violation": "unprimed",
+            "requires_any": [
+              {
+                "local_finding": true,
+                "scope_bounded": true,
+                "stubbed_pass": true
+              }
+            ],
+            "unresolved": []
+          }
+        ]
+      },
+      "after": {
+        "valid": true,
+        "state": {
+          "source_available": true,
+          "calls_located": true,
+          "local_finding": true,
+          "scope_bounded": true,
+          "stubbed_pass": false,
+          "reported": true,
+          "has_note": false,
+          "scored": false,
+          "whole_claim_supported": false
+        },
+        "trace": [
+          {
+            "index": 0,
+            "event": {
+              "id": "B-E1",
+              "action": "identify_calls",
+              "outcome": "located",
+              "source_refs": [
+                "B0",
+                "B3"
+              ],
+              "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "source_available": true,
+              "calls_located": false,
+              "local_finding": false,
+              "scope_bounded": false,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "enabled": [
+              "identify_calls",
+              "record_test"
+            ],
+            "occurring": [
+              "identify_calls"
+            ],
+            "accomplished_but_not_depleted": {},
+            "after": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": false,
+              "scope_bounded": false,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "accomplished_after": {
+              "identify_calls": "B-E1"
+            }
+          },
+          {
+            "index": 1,
+            "event": {
+              "id": "B-E2",
+              "action": "inspect_helper",
+              "outcome": "local",
+              "source_refs": [
+                "B0",
+                "B1",
+                "B4"
+              ],
+              "detail": "Historical report says SQL was moved out; current and committed shopping helper issue Trello requests.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": false,
+              "scope_bounded": false,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "enabled": [
+              "identify_calls",
+              "inspect_helper",
+              "record_test",
+              "note"
+            ],
+            "occurring": [
+              "inspect_helper"
+            ],
+            "accomplished_but_not_depleted": {
+              "identify_calls": "B-E1"
+            },
+            "after": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": true,
+              "scope_bounded": true,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "accomplished_after": {
+              "identify_calls": "B-E1",
+              "inspect_helper": "B-E2"
+            }
+          },
+          {
+            "index": 2,
+            "event": {
+              "id": "B-E3",
+              "action": "report_local",
+              "outcome": "reported",
+              "source_refs": [
+                "B0"
+              ],
+              "detail": "Report distinguishes endpoint SQL from helper work.",
+              "timing": "Relative order from the cited record; wall-clock time not inferred",
+              "actor": "Recorded checker/agent/runner as described in source"
+            },
+            "before": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": true,
+              "scope_bounded": true,
+              "stubbed_pass": false,
+              "reported": false,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "enabled": [
+              "identify_calls",
+              "inspect_helper",
+              "record_test",
+              "report_local",
+              "note"
+            ],
+            "occurring": [
+              "report_local"
+            ],
+            "accomplished_but_not_depleted": {
+              "identify_calls": "B-E1",
+              "inspect_helper": "B-E2"
+            },
+            "after": {
+              "source_available": true,
+              "calls_located": true,
+              "local_finding": true,
+              "scope_bounded": true,
+              "stubbed_pass": false,
+              "reported": true,
+              "has_note": false,
+              "scored": false,
+              "whole_claim_supported": false
+            },
+            "accomplished_after": {
+              "identify_calls": "B-E1",
+              "inspect_helper": "B-E2",
+              "report_local": "B-E3"
+            }
+          }
+        ]
+      },
+      "full_episode_regressions": [
+        true,
+        true
+      ]
+    }
+  ],
+  "alternates": [
+    [
+      {
+        "id": "alt-0",
+        "action": "identify_calls",
+        "outcome": "located"
+      },
+      {
+        "id": "alt-1",
+        "action": "inspect_helper",
+        "outcome": "local"
+      },
+      {
+        "id": "alt-2",
+        "action": "report_local",
+        "outcome": "reported"
+      },
+      {
+        "id": "alt-3",
+        "action": "note",
+        "outcome": "noted"
+      }
+    ],
+    [
+      {
+        "id": "alt-0",
+        "action": "identify_calls",
+        "outcome": "located"
+      },
+      {
+        "id": "alt-1",
+        "action": "inspect_helper",
+        "outcome": "local"
+      },
+      {
+        "id": "alt-2",
+        "action": "record_test",
+        "outcome": "stubbed"
+      },
+      {
+        "id": "alt-3",
+        "action": "report_local",
+        "outcome": "reported"
+      },
+      {
+        "id": "alt-4",
+        "action": "note",
+        "outcome": "noted"
+      }
+    ]
+  ],
+  "limit": "Model replay only. Does not rerun the application or establish real-world validity.",
+  "commutation_checks": [
+    {
+      "id": "PG2-commute",
+      "events": [
+        {
+          "id": "B-E1",
+          "action": "identify_calls",
+          "outcome": "located",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Compiler report names uninspected calls; it is not a purity certificate.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E2",
+          "action": "inspect_helper",
+          "outcome": "local",
+          "source_refs": [
+            "B0",
+            "B1",
+            "B4"
+          ],
+          "detail": "Historical report says SQL was moved out; current and committed shopping helper issue Trello requests.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E4",
+          "action": "record_test",
+          "outcome": "stubbed",
+          "source_refs": [
+            "B0",
+            "B3"
+          ],
+          "detail": "Passing endpoint observations with stubbed services; source report currently records 88 comparisons.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        },
+        {
+          "id": "B-E3",
+          "action": "report_local",
+          "outcome": "reported",
+          "source_refs": [
+            "B0"
+          ],
+          "detail": "Report distinguishes endpoint SQL from helper work.",
+          "timing": "Relative order from the cited record; wall-clock time not inferred",
+          "actor": "Recorded checker/agent/runner as described in source"
+        }
+      ],
+      "same_final_state": true,
+      "basis": "B-R3; provisional source-derived independence, not a real-world scheduling experiment"
+    }
+  ]
+}

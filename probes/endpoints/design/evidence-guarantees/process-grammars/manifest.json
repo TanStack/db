@@ -1,0 +1,13 @@
+{
+  "version": "v0.1",
+  "scope": "Frozen captured sources and four candidate process models; not a selected production design",
+  "sha256": {
+    "sources.json": "a6683816a74605c0f962f8cb47f6c3ad673787886051159864d682a29f4f23a8",
+    "replay.py": "a44c580cd0c1e26ecfd5861bc42ab1cb30e744b803cf21436a1a65e02aa1c986",
+    "validate.py": "37172a8f1c2dbf76196f3a92c3ad7220528bb42711ddd36383b7b0ea396bde8d",
+    "01-static-order/model.json": "f93de6dd1e04eb67e04b3434d7644b8edec227b3256348fd2105a40b474cbe16",
+    "02-helper-investigation/model.json": "e9c90917af57b2c0f88d38114fc98a962c94bee7ef86969e04f85f78a237f926",
+    "03-mutation-errors/model.json": "9c9f78c99227ad17fa7ee47f9cbb78e81168b8cee690e7de44b49019517cb622",
+    "04-selective-refresh/model.json": "f82967d2e2ac2e58be466a7b77cdeb6096ebf70b18a627a2604137b7bdc56cf4"
+  }
+}
