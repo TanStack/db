@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 2714" role="img" aria-labelledby="frame-title frame-desc">
+<title id="frame-title">How far must the law reach?</title>
+<desc id="frame-desc">Conceptual projection by the unit of obligation and its temporal reach. The law, not file count, determines placement. This tests why a local fact may not entail an end-to-end conclusion.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8 z" fill="#111"/></marker></defs>
+<style>
+      .title{font:700 30px "Source Serif 4",Georgia,serif;fill:#111}
+      .description{font:22px "Source Serif 4",Georgia,serif;fill:#333}
+      .axis{font:700 19px "Source Serif 4",Georgia,serif;fill:#111}
+      .quadrant{font:700 22px "Source Serif 4",Georgia,serif;fill:#111}
+      .quadrant-detail{font:19px "Source Serif 4",Georgia,serif;fill:#333}
+      .empty{font:italic 18px "Source Serif 4",Georgia,serif;fill:#555}
+      .point-number{font:700 14px "Source Serif 4",Georgia,serif}
+      .legend-label{font:700 20px "Source Serif 4",Georgia,serif;fill:#111}
+      .legend-detail{font:18px "Source Serif 4",Georgia,serif;fill:#444}
+      .calibration{font:19px "Source Serif 4",Georgia,serif;fill:#222}
+    </style>
+<rect width="840" height="2714" fill="#fff"/>
+<text class="title" x="70" y="55" text-anchor="start">How far must the law reach?</text>
+<text class="description" x="70" y="105" text-anchor="start">Conceptual projection by the unit of obligation and its</text>
+<text class="description" x="70" y="134" text-anchor="start">temporal reach. The law, not file count, determines</text>
+<rect x="120" y="270" width="300" height="300" fill="#fff"/>
+<rect x="420" y="270" width="300" height="300" fill="#fff"/>
+<rect x="120" y="570" width="300" height="300" fill="#fff"/>
+<rect x="420" y="570" width="300" height="300" fill="#fff"/>
+<rect x="120" y="270" width="600" height="600" fill="none" stroke="#111" stroke-width="2"/>
+<line x1="420" y1="270" x2="420" y2="870" stroke="#111" stroke-width="1.5" stroke-dasharray="7 7"/>
+<line x1="120" y1="570" x2="720" y2="570" stroke="#111" stroke-width="1.5" stroke-dasharray="7 7"/>
+<text class="quadrant" x="270" y="310" text-anchor="middle">Threads</text>
+<text class="quadrant-detail" x="270" y="338" text-anchor="middle">Follow one logical object or</text>
+<text class="quadrant-detail" x="270" y="361" text-anchor="middle">operation through movement or</text>
+<text class="quadrant-detail" x="270" y="384" text-anchor="middle">repetition. Threads here means</text>
+<text class="quadrant" x="570" y="310" text-anchor="middle">Conversations</text>
+<text class="quadrant-detail" x="570" y="338" text-anchor="middle">Several histories need a</text>
+<text class="quadrant-detail" x="570" y="361" text-anchor="middle">justified relation: effects</text>
+<text class="quadrant-detail" x="570" y="384" text-anchor="middle">and acknowledgments,</text>
+<text class="quadrant" x="270" y="610" text-anchor="middle">Specimens</text>
+<text class="quadrant-detail" x="270" y="638" text-anchor="middle">The focal claim is one</text>
+<text class="quadrant-detail" x="270" y="661" text-anchor="middle">value-transfer or admission</text>
+<text class="quadrant-detail" x="270" y="684" text-anchor="middle">relation at a boundary.</text>
+<text class="quadrant" x="570" y="610" text-anchor="middle">Assemblies</text>
+<text class="quadrant-detail" x="570" y="638" text-anchor="middle">One execution has a property</text>
+<text class="quadrant-detail" x="570" y="661" text-anchor="middle">only when its reads, writes,</text>
+<text class="quadrant-detail" x="570" y="684" text-anchor="middle">transforms, or handles compose</text>
+<line x1="90" y1="570" x2="750" y2="570" stroke="#111" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<line x1="420" y1="905" x2="420" y2="235" stroke="#111" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="axis" x="132" y="558" text-anchor="start">Law&apos;s unit: one logical unit</text>
+<text class="axis" x="708" y="541" text-anchor="end">Law&apos;s unit: linked</text>
+<text class="axis" x="708" y="558" text-anchor="end">participants</text>
+<text class="axis" x="420" y="220" text-anchor="middle">Temporal reach: history of changes</text>
+<text class="axis" x="420" y="928" text-anchor="middle">Temporal reach: one boundary or execution</text>
+<g aria-label="1. F16 Stable object targeting, category Source claim, featured because Prototype: same object remains the target while list positions change., x 0.20, y 0.83">
+<circle cx="240" cy="372" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="240" y="376" text-anchor="middle" fill="#111">1</text></g>
+<g aria-label="2. F15 Scoped deduplication, category Source claim, featured because Boundary case: single-service repeat tolerance can widen into a cross-participant claim., x 0.43, y 0.67">
+<circle cx="378" cy="468" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="378" y="472" text-anchor="middle" fill="#111">2</text></g>
+<g aria-label="3. F14 Ack includes effects, category Source claim, featured because Prototype: client settlement depends on causal correspondence across histories., x 0.84, y 0.84">
+<circle cx="624" cy="366" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="624" y="370" text-anchor="middle" fill="#111">3</text></g>
+<g aria-label="4. F17 Active-session revocation, category Source claim, featured because Different history law: a later policy change needs a response from active consumers., x 0.72, y 0.66">
+<circle cx="552" cy="474" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="552" y="478" text-anchor="middle" fill="#111">4</text></g>
+<g aria-label="5. F18 Deployment applicability, category Source claim, featured because Meta-level outlier: applicability of evidence has its own changing premises., x 0.54, y 0.53">
+<circle cx="444" cy="552" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="444" y="556" text-anchor="middle" fill="#111">5</text></g>
+<g aria-label="6. F08 Lossy key conversion, category Generated example, featured because Prototype: an exact value relation can fail within one transfer., x 0.21, y 0.22">
+<circle cx="246" cy="738" r="11" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="246" y="742" text-anchor="middle" fill="#111">6</text></g>
+<g aria-label="7. F06 Transaction handle flow, category Generated example, featured because Prototype: a local-looking call joins multiple effect participants., x 0.75, y 0.20">
+<circle cx="570" cy="750" r="11" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="570" y="754" text-anchor="middle" fill="#111">7</text></g>
+<g aria-label="8. F12 One logical snapshot, category Source claim, featured because Counterexample to equating composition with missing knowledge: an executor may still be needed., x 0.86, y 0.38">
+<circle cx="636" cy="642" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="636" y="646" text-anchor="middle" fill="#111">8</text></g>
+<text class="quadrant" x="120" y="965">Calibration</text>
+<text class="calibration" x="120" y="999"><tspan font-weight="650">Axis claim type:</tspan> Conceptual. Framework contracts and generated cases are</text>
+<text class="calibration" x="138" y="1023">distinct provenance categories. Coordinates express claim</text>
+<text class="calibration" x="138" y="1047">scope, not measured participant counts or durations.</text>
+<text class="calibration" x="120" y="1071"><tspan font-weight="650">Second-axis confidence:</tspan> Moderate. The observational boundary must be explicit:</text>
+<text class="calibration" x="138" y="1095">transactions contain histories and transfers have two ends.</text>
+<text class="calibration" x="138" y="1119">Both candidate maps share one fresh agent context.</text>
+<text class="calibration" x="120" y="1143"><tspan font-weight="650">Orthogonality:</tspan> Useful off-diagonal cases: stable object targeting is a</text>
+<text class="calibration" x="138" y="1167">one-unit history; transaction participation joins several</text>
+<text class="calibration" x="138" y="1191">parts within one execution. More history often adds</text>
+<text class="calibration" x="138" y="1215">participants, creating diagonal pull. F18 deliberately tests</text>
+<text class="calibration" x="138" y="1239">the broader evidence-applicability reading.</text>
+<text class="quadrant" x="120" y="1309">Examples</text>
+<circle cx="133" cy="1342" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1346" text-anchor="middle" fill="#111">1</text>
+<text class="legend-label" x="162" y="1347" text-anchor="start">F16 Stable object targeting</text>
+<text class="legend-detail" x="162" y="1373" text-anchor="start">category: Source claim · why plotted: Prototype: same object</text>
+<text class="legend-detail" x="162" y="1395" text-anchor="start">remains the target while list positions change. · source claim</text>
+<text class="legend-detail" x="162" y="1417" text-anchor="start">· F16; audits/queries.md Q21 · Stronger temporal claim than</text>
+<text class="legend-detail" x="162" y="1439" text-anchor="start">preserving a key in one serialized result.</text>
+<circle cx="133" cy="1466" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1470" text-anchor="middle" fill="#111">2</text>
+<text class="legend-label" x="162" y="1471" text-anchor="start">F15 Scoped deduplication</text>
+<text class="legend-detail" x="162" y="1497" text-anchor="start">category: Source claim · why plotted: Boundary case:</text>
+<text class="legend-detail" x="162" y="1519" text-anchor="start">single-service repeat tolerance can widen into a</text>
+<text class="legend-detail" x="162" y="1541" text-anchor="start">cross-participant claim. · source claim · F15;</text>
+<text class="legend-detail" x="162" y="1563" text-anchor="start">audits/protocol.md P18c/P23d; audits/queries.md Q20 ·</text>
+<text class="legend-detail" x="162" y="1585" text-anchor="start">Single-service scope is the plotted transfer hypothesis.</text>
+<text class="legend-detail" x="162" y="1607" text-anchor="start">Atomicity, retention, and effect domains need evidence. This</text>
+<text class="legend-detail" x="162" y="1629" text-anchor="start">does not authorize retries.</text>
+<circle cx="133" cy="1656" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1660" text-anchor="middle" fill="#111">3</text>
+<text class="legend-label" x="162" y="1661" text-anchor="start">F14 Ack includes effects</text>
+<text class="legend-detail" x="162" y="1687" text-anchor="start">category: Source claim · why plotted: Prototype: client</text>
+<text class="legend-detail" x="162" y="1709" text-anchor="start">settlement depends on causal correspondence across histories.</text>
+<text class="legend-detail" x="162" y="1731" text-anchor="start">· source claim · F14; audits/protocol.md P12b/P17a;</text>
+<text class="legend-detail" x="162" y="1753" text-anchor="start">02-research-survey.md C11 · Source contract/example;</text>
+<text class="legend-detail" x="162" y="1775" text-anchor="start">replication and rebase remain outside Endpoints scope. A row</text>
+<text class="legend-detail" x="162" y="1797" text-anchor="start">ID may not identify an operation.</text>
+<circle cx="133" cy="1824" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1828" text-anchor="middle" fill="#111">4</text>
+<text class="legend-label" x="162" y="1829" text-anchor="start">F17 Active-session revocation</text>
+<text class="legend-detail" x="162" y="1855" text-anchor="start">category: Source claim · why plotted: Different history law: a</text>
+<text class="legend-detail" x="162" y="1877" text-anchor="start">later policy change needs a response from active consumers. ·</text>
+<text class="legend-detail" x="162" y="1899" text-anchor="start">source claim · F17; audits/protocol.md P26b;</text>
+<text class="legend-detail" x="162" y="1921" text-anchor="start">02-research-survey.md C18 · An entry-time check does not</text>
+<text class="legend-detail" x="162" y="1943" text-anchor="start">itself create a disconnect or revalidation path.</text>
+<circle cx="133" cy="1970" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1974" text-anchor="middle" fill="#111">5</text>
+<text class="legend-label" x="162" y="1975" text-anchor="start">F18 Deployment applicability</text>
+<text class="legend-detail" x="162" y="2001" text-anchor="start">category: Source claim · why plotted: Meta-level outlier:</text>
+<text class="legend-detail" x="162" y="2023" text-anchor="start">applicability of evidence has its own changing premises. ·</text>
+<text class="legend-detail" x="162" y="2045" text-anchor="start">source claim · F18; 02-research-survey.md C19;</text>
+<text class="legend-detail" x="162" y="2067" text-anchor="start">audits/language.md L27b · Near both watersheds. Source hash,</text>
+<text class="legend-detail" x="162" y="2089" text-anchor="start">mutable name, configuration, and database authority are</text>
+<text class="legend-detail" x="162" y="2111" text-anchor="start">distinct bindings.</text>
+<circle cx="133" cy="2138" r="13" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="2142" text-anchor="middle" fill="#111">6</text>
+<text class="legend-label" x="162" y="2143" text-anchor="start">F08 Lossy key conversion</text>
+<text class="legend-detail" x="162" y="2169" text-anchor="start">category: Generated example · why plotted: Prototype: an exact</text>
+<text class="legend-detail" x="162" y="2191" text-anchor="start">value relation can fail within one transfer. · generated</text>
+<text class="legend-detail" x="162" y="2213" text-anchor="start">example · F08; 03-ground-condition.md G5;</text>
+<text class="legend-detail" x="162" y="2235" text-anchor="start">02-research-survey.md E4 · An encode/decode pair is one</text>
+<text class="legend-detail" x="162" y="2257" text-anchor="start">logical value law here; injectivity and ordering remain</text>
+<text class="legend-detail" x="162" y="2279" text-anchor="start">separate requirements.</text>
+<circle cx="133" cy="2306" r="13" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="2310" text-anchor="middle" fill="#111">7</text>
+<text class="legend-label" x="162" y="2311" text-anchor="start">F06 Transaction handle flow</text>
+<text class="legend-detail" x="162" y="2337" text-anchor="start">category: Generated example · why plotted: Prototype: a</text>
+<text class="legend-detail" x="162" y="2359" text-anchor="start">local-looking call joins multiple effect participants. ·</text>
+<text class="legend-detail" x="162" y="2381" text-anchor="start">generated example · F06; 03-ground-condition.md G4;</text>
+<text class="legend-detail" x="162" y="2403" text-anchor="start">02-research-survey.md E3 · The observation boundary is one</text>
+<text class="legend-detail" x="162" y="2425" text-anchor="start">transaction execution. Inspection does not add rollback to an</text>
+<text class="legend-detail" x="162" y="2447" text-anchor="start">escaped participant.</text>
+<circle cx="133" cy="2474" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="2478" text-anchor="middle" fill="#111">8</text>
+<text class="legend-label" x="162" y="2479" text-anchor="start">F12 One logical snapshot</text>
+<text class="legend-detail" x="162" y="2505" text-anchor="start">category: Source claim · why plotted: Counterexample to</text>
+<text class="legend-detail" x="162" y="2527" text-anchor="start">equating composition with missing knowledge: an executor may</text>
+<text class="legend-detail" x="162" y="2549" text-anchor="start">still be needed. · source claim · F12; 02-research-survey.md</text>
+<text class="legend-detail" x="162" y="2571" text-anchor="start">C4/C5; audits/queries.md Q07 · The contract joins reads within</text>
+<text class="legend-detail" x="162" y="2593" text-anchor="start">one logical execution. A transaction contains internal events;</text>
+<text class="legend-detail" x="162" y="2615" text-anchor="start">this axis is observational scope, not event count.</text>
+</svg>

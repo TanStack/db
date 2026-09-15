@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 2712" role="img" aria-labelledby="frame-title frame-desc">
+<title id="frame-title">What is still missing?</title>
+<desc id="frame-desc">Conceptual projection of claim slices: supplying a fact versus supplying behavior, and extra work versus changed semantics. Neither axis is measured; regions overlap. General agent evidence admission is not implemented. Bind a fact means inspect and bind an existing behavior claim; implement behavior includes building or enforcing the missing consumer action.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8 z" fill="#111"/></marker></defs>
+<style>
+      .title{font:700 30px "Source Serif 4",Georgia,serif;fill:#111}
+      .description{font:22px "Source Serif 4",Georgia,serif;fill:#333}
+      .axis{font:700 19px "Source Serif 4",Georgia,serif;fill:#111}
+      .quadrant{font:700 22px "Source Serif 4",Georgia,serif;fill:#111}
+      .quadrant-detail{font:19px "Source Serif 4",Georgia,serif;fill:#333}
+      .empty{font:italic 18px "Source Serif 4",Georgia,serif;fill:#555}
+      .point-number{font:700 14px "Source Serif 4",Georgia,serif}
+      .legend-label{font:700 20px "Source Serif 4",Georgia,serif;fill:#111}
+      .legend-detail{font:18px "Source Serif 4",Georgia,serif;fill:#444}
+      .calibration{font:19px "Source Serif 4",Georgia,serif;fill:#222}
+    </style>
+<rect width="840" height="2712" fill="#fff"/>
+<text class="title" x="70" y="55" text-anchor="start">What is still missing?</text>
+<text class="description" x="70" y="105" text-anchor="start">Conceptual projection of claim slices: supplying a fact</text>
+<text class="description" x="70" y="134" text-anchor="start">versus supplying behavior, and extra work versus changed</text>
+<rect x="120" y="270" width="300" height="300" fill="#fff"/>
+<rect x="420" y="270" width="300" height="300" fill="#fff"/>
+<rect x="120" y="570" width="300" height="300" fill="#fff"/>
+<rect x="420" y="570" width="300" height="300" fill="#fff"/>
+<rect x="120" y="270" width="600" height="600" fill="none" stroke="#111" stroke-width="2"/>
+<line x1="420" y1="270" x2="420" y2="870" stroke="#111" stroke-width="1.5" stroke-dasharray="7 7"/>
+<line x1="120" y1="570" x2="720" y2="570" stroke="#111" stroke-width="1.5" stroke-dasharray="7 7"/>
+<text class="quadrant" x="270" y="310" text-anchor="middle">Inspectors</text>
+<text class="quadrant-detail" x="270" y="338" text-anchor="middle">An existing validator, codec,</text>
+<text class="quadrant-detail" x="270" y="361" text-anchor="middle">or transaction participant has</text>
+<text class="quadrant-detail" x="270" y="384" text-anchor="middle">the required behavior; the</text>
+<text class="quadrant" x="570" y="310" text-anchor="middle">Conductors</text>
+<text class="quadrant-detail" x="570" y="338" text-anchor="middle">Checks, authority, or events</text>
+<text class="quadrant-detail" x="570" y="361" text-anchor="middle">must actually occur at the</text>
+<text class="quadrant-detail" x="570" y="384" text-anchor="middle">required point. Knowing a</text>
+<text class="quadrant" x="270" y="610" text-anchor="middle">Surveyors</text>
+<text class="quadrant-detail" x="270" y="638" text-anchor="middle">Complete dependency</text>
+<text class="quadrant-detail" x="270" y="661" text-anchor="middle">inventories let an existing</text>
+<text class="quadrant-detail" x="270" y="684" text-anchor="middle">conservative consumer save</text>
+<text class="quadrant" x="570" y="610" text-anchor="middle">Machinists</text>
+<text class="quadrant-detail" x="570" y="638" text-anchor="middle">Knowing query meaning or</text>
+<text class="quadrant-detail" x="570" y="661" text-anchor="middle">declared requirements still</text>
+<text class="quadrant-detail" x="570" y="684" text-anchor="middle">leaves executable coalescing</text>
+<line x1="90" y1="570" x2="750" y2="570" stroke="#111" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<line x1="420" y1="905" x2="420" y2="235" stroke="#111" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<text class="axis" x="132" y="558" text-anchor="start">Next step: bind a fact</text>
+<text class="axis" x="708" y="541" text-anchor="end">Next step: implement</text>
+<text class="axis" x="708" y="558" text-anchor="end">behavior</text>
+<text class="axis" x="420" y="220" text-anchor="middle">Consequence if unresolved: result or settlement changes</text>
+<text class="axis" x="420" y="928" text-anchor="middle">Consequence if unresolved: conservative extra work</text>
+<g aria-label="1. F07 Installed validator, category Source claim, featured because Prototype: inspect existing behavior whose truth controls accepted values., x 0.22, y 0.83">
+<circle cx="252" cy="372" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="252" y="376" text-anchor="middle" fill="#111">1</text></g>
+<g aria-label="2. F06 Existing tx participant, category Generated example, featured because Boundary case: inspection can establish use of an existing transaction., x 0.35, y 0.64">
+<circle cx="330" cy="486" r="11" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="330" y="490" text-anchor="middle" fill="#111">2</text></g>
+<g aria-label="3. F05 Job acknowledged early, category Generated example, featured because Prototype: a correct footprint cannot create a later completion boundary., x 0.84, y 0.82">
+<circle cx="624" cy="378" r="11" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="624" y="382" text-anchor="middle" fill="#111">3</text></g>
+<g aria-label="4. F11 Missing authored check, category Source claim, featured because Tests that knowing policy coverage does not implement an absent check., x 0.72, y 0.64">
+<circle cx="552" cy="486" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="552" y="490" text-anchor="middle" fill="#111">4</text></g>
+<g aria-label="5. F03 Conditional footprint, category Generated example, featured because Prototype: a broad complete bound can save reads without exact branch precision., x 0.20, y 0.21">
+<circle cx="240" cy="744" r="11" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="240" y="748" text-anchor="middle" fill="#111">5</text></g>
+<g aria-label="6. F02 Skipped opaque calls, category Code observation, featured because Outlier: a partial producer result breaks the conservative-fallback premise., x 0.43, y 0.54">
+<circle cx="378" cy="546" r="11" fill="#0072B2" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="378" y="550" text-anchor="middle" fill="#fff">6</text></g>
+<g aria-label="7. F09 Fragment coalescing, category Source claim, featured because Prototype: declaration knowledge still needs query construction machinery., x 0.75, y 0.20">
+<circle cx="570" cy="750" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="570" y="754" text-anchor="middle" fill="#111">7</text></g>
+<g aria-label="8. F10 Predicate lowering, category Source claim, featured because Separate mechanism: understanding an opaque predicate does not implement SQL lowering., x 0.84, y 0.37">
+<circle cx="624" cy="648" r="11" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="624" y="652" text-anchor="middle" fill="#111">8</text></g>
+<text class="quadrant" x="120" y="965">Calibration</text>
+<text class="calibration" x="120" y="999"><tspan font-weight="650">Axis claim type:</tspan> Conceptual inference from typed source claims, constructed</text>
+<text class="calibration" x="138" y="1023">cases, and two code observations; coordinates are editorial,</text>
+<text class="calibration" x="138" y="1047">not measured.</text>
+<text class="calibration" x="120" y="1071"><tspan font-weight="650">Second-axis confidence:</tspan> Moderate. Extra-work placement requires an actual correct</text>
+<text class="calibration" x="138" y="1095">fallback; F02 is a counterpressure. Same fresh agent</text>
+<text class="calibration" x="138" y="1119">produced both maps, so they are internally correlated.</text>
+<text class="calibration" x="120" y="1143"><tspan font-weight="650">Orthogonality:</tspan> Useful four-region contrast: inspectable semantic facts and</text>
+<text class="calibration" x="138" y="1167">missing optimization machinery occupy both off-diagonal</text>
+<text class="calibration" x="138" y="1191">regions. A usable fact always presumes a consumer; missing</text>
+<text class="calibration" x="138" y="1215">admission machinery is not hidden by the left pole.</text>
+<text class="quadrant" x="120" y="1285">Examples</text>
+<circle cx="133" cy="1318" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1322" text-anchor="middle" fill="#111">1</text>
+<text class="legend-label" x="162" y="1323" text-anchor="start">F07 Installed validator</text>
+<text class="legend-detail" x="162" y="1349" text-anchor="start">category: Source claim · why plotted: Prototype: inspect</text>
+<text class="legend-detail" x="162" y="1371" text-anchor="start">existing behavior whose truth controls accepted values. ·</text>
+<text class="legend-detail" x="162" y="1393" text-anchor="start">source claim · F07; 06-frame-projection.md inventory;</text>
+<text class="legend-detail" x="162" y="1415" text-anchor="start">audits/language.md L19a/L5a · Placement assumes a real</text>
+<text class="legend-detail" x="162" y="1437" text-anchor="start">validator is installed. An unchecked cast belongs to a</text>
+<text class="legend-detail" x="162" y="1459" text-anchor="start">missing-behavior case.</text>
+<circle cx="133" cy="1486" r="13" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1490" text-anchor="middle" fill="#111">2</text>
+<text class="legend-label" x="162" y="1491" text-anchor="start">F06 Existing tx participant</text>
+<text class="legend-detail" x="162" y="1517" text-anchor="start">category: Generated example · why plotted: Boundary case:</text>
+<text class="legend-detail" x="162" y="1539" text-anchor="start">inspection can establish use of an existing transaction. ·</text>
+<text class="legend-detail" x="162" y="1561" text-anchor="start">generated example · F06; 02-research-survey.md E3;</text>
+<text class="legend-detail" x="162" y="1583" text-anchor="start">03-ground-condition.md G4 · All relevant effects must use the</text>
+<text class="legend-detail" x="162" y="1605" text-anchor="start">supplied handle and finish before return. An escaping handle</text>
+<text class="legend-detail" x="162" y="1627" text-anchor="start">moves the claim right.</text>
+<circle cx="133" cy="1654" r="13" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1658" text-anchor="middle" fill="#111">3</text>
+<text class="legend-label" x="162" y="1659" text-anchor="start">F05 Job acknowledged early</text>
+<text class="legend-detail" x="162" y="1685" text-anchor="start">category: Generated example · why plotted: Prototype: a</text>
+<text class="legend-detail" x="162" y="1707" text-anchor="start">correct footprint cannot create a later completion boundary. ·</text>
+<text class="legend-detail" x="162" y="1729" text-anchor="start">generated example · F05; 03-ground-condition.md G2 · A</text>
+<text class="legend-detail" x="162" y="1751" text-anchor="start">preexisting wait-for-completion contract could make part of</text>
+<text class="legend-detail" x="162" y="1773" text-anchor="start">the remaining task inspectable.</text>
+<circle cx="133" cy="1800" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1804" text-anchor="middle" fill="#111">4</text>
+<text class="legend-label" x="162" y="1805" text-anchor="start">F11 Missing authored check</text>
+<text class="legend-detail" x="162" y="1831" text-anchor="start">category: Source claim · why plotted: Tests that knowing</text>
+<text class="legend-detail" x="162" y="1853" text-anchor="start">policy coverage does not implement an absent check. · source</text>
+<text class="legend-detail" x="162" y="1875" text-anchor="start">claim · F11; audits/queries.md Q15-Q18; 02-research-survey.md</text>
+<text class="legend-detail" x="162" y="1897" text-anchor="start">C10 · Plots the missing-enforcement transfer slice, inferred</text>
+<text class="legend-detail" x="162" y="1919" text-anchor="start">from source contracts. Existing checks move left. Auth must</text>
+<text class="legend-detail" x="162" y="1941" text-anchor="start">remain authored.</text>
+<circle cx="133" cy="1968" r="13" fill="#D55E00" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="1972" text-anchor="middle" fill="#111">5</text>
+<text class="legend-label" x="162" y="1973" text-anchor="start">F03 Conditional footprint</text>
+<text class="legend-detail" x="162" y="1999" text-anchor="start">category: Generated example · why plotted: Prototype: a broad</text>
+<text class="legend-detail" x="162" y="2021" text-anchor="start">complete bound can save reads without exact branch precision.</text>
+<text class="legend-detail" x="162" y="2043" text-anchor="start">· generated example · F03; 02-research-survey.md E1;</text>
+<text class="legend-detail" x="162" y="2065" text-anchor="start">03-ground-condition.md G1 · Assumes settled relevant effects</text>
+<text class="legend-detail" x="162" y="2087" text-anchor="start">and a conservative consumer. General agent evidence admission</text>
+<text class="legend-detail" x="162" y="2109" text-anchor="start">is still absent.</text>
+<circle cx="133" cy="2136" r="13" fill="#0072B2" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="2140" text-anchor="middle" fill="#fff">6</text>
+<text class="legend-label" x="162" y="2141" text-anchor="start">F02 Skipped opaque calls</text>
+<text class="legend-detail" x="162" y="2167" text-anchor="start">category: Code observation · why plotted: Outlier: a partial</text>
+<text class="legend-detail" x="162" y="2189" text-anchor="start">producer result breaks the conservative-fallback premise. ·</text>
+<text class="legend-detail" x="162" y="2211" text-anchor="start">code observation · F02; inline-dependencies.mjs around 210-217</text>
+<text class="legend-detail" x="162" y="2233" text-anchor="start">and 315-324 · Just above the semantic watershed: current</text>
+<text class="legend-detail" x="162" y="2255" text-anchor="start">analysis records skipped calls while returning recognized SQL</text>
+<text class="legend-detail" x="162" y="2277" text-anchor="start">dependencies. Its partial footprint can change correctness,</text>
+<text class="legend-detail" x="162" y="2299" text-anchor="start">not merely read cost. It remains an outlier from the</text>
+<text class="legend-detail" x="162" y="2321" text-anchor="start">dependency-inventory cluster.</text>
+<circle cx="133" cy="2348" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="2352" text-anchor="middle" fill="#111">7</text>
+<text class="legend-label" x="162" y="2353" text-anchor="start">F09 Fragment coalescing</text>
+<text class="legend-detail" x="162" y="2379" text-anchor="start">category: Source claim · why plotted: Prototype: declaration</text>
+<text class="legend-detail" x="162" y="2401" text-anchor="start">knowledge still needs query construction machinery. · source</text>
+<text class="legend-detail" x="162" y="2423" text-anchor="start">claim · F09; audits/queries.md Q10/Q11; 02-research-survey.md</text>
+<text class="legend-detail" x="162" y="2445" text-anchor="start">C6 · Plots coalescing only. Masking and declaration provenance</text>
+<text class="legend-detail" x="162" y="2467" text-anchor="start">have semantic obligations above the line.</text>
+<circle cx="133" cy="2494" r="13" fill="#009E73" stroke="#111" stroke-width="1.5"/>
+<text class="point-number" x="133" y="2498" text-anchor="middle" fill="#111">8</text>
+<text class="legend-label" x="162" y="2499" text-anchor="start">F10 Predicate lowering</text>
+<text class="legend-detail" x="162" y="2525" text-anchor="start">category: Source claim · why plotted: Separate mechanism:</text>
+<text class="legend-detail" x="162" y="2547" text-anchor="start">understanding an opaque predicate does not implement SQL</text>
+<text class="legend-detail" x="162" y="2569" text-anchor="start">lowering. · source claim · F10; audits/language.md L20b;</text>
+<text class="legend-detail" x="162" y="2591" text-anchor="start">02-research-survey.md C14 · Historical Links example; not a</text>
+<text class="legend-detail" x="162" y="2613" text-anchor="start">claim about current Links or an implemented Endpoints feature.</text>
+</svg>

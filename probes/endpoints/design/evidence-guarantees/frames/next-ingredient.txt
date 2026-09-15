@@ -1,0 +1,37 @@
+What is still missing?
+Conceptual projection of claim slices: supplying a fact versus supplying behavior,
+and extra work versus changed semantics. Neither axis is measured; regions overlap.
+General agent evidence admission is not implemented. Bind a fact means inspect and
+bind an existing behavior claim; implement behavior includes building or enforcing
+the missing consumer action.
+
+              Consequence if unresolved: result or settlement changes
+                                         ^
++----------------------------------------+----------------------------------------+
+|Inspectors                              |Conductors                              |
+|[1] F07 Installed validator             |[3] F05 Job acknowledged early          |
+|[2] F06 Existing tx participant         |[4] F11 Missing authored check          |
+|+ 1 more below                          |                                        |
+Next step: bind a fact <- +----------------------------------------+----------------------------------------+ -> Next step: implement behavior
+|Surveyors                               |Machinists                              |
+|[5] F03 Conditional footprint           |[7] F09 Fragment coalescing             |
+|                                        |[8] F10 Predicate lowering              |
+|                                        |                                        |
++----------------------------------------+----------------------------------------+
+                                         v
+                Consequence if unresolved: conservative extra work
+
+Placements (normalized x, y):
+[1] F07 Installed validator (0.22, 0.83) - category: Source claim; why plotted: Prototype: inspect existing behavior whose truth controls accepted values.; source claim; F07; 06-frame-projection.md inventory; audits/language.md L19a/L5a - Placement assumes a real validator is installed. An unchecked cast belongs to a missing-behavior case.
+[2] F06 Existing tx participant (0.35, 0.64) - category: Generated example; why plotted: Boundary case: inspection can establish use of an existing transaction.; generated example; F06; 02-research-survey.md E3; 03-ground-condition.md G4 - All relevant effects must use the supplied handle and finish before return. An escaping handle moves the claim right.
+[3] F05 Job acknowledged early (0.84, 0.82) - category: Generated example; why plotted: Prototype: a correct footprint cannot create a later completion boundary.; generated example; F05; 03-ground-condition.md G2 - A preexisting wait-for-completion contract could make part of the remaining task inspectable.
+[4] F11 Missing authored check (0.72, 0.64) - category: Source claim; why plotted: Tests that knowing policy coverage does not implement an absent check.; source claim; F11; audits/queries.md Q15-Q18; 02-research-survey.md C10 - Plots the missing-enforcement transfer slice, inferred from source contracts. Existing checks move left. Auth must remain authored.
+[5] F03 Conditional footprint (0.20, 0.21) - category: Generated example; why plotted: Prototype: a broad complete bound can save reads without exact branch precision.; generated example; F03; 02-research-survey.md E1; 03-ground-condition.md G1 - Assumes settled relevant effects and a conservative consumer. General agent evidence admission is still absent.
+[6] F02 Skipped opaque calls (0.43, 0.54) - category: Code observation; why plotted: Outlier: a partial producer result breaks the conservative-fallback premise.; code observation; F02; inline-dependencies.mjs around 210-217 and 315-324 - Just above the semantic watershed: current analysis records skipped calls while returning recognized SQL dependencies. Its partial footprint can change correctness, not merely read cost. It remains an outlier from the dependency-inventory cluster.
+[7] F09 Fragment coalescing (0.75, 0.20) - category: Source claim; why plotted: Prototype: declaration knowledge still needs query construction machinery.; source claim; F09; audits/queries.md Q10/Q11; 02-research-survey.md C6 - Plots coalescing only. Masking and declaration provenance have semantic obligations above the line.
+[8] F10 Predicate lowering (0.84, 0.37) - category: Source claim; why plotted: Separate mechanism: understanding an opaque predicate does not implement SQL lowering.; source claim; F10; audits/language.md L20b; 02-research-survey.md C14 - Historical Links example; not a claim about current Links or an implemented Endpoints feature.
+
+Calibration:
+Axis claim type: Conceptual inference from typed source claims, constructed cases, and two code observations; coordinates are editorial, not measured.
+Second-axis confidence: Moderate. Extra-work placement requires an actual correct fallback; F02 is a counterpressure. Same fresh agent produced both maps, so they are internally correlated.
+Orthogonality: Useful four-region contrast: inspectable semantic facts and missing optimization machinery occupy both off-diagonal regions. A usable fact always presumes a consumer; missing admission machinery is not hidden by the left pole.

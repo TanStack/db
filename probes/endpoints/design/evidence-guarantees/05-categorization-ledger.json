@@ -1,0 +1,1310 @@
+{
+  "baseline": "9bbbd08d9",
+  "productionBaseline": "9189b4f34",
+  "sourceSurveySha256": "b31c3059af06b4afd40134577a60a50083c10f96b6088c4288eea35518e9e4b2",
+  "routes": {
+    "P": "Present in a bounded form",
+    "C": "Reusable compiler/linter/checker work",
+    "E": "Scoped agent-supplied fact or domain check",
+    "A": "Authored application/adapter behavior or policy",
+    "R": "Runtime/protocol/enforcement work if adopted",
+    "D": "Deferred, outside current scope, or source-specific"
+  },
+  "families": {
+    "effects": "Effect bounds and affected collections",
+    "completion": "Completion, visibility and acknowledgment",
+    "transactions": "Atomicity, isolation and domain invariants",
+    "retry": "Retries, repeated effects and deduplication",
+    "values": "Validation, conversion and disclosure",
+    "code-boundary": "Code placement, registration and delivery",
+    "identity": "Entity, session, operation and authority identity",
+    "authorization": "Authored authorization and its coverage",
+    "optimism": "Prediction, rollback and action histories",
+    "ordering": "Operation order",
+    "query-semantics": "Query meaning, snapshots and determinism",
+    "composition": "Component data composition",
+    "errors": "Public and internal errors",
+    "evidence-lifetime": "Evidence scope, deployment and invalidation",
+    "sync": "Replication and source-specific obligations"
+  },
+  "routeCounts": {
+    "P": 53,
+    "C": 55,
+    "E": 80,
+    "A": 61,
+    "R": 43,
+    "D": 27
+  },
+  "evidenceRoles": {
+    "extension": "Candidate semantic fact for a present mechanism; admission/invalidation still needed",
+    "consumer": "Fact needs an additional enforcement/protocol consumer",
+    "app-check": "Domain/prediction check, not an optimization certificate",
+    "ordinary": "Primarily reusable checking or authored code work",
+    "deferred": "Evidence transfer depends on a deferred/source-specific feature",
+    "none": "No distinct evidence-system task established"
+  },
+  "evidenceRoleCounts": {
+    "consumer": 18,
+    "extension": 19,
+    "none": 5,
+    "app-check": 8,
+    "ordinary": 24,
+    "deferred": 11
+  },
+  "items": [
+    {
+      "id": "C1",
+      "family": "transactions",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Call atomicity and commit-delayed channel sends.",
+      "current": "PG transactions can be authored; Endpoints invokes the handler without wrapping it in a transaction or delaying arbitrary external effects.",
+      "failure": "First SQL statement commits; second throws. Or an email is sent before a later SQL rollback.",
+      "agent": "Trace an unsupported adapter to establish existing transaction participation and post-commit behavior. If those behaviors are absent, change app/adapter code; evidence cannot create atomicity.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "C2",
+      "family": "effects",
+      "routes": [
+        "C",
+        "E",
+        "R"
+      ],
+      "claim": "Foreign-call effect/tier declarations, with separate transactional hook obligations.",
+      "current": "Supported SQL has summaries. There is no general agent-evidence admission format or hook runtime.",
+      "failure": "An HTTP helper writes shopping items although the visible SQL only updates recipes.",
+      "agent": "Inspect exact implementation, hooks, configuration, failure paths and database binding; supply a scoped read/write bound. Hook ordering remains a distinct claim, as in L5b.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "C3",
+      "family": "effects",
+      "routes": [
+        "P",
+        "C",
+        "E"
+      ],
+      "claim": "Invalidate queries sharing affected entities.",
+      "current": "Registered read/write footprints are intersected; unknown bounds refetch. SQL-only fallback can omit imported-call effects, so complete handler coverage is conditional.",
+      "failure": "A helper writes tags, but tags are absent from the emitted write set, so a retained tag query is skipped.",
+      "agent": "Supply missing upper bounds for opaque calls, including failures and indirect writes. The compiler unions these with SQL. Conditional precision is optional; a complete unconditional bound is useful.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "C4",
+      "family": "query-semantics",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "One logical snapshot per query and a restricted deterministic query context.",
+      "current": "A single SQL statement uses PG semantics. Multiple handler statements and parallel endpoint reads are not enclosed in a shared snapshot; external calls remain allowed.",
+      "failure": "A query reads a total, another commit occurs, then it reads the component rows from a different snapshot.",
+      "agent": "Inspect hidden read dependencies and nondeterminism. To guarantee a shared snapshot, authored transactions with suitable isolation or new runtime behavior must exist.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "C5",
+      "family": "transactions",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Atomic mutation execution, distinct from external actions and their retry constraints.",
+      "current": "Handlers run once per dispatched request; reads retry. Atomicity of handler writes depends on authored SQL/transactions.",
+      "failure": "An external charge succeeds and a later database write fails; rerunning the handler charges twice.",
+      "agent": "Certify an existing transaction participant, a particular no-effect failure prefix, or a deduplication contract separately. None implies the other two.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "C6",
+      "family": "composition",
+      "routes": [
+        "D",
+        "R"
+      ],
+      "claim": "Fragment masking restricts component data access.",
+      "current": "Endpoint collections expose their row schema; no Relay-style fragment ownership/witness API is provided.",
+      "failure": "A component reads a field it never declared because the shared collection happens to contain it.",
+      "agent": "No evidence fact can install masking. An agent could implement a chosen interface/compiler feature; it is a separate product feature, not needed for current refetch coherence.",
+      "evidenceRole": "none"
+    },
+    {
+      "id": "C7",
+      "family": "optimism",
+      "routes": [
+        "P",
+        "E",
+        "A"
+      ],
+      "claim": "Optimistic merging/rollback with authored update and invalidation semantics.",
+      "current": "DB transactions and Endpoints settlement manage overlays; supported relation models propagate optimism. Arbitrary app predictions are not validated automatically.",
+      "failure": "A title is trimmed on the server but raw optimistic input remains untrimmed, or changing a field moves a row across a filter.",
+      "agent": "Provide domain generators and an explicit comparison law for real onMutate/server executions. A test can expose a wrong prediction; legitimate server-state divergence remains allowed.",
+      "evidenceRole": "app-check"
+    },
+    {
+      "id": "C8",
+      "family": "optimism",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Client/server divergence settles through authority; source engines also replay/rebase.",
+      "current": "Endpoints replaces guesses with authoritative reads and handles overlapping responses conservatively. Durable offline replay/rebase is not provided.",
+      "failure": "Two users reserve the last item; both predict success but only one server operation succeeds.",
+      "agent": "Test authored conflict policy and prediction under declared initial-state assumptions. Framework settlement needs its own history oracle; passing app tests does not install a sync engine.",
+      "evidenceRole": "app-check"
+    },
+    {
+      "id": "C9",
+      "family": "transactions",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "PG batch rollback excludes arbitrary remote operations.",
+      "current": "A handler may use a PG transaction; refresh also reconciles partial writes after a throw. There is no distributed rollback mechanism.",
+      "failure": "A transaction rolls back recipes while a remote shopping service has already committed its changes.",
+      "agent": "Document participants and completion boundaries; inspect existing compensation if any. Repair code/semantics when the desired atomicity is not implemented.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "C10",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Configured row/column and expression-based permissions are enforced.",
+      "current": "Endpoint handlers retain authored authorization. The framework validates input and collection descriptors but does not supply application permission rules.",
+      "failure": "A signed-in user submits another user’s row ID to an update guarded only by a login check.",
+      "agent": "Trace an opaque authorization helper and all accepting paths against an authored policy. An agent can repair code; evidence describes enforcement already present, not policy intent.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "C11",
+      "family": "completion",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Complete sync checkpoints and matching write arrival before optimism retires.",
+      "current": "Endpoints uses request closure plus authoritative reads, not sync checkpoints or operation-tagged change delivery.",
+      "failure": "An API returns accepted, the framework refetches, and the background job commits afterward.",
+      "agent": "Establish exactly what an adapter response means on success, throw and timeout. If relevant writes remain live, a completion/polling mechanism is needed; a write footprint is insufficient.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "C12",
+      "family": "completion",
+      "routes": [
+        "P",
+        "E",
+        "R"
+      ],
+      "claim": "Result receipt, cache settlement and reconnect replay are different events.",
+      "current": "The runtime settles after valid authority or reports read/transport failure; it does not automatically replay mutations.",
+      "failure": "Treating handler success plus exhausted reads as a retryable write failure duplicates a committed action.",
+      "agent": "Trace adapter outcome mapping and closure semantics. The runtime owns response validation and settlement; any future retry consumer needs its own admissibility claim.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "C13",
+      "family": "values",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Configured runtime output validation.",
+      "current": "Authoritative collection rows are validated in the client. Generated res.json is an identity function; no general server-side mutation-result/output schema enforcement is shown.",
+      "failure": "A malformed or sensitive field crosses the wire before the client rejects the row.",
+      "agent": "Add a schema/validator as ordinary code; inspect custom validators’ accepting paths. Evidence cannot substitute for running the validator before disclosure.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "C14",
+      "family": "query-semantics",
+      "routes": [
+        "P",
+        "C",
+        "E"
+      ],
+      "claim": "Supported SQL compilation and explicit cross-tier conversion.",
+      "current": "The compiler recognizes bounded query shapes and uses runtime row schemas. Unsupported result transforms do not acquire a general relational model.",
+      "failure": "A custom bigint-to-number conversion maps two different IDs to the same browser key.",
+      "agent": "Inspect a codec/transform for explicit identity, equality, ordering and membership laws over a stated domain. A proof/check does not implement missing query lowering.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "C15",
+      "family": "transactions",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Validation/authorization precedes overridable persistence.",
+      "current": "Mutation input and retained descriptors are admitted before the handler. Auth and persistence remain authored; custom validator purity is not automatically established.",
+      "failure": "A persistence adapter returns a failure value the surrounding handler ignores, which becomes framework success.",
+      "agent": "Inspect adapter participation and its actual success/error channel; verify accepting validators and whole-batch ordering when such a batch is authored.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "C16",
+      "family": "sync",
+      "routes": [
+        "C",
+        "E",
+        "D"
+      ],
+      "claim": "Checkpoint order, deletion retention and reconnect resync.",
+      "current": "These replication obligations are outside the Endpoints refetch protocol; client sorting alone supplies none of them.",
+      "failure": "A paged change reader uses a nonunique timestamp and permanently skips tied rows or deletes.",
+      "agent": "For a future/existing sync adapter, inspect its cursor/deletion contract and run conformance checks. Standard SQL ordering belongs to compiler/catalog analysis, not an agent-only task.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "C17",
+      "family": "evidence-lifetime",
+      "routes": [
+        "P",
+        "E",
+        "R",
+        "D"
+      ],
+      "claim": "Backend event order and reset detection.",
+      "current": "Query versions and client lifetimes reject some stale state. There is no backend reset protocol or general evidence-to-deployment binding.",
+      "failure": "A remote database is replaced while local source hashes stay unchanged; an old contract is still treated as applicable.",
+      "agent": "Bind a remote fact to an inspectable implementation/environment identity. A consumer must invalidate/recheck it on mismatch; evidence itself does not reset caches.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "C18",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Authorization at mount and privileged event boundaries.",
+      "current": "Handlers can check each request. The compiler does not prove every application entry path is protected.",
+      "failure": "A second endpoint invokes the same write helper without the authorization check in the first endpoint.",
+      "agent": "Enumerate entry paths and inspect opaque checks against the application’s policy; repair uncovered paths as authored code.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "C19",
+      "family": "evidence-lifetime",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "R"
+      ],
+      "claim": "Code identity differs from mutable deployment names and environment identity.",
+      "current": "Compiler versions include local source/schema evidence; a URL or package name is not bound to its current remote implementation/configuration.",
+      "failure": "The API behind a stable URL gains a PG write without changing the endpoint source.",
+      "agent": "Record exact inspectable remote revision/configuration and an invalidation condition. If identity cannot be established, the claim remains conditional or unknown.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "C20",
+      "family": "effects",
+      "routes": [
+        "P",
+        "C",
+        "E"
+      ],
+      "claim": "Post-call data and invalidated paths may exceed the returned result.",
+      "current": "Retained collections are sent to the server and selected using footprints; handler result data is not treated as the full write set.",
+      "failure": "Returning only the changed recipe misses shopping rows changed by an imported helper.",
+      "agent": "Supply complete opaque read/write bounds for affected-query selection. The existing matcher can consume a union after an evidence adapter is implemented.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "L4a",
+      "family": "values",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Values stay separate from SQL/HTML code.",
+      "current": "Supported Drizzle/SQL forms are analyzed; the footprint analyzer is not a general injection-safety checker or HTML escaper.",
+      "failure": "A helper concatenates input into raw SQL while still touching only the expected table.",
+      "agent": "Inspect raw helpers’ parameterization/escaping on every path. Use existing parameterized APIs or repair code where separation is absent; a correct footprint does not prove injection safety.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L4b",
+      "family": "evidence-lifetime",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Module encapsulation and schema agreement have an external-access boundary.",
+      "current": "A build-time catalog snapshot is checked for format/hash. TS encapsulation does not restrict DB credentials or prove exclusive writers; unrelated writers are outside scope.",
+      "failure": "A deployed migration changes table semantics after the analyzed snapshot was built.",
+      "agent": "Bind analyzed schema and physical DB/environment to deployment. Do not require exclusive-writer proof for the user’s mutation-scoped coherence contract, or introduce per-request catalog scans.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "L4c",
+      "family": "code-boundary",
+      "routes": [
+        "P",
+        "C",
+        "E"
+      ],
+      "claim": "Generated route/endpoint identities do not collide.",
+      "current": "Module/owner/name/ordinal identities and registry duplicate checks exist. This does not establish collision freedom for every unrelated app router/plugin.",
+      "failure": "An opaque route plugin registers a path already owned by another handler.",
+      "agent": "Inspect the plugin’s registrations if they are outside the route compiler. Visible registrations need a deterministic collision check, not certification prose.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L5a",
+      "family": "values",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "A decoder must establish the invariant assumed for client-supplied values.",
+      "current": "Zod input parsing runs before the handler, but arbitrary refinements/decoders have only the guarantees their code enforces.",
+      "failure": "A decoder casts a string to a validated tenant ID without checking its format or tenant membership.",
+      "agent": "Inspect all accepted-value paths and downstream preconditions. Keep syntactic admission separate from actor authorization and from encode/decode round trips.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "L5b",
+      "family": "transactions",
+      "routes": [
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Rollback-after-commit callbacks and irreversible post-SQL-commit hooks have distinct ordering.",
+      "current": "No Endpoints foreign-effect transaction-hook protocol is present.",
+      "failure": "An adapter makes an irreversible call in a callback that can still be followed by rollback.",
+      "agent": "Inspect a particular existing hook runtime’s ordering and compensation behavior. New scheduling/compensation is implementation work, not a fact declaration.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "L5c",
+      "family": "authorization",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "HTTP method/CSRF policy can depend on cookie reads and persistent effects.",
+      "current": "Generated query and mutation server functions use POST. This alone proves neither CSRF protection nor read-only query behavior; Start’s full HTTP policy was not audited here.",
+      "failure": "A cookie-authenticated request with a side effect is admitted without the required origin/token check.",
+      "agent": "Trace hidden cookie reads/effects and actual HTTP protections if needed. The fact can drive linting; the app/server must enforce the chosen request policy.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L5d",
+      "family": "evidence-lifetime",
+      "routes": [
+        "C",
+        "E",
+        "R"
+      ],
+      "claim": "Escape hatches widen the code that an audit must cover.",
+      "current": "Analyzed local helper files affect versions, but skipped imports and remote/configured hooks do not form a complete audited closure.",
+      "failure": "A reviewed wrapper delegates to a newly configured hook outside the recorded dependency list.",
+      "agent": "Enumerate reachable extension points and configuration, pin the evidence scope, and name unresolved paths. The evidence consumer must reject stale or incomplete claims for its required domain.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "L20a",
+      "family": "values",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "R"
+      ],
+      "claim": "Producer/consumer message compatibility includes runtime decoding.",
+      "current": "Inputs and confirmation envelopes have runtime validation. There is no general actor/mailbox protocol system.",
+      "failure": "A remote producer sends a syntactically valid success message whose payload violates the consumer’s expected domain.",
+      "agent": "Inspect custom producer/decoder compatibility; standard endpoint schema compatibility is compiler/runtime work. Delivery and completion are separate obligations.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L20b",
+      "family": "query-semantics",
+      "routes": [
+        "P",
+        "C",
+        "E"
+      ],
+      "claim": "Opaque predicates can prevent SQL lowering and move filter/limit execution.",
+      "current": "Bounded shapes are modeled; unsupported transformed queries remain opaque rather than gaining an invented client predicate.",
+      "failure": "Filtering after LIMIT produces different rows from filtering before LIMIT.",
+      "agent": "Recover an opaque predicate’s meaning and preconditions. The compiler still needs a correct lowering rule; until then retain the full authored query/refetch path.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "L21a",
+      "family": "code-boundary",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "R",
+        "D"
+      ],
+      "claim": "Tier placement and opacity are different from source confidentiality.",
+      "current": "Server handlers are extracted and server imports blocked in client loading; no Eliom client-fragment opacity/type calculus is implemented.",
+      "failure": "A helper accesses browser APIs when invoked by server code, despite its source being excluded from the browser bundle.",
+      "agent": "Inspect environmental requirements of unsupported helpers. Placement checks and bundle exclusion are compiler/build mechanisms; do not infer a cross-tier theorem for TS.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L21b",
+      "family": "code-boundary",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Deferred-fragment order and primitive-definedness are premises of a restricted model.",
+      "current": "No deferred-fragment scheduler or universal termination/type-preservation theorem applies to arbitrary endpoint JavaScript.",
+      "failure": "A library throws for a nominally well-typed value, or a supposedly ordered effect runs asynchronously after return.",
+      "agent": "Establish a bounded helper’s input domain, failure and ordering contract when needed. Historical theorem premises are not missing Endpoints features to implement wholesale.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "L19a",
+      "family": "values",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "An ordinary validator can return accepted values and throw on rejection.",
+      "current": "Zod parsing is installed; the implementation of a custom refinement/transform is not certified merely by its declared type.",
+      "failure": "A custom validator accepts a negative quantity on one branch then returns a positive-quantity type.",
+      "agent": "Inspect the installed validator’s accepting paths and transformations, or write a bounded exhaustive check. If it does not check the rule, fix the validator.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "L19b",
+      "family": "values",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Ordered parser composition determines final values and middleware observations.",
+      "current": "The current boundary parses one generated envelope containing the declared input schema. It does not implement tRPC’s chained-input pipeline.",
+      "failure": "A later transform overwrites a field already checked by an earlier validator.",
+      "agent": "Trace actual parser order and final output through opaque schema helpers. For ordinary visible Zod composition this is reusable compiler analysis; preserve raw optimistic input separately.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L19c",
+      "family": "values",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Output shape and output disclosure are separate guarantees.",
+      "current": "Client row checks cannot prevent bytes already sent; generated handlers do not impose a server output whitelist.",
+      "failure": "A query includes a secret field which the client schema strips or rejects only after delivery.",
+      "agent": "Inspect whether an existing output parser actually strips/rejects forbidden fields before serialization, against an authored disclosure policy. Otherwise add the enforcement as code.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L22a",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Operation and metadata conditions determine which validation/auth checks run.",
+      "current": "No Open RIA attribute pipeline exists. Endpoint checks are ordinary authored control flow, including deletes.",
+      "failure": "A delete path assumes an entity validator will enforce ownership but never invokes it.",
+      "agent": "Map each operation/entry path to the checks actually run. Do not import a source framework’s defaults as the intended Endpoints policy.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L22b",
+      "family": "completion",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Persistence error signaling must match the caller’s actual interpretation.",
+      "current": "A resolved handler is encoded as success even if its returned application value denotes failure; thrown errors are separately encoded.",
+      "failure": "An adapter returns false and its caller reports a successful save without examining it.",
+      "agent": "Trace return values, thrown errors and side-channel error state through the real caller. Open RIA’s ignored Boolean is a source-specific example, not an Endpoints defect.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "L22c",
+      "family": "transactions",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Whole-batch admission can precede execution, without proving validation hooks pure.",
+      "current": "Input and all retained query descriptors are checked before the write. A batch inside a handler has whatever validation order the author wrote.",
+      "failure": "A handler writes item one before discovering item two is invalid.",
+      "agent": "Inspect batch validation/control flow and custom validator effects. Use ordinary prevalidation/transactions where required; schema failure only proves the handler did not start.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "L27a",
+      "family": "effects",
+      "routes": [
+        "C",
+        "E",
+        "R"
+      ],
+      "claim": "HTTP, durable, ephemeral and service effects are different domains.",
+      "current": "Current dependency selection consumes PG relation sets, not a general effect system.",
+      "failure": "A call makes no PG writes but charges money or changes an in-memory cache.",
+      "agent": "Supply only the domains required by a named consumer. PG-write-empty can justify a refresh skip; it cannot justify retry, query determinism or confidentiality.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "L27b",
+      "family": "evidence-lifetime",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Storage authority depends on environment and runtime configuration.",
+      "current": "Physical module/relation binding and session scope are modeled locally; no Unison-style environment access system is provided.",
+      "failure": "The same library/config key is routed to a different database or tenant.",
+      "agent": "Trace the actual binding and authority context. Bind remote evidence to those dependencies without copying credentials into evidence records.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "L27c",
+      "family": "sync",
+      "routes": [
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Provisioning idempotence preserves resource identity across repeated deployment.",
+      "current": "Resource provisioning is outside the endpoint query/mutation protocol.",
+      "failure": "A repeated deployment helper creates a second database instead of reopening the first.",
+      "agent": "If such a helper becomes relevant, inspect its lookup/create and concurrency contract. This is not evidence that user mutations are idempotent.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "Q01",
+      "family": "errors",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Unexpected server errors are redacted.",
+      "current": "refreshAfterMutation currently copies Error.message into the handler envelope; a framework-wide public/private error policy is absent on that path.",
+      "failure": "A database exception includes SQL details or an internal URL and is sent to the browser.",
+      "agent": "Inspect existing mapper paths and authored public error classes. A safe mapper must actually run; documenting the leak cannot prevent it.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q02",
+      "family": "effects",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Query handlers are read-only as an application obligation.",
+      "current": "Recognized direct query writes block a dependency proof, but that is not a general execution prohibition; imported calls may be skipped.",
+      "failure": "A query helper updates last-seen state, and read retries repeat that write.",
+      "agent": "Inspect hidden writes and other effects for the actual read/retry consumer. Normal SQL effects are compiler work; “query” as a declaration name is not proof.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "Q03",
+      "family": "errors",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Intentional public error disclosure is conditional on status/type.",
+      "current": "The handler error envelope has a string message, not a Wasp-style 4xx-only public error contract.",
+      "failure": "An internal 500 is wrapped in a nominal public error and its details are exposed.",
+      "agent": "Inspect all mapping conditions, not just the class name. Select and implement the app/framework error contract before certifying a mapper against it.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q04",
+      "family": "query-semantics",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "R",
+        "D"
+      ],
+      "claim": "Deterministic context supports query reuse and subscriptions.",
+      "current": "The SQL analyzer marks recognized time/random functions as read uncertainty. Ordinary JS time, randomness and remote state are not controlled by a Convex-like executor.",
+      "failure": "Date.now changes a query result without any table write that the dependency matcher can see.",
+      "agent": "Describe relevant nondeterministic inputs and hidden reads. Evidence may disable a particular reuse optimization; it cannot freeze time or install subscriptions.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "Q05",
+      "family": "code-boundary",
+      "routes": [
+        "P",
+        "C",
+        "E"
+      ],
+      "claim": "Exported helpers are distinct from public endpoint registration.",
+      "current": "The compiler creates handlers for query/mutation declarations, not every exported function; registry discovery has explicit module rules.",
+      "failure": "A wrapper accidentally marks an internal administrative helper as a public endpoint.",
+      "agent": "Inspect opaque registration plugins and reachability if used. Direct declarations are compiler-visible; endpoint reachability still does not imply authorization.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q06",
+      "family": "ordering",
+      "routes": [
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Some clients preserve mutation issue order with a queue.",
+      "current": "Endpoints deliberately dispatches overlapping actions without a mutation queue. Fresh settlement does not promise click-order execution.",
+      "failure": "Set title A then B arrives as B then A; authority correctly ends at A.",
+      "agent": "No certificate can add order. If an app operation requires it, express sequencing/preconditions in authored code; do not add an implicit global framework queue.",
+      "evidenceRole": "none"
+    },
+    {
+      "id": "Q07",
+      "family": "transactions",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Mutation consistency includes reads and deterministic decisions, not only atomic writes.",
+      "current": "Authored PG transaction scope/isolation governs these properties; dependency extraction follows handles but does not prove isolation or conflict policy.",
+      "failure": "Two transactions both read available stock and each decrements it without a suitable conditional update/lock.",
+      "agent": "Inspect hidden read placement, participant handle and existing conflict checks. Atomicity alone is insufficient; business invariants and suitable SQL must be authored.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "Q08",
+      "family": "ordering",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Parallel actions require explicit sequencing for dependent work.",
+      "current": "JavaScript awaits are preserved; the framework invokes concurrent actions without adding call order.",
+      "failure": "A handler starts an async helper without awaiting it and returns before its writes.",
+      "agent": "Lint visible unawaited calls; inspect an opaque helper’s promise-completion meaning. For dependent UI actions, use the returned transaction’s persistence completion where appropriate.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q09",
+      "family": "authorization",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Trusted caller identity and internal-only reachability are separate.",
+      "current": "Generated requests carry scope, but that client-supplied value is not a trusted identity; handlers must derive/check the actual session.",
+      "failure": "A public endpoint trusts scope=admin, or an internal helper loses caller context.",
+      "agent": "Trace trusted session derivation and context forwarding through wrappers. Internal-only registration is a distinct routing property to check.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "Q10",
+      "family": "composition",
+      "routes": [
+        "R",
+        "D"
+      ],
+      "claim": "Subtree data requirements compose before execution.",
+      "current": "Retained endpoints are refreshed together, but component fragments are not compiled into a composed subtree query.",
+      "failure": "A parent loads its data and only then discovers a child’s unrelated query, causing a waterfall.",
+      "agent": "This needs a loading/composition mechanism if desired. An agent may refactor application loading code; evidence alone does not compose queries.",
+      "evidenceRole": "none"
+    },
+    {
+      "id": "Q11",
+      "family": "composition",
+      "routes": [
+        "R",
+        "D"
+      ],
+      "claim": "Fetch provenance differs from coincidental cached-field availability.",
+      "current": "Collections carry endpoint identity, not Relay fragment-spread witnesses for each component.",
+      "failure": "A component appears to work only because an unrelated earlier screen fetched a field.",
+      "agent": "A component contract or lint rule could expose accidental reliance. A new fragment witness API is not required for current collection coherence.",
+      "evidenceRole": "none"
+    },
+    {
+      "id": "Q12",
+      "family": "completion",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Mutation response reads occur after processing and may follow declared fragments.",
+      "current": "refreshAfterMutation awaits the handler before reading retained targets; no fragment response compiler or cross-query snapshot is implied.",
+      "failure": "An opaque awaited API only queues a write; its response read is still too early.",
+      "agent": "Establish helper closure/visibility before treating handler return as processing complete. No extra evidence is needed for the visible await-to-read ordering itself.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "Q13",
+      "family": "optimism",
+      "routes": [
+        "P",
+        "E",
+        "A"
+      ],
+      "claim": "Overlapping overlays, rollback and intervening authority need history checks.",
+      "current": "Runtime overlap/topology handling and history regressions exist; arbitrary app action histories are not automatically certified.",
+      "failure": "A second optimistic action relies on a row created by a first action that fails.",
+      "agent": "Extend app generators to causal action histories and declared conflict semantics, exercising real actions and server paths. The independent framework oracle checks settlement, not app intent.",
+      "evidenceRole": "app-check"
+    },
+    {
+      "id": "Q14",
+      "family": "ordering",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Within-request operation order is distinct from transaction atomicity.",
+      "current": "Authored await order is preserved; Promise.all remains concurrent and a transaction does not invent a requested order.",
+      "failure": "An update races the insert it depends on inside a helper that launches both promises.",
+      "agent": "Inspect helper scheduling/await behavior and preserve explicit dependencies in app code. Do not infer sequentiality merely from a shared request or transaction.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "Q15",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Permission predicates must govern the executed write/read, not only a stale preflight.",
+      "current": "Authored SQL can include predicates; the compiler does not insert or certify application policies.",
+      "failure": "Ownership changes between an earlier permission check and an unrestricted update.",
+      "agent": "Trace how opaque policy facts connect to the actual statement and transaction/isolation context. Repair authored predicates/locking when the connection is missing.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q16",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Policies may constrain both old and proposed row state.",
+      "current": "Input schemas and authored SQL can enforce this; there is no generated before/after permission system.",
+      "failure": "A user owns a row before the update and changes its owner to an unauthorized account.",
+      "agent": "Check accepting paths against explicit old-state and new-state rules. An agent cannot infer which ownership transfers the product intends to permit.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q17",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Permission coverage includes every result object and every affected transaction object.",
+      "current": "Endpoints validates row shape, not per-row permission coverage; bulk policy checks remain authored.",
+      "failure": "A batch authorizes its first row but modifies additional unauthorized rows.",
+      "agent": "Inspect loops, bulk WHERE predicates and helper-returned sets for complete policy coverage. Standard visible set logic belongs in reusable analysis.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q18",
+      "family": "authorization",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Transition and field policies must cover every submitted change.",
+      "current": "Input parsing may strip unknown fields; valid schema fields are not automatically authorized fields.",
+      "failure": "A valid title change is accompanied by a forbidden role change that passes an any-field check.",
+      "agent": "Trace transformed input and enforce an authored all-fields rule against old/new values. A shape schema is not a permission policy.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "Q19",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Schema creation has a distinct permission boundary.",
+      "current": "Client requests do not carry arbitrary SQL/schema changes in this protocol; migration/admin endpoints, if authored, still need policy.",
+      "failure": "An administrative helper permits adding a protected attribute even though ordinary row writes are denied.",
+      "agent": "Inspect relevant admin paths only when present. Do not add schema-edit permissions to ordinary data endpoints solely for parity with a schemaless source.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "Q20",
+      "family": "retry",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Idempotence differs from effect-freedom and arbitrary function execution.",
+      "current": "Read paths retry; mutations are not automatically retried. SQL UPDATE does not by itself prove idempotence because expressions/triggers may differ.",
+      "failure": "Repeating “increment count” changes state twice even though the endpoint is named setCount.",
+      "agent": "Establish a precise repeat-execution law over relevant state and effects, or an existing deduplication contract. A future replay consumer must require that law, not a verb/name.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "Q21",
+      "family": "identity",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Operations target stable entity identity, not current array position.",
+      "current": "Endpoint rows use id keys and queries have canonical instance identities. Application code can still choose the wrong row from a list index.",
+      "failure": "A user selects item at index 2; reordering occurs; index 2 now names another item.",
+      "agent": "Trace ID selection and custom key/codec stability through helper boundaries. Framework keying is present; application selection semantics are separate.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "Q22",
+      "family": "identity",
+      "routes": [
+        "P",
+        "E",
+        "R",
+        "D"
+      ],
+      "claim": "Stale response rejection needs trustworthy version provenance and comparison scope.",
+      "current": "Epoch/topology checks and fresh reads handle overlapping local operations; this is not a global timestamp/LSN ordering protocol.",
+      "failure": "A numerically larger timestamp from another clock is accepted as newer authority.",
+      "agent": "For future manifests, establish version source and comparability domain. Evidence cannot implement ordering; LSN/version optimization remains deferred.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "P12a",
+      "family": "identity",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Different users must not share a browser data cache.",
+      "current": "EndpointRuntime binds one scope to one DbClient and rejects scope changes; applications must create/clean up the appropriate client lifetime.",
+      "failure": "Logout switches a UI identity but leaves another user’s retained client accessible.",
+      "agent": "Trace app session-to-client ownership and cleanup, including asynchronous callbacks. Scope partitioning does not prove server authorization.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "P12b",
+      "family": "completion",
+      "routes": [
+        "P",
+        "E",
+        "R",
+        "D"
+      ],
+      "claim": "Acknowledgment must include acknowledged effects; replay engines also preserve per-client order.",
+      "current": "Inline response admission/refresh settles local actions, without durable sequence acknowledgments or replay order.",
+      "failure": "An adapter acknowledges a mutation that is still queued, and the client drops its overlay.",
+      "agent": "Inspect acknowledgment/visibility coupling in an existing adapter. Queue ordering and replay state need machinery if later selected.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "P12c",
+      "family": "optimism",
+      "routes": [
+        "E",
+        "A"
+      ],
+      "claim": "Conflict behavior depends on application semantics and current authority.",
+      "current": "The server executes authored conflict logic; the framework does not choose reservation/merge policy.",
+      "failure": "Optimism reserves a now-unavailable item; a server rejection is expected, not an oracle failure by itself.",
+      "agent": "Supply concurrent-state generators and explicit permitted outcomes. Check authored policy separately from the framework’s rollback/settlement law.",
+      "evidenceRole": "app-check"
+    },
+    {
+      "id": "P16a",
+      "family": "sync",
+      "routes": [
+        "E",
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Failed upload acknowledgment may mean applied, discarded or durably queued.",
+      "current": "No FIFO upload queue/checkpoint engine exists. Endpoints reports read/transport failures rather than promising queue progress.",
+      "failure": "A permanent rejection is repeatedly retried and prevents later queued changes from advancing.",
+      "agent": "For an adapter, trace every terminal outcome and its actual liveness behavior. Choosing discard versus retry is app policy; a successful HTTP response alone proves none of them.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "P17a",
+      "family": "identity",
+      "routes": [
+        "P",
+        "E",
+        "R",
+        "D"
+      ],
+      "claim": "Write identity differs from row identity, especially when confirming deletes.",
+      "current": "RPC/transaction association correlates Endpoints calls; it does not use Electric’s operation-tagged replication matching.",
+      "failure": "Two updates to the same row are confused by an adapter that matches only row ID.",
+      "agent": "Trace an existing write ID end to end, including delete handling and reuse. Do not infer per-operation confirmation from entity identity alone.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "P17b",
+      "family": "optimism",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Causal rollback is different from discarding all pending work.",
+      "current": "Transactions isolate overlays and fresh reads settle overlaps. There is no general application dependency graph or durable replay of dependent writes.",
+      "failure": "Create fails; a pending edit of that new row is still treated as independently valid.",
+      "agent": "Identify causal dependencies in authored actions and test failure histories. Automatic selective replay/cancellation would require a separate protocol.",
+      "evidenceRole": "app-check"
+    },
+    {
+      "id": "P17c",
+      "family": "optimism",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Optimistic state has an ownership scope and lifetime.",
+      "current": "Collections/actions bind to DbClient, not a component-local array. Cleanup retires collections; pending state is not durable across reload.",
+      "failure": "Two UI roots accidentally use different clients for one intended session and display different guesses.",
+      "agent": "Inspect client sharing, cleanup and intended lifetime in the application. Persistence/offline semantics require additional mechanisms if desired.",
+      "evidenceRole": "app-check"
+    },
+    {
+      "id": "P18a",
+      "family": "code-boundary",
+      "routes": [
+        "P",
+        "C",
+        "E"
+      ],
+      "claim": "Server-only execution is weaker than excluding server source from client delivery.",
+      "current": "The compiler extracts handlers; load guards and sourcemap handling exclude declared server modules. Built-artifact oracle checks exist for generated cases.",
+      "failure": "A runtime isServer conditional leaves a secret literal inside a delivered client module.",
+      "agent": "For unrecognized dependencies, inspect environmental/source classification and extend deterministic build checks. Existing bundle checks are framework evidence, not an app-specific certificate.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "P18b",
+      "family": "errors",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Remote error redaction differs from local server error detail.",
+      "current": "Mutation Error.message is passed into the client envelope; no distinct internal/public error mapper is enforced there.",
+      "failure": "An internal exception suitable for server logs exposes account or connection details to the client.",
+      "agent": "Inspect custom mapper and logging paths against an authored disclosure contract; add the mapper where absent. This overlaps Q01, not a second independent defect.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "P18c",
+      "family": "retry",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Replay can be prevented or deduplicated with a real call-ID contract.",
+      "current": "No automatic mutation retry is installed; there is no general server deduplication store.",
+      "failure": "After losing a success response, an app resubmits the mutation and duplicates its effect.",
+      "agent": "Inspect existing atomic deduplication, key scope, result reuse, retention and concurrent duplicate handling. A token parameter without that machinery is insufficient.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "P23a",
+      "family": "transactions",
+      "routes": [
+        "E",
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Conflict detection compares assumed master state with actual state.",
+      "current": "The endpoint protocol has no automatic compare-and-swap or master-wins conflict algorithm; SQL can express authored preconditions.",
+      "failure": "An update based on version 4 overwrites a row already at version 5.",
+      "agent": "Inspect the adapter’s compare/write atomicity and returned conflict state. If absent, implement the intended conditional SQL/policy; do not import master-wins by default.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "P23b",
+      "family": "identity",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Checkpoint timestamps must come from a trusted ordering authority.",
+      "current": "Current endpoint settlement does not trust client timestamps as sync checkpoints.",
+      "failure": "A future incremental reader accepts a client-supplied future time and skips subsequent writes.",
+      "agent": "Trace timestamp assignment and ordering domain if an adapter introduces checkpoints. Standard SQL generation/ordering is compiler work; no checkpoint feature is currently needed.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "P23c",
+      "family": "retry",
+      "routes": [
+        "C",
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Repeated sync modifiers need an effect-free contract.",
+      "current": "There is no push/pull modifier pipeline. Similar obligations matter for any installed retried read/transform helper.",
+      "failure": "A modifier charges or writes an audit record each time the same batch is retried.",
+      "agent": "Inspect exact modifier effects across hooks and errors. The effect domain required for replay is broader than the table set required for invalidation.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "P23d",
+      "family": "retry",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Lost responses can duplicate already-completed processing.",
+      "current": "Unknown mutation outcomes are not automatically retried; user/app resubmission remains possible.",
+      "failure": "The server commits, the connection drops, and a second request repeats the external effect.",
+      "agent": "Establish existing deduplication/idempotence if replay is desired. A green normal-response test or read-only PG footprint cannot establish this.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "P24a",
+      "family": "authorization",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Actor identity comes from trusted session context, not request arguments.",
+      "current": "The generated envelope validates scope as a nonempty string, which is not authentication. Authored handlers must validate it against server context.",
+      "failure": "A user changes the scope field to another user ID in a forged request.",
+      "agent": "Trace session derivation and every privileged use, including helper forwarding. An agent can repair the handler; the compiler must not insert auth behavior.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "P24b",
+      "family": "completion",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R"
+      ],
+      "claim": "Validation rejection, handler failure and transport failure have different semantics.",
+      "current": "InvalidInputError, not-started, handler outcome and read-error envelopes exist. Unknown transport outcomes remain distinct; the system is not Zero’s skip/retry protocol.",
+      "failure": "A broad catch converts a timeout after commit into “nothing happened,” permitting unsafe retry.",
+      "agent": "Inspect opaque adapter error mapping and whether writes may continue. Runtime validation/classification stays framework work; do not conflate failure with rollback.",
+      "evidenceRole": "extension"
+    },
+    {
+      "id": "P24c",
+      "family": "optimism",
+      "routes": [
+        "P",
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Existing/missing rows and null/undefined have operation-specific semantics.",
+      "current": "DB actions and authored PG SQL decide behavior; Endpoints does not impose Zero’s successful-no-op rules.",
+      "failure": "Optimistic update of a missing row throws while authored SQL updates zero rows successfully, or undefined is confused with NULL.",
+      "agent": "Generate these states and compare according to the actual app/adapter contract. Inspect opaque write-helper defaults; do not declare source-framework parity as the expected oracle.",
+      "evidenceRole": "app-check"
+    },
+    {
+      "id": "P25a",
+      "family": "evidence-lifetime",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Identity mismatch needs a defined consumer response.",
+      "current": "Stale query versions reject with reload guidance, scope changes reject, and dev source changes trigger reload. General evidence mismatch behavior is not implemented.",
+      "failure": "An evidence checker detects a stale remote contract but the matcher still uses its old write bound.",
+      "agent": "Bind the configured stop/refetch/recheck behavior as well as identity. Detection alone supplies no safety unless the consumer stops relying on the invalid claim.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "P25b",
+      "family": "sync",
+      "routes": [
+        "D"
+      ],
+      "claim": "The inspected LiveStore docs explicitly lack merge-conflict handling.",
+      "current": "This is a source limitation, not a positive guarantee missing from Endpoints.",
+      "failure": "A comparison table credits a conflict guarantee the inspected source explicitly says is unfinished.",
+      "agent": "No certification task follows. Preserve the negative source claim; do not turn it into an implementation requirement or evidence opportunity.",
+      "evidenceRole": "none"
+    },
+    {
+      "id": "P26a",
+      "family": "authorization",
+      "routes": [
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Navigation and component/event paths can bypass the first middleware check.",
+      "current": "Endpoint handlers are explicit server entry points, but application routes/actions outside them were not exhaustively audited here.",
+      "failure": "A route checked during initial load later exposes a privileged action through a separate handler without rechecking.",
+      "agent": "Enumerate actual entry paths and their context/checks, including opaque framework wrappers. This is code-path analysis plus authored policy, not automatic auth rewriting.",
+      "evidenceRole": "ordinary"
+    },
+    {
+      "id": "P26b",
+      "family": "authorization",
+      "routes": [
+        "P",
+        "E",
+        "A",
+        "R",
+        "D"
+      ],
+      "claim": "Revocation requires a response for already-active sessions/connections.",
+      "current": "Scope changes are rejected when resolved; that does not autonomously learn server revocation or erase all active browser data.",
+      "failure": "A revoked user keeps an open tab showing cached data and attempts further actions.",
+      "agent": "Trace the app’s request checks, logout/client cleanup and any event-driven revocation. Live socket disconnect/sync is outside this transport; future requests still need authored checks.",
+      "evidenceRole": "consumer"
+    },
+    {
+      "id": "P19a",
+      "family": "sync",
+      "routes": [
+        "E",
+        "A",
+        "D"
+      ],
+      "claim": "Firestore read-before-write and offline rules are operation-specific.",
+      "current": "Endpoints uses PG and has no Firestore offline transaction/batch API. These restrictions do not transfer to arbitrary PG transactions.",
+      "failure": "An audit wrongly rejects valid PG read-after-write code because it imports Firestore’s rule.",
+      "agent": "Only inspect these rules for an actual Firestore adapter. Preserve the source boundary rather than adding unrelated Endpoints restrictions.",
+      "evidenceRole": "deferred"
+    },
+    {
+      "id": "P19b",
+      "family": "transactions",
+      "routes": [
+        "C",
+        "E",
+        "A"
+      ],
+      "claim": "Atomic writes can still violate a cross-row business invariant.",
+      "current": "A PG transaction can supply atomicity; correctness of totals, balances or paired updates remains authored SQL/constraints/policy.",
+      "failure": "Both debit and credit commit together, but their amounts differ.",
+      "agent": "Given an explicit invariant, inspect hidden helper semantics or build an independent domain oracle. Compiler/catalog checks can recognize existing constraints; neither infers business intent.",
+      "evidenceRole": "app-check"
+    }
+  ]
+}

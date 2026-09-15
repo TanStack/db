@@ -1,0 +1,135 @@
+{
+  "title": "What is still missing?",
+  "description": "Conceptual projection of claim slices: supplying a fact versus supplying behavior, and extra work versus changed semantics. Neither axis is measured; regions overlap. General agent evidence admission is not implemented. Bind a fact means inspect and bind an existing behavior claim; implement behavior includes building or enforcing the missing consumer action.",
+  "axes": {
+    "x": {
+      "name": "Next step",
+      "negative": "bind a fact",
+      "positive": "implement behavior"
+    },
+    "y": {
+      "name": "Consequence if unresolved",
+      "negative": "conservative extra work",
+      "positive": "result or settlement changes"
+    }
+  },
+  "quadrants": {
+    "tl": {
+      "name": "Inspectors",
+      "description": "An existing validator, codec, or transaction participant has the required behavior; the remaining question is whether inspection establishes the exact law. If the behavior is absent, this claim moves right."
+    },
+    "tr": {
+      "name": "Conductors",
+      "description": "Checks, authority, or events must actually occur at the required point. Knowing a write set does not make a queued job finish. Policy remains authored; no mutation queue is implied."
+    },
+    "bl": {
+      "name": "Surveyors",
+      "description": "Complete dependency inventories let an existing conservative consumer save irrelevant work. The current skipped-call gap strains this region: SQL-only known dependencies are not a complete footprint."
+    },
+    "br": {
+      "name": "Machinists",
+      "description": "Knowing query meaning or declared requirements still leaves executable coalescing or lowering machinery to build. This is the optimization slice, not all semantics of the source framework."
+    }
+  },
+  "categories": {
+    "code": {
+      "label": "Code observation",
+      "color": "#0072B2"
+    },
+    "source": {
+      "label": "Source claim",
+      "color": "#009E73"
+    },
+    "generated": {
+      "label": "Generated example",
+      "color": "#D55E00"
+    }
+  },
+  "examples": [
+    {
+      "label": "F07 Installed validator",
+      "x": 0.22,
+      "y": 0.83,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F07; 06-frame-projection.md inventory; audits/language.md L19a/L5a",
+      "plotReason": "Prototype: inspect existing behavior whose truth controls accepted values.",
+      "note": "Placement assumes a real validator is installed. An unchecked cast belongs to a missing-behavior case."
+    },
+    {
+      "label": "F06 Existing tx participant",
+      "x": 0.35,
+      "y": 0.64,
+      "category": "generated",
+      "provenance": "generated example",
+      "source": "F06; 02-research-survey.md E3; 03-ground-condition.md G4",
+      "plotReason": "Boundary case: inspection can establish use of an existing transaction.",
+      "note": "All relevant effects must use the supplied handle and finish before return. An escaping handle moves the claim right."
+    },
+    {
+      "label": "F05 Job acknowledged early",
+      "x": 0.84,
+      "y": 0.82,
+      "category": "generated",
+      "provenance": "generated example",
+      "source": "F05; 03-ground-condition.md G2",
+      "plotReason": "Prototype: a correct footprint cannot create a later completion boundary.",
+      "note": "A preexisting wait-for-completion contract could make part of the remaining task inspectable."
+    },
+    {
+      "label": "F11 Missing authored check",
+      "x": 0.72,
+      "y": 0.64,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F11; audits/queries.md Q15-Q18; 02-research-survey.md C10",
+      "plotReason": "Tests that knowing policy coverage does not implement an absent check.",
+      "note": "Plots the missing-enforcement transfer slice, inferred from source contracts. Existing checks move left. Auth must remain authored."
+    },
+    {
+      "label": "F03 Conditional footprint",
+      "x": 0.2,
+      "y": 0.21,
+      "category": "generated",
+      "provenance": "generated example",
+      "source": "F03; 02-research-survey.md E1; 03-ground-condition.md G1",
+      "plotReason": "Prototype: a broad complete bound can save reads without exact branch precision.",
+      "note": "Assumes settled relevant effects and a conservative consumer. General agent evidence admission is still absent."
+    },
+    {
+      "label": "F02 Skipped opaque calls",
+      "x": 0.43,
+      "y": 0.54,
+      "category": "code",
+      "provenance": "code observation",
+      "source": "F02; inline-dependencies.mjs around 210-217 and 315-324",
+      "plotReason": "Outlier: a partial producer result breaks the conservative-fallback premise.",
+      "note": "Just above the semantic watershed: current analysis records skipped calls while returning recognized SQL dependencies. Its partial footprint can change correctness, not merely read cost. It remains an outlier from the dependency-inventory cluster."
+    },
+    {
+      "label": "F09 Fragment coalescing",
+      "x": 0.75,
+      "y": 0.2,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F09; audits/queries.md Q10/Q11; 02-research-survey.md C6",
+      "plotReason": "Prototype: declaration knowledge still needs query construction machinery.",
+      "note": "Plots coalescing only. Masking and declaration provenance have semantic obligations above the line."
+    },
+    {
+      "label": "F10 Predicate lowering",
+      "x": 0.84,
+      "y": 0.37,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F10; audits/language.md L20b; 02-research-survey.md C14",
+      "plotReason": "Separate mechanism: understanding an opaque predicate does not implement SQL lowering.",
+      "note": "Historical Links example; not a claim about current Links or an implemented Endpoints feature."
+    }
+  ],
+  "calibration": {
+    "axisClaimType": "Conceptual inference from typed source claims, constructed cases, and two code observations; coordinates are editorial, not measured.",
+    "secondAxisConfidence": "Moderate. Extra-work placement requires an actual correct fallback; F02 is a counterpressure. Same fresh agent produced both maps, so they are internally correlated.",
+    "orthogonality": "Useful four-region contrast: inspectable semantic facts and missing optimization machinery occupy both off-diagonal regions. A usable fact always presumes a consumer; missing admission machinery is not hidden by the left pole."
+  }
+}

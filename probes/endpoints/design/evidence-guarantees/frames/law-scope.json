@@ -1,0 +1,135 @@
+{
+  "title": "How far must the law reach?",
+  "description": "Conceptual projection by the unit of obligation and its temporal reach. The law, not file count, determines placement. This tests why a local fact may not entail an end-to-end conclusion.",
+  "axes": {
+    "x": {
+      "name": "Law's unit",
+      "negative": "one logical unit",
+      "positive": "linked participants"
+    },
+    "y": {
+      "name": "Temporal reach",
+      "negative": "one boundary or execution",
+      "positive": "history of changes"
+    }
+  },
+  "quadrants": {
+    "tl": {
+      "name": "Threads",
+      "description": "Follow one logical object or operation through movement or repetition. Threads here means continuity of identity, not OS threads. Deduplication widens right when it must cover external participants."
+    },
+    "tr": {
+      "name": "Conversations",
+      "description": "Several histories need a justified relation: effects and acknowledgments, revocation and active sessions, or inspected code and a changing deployment. Recognition alone does not cause the consumer to act."
+    },
+    "bl": {
+      "name": "Specimens",
+      "description": "The focal claim is one value-transfer or admission relation at a boundary. Inspecting a specimen does not make a sampled test universal; the declared domain still matters."
+    },
+    "br": {
+      "name": "Assemblies",
+      "description": "One execution has a property only when its reads, writes, transforms, or handles compose correctly. Several files can implement one participant; one process can contain several participants."
+    }
+  },
+  "categories": {
+    "code": {
+      "label": "Code observation",
+      "color": "#0072B2"
+    },
+    "source": {
+      "label": "Source claim",
+      "color": "#009E73"
+    },
+    "generated": {
+      "label": "Generated example",
+      "color": "#D55E00"
+    }
+  },
+  "examples": [
+    {
+      "label": "F16 Stable object targeting",
+      "x": 0.2,
+      "y": 0.83,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F16; audits/queries.md Q21",
+      "plotReason": "Prototype: same object remains the target while list positions change.",
+      "note": "Stronger temporal claim than preserving a key in one serialized result."
+    },
+    {
+      "label": "F15 Scoped deduplication",
+      "x": 0.43,
+      "y": 0.67,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F15; audits/protocol.md P18c/P23d; audits/queries.md Q20",
+      "plotReason": "Boundary case: single-service repeat tolerance can widen into a cross-participant claim.",
+      "note": "Single-service scope is the plotted transfer hypothesis. Atomicity, retention, and effect domains need evidence. This does not authorize retries."
+    },
+    {
+      "label": "F14 Ack includes effects",
+      "x": 0.84,
+      "y": 0.84,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F14; audits/protocol.md P12b/P17a; 02-research-survey.md C11",
+      "plotReason": "Prototype: client settlement depends on causal correspondence across histories.",
+      "note": "Source contract/example; replication and rebase remain outside Endpoints scope. A row ID may not identify an operation."
+    },
+    {
+      "label": "F17 Active-session revocation",
+      "x": 0.72,
+      "y": 0.66,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F17; audits/protocol.md P26b; 02-research-survey.md C18",
+      "plotReason": "Different history law: a later policy change needs a response from active consumers.",
+      "note": "An entry-time check does not itself create a disconnect or revalidation path."
+    },
+    {
+      "label": "F18 Deployment applicability",
+      "x": 0.54,
+      "y": 0.53,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F18; 02-research-survey.md C19; audits/language.md L27b",
+      "plotReason": "Meta-level outlier: applicability of evidence has its own changing premises.",
+      "note": "Near both watersheds. Source hash, mutable name, configuration, and database authority are distinct bindings."
+    },
+    {
+      "label": "F08 Lossy key conversion",
+      "x": 0.21,
+      "y": 0.22,
+      "category": "generated",
+      "provenance": "generated example",
+      "source": "F08; 03-ground-condition.md G5; 02-research-survey.md E4",
+      "plotReason": "Prototype: an exact value relation can fail within one transfer.",
+      "note": "An encode/decode pair is one logical value law here; injectivity and ordering remain separate requirements."
+    },
+    {
+      "label": "F06 Transaction handle flow",
+      "x": 0.75,
+      "y": 0.2,
+      "category": "generated",
+      "provenance": "generated example",
+      "source": "F06; 03-ground-condition.md G4; 02-research-survey.md E3",
+      "plotReason": "Prototype: a local-looking call joins multiple effect participants.",
+      "note": "The observation boundary is one transaction execution. Inspection does not add rollback to an escaped participant."
+    },
+    {
+      "label": "F12 One logical snapshot",
+      "x": 0.86,
+      "y": 0.38,
+      "category": "source",
+      "provenance": "source claim",
+      "source": "F12; 02-research-survey.md C4/C5; audits/queries.md Q07",
+      "plotReason": "Counterexample to equating composition with missing knowledge: an executor may still be needed.",
+      "note": "The contract joins reads within one logical execution. A transaction contains internal events; this axis is observational scope, not event count."
+    }
+  ],
+  "calibration": {
+    "axisClaimType": "Conceptual. Framework contracts and generated cases are distinct provenance categories. Coordinates express claim scope, not measured participant counts or durations.",
+    "secondAxisConfidence": "Moderate. The observational boundary must be explicit: transactions contain histories and transfers have two ends. Both candidate maps share one fresh agent context.",
+    "orthogonality": "Useful off-diagonal cases: stable object targeting is a one-unit history; transaction participation joins several parts within one execution. More history often adds participants, creating diagonal pull. F18 deliberately tests the broader evidence-applicability reading."
+  }
+}
