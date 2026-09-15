@@ -92,6 +92,51 @@ function quoteIdentifier(
 }
 
 /**
+ * Escape content for use inside a PostgreSQL single-quoted string literal (`'...'`).
+ */
+const escapeSqlSingleQuotedString = (value: string): string =>
+  value.replace(/'/g, `''`)
+
+/**
+ * A SQL single-quoted string literal with standard quote doubling (e.g. `O'Brien` → `'O''Brien'`).
+ */
+const quoteSqlStringLiteral = (value: string): string =>
+  `'${escapeSqlSingleQuotedString(value)}'`
+
+/**
+ * Compile a property reference path to SQL.
+ *
+ * - `path.length === 1`: quoted identifier for the column (with optional `encodeColumnName`).
+ * - `path.length >= 2`: JSON/jsonb traversal from the root column: intermediate segments use `->`
+ *   (json/jsonb), the final segment uses `->>` (text). Keys are string/array indices as emitted by the IR
+ *   (e.g. `'0'` for the first array element).
+ *
+ * Non-goals: nested paths do not represent Postgres composite types or dotted SQL identifiers—only
+ * JSON/jsonb extraction from a single root column. If that column is not `json`/`jsonb`, execution may fail
+ * at runtime.
+ */
+export const compileRefPath = (
+  path: Array<string>,
+  encodeColumnName?: ColumnEncoder,
+): string => {
+  if (path.length === 0) {
+    throw new Error(`Ref path must have at least one segment`)
+  }
+  if (path.length === 1) {
+    return quoteIdentifier(path[0]!, encodeColumnName)
+  }
+
+  let sql = quoteIdentifier(path[0]!, encodeColumnName)
+  const keys = path.slice(1)
+  for (let i = 0; i < keys.length; i++) {
+    const keyLit = quoteSqlStringLiteral(keys[i]!)
+    const isLast = i === keys.length - 1
+    sql += isLast ? `->>${keyLit}` : `->${keyLit}`
+  }
+  return sql
+}
+
+/**
  * Compiles the expression to a SQL string and mutates the params array with the values.
  * @param exp - The expression to compile
  * @param params - The params array
@@ -108,13 +153,7 @@ function compileBasicExpression(
       params.push(exp.value)
       return `$${params.length}`
     case `ref`:
-      // TODO: doesn't yet support JSON(B) values which could be accessed with nested props
-      if (exp.path.length !== 1) {
-        throw new Error(
-          `Compiler can't handle nested properties: ${exp.path.join(`.`)}`,
-        )
-      }
-      return quoteIdentifier(exp.path[0]!, encodeColumnName)
+      return compileRefPath(exp.path, encodeColumnName)
     case `func`:
       return compileFunction(exp, params, encodeColumnName)
     default:
