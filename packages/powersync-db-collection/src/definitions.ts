@@ -202,9 +202,13 @@ export type OnDemandSyncHooks = {
 
 export type BasePowerSyncCollectionConfig<
   TTable extends Table = Table,
-  TSchema extends StandardSchemaV1 = never,
+  TSchema extends StandardSchemaV1<any> = never,
 > = Omit<
-  BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>,
+  BaseCollectionConfig<
+    InferPowerSyncOutputType<TTable, TSchema>,
+    string,
+    TSchema
+  >,
   `onInsert` | `onUpdate` | `onDelete` | `getKey` | `syncMode`
 > & {
   /** The PowerSync schema Table definition */
