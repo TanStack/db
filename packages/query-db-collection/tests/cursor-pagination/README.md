@@ -82,8 +82,9 @@ observe production publications, not manufacture them in the fixture.
   persistence promise, backend snapshot guarantee or offset/cursor jump hybrid.
 - Query-native key sharing reuses acquisitions. We do not add cross-owner
   cancellation leases or replace Query's own concurrent-fetch semantics.
-- The hook and core are unchanged. This does **not** close #863's central request
-  to avoid peek-ahead; it implements the narrower opaque-cursor adapter path.
+- The hook and core are unchanged. The maintainer chose to close #863 with this
+  partial implementation. Cached opaque-cursor loading ships; metadata/no-peek
+  is intentionally excluded, not unfinished work required to close the issue.
 
 ## Implementation verification
 
