@@ -26,7 +26,8 @@ cursor experiment or the existing production controller.
   the prototype's rule that an aborted reader must discard its response.
 - Query owns cache expiry, garbage collection and invalidation. Use a distinct
   infinite-query key under the collection prefix for each source/filter/order.
-  Prefix invalidation reaches both caches. Collection refetch alone may reuse
+  For forced refresh, cancel the shared prefix before invalidating both caches;
+  invalidation alone can join an old in-flight append. Collection refetch alone may reuse
   fresh pages. Reset removes pages, but does not refresh collection rows.
 - The internal page format and full prefix are fixed: inherited `select` and
   `maxPages` settings cannot change them. Acquisition cancellation rejects its
@@ -126,17 +127,31 @@ deeper acquisition is held. The reference remains full filter/sort/slice; no
 Query state machine was added to it. The reviewer independently rechecked the
 three fixes after implementation.
 
-- Full Query DB package: **352 tests in 12 files**, default random-seed lane,
-  exit 0, 6.39 seconds.
-- Final stress: **98 tests in five files**, multiplier 100, seed 863, exit 0,
-  18.78 seconds. 105,000 generated histories: 35,000 cursor, 55,000 cache/defaults/
-  cancellation and 15,000 retained no-peek experiment histories. 80 tests concern the
+The cache-publication review then exposed invalidation during held growth and
+protocol errors after cache publication. Its oracle was red in four cells before
+the fixes. The supported refresh procedure now cancels before invalidation;
+response validation runs before Query can publish or resolve shared waiters.
+The new five-cell suite retains an invalidation-only fault control and covers
+shared readers, retries, malformed final tokens, recovery and bounded slice work.
+See LOSS-AUDIT.md for the distinct generator and observation gaps.
+
+Verification for the review fixes on base head `caf834456`:
+
+- Full Query DB package: **357 tests in 13 files**, default random-seed lane,
+  exit 0, 6.69 seconds.
+- Final stress: **103 tests in six files**, multiplier 100, seed 863, exit 0,
+  32.14 seconds. 135,000 generated histories: 35,000 cursor, 55,000 cache/defaults/
+  cancellation, 30,000 cache-publication/slice and 15,000 retained no-peek
+  experiment histories. 85 tests concern the
   shipping cursor helper; 18 retain the excluded experiment.
+- The first stress attempt hit the ordinary five-second test timeout in the
+  retry-heavy refresh property, with no assertion mismatch. The final stress
+  command uses a 60-second timeout; the default suite limit is unchanged.
 - Package TypeScript, targeted ESLint, formatting checks and Vite build pass.
 - Browser ESM diagnostic import, esbuild minification, target ES2020:
   `queryCollectionOptions` alone 46,590 bytes / 14,985 gzip; with the helper
-  50,882 / 16,555 (+4,292 / +1,570). The review fixes add 80 gzip bytes to the
-  earlier measurement. This is an opt-in import comparison,
+  51,140 / 16,665 (+4,550 / +1,680). These cache-publication fixes add 110 gzip
+  bytes to the preceding head's measurement. This is an opt-in import comparison,
   not a universal application bundle measurement.
 
 Final stress command, from `packages/query-db-collection`:
@@ -146,10 +161,11 @@ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 TANSTACK_DB_ORACLE_SEED=863 \
   ../../node_modules/.bin/vitest run \
   tests/cursor-pagination.oracle.test.ts \
   tests/cursor-pagination.cache-oracle.test.ts \
+  tests/cursor-pagination.publication-oracle.test.ts \
   tests/cursor-pagination.integration.test.ts \
   tests/cursor-pagination.no-peek.test.ts \
   tests/cursor-pagination.no-peek.integration.test.ts \
-  --typecheck.enabled=false --maxWorkers=1
+  --typecheck.enabled=false --maxWorkers=1 --testTimeout=60000
 ```
 
 Full-package command: `../../node_modules/.bin/vitest run --typecheck.enabled=false --maxWorkers=2`.

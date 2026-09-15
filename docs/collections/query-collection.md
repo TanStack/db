@@ -878,7 +878,8 @@ const postsCollection = createCollection(
   }),
 )
 
-// Refresh both the row queries and their underlying cursor pages.
+// Supersede old acquisitions, then refresh row queries and cursor pages.
+await queryClient.cancelQueries({ queryKey: ['posts'] })
 await queryClient.invalidateQueries({ queryKey: ['posts'] })
 ```
 
@@ -909,7 +910,10 @@ the beginning. Expiry alone does not start a timer-driven refresh. These page
 queries have no lasting observer, so their inactive `gcTime` can expire even
 while the collection remains visible. Collection rows remain available.
 
-Invalidate the shared key prefix after mutations or for a forced refresh.
+Cancel queries under the shared key prefix, then invalidate it after mutations
+or for a forced refresh, as above. Invalidation alone can join an old in-flight
+page append; its completion can mark the old sequence fresh again. Cancelling
+first rejects readers awaiting that acquisition and fences late responses.
 `collection.utils.refetch()` alone only refreshes its row queries and can reuse
 fresh cursor pages. `pager.reset()` removes that pager's page-query key and
 cancels its old queued reads; it does not itself refresh collection rows.

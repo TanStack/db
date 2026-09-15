@@ -1,5 +1,5 @@
 import { InfiniteQueryObserver } from '@tanstack/query-core'
-import type { QueryClient, QueryKey } from '@tanstack/query-core'
+import type { InfiniteData, QueryClient, QueryKey } from '@tanstack/query-core'
 
 /** One backend page. Only null means the ordered result is exhausted. */
 export interface CursorPage<T> {
@@ -37,8 +37,9 @@ export interface CursorPager<T> {
  * stale data rebuilds the loaded sequence from its first page.
  *
  * The key must not also be used for ordinary QueryCollection row arrays.
- * Put it under the collection's query-key prefix so prefix invalidation reaches
- * both caches. A positive staleTime avoids refreshing on every read.
+ * Put it under the collection's query-key prefix. For a forced refresh, cancel
+ * that prefix before invalidating both caches. A positive staleTime avoids
+ * refreshing on every read.
  *
  * Reads on one pager serialize; separate pagers share Query's cache and fetches.
  * Aborting a reader discards its answer, not shared cached
@@ -54,6 +55,7 @@ export function createCursorPager<T>({
 }: CursorPagerOptions<T>): CursorPager<T> {
   let generation = 0
   let tail = Promise.resolve()
+  const sequences = new WeakMap<AbortSignal, Set<string | undefined>>()
   const options = {
     queryKey,
     // Offsets address the complete sequence, never a selected or evicted prefix.
@@ -62,24 +64,36 @@ export function createCursorPager<T>({
     ...(staleTime === undefined ? {} : { staleTime }),
     ...(gcTime === undefined ? {} : { gcTime }),
     initialPageParam: undefined as string | undefined,
-    queryFn: ({
+    queryFn: async ({
       pageParam,
       signal,
     }: {
       pageParam: string | undefined
       signal: AbortSignal
-    }) => fetchPage(pageParam, signal),
-    getNextPageParam: (
-      page: CursorPage<T>,
-      _pages: Array<CursorPage<T>>,
-      _lastParam: string | undefined,
-      params: Array<string | undefined>,
-    ) => {
-      if (page.nextCursor !== null && params.includes(page.nextCursor)) {
+    }) => {
+      let params = sequences.get(signal)
+      if (pageParam === undefined || !params) {
+        // Refresh starts a new sequence; growth extends the validated cache.
+        // Query gives every page/retry in an acquisition the same signal.
+        params = new Set(
+          pageParam === undefined
+            ? []
+            : queryClient.getQueryData<
+                InfiniteData<CursorPage<T>, string | undefined>
+              >(queryKey)?.pageParams,
+        )
+        sequences.set(signal, params)
+      }
+      params.add(pageParam)
+      const page = await fetchPage(pageParam, signal)
+      // Validate even the final response, before Query publishes success or
+      // resolves shared waiters. getNextPageParam runs too late for that.
+      if (page.nextCursor !== null && params.has(page.nextCursor)) {
         throw new Error(`Backend repeated a continuation cursor`)
       }
-      return page.nextCursor
+      return page
     },
+    getNextPageParam: (page: CursorPage<T>) => page.nextCursor,
   }
 
   const observeAcquisition = <TResult>(request: Promise<TResult>) => {
@@ -146,7 +160,16 @@ export function createCursorPager<T>({
             checkCurrent()
             data = result.data!
           }
-          return data.pages.flatMap((page) => page.rows).slice(offset, end)
+          const rows: Array<T> = []
+          let start = 0
+          for (const page of data.pages) {
+            if (start >= end) break
+            const stop = Math.min(page.rows.length, end - start)
+            for (let index = Math.max(0, offset - start); index < stop; index++)
+              rows.push(page.rows[index]!)
+            start += page.rows.length
+          }
+          return rows
         } catch (error) {
           checkCurrent()
           throw error

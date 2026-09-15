@@ -104,3 +104,37 @@ The audit can itself turn old suggestions into obligations or over-rescue
 interesting detail. The tables separate source observations from the later
 scope dispositions. They do not infer consensus among issue commenters or
 certify that the implementation has no undiscovered bugs.
+
+## Cache publication review
+
+The next external review exposed two further false-green boundaries. The cache
+history awaited every read, so it never invalidated during growth. The repeated
+cursor test observed rejection, but not whether invalid data had already been
+published or whether a later read could recover.
+
+The publication oracle keeps the same full-relation reference. It adds:
+
+- Immutable cursor sequences with held suffix delivery, a real active outer
+  QueryObserver, and the documented cancel-then-invalidate procedure. Omitting
+  cancellation is a fault control rejected by the same row checker.
+- Growth and refresh with a malformed final continuation, generated page sizes,
+  depths and backward token targets, shared waiters, and Query retry enabled or
+  disabled. Assertions cover rejection, no successful cache publication, retained
+  last-good data, repair, and a subsequent fresh cache hit.
+- Generated cached windows checked against full filter/sort/slice truth, with
+  row-access counts requiring work proportional to the returned slice rather
+  than all cached rows.
+
+Before fixes, all four initial cells failed with seed 863. Growth/refresh
+protocol failures shrank to size/depth/target `[1, 1, 0]`, where an invalid
+acquisition emitted a successful cache publication. The slice failure shrank
+to `[1, 1, undefined]`: a beyond-end empty read still accessed the cached row.
+The held-growth failure returned version 0 after a required version-1 refresh.
+
+Refresh is a documented procedure correction, not a new invalidation engine.
+The driver now cancels before invalidating; the old procedure remains a negative
+control. Protocol validation moved into response acquisition, before Query can
+publish or resolve shared waiters. Its weakly held token set lasts only as long
+as the acquisition signal; cached page parameters seed later growth. Slice
+collection adds no persistent state. No production reference model, core query
+change, metadata API or no-peek feature was added.
