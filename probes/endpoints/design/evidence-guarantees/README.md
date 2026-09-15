@@ -21,6 +21,10 @@ of the Kitchen AI APIs.
 - [Frame Projection](06-frame-projection.md): two cluster-first maps, with
   [interactive map A](frames/next-ingredient.html) and
   [interactive map B](frames/law-scope.html). Neither map selects a design.
+- [Evidence-store stress tests](evidence-store-stress/README.md): boundary and
+  fracture readings, a frozen lifecycle draft, fresh hostile audit, and a
+  guide-word worksheet awaiting content review. Includes the later requirement
+  for an enforced boundary around agent conclusions and actions.
 
 The fracture scan and ground-condition cases are logical constructions. The
 survey records source contracts and marks Endpoints comparisons as inferences.
