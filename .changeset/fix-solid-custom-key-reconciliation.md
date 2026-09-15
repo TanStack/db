@@ -2,4 +2,5 @@
 '@tanstack/solid-db': patch
 ---
 
-Keep custom-key rows distinct when live query updates change their rendered order.
+Keep Solid live-query rows tied to their result identities when custom-key rows
+reorder or multiple results share the same public `$key`.
