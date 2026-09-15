@@ -1226,17 +1226,22 @@ export class CollectionStateManager<
       // sync commit has been applied, stop retaining completed optimistic keys
       // that were not confirmed by this commit so the temporary row is removed.
       for (const key of this.pendingOptimisticDirectUpserts) {
-        // Truncate republishes this captured snapshot. Keep its existing
-        // retention marker so the next sync can also publish its removal.
+        // An active delete can hide an accepted snapshot. Retain it through
+        // truncate so rollback can restore it. A direct insert completed after
+        // snapshot capture has no support in the replacement and must retire.
         if (
           hasTruncateSync &&
-          truncateOptimisticSnapshot?.upserts.has(key) &&
+          this.pendingOptimisticUpserts.has(key) &&
+          (truncateOptimisticSnapshot?.upserts.has(key) === true ||
+            truncateOptimisticSnapshot?.deletes.has(key) === true) &&
           !changedKeys.has(key)
         )
           continue
         if (!changedKeys.has(key)) {
           changedKeys.add(key)
-          if (!currentVisibleState.has(key)) {
+          // Truncate already emitted the prior visible rows as its clear
+          // prefix. Reconstructing one here would publish a duplicate delete.
+          if (!hasTruncateSync && !currentVisibleState.has(key)) {
             const previousValue = previousOptimisticUpserts.get(key)
             if (previousValue !== undefined) {
               currentVisibleState.set(key, previousValue)

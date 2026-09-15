@@ -44,6 +44,22 @@ comment and the current API/architecture contract before extending its model.
 
 ## Acceptance map
 
+The post-merge review added three missing domains to existing owners:
+
+- [Top-K batch contracts](../../packages/db-ivm/tests/operators/topk-batch-contract.test.ts)
+  cross sparse-array length/holes and RegExp source/flags/position with equal
+  controls, replacement order, hash consolidation, and actual retained graph
+  output. Ordinary replacements also run without the global `File` constructor.
+- [Leadership replay](../../packages/offline-transactions/tests/leadership-replay.property.test.ts)
+  holds real storage-read delivery across successful and permanently rejected
+  durable removals, with bounded scans, concurrent loads, and unfinished peers.
+  This is distinct from exactly-once execution across independent owners.
+- [Accepted-snapshot retention](../../packages/db/tests/collection-state-retention-oracle.property.test.ts)
+  varies truncate before/during/after an optimistic delete, rejection versus
+  rollback, post-capture direct insertion, and later ordinary sync/key reuse. A
+  hidden accepted insert returns after rollback; an uncaptured insert retires,
+  and neither snapshot is rebased onto synced fields.
+
 | Issue obligation | Implemented evidence | Limit |
 | --- | --- | --- |
 | Metamorphic laws | Includes cross-formulation/partition, D2 independent-key commutation, DBSP incremental/full recomputation, pagination provider/UI boundaries, optimistic snapshot stability | Equivalence premises are explicit; not arbitrary query rewrites. |

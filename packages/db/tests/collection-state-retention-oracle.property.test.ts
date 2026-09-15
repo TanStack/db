@@ -902,6 +902,111 @@ const insertionPrefix: Array<OptimisticStep> = [
   { type: `edit`, key: 1, fields: { b: 2 }, optimistic: true },
   { type: `settle`, slot: 1, success: true, cascade: false },
 ]
+it.each(
+  [`before delete`, `during delete`, `after rollback`].flatMap((timing) =>
+    [86105, undefined].map((seed) => ({ timing, seed })),
+  ),
+)(
+  `retains an accepted snapshot with truncate $timing (seed $seed)`,
+  async ({ timing, seed }) => {
+    await fc.assert(
+      fc.asyncProperty(historyRow, fc.boolean(), async (row, reject) => {
+        const truncate: OptimisticStep = {
+          type: `sync`,
+          rows: [],
+          truncate: true,
+          immediate: false,
+          copies: 1,
+        }
+        const counts = await runOptimisticHistory(
+          [],
+          [
+            {
+              type: `edit`,
+              key: row.id,
+              fields: { a: row.a, b: row.b, c: row.c },
+              optimistic: true,
+            },
+            { type: `settle`, slot: 0, success: true, cascade: false },
+            ...(timing === `before delete` ? [truncate] : []),
+            { type: `delete`, key: row.id, optimistic: true },
+            ...(timing === `during delete` ? [truncate] : []),
+            {
+              type: `settle`,
+              slot: 0,
+              success: false,
+              cascade: false,
+              failure: reject ? `reject` : `rollback`,
+            },
+            ...(timing === `after rollback` ? [truncate] : []),
+            // Ordinary sync may retire the completed local snapshot. Preserve
+            // that boundary and later key reuse, not an immortal local row.
+            {
+              type: `sync`,
+              rows: [],
+              truncate: false,
+              immediate: false,
+              copies: 1,
+            },
+            {
+              type: `edit`,
+              key: row.id,
+              fields: { a: row.a + 1 },
+              optimistic: true,
+            },
+            { type: `settle`, slot: 0, success: true, cascade: false },
+          ],
+        )
+        expect(counts.deletes).toBe(1)
+        expect(counts.settlements).toBe(3)
+      }),
+      { seed, numRuns: oracleRuns(30) },
+    )
+  },
+)
+
+it(`retires a completed direct insert that started after truncate capture`, async () => {
+  // Law: truncate may preserve only optimistic state present in its captured
+  // snapshot. A later completed direct insert has no support in the rebuilt
+  // source and must not return during an unrelated recomputation.
+  let sync!: Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
+  const events: Array<string> = []
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+    onInsert: () => Promise.resolve(),
+  })
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) events.push(`${change.type}:${change.key}`)
+    },
+    { includeInitialState: false },
+  )
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.truncate()
+    await collection.insert({ id: 1, value: 1 }).isPersisted.promise
+    expect(sync.commit()).toBe(true)
+    await collection.insert({ id: 2, value: 2 }).isPersisted.promise
+
+    expect(events).toEqual([`insert:1`, `delete:1`, `insert:2`])
+    expect([...collection.state.keys()]).toEqual([2])
+    expect([...collection._state.syncedData.keys()]).toEqual([])
+    expect([...collection._state.pendingOptimisticUpserts.keys()]).toEqual([2])
+    expect([...collection._state.pendingOptimisticDirectUpserts]).toEqual([2])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
 it.each([true, false])(
   `replays insert dependency settlement, accepted=%s`,
   async (success) => {
