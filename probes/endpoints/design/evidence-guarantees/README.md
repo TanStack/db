@@ -25,6 +25,37 @@ of the Kitchen AI APIs.
   fracture readings, a frozen lifecycle draft, fresh hostile audit, and a
   guide-word worksheet awaiting content review. Includes the later requirement
   for an enforced boundary around agent conclusions and actions.
+- [Reviewed decisions](evidence-store-stress/08-content-review.md): later user
+  answers qualify the frozen lifecycle and audit suggestions.
+- [Four Process Grammars](process-grammars/README.md): bounded histories for
+  ordering, helper inspection, mutation errors and selective refresh.
+- [Evidence-donor survey](evidence-donors-survey.md): ten donor families across
+  provenance, argument, assessment, execution records and temporal revision.
+- [Structural Recombine](structural-recombine.md): 34 traceable parts, eight
+  examined candidates, five retained candidate recombinations and three
+  confirmations, with three unranked arrangements. The [procedure audit](structural-recombine-audit.md)
+  corrects the original novelty count and missing log entries. No architecture
+  is selected.
+- [Field Log](../field-trip-optimistic-coherence/field_log.md): recovered run
+  readouts and review decisions, explicitly recorded retrospectively. The
+  Guide-word content review remains unfinished.
+- [Base-system Design Grammar](base-grammar/README.md): exploratory extraction
+  for a reusable evidence base with domain-owned claim/check packages; includes
+  frozen analytical layers and explicit trust/range limits.
+- [Grammar repair v2](base-grammar/revisions/v2/README.md): current contract for
+  structured argument routes, expiring repair authority and causal replay;
+  original grammar and audit snapshots remain frozen.
+- [Evidence base prototype](../../../evidence-base/README.md): runnable local
+  argument checker, bounded Endpoints example, oracle controls and packaged
+  claim/check authoring workflows. No production Endpoints integration.
+- [Cross-machine handoff](../../../evidence-base/HANDOFF.md): current repair,
+  validation, preserved decisions, next work and portable run instructions.
+- [shadcn donor study](shadcn-donor-study.md): diagnostic construction and
+  agent-correction eval methodology, with reported-result and source limits.
+- [Base-design audits](base-stress/README.md): Fracture Scan and a fresh Hostile
+  Assay, with frozen inputs and executable witnesses. Three distinct issues
+  concern explanation structure and replay applicability/causality; no fixes
+  are applied by the audits. The subsequent v2 repair addresses them separately.
 
 The fracture scan and ground-condition cases are logical constructions. The
 survey records source contracts and marks Endpoints comparisons as inferences.
@@ -40,6 +71,7 @@ Run `python3 validate-categorization.py` in this directory to check all 85 IDs,
 ledger fields, category counts, frozen survey hash and local artifact links.
 This checks accounting, not the truth of a classification or runtime behavior.
 
-The next design has not been selected. The packet preserves questions about
-claim scope, consumer requirements, support methods, failure/completion paths,
-and source/config/deployment invalidation for later work.
+The user selected a reusable evidence base, followed by a prototype and packaged
+claim/check authoring workflows; Endpoints consumes domain-specific packages.
+The initial grammar and prototype above do not settle production storage,
+enforcement, semantic rule soundness or check-level policy.

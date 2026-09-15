@@ -1,0 +1,41 @@
+{
+  "scope": "Portable copies of the external RFC and instrument cards used by this evidence-design work. Original historical paths and hashes remain unchanged in frozen records.",
+  "pathRemapping": "Historical paths beginning /Users/kylemathews/.codex/worktrees/e079/tanstack-db/ refer to the same repository-relative path in a new checkout. Kitchen AI passages used in Process Grammar are embedded in process-grammars/sources.json; that separate application is not needed to run the evidence-base prototype.",
+  "files": [
+    {
+      "original": "/Users/kylemathews/programs/dialectics/field-trip-tanstack-db-endpoints-prototype/sources/tanstack-db-endpoints-rfc-v0.18.md",
+      "local": "tanstack-db-endpoints-rfc-v0.18.md",
+      "sha256": "d977ac6e47c827852ac0fd456b5e52e66b18fc34265af4607b94e1f7b835320f"
+    },
+    {
+      "original": "/Users/kylemathews/programs/linux-config/skills/field-lab/reference/instruments/design-grammar.md",
+      "local": "design-grammar.md",
+      "sha256": "83c78c284a36b0248b2fe9ad13fd7d7fca7cbc3fc6b49221eae03246d8740094"
+    },
+    {
+      "original": "/Users/kylemathews/programs/linux-config/skills/field-lab/reference/instruments/fracture-scan.md",
+      "local": "fracture-scan.md",
+      "sha256": "72bd9af23ff386c79729c827c2e3a0d0976ee4e9ff2a56e6e9cd5e2712ad1d4a"
+    },
+    {
+      "original": "/Users/kylemathews/programs/linux-config/skills/field-lab/reference/instruments/hostile-assay.md",
+      "local": "hostile-assay.md",
+      "sha256": "3734ba07e0022d25aed4e6d227f4999a4d967d2d41bf8a1231d7c70a39534618"
+    },
+    {
+      "original": "/Users/kylemathews/programs/linux-config/skills/field-lab/reference/instruments/structural-recombine.md",
+      "local": "structural-recombine.md",
+      "sha256": "47bf8ee6102ac01ea83ed6ae0bd0d44be422bdea8e8a2293cd51410a9a43ba1e"
+    },
+    {
+      "original": "/Users/kylemathews/programs/linux-config/skills/field-lab/reference/instruments/process-grammar.md",
+      "local": "process-grammar.md",
+      "sha256": "013a084100c996f331e23ee2f3e9ed558f89541a8c3c28d62c3e30baf32d1d37"
+    },
+    {
+      "original": "/Users/kylemathews/programs/linux-config/skills/field-lab/reference/instruments/research-survey.md",
+      "local": "research-survey.md",
+      "sha256": "6af788dadab5aa26263d23d06f98f14f0b4cf05aff2996c4e40fc5472fe14355"
+    }
+  ]
+}
