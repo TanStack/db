@@ -21,7 +21,6 @@ export class TransactionExecutor {
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: TransactionSignaler
   private retryTimer: ReturnType<typeof setTimeout> | null = null
-  private acknowledgmentRevision = 0
 
   constructor(
     scheduler: KeyScheduler,
@@ -104,7 +103,6 @@ export class TransactionExecutor {
             try {
               // Replay can still see this ID until durable deletion settles.
               await this.outbox.remove(transaction.id)
-              this.acknowledgmentRevision++
             } finally {
               this.scheduler.markCompleted(transaction)
             }
@@ -232,45 +230,43 @@ export class TransactionExecutor {
   }
 
   async loadPendingTransactions(): Promise<void> {
-    let transactions: Array<OfflineTransaction>
-    let revision: number
-    do {
-      revision = this.acknowledgmentRevision
-      transactions = await this.outbox.getAll()
+    let removedIds: Array<string> = []
+    await this.outbox.withAll((transactions) => {
       const { isOfflineEnabled } = this.offlineExecutor
       if (!isOfflineEnabled) return
-      // getAll can retain earlier rows while awaiting later storage reads.
-      // Reread after acknowledgment rather than readmit successfully deleted IDs.
-    } while (revision !== this.acknowledgmentRevision)
-    let filteredTransactions = transactions
+      let filteredTransactions = transactions
 
-    if (this.config.beforeRetry) {
-      filteredTransactions = this.config.beforeRetry(transactions)
-    }
+      if (this.config.beforeRetry) {
+        filteredTransactions = this.config.beforeRetry(transactions)
+      }
 
-    // The outbox read or retry hook may outlive this owner's right to replay.
-    if (!this.offlineExecutor.isOfflineEnabled) return
+      // The outbox read or retry hook may outlive this owner's right to replay.
+      if (!this.offlineExecutor.isOfflineEnabled) return
 
-    const newlyLoaded = filteredTransactions.filter((transaction) =>
-      this.scheduler.schedule(transaction),
-    )
+      const newlyLoaded = filteredTransactions.filter((transaction) =>
+        this.scheduler.schedule(transaction),
+      )
 
-    // Restore optimistic state for loaded transactions
-    // This ensures the UI shows the optimistic data while transactions are pending
-    this.restoreOptimisticState(newlyLoaded)
+      // Restore optimistic state for loaded transactions
+      // This ensures the UI shows the optimistic data while transactions are pending
+      this.restoreOptimisticState(newlyLoaded)
 
-    // Reset retry delays for all loaded transactions so they can run immediately
-    this.resetRetryDelays()
+      // Reset retry delays for all loaded transactions so they can run immediately
+      this.resetRetryDelays()
 
-    // Schedule retry timer for loaded transactions
-    this.scheduleNextRetry()
+      // Schedule retry timer for loaded transactions
+      this.scheduleNextRetry()
 
-    const removedTransactions = transactions.filter(
-      (tx) => !filteredTransactions.some((filtered) => filtered.id === tx.id),
-    )
+      removedIds = transactions
+        .filter(
+          (tx) =>
+            !filteredTransactions.some((filtered) => filtered.id === tx.id),
+        )
+        .map(({ id }) => id)
+    })
 
-    if (removedTransactions.length > 0) {
-      await this.outbox.removeMany(removedTransactions.map((tx) => tx.id))
+    if (removedIds.length > 0) {
+      await this.outbox.removeMany(removedIds)
     }
   }
 

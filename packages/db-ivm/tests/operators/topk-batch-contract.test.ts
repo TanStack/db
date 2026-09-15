@@ -237,6 +237,36 @@ it.each(
   },
 )
 
+it.each([
+  { name: `RegExp source`, before: /old/g, after: /new/g },
+  { name: `RegExp flags`, before: /same/g, after: /same/i },
+  {
+    name: `RegExp position`,
+    before: Object.assign(/same/g, { lastIndex: 0 }),
+    after: Object.assign(/same/g, { lastIndex: 1 }),
+  },
+  { name: `sparse-array length`, before: [], after: Array(2) },
+])(
+  `keeps a $name replacement through hash consolidation`,
+  ({ before, after }) => {
+    // Relation: a retraction and a distinct addition must remain observable to
+    // an ordered operator even when an earlier stage consolidates the batch.
+    const previous = { id: 1, value: before }
+    const next = { id: 1, value: after }
+    expect(
+      new MultiSet([
+        [previous, -1],
+        [next, 1],
+      ])
+        .consolidate()
+        .getInner(),
+    ).toEqual([
+      [previous, -1],
+      [next, 1],
+    ])
+  },
+)
+
 it.each([true, false])(
   `replaces ordinary rows with File available=%s`,
   (available) => {

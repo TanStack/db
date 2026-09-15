@@ -13,6 +13,7 @@ const UNDEFINED = randomHash()
 const KEY = randomHash()
 const FUNCTIONS = randomHash()
 const DATE_MARKER = randomHash()
+const REGEXP_MARKER = randomHash()
 const STRUCTURAL_MARKERS = {
   object: randomHash(),
   array: randomHash(),
@@ -89,12 +90,19 @@ function hashObject(input: object, context: HashContext): number {
       valueHash = hashUint8Array(input)
     } else if (isTemporal(input)) {
       valueHash = hashTemporal(input)
+    } else if (input instanceof RegExp) {
+      valueHash = hashPlainObject(input, REGEXP_MARKER, context, [
+        input.source,
+        input.flags,
+        input.lastIndex,
+      ])
     } else {
       const [kind, plainObjectInput] = structuralShape(input)
       valueHash = hashPlainObject(
         plainObjectInput,
         STRUCTURAL_MARKERS[kind],
         context,
+        kind === `array` ? [input instanceof Array ? input.length : 0] : [],
       )
     }
   } finally {
@@ -136,11 +144,13 @@ function hashPlainObject(
   input: object,
   marker: number,
   context: HashContext,
+  headerValues: ReadonlyArray<unknown> = [],
 ): number {
   const hasher = new MurmurHashStream()
 
   // Mark the type of the input
   hasher.update(marker)
+  for (const value of headerValues) updateHasher(hasher, value, context)
   const keys = Object.keys(input)
   keys.sort(keySort)
   for (const key of keys) {

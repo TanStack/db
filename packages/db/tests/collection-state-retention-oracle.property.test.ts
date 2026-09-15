@@ -965,6 +965,48 @@ it.each(
   },
 )
 
+it(`retires a completed direct insert that started after truncate capture`, async () => {
+  // Law: truncate may preserve only optimistic state present in its captured
+  // snapshot. A later completed direct insert has no support in the rebuilt
+  // source and must not return during an unrelated recomputation.
+  let sync!: Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
+  const events: Array<string> = []
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+    onInsert: () => Promise.resolve(),
+  })
+  const subscription = collection.subscribeChanges(
+    (changes) => {
+      for (const change of changes) events.push(`${change.type}:${change.key}`)
+    },
+    { includeInitialState: false },
+  )
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.truncate()
+    await collection.insert({ id: 1, value: 1 }).isPersisted.promise
+    expect(sync.commit()).toBe(true)
+    await collection.insert({ id: 2, value: 2 }).isPersisted.promise
+
+    expect(events).toEqual([`insert:1`, `delete:1`, `insert:2`])
+    expect([...collection.state.keys()]).toEqual([2])
+    expect([...collection._state.syncedData.keys()]).toEqual([])
+    expect([...collection._state.pendingOptimisticUpserts.keys()]).toEqual([2])
+    expect([...collection._state.pendingOptimisticDirectUpserts]).toEqual([2])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
 it.each([true, false])(
   `replays insert dependency settlement, accepted=%s`,
   async (success) => {
