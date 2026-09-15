@@ -2,4 +2,4 @@
 '@tanstack/query-db-collection': patch
 ---
 
-Prevent on-demand manual writes from replacing predicate-, order-, or pagination-scoped Query cache entries with the full synced collection snapshot. Active enabled scopes revalidate, while inactive or disabled entries are removed; eager collections continue to patch their full-result cache.
+Keep on-demand Query cache ownership and post-write readiness isolated across collections, co-owners, deferred cleanup, errors, and custom query hashes. Active enabled scopes revalidate from post-write provider results, while inactive collection-owned entries are removed without disturbing unrelated or foreign-observed Queries.
