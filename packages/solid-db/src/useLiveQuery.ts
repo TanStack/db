@@ -329,7 +329,13 @@ export function useLiveQuery(
   // Reactive state that gets updated granularly through change events
   const state = new ReactiveMap<string | number, any>()
 
-  // Reactive data array that maintains sorted order
+  // Keep the live Collection's result keys private while preserving one stable
+  // Solid store per logical row. A row's public $key can belong to an upstream
+  // Collection and is therefore not necessarily unique in this result.
+  const rowsByKey = new Map<
+    string | number,
+    { value: any; update: (value: any) => void }
+  >()
   const [data, setData] = createStore<Array<any>>([], {
     name: `TanstackDBData`,
   })
@@ -346,11 +352,31 @@ export function useLiveQuery(
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>,
   ) => {
-    setData((prev) =>
-      reconcile(Array.from(currentCollection.values()), { key: `$key` })(
-        prev,
-      ).filter(Boolean),
-    )
+    const nextRows: Array<any> = []
+    const retainedKeys = new Set<string | number>()
+
+    for (const [key, value] of currentCollection.entries()) {
+      retainedKeys.add(key)
+
+      const existing = rowsByKey.get(key)
+      if (existing) {
+        existing.update(value)
+        nextRows.push(existing.value)
+      } else {
+        const [row, setRow] = createStore(value)
+        rowsByKey.set(key, {
+          value: row,
+          update: (nextValue) => setRow(reconcile(nextValue, { key: null })),
+        })
+        nextRows.push(row)
+      }
+    }
+
+    for (const key of rowsByKey.keys()) {
+      if (!retainedKeys.has(key)) rowsByKey.delete(key)
+    }
+
+    setData((previous) => reconcile(nextRows, { key: null })(previous))
   }
 
   // Generation guard for the resource's async continuations: Solid discards a
@@ -399,6 +425,7 @@ export function useLiveQuery(
     if (!currentCollection) {
       setStatus(`disabled` as const)
       state.clear()
+      rowsByKey.clear()
       setData([])
       return
     }

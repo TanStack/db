@@ -2317,6 +2317,9 @@ describe(`Query Collections`, () => {
         }),
       )
       const renderedKeys: Array<string | number> = []
+      const initialNodes = new Map<string, HTMLLIElement>()
+      const initialTokens = new Map<string, string>()
+      let tokenSequence = 0
 
       function TestComponent() {
         const query = useLiveQuery((q) =>
@@ -2333,8 +2336,15 @@ describe(`Query Collections`, () => {
             <For each={query()}>
               {(item) => {
                 renderedKeys.push(item.$key)
+                const keyAtCreation = item._id
+                const token = `mapper-${++tokenSequence}`
+                initialTokens.set(keyAtCreation, token)
                 return (
-                  <li data-row-key={item.$key}>
+                  <li
+                    ref={(node) => initialNodes.set(keyAtCreation, node)}
+                    data-row-key={item.$key}
+                    data-token={token}
+                  >
                     {item._id}:{item.name}
                   </li>
                 )
@@ -2350,15 +2360,25 @@ describe(`Query Collections`, () => {
           (element) => ({
             key: element.getAttribute(`data-row-key`),
             text: element.textContent,
+            token: element.getAttribute(`data-token`),
+            node: element,
           }),
         )
+      const readRenderedValues = () =>
+        readRenderedRows().map(({ key, text }) => ({ key, text }))
+      const expectedIdentityRows = () =>
+        expectedRows().map(({ key }) => ({
+          key,
+          token: initialTokens.get(key),
+          retainedOwnNode: true,
+        }))
 
       await waitFor(() => {
         expect(rendered.getByTestId(`custom-key-list`).dataset.ready).toBe(
           `true`,
         )
         expect(renderedKeys).toEqual([`bob1`, `kevin1`, `stuart1`])
-        expect(readRenderedRows()).toEqual(expectedRows())
+        expect(readRenderedValues()).toEqual(expectedRows())
       })
 
       const updatedItem = { _id: `stuart1`, name: `Alvin` }
@@ -2369,8 +2389,141 @@ describe(`Query Collections`, () => {
 
       await waitFor(() => {
         expect(collection.get(`stuart1`)?.name).toBe(`Alvin`)
-        expect(readRenderedRows()).toEqual(expectedRows())
+        expect(readRenderedValues()).toEqual(expectedRows())
+        expect(
+          readRenderedRows().map(({ key, token, node }) => ({
+            key,
+            token,
+            retainedOwnNode: node === initialNodes.get(key!),
+          })),
+        ).toEqual(expectedIdentityRows())
       })
+    })
+
+    it(`keeps union rows with colliding public keys tied to their live result identities`, async () => {
+      type UnionItem = {
+        id: string
+        label: string
+      }
+
+      const left = createCollection(
+        mockSyncCollectionOptions<UnionItem>({
+          id: `solid-colliding-union-left`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `shared`, label: `Left` }],
+        }),
+      )
+      const right = createCollection(
+        mockSyncCollectionOptions<UnionItem>({
+          id: `solid-colliding-union-right`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `shared`, label: `Right` }],
+        }),
+      )
+      const live = createLiveQueryCollection((q) =>
+        q.unionAll(q.from({ left }), q.from({ right })),
+      )
+      const initialNodes = new Map<string, HTMLLIElement>()
+      const initialTokens = new Map<string, string>()
+      let tokenSequence = 0
+
+      function TestComponent() {
+        const query = useLiveQuery(() => live)
+        return (
+          <ol
+            data-testid="colliding-union-list"
+            data-ready={query.isReady ? `true` : `false`}
+            data-hook-count={query().length}
+          >
+            <For each={query()}>
+              {(item) => {
+                const labelAtCreation = item.label
+                const token = `mapper-${++tokenSequence}`
+                initialTokens.set(labelAtCreation, token)
+                return (
+                  <li
+                    ref={(node) => initialNodes.set(labelAtCreation, node)}
+                    data-label={item.label}
+                    data-token={token}
+                    data-upstream-key={item.$key}
+                  >
+                    {item.label}
+                  </li>
+                )
+              }}
+            </For>
+          </ol>
+        )
+      }
+
+      const rendered = render(() => <TestComponent />)
+      const list = () => rendered.getByTestId(`colliding-union-list`)
+      const renderedRows = () =>
+        Array.from(list().children).map((element) => ({
+          label: element.getAttribute(`data-label`),
+          text: element.textContent,
+          token: element.getAttribute(`data-token`),
+          upstreamKey: element.getAttribute(`data-upstream-key`),
+          node: element,
+        }))
+
+      await waitFor(() => {
+        expect(list().dataset.ready).toBe(`true`)
+        expect(list().dataset.hookCount).toBe(`2`)
+        expect(
+          renderedRows().map(({ label, text, upstreamKey }) => ({
+            label,
+            text,
+            upstreamKey,
+          })),
+        ).toEqual([
+          { label: `Left`, text: `Left`, upstreamKey: `shared` },
+          { label: `Right`, text: `Right`, upstreamKey: `shared` },
+        ])
+      })
+
+      const initialLiveRows = [...live.entries()].map(([resultKey, item]) => ({
+        resultKey,
+        label: item.label,
+        upstreamKey: item.$key,
+      }))
+      expect(
+        new Set(initialLiveRows.map(({ resultKey }) => resultKey)).size,
+      ).toBe(2)
+      expect(initialLiveRows.map(({ upstreamKey }) => upstreamKey)).toEqual([
+        `shared`,
+        `shared`,
+      ])
+
+      left.utils.begin()
+      left.utils.write({
+        type: `delete`,
+        value: { id: `shared`, label: `Left` },
+      })
+      left.utils.commit()
+
+      await waitFor(() => {
+        expect(live.toArray.map(({ label }) => label)).toEqual([`Right`])
+        expect(list().dataset.hookCount).toBe(`1`)
+        expect(
+          renderedRows().map(({ label, text, token, node }) => ({
+            label,
+            text,
+            token,
+            retainedOwnNode: node === initialNodes.get(label!),
+          })),
+        ).toEqual([
+          {
+            label: `Right`,
+            text: `Right`,
+            token: initialTokens.get(`Right`),
+            retainedOwnNode: true,
+          },
+        ])
+      })
+
+      rendered.unmount()
+      expect(rendered.container.childElementCount).toBe(0)
     })
 
     it(`should reflect optimistic inserts in the data array and reconcile after sync`, async () => {
