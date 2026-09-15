@@ -138,3 +138,38 @@ publish or resolve shared waiters. Its weakly held token set lasts only as long
 as the acquisition signal; cached page parameters seed later growth. Slice
 collection adds no persistent state. No production reference model, core query
 change, metadata API or no-peek feature was added.
+
+## Nested acquisition and fixture review
+
+The next review tested boundaries the standalone cache oracle did not own:
+an actual outer QueryCollection, browser retry defaults, aborting a queued reader,
+and manual row writes. Nine boundary checks failed before fixes; a separate
+generated manual-write law reproduced the documented prefix collision.
+
+- The browser boundary oracle uses real QueryCollection preload and Query state.
+  Page cancellation must settle the outer row query with an ordinary AbortError;
+  silently replaced acquisitions must deliver the replacement's new values.
+  It also checks prompt reader abort without transport cancellation, fresh reads
+  beside same-turn cancellation, global/default retry consistency, legacy signals,
+  invalid response/cache continuations, and unrelated-query hash work.
+- Actual acquisitions and cache hits now follow separate paths. One Query observer
+  identifies its current query directly; the cache no longer gets scanned per page.
+  Readers follow silent replacements and translate explicit acquisition cancellation
+  out of Query's internal control-error type. Aborted readers release the queue
+  without canceling the shared transport; generation/reset isolation stays intact.
+- The documented row/page keys are siblings beneath a resource prefix. The manual
+  write law crosses insert/update/delete and sizes, retaining exact public row
+  values and unchanged page-cache records. This fixes the recipe, not QueryCollection's
+  intentional prefix-wide manual-write behavior.
+- CodeRabbit's late-delivery observations now await a transport marker and drain
+  the promise work before checking cache fences. Its backend fixture finding is
+  covered by unique sequence namespaces and a generated foreign-token rejection
+  law. Fixed `next` tokens in the boundary suite still exercise lawful reuse across
+  sequential acquisitions; fixture isolation is not a new backend API requirement.
+
+The reference relation remains unchanged. Undefined continuations are not valid
+under the null-only protocol: the helper now gives a clear error, rejects malformed
+cached continuations instead of looping, and the example normalizes an endpoint's
+omitted terminal cursor. Full-prefix stale refresh and independent cache GC are
+retained Query semantics. No-peek experiments remain valuable tests, not shipping
+features. The maintainer's patch-release and partial-closeout decisions stand.

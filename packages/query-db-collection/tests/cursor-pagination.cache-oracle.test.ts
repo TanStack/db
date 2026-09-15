@@ -1,4 +1,4 @@
-import { QueryClient, isCancelledError } from '@tanstack/query-core'
+import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
@@ -122,6 +122,7 @@ describe(`cursor cache lifecycle`, () => {
             const key = [`cancel-history`]
             const hold = createDeferred<void>()
             const started = createDeferred<AbortSignal>()
+            const delivered = createDeferred<void>()
             let holdAt = Infinity
             let calls = 0
             let rows = makeRows(size * (depth + 2))
@@ -141,6 +142,7 @@ describe(`cursor cache lifecycle`, () => {
                   // Hold real response delivery; deliberately ignore abort to
                   // prove Query also fences a transport's late completion.
                   await hold.promise
+                  delivered.resolve()
                 }
                 return page
               },
@@ -197,10 +199,7 @@ describe(`cursor cache lifecycle`, () => {
               for (const result of await Promise.all([pending, peer])) {
                 expect(result.status).toBe(`rejected`)
                 if (result.status === `rejected`)
-                  expect(
-                    isCancelledError(result.reason),
-                    String(result.reason),
-                  ).toBe(true)
+                  expect(result.reason).toMatchObject({ name: `AbortError` })
               }
               expect(
                 calls,
@@ -208,8 +207,8 @@ describe(`cursor cache lifecycle`, () => {
               ).toBe(holdAt)
               expect(client.getQueryData(key)).toBe(previous)
               hold.resolve()
-              await Promise.resolve()
-              await Promise.resolve()
+              await delivered.promise
+              await new Promise((resolve) => setTimeout(resolve, 0))
               expect(client.getQueryData(key)).toBe(previous)
               await checkWindow(pager, rows, rows.length)
             } finally {
@@ -244,9 +243,10 @@ describe(`cursor cache lifecycle`, () => {
         if (ignoreInvalidation) {
           // Deliberately bypass Query's stale check, but still execute the
           // production pager and the same value checker as the history law.
-          vi.spyOn(client, `fetchInfiniteQuery`).mockImplementation((options) =>
-            client.ensureInfiniteQueryData(options),
-          )
+          client
+            .getQueryCache()
+            .find({ queryKey: key, exact: true })!
+            .setState({ isInvalidated: false })
           await expect(checkWindow(pager, rows, 2)).rejects.toThrow(
             `window matches`,
           )
@@ -266,6 +266,7 @@ describe(`cursor cache lifecycle`, () => {
     })
     const key = [`cancel`]
     const hold = createDeferred<void>()
+    const delivered = createDeferred<void>()
     let deliveredSignal: AbortSignal | undefined
     let holdResponse = true
     const rows = makeRows(2)
@@ -274,7 +275,10 @@ describe(`cursor cache lifecycle`, () => {
       queryKey: key,
       fetchPage: async (_cursor, signal) => {
         deliveredSignal = signal
-        if (holdResponse) await hold.promise
+        if (holdResponse) {
+          await hold.promise
+          delivered.resolve()
+        }
         return { rows, nextCursor: null }
       },
     })
@@ -288,7 +292,8 @@ describe(`cursor cache lifecycle`, () => {
       expect(await pending).toBe(`rejected`)
       expect(deliveredSignal?.aborted).toBe(true)
       hold.resolve()
-      await Promise.resolve()
+      await delivered.promise
+      await new Promise((resolve) => setTimeout(resolve, 0))
       expect(client.getQueryData(key)).toBeUndefined()
       holdResponse = false
       await checkWindow(pager, rows, 2)

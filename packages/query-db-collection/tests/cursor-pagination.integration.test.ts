@@ -5,6 +5,8 @@ import {
   createLiveQueryCollection,
 } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
+import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
 import { createDeferred } from '../../db/src/deferred.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
@@ -58,7 +60,7 @@ function createFixture(
   const source = createCollection(
     queryCollectionOptions<Row>({
       queryClient: client,
-      queryKey: [`cursor-experiment`, scope],
+      queryKey: [`cursor-experiment`, scope, `rows`],
       syncMode: `on-demand`,
       autoIndex: `eager`,
       defaultIndexType: BasicIndex,
@@ -151,6 +153,72 @@ const observeRows = (rows: ReadonlyArray<Row>) =>
   rows.map(({ id, rank, group }) => ({ id, rank, group }))
 
 describe(`cursor adapter through production pagination`, () => {
+  it(`manual row writes preserve the separate page cache`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom(`insert`, `update`, `delete`),
+        fc.integer({ min: 2, max: 6 }),
+        async (operation, count) => {
+          const client = new QueryClient({
+            defaultOptions: {
+              queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+            },
+          })
+          const rows = Array.from({ length: count }, (_, id) => ({
+            id,
+            rank: id,
+            group: 0,
+          }))
+          const pageKey = [`manual`, `pages`]
+          const pager = createCursorPager({
+            queryClient: client,
+            queryKey: pageKey,
+            fetchPage: () => Promise.resolve({ rows, nextCursor: null }),
+          })
+          const source = createCollection(
+            queryCollectionOptions({
+              queryClient: client,
+              queryKey: [`manual`, `rows`],
+              getKey: (row: Row) => row.id,
+              queryFn: () => pager.read({}),
+            }),
+          )
+          try {
+            await source.preload()
+            const previous = client.getQueryData(pageKey)
+            const expected = rows.map((row) => ({ ...row }))
+            if (operation === `insert`) {
+              const row = { id: count, rank: count, group: 0 }
+              source.utils.writeInsert(row)
+              expected.push(row)
+            } else if (operation === `update`) {
+              source.utils.writeUpdate({ id: 0, group: 1 })
+              expected[0]!.group = 1
+            } else {
+              source.utils.writeDelete(0)
+              expected.shift()
+            }
+            expect(
+              [...source.values()].map(({ id, rank, group }) => ({
+                id,
+                rank,
+                group,
+              })),
+            ).toEqual(expected)
+            expect(
+              client.getQueryData(pageKey),
+              `manual writes cannot overwrite page records`,
+            ).toBe(previous)
+            expect(await pager.read({})).toEqual(rows)
+          } finally {
+            await source.cleanup()
+            client.clear()
+          }
+        },
+      ),
+      oraclePropertyOptions(50, `cursor-pagination.manual-write`),
+    )
+  })
   it.each(
     [false, true].flatMap((descending) =>
       [2, 5].map((backendSize) => ({ descending, backendSize })),

@@ -30,6 +30,36 @@ const fixtureRows: Array<Row> = Array.from({ length: 9 }, (_, id) => ({
 }))
 const allAscending: Scope = { group: undefined, descending: false }
 
+it(`backend sequences reject foreign tokens while retaining their own continuations`, async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({ min: 1, max: 5 }),
+      fc.boolean(),
+      async (size, descending) => {
+        const scope = { group: undefined, descending }
+        const rows = Array.from({ length: size * 3 }, (_, id) => ({
+          id,
+          rank: id,
+          group: 0,
+        }))
+        const a = createBackend(rows, scope, size)
+        const b = createBackend(rows, scope, size)
+        const firstA = await a.fetchPage(undefined),
+          firstB = await b.fetchPage(undefined)
+        expect(firstA.nextCursor).not.toBe(firstB.nextCursor)
+        await expect(
+          Promise.resolve().then(() => b.fetchPage(firstA.nextCursor!)),
+        ).rejects.toThrow(`Foreign`)
+        const own = await b.fetchPage(firstB.nextCursor!)
+        expect(own.rows).toEqual(
+          expectedRows(rows, scope, { offset: size, limit: size }),
+        )
+      },
+    ),
+    oraclePropertyOptions(50, `cursor-pagination.backend-ownership`),
+  )
+})
+
 async function checkRead(
   source: Array<Row>,
   scope: Scope,

@@ -1,8 +1,4 @@
-import {
-  QueryClient,
-  QueryObserver,
-  isCancelledError,
-} from '@tanstack/query-core'
+import { QueryClient, QueryObserver } from '@tanstack/query-core'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
@@ -117,7 +113,7 @@ describe(`cursor cache publication`, () => {
                 ).toEqual(expected)
               if (cancel) {
                 check()
-                expect(isCancelledError(oldResult)).toBe(true)
+                expect(oldResult).toMatchObject({ name: `AbortError` })
                 expect(starts).toBe(2)
                 expect(
                   await createCursorPager(options).read({

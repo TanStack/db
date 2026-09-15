@@ -6,6 +6,8 @@ export type FetchPage<T> = (
   signal?: AbortSignal,
 ) => Promise<Page<T>>
 
+let nextSequence = 0
+
 /** Backend token table is private to the fixture; the pager cannot decode it. */
 export function createBackend(
   source: ReadonlyArray<Row>,
@@ -13,6 +15,7 @@ export function createBackend(
   pageSize: number,
   emptyFirst = false,
 ) {
+  const sequence = ++nextSequence
   const rows: Array<Row> = []
   // Separate formulation from the model's filter/sort/slice. The backend's
   // trusted job is to expose one stable relation in opaque, finite pages.
@@ -29,7 +32,7 @@ export function createBackend(
   let serial = 0
   const calls: Array<string | undefined> = []
   const token = (offset: number): string => {
-    const value = `opaque-${++serial}-${Math.imul(serial, 2654435761) >>> 0}`
+    const value = `opaque-${sequence}-${++serial}-${Math.imul(serial, 2654435761) >>> 0}`
     tokens.set(value, offset)
     return value
   }

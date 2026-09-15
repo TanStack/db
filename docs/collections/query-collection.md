@@ -855,7 +855,7 @@ import { createCursorPager, queryCollectionOptions } from '@tanstack/query-db-co
 const postsCollection = createCollection(
   queryCollectionOptions({
     queryClient,
-    queryKey: ['posts'],
+    queryKey: ['posts', 'rows'],
     syncMode: 'on-demand',
     getKey: (post: Post) => post.id,
     queryFn: async (ctx) => {
@@ -870,7 +870,8 @@ const postsCollection = createCollection(
         gcTime: 5 * 60_000,
         fetchPage: async (cursor, signal) => {
           const response = await api.listPosts({ ...request, cursor, signal })
-          return { rows: response.items, nextCursor: response.nextCursor }
+          // This endpoint omits the cursor at exhaustion; the pager uses null.
+          return { rows: response.items, nextCursor: response.nextCursor ?? null }
         },
       })
       return pager.read({ offset, limit }, ctx.signal)
@@ -887,9 +888,18 @@ Creating a pager does **not** discard Query's cached pages. Its key identifies
 one source/filter/order sequence, excluding the requested window. Include any
 tenant or other value that changes the endpoint's result. Use a dedicated key:
 an infinite-query page record cannot share a key with a QueryCollection's row
-array. The helper does not translate predicates, change ordering, or infer a
+array. Keep the page key outside the row collection's prefix: in the example,
+`['posts', 'rows']` and `['posts', 'cursor-pages', request]` are siblings.
+Manual collection writes update every cache entry under the row prefix, so
+nesting pages beneath that prefix would overwrite their infinite-query record.
+The helper does not translate predicates, change ordering, or infer a
 unique tie-breaker; the endpoint must honor a deterministic total order and
 provide a consistent cursor sequence while it is read.
+
+The example creates a pager per query-function call, sharing Query's cache and
+acquisitions but not a local read queue. Retain a pager per scope if you need
+cross-call serialization or its `reset()` method. Collection cleanup releases
+row queries; the separate page cache follows its own `gcTime`.
 
 Treat cached rows as immutable, as with other Query data. Reads return slices
 of those rows, not detached copies; cross-read object identity is not promised.
@@ -899,14 +909,16 @@ sequence. It deliberately does not use the separate `LoadSubsetOptions.cursor`
 predicate hints. Those expressions are not opaque backend tokens, and are not
 already included in `where`.
 
-Query owns `staleTime`, `gcTime`, retries and invalidation. A positive `staleTime`
+Query owns `staleTime`, `gcTime`, retries and invalidation. Configure retries in
+QueryClient defaults (globally or for the page-key prefix); without a setting,
+all acquisition phases use imperative Query's no-retry default. A positive `staleTime`
 allows reuse across calls; omitted values inherit QueryClient defaults.
 Defaults for `maxPages` and `select` do not apply to this internal page cache:
 offset reads need the full prefix in its original page format. Reads on one
 pager serialize; separate pagers share the cache and in-flight acquisitions.
 Query dates freshness from the latest successful fetch, including page growth. When
 stale data is next requested, Query refreshes the loaded pages sequentially from
-the beginning. Expiry alone does not start a timer-driven refresh. These page
+the beginning, even for a shallow read. Expiry alone does not start a timer-driven refresh. These page
 queries have no lasting observer, so their inactive `gcTime` can expire even
 while the collection remains visible. Collection rows remain available.
 
@@ -924,10 +936,14 @@ zero limit performs no fetch. Repeated continuation tokens throw. A rejected
 read never returns a partial window as success, and failed refreshes leave
 Query's last successful cache data available.
 
-Aborting a read prevents delivery to that reader, but does not cancel a shared
+Aborting a read promptly rejects that reader and releases its queue position
+once it becomes active, but does not cancel a shared
 page acquisition. Use `queryClient.cancelQueries` on the page key to cancel its
 transport and reject reads awaiting that acquisition, including growth and
-refresh. Cached pages remain available, and a later read can retry. The backend
+refresh. Explicit page cancellation rejects readers with an `AbortError`, not
+Query's internal cancellation control error. A cancelling refetch instead moves
+waiting readers onto the replacement acquisition. Cached pages remain available,
+and a later read can retry. The backend
 must honor its signal to stop network work; late results cannot enter the cache.
 No cursor can guarantee a stable snapshot of an endpoint that changes its ordering during
 pagination; the endpoint must define its consistency and cursor-expiry rules.

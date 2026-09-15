@@ -25,13 +25,17 @@ cursor experiment or the existing production controller.
   to rebuild the prefix when retried. These are Query's semantics, replacing
   the prototype's rule that an aborted reader must discard its response.
 - Query owns cache expiry, garbage collection and invalidation. Use a distinct
-  infinite-query key under the collection prefix for each source/filter/order.
+  infinite-query key for each source/filter/order, beside the row prefix under
+  a shared resource prefix. Never put pages inside the row collection's prefix:
+  manual row writes update every query beneath it.
   For forced refresh, cancel the shared prefix before invalidating both caches;
   invalidation alone can join an old in-flight append. Collection refetch alone may reuse
   fresh pages. Reset removes pages, but does not refresh collection rows.
 - The internal page format and full prefix are fixed: inherited `select` and
-  `maxPages` settings cannot change them. Acquisition cancellation rejects its
-  waiting reads without automatically starting replacement work. Cached reads
+  `maxPages` settings cannot change them. Explicit acquisition cancellation rejects its
+  waiting reads with AbortError without starting new work; a silent cancelling
+  refetch moves waiters to the replacement. Aborted readers release their own
+  queue position without cancelling transport. Cached reads
   need not wait for a deeper peer acquisition.
 - Rows are immutable request/cache values. Reading may return a fresh array;
   cross-read object identity is not promised.
@@ -135,14 +139,14 @@ The new five-cell suite retains an invalidation-only fault control and covers
 shared readers, retries, malformed final tokens, recovery and bounded slice work.
 See LOSS-AUDIT.md for the distinct generator and observation gaps.
 
-Verification for the review fixes on base head `caf834456`:
+Verification for the latest review fixes on base head `3f43deeb6`:
 
-- Full Query DB package: **357 tests in 13 files**, default random-seed lane,
-  exit 0, 6.69 seconds.
-- Final stress: **103 tests in six files**, multiplier 100, seed 863, exit 0,
-  32.14 seconds. 135,000 generated histories: 35,000 cursor, 55,000 cache/defaults/
-  cancellation, 30,000 cache-publication/slice and 15,000 retained no-peek
-  experiment histories. 85 tests concern the
+- Full Query DB package: **370 tests in 14 files**, default random-seed lane,
+  exit 0, 7.82 seconds.
+- Final stress: **116 tests in seven files**, multiplier 100, seed 863, exit 0,
+  73.48 seconds. 154,000 generated histories: the previous 135,000 plus
+  6,000 nested cancellation/replacement, 3,000 reader abort, 5,000 manual-write
+  and 5,000 backend-token isolation histories. 98 tests concern the
   shipping cursor helper; 18 retain the excluded experiment.
 - The first stress attempt hit the ordinary five-second test timeout in the
   retry-heavy refresh property, with no assertion mismatch. The final stress
@@ -150,8 +154,8 @@ Verification for the review fixes on base head `caf834456`:
 - Package TypeScript, targeted ESLint, formatting checks and Vite build pass.
 - Browser ESM diagnostic import, esbuild minification, target ES2020:
   `queryCollectionOptions` alone 46,590 bytes / 14,985 gzip; with the helper
-  51,140 / 16,665 (+4,550 / +1,680). These cache-publication fixes add 110 gzip
-  bytes to the preceding head's measurement. This is an opt-in import comparison,
+  52,014 / 16,999 (+5,424 / +2,014). These boundary fixes add 334 gzip
+  bytes to published head `3f43deeb6`. This is an opt-in import comparison,
   not a universal application bundle measurement.
 
 Final stress command, from `packages/query-db-collection`:
@@ -162,6 +166,7 @@ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 TANSTACK_DB_ORACLE_SEED=863 \
   tests/cursor-pagination.oracle.test.ts \
   tests/cursor-pagination.cache-oracle.test.ts \
   tests/cursor-pagination.publication-oracle.test.ts \
+  tests/cursor-pagination.boundary-oracle.test.ts \
   tests/cursor-pagination.integration.test.ts \
   tests/cursor-pagination.no-peek.test.ts \
   tests/cursor-pagination.no-peek.integration.test.ts \
