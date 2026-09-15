@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ScrollView, Text, View } from 'react-native'
 import * as SQLite from 'expo-sqlite'
 import { createCollection } from '@tanstack/db'
@@ -14,20 +14,12 @@ import type {
 } from '../runtime-protocol'
 
 type DatabaseHandle = Awaited<ReturnType<typeof SQLite.openDatabaseAsync>>
-type TransactionHandleLike = {
-  execAsync: (sql: string) => Promise<void>
-  getAllAsync: (
-    sql: string,
-    params?: ReadonlyArray<unknown> | Record<string, unknown>,
-  ) => Promise<ReadonlyArray<unknown>>
-  runAsync: (
-    sql: string,
-    params?: ReadonlyArray<unknown> | Record<string, unknown>,
-  ) => Promise<unknown>
-}
+type TransactionHandle = Parameters<
+  Parameters<DatabaseHandle['withExclusiveTransactionAsync']>[0]
+>[0]
 
 type ActiveTransaction = {
-  transaction: TransactionHandleLike
+  transaction: TransactionHandle
   complete: {
     resolve: () => void
     reject: (error?: unknown) => void
@@ -61,12 +53,6 @@ async function postJson<TBody extends object>(
   if (!response.ok) {
     throw new Error(`POST ${url} failed with status ${response.status}`)
   }
-}
-
-function normalizeSqliteParams(
-  params?: ReadonlyArray<unknown> | Record<string, unknown>,
-): ReadonlyArray<unknown> | Record<string, unknown> | undefined {
-  return params === undefined ? undefined : params
 }
 
 async function closeDatabaseHandle(database: DatabaseHandle): Promise<void> {
@@ -129,14 +115,7 @@ export default function App() {
     ): Promise<ExpoRuntimeSmokeTestResult> => {
       const database = await SQLite.openDatabaseAsync(databaseName)
       const collectionId = `expo-runtime-smoke-${Date.now().toString(36)}`
-      const persistence = createExpoSQLitePersistence<
-        {
-          id: string
-          title: string
-          score: number
-        },
-        string
-      >({
+      const persistence = createExpoSQLitePersistence({
         database,
       })
       const collection = createCollection(
@@ -198,20 +177,18 @@ export default function App() {
             command.databaseId,
             command.databaseName,
           )
-          const params = normalizeSqliteParams(command.params)
-          return params === undefined
+          return command.params === undefined
             ? database.getAllAsync(command.sql)
-            : database.getAllAsync(command.sql, params)
+            : database.getAllAsync(command.sql, command.params)
         }
         case `db:run`: {
           const database = await getDatabase(
             command.databaseId,
             command.databaseName,
           )
-          const params = normalizeSqliteParams(command.params)
-          return params === undefined
+          return command.params === undefined
             ? database.runAsync(command.sql)
-            : database.runAsync(command.sql, params)
+            : database.runAsync(command.sql, command.params)
         }
         case `db:close`: {
           const database = databaseHandles.get(command.databaseId)
@@ -270,20 +247,18 @@ export default function App() {
           if (!transaction) {
             throw new Error(`Unknown transaction id`)
           }
-          const params = normalizeSqliteParams(command.params)
-          return params === undefined
+          return command.params === undefined
             ? transaction.transaction.getAllAsync(command.sql)
-            : transaction.transaction.getAllAsync(command.sql, params)
+            : transaction.transaction.getAllAsync(command.sql, command.params)
         }
         case `tx:run`: {
           const transaction = activeTransactions.get(command.transactionId)
           if (!transaction) {
             throw new Error(`Unknown transaction id`)
           }
-          const params = normalizeSqliteParams(command.params)
-          return params === undefined
+          return command.params === undefined
             ? transaction.transaction.runAsync(command.sql)
-            : transaction.transaction.runAsync(command.sql, params)
+            : transaction.transaction.runAsync(command.sql, command.params)
         }
         case `tx:commit`: {
           const transaction = activeTransactions.get(command.transactionId)
