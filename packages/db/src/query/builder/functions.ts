@@ -45,7 +45,7 @@ type ComparisonOperandPrimitive<T extends string | number | boolean> =
   | null
 
 // Helper type for values that can be lowered to expressions.
-type ExpressionLike =
+export type ExpressionLike =
   | Aggregate
   | BasicExpression
   | RefProxy<any>

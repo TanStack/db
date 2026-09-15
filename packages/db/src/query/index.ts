@@ -75,6 +75,24 @@ export {
 
 // Ref proxy utilities
 export type { Ref } from './builder/types.js'
+export { toExpression } from './builder/ref-proxy.js'
+export type { ExpressionLike } from './builder/functions.js'
+
+// Custom aggregate functions
+export type { Aggregate } from './ir.js'
+export {
+  registerAggregate,
+  unregisterAggregate,
+  getRegisteredAggregates,
+  createAggregate,
+  BUILTIN_AGGREGATE_NAMES,
+} from './aggregates.js'
+export type {
+  AggregateContext,
+  AggregateEntry,
+  CustomAggregateImpl,
+  CustomAggregateFactory,
+} from './aggregates.js'
 
 // Compiler
 export { compileQuery } from './compiler/index.js'
