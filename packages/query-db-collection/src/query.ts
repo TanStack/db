@@ -1,4 +1,4 @@
-import { QueryObserver, hashKey } from '@tanstack/query-core'
+import { QueryObserver, hashKey, partialMatchKey } from '@tanstack/query-core'
 import {
   LoadSubsetOperationAbortedError,
   deepEquals,
@@ -336,37 +336,12 @@ const QUERY_COLLECTION_GC_PREFIX = `queryCollection:gc:`
 
 type AnyQuery = Query<any, any, any, any>
 
-type QueryCollectionWriteState = {
-  requiredVersion: number
-  completedVersion: number
-}
-
-let nextQueryCollectionWriteVersion = 0
-const queryCollectionWriteStates = new WeakMap<
-  AnyQuery,
-  QueryCollectionWriteState
->()
-
-const hasPostWriteAuthority = (query: AnyQuery): boolean => {
-  const state = queryCollectionWriteStates.get(query)
-  return state === undefined || state.completedVersion >= state.requiredVersion
-}
-
-const requirePostWriteAuthority = (query: AnyQuery): void => {
-  const state = queryCollectionWriteStates.get(query) ?? {
-    requiredVersion: 0,
-    completedVersion: 0,
-  }
-  state.requiredVersion = ++nextQueryCollectionWriteVersion
-  queryCollectionWriteStates.set(query, state)
-}
-
-const recordFetchCompletion = (query: AnyQuery, version: number): void => {
-  const state = queryCollectionWriteStates.get(query)
-  if (state) {
-    state.completedVersion = Math.max(state.completedVersion, version)
-  }
-}
+let nextQueryCollectionFetchStart = 0
+const queryCollectionFetchActionStarts = new WeakMap<object, number>()
+const queryCollectionCurrentFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionSuccessfulFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionRequiredFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
 
 type PersistedScannedRowForQuery<TItem extends object> = {
   key: string | number
@@ -831,6 +806,71 @@ export function queryCollectionOptions(
   // actual Query object. Weak membership survives subset unload without
   // retaining entries after Query Core garbage-collects them.
   let ownedCacheQueries = new WeakSet<AnyQuery>()
+  const cacheOwnerToken = {}
+  const trackedCacheQueries = new Set<AnyQuery>(
+    queryClient.getQueryCache().findAll({ queryKey: baseKey }),
+  )
+  const logicalHashesByQuery = new WeakMap<AnyQuery, Set<string>>()
+
+  // Manual writes require a successful fetch which started after the write.
+  // Observe Query Core's fetch/success actions so foreign query functions and
+  // initialPromise fetches count, while cancelled/reverted requests do not.
+  const requiredFetchStarts = new Map<string, number>()
+  const postWriteRefetchGenerations = new Map<string, number>()
+
+  const trackCacheQuery = (query: AnyQuery, logicalHash?: string): void => {
+    trackedCacheQueries.add(query)
+    if (logicalHash !== undefined) {
+      const hashes = logicalHashesByQuery.get(query) ?? new Set<string>()
+      hashes.add(logicalHash)
+      logicalHashesByQuery.set(query, hashes)
+    }
+  }
+
+  const trackOwnedCacheQuery = (query: AnyQuery, logicalHash: string): void => {
+    ownedCacheQueries.add(query)
+    trackCacheQuery(query, logicalHash)
+    const owners = queryCollectionCacheOwners.get(query) ?? new Set<object>()
+    owners.add(cacheOwnerToken)
+    queryCollectionCacheOwners.set(query, owners)
+  }
+
+  const getLogicalHashes = (query: AnyQuery): Set<string> =>
+    logicalHashesByQuery.get(query) ?? new Set([hashKey(query.queryKey)])
+
+  const hasPostWriteAuthority = (
+    hashedQueryKey: string,
+    query: AnyQuery,
+  ): boolean => {
+    const localRequiredStart = requiredFetchStarts.get(hashedQueryKey)
+    const sharedRequiredStart = queryCollectionRequiredFetchStarts.get(query)
+    const requiredStart = Math.max(
+      localRequiredStart ?? 0,
+      sharedRequiredStart ?? 0,
+    )
+    return (
+      (localRequiredStart === undefined && sharedRequiredStart === undefined) ||
+      (queryCollectionSuccessfulFetchStarts.get(query) ?? 0) > requiredStart
+    )
+  }
+
+  const requirePostWriteAuthority = (
+    hashedQueryKey: string,
+    query: AnyQuery,
+  ): number => {
+    requiredFetchStarts.set(hashedQueryKey, nextQueryCollectionFetchStart)
+    queryCollectionRequiredFetchStarts.set(
+      query,
+      Math.max(
+        queryCollectionRequiredFetchStarts.get(query) ?? 0,
+        nextQueryCollectionFetchStart,
+      ),
+    )
+    const generation =
+      (postWriteRefetchGenerations.get(hashedQueryKey) ?? 0) + 1
+    postWriteRefetchGenerations.set(hashedQueryKey, generation)
+    return generation
+  }
 
   const isObserverEnabled = (
     observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
@@ -1337,7 +1377,7 @@ export function queryCollectionOptions(
             const query = observer.getCurrentQuery()
             if (
               (result.isSuccess &&
-                hasPostWriteAuthority(query) &&
+                hasPostWriteAuthority(hashedQueryKey, query) &&
                 !collection.deferDataRefresh) ||
               (result.isError && !result.isFetching)
             ) {
@@ -1429,7 +1469,7 @@ export function queryCollectionOptions(
 
         if (
           currentResult.isSuccess &&
-          hasPostWriteAuthority(observer.getCurrentQuery())
+          hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
         ) {
           if (collection.deferDataRefresh) {
             return waitForQueryReadyAndApplied(observer, hashedQueryKey)
@@ -1443,15 +1483,6 @@ export function queryCollectionOptions(
         }
       }
 
-      const trackedQueryFunction = (context: QueryFunctionContext<any>) => {
-        const query = localObserver.getCurrentQuery()
-        const fetchVersion =
-          queryCollectionWriteStates.get(query)?.requiredVersion ?? 0
-        return Promise.resolve(queryFunction(context)).then((data) => {
-          recordFetchCompletion(query, fetchVersion)
-          return data
-        })
-      }
       const observerOptions: QueryObserverOptions<
         Array<any>,
         any,
@@ -1473,7 +1504,7 @@ export function queryCollectionOptions(
         }),
         ...initialDataObserverOptions,
         queryKey: key,
-        queryFn: trackedQueryFunction,
+        queryFn: queryFunction,
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
@@ -1486,7 +1517,8 @@ export function queryCollectionOptions(
         Array<any>,
         any
       >(queryClient, observerOptions)
-      ownedCacheQueries.add(localObserver.getCurrentQuery())
+      const localQuery = localObserver.getCurrentQuery()
+      trackOwnedCacheQuery(localQuery, hashedQueryKey)
       const resolvedQueryGcTime = queryClient.getQueryCache().find({
         queryKey: key,
         exact: true,
@@ -1522,7 +1554,10 @@ export function queryCollectionOptions(
         }
         if (
           !currentResult.isSuccess ||
-          !hasPostWriteAuthority(localObserver.getCurrentQuery())
+          !hasPostWriteAuthority(
+            hashedQueryKey,
+            localObserver.getCurrentQuery(),
+          )
         ) {
           return waitForQueryReadyAndApplied(localObserver, hashedQueryKey)
         }
@@ -1798,10 +1833,26 @@ export function queryCollectionOptions(
         const observer = state.observers.get(hashedQueryKey)
         if (observer) {
           const query = observer.getCurrentQuery()
-          ownedCacheQueries.add(query)
+          trackOwnedCacheQuery(query, hashedQueryKey)
           if (result.isSuccess) {
-            if (!hasPostWriteAuthority(query)) return
-            queryCollectionWriteStates.delete(query)
+            if (!hasPostWriteAuthority(hashedQueryKey, query)) {
+              // Query observers are notified before Query Cache subscribers.
+              // Recheck after the cache success action records fetch authority.
+              queueMicrotask(() => {
+                const currentObserver = state.observers.get(hashedQueryKey)
+                if (
+                  currentObserver === observer &&
+                  hasPostWriteAuthority(
+                    hashedQueryKey,
+                    currentObserver.getCurrentQuery(),
+                  )
+                ) {
+                  handleQueryResult(currentObserver.getCurrentResult())
+                }
+              })
+              return
+            }
+            requiredFetchStarts.delete(hashedQueryKey)
           }
         }
         if (result.isSuccess) {
@@ -2159,10 +2210,36 @@ export function queryCollectionOptions(
     const unsubscribeQueryCache = queryClient
       .getQueryCache()
       .subscribe((event) => {
+        if (
+          event.type === `added` &&
+          partialMatchKey(event.query.queryKey, baseKey)
+        ) {
+          trackCacheQuery(event.query)
+        }
+
+        if (event.type === `updated`) {
+          if (event.action.type === `fetch`) {
+            let fetchStart = queryCollectionFetchActionStarts.get(event.action)
+            if (fetchStart === undefined) {
+              fetchStart = ++nextQueryCollectionFetchStart
+              queryCollectionFetchActionStarts.set(event.action, fetchStart)
+            }
+            queryCollectionCurrentFetchStarts.set(event.query, fetchStart)
+          } else if (event.action.type === `success` && !event.action.manual) {
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              queryCollectionSuccessfulFetchStarts.set(event.query, fetchStart)
+            }
+          }
+        }
+
         // Ownership uses our stable key, not the Query client's optional
         // custom cache hash function.
         const hashedKey = hashKey(event.query.queryKey)
         if (event.type === `removed`) {
+          trackedCacheQueries.delete(event.query)
           // Only cleanup if this is OUR query (we track it)
           if (hashToQueryKey.has(hashedKey)) {
             if (syncMode === `eager`) {
@@ -2205,12 +2282,22 @@ export function queryCollectionOptions(
 
       // Removing a Query destroys it and synchronously cancels its retryer.
       // Finish this before a later collection sync can create a replacement.
-      queryClient.removeQueries({
-        predicate: (query) =>
-          allHashedKeys.has(hashKey(query.queryKey)) &&
+      for (const query of [...trackedCacheQueries]) {
+        const belongsToCleanup = [...getLogicalHashes(query)].some((hash) =>
+          allHashedKeys.has(hash),
+        )
+        if (
+          belongsToCleanup &&
           (syncMode === `eager` ||
-            (ownedCacheQueries.has(query) && query.getObserversCount() === 0)),
-      })
+            (ownedCacheQueries.has(query) && query.getObserversCount() === 0))
+        ) {
+          queryClient.getQueryCache().remove(query)
+        }
+      }
+      for (const query of trackedCacheQueries) {
+        queryCollectionCacheOwners.get(query)?.delete(cacheOwnerToken)
+      }
+      trackedCacheQueries.clear()
       ownedCacheQueries = new WeakSet<AnyQuery>()
     }
 
@@ -2379,7 +2466,7 @@ export function queryCollectionOptions(
    * and remove every other scoped entry so a later owner fetches it again.
    * Eager collections retain their single full-result cache patch.
    */
-  const updateCacheData = (items: Array<any>): void => {
+  const updateCacheData = (getItems: () => Array<any>): void => {
     if (syncMode === `on-demand`) {
       const deferredRefresh = writeContext?.collection.deferDataRefresh
       const revalidatingQueries = new Set<AnyQuery>()
@@ -2388,6 +2475,39 @@ export function queryCollectionOptions(
       for (const observer of state.observers.values()) {
         const query = observer.getCurrentQuery()
         ownObserverCounts.set(query, (ownObserverCounts.get(query) ?? 0) + 1)
+      }
+
+      const refetchTrackedQuery = async (
+        query: AnyQuery,
+        logicalHashes: Set<string>,
+        generations: Map<string, number>,
+      ): Promise<void> => {
+        try {
+          await query.fetch(undefined, { cancelRefetch: false })
+        } catch {
+          // A failed post-write refetch is terminal for this attempt.
+          return
+        }
+
+        const stillNeedsAuthority = [...logicalHashes].some(
+          (hashedQueryKey) =>
+            postWriteRefetchGenerations.get(hashedQueryKey) ===
+              generations.get(hashedQueryKey) &&
+            !hasPostWriteAuthority(hashedQueryKey, query),
+        )
+        if (
+          stillNeedsAuthority &&
+          queryClient.getQueryCache().get(query.queryHash) === query &&
+          !query.isDisabled()
+        ) {
+          try {
+            // The first call may have reused a request which began before the
+            // write. One bounded follow-up then establishes authority.
+            await query.fetch(undefined, { cancelRefetch: false })
+          } catch {
+            // The Query result owns error publication.
+          }
+        }
       }
 
       for (const [hashedQueryKey, observer] of state.observers) {
@@ -2400,9 +2520,10 @@ export function queryCollectionOptions(
           continue
         }
 
-        requirePostWriteAuthority(query)
+        const generation = requirePostWriteAuthority(hashedQueryKey, query)
         revalidatingQueries.add(query)
         const ownedAtSchedule = ownedCacheQueries.has(query)
+        query.invalidate()
         manualWriteSnapshots.set(hashedQueryKey, {
           data: query.state.data,
           dataUpdateCount: query.state.dataUpdateCount,
@@ -2410,19 +2531,20 @@ export function queryCollectionOptions(
 
         const retireProtectedQuery = () => {
           if (!ownedAtSchedule) return
+          if (queryClient.getQueryCache().get(query.queryHash) !== query) return
           if (query.getObserversCount() > 0) {
-            void queryClient.invalidateQueries(
-              { predicate: (candidate) => candidate === query },
-              { cancelRefetch: false },
-            )
+            query.invalidate()
+            if (!query.isDisabled()) {
+              const logicalHashes = new Set([hashedQueryKey])
+              const generations = new Map([[hashedQueryKey, generation]])
+              void refetchTrackedQuery(query, logicalHashes, generations)
+            }
           } else {
-            queryClient.removeQueries({
-              predicate: (candidate) => candidate === query,
-            })
+            queryClient.getQueryCache().remove(query)
           }
         }
 
-        const refetchObserver = () => {
+        const refetchObserver = async () => {
           if (
             state.observers.get(hashedQueryKey) !== observer ||
             (queryRefCounts.get(hashedQueryKey) ?? 0) <= 0
@@ -2430,62 +2552,79 @@ export function queryCollectionOptions(
             retireProtectedQuery()
             return
           }
-          void observer.refetch().then(
-            () => {
-              if (hasPostWriteAuthority(query)) return
-              if (
-                state.observers.get(hashedQueryKey) === observer &&
-                (queryRefCounts.get(hashedQueryKey) ?? 0) > 0 &&
-                isObserverEnabled(observer)
-              ) {
-                refetchObserver()
-              } else {
-                retireProtectedQuery()
-              }
-            },
-            () => {
-              // The query result handler owns error publication.
-            },
-          )
+
+          if (
+            hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
+          ) {
+            return
+          }
+
+          const result = await observer.refetch().catch(() => undefined)
+          if (
+            result?.isError ||
+            postWriteRefetchGenerations.get(hashedQueryKey) !== generation
+          ) {
+            return
+          }
+
+          const currentQuery = observer.getCurrentQuery()
+          if (hasPostWriteAuthority(hashedQueryKey, currentQuery)) return
+          if (
+            state.observers.get(hashedQueryKey) === observer &&
+            (queryRefCounts.get(hashedQueryKey) ?? 0) > 0 &&
+            isObserverEnabled(observer)
+          ) {
+            // A cancellation/revert or a reused pre-write request can resolve
+            // without authority. Retry once; errors end the attempt.
+            await observer.refetch().catch(() => undefined)
+          } else {
+            retireProtectedQuery()
+          }
         }
 
         if (deferredRefresh) {
           void deferredRefresh.then(refetchObserver, refetchObserver)
         } else {
-          refetchObserver()
+          void refetchObserver()
         }
       }
 
-      const sharedQueries = new Set<AnyQuery>()
-      queryClient.removeQueries({
-        predicate: (query) => {
-          if (!ownedCacheQueries.has(query) || revalidatingQueries.has(query)) {
-            return false
-          }
+      for (const query of [...trackedCacheQueries]) {
+        if (revalidatingQueries.has(query)) continue
 
-          const ownObservers = ownObserverCounts.get(query) ?? 0
-          if (query.getObserversCount() > ownObservers) {
-            if (ownObservers === 0) {
-              requirePostWriteAuthority(query)
-              sharedQueries.add(query)
-            }
-            return false
+        const ownedByAnotherCollection = [
+          ...(queryCollectionCacheOwners.get(query) ?? []),
+        ].some((owner) => owner !== cacheOwnerToken)
+        if (ownedByAnotherCollection) continue
+
+        const ownObservers = ownObserverCounts.get(query) ?? 0
+        if (query.getObserversCount() > ownObservers) {
+          // A disabled collection observer must not authorize a foreign
+          // observer to refetch on the collection's behalf.
+          if (ownObservers > 0) continue
+
+          const logicalHashes = getLogicalHashes(query)
+          const generations = new Map<string, number>()
+          for (const hashedQueryKey of logicalHashes) {
+            generations.set(
+              hashedQueryKey,
+              requirePostWriteAuthority(hashedQueryKey, query),
+            )
           }
-          return true
-        },
-      })
-      if (sharedQueries.size > 0) {
-        void queryClient.invalidateQueries(
-          {
-            predicate: (query) => sharedQueries.has(query),
-          },
-          { cancelRefetch: false },
-        )
+          query.invalidate()
+          if (!query.isDisabled()) {
+            void refetchTrackedQuery(query, logicalHashes, generations)
+          }
+          continue
+        }
+
+        queryClient.getQueryCache().remove(query)
       }
       return
     }
 
-    const allCached = queryClient.getQueryCache().findAll({ queryKey: baseKey })
+    const items = getItems()
+    const allCached = [...trackedCacheQueries]
 
     if (allCached.length > 0) {
       for (const query of allCached) {
@@ -2507,7 +2646,7 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => SyncAppliedReceipt
-    updateCacheData?: (items: Array<any>) => void
+    updateCacheData?: (getItems: () => Array<any>) => void
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
