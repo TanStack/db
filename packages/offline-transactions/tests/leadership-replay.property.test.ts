@@ -947,3 +947,56 @@ it.each([`keys`, `get`] as const)(
     )
   },
 )
+
+it.each([false, true])(
+  `fences each successful clear deletion while a peer is pending or fails, failure=%s`,
+  async (failure) => {
+    const captured = gate(),
+      delivery = gate(),
+      removed = gate(),
+      release = gate()
+    let hold = true
+    class Storage extends FakeStorageAdapter {
+      override async get(key: string) {
+        const value = await super.get(key)
+        if (hold && key === `tx:removed`) {
+          captured.resolve()
+          await delivery.promise
+        }
+        return value
+      }
+      override async delete(key: string) {
+        if (key === `tx:peer`) {
+          await release.promise
+          if (failure) throw new Error(`storage deletion failed`)
+        }
+        await super.delete(key)
+        if (key === `tx:removed`) removed.resolve()
+      }
+    }
+    const outbox = new OutboxManager(new Storage(), {})
+    await outbox.add(storedTransaction(`removed`))
+    await outbox.add(storedTransaction(`peer`))
+    const reading = outbox.getAll()
+    await atOracleCheckpoint(captured.promise, `read captured removed row`)
+    const clearing = outbox.clear().then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    try {
+      await atOracleCheckpoint(removed.promise, `first deletion finished`)
+      if (failure) {
+        release.resolve()
+        expect(await clearing).toBeInstanceOf(Error)
+      }
+      hold = false
+      delivery.resolve()
+      expect((await reading).map(({ id }) => id)).toEqual([`peer`])
+    } finally {
+      hold = false
+      delivery.resolve()
+      release.resolve()
+      await clearing
+    }
+  },
+)
