@@ -124,6 +124,18 @@ const equalityJoinCases = [
   },
 ]
 
+type JoinPair = readonly [number | undefined, number | undefined]
+
+function sortJoinPairs(pairs: Array<JoinPair>): Array<JoinPair> {
+  return pairs.sort(
+    ([leftA, rightA], [leftB, rightB]) =>
+      (leftA ?? Number.POSITIVE_INFINITY) -
+        (leftB ?? Number.POSITIVE_INFINITY) ||
+      (rightA ?? Number.POSITIVE_INFINITY) -
+        (rightB ?? Number.POSITIVE_INFINITY),
+  )
+}
+
 function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<User>({
@@ -1214,8 +1226,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         expect(query.toArray.map(stripVirtualProps)).toEqual([{ rightId: 10 }])
       })
 
-      test(`full joins keep nullish equality operands unmatched`, () => {
-        type NullishRow = { id: number; value: null | undefined }
+      test(`full joins leave nullish equality operands unmatched`, () => {
+        type NullishRow = { id: number; value: null | undefined | string }
         const leftCollection = createCollection(
           mockSyncCollectionOptions<NullishRow>({
             id: `nullish-full-left-${autoIndex}`,
@@ -1223,6 +1235,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             initialData: [
               { id: 1, value: null },
               { id: 2, value: undefined },
+              { id: 3, value: `\0m` },
+              { id: 4, value: `\0j` },
             ],
             autoIndex,
           }),
@@ -1234,6 +1248,8 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             initialData: [
               { id: 1, value: null },
               { id: 2, value: undefined },
+              { id: 3, value: `\0m` },
+              { id: 4, value: `\0j` },
             ],
             autoIndex,
           }),
@@ -1252,18 +1268,16 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               })),
         })
 
-        const pairs = query.toArray
-          .map(({ leftId, rightId }) => [leftId, rightId] as const)
-          .sort(
-            ([leftA, rightA], [leftB, rightB]) =>
-              (leftA ?? Number.POSITIVE_INFINITY) -
-                (leftB ?? Number.POSITIVE_INFINITY) ||
-              (rightA ?? Number.POSITIVE_INFINITY) -
-                (rightB ?? Number.POSITIVE_INFINITY),
-          )
+        const pairs = sortJoinPairs(
+          query.toArray.map(
+            ({ leftId, rightId }) => [leftId, rightId] as const,
+          ),
+        )
         expect(pairs).toEqual([
           [1, undefined],
           [2, undefined],
+          [3, 3],
+          [4, 4],
           [undefined, 1],
           [undefined, 2],
         ])
@@ -1301,15 +1315,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               })),
         })
         const pairs = () =>
-          query.toArray
-            .map(({ leftId, rightId }) => [leftId, rightId] as const)
-            .sort(
-              ([leftA, rightA], [leftB, rightB]) =>
-                (leftA ?? Number.POSITIVE_INFINITY) -
-                  (leftB ?? Number.POSITIVE_INFINITY) ||
-                (rightA ?? Number.POSITIVE_INFINITY) -
-                  (rightB ?? Number.POSITIVE_INFINITY),
-            )
+          sortJoinPairs(
+            query.toArray.map(
+              ({ leftId, rightId }) => [leftId, rightId] as const,
+            ),
+          )
         const replaceRight = (value: Uint8Array) => {
           rightCollection.utils.begin()
           rightCollection.utils.write({
@@ -1345,7 +1355,10 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           mockSyncCollectionOptions<NullableRow>({
             id: `nullish-lifecycle-right-${autoIndex}`,
             getKey: (row) => row.id,
-            initialData: [{ id: 1, value: null }],
+            initialData: [
+              { id: 2, value: null },
+              { id: 1, value: null },
+            ],
             autoIndex,
           }),
         )
@@ -1363,15 +1376,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               })),
         })
         const pairs = () =>
-          query.toArray
-            .map(({ leftId, rightId }) => [leftId, rightId] as const)
-            .sort(([leftA], [leftB]) =>
-              leftA === undefined
-                ? 1
-                : leftB === undefined
-                  ? -1
-                  : leftA - leftB,
-            )
+          sortJoinPairs(
+            query.toArray
+              .map(({ leftId, rightId }) => [leftId, rightId] as const)
+              .reverse(),
+          )
         const update = (
           collection: typeof leftCollection,
           id: number,
@@ -1385,18 +1394,24 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         expect(pairs()).toEqual([
           [1, undefined],
           [undefined, 1],
+          [undefined, 2],
         ])
         update(rightCollection, 1, 1)
         expect(pairs()).toEqual([
           [1, undefined],
           [undefined, 1],
+          [undefined, 2],
         ])
         update(leftCollection, 1, 1)
-        expect(pairs()).toEqual([[1, 1]])
+        expect(pairs()).toEqual([
+          [1, 1],
+          [undefined, 2],
+        ])
         update(leftCollection, 1, null)
         expect(pairs()).toEqual([
           [1, undefined],
           [undefined, 1],
+          [undefined, 2],
         ])
       })
 

@@ -156,14 +156,15 @@ function getRouteJoinKey(
 function getJoinKey(
   row: NamespacedRow,
   source: string,
-  originalKey: unknown,
   side: `main` | `joined`,
   value: unknown,
   routeJoinedSource: boolean,
   valueIdentity: ValueIdentity,
 ): string {
   if (value == null) {
-    return serializeValue([`nullishJoin`, side, originalKey])
+    // Serialized equality and route keys are JSON or `~`-prefixed, so these
+    // side-local sentinels cannot collide with a satisfiable join operand.
+    return side === `main` ? `\0m` : `\0j`
   }
   return routeJoinedSource
     ? getRouteJoinKey(row, source, value, valueIdentity)
@@ -363,7 +364,6 @@ function processJoin(
       const mainKey = getJoinKey(
         namespacedRow,
         mainSource,
-        currentKey,
         `main`,
         value,
         routeJoinedSource,
@@ -389,7 +389,6 @@ function processJoin(
       const joinedKey = getJoinKey(
         namespacedRow,
         joinedSource,
-        currentKey,
         `joined`,
         value,
         routeJoinedSource,
