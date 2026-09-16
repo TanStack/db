@@ -164,37 +164,6 @@ function isNullValue(exp: IR.BasicExpression<unknown>): boolean {
   return exp.type === `val` && (exp.value === null || exp.value === undefined)
 }
 
-function compileBooleanComparison(
-  name: string,
-  args: Array<IR.BasicExpression>,
-  literalIndex: number,
-  params: Array<unknown>,
-  encodeColumnName?: ColumnEncoder,
-): string {
-  const literal = args[literalIndex] as IR.Value<boolean>
-  const valueArg = args[literalIndex === 0 ? 1 : 0]!
-  const compiled = compileBasicExpression(valueArg, params, encodeColumnName)
-  const value = `(${compiled})`
-  const op =
-    literalIndex === 1
-      ? name
-      : name === `lt`
-        ? `gt`
-        : name === `gt`
-          ? `lt`
-          : name === `lte`
-            ? `gte`
-            : `lte`
-
-  if ((op === `lte` && literal.value) || (op === `gte` && !literal.value)) {
-    return `${value} = ${value}`
-  }
-  if ((op === `lt` && !literal.value) || (op === `gt` && literal.value)) {
-    return `${value} <> ${value}`
-  }
-  return `${value} = ${op === `lt` || op === `lte` ? `FALSE` : `TRUE`}`
-}
-
 function compileFunction(
   exp: IR.Func<unknown>,
   params: Array<unknown> = [],
@@ -252,13 +221,21 @@ function compileFunction(
     isBooleanComparisonOp(name) &&
     booleanLiteralIndex !== -1
   ) {
-    return compileBooleanComparison(
-      name,
-      args,
-      booleanLiteralIndex,
-      params,
-      encodeColumnName,
-    )
+    const literalValue = (args[booleanLiteralIndex] as IR.Value<boolean>).value
+    const valueArg = args[booleanLiteralIndex === 0 ? 1 : 0]!
+    const compiled = compileBasicExpression(valueArg, params, encodeColumnName)
+    const value = `(${compiled})`
+    const lessThan =
+      (name === `lt` || name === `lte`) === (booleanLiteralIndex === 1)
+    const inclusive = name === `lte` || name === `gte`
+
+    if (inclusive && literalValue === lessThan) {
+      return `${value} = ${value}`
+    }
+    if (!inclusive && literalValue !== lessThan) {
+      return `${value} <> ${value}`
+    }
+    return `${value} = ${lessThan ? `FALSE` : `TRUE`}`
   }
 
   const compiledArgs = args.map((arg: IR.BasicExpression) => {
@@ -309,14 +286,12 @@ function compileFunction(
       const arrayArg = args[1]!
 
       if (valueArg.type === `val` && Array.isArray(valueArg.value)) {
-        throw new Error(
-          `Cannot use an array-valued left operand of 'in'. Pass a scalar value instead.`,
-        )
+        throw new Error(`Array-valued 'in' left operand; expected a scalar`)
       }
 
       if (arrayArg.type === `ref` && valueArg.type === `val`) {
         // Resolve literal parameters from the array element type before containment.
-        return `(${lhs} = ANY(${rhs}) OR TRUE) AND ${rhs} @> ARRAY[${lhs}] AND ${rhs} IS NOT NULL`
+        return `${lhs} = ANY(${rhs}) AND ${rhs} @> ARRAY[${lhs}] AND ${rhs} IS NOT NULL`
       }
 
       // Literal value lists and ref/ref membership retain the original = ANY form.

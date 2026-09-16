@@ -156,7 +156,7 @@ describe(`sql-compiler`, () => {
         })
 
         expect(result.where).toBe(
-          `($1 = ANY("roles") OR TRUE) AND "roles" @> ARRAY[$1] AND "roles" IS NOT NULL`,
+          `$1 = ANY("roles") AND "roles" @> ARRAY[$1] AND "roles" IS NOT NULL`,
         )
         expect(result.params).toEqual({ '1': `admin` })
       })
