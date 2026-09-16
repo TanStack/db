@@ -201,7 +201,7 @@ export class TransactionSerializer {
       requireTemporalConstructor(temporalConstructorName)
       return {
         __type: `Temporal`,
-        type: value[Symbol.toStringTag],
+        type: `Temporal.${temporalConstructorName}`,
         value: value.toString(),
       }
     }

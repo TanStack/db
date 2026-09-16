@@ -388,6 +388,37 @@ it(`rejects native scalars before storage when global restoration is unavailable
   }
 })
 
+it(`uses one validated Temporal tag when writing a marker`, () => {
+  const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
+  const previousTemporal = temporalGlobal.Temporal
+  let reads = 0
+  temporalGlobal.Temporal = {
+    PlainDate: { from: (value: string) => value },
+  }
+  const value = {
+    get [Symbol.toStringTag]() {
+      reads++
+      return reads === 1 ? `Temporal.PlainDate` : `Temporal.Invalid`
+    },
+    toString: () => `2026-09-16`,
+  }
+
+  try {
+    const wire = JSON.parse(
+      new TransactionSerializer({}).serialize(metadataTransaction({ value })),
+    )
+    expect(wire.metadata.value).toEqual({
+      __type: `Temporal`,
+      type: `Temporal.PlainDate`,
+      value: `2026-09-16`,
+    })
+    expect(reads).toBe(1)
+  } finally {
+    if (previousTemporal === undefined) delete temporalGlobal.Temporal
+    else temporalGlobal.Temporal = previousTemporal
+  }
+})
+
 it(`preserves metadata toJSON values without changing mutation value semantics`, () => {
   class JsonValue {
     toJSON(key: string) {
