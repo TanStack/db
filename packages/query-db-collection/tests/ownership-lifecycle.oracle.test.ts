@@ -1,6 +1,7 @@
 import {
   QueryClient,
   QueryObserver,
+  focusManager,
   hashKey,
   isCancelledError,
 } from '@tanstack/query-core'
@@ -592,6 +593,85 @@ describe(`query collection ownership lifecycle`, () => {
     expect(queryFn).not.toHaveBeenCalled()
   })
 
+  it(`does not restart a cleaned-up idle collection for a direct write`, async () => {
+    const id = `cleaned-idle-direct-write`
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn((): Promise<Array<Item>> => Promise.resolve([]))
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: false,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.cleanup()
+    expect(() => collection.utils.writeUpsert(shared)).toThrow(
+      SyncNotInitializedError,
+    )
+    expect(collection.status).toBe(`cleaned-up`)
+    expect(rows(collection)).toEqual([])
+    expect(queryFn).not.toHaveBeenCalled()
+  })
+
+  it(`does not restart a cleaned-up collection for a late mutation refetch`, async () => {
+    const id = `late-mutation-after-cleanup`
+    const queryKey = [id] as const
+    const inserted = { id: `late`, category: `mutation`, name: `Late` }
+    const serverRows: Array<Item> = []
+    const handlerEntered = createDeferred<void>()
+    const releaseHandler = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve(structuredClone(serverRows)))
+    let writeLate = (_item: Item) => {}
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+        onInsert: async ({ transaction }) => {
+          handlerEntered.resolve()
+          await releaseHandler.promise
+          transaction.mutations.forEach(({ modified }) =>
+            writeLate(structuredClone(modified)),
+          )
+          return { refetch: false }
+        },
+      }),
+    )
+    writeLate = (item) => collection.utils.writeUpsert(item)
+    cleanups.push(async () => {
+      releaseHandler.resolve()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    expect(queryFn).toHaveBeenCalledOnce()
+
+    const mutation = collection.insert(inserted)
+    await handlerEntered.promise
+    await collection.cleanup()
+    releaseHandler.resolve()
+    await mutation.isPersisted.promise
+
+    expect(collection.status).toBe(`cleaned-up`)
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(itemIds(collection._state.syncedData.values())).toEqual([])
+    expect(queryClient.getQueryData(queryKey)).toEqual([])
+  })
+
   it.each([
     { ordered: false, settlementOrder: [0, 1] },
     { ordered: false, settlementOrder: [1, 0] },
@@ -797,6 +877,243 @@ describe(`query collection ownership lifecycle`, () => {
     ).toThrow()
   })
 
+  it(`supersedes a stale focus result before publishing a newer mutation snapshot`, async () => {
+    const id = `focus-result-supersession`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `mutation`, name: `A` }
+    const retired = { id: `b`, category: `mutation`, name: `B` }
+    const inserted = { id: `c`, category: `mutation`, name: `C` }
+    const serverRows = [initial, retired]
+    const firstFocus = createDeferred<Array<Item>>()
+    const secondFocus = createDeferred<Array<Item>>()
+    const handlerEntered = createDeferred<void>()
+    const releaseHandler = createDeferred<void>()
+    const queryClient = createQueryClient(false, 0)
+    let queryCalls = 0
+    const queryFn = vi.fn(() => {
+      queryCalls++
+      if (queryCalls === 2) return firstFocus.promise
+      if (queryCalls === 3) return secondFocus.promise
+      return Promise.resolve(structuredClone(serverRows))
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        staleTime: 0,
+        refetchOnWindowFocus: true,
+        onInsert: async ({ transaction }) => {
+          serverRows.splice(
+            0,
+            serverRows.length,
+            initial,
+            ...transaction.mutations.map(({ modified }) =>
+              structuredClone(modified),
+            ),
+          )
+          handlerEntered.resolve()
+          await releaseHandler.promise
+          return { refetch: false }
+        },
+      }),
+    )
+    const derived = createLiveQueryCollection((query) =>
+      query.from({ item: collection }).select(({ item }) => ({
+        id: item.id,
+        category: item.category,
+        name: item.name,
+      })),
+    )
+    const sourcePublications: Array<Array<string>> = []
+    const derivedPublications: Array<MutationPublicationSnapshot> = []
+    const sourceSubscription = collection.subscribeChanges(() => {
+      sourcePublications.push(itemIds(collection.toArray))
+    })
+    const derivedSubscription = derived.subscribeChanges(() => {
+      const source = itemIds(collection.toArray)
+      derivedPublications.push({
+        source,
+        derived: itemIds(derived.toArray),
+        expected: source,
+      })
+    })
+    cleanups.push(async () => {
+      releaseHandler.resolve()
+      sourceSubscription.unsubscribe()
+      derivedSubscription.unsubscribe()
+      await derived.cleanup()
+      await collection.cleanup()
+      queryClient.clear()
+      focusManager.setFocused(undefined)
+    })
+
+    await derived.preload()
+    expect(queryFn).toHaveBeenCalledOnce()
+    sourcePublications.length = 0
+    derivedPublications.length = 0
+
+    focusManager.setFocused(false)
+    focusManager.setFocused(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+    const mutation = collection.insert(inserted)
+    await handlerEntered.promise
+    firstFocus.resolve([structuredClone(initial)])
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryState(queryKey)?.fetchStatus).toBe(`idle`),
+    )
+
+    let waiterOutcome: `pending` | `resolved` | `rejected` = `pending`
+    const waiter = Promise.resolve(collection._sync.loadSubset({})).then(
+      () => {
+        waiterOutcome = `resolved`
+      },
+      (error) => {
+        waiterOutcome = `rejected`
+        throw error
+      },
+    )
+
+    focusManager.setFocused(false)
+    focusManager.setFocused(true)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    secondFocus.resolve(structuredClone(serverRows))
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryState(queryKey)?.fetchStatus).toBe(`idle`),
+    )
+
+    releaseHandler.resolve()
+    await mutation.isPersisted.promise
+    await waiter
+    await vi.waitFor(() =>
+      expect(itemIds(derived.toArray)).toEqual([initial.id, inserted.id]),
+    )
+
+    expect(waiterOutcome).toBe(`resolved`)
+    expect(sourcePublications).not.toContainEqual([initial.id])
+    for (const publication of sourcePublications) {
+      expect([
+        [initial.id, inserted.id],
+        [initial.id, retired.id, inserted.id].sort(),
+      ]).toContainEqual(publication)
+    }
+    expectMutationPublicationIntegrity(derivedPublications)
+    expect({
+      cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
+      synced: itemIds(collection._state.syncedData.values()),
+      source: itemIds(collection.toArray),
+      derived: itemIds(derived.toArray),
+    }).toEqual({
+      cache: [initial.id, inserted.id],
+      synced: [initial.id, inserted.id],
+      source: [initial.id, inserted.id],
+      derived: [initial.id, inserted.id],
+    })
+
+    queryClient.setQueryData(queryKey, [])
+    await vi.waitFor(() => {
+      expect({
+        synced: itemIds(collection._state.syncedData.values()),
+        source: itemIds(collection.toArray),
+        derived: itemIds(derived.toArray),
+      }).toEqual({ synced: [], source: [], derived: [] })
+    })
+  })
+
+  it(`keeps only the newest cache result when publication reenters application`, async () => {
+    const id = `reentrant-result-application`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `result`, name: `A` }
+    const outer = { id: `b`, category: `result`, name: `B` }
+    const inner = { id: `c`, category: `result`, name: `C` }
+    const queryClient = createQueryClient()
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn: () => Promise.resolve([initial]),
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    const publications: Array<Array<string>> = []
+    let injected = false
+    const subscription = collection.subscribeChanges(() => {
+      const ids = itemIds(collection.toArray)
+      publications.push(ids)
+      if (!injected && ids.includes(outer.id)) {
+        injected = true
+        queryClient.setQueryData(queryKey, [inner])
+      }
+    })
+    cleanups.push(async () => subscription.unsubscribe())
+
+    queryClient.setQueryData(queryKey, [outer])
+    await vi.waitFor(() => expect(itemIds(collection.toArray)).toEqual([`c`]))
+
+    expect(publications).toEqual([[`b`], [`c`]])
+    queryClient.setQueryData(queryKey, [])
+    await vi.waitFor(() => expect(collection.toArray).toEqual([]))
+  })
+
+  it(`retains a reentrant newer application failure for subset settlement`, async () => {
+    const id = `reentrant-result-failure`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `result`, name: `A` }
+    const outer = { id: `b`, category: `result`, name: `B` }
+    const invalid = { id: `invalid`, category: `result`, name: `Invalid` }
+    const applicationError = new Error(`newest result application failed`)
+    const queryClient = createQueryClient()
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn: () => Promise.resolve([initial]),
+        getKey: (item) => {
+          if (item.id === invalid.id) throw applicationError
+          return item.id
+        },
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      consoleError.mockRestore()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    let injected = false
+    const subscription = collection.subscribeChanges(() => {
+      if (!injected && collection.has(outer.id)) {
+        injected = true
+        queryClient.setQueryData(queryKey, [invalid])
+      }
+    })
+    cleanups.push(async () => subscription.unsubscribe())
+
+    queryClient.setQueryData(queryKey, [outer])
+    await vi.waitFor(() => expect(collection.utils.errorCount).toBe(1))
+    await expect(Promise.resolve(collection._sync.loadSubset({}))).rejects.toBe(
+      applicationError,
+    )
+  })
+
   it(`retires mutation ownership when a later cache result is empty`, async () => {
     const id = `mutation-ownership-replacement`
     const queryKey = [id] as const
@@ -845,6 +1162,156 @@ describe(`query collection ownership lifecycle`, () => {
         source: itemIds(collection.toArray),
       }).toEqual({ cache: [], synced: [], source: [] })
     })
+  })
+
+  it(`publishes an authoritative delete after its mutation refetch`, async () => {
+    const id = `mutation-delete-publication`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `mutation`, name: `A` }
+    const serverRows = [initial]
+    const queryClient = createQueryClient()
+    const preexistingRefetchResult = createDeferred<Array<Item>>()
+    const mutationRefetchResult = createDeferred<Array<Item>>()
+    const persistenceGate = createDeferred<void>()
+    const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
+    const commitRequests: Array<{
+      writes: Array<string>
+      receipt: `immediate` | `pending`
+      outcome?: `applied` | `aborted` | `rejected`
+    }> = []
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce(structuredClone(serverRows))
+      .mockReturnValueOnce(preexistingRefetchResult.promise)
+      .mockReturnValueOnce(mutationRefetchResult.promise)
+    const baseOptions = queryCollectionOptions<Item>({
+      id,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey: (item) => item.id,
+      startSync: true,
+      onDelete: async ({ transaction }) => {
+        await persistenceGate.promise
+        const deleted = new Set(
+          transaction.mutations.map(({ original }) => original.id),
+        )
+        serverRows.splice(
+          0,
+          serverRows.length,
+          ...serverRows.filter(({ id: rowId }) => !deleted.has(rowId)),
+        )
+      },
+    })
+    const originalSync = baseOptions.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          let writes: Array<string> = []
+          return originalSync.sync({
+            ...params,
+            metadata: recordMetadata(params.metadata!, metadata),
+            begin: () => {
+              writes = []
+              params.begin()
+            },
+            write: (change) => {
+              writes.push(change.type)
+              params.write(change)
+            },
+            commit: (signal) => {
+              const result = params.commit(signal)
+              const request: (typeof commitRequests)[number] = {
+                writes: [...writes],
+                receipt: result === true ? `immediate` : `pending`,
+              }
+              commitRequests.push(request)
+              if (result === true) {
+                request.outcome = `applied`
+              } else {
+                void result.then(
+                  () => {
+                    request.outcome = `applied`
+                  },
+                  (error) => {
+                    request.outcome = isCancelledError(error)
+                      ? `aborted`
+                      : `rejected`
+                  },
+                )
+              }
+              return result
+            },
+          })
+        },
+      },
+    })
+    const derived = createLiveQueryCollection((query) =>
+      query.from({ item: collection }).select(({ item }) => ({
+        id: item.id,
+        category: item.category,
+        name: item.name,
+      })),
+    )
+    const capture = (): MutationLifecycleSnapshot => ({
+      server: itemIds(serverRows),
+      cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
+      synced: itemIds(collection._state.syncedData.values()),
+      source: itemIds(collection.toArray),
+      derived: itemIds(derived.toArray),
+    })
+    const publications: Array<MutationLifecycleSnapshot> = []
+    const subscription = derived.subscribeChanges(() => {
+      publications.push(capture())
+    })
+    cleanups.push(async () => {
+      persistenceGate.resolve()
+      preexistingRefetchResult.resolve([])
+      mutationRefetchResult.resolve([])
+      subscription.unsubscribe()
+      await derived.cleanup()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await derived.preload()
+    expectMutationLifecycleSnapshot(
+      capture(),
+      [initial.id],
+      [initial.id],
+      false,
+    )
+
+    const preexistingRefetch = collection.utils.refetch({ throwOnError: true })
+    void preexistingRefetch.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+    const mutation = collection.delete(initial.id)
+    expect(itemIds(collection.toArray)).toEqual([])
+    expect(itemIds(derived.toArray)).toEqual([])
+
+    persistenceGate.resolve()
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    mutationRefetchResult.resolve([])
+    await mutation.isPersisted.promise
+
+    expect(queryFn).toHaveBeenCalledTimes(3)
+    expect(commitRequests.some(({ writes }) => writes.includes(`delete`))).toBe(
+      true,
+    )
+    expect(commitRequests.some(({ receipt }) => receipt === `pending`)).toBe(
+      true,
+    )
+    expect(metadata.writes).toContainEqual({ type: `delete`, key: initial.id })
+    await vi.waitFor(() =>
+      expect(commitRequests.every(({ outcome }) => outcome !== undefined)).toBe(
+        true,
+      ),
+    )
+    expectMutationLifecycleSnapshot(capture(), [], [], false)
+    expect(publications.at(-1)?.source).toEqual([])
+    expect(publications.at(-1)?.derived).toEqual([])
   })
 
   it(`keeps cached rows until the final exact acquisition is released`, async () => {

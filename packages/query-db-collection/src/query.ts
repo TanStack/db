@@ -918,7 +918,6 @@ export function queryCollectionOptions(
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
   let ensureEagerSubscription = () => {}
-  let replaceMutationResultApplications = () => {}
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
@@ -997,9 +996,13 @@ export function queryCollectionOptions(
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
-    const retainedResultApplicationTokens = new Map<string, object>()
-    const activeResultApplicationTokens = new Map<string, object>()
-    const resultApplicationControllers = new Map<string, Set<AbortController>>()
+    type ResultApplicationController = AbortController & {
+      restoreOwnershipTracking?: () => void
+    }
+    const resultApplicationControllers = new Map<
+      string,
+      ResultApplicationController
+    >()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -1008,21 +1011,37 @@ export function queryCollectionOptions(
     let persistedRetentionMaintenance = Promise.resolve()
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
+      const controller = resultApplicationControllers.get(hashedQueryKey)
+      controller?.restoreOwnershipTracking?.()
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
-      retainedResultApplicationTokens.delete(hashedQueryKey)
-      activeResultApplicationTokens.delete(hashedQueryKey)
-      resultApplicationControllers
-        .get(hashedQueryKey)
-        ?.forEach((controller) => controller.abort())
       resultApplicationControllers.delete(hashedQueryKey)
+      controller?.abort()
+    }
+
+    const waitForCurrentResultApplication = async (
+      hashedQueryKey: string,
+    ): Promise<void> => {
+      while (true) {
+        const application = pendingResultApplications.get(hashedQueryKey)
+        if (!application) return
+        try {
+          await application
+        } catch (error) {
+          if (pendingResultApplications.get(hashedQueryKey) === application) {
+            throw error
+          }
+        }
+      }
     }
 
     const getResultApplicationSettlement = (
       hashedQueryKey: string,
     ): true | Promise<void> => {
       const pending = pendingResultApplications.get(hashedQueryKey)
-      if (pending) return pending
+      if (pending) {
+        return waitForCurrentResultApplication(hashedQueryKey)
+      }
 
       if (failedResultApplications.has(hashedQueryKey)) {
         return Promise.reject(failedResultApplications.get(hashedQueryKey))
@@ -1593,7 +1612,7 @@ export function queryCollectionOptions(
     const applySuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
-      applicationToken: object,
+      applicationToken: ResultApplicationController,
       persistedBaseline?: Map<
         string | number,
         {
@@ -1657,11 +1676,8 @@ export function queryCollectionOptions(
 
       const restoreOwnershipTracking = () => {
         if (!state.observers.has(hashedQueryKey)) return
-        const currentApplicationToken =
-          activeResultApplicationTokens.get(hashedQueryKey)
         if (
-          currentApplicationToken !== undefined &&
-          currentApplicationToken !== applicationToken
+          resultApplicationControllers.get(hashedQueryKey) !== applicationToken
         ) {
           return
         }
@@ -1679,6 +1695,7 @@ export function queryCollectionOptions(
           }
         })
       }
+      applicationToken.restoreOwnershipTracking = restoreOwnershipTracking
 
       try {
         // From this point onward the result, including an empty result, is the
@@ -1735,6 +1752,7 @@ export function queryCollectionOptions(
           }
         })
 
+        applicationToken.restoreOwnershipTracking = undefined
         const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -1743,15 +1761,18 @@ export function queryCollectionOptions(
         // Readiness is publication: do not expose it until the establishing
         // transaction's rows and events are visible.
         if (applied !== true) {
+          applicationToken.restoreOwnershipTracking = restoreOwnershipTracking
           await applied
         }
         if (signal?.aborted) {
           restoreOwnershipTracking()
           return
         }
+        applicationToken.restoreOwnershipTracking = undefined
         markReady()
       } catch (error) {
         restoreOwnershipTracking()
+        applicationToken.restoreOwnershipTracking = undefined
 
         if (transactionActive) {
           const cancellation = new AbortController()
@@ -1769,7 +1790,7 @@ export function queryCollectionOptions(
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
-      applicationToken: object,
+      applicationToken: ResultApplicationController,
       signal: AbortSignal,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
@@ -1777,7 +1798,7 @@ export function queryCollectionOptions(
         await loadPersistedBaselineForQuery(hashedQueryKey)
       if (
         collection.status === `cleaned-up` ||
-        retainedResultApplicationTokens.get(hashedQueryKey) !== applicationToken
+        resultApplicationControllers.get(hashedQueryKey) !== applicationToken
       ) {
         return
       }
@@ -1825,31 +1846,24 @@ export function queryCollectionOptions(
 
     const enqueueResultApplication = (
       hashedQueryKey: string,
-      apply: (signal: AbortSignal, applicationToken: object) => Promise<void>,
-      observedApplicationToken?: object,
+      apply: (
+        signal: AbortSignal,
+        applicationToken: ResultApplicationController,
+      ) => Promise<void>,
     ): void => {
-      const controller = new AbortController()
-      const applicationToken = observedApplicationToken ?? {}
-      const controllers =
-        resultApplicationControllers.get(hashedQueryKey) ?? new Set()
-      controllers.add(controller)
-      resultApplicationControllers.set(hashedQueryKey, controllers)
-      const previousApplication = pendingResultApplications.get(hashedQueryKey)
-      const run = () => {
-        activeResultApplicationTokens.set(hashedQueryKey, applicationToken)
-        return apply(controller.signal, applicationToken)
-      }
-      const application = previousApplication
-        ? previousApplication.then(run, run)
-        : run()
+      invalidatePendingResultApplication(hashedQueryKey)
+      const controller: ResultApplicationController = new AbortController()
+      resultApplicationControllers.set(hashedQueryKey, controller)
+      const application = apply(controller.signal, controller)
       const cleanupController = () => {
-        controllers.delete(controller)
-        if (controllers.size === 0) {
+        if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
         }
       }
       void application.then(cleanupController, cleanupController)
-      trackResultApplication(hashedQueryKey, application)
+      if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+        trackResultApplication(hashedQueryKey, application)
+      }
     }
 
     // eslint-disable-next-line no-shadow
@@ -1935,17 +1949,10 @@ export function queryCollectionOptions(
               }
               return
             }
+            if (result.isFetching) return
 
-            const applicationToken = {}
-            retainedResultApplicationTokens.set(
-              hashedQueryKey,
-              applicationToken,
-            )
-            enqueueResultApplication(
-              hashedQueryKey,
-              (signal, token) =>
-                reconcileSuccessfulResult(queryKey, result, token, signal),
-              applicationToken,
+            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+              reconcileSuccessfulResult(queryKey, result, token, signal),
             )
           } else {
             enqueueResultApplication(hashedQueryKey, (signal, token) =>
@@ -1983,26 +1990,6 @@ export function queryCollectionOptions(
         }
       }
       return handleQueryResult
-    }
-
-    replaceMutationResultApplications = () => {
-      state.observers.forEach((observer, hashedQueryKey) => {
-        const result = observer.getCurrentResult()
-        if (
-          !result.isSuccess ||
-          result.isFetching ||
-          !hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
-        ) {
-          return
-        }
-
-        // Earlier snapshots can be waiting behind this persisting mutation.
-        // Replace them with the completed refetch so its sync transaction is
-        // staged before the mutation handler returns; awaiting it here would
-        // deadlock on the mutation that owns the publication barrier.
-        invalidatePendingResultApplication(hashedQueryKey)
-        makeQueryResultHandler(hashToQueryKey.get(hashedQueryKey)!)(result)
-      })
     }
 
     const isSubscribed = (hashedQueryKey: string) => {
@@ -2197,7 +2184,6 @@ export function queryCollectionOptions(
       }
 
       const hasListeners = observer?.hasListeners() ?? false
-
       if (hasListeners) {
         // During invalidateQueries, TanStack Query keeps internal listeners alive.
         // Leave refcount at 0 but keep observer so it can resubscribe.
@@ -2306,7 +2292,6 @@ export function queryCollectionOptions(
     const cleanup = () => {
       pendingStartupLoads.clear()
       ensureEagerSubscription = () => {}
-      replaceMutationResultApplications = () => {}
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2442,11 +2427,6 @@ export function queryCollectionOptions(
     })
 
     return Promise.all(refetchPromises)
-  }
-
-  const refetchAfterMutation = async () => {
-    await refetch()
-    replaceMutationResultApplications()
   }
 
   /**
@@ -2780,7 +2760,7 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetchAfterMutation()
+          await refetch()
         }
 
         return handlerResult
@@ -2794,7 +2774,7 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetchAfterMutation()
+          await refetch()
         }
 
         return handlerResult
@@ -2808,7 +2788,7 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetchAfterMutation()
+          await refetch()
         }
 
         return handlerResult
@@ -2820,21 +2800,15 @@ export function queryCollectionOptions(
 
   const sync = withCollectionSyncConfigFactory(
     { sync: enhancedInternalSync },
-    (source, utilities, startSync) => {
+    (source, utilities, startSyncIfIdle) => {
       const boundUtilities = utilities as Record<
         string,
         (...args: Array<any>) => any
       >
-      for (const name of [
-        `writeInsert`,
-        `writeUpdate`,
-        `writeDelete`,
-        `writeUpsert`,
-        `writeBatch`,
-      ]) {
+      for (const name of Object.keys(writeUtils)) {
         const write = boundUtilities[name]!
         boundUtilities[name] = (...args) => {
-          startSync()
+          startSyncIfIdle()
           return write(...args)
         }
       }

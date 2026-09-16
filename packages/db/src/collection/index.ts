@@ -57,25 +57,23 @@ const collectionSyncConfigCleanup: unique symbol = Symbol.for(
 
 type CollectionSyncConfigWithFactory<TSync extends object> = TSync & {
   readonly [collectionSyncConfigFactory]: (
-    this: TSync,
+    source: TSync,
     utilities: object,
-    startSync: () => void,
+    startSyncIfIdle: () => void,
   ) => TSync
 }
 
-/**
- * @internal Lets adapters bind a sync config to each collection instance.
- * The factory may retain `startSync` for later use, but must not call it during
- * materialization before Collection construction has completed.
- */
+/** @internal The factory must defer `startSyncIfIdle` until construction ends. */
 export function withCollectionSyncConfigFactory<TSync extends object>(
   sync: TSync,
-  factory: (source: TSync, utilities: object, startSync: () => void) => TSync,
+  factory: (
+    source: TSync,
+    utilities: object,
+    startSyncIfIdle: () => void,
+  ) => TSync,
 ): CollectionSyncConfigWithFactory<TSync> {
   Object.defineProperty(sync, collectionSyncConfigFactory, {
-    value(this: TSync, utilities: object, startSync: () => void) {
-      return factory(this, utilities, startSync)
-    },
+    value: factory,
     // Preserve the hook when callers wrap a sync config with object spread.
     enumerable: true,
   })
@@ -100,7 +98,7 @@ function materializeCollectionSyncConfig<
 >(
   sync: TSync,
   utilities: TUtils,
-  startSync: () => void,
+  startSyncIfIdle: () => void,
 ): { sync: TSync; utilities: TUtils } {
   const factory = (
     sync as unknown as Partial<CollectionSyncConfigWithFactory<TSync>>
@@ -114,7 +112,7 @@ function materializeCollectionSyncConfig<
     Object.getOwnPropertyDescriptors(utilities),
   ) as TUtils
   return {
-    sync: factory.call(sync, ownedUtilities, startSync),
+    sync: factory(sync, ownedUtilities, startSyncIfIdle),
     utilities: ownedUtilities,
   }
 }
@@ -408,9 +406,9 @@ export class CollectionImpl<
 
     // Set default values for optional config properties
     const { sync: collectionSync, utilities: collectionUtils } =
-      materializeCollectionSyncConfig(config.sync, config.utils ?? {}, () =>
-        this._sync.startSync(),
-      )
+      materializeCollectionSyncConfig(config.sync, config.utils ?? {}, () => {
+        if (this._lifecycle.status === `idle`) this._sync.startSync()
+      })
     this.config = {
       ...config,
       sync: collectionSync,

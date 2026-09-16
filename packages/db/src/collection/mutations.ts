@@ -76,10 +76,6 @@ export class CollectionMutationsManager<
       : getActiveTransaction()
   }
 
-  private startSyncForMutation(): void {
-    if (this.lifecycle.status === `idle`) this.collection._sync.startSync()
-  }
-
   private createTransaction<T extends object>(config: TransactionConfig<T>) {
     return this.transactionScope
       ? this.transactionScope.createTransaction(config)
@@ -245,12 +241,9 @@ export class CollectionMutationsManager<
       mutations.push(mutation)
     })
 
-    this.startSyncForMutation()
-    for (const mutation of mutations) {
-      if (this.state.has(mutation.key)) {
-        throw new DuplicateKeyError(mutation.key)
-      }
-    }
+    this.collection._sync.startSync()
+    const duplicate = mutations.find(({ key }) => this.state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
@@ -327,12 +320,13 @@ export class CollectionMutationsManager<
       throw new NoKeysPassedToUpdateError()
     }
 
-    this.startSyncForMutation()
-
     const callback =
-      typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
+      typeof configOrCallback === `function` ? configOrCallback : maybeCallback
+    if (typeof callback !== `function`) throw new TypeError()
     const config =
       typeof configOrCallback === `function` ? {} : configOrCallback
+
+    this.collection._sync.startSync()
 
     // Get the current objects or empty objects if they don't exist
     const currentObjects = keysArray.map((key) => {
@@ -510,8 +504,7 @@ export class CollectionMutationsManager<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
-    this.startSyncForMutation()
-
+    this.collection._sync.startSync()
     const mutations: Array<
       PendingMutation<
         TOutput,

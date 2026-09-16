@@ -180,6 +180,35 @@ describe(`Collection Lifecycle Management`, () => {
     }
   })
 
+  it(`surfaces idle sync startup errors before applying a mutation`, async () => {
+    type Row = { id: string; value: string }
+    const startupError = new Error(`sync startup failed`)
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `mutation-sync-startup-error`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: () => {
+          syncStarts++
+          throw startupError
+        },
+      },
+      onInsert: async () => {},
+    })
+
+    try {
+      expect(() =>
+        collection.insert({ id: `rejected`, value: `rejected` }),
+      ).toThrow(startupError)
+      expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`error`)
+      expect(collection.size).toBe(0)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it.each([`update`, `delete`] as const)(
     `does not start idle sync when %s has no handler`,
     async (operation) => {
@@ -255,6 +284,39 @@ describe(`Collection Lifecycle Management`, () => {
       }
     },
   )
+
+  it(`does not start idle sync when update receives no callback`, async () => {
+    type Row = { id: string; value: string }
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `rejected-update-missing-callback`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncStarts++
+          begin()
+          write({ type: `insert`, value: { id: `target`, value: `original` } })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: async () => {},
+    })
+
+    try {
+      expect(() =>
+        (collection.update as (key: string, config: object) => unknown)(
+          `target`,
+          {},
+        ),
+      ).toThrow(TypeError)
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
 
   it.each([`update`, `delete`] as const)(
     `starts idle sync before %s checks collection state`,
