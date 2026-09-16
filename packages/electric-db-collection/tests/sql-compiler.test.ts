@@ -69,6 +69,37 @@ describe(`sql-compiler`, () => {
         expect(result.params).toEqual({ '1': `5` })
       })
 
+      it.each([
+        [`gt`, false, `left`, `("enabled") <> ("enabled")`],
+        [`gt`, false, `right`, `("enabled") = TRUE`],
+        [`gt`, true, `left`, `("enabled") = FALSE`],
+        [`gt`, true, `right`, `("enabled") <> ("enabled")`],
+        [`gte`, false, `left`, `("enabled") = FALSE`],
+        [`gte`, false, `right`, `("enabled") = ("enabled")`],
+        [`gte`, true, `left`, `("enabled") = ("enabled")`],
+        [`gte`, true, `right`, `("enabled") = TRUE`],
+        [`lt`, false, `left`, `("enabled") = TRUE`],
+        [`lt`, false, `right`, `("enabled") <> ("enabled")`],
+        [`lt`, true, `left`, `("enabled") <> ("enabled")`],
+        [`lt`, true, `right`, `("enabled") = FALSE`],
+        [`lte`, false, `left`, `("enabled") = ("enabled")`],
+        [`lte`, false, `right`, `("enabled") = FALSE`],
+        [`lte`, true, `left`, `("enabled") = TRUE`],
+        [`lte`, true, `right`, `("enabled") = ("enabled")`],
+      ] as const)(
+        `folds boolean %s with %s on the %s`,
+        (operator, literal, literalSide, expected) => {
+          const column = ref(`enabled`)
+          const value = val(literal)
+          const args =
+            literalSide === `left` ? [value, column] : [column, value]
+          const result = compileSQL({ where: func(operator, args) })
+
+          expect(result.where).toBe(expected)
+          expect(result.params).toEqual({})
+        },
+      )
+
       // Regression test for https://github.com/TanStack/db/issues/1147
       it(`should compile eq with empty string value`, () => {
         const result = compileSQL({
