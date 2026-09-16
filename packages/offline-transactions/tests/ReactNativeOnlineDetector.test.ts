@@ -38,36 +38,46 @@ vi.mock(`react-native`, () => {
 
 // Mock the @react-native-community/netinfo module
 vi.mock(`@react-native-community/netinfo`, () => {
-  const listeners: Array<
-    (state: {
-      isConnected: boolean
-      isInternetReachable: boolean | null
-    }) => void
-  > = []
+  type NetworkState = {
+    isConnected: boolean
+    isInternetReachable: boolean | null
+  }
+  const listeners: Array<(state: NetworkState) => void> = []
+  let holdNextFetch = false
+  let resolveFetch: ((state: NetworkState) => void) | undefined
   return {
     default: {
-      addEventListener: vi.fn(
-        (
-          callback: (state: {
-            isConnected: boolean
-            isInternetReachable: boolean | null
-          }) => void,
-        ) => {
-          listeners.push(callback)
-          return () => {
-            const index = listeners.indexOf(callback)
-            if (index > -1) {
-              listeners.splice(index, 1)
-            }
+      fetch: vi.fn(() => {
+        if (!holdNextFetch) return Promise.reject(new Error(`unavailable`))
+        holdNextFetch = false
+        return new Promise<NetworkState>((resolve) => {
+          resolveFetch = resolve
+        })
+      }),
+      addEventListener: vi.fn((callback: (state: NetworkState) => void) => {
+        listeners.push(callback)
+        return () => {
+          const index = listeners.indexOf(callback)
+          if (index > -1) {
+            listeners.splice(index, 1)
           }
-        },
-      ),
+        }
+      }),
+      __holdNextFetch: () => {
+        holdNextFetch = true
+      },
+      __resolveFetch: (state: NetworkState) => {
+        if (!resolveFetch) throw new Error(`No startup fetch is pending`)
+        resolveFetch(state)
+        resolveFetch = undefined
+      },
+      __resetFetch: () => {
+        holdNextFetch = false
+        resolveFetch = undefined
+      },
       // Expose for testing
       __listeners: listeners,
-      __triggerState: (state: {
-        isConnected: boolean
-        isInternetReachable: boolean | null
-      }) => {
+      __triggerState: (state: NetworkState) => {
         for (const listener of listeners) {
           listener(state)
         }
@@ -82,6 +92,7 @@ describe(`ReactNativeOnlineDetector`, () => {
     // Clear internal listener arrays
     ;(AppState as any).__listeners.length = 0
     ;(NetInfo as any).__listeners.length = 0
+    ;(NetInfo as any).__resetFetch()
   })
 
   describe(`initialization`, () => {
@@ -110,6 +121,92 @@ describe(`ReactNativeOnlineDetector`, () => {
   })
 
   describe(`network connectivity changes`, () => {
+    it(`gives live events authority over a late startup snapshot`, async () => {
+      ;(NetInfo as any).__holdNextFetch()
+      const detector = new ReactNativeOnlineDetector()
+      const callback = vi.fn()
+      detector.subscribe(callback)
+      try {
+        expect(NetInfo.fetch).toHaveBeenCalledOnce()
+        ;(NetInfo as any).__triggerState({
+          isConnected: false,
+          isInternetReachable: false,
+        })
+        expect(detector.isOnline()).toBe(false)
+        ;(NetInfo as any).__resolveFetch({
+          isConnected: true,
+          isInternetReachable: true,
+        })
+        await Promise.resolve()
+        ;(NetInfo as any).__triggerState({
+          isConnected: true,
+          isInternetReachable: true,
+        })
+
+        expect({
+          notifications: callback.mock.calls.length,
+          isOnline: detector.isOnline(),
+        }).toEqual({ notifications: 1, isOnline: true })
+      } finally {
+        detector.dispose()
+      }
+    })
+
+    it(`does not let a late startup snapshot invent an offline edge`, async () => {
+      ;(NetInfo as any).__holdNextFetch()
+      const detector = new ReactNativeOnlineDetector()
+      const callback = vi.fn()
+      detector.subscribe(callback)
+      try {
+        expect(NetInfo.fetch).toHaveBeenCalledOnce()
+        ;(NetInfo as any).__triggerState({
+          isConnected: true,
+          isInternetReachable: true,
+        })
+        ;(NetInfo as any).__resolveFetch({
+          isConnected: false,
+          isInternetReachable: false,
+        })
+        await Promise.resolve()
+        ;(NetInfo as any).__triggerState({
+          isConnected: true,
+          isInternetReachable: true,
+        })
+
+        expect({
+          notifications: callback.mock.calls.length,
+          isOnline: detector.isOnline(),
+        }).toEqual({ notifications: 0, isOnline: true })
+      } finally {
+        detector.dispose()
+      }
+    })
+
+    it(`uses the startup snapshot until a live event arrives`, async () => {
+      ;(NetInfo as any).__holdNextFetch()
+      const detector = new ReactNativeOnlineDetector()
+      const callback = vi.fn()
+      detector.subscribe(callback)
+      try {
+        ;(NetInfo as any).__resolveFetch({
+          isConnected: false,
+          isInternetReachable: false,
+        })
+        await Promise.resolve()
+        expect(detector.isOnline()).toBe(false)
+        ;(NetInfo as any).__triggerState({
+          isConnected: true,
+          isInternetReachable: true,
+        })
+        expect({
+          notifications: callback.mock.calls.length,
+          isOnline: detector.isOnline(),
+        }).toEqual({ notifications: 1, isOnline: true })
+      } finally {
+        detector.dispose()
+      }
+    })
+
     it(`should notify subscribers when transitioning from offline to online`, () => {
       const detector = new ReactNativeOnlineDetector()
       const callback = vi.fn()
@@ -268,6 +365,19 @@ describe(`ReactNativeOnlineDetector`, () => {
   })
 
   describe(`disposal`, () => {
+    it(`ignores startup snapshots that settle after disposal`, async () => {
+      ;(NetInfo as any).__holdNextFetch()
+      const detector = new ReactNativeOnlineDetector()
+      detector.dispose()
+      ;(NetInfo as any).__resolveFetch({
+        isConnected: false,
+        isInternetReachable: false,
+      })
+      await Promise.resolve()
+
+      expect(detector.isOnline()).toBe(true)
+    })
+
     it(`should unsubscribe from all native events on dispose`, () => {
       const detector = new ReactNativeOnlineDetector()
       const callback = vi.fn()

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocalStorageAdapter, startOfflineExecutor } from '../src/index'
+import { MissingTemporalConstructorError } from '../src/outbox/TransactionSerializer'
+import { FakeStorageAdapter } from './harness'
 import type { OfflineConfig } from '../src/types'
 
 describe(`OfflineExecutor`, () => {
@@ -72,5 +74,68 @@ describe(`OfflineExecutor`, () => {
     const executor = startOfflineExecutor(config)
 
     expect(() => executor.dispose()).not.toThrow()
+  })
+
+  it(`rejects startup when persisted native scalars cannot be restored`, async () => {
+    const storage = new FakeStorageAdapter()
+    await storage.set(
+      `tx:native-scalar`,
+      JSON.stringify({
+        valueEncoding: 3,
+        id: `native-scalar`,
+        mutationFnName: `syncData`,
+        mutations: [
+          {
+            globalKey: `test-collection:one`,
+            type: `insert`,
+            modified: {
+              id: `one`,
+              due: {
+                __type: `Temporal`,
+                type: `Temporal.PlainDate`,
+                value: `2026-09-16`,
+              },
+            },
+            original: {},
+            changes: {},
+            collectionId: `test-collection`,
+          },
+        ],
+        keys: [`test-collection:one`],
+        idempotencyKey: `once`,
+        createdAt: new Date(0).toISOString(),
+        retryCount: 0,
+        nextAttemptAt: 0,
+        version: 1,
+      }),
+    )
+    const temporalGlobal = globalThis as {
+      Temporal?: Record<string, unknown>
+    }
+    const previousTemporal = temporalGlobal.Temporal
+    temporalGlobal.Temporal = {}
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const executor = startOfflineExecutor({
+      ...config,
+      storage,
+      leaderElection: {
+        requestLeadership: async () => true,
+        releaseLeadership: () => {},
+        isLeader: () => true,
+        onLeadershipChange: () => () => {},
+      },
+    })
+
+    try {
+      await expect(executor.waitForInit()).rejects.toBeInstanceOf(
+        MissingTemporalConstructorError,
+      )
+      expect(storage.snapshot()).toHaveProperty(`tx:native-scalar`)
+    } finally {
+      executor.dispose()
+      warning.mockRestore()
+      if (previousTemporal === undefined) delete temporalGlobal.Temporal
+      else temporalGlobal.Temporal = previousTemporal
+    }
   })
 })

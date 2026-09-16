@@ -3,7 +3,7 @@ import type { OfflineTransaction } from '../types'
 
 export class KeyScheduler {
   private pendingTransactions: Array<OfflineTransaction> = []
-  private isRunning = false
+  private activeTransactionId: string | undefined
 
   schedule(transaction: OfflineTransaction): boolean {
     return withSyncSpan(
@@ -35,7 +35,10 @@ export class KeyScheduler {
       `scheduler.getNext`,
       { pendingCount: this.pendingTransactions.length },
       (span) => {
-        if (this.isRunning || this.pendingTransactions.length === 0) {
+        if (
+          this.activeTransactionId !== undefined ||
+          this.pendingTransactions.length === 0
+        ) {
           span.setAttribute(`result`, `empty`)
           return undefined
         }
@@ -59,17 +62,17 @@ export class KeyScheduler {
     return Date.now() >= transaction.nextAttemptAt
   }
 
-  markStarted(_transaction: OfflineTransaction): void {
-    this.isRunning = true
+  markStarted(transaction: OfflineTransaction): void {
+    this.activeTransactionId = transaction.id
   }
 
   markCompleted(transaction: OfflineTransaction): void {
     this.removeTransaction(transaction)
-    this.isRunning = false
+    this.activeTransactionId = undefined
   }
 
   markFailed(_transaction: OfflineTransaction): void {
-    this.isRunning = false
+    this.activeTransactionId = undefined
   }
 
   private removeTransaction(transaction: OfflineTransaction): void {
@@ -99,12 +102,24 @@ export class KeyScheduler {
   }
 
   getRunningCount(): number {
-    return this.isRunning ? 1 : 0
+    return this.activeTransactionId === undefined ? 0 : 1
   }
 
   clear(): void {
     this.pendingTransactions = []
-    this.isRunning = false
+    this.activeTransactionId = undefined
+  }
+
+  private removePendingTransactions(
+    transactionIds: Iterable<string>,
+  ): Array<string> {
+    const ids = new Set(transactionIds)
+    if (this.activeTransactionId !== undefined)
+      ids.delete(this.activeTransactionId)
+    this.pendingTransactions = this.pendingTransactions.filter(
+      ({ id }) => !ids.has(id),
+    )
+    return [...ids]
   }
 
   getAllPendingTransactions(): Array<OfflineTransaction> {
@@ -125,4 +140,12 @@ export class KeyScheduler {
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
     )
   }
+}
+
+/** @internal Reconcile one replay snapshot without canceling issued work. */
+export function reconcilePendingTransactions(
+  scheduler: KeyScheduler,
+  transactionIds: Iterable<string>,
+): Array<string> {
+  return scheduler[`removePendingTransactions`](transactionIds)
 }

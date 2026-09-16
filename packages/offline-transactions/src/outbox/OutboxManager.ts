@@ -1,5 +1,8 @@
 import { withSpan } from '../telemetry/tracer'
-import { TransactionSerializer } from './TransactionSerializer'
+import {
+  MissingTemporalConstructorError,
+  TransactionSerializer,
+} from './TransactionSerializer'
 import type { OfflineTransaction, StorageAdapter } from '../types'
 import type { Collection } from '@tanstack/db'
 
@@ -74,6 +77,7 @@ export class OutboxManager {
         span.setAttribute(`result`, `found`)
         return transaction
       } catch (error) {
+        if (error instanceof MissingTemporalConstructorError) throw error
         console.warn(`Failed to deserialize transaction ${id}:`, error)
         span.setAttribute(`result`, `deserialize_error`)
         return null
@@ -108,6 +112,7 @@ export class OutboxManager {
               const transaction = this.serializer.deserialize(data)
               transactions.push(transaction)
             } catch (error) {
+              if (error instanceof MissingTemporalConstructorError) throw error
               console.warn(
                 `Failed to deserialize transaction from key ${key}:`,
                 error,

@@ -1,9 +1,15 @@
 import { createCollection, createTransaction } from '@tanstack/db'
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
-import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
+import { OutboxManager } from '../src/outbox/OutboxManager'
+import {
+  MissingTemporalConstructorError,
+  TransactionSerializer,
+} from '../src/outbox/TransactionSerializer'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
+import { FakeStorageAdapter } from './harness'
 import type { OfflineTransaction } from '../src/types'
+import type { PendingMutation } from '@tanstack/db'
 
 type Value =
   | null
@@ -108,6 +114,7 @@ async function checkRoundtrip(
   fault: Fault = `none`,
   boundary: `encoder` | `decoder` = `encoder`,
   legacy = false,
+  versionTwo = false,
 ) {
   const row = (index: number, revision: number, payload: Value): Row => ({
     id: `row:${index}`,
@@ -206,7 +213,7 @@ async function checkRoundtrip(
     }
     const expectedWire = {
       ...envelope,
-      valueEncoding: 2,
+      valueEncoding: 3,
       createdAt: new Date(time).toISOString(),
       mutations: edits.map((edit, index) => ({
         globalKey: transaction.mutations[index]!.globalKey,
@@ -237,7 +244,7 @@ async function checkRoundtrip(
       if (fault === `omit-changes`)
         encoded = encoded.replaceAll(`"changes":`, `"lostChanges":`)
       if (fault === `unknown-encoding`)
-        encoded = encoded.replace(`"valueEncoding":2`, `"valueEncoding":3`)
+        encoded = encoded.replace(`"valueEncoding":3`, `"valueEncoding":4`)
       return encoded
     }
     const serialized = serializer.serialize(offline)
@@ -257,6 +264,8 @@ async function checkRoundtrip(
       const { valueEncoding: _encoding, ...oldWire } = expectedWire
       wires.push(JSON.stringify(oldWire))
     }
+    if (versionTwo)
+      wires.push(JSON.stringify({ ...expectedWire, valueEncoding: 2 }))
     for (const wire of wires) {
       const decoded = fresh.deserialize(wire)
       const { mutations, ...rest } = decoded
@@ -299,6 +308,373 @@ const twin: Pair = {
   wire: `2024-01-01T00:00:00.000Z`,
 }
 
+const temporalCases = [
+  [`Duration`, `PT1H30M`],
+  [`Instant`, `2026-09-16T12:34:56Z`],
+  [`PlainDate`, `2026-09-16`],
+  [`PlainDateTime`, `2026-09-16T12:34:56`],
+  [`PlainMonthDay`, `09-16`],
+  [`PlainTime`, `12:34:56`],
+  [`PlainYearMonth`, `2026-09`],
+  [`ZonedDateTime`, `2026-09-16T12:34:56-06:00[America/Denver]`],
+] as const
+
+type TemporalName = (typeof temporalCases)[number][0]
+
+class TemporalStub {
+  readonly #name: TemporalName
+  readonly #value: string
+
+  constructor(name: TemporalName, value: string) {
+    this.#name = name
+    this.#value = value
+  }
+
+  get [Symbol.toStringTag](): `Temporal.${TemporalName}` {
+    return `Temporal.${this.#name}`
+  }
+
+  toString(): string {
+    return this.#value
+  }
+}
+
+it(`preserves native scalar identity across storage restart`, async () => {
+  type NativeRow = {
+    id: string
+    values: Record<TemporalName, TemporalStub>
+  }
+  const writer = createCollection<NativeRow>({
+    id: `native-scalar-writer`,
+    getKey: (row) => row.id,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  const reader = createCollection<NativeRow>({
+    id: `native-scalar-reader`,
+    getKey: (row) => row.id,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  const previousTemporal = (
+    globalThis as { Temporal?: Record<string, unknown> }
+  ).Temporal
+  ;(globalThis as { Temporal?: Record<string, unknown> }).Temporal =
+    Object.fromEntries(
+      temporalCases.map(([name]) => [
+        name,
+        { from: (value: string) => new TemporalStub(name, value) },
+      ]),
+    )
+
+  const values = Object.fromEntries(
+    temporalCases.map(([name, value]) => [name, new TemporalStub(name, value)]),
+  ) as NativeRow[`values`]
+  const mutation = {
+    globalKey: `native-scalar-writer:one`,
+    type: `update`,
+    modified: { id: `one`, values },
+    original: { id: `one`, values },
+    changes: { values },
+    collection: writer,
+  } as unknown as PendingMutation
+  const transaction: OfflineTransaction = {
+    id: `native-scalars`,
+    mutationFnName: `persist`,
+    mutations: [mutation],
+    keys: [mutation.globalKey],
+    idempotencyKey: `once`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    metadata: { nested: { values } },
+    version: 1,
+  }
+
+  try {
+    const encoded = new TransactionSerializer({ rows: writer }).serialize(
+      transaction,
+    )
+    const wire = JSON.parse(encoded)
+    expect(wire.valueEncoding).toBe(3)
+    const encodedLocations = [
+      wire.mutations[0].modified.values,
+      wire.mutations[0].original.values,
+      wire.mutations[0].changes.values,
+      wire.metadata.nested.values,
+    ] as Array<Record<TemporalName, unknown>>
+    for (const location of encodedLocations)
+      for (const [name, value] of temporalCases)
+        expect(location[name]).toEqual({
+          __type: `Temporal`,
+          type: `Temporal.${name}`,
+          value,
+        })
+
+    const restarted = new TransactionSerializer({ rows: reader })
+    const decoded = restarted.deserialize(encoded)
+    const decodedMutation = decoded.mutations[0]!
+    const restored = [
+      (decodedMutation.modified as NativeRow).values,
+      (decodedMutation.original as NativeRow).values,
+      (decodedMutation.changes as { values: NativeRow[`values`] }).values,
+      (
+        decoded.metadata as {
+          nested: { values: NativeRow[`values`] }
+        }
+      ).nested.values,
+    ] as Array<Record<TemporalName, unknown>>
+
+    for (const location of restored) {
+      for (const [name, value] of temporalCases) {
+        expect(location[name]).toBeInstanceOf(TemporalStub)
+        expect(Object.prototype.toString.call(location[name])).toBe(
+          `[object Temporal.${name}]`,
+        )
+        expect(String(location[name])).toBe(value)
+      }
+    }
+  } finally {
+    if (previousTemporal === undefined)
+      delete (globalThis as { Temporal?: Record<string, unknown> }).Temporal
+    else
+      (globalThis as { Temporal?: Record<string, unknown> }).Temporal =
+        previousTemporal
+    await writer.cleanup()
+    await reader.cleanup()
+  }
+})
+
+it(`preserves marker-shaped user data through current wire encoding`, async () => {
+  const runtime = {
+    __type: `Temporal`,
+    type: `Temporal.PlainDate`,
+    value: `2026-09-16`,
+  }
+  await checkRoundtrip(
+    [
+      {
+        kind: `insert`,
+        slot: 0,
+        before: twin,
+        after: { runtime, wire: objectWire(runtime) },
+      },
+    ],
+    0,
+  )
+})
+
+it(`preserves prior wire meanings when reading native scalar markers`, async () => {
+  const collection = createCollection<{
+    id: string
+    due: unknown
+    createdAt: unknown
+  }>({
+    id: `native-scalar-compatibility`,
+    getKey: (row) => row.id,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  const serializer = new TransactionSerializer({ rows: collection })
+  const temporalData = {
+    __type: `Temporal`,
+    type: `Temporal.PlainDate`,
+    value: `2026-09-16`,
+  }
+  const dateMarker = {
+    __type: `Date`,
+    value: `2026-09-16T12:34:56.000Z`,
+  }
+  const baseWire = {
+    id: `compatibility`,
+    mutationFnName: `persist`,
+    mutations: [
+      {
+        globalKey: `rows:one`,
+        type: `insert`,
+        modified: { id: `one`, due: temporalData, createdAt: dateMarker },
+        original: {},
+        changes: {},
+        collectionId: `rows`,
+      },
+    ],
+    keys: [`rows:one`],
+    idempotencyKey: `once`,
+    createdAt: new Date(0).toISOString(),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    metadata: { due: temporalData, createdAt: dateMarker },
+    version: 1,
+  }
+
+  try {
+    const unversioned = serializer.deserialize(JSON.stringify(baseWire))
+    expect(unversioned.mutations[0]!.modified).toEqual({
+      id: `one`,
+      due: temporalData,
+      createdAt: new Date(dateMarker.value),
+    })
+    expect(unversioned.metadata).toEqual(baseWire.metadata)
+
+    const versionTwo = serializer.deserialize(
+      JSON.stringify({
+        ...baseWire,
+        valueEncoding: 2,
+        mutations: [
+          {
+            ...baseWire.mutations[0],
+            modified: {
+              id: `one`,
+              due: { __type: `Object`, value: temporalData },
+              createdAt: dateMarker,
+            },
+          },
+        ],
+      }),
+    )
+    expect(versionTwo.mutations[0]!.modified).toEqual({
+      id: `one`,
+      due: temporalData,
+      createdAt: new Date(dateMarker.value),
+    })
+    expect(versionTwo.metadata).toEqual(baseWire.metadata)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
+it(`fails visibly when a stored native scalar cannot be restored`, async () => {
+  const collection = createCollection<{ id: string; due: unknown }>({
+    id: `native-scalar-missing-runtime`,
+    getKey: (row) => row.id,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  const marker = {
+    __type: `Temporal`,
+    type: `Temporal.PlainDate`,
+    value: `2026-09-16`,
+  }
+  const wire = JSON.stringify({
+    valueEncoding: 3,
+    id: `missing-runtime`,
+    mutationFnName: `persist`,
+    mutations: [
+      {
+        globalKey: `rows:one`,
+        type: `insert`,
+        modified: { id: `one`, due: marker },
+        original: {},
+        changes: {},
+        collectionId: `rows`,
+      },
+    ],
+    keys: [`rows:one`],
+    idempotencyKey: `once`,
+    createdAt: new Date(0).toISOString(),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    metadata: { due: marker },
+    version: 1,
+  })
+  const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
+  const previousTemporal = temporalGlobal.Temporal
+  temporalGlobal.Temporal = {}
+  const storage = new FakeStorageAdapter()
+  await storage.set(`tx:missing-runtime`, wire)
+  const outbox = new OutboxManager(storage, { rows: collection })
+
+  try {
+    expect(() =>
+      new TransactionSerializer({ rows: collection }).deserialize(wire),
+    ).toThrow(MissingTemporalConstructorError)
+    await expect(outbox.get(`missing-runtime`)).rejects.toThrow(
+      MissingTemporalConstructorError,
+    )
+    await expect(outbox.getAll()).rejects.toThrow(
+      MissingTemporalConstructorError,
+    )
+    expect(storage.snapshot()).toHaveProperty(`tx:missing-runtime`, wire)
+  } finally {
+    if (previousTemporal === undefined) delete temporalGlobal.Temporal
+    else temporalGlobal.Temporal = previousTemporal
+    await collection.cleanup()
+  }
+})
+
+it(`rejects malformed native scalar markers and constructor failures`, async () => {
+  const collection = createCollection<{ id: string; due: unknown }>({
+    id: `native-scalar-invalid`,
+    getKey: (row) => row.id,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+  const serializer = new TransactionSerializer({ rows: collection })
+  const wire = (marker: unknown) =>
+    JSON.stringify({
+      valueEncoding: 3,
+      id: `invalid-native-scalar`,
+      mutationFnName: `persist`,
+      mutations: [
+        {
+          globalKey: `rows:one`,
+          type: `insert`,
+          modified: { id: `one`, due: marker },
+          original: {},
+          changes: {},
+          collectionId: `rows`,
+        },
+      ],
+      keys: [`rows:one`],
+      idempotencyKey: `once`,
+      createdAt: new Date(0).toISOString(),
+      retryCount: 0,
+      nextAttemptAt: 0,
+      version: 1,
+    })
+
+  try {
+    expect(() =>
+      serializer.deserialize(
+        wire({
+          __type: `Temporal`,
+          type: `Temporal.Calendar`,
+          value: `iso8601`,
+        }),
+      ),
+    ).toThrow(`Corrupted Temporal marker: invalid type field`)
+    expect(() =>
+      serializer.deserialize(
+        wire({ __type: `Temporal`, type: `Temporal.PlainDate` }),
+      ),
+    ).toThrow(`Corrupted Temporal marker: missing value field`)
+
+    const temporalGlobal = globalThis as {
+      Temporal?: Record<string, unknown>
+    }
+    const previousTemporal = temporalGlobal.Temporal
+    const constructorFailure = new Error(`constructor rejected value`)
+    temporalGlobal.Temporal = {
+      PlainDate: {
+        from: () => {
+          throw constructorFailure
+        },
+      },
+    }
+    try {
+      expect(() =>
+        serializer.deserialize(
+          wire({
+            __type: `Temporal`,
+            type: `Temporal.PlainDate`,
+            value: `not-a-date`,
+          }),
+        ),
+      ).toThrow(constructorFailure)
+    } finally {
+      if (previousTemporal === undefined) delete temporalGlobal.Temporal
+      else temporalGlobal.Temporal = previousTemporal
+    }
+  } finally {
+    await collection.cleanup()
+  }
+})
+
 // Roundtrips generate valid envelopes. Corrupted wire must be rejected before
 // it can replace any mutation field with an invented empty object.
 it.each([`modified`, `original`, `changes`] as const)(
@@ -335,7 +711,7 @@ it.each([`modified`, `original`, `changes`] as const)(
                 JSON.stringify({
                   id: `bad`,
                   createdAt: new Date(0).toISOString(),
-                  valueEncoding: 2,
+                  valueEncoding: 3,
                   mutations: [mutation],
                 }),
               ),
@@ -471,6 +847,35 @@ it.each([20260915, undefined])(
   },
 )
 
+it.each([20260916, undefined])(
+  `reads version-two escaped values across restart (seed %s)`,
+  async (seed) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.record({
+            kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
+            slot: fc.integer({ min: 0, max: 1 }),
+            before: tree(2),
+            after: tree(2),
+          }),
+          { minLength: 1, maxLength: 6 },
+        ),
+        async (edits) =>
+          checkRoundtrip(edits, 0, `none`, `encoder`, false, true),
+      ),
+      {
+        seed: seed ?? replaySeed,
+        numRuns,
+        ...(seed === undefined && replayPath !== undefined
+          ? { path: replayPath }
+          : {}),
+        examples: [[pinned]],
+      },
+    )
+  },
+)
+
 it.each(
   (
     [
@@ -499,7 +904,7 @@ it.each(
               message:
                 fault === `wrong-registry`
                   ? `Collection with id writer:0 not found`
-                  : `Unsupported transaction value encoding: 3`,
+                  : `Unsupported transaction value encoding: 4`,
             }
       await expect(
         checkRoundtrip(pinned, 0, fault, boundary),

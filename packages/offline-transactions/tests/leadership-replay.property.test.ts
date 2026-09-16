@@ -32,6 +32,298 @@ const storedTransaction = (id: string): OfflineTransaction => ({
   version: 1,
 })
 
+it(`revokes only replay work excluded by the retry hook`, async () => {
+  // The hook classifies one captured replay snapshot. Reconciliation may
+  // revoke IDs from that snapshot, but must preserve work admitted later.
+  const captured = gate()
+  const delivery = gate()
+  let hold = false
+  let scans = 0
+  class Storage extends FakeStorageAdapter {
+    override async keys() {
+      scans++
+      return super.keys()
+    }
+
+    override async get(key: string) {
+      const value = await super.get(key)
+      if (hold && key === `tx:filtered`) {
+        captured.resolve()
+        await delivery.promise
+      }
+      return value
+    }
+  }
+
+  const filtered = storedTransaction(`filtered`)
+  const retained = {
+    ...storedTransaction(`retained`),
+    createdAt: new Date(1),
+  }
+  const admitted = {
+    ...storedTransaction(`admitted`),
+    createdAt: new Date(2),
+  }
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  await outbox.add(filtered)
+  await outbox.add(retained)
+
+  const hookInputs: Array<Array<string>> = []
+  const calls: Array<string> = []
+  let filterReplay = false
+  let online = false
+  const scheduler = new KeyScheduler()
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: async ({ transaction }) => {
+          calls.push(transaction.id)
+        },
+      },
+      beforeRetry: (transactions) => {
+        hookInputs.push(transactions.map(({ id }) => id))
+        return filterReplay
+          ? transactions.filter(({ id }) => id !== filtered.id)
+          : transactions
+      },
+      jitter: false,
+    },
+    {
+      isOfflineEnabled: true,
+      isOnline: () => online,
+      resolveTransaction: () => {},
+      rejectTransaction: () => {},
+      registerRestorationTransaction: () => {},
+    },
+  )
+
+  try {
+    await executor.loadPendingTransactions()
+    expect(scheduler.getAllPendingTransactions().map(({ id }) => id)).toEqual([
+      filtered.id,
+      retained.id,
+    ])
+
+    filterReplay = true
+    hold = true
+    const loading = executor.loadPendingTransactions()
+    await atOracleCheckpoint(captured.promise, `retry scan captured filtered`)
+    await outbox.add(admitted)
+    await executor.execute(admitted)
+    hold = false
+    delivery.resolve()
+    await atOracleCheckpoint(loading, `filtered retry scan delivered`)
+
+    const queued = scheduler.getAllPendingTransactions().map(({ id }) => id)
+    const durable = (await outbox.getAll()).map(({ id }) => id)
+    online = true
+    await atOracleCheckpoint(executor.executeAll(), `retained work drained`)
+
+    expect({ queued, durable, calls, hookInputs, scans }).toEqual({
+      queued: [retained.id, admitted.id],
+      durable: [retained.id, admitted.id],
+      calls: [retained.id, admitted.id],
+      hookInputs: [
+        [filtered.id, retained.id],
+        [filtered.id, retained.id],
+      ],
+      scans: 3,
+    })
+  } finally {
+    hold = false
+    delivery.resolve()
+    executor.clear()
+  }
+})
+
+it(`keeps issued work durable when a replay hook excludes it`, async () => {
+  const entered = gate()
+  const release = gate()
+  const retryRead = gate()
+  const retryWrite = gate()
+  let holdRetryUpdate = false
+  class Storage extends FakeStorageAdapter {
+    override async get(key: string) {
+      const value = await super.get(key)
+      if (holdRetryUpdate && key === `tx:active`) {
+        holdRetryUpdate = false
+        retryRead.resolve()
+        await retryWrite.promise
+      }
+      return value
+    }
+  }
+  const active = storedTransaction(`active`)
+  const filtered = {
+    ...storedTransaction(`filtered`),
+    createdAt: new Date(1),
+  }
+  const retained = {
+    ...storedTransaction(`retained`),
+    createdAt: new Date(2),
+  }
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  await Promise.all(
+    [active, filtered, retained].map((transaction) => outbox.add(transaction)),
+  )
+  const scheduler = new KeyScheduler()
+  let online = true
+  for (const transaction of [active, filtered, retained])
+    scheduler.schedule(transaction)
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: async () => {
+          entered.resolve()
+          await release.promise
+          holdRetryUpdate = true
+          throw new Error(`retry`)
+        },
+      },
+      beforeRetry: (transactions) =>
+        transactions.filter(({ id }) => id === retained.id),
+      jitter: false,
+    },
+    {
+      isOfflineEnabled: true,
+      isOnline: () => online,
+      resolveTransaction: () => {},
+      rejectTransaction: () => {},
+      registerRestorationTransaction: () => {},
+    },
+  )
+
+  let executing: Promise<void> | undefined
+  try {
+    executing = executor.executeAll()
+    await atOracleCheckpoint(entered.promise, `issued work entered provider`)
+    await executor.loadPendingTransactions()
+
+    expect({
+      queued: scheduler.getAllPendingTransactions().map(({ id }) => id),
+      durable: (await outbox.getAll()).map(({ id }) => id),
+      running: scheduler.getRunningCount(),
+    }).toEqual({
+      queued: [active.id, retained.id],
+      durable: [active.id, retained.id],
+      running: 1,
+    })
+
+    release.resolve()
+    await atOracleCheckpoint(retryRead.promise, `retry persistence read issued`)
+    await executor.loadPendingTransactions()
+    expect({
+      queued: scheduler.getAllPendingTransactions().map(({ id }) => id),
+      durable: (await outbox.getAll()).map(({ id }) => id),
+      running: scheduler.getRunningCount(),
+    }).toEqual({
+      queued: [active.id, retained.id],
+      durable: [active.id, retained.id],
+      running: 1,
+    })
+
+    online = false
+    retryWrite.resolve()
+    await atOracleCheckpoint(executing, `issued work scheduled its retry`)
+    expect({
+      active: await outbox.get(active.id),
+      filtered: await outbox.get(filtered.id),
+      queued: scheduler.getAllPendingTransactions().map(({ id }) => id),
+      running: scheduler.getRunningCount(),
+    }).toMatchObject({
+      active: { id: active.id, retryCount: 1 },
+      filtered: null,
+      queued: [active.id, retained.id],
+      running: 0,
+    })
+  } finally {
+    online = false
+    release.resolve()
+    retryWrite.resolve()
+    await executing?.catch(() => undefined)
+    executor.clear()
+  }
+})
+
+it(`keeps permanently failed work owned until durable deletion settles`, async () => {
+  const deleting = gate()
+  const deleteRelease = gate()
+  class Storage extends FakeStorageAdapter {
+    override async delete(key: string) {
+      if (key === `tx:active`) {
+        deleting.resolve()
+        await deleteRelease.promise
+      }
+      return super.delete(key)
+    }
+  }
+  const active = storedTransaction(`active`)
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  await outbox.add(active)
+  const scheduler = new KeyScheduler()
+  scheduler.schedule(active)
+  const calls: Array<string> = []
+  let online = true
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: async ({ transaction }) => {
+          calls.push(transaction.id)
+          throw new NonRetriableError(`permanent`)
+        },
+      },
+      jitter: false,
+    },
+    {
+      isOfflineEnabled: true,
+      isOnline: () => online,
+      resolveTransaction: () => {},
+      rejectTransaction: () => {},
+      registerRestorationTransaction: () => {},
+    },
+  )
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let executing: Promise<void> | undefined
+
+  try {
+    executing = executor.executeAll()
+    await atOracleCheckpoint(deleting.promise, `durable rejection started`)
+    await executor.loadPendingTransactions()
+    expect({
+      queued: scheduler.getAllPendingTransactions().map(({ id }) => id),
+      durable: (await outbox.getAll()).map(({ id }) => id),
+      running: scheduler.getRunningCount(),
+    }).toEqual({ queued: [active.id], durable: [active.id], running: 1 })
+
+    online = false
+    deleteRelease.resolve()
+    await atOracleCheckpoint(executing, `durable rejection settled`)
+    expect({
+      queued: scheduler.getAllPendingTransactions().map(({ id }) => id),
+      durable: (await outbox.getAll()).map(({ id }) => id),
+      calls,
+    }).toEqual({ queued: [], durable: [], calls: [active.id] })
+  } finally {
+    online = false
+    deleteRelease.resolve()
+    await executing?.catch(() => undefined)
+    executor.clear()
+    warning.mockRestore()
+  }
+})
+
 it.each([`construction`, `leadership`, `outbox read`, `retry hook`] as const)(
   `does not revive a disposed executor after %s`,
   async (boundary) => {

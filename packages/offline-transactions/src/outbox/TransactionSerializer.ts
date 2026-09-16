@@ -6,6 +6,33 @@ import type {
 } from '../types'
 import type { Collection, PendingMutation } from '@tanstack/db'
 
+const temporalConstructorNames = [
+  `Duration`,
+  `Instant`,
+  `PlainDate`,
+  `PlainDateTime`,
+  `PlainMonthDay`,
+  `PlainTime`,
+  `PlainYearMonth`,
+  `ZonedDateTime`,
+] as const
+
+type TemporalConstructorName = (typeof temporalConstructorNames)[number]
+
+function getTemporalConstructorName(
+  type: unknown,
+): TemporalConstructorName | undefined {
+  if (typeof type !== `string` || !type.startsWith(`Temporal.`)) return
+  const constructorName = type.slice(
+    `Temporal.`.length,
+  ) as TemporalConstructorName
+  return temporalConstructorNames.includes(constructorName)
+    ? constructorName
+    : undefined
+}
+
+export class MissingTemporalConstructorError extends Error {}
+
 function setDataProperty(
   object: Record<string, unknown>,
   key: string,
@@ -39,8 +66,9 @@ export class TransactionSerializer {
   serialize(transaction: OfflineTransaction): string {
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
-      valueEncoding: 2,
+      valueEncoding: 3,
       createdAt: transaction.createdAt.toISOString(),
+      metadata: this.serializeValue(transaction.metadata),
       mutations: transaction.mutations.map((mutation) =>
         this.serializeMutation(mutation),
       ),
@@ -57,7 +85,11 @@ export class TransactionSerializer {
     }: Omit<SerializedOfflineTransaction, `valueEncoding`> & {
       valueEncoding?: unknown
     } = JSON.parse(data)
-    if (valueEncoding !== undefined && valueEncoding !== 2) {
+    if (
+      valueEncoding !== undefined &&
+      valueEncoding !== 2 &&
+      valueEncoding !== 3
+    ) {
       throw new Error(
         `Unsupported transaction value encoding: ${valueEncoding}`,
       )
@@ -73,8 +105,12 @@ export class TransactionSerializer {
     return {
       ...parsed,
       createdAt,
+      metadata:
+        valueEncoding === 3
+          ? this.deserializeValue(parsed.metadata, valueEncoding)
+          : parsed.metadata,
       mutations: parsed.mutations.map((mutationData) =>
-        this.deserializeMutation(mutationData, valueEncoding === 2),
+        this.deserializeMutation(mutationData, valueEncoding),
       ),
     }
   }
@@ -99,14 +135,14 @@ export class TransactionSerializer {
 
   private deserializeMutation(
     data: SerializedMutation,
-    escapedObjects: boolean,
+    valueEncoding: 2 | 3 | undefined,
   ): PendingMutation {
     const collection = this.collections[data.collectionId]
     if (!collection) {
       throw new Error(`Collection with id ${data.collectionId} not found`)
     }
 
-    const modified = this.deserializeValue(data.modified, escapedObjects)
+    const modified = this.deserializeValue(data.modified, valueEncoding)
 
     // Extract the key from the modified data using the collection's getKey function
     // This is needed for optimistic state restoration to work correctly
@@ -118,8 +154,8 @@ export class TransactionSerializer {
       globalKey: data.globalKey,
       type: data.type as any,
       modified,
-      original: this.deserializeValue(data.original, escapedObjects),
-      changes: this.deserializeValue(data.changes, escapedObjects) ?? {},
+      original: this.deserializeValue(data.original, valueEncoding),
+      changes: this.deserializeValue(data.changes, valueEncoding) ?? {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
@@ -141,6 +177,17 @@ export class TransactionSerializer {
       return { __type: `Date`, value: value.toISOString() }
     }
 
+    if (
+      typeof value === `object` &&
+      getTemporalConstructorName(value[Symbol.toStringTag])
+    ) {
+      return {
+        __type: `Temporal`,
+        type: value[Symbol.toStringTag],
+        value: value.toString(),
+      }
+    }
+
     if (typeof value === `object`) {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
@@ -157,7 +204,7 @@ export class TransactionSerializer {
     return value
   }
 
-  private deserializeValue(value: any, escapedObjects: boolean): any {
+  private deserializeValue(value: any, valueEncoding: 2 | 3 | undefined): any {
     if (value === null || value === undefined) {
       return value
     }
@@ -175,9 +222,36 @@ export class TransactionSerializer {
       return date
     }
 
+    if (
+      valueEncoding === 3 &&
+      typeof value === `object` &&
+      value.__type === `Temporal`
+    ) {
+      const constructorName = getTemporalConstructorName(value.type)
+      if (!constructorName)
+        throw new Error(`Corrupted Temporal marker: invalid type field`)
+      if (typeof value.value !== `string`)
+        throw new Error(`Corrupted Temporal marker: missing value field`)
+      const constructor = (
+        globalThis as {
+          Temporal?: Partial<
+            Record<
+              TemporalConstructorName,
+              { from: (value: string) => unknown }
+            >
+          >
+        }
+      ).Temporal?.[constructorName]
+      if (typeof constructor?.from !== `function`)
+        throw new MissingTemporalConstructorError(
+          `Cannot restore Temporal.${constructorName}: missing global constructor`,
+        )
+      return constructor.from(value.value)
+    }
+
     if (typeof value === `object`) {
       // Unwrap once, then decode only the fields: the object's own __type is data.
-      if (escapedObjects && value.__type === `Object`) {
+      if (valueEncoding !== undefined && value.__type === `Object`) {
         if (
           value.value === null ||
           typeof value.value !== `object` ||
@@ -193,7 +267,7 @@ export class TransactionSerializer {
           setDataProperty(
             result,
             key,
-            this.deserializeValue(value[key], escapedObjects),
+            this.deserializeValue(value[key], valueEncoding),
           )
         }
       }

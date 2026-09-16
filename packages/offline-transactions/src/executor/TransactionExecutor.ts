@@ -2,6 +2,7 @@ import { createTransaction } from '@tanstack/db'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
+import { reconcilePendingTransactions } from './KeyScheduler'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
@@ -180,8 +181,11 @@ export class TransactionExecutor {
         span.setAttribute(`shouldRetry`, shouldRetry)
 
         if (!shouldRetry) {
-          this.scheduler.markCompleted(transaction)
-          await this.outbox.remove(transaction.id)
+          try {
+            await this.outbox.remove(transaction.id)
+          } finally {
+            this.scheduler.markCompleted(transaction)
+          }
           console.warn(
             `Transaction ${transaction.id} failed permanently:`,
             error,
@@ -211,7 +215,6 @@ export class TransactionExecutor {
         span.setAttribute(`retryDelay`, delay)
         span.setAttribute(`nextRetryCount`, updatedTransaction.retryCount)
 
-        this.scheduler.markFailed(transaction)
         this.scheduler.updateTransaction(updatedTransaction)
 
         try {
@@ -221,6 +224,8 @@ export class TransactionExecutor {
           span.recordException(persistError as Error)
           span.setAttribute(`result`, `persist_failed`)
           throw persistError
+        } finally {
+          this.scheduler.markFailed(transaction)
         }
 
         // Schedule retry timer
@@ -247,6 +252,14 @@ export class TransactionExecutor {
         this.scheduler.schedule(transaction),
       )
 
+      removedIds = transactions
+        .filter(
+          (tx) =>
+            !filteredTransactions.some((filtered) => filtered.id === tx.id),
+        )
+        .map(({ id }) => id)
+      removedIds = reconcilePendingTransactions(this.scheduler, removedIds)
+
       // Restore optimistic state for loaded transactions
       // This ensures the UI shows the optimistic data while transactions are pending
       this.restoreOptimisticState(newlyLoaded)
@@ -256,13 +269,6 @@ export class TransactionExecutor {
 
       // Schedule retry timer for loaded transactions
       this.scheduleNextRetry()
-
-      removedIds = transactions
-        .filter(
-          (tx) =>
-            !filteredTransactions.some((filtered) => filtered.id === tx.id),
-        )
-        .map(({ id }) => id)
     })
 
     if (removedIds.length > 0) {
