@@ -200,6 +200,108 @@ tx.mutate(() => {
 await tx.commit()
 ```
 
+## Tracking Submission Status
+
+The `Transaction` returned by `mutate()` exposes local transaction state. Its
+`state` starts as `pending`, becomes `persisting` during commit, and settles as
+`completed` or `failed`. A rollback can move it to `failed` before or during
+persistence. `isPersisted.promise` settles at the same success or failure
+boundary.
+
+On the offline-execution path, successful settlement means the configured
+`mutationFn` returned and the executor removed the transaction from its durable
+outbox. It means the server confirmed or exposed the write only when that
+`mutationFn` explicitly waits for the provider's acknowledgement, read-back, or
+sync observation before returning.
+
+```typescript
+const offlineTx = offline.createOfflineTransaction({
+  mutationFnName: 'syncTodos',
+  autoCommit: false,
+})
+
+const tx = offlineTx.mutate(() => {
+  todoCollection.insert({ id: '1', text: 'Buy milk', completed: false })
+})
+
+console.log(tx.state) // 'pending'
+
+void offlineTx.commit().catch((error) => {
+  showSubmissionError(error)
+})
+
+await tx.isPersisted.promise
+console.log(tx.state) // 'completed'
+```
+
+### Tracking Every Pending Transaction for an Item
+
+An item can have more than one transaction in flight. Track transaction
+identities rather than storing one replaceable boolean or deleting an
+item-keyed entry unconditionally:
+
+```typescript
+import type { Transaction } from '@tanstack/db'
+
+const pendingByItem = new Map<string, Set<Transaction>>()
+
+function trackPending(itemId: string, tx: Transaction) {
+  const pending = pendingByItem.get(itemId) ?? new Set<Transaction>()
+  pending.add(tx)
+  pendingByItem.set(itemId, pending)
+
+  const removeThisTransaction = () => {
+    pending.delete(tx)
+    if (pending.size === 0 && pendingByItem.get(itemId) === pending) {
+      pendingByItem.delete(itemId)
+    }
+  }
+
+  // Handle fulfillment and rejection so cleanup does not create another
+  // rejected Promise chain.
+  void tx.isPersisted.promise.then(removeThisTransaction, removeThisTransaction)
+}
+
+function isPending(itemId: string): boolean {
+  return (pendingByItem.get(itemId)?.size ?? 0) > 0
+}
+```
+
+Using only `pendingItems.delete(itemId)` in an older transaction's completion
+handler is unsafe because it can erase a newer transaction's status. A map that
+represents only "the latest submission" must identity-check its cleanup:
+
+```typescript
+if (latestByItem.get(itemId) === tx) {
+  latestByItem.delete(itemId)
+}
+```
+
+That latest-only map can still be empty while an older transaction is pending
+if the newer transaction settles first. Use a set as above when the UI must
+answer whether _any_ submission remains pending.
+
+### Inspecting Offline Work
+
+The executor exposes point-in-time scheduler counts and the durable outbox:
+
+```typescript
+// Scheduled entries. The pending count can include the currently running entry.
+const pendingCount = offline.getPendingCount()
+const runningCount = offline.getRunningCount()
+
+// Durable entries, including retry metadata.
+const outbox = await offline.peekOutbox()
+for (const entry of outbox) {
+  console.log(entry.id, entry.retryCount, entry.lastError)
+}
+```
+
+These values describe local executor work, not backend confirmation. A normal
+retriable error leaves the transaction queued. A `NonRetriableError` marks a
+permanent failure, removes the outbox entry, and rolls back its optimistic
+state.
+
 ## Migration from TanStack DB
 
 This package uses explicit offline transactions to provide offline capabilities:
