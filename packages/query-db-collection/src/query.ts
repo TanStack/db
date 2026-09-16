@@ -807,9 +807,7 @@ export function queryCollectionOptions(
   // retaining entries after Query Core garbage-collects them.
   let ownedCacheQueries = new WeakSet<AnyQuery>()
   const cacheOwnerToken = {}
-  const trackedCacheQueries = new Set<AnyQuery>(
-    queryClient.getQueryCache().findAll({ queryKey: baseKey }),
-  )
+  let trackedCacheQueries: Set<AnyQuery>
   const logicalHashesByQuery = new WeakMap<AnyQuery, Set<string>>()
 
   // Manual writes require a successful fetch which started after the write.
@@ -980,6 +978,10 @@ export function queryCollectionOptions(
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
+    // Rebuild on every start so caches created while sync was stopped are owned.
+    trackedCacheQueries = new Set(
+      queryClient.getQueryCache().findAll({ queryKey: baseKey }),
+    )
     const { begin, write, commit, markReady, markError, collection, metadata } =
       params
     const persistedMetadata = metadata as

@@ -1248,3 +1248,37 @@ describe(`query collection ownership lifecycle`, () => {
     expect(values).not.toHaveBeenCalled()
   })
 })
+
+it.each([false, true])(
+  `evicts sibling caches created before sync starts, restart=%s`,
+  async (restart) => {
+    const queryClient = createQueryClient()
+    const id = `delayed-sync-cache`
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve([shared]),
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: false,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    if (restart) {
+      collection.startSyncImmediate()
+      await collection._sync.loadSubset({})
+      await collection.cleanup()
+    }
+    const siblingKey = [id, `prefetched-sibling`]
+    queryClient.setQueryData(siblingKey, [shared])
+    collection.startSyncImmediate()
+    await collection._sync.loadSubset({})
+    collection.utils.writeDelete(shared.id)
+    expect(queryClient.getQueryData(siblingKey)).toBeUndefined()
+  },
+)
