@@ -716,7 +716,8 @@ type BranchUnionResultRefs<TContext extends Context> =
 type JoinedRefsForContext<TContext extends Context> =
   TContext[`joinTypes`] extends Record<string, any>
     ? {
-        [K in keyof TContext[`joinTypes`] & keyof TContext[`schema`]]: RefForContextSchemaValue<
+        [K in keyof TContext[`joinTypes`] &
+          keyof TContext[`schema`]]: RefForContextSchemaValue<
           TContext[`schema`][K],
           IsNullableContextKey<TContext, K>
         >
@@ -733,9 +734,9 @@ export type RefsForContext<TContext extends Context> = {
     KeysOfUnion<RefsSchemaForContext<TContext>>,
     JoinedRefKey<TContext>
   >]: RefForContextSchemaValue<
-      ValueOfUnion<RefsSchemaForContext<TContext>, K>,
-      IsNullableContextKey<TContext, K>
-    >
+    ValueOfUnion<RefsSchemaForContext<TContext>, K>,
+    IsNullableContextKey<TContext, K>
+  >
 } & (TContext[`hasResult`] extends true
   ? { $selected: Ref<TContext[`result`]> }
   : {}) &
@@ -937,10 +938,7 @@ export type MergeContextWithJoinType<
   TContext extends Context,
   TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
-> = Omit<
-  TContext,
-  `schema` | `refsSchema` | `hasJoins` | `joinTypes`
-> & {
+> = Omit<TContext, `schema` | `refsSchema` | `hasJoins` | `joinTypes`> & {
   baseSchema: TContext[`baseSchema`]
   // Apply optionality immediately to the schema
   schema: ApplyJoinOptionalityToMergedSchema<
@@ -1264,10 +1262,7 @@ export type HasJoinType<
 export type MergeContextForJoinCallback<
   TContext extends Context,
   TNewSchema extends ContextSchema,
-> = Omit<
-  TContext,
-  `schema` | `refsSchema` | `hasJoins` | `joinTypes`
-> & {
+> = Omit<TContext, `schema` | `refsSchema` | `hasJoins` | `joinTypes`> & {
   baseSchema: TContext[`baseSchema`]
   // Merge schemas without applying join optionality - both are non-optional in join condition
   schema: TContext[`schema`] & TNewSchema

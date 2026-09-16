@@ -252,9 +252,7 @@ describe(`query API type algebra`, () => {
       Concrete[`selectedBranchUnion`]
     >[`renamed`]
     type JoinedBranchId = QueryResult<Concrete[`joinedBranchUnion`]>[`id`]
-    type JoinedBranchRowId = QueryResult<
-      Concrete[`joinedBranchUnion`]
-    >[`rowId`]
+    type JoinedBranchRowId = QueryResult<Concrete[`joinedBranchUnion`]>[`rowId`]
     expectTypeOf<DirectConcrete>().toEqualTypeOf<number>()
     expectTypeOf<IsAny<JoinedId>>().toEqualTypeOf<false>()
     expectTypeOf<JoinedId>().toEqualTypeOf<string | undefined>()
@@ -477,5 +475,4 @@ describe(`query API type algebra`, () => {
 
     void useSchemaFallback
   })
-
 })
