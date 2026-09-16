@@ -646,6 +646,7 @@ describe(`createLiveQueryObserver`, () => {
         afterValue.layoutRevision,
       )
       expect([...afterLayout.state!.keys()]).toEqual([`1`, `3`])
+      expect([...afterValue.state!.keys()]).toEqual([`1`, `2`])
     } finally {
       unsubscribe()
       observer.dispose()
