@@ -67,8 +67,8 @@ function expectDistinctHashes(
   }
 }
 
-// This is the original sampled array/object distinction, also used to verify
-// actual source failure replay below. A collision is not a product defect.
+// This is the original sampled array/object distinction. A collision is not a
+// product defect.
 function expectArrayObjectDistinct(
   arr: Array<number>,
   session: HashSession = nativeSession,
@@ -78,6 +78,13 @@ function expectArrayObjectDistinct(
     obj[String(index)] = value
   })
   expectDistinctHashes(`array-object`, arr, arr, obj, session)
+}
+
+function expectBooleanNullDistinct(
+  value: boolean,
+  session: HashSession = nativeSession,
+): void {
+  expectDistinctHashes(`boolean-null`, value, value, null, session)
 }
 
 function expectEqualHashes(
@@ -428,15 +435,14 @@ describe(`hash property-based tests`, () => {
       const collisionSession = await captureHashSession(
         nativeSession.tape.map(() => 0),
       )
-      const property = fc.property(
-        fc.array(fc.integer(), { minLength: 1, maxLength: 5 }),
-        (arr) => expectArrayObjectDistinct(arr, collisionSession),
+      const property = fc.property(fc.boolean(), (value) =>
+        expectBooleanNullDistinct(value, collisionSession),
       )
       const failed = fc.check(property, { seed: 205205, numRuns: 1 })
       expect(failed.failed).toBe(true)
       expect(failed.numShrinks).toBeGreaterThan(0)
-      expect(failed.counterexample).toEqual([[0]])
-      expect(failed.counterexamplePath).toBe(`0:0:0`)
+      expect(failed.counterexample).toEqual([false])
+      expect(failed.counterexamplePath).toBe(`0:0`)
       expect(failed.errorInstance).toBeInstanceOf(HashReplayError)
       if (
         !(failed.errorInstance instanceof HashReplayError) ||
@@ -446,14 +452,13 @@ describe(`hash property-based tests`, () => {
       }
       const failure = failed.errorInstance
       expect(failure.cause).toMatchObject({ name: `AssertionError` })
-      expect(failure.replay.law).toBe(`array-object`)
+      expect(failure.replay.law).toBe(`boolean-null`)
       expect(failure.replay.input).toEqual(failed.counterexample[0])
       expect(failure.replay.observed[0]).toBe(failure.replay.observed[1])
       const replaySession = await captureHashSession(failure.replay.tape)
       const replay = fc.check(
-        fc.property(
-          fc.array(fc.integer(), { minLength: 1, maxLength: 5 }),
-          (arr) => expectArrayObjectDistinct(arr, replaySession),
+        fc.property(fc.boolean(), (value) =>
+          expectBooleanNullDistinct(value, replaySession),
         ),
         {
           seed: failed.seed,
@@ -491,7 +496,7 @@ describe(`hash property-based tests`, () => {
       expect(reported.cause).toBeInstanceOf(HashReplayError)
       // The same original consumer remains a valid sampled control under its
       // native initialization; it is not weakened to accommodate the collision.
-      expectArrayObjectDistinct([0])
+      expectBooleanNullDistinct(false)
     })
 
     it.each([0, 42, ``, `reconstructed`])(
