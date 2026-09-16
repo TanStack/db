@@ -149,8 +149,8 @@ export class CollectionChangesManager<
               ? {
                   ...change,
                   type: `update`,
-                  previousValue: this.enrichChangeWithVirtualProps(pending)
-                    .value,
+                  previousValue:
+                    this.enrichChangeWithVirtualProps(pending).value,
                 }
               : change,
           )
