@@ -55,7 +55,7 @@ const db = new PowerSyncDatabase({
 ### 3. (optional) Configure Sync with a Backend
 
 ```ts
-import {
+import type {
   CommonPowerSyncDatabase,
   PowerSyncBackendConnector,
   PowerSyncCredentials,
