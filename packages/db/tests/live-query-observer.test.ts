@@ -608,6 +608,51 @@ describe(`createLiveQueryObserver`, () => {
     observer.dispose()
   })
 
+  it(`separates value publications from layout revisions`, async () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any, {
+      mode: `wholesale`,
+    })
+    let notifications = 0
+    const unsubscribe = observer.subscribe(() => notifications++)
+
+    try {
+      const before = observer.getSnapshot()
+      source.utils.begin()
+      source.utils.write({
+        type: `update`,
+        value: { id: `1`, name: `Updated` },
+      })
+      source.utils.commit()
+      const afterValue = observer.getSnapshot()
+
+      expect(notifications).toBe(1)
+      expect(afterValue).not.toBe(before)
+      expect(afterValue.layoutRevision).toBe(before.layoutRevision)
+      expect(afterValue.state?.get(`1`)?.name).toBe(`Updated`)
+      expect(before.state?.get(`1`)?.name).toBe(`A`)
+
+      source.utils.begin()
+      source.utils.write({ type: `delete`, value: SEED[1]! })
+      source.utils.write({
+        type: `insert`,
+        value: { id: `3`, name: `C` },
+      })
+      source.utils.commit()
+      const afterLayout = observer.getSnapshot()
+
+      expect(notifications).toBe(2)
+      expect(afterLayout.layoutRevision).toBeGreaterThan(
+        afterValue.layoutRevision,
+      )
+      expect([...afterLayout.state!.keys()]).toEqual([`1`, `3`])
+    } finally {
+      unsubscribe()
+      observer.dispose()
+      await source.cleanup()
+    }
+  })
+
   it(`delivers initial state then change deltas to subscribers (granular path)`, () => {
     const source = makeSource()
     const observer = createLiveQueryObserver<Row, string>(source as any)
