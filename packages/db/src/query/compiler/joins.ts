@@ -1,5 +1,4 @@
 import {
-  filter,
   join as joinOperator,
   map,
   serializeValue,
@@ -503,7 +502,7 @@ function processJoin(
 
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
-    processJoinResults(joinClause.type),
+    processJoinResults,
   )
 }
 
@@ -740,65 +739,38 @@ function getFirstFromAlias(query: QueryIR): string | undefined {
   return getFromSources(query.from)[0]?.alias
 }
 
-/**
- * Processes the results of a join operation
- */
-function processJoinResults(joinType: string) {
-  return function (
-    pipeline: IStreamBuilder<
-      [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
-    >,
-  ): NamespacedAndKeyedStream {
-    return pipeline.pipe(
-      // Process the join result and handle nulls
-      filter((result) => {
-        const [_key, [main, joined]] = result
-        const mainNamespacedRow = main?.[1]
-        const joinedNamespacedRow = joined?.[1]
+function processJoinResults(
+  pipeline: IStreamBuilder<
+    [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
+  >,
+): NamespacedAndKeyedStream {
+  return pipeline.pipe(
+    map((result) => {
+      const [_key, [main, joined]] = result
+      const mainKey = main?.[0]
+      const mainNamespacedRow = main?.[1]
+      const joinedKey = joined?.[0]
+      const joinedNamespacedRow = joined?.[1]
 
-        // Handle different join types
-        if (joinType === `inner`) {
-          return !!(mainNamespacedRow && joinedNamespacedRow)
-        }
+      // Merge the namespaced rows
+      const mergedNamespacedRow: NamespacedRow = {}
 
-        if (joinType === `left`) {
-          return !!mainNamespacedRow
-        }
+      // Add main row data if it exists
+      if (mainNamespacedRow) {
+        Object.assign(mergedNamespacedRow, mainNamespacedRow)
+      }
 
-        if (joinType === `right`) {
-          return !!joinedNamespacedRow
-        }
+      // Add joined row data if it exists
+      if (joinedNamespacedRow) {
+        Object.assign(mergedNamespacedRow, joinedNamespacedRow)
+      }
 
-        // For full joins, always include
-        return true
-      }),
-      map((result) => {
-        const [_key, [main, joined]] = result
-        const mainKey = main?.[0]
-        const mainNamespacedRow = main?.[1]
-        const joinedKey = joined?.[0]
-        const joinedNamespacedRow = joined?.[1]
+      // We create a composite key that combines the main and joined keys
+      const resultKey = `[${mainKey},${joinedKey}]`
 
-        // Merge the namespaced rows
-        const mergedNamespacedRow: NamespacedRow = {}
-
-        // Add main row data if it exists
-        if (mainNamespacedRow) {
-          Object.assign(mergedNamespacedRow, mainNamespacedRow)
-        }
-
-        // Add joined row data if it exists
-        if (joinedNamespacedRow) {
-          Object.assign(mergedNamespacedRow, joinedNamespacedRow)
-        }
-
-        // We create a composite key that combines the main and joined keys
-        const resultKey = `[${mainKey},${joinedKey}]`
-
-        return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
-      }),
-    )
-  }
+      return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
+    }),
+  )
 }
 
 /**
