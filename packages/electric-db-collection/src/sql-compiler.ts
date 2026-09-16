@@ -386,7 +386,7 @@ function compileFunction(
       isNestedRef(arg) &&
       [`like`, `ilike`, `upper`, `lower`].includes(name)
     ) {
-      compiled = compileNestedRef(arg.path, encodeColumnName, `text`)
+      compiled = compileNestedScalarRef(arg, ``, encodeColumnName)
     } else {
       compiled = compileBasicExpression(arg, params, encodeColumnName)
     }

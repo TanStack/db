@@ -274,6 +274,7 @@ describe(`Electric predicate compiler semantics`, () => {
           metrics: {
             score: 2,
             enabled: true,
+            stringValue: `true`,
             nullable: `present`,
             "owner's tier": `bronze`,
             tags: [`admin`, `editor`],
@@ -623,7 +624,23 @@ describe(`Electric predicate compiler semantics`, () => {
           new IR.Value(`true`),
         ),
       }),
-    ).toEqual([])
+    ).toEqual([1])
+
+    const stringValue = nested(`payload`, `metrics`, `stringValue`)
+    for (const [operator, expected] of [
+      [`upper`, `TRUE`],
+      [`lower`, `true`],
+    ] as const) {
+      expect(
+        await selectedIds({
+          where: call(
+            `eq`,
+            call(operator, stringValue),
+            new IR.Value(expected),
+          ),
+        }),
+      ).toEqual([1])
+    }
   })
 
   it(`preserves nullable boolean ordering and membership under negation`, async () => {
