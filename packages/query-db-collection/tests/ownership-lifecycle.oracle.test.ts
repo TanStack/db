@@ -14,6 +14,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src/index.js'
+import { SyncNotInitializedError } from '../src/errors.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type {
   Collection,
@@ -31,6 +32,19 @@ type Item = {
   name: string
 }
 
+type MutationLifecycleSnapshot = {
+  server: Array<string>
+  cache: Array<string>
+  synced: Array<string>
+  source: Array<string>
+  derived: Array<string>
+}
+
+type MutationPublicationSnapshot = Pick<
+  MutationLifecycleSnapshot,
+  `source` | `derived`
+> & { expected: Array<string> }
+
 type MetadataRecorder = {
   rows: Map<string | number, unknown>
   writes: Array<{ type: `set` | `delete`; key: string | number }>
@@ -44,6 +58,9 @@ type OwnershipFixtureOptions = {
   staleTime?: number
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
+  scanPersisted?: () => Promise<
+    Array<{ key: string | number; value: Item; metadata?: unknown }>
+  >
 }
 
 type OwnershipFixture = {
@@ -116,6 +133,7 @@ function createOwnershipFixture({
   syncMode = `on-demand`,
   metadataRecorder,
   setupMetadata,
+  scanPersisted,
   customHash,
   staleTime,
 }: OwnershipFixtureOptions): OwnershipFixture {
@@ -137,7 +155,7 @@ function createOwnershipFixture({
   const originalSync = baseOptions.sync
   let pendingSetup = setupMetadata
   const collection = createCollection(
-    metadataRecorder || setupMetadata
+    metadataRecorder || setupMetadata || scanPersisted
       ? {
           ...baseOptions,
           sync: {
@@ -148,15 +166,21 @@ function createOwnershipFixture({
               const observedMetadata = metadataRecorder
                 ? recordMetadata(params.metadata, metadataRecorder)
                 : params.metadata
+              const metadataWithPersistedScan = scanPersisted
+                ? ({
+                    ...observedMetadata,
+                    row: { ...observedMetadata.row, scanPersisted },
+                  } as SyncMetadataApi<string | number>)
+                : observedMetadata
               if (pendingSetup) {
                 params.begin()
-                pendingSetup(observedMetadata)
+                pendingSetup(metadataWithPersistedScan)
                 params.commit()
                 pendingSetup = undefined
               }
               return originalSync.sync({
                 ...params,
-                metadata: observedMetadata,
+                metadata: metadataWithPersistedScan,
               })
             },
           },
@@ -174,6 +198,37 @@ function rows(collection: {
   keys: () => Iterable<string | number>
 }): Array<string> {
   return Array.from(collection.keys()).map(String).sort()
+}
+
+function itemIds(items: Iterable<Item>): Array<string> {
+  return Array.from(items, ({ id }) => id).sort()
+}
+
+function expectMutationLifecycleSnapshot(
+  snapshot: MutationLifecycleSnapshot,
+  authoritative: ReadonlyArray<string>,
+  visible: ReadonlyArray<string>,
+  ordered: boolean,
+): void {
+  expect(snapshot).toEqual({
+    server: [...authoritative].sort(),
+    cache: [...authoritative].sort(),
+    synced: [...authoritative].sort(),
+    source: [...visible].sort(),
+    derived: ordered ? [...visible] : [...visible].sort(),
+  })
+}
+
+function expectMutationPublicationIntegrity(
+  publications: ReadonlyArray<MutationPublicationSnapshot>,
+): void {
+  for (const publication of publications) {
+    expect(publication).toEqual({
+      source: publication.expected,
+      derived: publication.expected,
+      expected: publication.expected,
+    })
+  }
 }
 
 function persistedOwners(
@@ -463,6 +518,335 @@ function expectColdOwnerRevalidation(
 describe(`query collection ownership lifecycle`, () => {
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+  })
+
+  it(`starts an idle collection only when a direct write is invoked`, () => {
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn((): Promise<Array<Item>> => Promise.resolve([]))
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id: `idle-direct-write-startup`,
+        queryClient,
+        queryKey: [`idle-direct-write-startup`],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: false,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    expect(collection.status).toBe(`idle`)
+    expect(collection.utils.isError).toBe(false)
+    expect(collection.status).toBe(`idle`)
+
+    collection.utils.writeUpsert({
+      id: `first`,
+      category: `direct`,
+      name: `First`,
+    })
+
+    expect(collection.status).toBe(`ready`)
+    expect(rows(collection)).toEqual([`first`])
+    expect(queryFn).not.toHaveBeenCalled()
+  })
+
+  it(`fails fast when a direct write is attempted during deferred startup`, () => {
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn((): Promise<Array<Item>> => Promise.resolve([]))
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id: `deferred-direct-write`,
+        queryClient,
+        queryKey: [`deferred-direct-write`],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: false,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    expect(collection._deferSyncStart()).toBe(true)
+    for (const write of [
+      () => collection.utils.writeInsert(shared),
+      () => collection.utils.writeUpdate(shared),
+      () => collection.utils.writeDelete(shared.id),
+      () => collection.utils.writeUpsert(shared),
+      () => collection.utils.writeBatch(() => {}),
+    ]) {
+      expect(write).toThrow(SyncNotInitializedError)
+    }
+    expect(collection.status).toBe(`idle`)
+    expect(rows(collection)).toEqual([])
+
+    collection._resumeSyncStart()
+    expect(collection.status).toBe(`ready`)
+    expect(rows(collection)).toEqual([])
+    expect(queryFn).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { ordered: false, settlementOrder: [0, 1] },
+    { ordered: false, settlementOrder: [1, 0] },
+    { ordered: true, settlementOrder: [0, 1] },
+    { ordered: true, settlementOrder: [1, 0] },
+  ] as const)(
+    `publishes mutation refetches through source and downstream view: %j`,
+    async ({ ordered, settlementOrder }) => {
+      const id = `mutation-publication-${ordered ? `ordered` : `unordered`}-${settlementOrder.join(``)}`
+      const queryClient = createQueryClient()
+      const serverRows: Array<Item> = []
+      const persistenceGates: Array<ReturnType<typeof createDeferred<void>>> =
+        []
+      const queryFn = vi.fn(() =>
+        Promise.resolve(serverRows.map((item) => structuredClone(item))),
+      )
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+          onInsert: async ({ transaction }) => {
+            const gate = createDeferred<void>()
+            persistenceGates.push(gate)
+            await gate.promise
+            serverRows.push(
+              ...transaction.mutations.map(({ modified }) =>
+                structuredClone(modified),
+              ),
+            )
+          },
+        }),
+      )
+      const derived = createLiveQueryCollection((query) => {
+        const source = query.from({ item: collection })
+        const result = ordered
+          ? source.orderBy(({ item }) => item.name, `asc`)
+          : source
+        return result.select(({ item }) => ({ ...item }))
+      })
+      const publications: Array<MutationPublicationSnapshot> = []
+      let expectedPublication: Array<string> = []
+      const subscription = derived.subscribeChanges(() => {
+        publications.push({
+          source: ordered
+            ? [...collection.toArray]
+                .sort((left, right) => left.name.localeCompare(right.name))
+                .map(({ id: rowId }) => rowId)
+            : rows(collection),
+          derived: ordered
+            ? derived.toArray.map(({ id: rowId }) => rowId)
+            : rows(derived),
+          expected: expectedPublication,
+        })
+      })
+      cleanups.push(async () => {
+        persistenceGates.forEach((gate) => gate.resolve())
+        subscription.unsubscribe()
+        await derived.cleanup()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      const firstItem = {
+        id: `z-first`,
+        category: `mutation`,
+        name: `1-first`,
+      }
+      const secondItem = {
+        id: `a-second`,
+        category: `mutation`,
+        name: `2-second`,
+      }
+      await derived.preload()
+      expectedPublication = [firstItem.id]
+      const first = collection.insert(firstItem)
+      const visibleIds = [firstItem.id, secondItem.id]
+      expectedPublication = ordered ? visibleIds : [...visibleIds].sort()
+      const second = collection.insert(secondItem)
+      const transactions = [first, second]
+      const items = [firstItem, secondItem]
+      const queryKey = [id] as const
+      const capture = (): MutationLifecycleSnapshot => ({
+        server: itemIds(serverRows),
+        cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
+        synced: itemIds(collection._state.syncedData.values()),
+        source: itemIds(collection.toArray),
+        derived: ordered
+          ? derived.toArray.map(({ id: rowId }) => rowId)
+          : itemIds(derived.toArray),
+      })
+
+      expect(persistenceGates).toHaveLength(2)
+      expect(queryFn).toHaveBeenCalledOnce()
+      expectMutationLifecycleSnapshot(capture(), [], visibleIds, ordered)
+
+      const settled = new Set<number>()
+      for (const transactionIndex of settlementOrder) {
+        persistenceGates[transactionIndex]!.resolve()
+        await transactions[transactionIndex]!.isPersisted.promise
+        settled.add(transactionIndex)
+
+        const authoritativeIds = [...settled].map((index) => items[index]!.id)
+        expect(queryFn).toHaveBeenCalledTimes(1 + settled.size)
+        const expectedSynced =
+          settled.size === transactions.length ? authoritativeIds : []
+        expect(capture()).toEqual({
+          server: [...authoritativeIds].sort(),
+          cache: [...authoritativeIds].sort(),
+          synced: [...expectedSynced].sort(),
+          source: [...visibleIds].sort(),
+          derived: ordered ? visibleIds : [...visibleIds].sort(),
+        })
+        expectMutationPublicationIntegrity(publications)
+        expect(publications.at(-1)?.derived).toEqual(
+          ordered ? visibleIds : [...visibleIds].sort(),
+        )
+      }
+
+      const thirdItem = {
+        id: `m-third`,
+        category: `mutation`,
+        name: `3-third`,
+      }
+      const allVisibleIds = [...visibleIds, thirdItem.id]
+      expectedPublication = ordered
+        ? allVisibleIds
+        : [...allVisibleIds].sort()
+      const third = collection.insert(thirdItem)
+      expect(persistenceGates).toHaveLength(3)
+      expectMutationLifecycleSnapshot(
+        capture(),
+        visibleIds,
+        allVisibleIds,
+        ordered,
+      )
+
+      persistenceGates[2]!.resolve()
+      await third.isPersisted.promise
+
+      expect(queryFn).toHaveBeenCalledTimes(4)
+      expectMutationLifecycleSnapshot(
+        capture(),
+        allVisibleIds,
+        allVisibleIds,
+        ordered,
+      )
+      expectMutationPublicationIntegrity(publications)
+      expect(publications.at(-1)?.derived).toEqual(
+        ordered ? allVisibleIds : [...allVisibleIds].sort(),
+      )
+    },
+  )
+
+  it(`rejects incomplete and misordered mutation publication receipts`, () => {
+    const visible = [`z-first`, `a-second`, `m-third`]
+    const valid: MutationLifecycleSnapshot = {
+      server: [...visible].sort(),
+      cache: [...visible].sort(),
+      synced: [...visible].sort(),
+      source: [...visible].sort(),
+      derived: visible,
+    }
+
+    expectMutationLifecycleSnapshot(valid, visible, visible, true)
+    for (const mutant of [
+      { ...valid, synced: [] },
+      { ...valid, source: [] },
+      { ...valid, derived: visible.slice(0, 2) },
+      { ...valid, derived: [...visible].reverse() },
+      { ...valid, source: [...valid.source, `stale`] },
+    ]) {
+      expect(() =>
+        expectMutationLifecycleSnapshot(mutant, visible, visible, true),
+      ).toThrow()
+    }
+  })
+
+  it(`rejects a torn intermediate publication before a complete final snapshot`, () => {
+    const first = [`z-first`]
+    const firstAndSecond = [`z-first`, `a-second`]
+    const allVisible = [`z-first`, `a-second`, `m-third`]
+    const legitimateSequence: Array<MutationPublicationSnapshot> = [
+      { source: first, derived: first, expected: first },
+      {
+        source: firstAndSecond,
+        derived: firstAndSecond,
+        expected: firstAndSecond,
+      },
+      { source: allVisible, derived: allVisible, expected: allVisible },
+    ]
+
+    expect(() =>
+      expectMutationPublicationIntegrity(legitimateSequence),
+    ).not.toThrow()
+    expect(() =>
+      expectMutationPublicationIntegrity([
+        ...legitimateSequence.slice(0, 2),
+        { source: [], derived: [], expected: allVisible },
+        legitimateSequence[2]!,
+      ]),
+    ).toThrow()
+  })
+
+  it(`retires mutation ownership when a later cache result is empty`, async () => {
+    const id = `mutation-ownership-replacement`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `mutation`, name: `A` }
+    const inserted = { id: `b`, category: `mutation`, name: `B` }
+    const serverRows = [initial]
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve(structuredClone(serverRows)))
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+        onInsert: ({ transaction }) => {
+          serverRows.push(
+            ...transaction.mutations.map(({ modified }) =>
+              structuredClone(modified),
+            ),
+          )
+          return Promise.resolve()
+        },
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    const mutation = collection.insert(inserted)
+    await mutation.isPersisted.promise
+    expect({
+      cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
+      synced: itemIds(collection._state.syncedData.values()),
+      source: itemIds(collection.toArray),
+    }).toEqual({ cache: [`a`, `b`], synced: [`a`, `b`], source: [`a`, `b`] })
+
+    queryClient.setQueryData(queryKey, [])
+    await vi.waitFor(() => {
+      expect({
+        cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
+        synced: itemIds(collection._state.syncedData.values()),
+        source: itemIds(collection.toArray),
+      }).toEqual({ cache: [], synced: [], source: [] })
+    })
   })
 
   it(`keeps cached rows until the final exact acquisition is released`, async () => {
@@ -957,6 +1341,53 @@ describe(`query collection ownership lifecycle`, () => {
 
   it(`preserves committed peer ownership through a cold revalidation`, async () => {
     expectColdOwnerRevalidation(await observeColdOwnerRevalidation())
+  })
+
+  it(`does not publish a superseded result after its persisted scan resolves`, async () => {
+    const id = `superseded-retained-scan`
+    const queryKey = [id] as const
+    const queryHash = hashKey(queryKey)
+    const stale = { id: `stale`, category: `retained`, name: `Stale` }
+    const fresh = { id: `fresh`, category: `retained`, name: `Fresh` }
+    const firstScan = createDeferred<
+      Array<{ key: string | number; value: Item; metadata?: unknown }>
+    >()
+    const scanPersisted = vi
+      .fn()
+      .mockReturnValueOnce(firstScan.promise)
+      .mockResolvedValue([])
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      results: [[stale], [fresh]],
+      syncMode: `eager`,
+      scanPersisted,
+      setupMetadata: (metadata) => {
+        metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+          queryHash,
+          mode: `until-revalidated`,
+        })
+      },
+    })
+    const publications: Array<Array<string>> = []
+    const subscription = collection.subscribeChanges(() => {
+      publications.push(itemIds(collection.toArray))
+    })
+    cleanups.push(() => {
+      subscription.unsubscribe()
+      return Promise.resolve()
+    })
+
+    await vi.waitFor(() => expect(scanPersisted).toHaveBeenCalledOnce())
+    expect(queryFn).toHaveBeenCalledOnce()
+    const refetch = collection.utils.refetch({ throwOnError: true })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    await refetch
+    firstScan.resolve([])
+
+    await vi.waitFor(() => {
+      expect(itemIds(collection.toArray)).toEqual([fresh.id])
+    })
+    expect(publications).not.toContainEqual([stale.id])
   })
 
   it(`rejects emitted ownership that is absent from cold storage`, async () => {

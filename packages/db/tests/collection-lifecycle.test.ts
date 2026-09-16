@@ -1,7 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
 import { CleanupQueue } from '../src/collection/cleanup-queue.js'
-import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
+import {
+  DuplicateKeyError,
+  InvalidCollectionStatusTransitionError,
+  InvalidKeyError,
+  MissingDeleteHandlerError,
+  MissingInsertHandlerError,
+  MissingUpdateHandlerError,
+  NoKeysPassedToDeleteError,
+  NoKeysPassedToUpdateError,
+  SchemaValidationError,
+  UndefinedKeyError,
+} from '../src/errors.js'
 import {
   getActivePublicationContext,
   transactionScopedScheduler,
@@ -24,6 +36,336 @@ function getChangesManager(collection: object): {
 }
 
 describe(`Collection Lifecycle Management`, () => {
+  it(`does not start idle sync when an insert has no handler`, async () => {
+    type Row = { id: string; value: string }
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `rejected-mutation-missing-handler`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          syncStarts++
+          markReady()
+        },
+      },
+    })
+
+    try {
+      expect(() =>
+        collection.insert({ id: `rejected`, value: `rejected` }),
+      ).toThrow(MissingInsertHandlerError)
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not start idle sync when insert schema validation rejects`, async () => {
+    let syncStarts = 0
+    const collection = createCollection({
+      id: `rejected-mutation-schema`,
+      getKey: (row) => row.id,
+      schema: z.object({ id: z.string(), value: z.string().min(1) }),
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          syncStarts++
+          markReady()
+        },
+      },
+      onInsert: async () => {},
+    })
+
+    try {
+      expect(() => collection.insert({ id: `rejected`, value: `` })).toThrow(
+        SchemaValidationError,
+      )
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not start idle sync when insert key validation rejects`, async () => {
+    type Row = { id: string; value: string }
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `rejected-mutation-invalid-key`,
+      getKey: () => true as never,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          syncStarts++
+          markReady()
+        },
+      },
+      onInsert: async () => {},
+    })
+
+    try {
+      expect(() =>
+        collection.insert({ id: `rejected`, value: `rejected` }),
+      ).toThrow(InvalidKeyError)
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not start idle sync when an insert key is missing`, async () => {
+    type Row = { id: string; value: string }
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `rejected-mutation-missing-key`,
+      getKey: () => undefined as never,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          syncStarts++
+          markReady()
+        },
+      },
+      onInsert: async () => {},
+    })
+
+    try {
+      expect(() =>
+        collection.insert({ id: `rejected`, value: `rejected` }),
+      ).toThrow(UndefinedKeyError)
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`starts idle sync exactly once when a mutation is accepted`, async () => {
+    type Row = { id: string; value: string }
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `mutation-starts-idle-sync`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          syncStarts++
+          markReady()
+        },
+      },
+      onInsert: async () => {},
+    })
+
+    try {
+      expect(collection.status).toBe(`idle`)
+      const first = collection.insert({ id: `first`, value: `first` })
+
+      expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`ready`)
+
+      const second = collection.insert({ id: `second`, value: `second` })
+      await Promise.all([first.isPersisted.promise, second.isPersisted.promise])
+
+      expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.toArray.map(({ id }) => id).sort()).toEqual([
+        `first`,
+        `second`,
+      ])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`update`, `delete`] as const)(
+    `does not start idle sync when %s has no handler`,
+    async (operation) => {
+      type Row = { id: string; value: string }
+      let syncStarts = 0
+      const collection = createCollection<Row>({
+        id: `rejected-${operation}-missing-handler`,
+        getKey: (row) => row.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            syncStarts++
+            markReady()
+          },
+        },
+      })
+
+      try {
+        const mutate = () =>
+          operation === `update`
+            ? collection.update(`target`, (draft) => {
+                draft.value = `updated`
+              })
+            : collection.delete(`target`)
+
+        expect(mutate).toThrow(
+          operation === `update`
+            ? MissingUpdateHandlerError
+            : MissingDeleteHandlerError,
+        )
+        expect(syncStarts).toBe(0)
+        expect(collection.status).toBe(`idle`)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`update`, `delete`] as const)(
+    `does not start idle sync when %s receives no keys`,
+    async (operation) => {
+      type Row = { id: string; value: string }
+      let syncStarts = 0
+      const collection = createCollection<Row>({
+        id: `rejected-${operation}-empty-keys`,
+        getKey: (row) => row.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            syncStarts++
+            markReady()
+          },
+        },
+        onUpdate: async () => {},
+        onDelete: async () => {},
+      })
+
+      try {
+        const mutate = () =>
+          operation === `update`
+            ? collection.update([], () => {})
+            : collection.delete([])
+
+        expect(mutate).toThrow(
+          operation === `update`
+            ? NoKeysPassedToUpdateError
+            : NoKeysPassedToDeleteError,
+        )
+        expect(syncStarts).toBe(0)
+        expect(collection.status).toBe(`idle`)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`update`, `delete`] as const)(
+    `starts idle sync before %s checks collection state`,
+    async (operation) => {
+      type Row = { id: string; value: string }
+      const target = { id: `target`, value: `original` }
+      let syncStarts = 0
+      const collection = createCollection<Row>({
+        id: `accepted-${operation}-hydrates-target`,
+        getKey: (row) => row.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncStarts++
+            begin()
+            write({ type: `insert`, value: target })
+            commit()
+            markReady()
+          },
+        },
+        onUpdate: async () => {},
+        onDelete: async () => {},
+      })
+
+      try {
+        expect(collection.status).toBe(`idle`)
+        const transaction =
+          operation === `update`
+            ? collection.update(`target`, (draft) => {
+                draft.value = `updated`
+              })
+            : collection.delete(`target`)
+
+        expect(syncStarts).toBe(1)
+        expect(collection.status).toBe(`ready`)
+        expect(
+          transaction.mutations.map(({ key, type }) => ({ key, type })),
+        ).toEqual([{ key: `target`, type: operation }])
+        await transaction.isPersisted.promise
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`does not start idle sync when an insert batch has duplicate keys`, async () => {
+    type Row = { id: string; value: string }
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `rejected-insert-batch-duplicate`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: ({ markReady }) => {
+          syncStarts++
+          markReady()
+        },
+      },
+      onInsert: async () => {},
+    })
+
+    try {
+      expect(() =>
+        collection.insert([
+          { id: `duplicate`, value: `first` },
+          { id: `duplicate`, value: `second` },
+        ]),
+      ).toThrow(DuplicateKeyError)
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`checks hydrated collection keys before admitting an idle insert`, async () => {
+    type Row = { id: string; value: string }
+    const target = { id: `target`, value: `synced` }
+    const onInsert = vi.fn(async () => {})
+    let syncStarts = 0
+    const collection = createCollection<Row>({
+      id: `idle-insert-hydrated-duplicate`,
+      getKey: (row) => row.id,
+      startSync: false,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncStarts++
+          begin()
+          write({ type: `insert`, value: target })
+          commit()
+          markReady()
+        },
+      },
+      onInsert,
+    })
+
+    try {
+      expect(() => collection.insert({ id: `target`, value: `local` })).toThrow(
+        DuplicateKeyError,
+      )
+      expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.toArray.map(({ id, value }) => ({ id, value }))).toEqual(
+        [target],
+      )
+      expect(onInsert).not.toHaveBeenCalled()
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it.each(
     ([`same`, `missing`, `changed`, `empty`] as const).flatMap((shape) =>
       ([`atomic`, `split`] as const).map((delivery) => ({ shape, delivery })),

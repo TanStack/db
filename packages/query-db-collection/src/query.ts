@@ -4,6 +4,7 @@ import {
   deepEquals,
   getLoadSubsetDemandKey,
   withCollectionConfigFactory,
+  withCollectionSyncConfigFactory,
 } from '@tanstack/db'
 import {
   GetKeyRequiredError,
@@ -917,6 +918,7 @@ export function queryCollectionOptions(
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
   let ensureEagerSubscription = () => {}
+  let replaceMutationResultApplications = () => {}
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
@@ -995,7 +997,8 @@ export function queryCollectionOptions(
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
-    const resultApplicationTokens = new Map<string, object>()
+    const retainedResultApplicationTokens = new Map<string, object>()
+    const activeResultApplicationTokens = new Map<string, object>()
     const resultApplicationControllers = new Map<string, Set<AbortController>>()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
@@ -1007,7 +1010,8 @@ export function queryCollectionOptions(
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
-      resultApplicationTokens.delete(hashedQueryKey)
+      retainedResultApplicationTokens.delete(hashedQueryKey)
+      activeResultApplicationTokens.delete(hashedQueryKey)
       resultApplicationControllers
         .get(hashedQueryKey)
         ?.forEach((controller) => controller.abort())
@@ -1589,6 +1593,7 @@ export function queryCollectionOptions(
     const applySuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
+      applicationToken: object,
       persistedBaseline?: Map<
         string | number,
         {
@@ -1652,6 +1657,14 @@ export function queryCollectionOptions(
 
       const restoreOwnershipTracking = () => {
         if (!state.observers.has(hashedQueryKey)) return
+        const currentApplicationToken =
+          activeResultApplicationTokens.get(hashedQueryKey)
+        if (
+          currentApplicationToken !== undefined &&
+          currentApplicationToken !== applicationToken
+        ) {
+          return
+        }
 
         if (previousOwnedRows === undefined) {
           queryToRows.delete(hashedQueryKey)
@@ -1764,11 +1777,17 @@ export function queryCollectionOptions(
         await loadPersistedBaselineForQuery(hashedQueryKey)
       if (
         collection.status === `cleaned-up` ||
-        resultApplicationTokens.get(hashedQueryKey) !== applicationToken
+        retainedResultApplicationTokens.get(hashedQueryKey) !== applicationToken
       ) {
         return
       }
-      await applySuccessfulResult(queryKey, result, persistedBaseline, signal)
+      await applySuccessfulResult(
+        queryKey,
+        result,
+        applicationToken,
+        persistedBaseline,
+        signal,
+      )
     }
 
     const trackResultApplication = (
@@ -1806,15 +1825,20 @@ export function queryCollectionOptions(
 
     const enqueueResultApplication = (
       hashedQueryKey: string,
-      apply: (signal: AbortSignal) => Promise<void>,
+      apply: (signal: AbortSignal, applicationToken: object) => Promise<void>,
+      observedApplicationToken?: object,
     ): void => {
       const controller = new AbortController()
+      const applicationToken = observedApplicationToken ?? {}
       const controllers =
         resultApplicationControllers.get(hashedQueryKey) ?? new Set()
       controllers.add(controller)
       resultApplicationControllers.set(hashedQueryKey, controllers)
       const previousApplication = pendingResultApplications.get(hashedQueryKey)
-      const run = () => apply(controller.signal)
+      const run = () => {
+        activeResultApplicationTokens.set(hashedQueryKey, applicationToken)
+        return apply(controller.signal, applicationToken)
+      }
       const application = previousApplication
         ? previousApplication.then(run, run)
         : run()
@@ -1913,18 +1937,32 @@ export function queryCollectionOptions(
             }
 
             const applicationToken = {}
-            resultApplicationTokens.set(hashedQueryKey, applicationToken)
-            enqueueResultApplication(hashedQueryKey, (signal) =>
-              reconcileSuccessfulResult(
-                queryKey,
-                result,
-                applicationToken,
-                signal,
-              ),
+            retainedResultApplicationTokens.set(
+              hashedQueryKey,
+              applicationToken,
+            )
+            enqueueResultApplication(
+              hashedQueryKey,
+              (signal, token) =>
+                reconcileSuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  signal,
+                ),
+              applicationToken,
             )
           } else {
-            enqueueResultApplication(hashedQueryKey, (signal) =>
-              applySuccessfulResult(queryKey, result, undefined, signal),
+            enqueueResultApplication(
+              hashedQueryKey,
+              (signal, token) =>
+                applySuccessfulResult(
+                  queryKey,
+                  result,
+                  token,
+                  undefined,
+                  signal,
+                ),
             )
           }
         } else {
@@ -1958,6 +1996,26 @@ export function queryCollectionOptions(
         }
       }
       return handleQueryResult
+    }
+
+    replaceMutationResultApplications = () => {
+      state.observers.forEach((observer, hashedQueryKey) => {
+        const result = observer.getCurrentResult()
+        if (
+          !result.isSuccess ||
+          result.isFetching ||
+          !hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
+        ) {
+          return
+        }
+
+        // Earlier snapshots can be waiting behind this persisting mutation.
+        // Replace them with the completed refetch so its sync transaction is
+        // staged before the mutation handler returns; awaiting it here would
+        // deadlock on the mutation that owns the publication barrier.
+        invalidatePendingResultApplication(hashedQueryKey)
+        makeQueryResultHandler(hashToQueryKey.get(hashedQueryKey)!)(result)
+      })
     }
 
     const isSubscribed = (hashedQueryKey: string) => {
@@ -2261,6 +2319,7 @@ export function queryCollectionOptions(
     const cleanup = () => {
       pendingStartupLoads.clear()
       ensureEagerSubscription = () => {}
+      replaceMutationResultApplications = () => {}
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2396,6 +2455,11 @@ export function queryCollectionOptions(
     })
 
     return Promise.all(refetchPromises)
+  }
+
+  const refetchAfterMutation = async () => {
+    await refetch()
+    replaceMutationResultApplications()
   }
 
   /**
@@ -2729,7 +2793,7 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetch()
+          await refetchAfterMutation()
         }
 
         return handlerResult
@@ -2743,7 +2807,7 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetch()
+          await refetchAfterMutation()
         }
 
         return handlerResult
@@ -2757,7 +2821,7 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetch()
+          await refetchAfterMutation()
         }
 
         return handlerResult
@@ -2767,11 +2831,35 @@ export function queryCollectionOptions(
   // Create utils instance with state and dependencies passed explicitly
   const utils: any = new QueryCollectionUtilsImpl(state, refetch, writeUtils)
 
+  const sync = withCollectionSyncConfigFactory(
+    { sync: enhancedInternalSync },
+    (source, utilities, startSync) => {
+      const boundUtilities = utilities as Record<
+        string,
+        (...args: Array<any>) => any
+      >
+      for (const name of [
+        `writeInsert`,
+        `writeUpdate`,
+        `writeDelete`,
+        `writeUpsert`,
+        `writeBatch`,
+      ]) {
+        const write = boundUtilities[name]!
+        boundUtilities[name] = (...args) => {
+          startSync()
+          return write(...args)
+        }
+      }
+      return source
+    },
+  )
+
   const options = {
     ...baseCollectionConfig,
     getKey,
     syncMode,
-    sync: { sync: enhancedInternalSync },
+    sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,

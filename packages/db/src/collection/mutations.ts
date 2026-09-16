@@ -76,6 +76,10 @@ export class CollectionMutationsManager<
       : getActiveTransaction()
   }
 
+  private startSyncForMutation(): void {
+    if (this.lifecycle.status === `idle`) this.collection._sync.startSync()
+  }
+
   private createTransaction<T extends object>(config: TransactionConfig<T>) {
     return this.transactionScope
       ? this.transactionScope.createTransaction(config)
@@ -206,9 +210,9 @@ export class CollectionMutationsManager<
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
 
-      // Check if an item with this ID already exists in the collection or in the current batch
+      // Reject duplicate keys within this batch before starting sync.
       const key = this.config.getKey(validatedData)
-      if (this.state.has(key) || keysInCurrentBatch.has(key)) {
+      if (keysInCurrentBatch.has(key)) {
         throw new DuplicateKeyError(key)
       }
       keysInCurrentBatch.add(key)
@@ -240,6 +244,13 @@ export class CollectionMutationsManager<
 
       mutations.push(mutation)
     })
+
+    this.startSyncForMutation()
+    for (const mutation of mutations) {
+      if (this.state.has(mutation.key)) {
+        throw new DuplicateKeyError(mutation.key)
+      }
+    }
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
@@ -315,6 +326,8 @@ export class CollectionMutationsManager<
     if (isArray && keysArray.length === 0) {
       throw new NoKeysPassedToUpdateError()
     }
+
+    this.startSyncForMutation()
 
     const callback =
       typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
@@ -497,6 +510,8 @@ export class CollectionMutationsManager<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
+    this.startSyncForMutation()
+
     const mutations: Array<
       PendingMutation<
         TOutput,
