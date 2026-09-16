@@ -1,3 +1,4 @@
+import { compareKeys } from '@tanstack/db-ivm'
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
@@ -414,19 +415,63 @@ export class CollectionStateManager<
    */
   public *keys(): IterableIterator<TKey> {
     const { syncedData, optimisticDeletes, optimisticUpserts } = this
-    // Yield keys from synced data, skipping any that are deleted.
-    for (const key of syncedData.keys()) {
-      if (!optimisticDeletes.has(key)) {
-        yield key
+    const compare = this.config.compare
+
+    if (!compare || optimisticUpserts.size === 0) {
+      // Yield keys from synced data, skipping any that are deleted.
+      for (const key of syncedData.keys()) {
+        if (!optimisticDeletes.has(key)) {
+          yield key
+        }
+      }
+      // Without a comparator, preserve insertion order for optimistic keys.
+      for (const key of optimisticUpserts.keys()) {
+        if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
+          yield key
+        }
+      }
+      return
+    }
+
+    const compareEntries = (
+      [leftKey, leftValue]: [TKey, TOutput],
+      [rightKey, rightValue]: [TKey, TOutput],
+    ) => compare(leftValue, rightValue) || compareKeys(leftKey, rightKey)
+    const optimisticEntries = [...optimisticUpserts.entries()]
+      .filter(([key]) => !optimisticDeletes.has(key))
+      .sort(compareEntries)
+    const syncedEntries = syncedData.entries()
+    let syncedEntry = syncedEntries.next()
+    const advanceSynced = () => {
+      while (
+        !syncedEntry.done &&
+        (optimisticDeletes.has(syncedEntry.value[0]) ||
+          optimisticUpserts.has(syncedEntry.value[0]))
+      ) {
+        syncedEntry = syncedEntries.next()
       }
     }
-    // Yield keys from upserts that were not already in synced data.
-    for (const key of optimisticUpserts.keys()) {
-      if (!syncedData.has(key) && !optimisticDeletes.has(key)) {
-        // The optimisticDeletes check is technically redundant if inserts/updates always remove from deletes,
-        // but it's safer to keep it.
-        yield key
+    advanceSynced()
+
+    let optimisticIndex = 0
+    while (!syncedEntry.done && optimisticIndex < optimisticEntries.length) {
+      const optimisticEntry = optimisticEntries[optimisticIndex]!
+      if (compareEntries(optimisticEntry, syncedEntry.value) < 0) {
+        yield optimisticEntry[0]
+        optimisticIndex++
+      } else {
+        yield syncedEntry.value[0]
+        syncedEntry = syncedEntries.next()
+        advanceSynced()
       }
+    }
+    while (!syncedEntry.done) {
+      yield syncedEntry.value[0]
+      syncedEntry = syncedEntries.next()
+      advanceSynced()
+    }
+    while (optimisticIndex < optimisticEntries.length) {
+      yield optimisticEntries[optimisticIndex++]![0]
     }
   }
 

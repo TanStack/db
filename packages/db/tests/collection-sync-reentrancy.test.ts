@@ -856,7 +856,7 @@ describe(`sync publication reentrancy`, () => {
     },
   )
 
-  it(`honors a parked layout mark when truncate drains its causal prefix`, async () => {
+  it(`keeps a parked layout mark hidden when truncate preserves visible order`, async () => {
     const updatePersistence = createDeferred<void>()
     const insertPersistence = createDeferred<void>()
     let sync!: OrderedSync
@@ -930,22 +930,22 @@ describe(`sync publication reentrancy`, () => {
       const truncateReceipt = sync.commit()
 
       expect(truncateReceipt).toBe(true)
-      expect([...collection.keys()]).toEqual([2, 1, 3])
+      expect([...collection.keys()]).toEqual([1, 2, 3])
       expect(collection.toArray.map(({ value }) => value)).toEqual([
-        `two`,
         `optimistic-one`,
+        `two`,
         `optimistic-three`,
       ])
-      expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
+      expect(collection._layoutRevision).toBe(revisionBeforeDrain)
       expect(callbacks).toEqual([
         {
           // Delete the prior public layout [1, 2, 3], not the unpublished
-          // rank update's intermediate [2, 1, 3], then replay whole snapshots.
+          // server-only rank update, then replay whole visible snapshots.
           changes: [1, 2, 3, 1, 3, 1, 2],
-          keys: [2, 1, 3],
-          values: [`two`, `optimistic-one`, `optimistic-three`],
+          keys: [1, 2, 3],
+          values: [`optimistic-one`, `two`, `optimistic-three`],
           markedReceiptSettled: false,
-          revision: revisionBeforeDrain + 1,
+          revision: revisionBeforeDrain,
         },
       ])
       if (firstReceipt !== true) await firstReceipt
