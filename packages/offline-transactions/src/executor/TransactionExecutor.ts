@@ -57,6 +57,7 @@ export class TransactionExecutor {
     } finally {
       this.isExecuting = false
       this.executionPromise = null
+      this.scheduleNextRetry()
     }
   }
 
@@ -74,9 +75,6 @@ export class TransactionExecutor {
 
       await this.executeTransaction(transaction)
     }
-
-    // Schedule next retry after execution completes
-    this.scheduleNextRetry()
   }
 
   private async executeTransaction(
@@ -227,9 +225,6 @@ export class TransactionExecutor {
         } finally {
           this.scheduler.markFailed(transaction)
         }
-
-        // Schedule retry timer
-        this.scheduleNextRetry()
       },
     )
   }
@@ -273,6 +268,9 @@ export class TransactionExecutor {
 
     if (removedIds.length > 0) {
       await this.outbox.removeMany(removedIds)
+      const error = new NonRetriableError(`Transaction excluded by beforeRetry`)
+      for (const id of removedIds)
+        this.offlineExecutor.rejectTransaction(id, error)
     }
   }
 

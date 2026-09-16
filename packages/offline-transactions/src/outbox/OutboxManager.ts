@@ -77,7 +77,10 @@ export class OutboxManager {
         span.setAttribute(`result`, `found`)
         return transaction
       } catch (error) {
-        if (error instanceof MissingTemporalConstructorError) throw error
+        if (error instanceof MissingTemporalConstructorError) {
+          error.message = `transaction ${id}: ${error.message}`
+          throw error
+        }
         console.warn(`Failed to deserialize transaction ${id}:`, error)
         span.setAttribute(`result`, `deserialize_error`)
         return null
@@ -112,7 +115,10 @@ export class OutboxManager {
               const transaction = this.serializer.deserialize(data)
               transactions.push(transaction)
             } catch (error) {
-              if (error instanceof MissingTemporalConstructorError) throw error
+              if (error instanceof MissingTemporalConstructorError) {
+                error.message = `transaction ${key.slice(this.keyPrefix.length)}: ${error.message}`
+                throw error
+              }
               console.warn(
                 `Failed to deserialize transaction from key ${key}:`,
                 error,

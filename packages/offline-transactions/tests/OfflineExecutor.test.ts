@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocalStorageAdapter, startOfflineExecutor } from '../src/index'
-import { MissingTemporalConstructorError } from '../src/outbox/TransactionSerializer'
 import { FakeStorageAdapter } from './harness'
 import type { OfflineConfig } from '../src/types'
 
@@ -76,48 +75,20 @@ describe(`OfflineExecutor`, () => {
     expect(() => executor.dispose()).not.toThrow()
   })
 
-  it(`rejects startup when persisted native scalars cannot be restored`, async () => {
-    const storage = new FakeStorageAdapter()
-    await storage.set(
-      `tx:native-scalar`,
-      JSON.stringify({
-        valueEncoding: 3,
-        id: `native-scalar`,
-        mutationFnName: `syncData`,
-        mutations: [
-          {
-            globalKey: `test-collection:one`,
-            type: `insert`,
-            modified: {
-              id: `one`,
-              due: {
-                __type: `Temporal`,
-                type: `Temporal.PlainDate`,
-                value: `2026-09-16`,
-              },
-            },
-            original: {},
-            changes: {},
-            collectionId: `test-collection`,
-          },
-        ],
-        keys: [`test-collection:one`],
-        idempotencyKey: `once`,
-        createdAt: new Date(0).toISOString(),
-        retryCount: 0,
-        nextAttemptAt: 0,
-        version: 1,
-      }),
-    )
-    const temporalGlobal = globalThis as {
-      Temporal?: Record<string, unknown>
+  it(`keeps constructor-started initialization failures observable`, async () => {
+    const storageError = new Error(`storage unavailable`)
+    class Storage extends FakeStorageAdapter {
+      override async keys(): Promise<Array<string>> {
+        throw storageError
+      }
     }
-    const previousTemporal = temporalGlobal.Temporal
-    temporalGlobal.Temporal = {}
+    const unhandled: Array<unknown> = []
+    const onUnhandled = (error: unknown) => unhandled.push(error)
+    process.on(`unhandledRejection`, onUnhandled)
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const executor = startOfflineExecutor({
       ...config,
-      storage,
+      storage: new Storage(),
       leaderElection: {
         requestLeadership: async () => true,
         releaseLeadership: () => {},
@@ -127,12 +98,119 @@ describe(`OfflineExecutor`, () => {
     })
 
     try {
-      await expect(executor.waitForInit()).rejects.toBeInstanceOf(
-        MissingTemporalConstructorError,
-      )
-      expect(storage.snapshot()).toHaveProperty(`tx:native-scalar`)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).toEqual([])
+      await expect(executor.waitForInit()).rejects.toBe(storageError)
     } finally {
       executor.dispose()
+      warning.mockRestore()
+      process.off(`unhandledRejection`, onUnhandled)
+    }
+  })
+
+  it(`identifies unreadable rows for targeted removal before restart`, async () => {
+    const storage = new FakeStorageAdapter()
+    const record = (id: string, metadata: Record<string, unknown>) =>
+      JSON.stringify({
+        valueEncoding: 3,
+        id,
+        mutationFnName: `syncData`,
+        mutations: [],
+        keys: [],
+        idempotencyKey: `${id}/once`,
+        createdAt: new Date(0).toISOString(),
+        retryCount: 0,
+        nextAttemptAt: 0,
+        metadata,
+        version: 1,
+      })
+    await storage.set(
+      `tx:native-scalar`,
+      record(`native-scalar`, {
+        due: {
+          __type: `Temporal`,
+          type: `Temporal.PlainDate`,
+          value: `2026-09-16`,
+        },
+      }),
+    )
+    await storage.set(`tx:readable`, record(`readable`, { note: `safe` }))
+    const temporalGlobal = globalThis as {
+      Temporal?: Record<string, unknown>
+    }
+    const previousTemporal = temporalGlobal.Temporal
+    temporalGlobal.Temporal = {}
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const unhandled: Array<unknown> = []
+    const onUnhandled = (error: unknown) => unhandled.push(error)
+    process.on(`unhandledRejection`, onUnhandled)
+    const calls: Array<{ id: string; metadata: unknown }> = []
+    let firstExecutor: ReturnType<typeof startOfflineExecutor> | undefined
+    let secondExecutor: ReturnType<typeof startOfflineExecutor> | undefined
+    const leaderElection = {
+      requestLeadership: async () => true,
+      releaseLeadership: () => {},
+      isLeader: () => true,
+      onLeadershipChange: () => () => {},
+    }
+
+    try {
+      mockMutationFn.mockImplementation(
+        ({ transaction }: { transaction: { id: string; metadata: unknown } }) =>
+          calls.push({ id: transaction.id, metadata: transaction.metadata }),
+      )
+      firstExecutor = startOfflineExecutor({
+        ...config,
+        storage,
+        leaderElection,
+      })
+      await expect(firstExecutor.waitForInit()).rejects.toThrow(
+        /transaction native-scalar/,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(calls).toEqual([])
+      expect(storage.snapshot()).toHaveProperty(`tx:native-scalar`)
+      expect(storage.snapshot()).toHaveProperty(`tx:readable`)
+      expect(unhandled).toEqual([])
+
+      await firstExecutor.removeFromOutbox(`native-scalar`)
+      firstExecutor.dispose()
+      const recoveredReplay = new Promise<void>((resolve) => {
+        mockMutationFn.mockImplementation(
+          ({
+            transaction,
+          }: {
+            transaction: { id: string; metadata: unknown }
+          }) => {
+            calls.push({ id: transaction.id, metadata: transaction.metadata })
+            if (transaction.id === `readable`) resolve()
+          },
+        )
+      })
+      secondExecutor = startOfflineExecutor({
+        ...config,
+        storage,
+        leaderElection,
+      })
+      await expect(secondExecutor.waitForInit()).resolves.toBeUndefined()
+      await recoveredReplay
+      expect(calls).toEqual([
+        {
+          id: `readable`,
+          metadata: { note: `safe` },
+        },
+      ])
+      expect(storage.snapshot()).toEqual({})
+      expect(warning).toHaveBeenCalledWith(
+        `Failed to initialize offline executor:`,
+        expect.objectContaining({
+          message: expect.stringMatching(/transaction native-scalar/),
+        }),
+      )
+    } finally {
+      firstExecutor?.dispose()
+      secondExecutor?.dispose()
+      process.off(`unhandledRejection`, onUnhandled)
       warning.mockRestore()
       if (previousTemporal === undefined) delete temporalGlobal.Temporal
       else temporalGlobal.Temporal = previousTemporal

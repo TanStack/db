@@ -84,7 +84,7 @@ export class TransactionSerializer {
       ...transaction,
       valueEncoding: 3,
       createdAt: transaction.createdAt.toISOString(),
-      metadata: this.serializeValue(transaction.metadata),
+      metadata: this.serializeValue(transaction.metadata, `metadata`),
       mutations: transaction.mutations.map((mutation) =>
         this.serializeMutation(mutation),
       ),
@@ -184,7 +184,7 @@ export class TransactionSerializer {
     } as PendingMutation
   }
 
-  private serializeValue(value: any): any {
+  private serializeValue(value: any, jsonKey?: string): any {
     if (value === null || value === undefined) {
       return value
     }
@@ -207,10 +207,29 @@ export class TransactionSerializer {
     }
 
     if (typeof value === `object`) {
+      if (jsonKey !== undefined && typeof value.toJSON === `function`) {
+        const jsonValue = value.toJSON(jsonKey)
+        if (jsonValue !== value) return this.serializeValue(jsonValue, jsonKey)
+      }
+      if (
+        jsonKey !== undefined &&
+        (value instanceof Boolean ||
+          value instanceof Number ||
+          value instanceof String)
+      ) {
+        return value.valueOf()
+      }
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          setDataProperty(result, key, this.serializeValue(value[key]))
+          setDataProperty(
+            result,
+            key,
+            this.serializeValue(
+              value[key],
+              jsonKey === undefined ? undefined : key,
+            ),
+          )
         }
       }
       return !Array.isArray(value) &&

@@ -8,7 +8,7 @@ import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { NonRetriableError } from '../src/types'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
-import type { OfflineTransaction } from '../src/types'
+import type { OfflineTransaction, OnlineDetector } from '../src/types'
 
 function gate() {
   let resolve!: () => void
@@ -137,6 +137,245 @@ it(`revokes only replay work excluded by the retry hook`, async () => {
     hold = false
     delivery.resolve()
     executor.clear()
+  }
+})
+
+it(`settles replay work discarded by the retry hook`, async () => {
+  const persisted = gate()
+  const removed = gate()
+  class Storage extends FakeStorageAdapter {
+    override async set(key: string, value: string) {
+      await super.set(key, value)
+      persisted.resolve()
+    }
+
+    override async delete(key: string) {
+      await super.delete(key)
+      removed.resolve()
+    }
+  }
+  const onlineDetector: OnlineDetector = {
+    subscribe: () => () => {},
+    notifyOnline: () => {},
+    isOnline: () => false,
+    dispose: () => {},
+  }
+  let discardReplay = false
+  const storage = new Storage()
+  const env = createTestOfflineEnvironment({
+    storage,
+    config: {
+      onlineDetector,
+      beforeRetry: (transactions) => (discardReplay ? [] : transactions),
+    },
+  })
+  let commitStatus: unknown = `pending`
+  let waitStatus: unknown = `pending`
+  let commitObserved: Promise<void> | undefined
+  let waitObserved: Promise<void> | undefined
+  let transactionId = ``
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const transaction = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    transactionId = transaction.id
+    waitObserved = env.executor
+      .waitForTransactionCompletion(transaction.id)
+      .then(
+        () => {
+          waitStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          waitStatus = error
+        },
+      )
+    transaction.mutate(() => {
+      env.collection.insert({
+        id: `discarded`,
+        value: `optimistic`,
+        completed: false,
+        updatedAt: new Date(0),
+      })
+    })
+    commitObserved = transaction.commit().then(
+      () => {
+        commitStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        commitStatus = error
+      },
+    )
+    await atOracleCheckpoint(persisted.promise, `discarded work persisted`)
+    expect(env.collection.get(`discarded`)).toMatchObject({
+      value: `optimistic`,
+    })
+
+    env.leader.setLeader(false)
+    discardReplay = true
+    env.leader.setLeader(true)
+    await atOracleCheckpoint(removed.promise, `discarded work removed`)
+    await turn()
+
+    expect(commitStatus).toBeInstanceOf(NonRetriableError)
+    expect(waitStatus).toBe(commitStatus)
+    expect(env.collection.get(`discarded`)).toBeUndefined()
+    expect(storage.snapshot()).not.toHaveProperty(`tx:${transaction.id}`)
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    if (commitStatus === `pending` && transactionId)
+      env.executor.rejectTransaction(
+        transactionId,
+        new NonRetriableError(`oracle cleanup`),
+      )
+    await cleanupOfflineOracle(
+      [
+        () => Promise.all([commitObserved, waitObserved]),
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+it(`keeps retry timers live when a retry record update fails`, async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(0)
+  const storageError = new Error(`retry update failed`)
+  class Storage extends FakeStorageAdapter {
+    private failed = false
+
+    override async set(key: string, value: string) {
+      if (!this.failed && JSON.parse(value).retryCount > 0) {
+        this.failed = true
+        throw storageError
+      }
+      await super.set(key, value)
+    }
+  }
+  const transaction = storedTransaction(`retry-after-update-failure`)
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  await outbox.add(transaction)
+  const scheduler = new KeyScheduler()
+  const calls: Array<string> = []
+  const completed: Array<string> = []
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: async ({ transaction: current }) => {
+          calls.push(current.id)
+          if (calls.length === 1) throw new Error(`provider unavailable`)
+        },
+      },
+      jitter: false,
+    },
+    {
+      isOfflineEnabled: true,
+      isOnline: () => true,
+      resolveTransaction: (id) => completed.push(id),
+      rejectTransaction: () => {},
+      registerRestorationTransaction: () => {},
+    },
+  )
+
+  try {
+    await expect(executor.execute(transaction)).rejects.toBe(storageError)
+    expect({ calls, completed, pending: executor.getPendingCount() }).toEqual({
+      calls: [transaction.id],
+      completed: [],
+      pending: 1,
+    })
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect({ calls, completed, pending: executor.getPendingCount() }).toEqual({
+      calls: [transaction.id, transaction.id],
+      completed: [transaction.id],
+      pending: 0,
+    })
+    expect(await outbox.get(transaction.id)).toBeNull()
+  } finally {
+    executor.clear()
+    vi.useRealTimers()
+  }
+})
+
+it(`keeps later work live when a permanent record removal fails`, async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(0)
+  const storageError = new Error(`permanent removal failed`)
+  class Storage extends FakeStorageAdapter {
+    private failed = false
+
+    override async delete(key: string) {
+      if (!this.failed && key === `tx:permanent`) {
+        this.failed = true
+        throw storageError
+      }
+      await super.delete(key)
+    }
+  }
+  const permanent = storedTransaction(`permanent`)
+  const later = { ...storedTransaction(`later`), createdAt: new Date(1) }
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  await outbox.add(permanent)
+  await outbox.add(later)
+  const scheduler = new KeyScheduler()
+  scheduler.schedule(permanent)
+  scheduler.schedule(later)
+  const calls: Array<string> = []
+  const completed: Array<string> = []
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: async ({ transaction }) => {
+          calls.push(transaction.id)
+          if (transaction.id === permanent.id)
+            throw new NonRetriableError(`permanent`)
+        },
+      },
+      jitter: false,
+    },
+    {
+      isOfflineEnabled: true,
+      isOnline: () => true,
+      resolveTransaction: (id) => completed.push(id),
+      rejectTransaction: () => {},
+      registerRestorationTransaction: () => {},
+    },
+  )
+
+  try {
+    await expect(executor.executeAll()).rejects.toBe(storageError)
+    expect({ calls, completed, pending: executor.getPendingCount() }).toEqual({
+      calls: [permanent.id],
+      completed: [],
+      pending: 1,
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect({ calls, completed, pending: executor.getPendingCount() }).toEqual({
+      calls: [permanent.id, later.id],
+      completed: [later.id],
+      pending: 0,
+    })
+    expect(await outbox.get(permanent.id)).toEqual(permanent)
+    expect(await outbox.get(later.id)).toBeNull()
+  } finally {
+    executor.clear()
+    vi.useRealTimers()
   }
 })
 

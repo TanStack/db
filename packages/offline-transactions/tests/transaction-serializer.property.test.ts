@@ -371,6 +371,70 @@ it(`rejects native scalars before storage when global restoration is unavailable
   }
 })
 
+it(`preserves metadata toJSON values without changing mutation value semantics`, () => {
+  class JsonValue {
+    toJSON(key: string) {
+      return `from-toJSON:${key}`
+    }
+  }
+  const collection = {
+    id: `metadata-json-writer`,
+    getKeyFromItem: (value: { id: string }) => value.id,
+  } as any
+  const serializer = new TransactionSerializer({ rows: collection })
+  const url = new URL(`https://example.com/path`)
+  const jsonValue = new JsonValue()
+  const metadata = {
+    url,
+    jsonValue,
+    nested: [jsonValue],
+    boxed: [Object(7), Object(`value`), Object(false)],
+  }
+  Object.defineProperty(metadata, `toJSON`, {
+    value: (key: string) => ({ ...metadata, metadataKey: key }),
+  })
+  const transaction: OfflineTransaction = {
+    id: `metadata-json`,
+    mutationFnName: `persist`,
+    mutations: [
+      {
+        globalKey: `metadata-json-writer:one`,
+        type: `insert`,
+        modified: { id: `one`, url, jsonValue },
+        original: {},
+        changes: {},
+        collection,
+      } as unknown as PendingMutation,
+    ],
+    keys: [`metadata-json-writer:one`],
+    idempotencyKey: `once`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    metadata,
+    version: 1,
+  }
+
+  const encoded = serializer.serialize(transaction)
+  const wire = JSON.parse(encoded)
+  expect(wire.metadata).toEqual({
+    url: `https://example.com/path`,
+    jsonValue: `from-toJSON:jsonValue`,
+    nested: [`from-toJSON:0`],
+    boxed: [7, `value`, false],
+    metadataKey: `metadata`,
+  })
+  expect(wire.mutations[0].modified).toEqual({
+    id: `one`,
+    url: {},
+    jsonValue: {},
+  })
+
+  const decoded = serializer.deserialize(encoded)
+  expect(decoded.metadata).toEqual(wire.metadata)
+  expect(decoded.mutations[0]!.modified).toEqual(wire.mutations[0].modified)
+})
+
 it(`preserves native scalar identity across storage restart`, async () => {
   type NativeRow = {
     id: string
@@ -572,7 +636,7 @@ it(`preserves prior wire meanings when reading native scalar markers`, async () 
   }
 })
 
-it(`fails visibly when a stored native scalar cannot be restored`, async () => {
+it(`fails visibly with the retained native scalar transaction id`, async () => {
   const collection = createCollection<{ id: string; due: unknown }>({
     id: `native-scalar-missing-runtime`,
     getKey: (row) => row.id,
@@ -617,11 +681,9 @@ it(`fails visibly when a stored native scalar cannot be restored`, async () => {
       new TransactionSerializer({ rows: collection }).deserialize(wire),
     ).toThrow(MissingTemporalConstructorError)
     await expect(outbox.get(`missing-runtime`)).rejects.toThrow(
-      MissingTemporalConstructorError,
+      /transaction missing-runtime/,
     )
-    await expect(outbox.getAll()).rejects.toThrow(
-      MissingTemporalConstructorError,
-    )
+    await expect(outbox.getAll()).rejects.toThrow(/transaction missing-runtime/)
     expect(storage.snapshot()).toHaveProperty(`tx:missing-runtime`, wire)
   } finally {
     if (previousTemporal === undefined) delete temporalGlobal.Temporal
