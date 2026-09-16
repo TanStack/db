@@ -29,6 +29,7 @@ import { powerSyncCollectionOptions } from '../src'
 import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
 import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
 import type { WatchOnChangeHandler } from '@powersync/common'
+import type { PowerSyncLogger } from '@powersync/node'
 
 const describePowerSync = TEST_DATABASE_IMPLEMENTATION
   ? describe
@@ -38,9 +39,7 @@ type CrudRow = { data: string }
 
 async function createDatabase(
   schema: Schema,
-  logger?: {
-    log: (record: { level: number; message: string; error?: unknown }) => void
-  },
+  logger?: PowerSyncLogger,
 ) {
   const db = new PowerSyncDatabase({
     schema,
@@ -49,7 +48,7 @@ async function createDatabase(
       dbLocation: tmpdir(),
       implementation: TEST_DATABASE_IMPLEMENTATION,
     },
-    logger: logger as never,
+    logger,
   })
   await db.disconnectAndClear()
   return db

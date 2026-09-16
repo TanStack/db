@@ -13,10 +13,6 @@ import type {
  * This function takes an object representing a row, a table schema, and an optional custom serializer map.
  * It returns a new object with values transformed to be compatible with SQLite column types.
  *
- * ## Generics
- * - `TOutput`: The shape of the input object, typically matching the row data.
- * - `TTable`: The table schema, which must match the keys of `TOutput`.
- *
  * ## Parameters
  * - `value`: The object to serialize (row data).
  * - `tableSchema`: The schema describing the SQLite table columns and types.
@@ -40,11 +36,9 @@ import type {
 export function serializeForSQLite<TTable extends Table>(
   value: AnyTableColumnType<TTable>,
   tableSchema: TTable,
-  customSerializer: Partial<
-    CustomSQLiteSerializer<
-      AnyTableColumnType<TTable>,
-      ExtractedTableColumns<TTable>
-    >
+  customSerializer: CustomSQLiteSerializer<
+    AnyTableColumnType<TTable>,
+    ExtractedTableColumns<TTable>
   > = {},
 ): ExtractedTable<TTable> {
   return Object.fromEntries(
