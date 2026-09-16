@@ -173,8 +173,7 @@ export class OutboxManager {
     const keys = await this.storage.keys()
     const transactionKeys = keys.filter((key) => key.startsWith(this.keyPrefix))
 
-    await Promise.all(transactionKeys.map((key) => this.storage.delete(key)))
-    this.recordRemovals(
+    await this.removeMany(
       transactionKeys.map((key) => key.slice(this.keyPrefix.length)),
     )
   }
