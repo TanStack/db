@@ -16,7 +16,6 @@ import {
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
 } from '../../errors.js'
-import { normalizeValue } from '../../utils/comparison.js'
 import {
   getParentContextIdentity,
   getParentContextValue,
@@ -68,6 +67,12 @@ export type LazyCollectionCallbacks = {
   plans?: Array<LazyDemandPlan>
   setDemand?: (plan: LazyDemandPlan, keys: Set<unknown>) => void
 }
+
+type JoinInputValue = [
+  originalKey: unknown,
+  namespacedRow: NamespacedRow,
+  joinValue: unknown,
+]
 
 let nextLazyDemandPlanId = 0
 
@@ -146,6 +151,23 @@ function getRouteJoinKey(
     getParentContextIdentity(route?.parentContext ?? null),
     valueIdentity.equality(value),
   ])
+}
+
+function getJoinKey(
+  row: NamespacedRow,
+  source: string,
+  originalKey: unknown,
+  side: `main` | `joined`,
+  value: unknown,
+  routeJoinedSource: boolean,
+  valueIdentity: ValueIdentity,
+): string {
+  if (value == null) {
+    return serializeValue([`nullishJoin`, side, originalKey])
+  }
+  return routeJoinedSource
+    ? getRouteJoinKey(row, source, value, valueIdentity)
+    : valueIdentity.serializeEquality(value)
 }
 
 export function registerLazyDemandPlan(
@@ -337,15 +359,21 @@ function processJoin(
   let mainPipeline = pipeline.pipe(
     map(([currentKey, namespacedRow]) => {
       // Extract the join key from the main source expression
-      const value = normalizeValue(compiledMainExpr(namespacedRow))
-      const mainKey = routeJoinedSource
-        ? getRouteJoinKey(namespacedRow, mainSource, value, valueIdentity)
-        : value
+      const value = compiledMainExpr(namespacedRow)
+      const mainKey = getJoinKey(
+        namespacedRow,
+        mainSource,
+        currentKey,
+        `main`,
+        value,
+        routeJoinedSource,
+        valueIdentity,
+      )
 
-      // Return [joinKey, [originalKey, namespacedRow]]
-      return [mainKey, [currentKey, namespacedRow]] as [
-        unknown,
-        [string, typeof namespacedRow],
+      // Keep the raw value for lazy demand; the equality key is graph-local.
+      return [mainKey, [currentKey, namespacedRow, value]] as [
+        string,
+        JoinInputValue,
       ]
     }),
   )
@@ -357,15 +385,21 @@ function processJoin(
       const namespacedRow = wrapJoinedInputRow(joinedSource, row)
 
       // Extract the join key from the joined source expression
-      const value = normalizeValue(compiledJoinedExpr(namespacedRow))
-      const joinedKey = routeJoinedSource
-        ? getRouteJoinKey(namespacedRow, joinedSource, value, valueIdentity)
-        : value
+      const value = compiledJoinedExpr(namespacedRow)
+      const joinedKey = getJoinKey(
+        namespacedRow,
+        joinedSource,
+        currentKey,
+        `joined`,
+        value,
+        routeJoinedSource,
+        valueIdentity,
+      )
 
-      // Return [joinKey, [originalKey, namespacedRow]]
-      return [joinedKey, [currentKey, namespacedRow]] as [
-        unknown,
-        [string, typeof namespacedRow],
+      // Keep the raw value for lazy demand; the equality key is graph-local.
+      return [joinedKey, [currentKey, namespacedRow, value]] as [
+        string,
+        JoinInputValue,
       ]
     }),
   )
@@ -431,18 +465,20 @@ function processJoin(
       // Set up lazy loading: intercept active side's stream and dynamically load
       // matching rows from lazy side based on join keys.
       const activePipelineWithLoading: IStreamBuilder<
-        [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
+        [key: string, value: JoinInputValue]
       > = activePipeline.pipe(
         tap((data) => {
-          for (const [[joinKey], weight] of data.getInner()) {
-            if (joinKey == null) continue
-            const encoded = valueIdentity.serializeEquality(joinKey)
-            const previous = demandWeights.get(encoded)
+          for (const [[joinKey, [, , joinValue]], weight] of data.getInner()) {
+            if (joinValue == null) continue
+            const previous = demandWeights.get(joinKey)
             const nextWeight = (previous?.weight ?? 0) + weight
             if (nextWeight === 0) {
-              demandWeights.delete(encoded)
+              demandWeights.delete(joinKey)
             } else {
-              demandWeights.set(encoded, { key: joinKey, weight: nextWeight })
+              demandWeights.set(joinKey, {
+                key: previous?.key ?? joinValue,
+                weight: nextWeight,
+              })
             }
           }
 
@@ -711,13 +747,7 @@ function getFirstFromAlias(query: QueryIR): string | undefined {
 function processJoinResults(joinType: string) {
   return function (
     pipeline: IStreamBuilder<
-      [
-        key: string,
-        [
-          [string, NamespacedRow] | undefined,
-          [string, NamespacedRow] | undefined,
-        ],
-      ]
+      [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
     >,
   ): NamespacedAndKeyedStream {
     return pipeline.pipe(
