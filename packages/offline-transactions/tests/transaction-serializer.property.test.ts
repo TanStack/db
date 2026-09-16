@@ -339,6 +339,38 @@ class TemporalStub {
   }
 }
 
+it(`rejects native scalars before storage when global restoration is unavailable`, async () => {
+  const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
+  const previousTemporal = temporalGlobal.Temporal
+  temporalGlobal.Temporal = {}
+  const storage = new FakeStorageAdapter()
+  const outbox = new OutboxManager(storage, {})
+  const transaction: OfflineTransaction = {
+    id: `unrestorable-native-scalar`,
+    mutationFnName: `persist`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `once`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    metadata: {
+      due: new TemporalStub(`PlainDate`, `2026-09-16`),
+    },
+    version: 1,
+  }
+
+  try {
+    await expect(outbox.add(transaction)).rejects.toThrow(
+      MissingTemporalConstructorError,
+    )
+    expect(storage.snapshot()).toEqual({})
+  } finally {
+    if (previousTemporal === undefined) delete temporalGlobal.Temporal
+    else temporalGlobal.Temporal = previousTemporal
+  }
+})
+
 it(`preserves native scalar identity across storage restart`, async () => {
   type NativeRow = {
     id: string

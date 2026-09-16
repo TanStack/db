@@ -18,6 +18,7 @@ const temporalConstructorNames = [
 ] as const
 
 type TemporalConstructorName = (typeof temporalConstructorNames)[number]
+type TemporalConstructor = { from: (value: string) => unknown }
 
 function getTemporalConstructorName(
   type: unknown,
@@ -29,6 +30,21 @@ function getTemporalConstructorName(
   return temporalConstructorNames.includes(constructorName)
     ? constructorName
     : undefined
+}
+
+function requireTemporalConstructor(
+  name: TemporalConstructorName,
+): TemporalConstructor {
+  const constructor = (
+    globalThis as {
+      Temporal?: Partial<Record<TemporalConstructorName, TemporalConstructor>>
+    }
+  ).Temporal?.[name]
+  if (typeof constructor?.from !== `function`)
+    throw new MissingTemporalConstructorError(
+      `Missing global Temporal.${name} constructor`,
+    )
+  return constructor
 }
 
 export class MissingTemporalConstructorError extends Error {}
@@ -177,10 +193,12 @@ export class TransactionSerializer {
       return { __type: `Date`, value: value.toISOString() }
     }
 
-    if (
-      typeof value === `object` &&
-      getTemporalConstructorName(value[Symbol.toStringTag])
-    ) {
+    const temporalConstructorName =
+      typeof value === `object`
+        ? getTemporalConstructorName(value[Symbol.toStringTag])
+        : undefined
+    if (temporalConstructorName) {
+      requireTemporalConstructor(temporalConstructorName)
       return {
         __type: `Temporal`,
         type: value[Symbol.toStringTag],
@@ -232,21 +250,7 @@ export class TransactionSerializer {
         throw new Error(`Corrupted Temporal marker: invalid type field`)
       if (typeof value.value !== `string`)
         throw new Error(`Corrupted Temporal marker: missing value field`)
-      const constructor = (
-        globalThis as {
-          Temporal?: Partial<
-            Record<
-              TemporalConstructorName,
-              { from: (value: string) => unknown }
-            >
-          >
-        }
-      ).Temporal?.[constructorName]
-      if (typeof constructor?.from !== `function`)
-        throw new MissingTemporalConstructorError(
-          `Cannot restore Temporal.${constructorName}: missing global constructor`,
-        )
-      return constructor.from(value.value)
+      return requireTemporalConstructor(constructorName).from(value.value)
     }
 
     if (typeof value === `object`) {
