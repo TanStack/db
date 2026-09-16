@@ -146,7 +146,12 @@ export class CollectionChangesManager<
           combined.set(
             change.key,
             pending?.type === `delete` && change.type === `insert`
-              ? { ...change, type: `update`, previousValue: pending.value }
+              ? {
+                  ...change,
+                  type: `update`,
+                  previousValue: this.enrichChangeWithVirtualProps(pending)
+                    .value,
+                }
               : change,
           )
         }

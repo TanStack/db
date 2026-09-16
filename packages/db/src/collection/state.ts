@@ -1016,11 +1016,25 @@ export class CollectionStateManager<
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
+      // This map also records that a key has already appeared, so a later
+      // operation cannot replace the batch's before-image with an intermediate
+      // snapshot.
+      const syncPreviousValues = new Map<TKey, TOutput | undefined>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
-          if (operation.type !== `delete`)
-            syncedInsertedOrUpdatedKeys.add(operation.key as TKey)
+          const key = operation.key as TKey
+          changedKeys.add(key)
+          if (operation.type !== `delete`) syncedInsertedOrUpdatedKeys.add(key)
+          if (!syncPreviousValues.has(key)) {
+            syncPreviousValues.set(
+              key,
+              operation.type === `update` &&
+                `previousValue` in operation &&
+                operation.previousValue !== undefined
+                ? operation.previousValue
+                : undefined,
+            )
+          }
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -1147,6 +1161,13 @@ export class CollectionStateManager<
               ? 'local'
               : 'remote'
           if (origin === `local`) localKeys.add(key)
+
+          if (operation.type !== `delete`) {
+            // A sync source may intentionally reuse a live-reading row object.
+            // Its user fields can change without its identity changing, so an
+            // enriched snapshot cached for an earlier publication is stale.
+            this.virtualPropsCache.delete(operation.value)
+          }
 
           // Update synced data
           switch (operation.type) {
@@ -1381,7 +1402,16 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
-        const previousVisibleValue = currentVisibleState.get(key)
+        const syncPreviousValue = syncPreviousValues.get(key)
+        const hadOptimisticOverlay =
+          previousOptimisticUpserts.has(key) ||
+          previousOptimisticDeletes.has(key)
+        const previousVisibleValue =
+          !hasTruncateSync &&
+          !hadOptimisticOverlay &&
+          syncPreviousValue !== undefined
+            ? syncPreviousValue
+            : currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
         const previousVirtualProps =
           this.preSyncVirtualState.get(key) ??

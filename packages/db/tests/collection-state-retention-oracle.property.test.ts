@@ -726,6 +726,384 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
   }
 })
 
+type LivePreviousRow = {
+  id: number
+  value: number | null | undefined
+}
+
+function observeValuePublications(
+  collection: Collection<LivePreviousRow, number>,
+) {
+  const publications: Array<
+    Array<{
+      type: string
+      key: string | number
+      value: LivePreviousRow[`value`]
+      previousValue: LivePreviousRow[`value`]
+    }>
+  > = []
+  const subscription = collection.subscribeChanges(
+    (changes) =>
+      publications.push(
+        changes.map((change) => ({
+          type: change.type,
+          key: change.key,
+          value: change.value.value,
+          previousValue: change.previousValue?.value,
+        })),
+      ),
+    { includeInitialState: false },
+  )
+  return { publications, subscription }
+}
+
+async function runImmutablePreviousValuePublication(
+  initial: LivePreviousRow[`value`],
+  updates: ReadonlyArray<LivePreviousRow[`value`]>,
+) {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  let liveValue = initial
+  let writes = 0
+  const liveRow = {
+    id: 1,
+    get value() {
+      return liveValue
+    },
+  }
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: liveRow })
+        actions.write({ type: `insert`, value: { id: 2, value: 10 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const { publications, subscription } = observeValuePublications(collection)
+  try {
+    sync.begin()
+    let previousValue = initial
+    for (const value of updates) {
+      liveValue = value
+      sync.write({
+        type: `update`,
+        value: liveRow,
+        previousValue: { id: 1, value: previousValue },
+      })
+      writes++
+      previousValue = value
+    }
+    sync.write({
+      type: `update`,
+      value: { id: 2, value: 11 },
+      previousValue: { id: 2, value: 10 },
+    })
+    writes++
+    expect(sync.commit(), `live-value sync commit reached`).toBe(true)
+    expect(writes, `all live-value writes reached`).toBe(updates.length + 1)
+    expect(publications).toStrictEqual([
+      [
+        {
+          type: `update`,
+          key: 1,
+          value: updates.at(-1),
+          previousValue: initial,
+        },
+        {
+          type: `update`,
+          key: 2,
+          value: 11,
+          previousValue: 10,
+        },
+      ],
+    ])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
+it.each([
+  { initial: 0, updates: [1] },
+  { initial: 0, updates: [1, 2] },
+  { initial: null, updates: [1] },
+  { initial: undefined, updates: [1] },
+] satisfies Array<{
+  initial: LivePreviousRow[`value`]
+  updates: Array<LivePreviousRow[`value`]>
+}>)(
+  `publishes a live value from immutable previous state: %j`,
+  async ({ initial, updates }) => {
+    await runImmutablePreviousValuePublication(initial, updates)
+  },
+)
+
+it(`retains the pre-batch value when a later update supplies an intermediate snapshot`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: { id: 1, value: 0 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const { publications, subscription } = observeValuePublications(collection)
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.write({ type: `update`, value: { id: 1, value: 1 } })
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 2 },
+      previousValue: { id: 1, value: 1 },
+    })
+    expect(sync.commit(), `repeated update batch applies`).toBe(true)
+    expect(publications).toStrictEqual([
+      [{ type: `update`, key: 1, value: 2, previousValue: 0 }],
+    ])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`publishes an insert when only its following update supplies a previous value`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+  const { publications, subscription } = observeValuePublications(collection)
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 2 },
+      previousValue: { id: 1, value: 1 },
+    })
+    expect(sync.commit(), `insert then update batch applies`).toBe(true)
+    expect(publications).toStrictEqual([
+      [{ type: `insert`, key: 1, value: 2, previousValue: undefined }],
+    ])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`publishes a truncate rebuild as an insert despite an update snapshot`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: { id: 1, value: 0 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const { publications, subscription } = observeValuePublications(collection)
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.truncate()
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 1 },
+      previousValue: { id: 1, value: 0 },
+    })
+    expect(sync.commit(), `truncate rebuild applies`).toBe(true)
+    expect(publications).toStrictEqual([
+      [
+        { type: `delete`, key: 1, value: 0, previousValue: undefined },
+        { type: `insert`, key: 1, value: 1, previousValue: undefined },
+      ],
+    ])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`does not publish an authoritative update hidden by an optimistic overlay`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  let release!: () => void
+  const hold = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: { id: 1, value: 0 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const transaction = createTransaction<LivePreviousRow>({
+    autoCommit: false,
+    mutationFn: () => hold,
+  })
+  let commit: Promise<unknown> | undefined
+  const { publications, subscription } = observeValuePublications(collection)
+  try {
+    await collection.stateWhenReady()
+    transaction.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = 100
+      }),
+    )
+    publications.length = 0
+    commit = transaction.commit()
+    await Promise.resolve()
+
+    sync.begin({ immediate: true })
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 1 },
+      previousValue: { id: 1, value: 0 },
+    })
+    expect(sync.commit(), `hidden authoritative update applies`).toBe(true)
+    expect(collection.get(1)?.value, `optimistic overlay remains visible`).toBe(
+      100,
+    )
+    expect(publications, `hidden update is not published`).toStrictEqual([])
+  } finally {
+    subscription.unsubscribe()
+    release()
+    await commit
+    await collection.cleanup()
+  }
+})
+
+it(`does not carry previous-value state across a failed sync session`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  let session = 0
+  let liveValue: LivePreviousRow[`value`] = 0
+  const failure = new Error(`live value read failed`)
+  const liveRow = {
+    id: 1,
+    get value() {
+      return liveValue
+    },
+  }
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        session++
+        actions.begin()
+        if (session === 1) {
+          actions.write({ type: `insert`, value: liveRow })
+          actions.write({ type: `insert`, value: { id: 2, value: 0 } })
+        } else {
+          actions.write({ type: `insert`, value: { id: 1, value: 10 } })
+        }
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+  try {
+    liveValue = 1
+    sync.begin()
+    sync.write({
+      type: `update`,
+      value: liveRow,
+      previousValue: { id: 1, value: 0 },
+    })
+    sync.write({
+      type: `update`,
+      value: {
+        id: 2,
+        get value(): number {
+          throw failure
+        },
+      },
+      previousValue: { id: 2, value: 0 },
+    })
+    let thrown: unknown
+    try {
+      sync.commit()
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown, `the poisoned batch reached value comparison`).toBe(failure)
+
+    const optimisticFailure = new Error(`optimistic mutation failed`)
+    const optimistic = createTransaction<LivePreviousRow>({
+      autoCommit: false,
+      mutationFn: () => {
+        throw optimisticFailure
+      },
+    })
+    const persistence = optimistic.isPersisted.promise.catch((error) => error)
+    optimistic.mutate(() => collection.insert({ id: 3, value: 30 }))
+    expect(collection.has(3), `failed-sync optimistic overlay appears`).toBe(
+      true,
+    )
+    await expect(optimistic.commit()).rejects.toBe(optimisticFailure)
+    expect(await persistence, `failed optimistic receipt`).toBe(
+      optimisticFailure,
+    )
+    expect(
+      collection.has(3),
+      `failed-sync optimistic overlay rolls back before restart`,
+    ).toBe(false)
+
+    await collection.cleanup()
+    collection.startSyncImmediate()
+    expect(session, `replacement sync session started`).toBe(2)
+    const observation = observeValuePublications(collection)
+    subscription = observation.subscription
+    sync.begin()
+    sync.write({ type: `update`, value: { id: 1, value: 11 } })
+    expect(sync.commit(), `clean replacement batch applies`).toBe(true)
+    expect(observation.publications).toStrictEqual([
+      [{ type: `update`, key: 1, value: 11, previousValue: 10 }],
+    ])
+  } finally {
+    subscription?.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
 fcTest.prop(
   [fc.array(retentionActionArbitrary, { minLength: 1, maxLength: 20 })],
   oraclePropertyOptions(100, `collection-state.retention`),
@@ -1038,6 +1416,18 @@ it.each([true, false])(
     )
   },
 )
+it(`publishes prior optimistic ownership when rollback reveals an identical authoritative row`, async () => {
+  await runOptimisticHistory(
+    [{ id: 3, a: 0, b: 0, c: 0 }],
+    [
+      { type: `delete`, key: 3, optimistic: true },
+      { type: `edit`, key: 3, fields: { c: 0 }, optimistic: true },
+      { type: `sync`, rows: [], truncate: false, immediate: false, copies: 1 },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      { type: `settle`, slot: 0, success: false, cascade: false },
+    ],
+  )
+})
 fcTest.prop([optimisticHistory], { numRuns: oracleRuns(60), seed: 86103 })(
   `matches optimistic ownership and publication histories with a fixed seed`,
   async ({ initial, steps }) => {

@@ -1,4 +1,5 @@
 import { createDeferred } from './deferred'
+import { deepEquals } from './utils'
 import { safeRandomUUID } from './utils/uuid'
 import { normalizeError } from './utils/error.js'
 import './duplicate-instance-check'
@@ -132,6 +133,7 @@ export class TransactionScope {
 const defaultTransactionScope = new TransactionScope()
 const transactionScopes = new WeakMap<object, TransactionScope>()
 const transactionAmbientScopes = new WeakMap<object, TransactionScope>()
+const mutationBeforeImages = new WeakMap<object, object>()
 
 function getTransactionScope(transaction: object): TransactionScope {
   const scope = transactionScopes.get(transaction)
@@ -159,9 +161,10 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
  * - (update, update) → update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
+ * - (delete, insert) → null if restoring original, otherwise update
  *
- * Note: (delete, update) and (delete, insert) should never occur as the collection
- * layer prevents operations on deleted items within the same transaction.
+ * Note: (delete, update) should never occur as the collection layer prevents
+ * update operations on deleted items within the same transaction.
  *
  * @param existing - The existing mutation in the transaction
  * @param incoming - The new mutation being applied
@@ -199,7 +202,13 @@ function mergePendingMutations<T extends object>(
       return null
 
     case `update-delete`:
-      // Delete after update: delete dominates
+      // Delete after update: delete dominates. Preserve the transaction's
+      // private before-image in case a later insert needs to reduce the whole
+      // sequence, without changing the established delete payload.
+      mutationBeforeImages.set(
+        incoming,
+        mutationBeforeImages.get(existing) ?? existing.original,
+      )
       return incoming
 
     case `update-update`: {
@@ -217,9 +226,45 @@ function mergePendingMutations<T extends object>(
     }
 
     case `delete-delete`:
+      mutationBeforeImages.set(
+        incoming,
+        mutationBeforeImages.get(existing) ?? existing.original,
+      )
+      return incoming
+
     case `insert-insert`:
       // Same type: replace with latest
       return incoming
+
+    case `delete-insert`: {
+      const original = (mutationBeforeImages.get(existing) ??
+        existing.original) as T
+      if (deepEquals(original, incoming.modified)) {
+        return null
+      }
+
+      const modified = incoming.modified
+      const keys = new Set([...Object.keys(original), ...Object.keys(modified)])
+      const changes = Object.fromEntries(
+        [...keys]
+          .filter(
+            (key) =>
+              Object.hasOwn(original, key) !== Object.hasOwn(modified, key) ||
+              !deepEquals(original[key as keyof T], modified[key as keyof T]),
+          )
+          .map((key) => [key, modified[key as keyof T]]),
+      ) as Partial<T>
+
+      return {
+        ...incoming,
+        type: `update`,
+        original,
+        modified,
+        changes,
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+      }
+    }
 
     default: {
       // Exhaustiveness check
@@ -450,6 +495,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    * - **insert + delete** → removed (mutations cancel each other out)
    * - **update + delete** → delete (delete dominates)
    * - **update + update** → update (union changes, keep first original)
+   * - **delete + insert** → removed if restored, otherwise update
    * - **same type** → replace with latest
    *
    * This merging reduces over-the-wire churn and keeps the optimistic local view
