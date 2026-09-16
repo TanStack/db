@@ -277,6 +277,8 @@ describe(`Electric predicate compiler semantics`, () => {
             nullable: `present`,
             "owner's tier": `bronze`,
             tags: [`admin`, `editor`],
+            numbers: [1, 2],
+            flags: [true],
           },
         },
         roles: [`admin`, `editor`],
@@ -292,6 +294,8 @@ describe(`Electric predicate compiler semantics`, () => {
             "owner's tier": `silver`,
             "owner's, {odd} \\ key": `silver`,
             tags: [`viewer`, null],
+            numbers: [3],
+            flags: [true],
           },
         },
         roles: [`viewer`],
@@ -572,6 +576,23 @@ describe(`Electric predicate compiler semantics`, () => {
         ),
       }),
     ).toEqual([1, 3])
+
+    for (const [value, field, expected] of [
+      [2, `numbers`, [1]],
+      [4, `numbers`, []],
+      [true, `flags`, [1, 2]],
+      [false, `flags`, []],
+    ] as const) {
+      expect(
+        await selectedIds({
+          where: call(
+            `in`,
+            new IR.Value(value),
+            nested(`payload`, `metrics`, field),
+          ),
+        }),
+      ).toEqual(expected)
+    }
 
     await client.query(
       `INSERT INTO "${nestedTable}" (id, payload_data) VALUES (10, '{"metrics":{"score":"not-a-number","enabled":"not-a-boolean","stringValue":true}}')`,

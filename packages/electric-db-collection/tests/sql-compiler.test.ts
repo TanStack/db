@@ -199,24 +199,28 @@ describe(`sql-compiler`, () => {
         expect(encoded).toEqual([`payload`])
       })
 
-      it(`uses JSON containment for a scalar in a nested JSON array`, () => {
-        const result = compileSQL(
-          {
-            where: func(`in`, [
-              val(`admin`),
-              ref(`payload`, `metrics`, `tags`),
-            ]),
-          },
-          {
-            encodeColumnName: (name) =>
-              name === `payload` ? `payload_data` : name,
-          },
-        )
+      it(`preserves scalar JSON types in nested array containment`, () => {
+        for (const [value, field, cast] of [
+          [`admin`, `tags`, `::text`],
+          [2, `numbers`, `::double precision`],
+          [true, `flags`, `::boolean`],
+        ] as const) {
+          const result = compileSQL(
+            {
+              where: func(`in`, [val(value), ref(`payload`, `metrics`, field)]),
+            },
+            {
+              encodeColumnName: (name) =>
+                name === `payload` ? `payload_data` : name,
+            },
+          )
 
-        expect(result.where).toContain(`"payload_data"`)
-        expect(result.where).toContain(`@>`)
-        expect(result.where).not.toContain(`ANY`)
-        expect(result.params).toEqual({ '1': `admin` })
+          expect(result.where).toContain(`"payload_data"`)
+          expect(result.where).toContain(`@>`)
+          expect(result.where).toContain(cast)
+          expect(result.where).not.toContain(`ANY`)
+          expect(result.params).toEqual({ '1': String(value) })
+        }
       })
 
       it(`lowers mapped nested references in filtering and ordering`, () => {
