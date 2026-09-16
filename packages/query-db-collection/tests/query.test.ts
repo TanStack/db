@@ -1640,6 +1640,83 @@ describe(`QueryCollection`, () => {
         }),
       )
     })
+
+    it(`should make a single request for an orderBy + limit query`, async () => {
+      // A backing dataset larger than the requested window. If the collection
+      // over-fetches (e.g. loads the whole table and then re-requests the
+      // window), the queryFn is invoked more than once.
+      const allItems: Array<TestItem> = Array.from({ length: 30 }, (_, i) => ({
+        id: `item-${String(i).padStart(2, `0`)}`,
+        name: `Item ${i}`,
+      }))
+
+      const queryFn = vi
+        .fn()
+        .mockImplementation((ctx: QueryFunctionContext<any>) => {
+          const { offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+          const sorted = [...allItems].sort((a, b) => a.id.localeCompare(b.id))
+          const window =
+            limit === undefined
+              ? sorted.slice(offset)
+              : sorted.slice(offset, offset + limit)
+          return Promise.resolve(window)
+        })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetOrderByLimitTest`,
+        queryClient,
+        queryKey: [`loadSubsetOrderByLimitTest`],
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        // Eager indexing lets orderBy + limit take the lazy windowed load path
+        // (a single bounded request) instead of falling back to loading all data.
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ todo: collection })
+            .orderBy(({ todo }) => todo.id, `asc`)
+            .limit(10),
+      })
+
+      await liveQuery.preload()
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalled()
+      })
+
+      // The first request is the correct bounded window.
+      expect(queryFn).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            loadSubsetOptions: expect.objectContaining({
+              orderBy: expect.arrayContaining([
+                expect.objectContaining({
+                  expression: expect.objectContaining({ path: [`id`] }),
+                  compareOptions: expect.objectContaining({
+                    direction: `asc`,
+                  }),
+                }),
+              ]),
+              limit: 10,
+            }),
+          }),
+        }),
+      )
+
+      // A plain orderBy + limit query must resolve to exactly one bounded
+      // request. Regression: it also fires a second request with empty
+      // loadSubsetOptions ({}), i.e. an unbounded full-table load.
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe(`Select method testing`, () => {
