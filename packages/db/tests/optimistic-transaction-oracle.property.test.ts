@@ -450,6 +450,144 @@ describe(`Delete then insert transaction laws`, () => {
       original,
     )
   })
+
+  it(`delivers a replacement after duplicate deletes of another overlay`, async () => {
+    const original = { id: 1, value: 0, note: `original` }
+    const overlaid = { id: 1, value: 1, note: `original` }
+    const collection = createCollection<ReplacementRow, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: (actions) => {
+          actions.begin()
+          actions.write({ type: `insert`, value: original })
+          actions.commit()
+          actions.markReady()
+        },
+      },
+    })
+    let rejectOverlay!: (error: Error) => void
+    const overlayGate = new Promise<void>((_resolve, reject) => {
+      rejectOverlay = reject
+    })
+    const overlay = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: () => overlayGate,
+    })
+    let deliveries = 0
+    let delivered: ReplacementRow | undefined
+    const replacement = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: ({ transaction }) => {
+        deliveries++
+        delivered = transaction.mutations[0].modified
+        return Promise.resolve()
+      },
+    })
+    const overlaySettlement = overlay.isPersisted.promise.catch(() => undefined)
+    const replacementSettlement = replacement.isPersisted.promise.catch(
+      () => undefined,
+    )
+
+    try {
+      await collection.preload()
+      overlay.mutate(() =>
+        collection.update(1, (draft) => {
+          draft.value = 1
+        }),
+      )
+      const overlayCommit = overlay.commit().catch(() => undefined)
+      await Promise.resolve()
+
+      replacement.mutate(() => {
+        collection.delete([1, 1])
+        collection.insert(overlaid)
+      })
+      await replacement.commit()
+
+      expect(deliveries, `replacement persistence delivery count`).toBe(1)
+      expect(delivered, `replacement server payload`).toStrictEqual(overlaid)
+
+      rejectOverlay(new Error(`earlier overlay failed`))
+      await overlayCommit
+    } finally {
+      if (overlay.state === `pending` || overlay.state === `persisting`)
+        overlay.rollback()
+      if (replacement.state === `pending` || replacement.state === `persisting`)
+        replacement.rollback()
+      await Promise.all([overlaySettlement, replacementSettlement])
+      await collection.cleanup()
+    }
+  })
+
+  it(`delivers a replacement equal only to another pending insert`, async () => {
+    const inserted = { id: 1, value: 1, note: `inserted` }
+    const collection = createCollection<ReplacementRow, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => markReady(),
+      },
+    })
+    let rejectInsert!: (error: Error) => void
+    const insertGate = new Promise<void>((_resolve, reject) => {
+      rejectInsert = reject
+    })
+    const pendingInsert = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: () => insertGate,
+    })
+    let deliveries = 0
+    let delivered: { type: string; modified: ReplacementRow } | undefined
+    const replacement = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: ({ transaction }) => {
+        deliveries++
+        const mutation = transaction.mutations[0]
+        delivered = {
+          type: mutation.type,
+          modified: mutation.modified,
+        }
+        return Promise.resolve()
+      },
+    })
+    const insertSettlement = pendingInsert.isPersisted.promise.catch(
+      () => undefined,
+    )
+    const replacementSettlement = replacement.isPersisted.promise.catch(
+      () => undefined,
+    )
+
+    try {
+      await collection.preload()
+      pendingInsert.mutate(() => collection.insert(inserted))
+      const insertCommit = pendingInsert.commit().catch(() => undefined)
+      await Promise.resolve()
+
+      replacement.mutate(() => {
+        collection.delete(1)
+        collection.insert(inserted)
+      })
+      await replacement.commit()
+
+      expect(deliveries, `replacement persistence delivery count`).toBe(1)
+      expect(delivered, `replacement server mutation`).toStrictEqual({
+        type: `insert`,
+        modified: inserted,
+      })
+
+      rejectInsert(new Error(`earlier insert failed`))
+      await insertCommit
+    } finally {
+      if (
+        pendingInsert.state === `pending` ||
+        pendingInsert.state === `persisting`
+      )
+        pendingInsert.rollback()
+      if (replacement.state === `pending` || replacement.state === `persisting`)
+        replacement.rollback()
+      await Promise.all([insertSettlement, replacementSettlement])
+      await collection.cleanup()
+    }
+  })
 })
 
 // Observe user fields without discarding unexpected fields or undefined keys.

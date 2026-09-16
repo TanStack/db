@@ -2,10 +2,12 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { DuplicateKeySyncError } from '../src/errors.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { runOptimisticHistory } from './optimistic-history-oracle.js'
 import type { OptimisticStep } from './optimistic-history-oracle.js'
+import type { CollectionChangesManager } from '../src/collection/changes.js'
 import type { Collection } from '../src/collection/index.js'
 import type { SyncConfig, TransactionState } from '../src/types.js'
 
@@ -733,6 +735,7 @@ type LivePreviousRow = {
 
 function observeValuePublications(
   collection: Collection<LivePreviousRow, number>,
+  includeInitialState = false,
 ) {
   const publications: Array<
     Array<{
@@ -752,7 +755,7 @@ function observeValuePublications(
           previousValue: change.previousValue?.value,
         })),
       ),
-    { includeInitialState: false },
+    { includeInitialState },
   )
   return { publications, subscription }
 }
@@ -843,6 +846,232 @@ it.each([
     await runImmutablePreviousValuePublication(initial, updates)
   },
 )
+
+it(`snapshots a buffered delete before its row object is reused`, async () => {
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: ({ markReady }) => markReady(),
+    },
+  })
+  const { publications, subscription } = observeValuePublications(collection)
+  const changes = (
+    collection as unknown as {
+      _changes: CollectionChangesManager<LivePreviousRow, number>
+    }
+  )._changes
+  const reusedRow: LivePreviousRow = { id: 1, value: 0 }
+
+  try {
+    await collection.stateWhenReady()
+    changes.shouldBatchEvents = true
+    changes.emitEvents([{ type: `delete`, key: 1, value: reusedRow }])
+    expect(publications, `delete remains buffered`).toStrictEqual([])
+
+    reusedRow.value = 1
+    changes.emitEvents(
+      [{ type: `insert`, key: 1, value: { ...reusedRow } }],
+      true,
+    )
+    expect(publications).toStrictEqual([
+      [{ type: `update`, key: 1, value: 1, previousValue: 0 }],
+    ])
+  } finally {
+    subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`uses the preserved visible row when rollback releases a queued sync`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  let rejectPersistence!: (error: Error) => void
+  const persistenceGate = new Promise<void>((_resolve, reject) => {
+    rejectPersistence = reject
+  })
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: { id: 1, value: 0 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const transaction = createTransaction<LivePreviousRow>({
+    autoCommit: false,
+    mutationFn: () => persistenceGate,
+  })
+  const publications = observeValuePublications(collection)
+
+  try {
+    await collection.stateWhenReady()
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    transaction.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = 1
+      }),
+    )
+    publications.publications.length = 0
+    const commit = transaction.commit()
+    await Promise.resolve()
+
+    sync.begin()
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 2 },
+      previousValue: { id: 1, value: 0 },
+    })
+    const receipt = sync.commit()
+    expect(receipt).not.toBe(true)
+
+    const failure = new Error(`queued mutation failed`)
+    rejectPersistence(failure)
+    await expect(commit).rejects.toBe(failure)
+    if (receipt !== true) await receipt
+
+    expect(collection.get(1)?.value).toBe(2)
+    expect(publications.publications).toStrictEqual([
+      [{ type: `update`, key: 1, value: 2, previousValue: 1 }],
+    ])
+    expect(index.lookup(`eq`, 0)).toEqual(new Set())
+    expect(index.lookup(`eq`, 1)).toEqual(new Set())
+    expect(index.lookup(`eq`, 2)).toEqual(new Set([1]))
+  } finally {
+    publications.subscription.unsubscribe()
+    if (transaction.state === `pending` || transaction.state === `persisting`)
+      transaction.rollback()
+    await collection.cleanup()
+  }
+})
+
+it(`publishes a provider update for an unseen key as an insert`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+  const publications = observeValuePublications(collection, true)
+
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 1 },
+      previousValue: { id: 1, value: 0 },
+    })
+    expect(sync.commit()).toBe(true)
+    expect(publications.publications).toStrictEqual([
+      [],
+      [{ type: `insert`, key: 1, value: 1, previousValue: undefined }],
+    ])
+  } finally {
+    publications.subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`suppresses a replacement-object redelivery with a stale before-image`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: { id: 1, value: 1 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const publications = observeValuePublications(collection)
+
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 1 },
+      previousValue: { id: 1, value: 0 },
+    })
+    expect(sync.commit()).toBe(true)
+    expect(publications.publications).toStrictEqual([])
+  } finally {
+    publications.subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
+
+it(`suppresses a replacement object's partial before-image without index drift`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: { id: 1, value: 1 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const publications = observeValuePublications(collection)
+
+  try {
+    await collection.stateWhenReady()
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    sync.begin()
+    sync.write({
+      type: `update`,
+      value: { id: 1, value: 1 },
+      previousValue: { id: 1 } as LivePreviousRow,
+    })
+    expect(sync.commit()).toBe(true)
+
+    expect(
+      {
+        publications: publications.publications,
+        indexed: index.lookup(`eq`, 1),
+        rangeDomains: (
+          index as unknown as {
+            rangeValueDomains: Map<string, number>
+          }
+        ).rangeValueDomains,
+      },
+      `partial before-image observation`,
+    ).toStrictEqual({
+      publications: [],
+      indexed: new Set([1]),
+      rangeDomains: new Map([[`number`, 1]]),
+    })
+  } finally {
+    publications.subscription.unsubscribe()
+    await collection.cleanup()
+  }
+})
 
 it(`retains the pre-batch value when a later update supplies an intermediate snapshot`, async () => {
   let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]

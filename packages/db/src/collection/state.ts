@@ -1016,25 +1016,11 @@ export class CollectionStateManager<
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
-      // This map also records that a key has already appeared, so a later
-      // operation cannot replace the batch's before-image with an intermediate
-      // snapshot.
-      const syncPreviousValues = new Map<TKey, TOutput | undefined>()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
           changedKeys.add(key)
           if (operation.type !== `delete`) syncedInsertedOrUpdatedKeys.add(key)
-          if (!syncPreviousValues.has(key)) {
-            syncPreviousValues.set(
-              key,
-              operation.type === `update` &&
-                `previousValue` in operation &&
-                operation.previousValue !== undefined
-                ? operation.previousValue
-                : undefined,
-            )
-          }
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -1069,6 +1055,26 @@ export class CollectionStateManager<
           const currentValue = this.get(key)
           if (currentValue !== undefined) {
             currentVisibleState.set(key, currentValue)
+          }
+        }
+      }
+
+      // Only an update that reuses the currently stored row can have changed
+      // that row's readable fields before this commit captured them. Preserve
+      // the first operation for each key so later writes cannot substitute an
+      // intermediate before-image.
+      const syncPreviousValues = new Map<TKey, TOutput | undefined>()
+      for (const transaction of committedSyncedTransactions) {
+        for (const operation of transaction.operations) {
+          const key = operation.key as TKey
+          if (!syncPreviousValues.has(key)) {
+            syncPreviousValues.set(
+              key,
+              operation.type === `update` &&
+                currentVisibleState.get(key) === operation.value
+                ? operation.previousValue
+                : undefined,
+            )
           }
         }
       }

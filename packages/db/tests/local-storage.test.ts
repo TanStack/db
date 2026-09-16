@@ -1016,6 +1016,70 @@ describe(`localStorage collection`, () => {
       subscription.unsubscribe()
     })
 
+    it(`keeps replacement fields absent in memory, storage, and reload`, async () => {
+      type ReplacementRow = {
+        id: string
+        title: string
+        removed?: string
+      }
+      const createReplacementCollection = () =>
+        createCollection(
+          localStorageCollectionOptions<ReplacementRow>({
+            storageKey: `replacement-rows`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (row) => row.id,
+          }),
+        )
+      const collection = createReplacementCollection()
+      let reopened: typeof collection | undefined
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: ({ transaction: committed }: any) =>
+          Promise.resolve(collection.utils.acceptMutations(committed)),
+      })
+
+      try {
+        await collection.preload()
+        const insert = collection.insert({
+          id: `row`,
+          title: `replacement`,
+          removed: `old`,
+        })
+        await insert.isPersisted.promise
+
+        transaction.mutate(() => {
+          collection.delete(`row`)
+          collection.insert({ id: `row`, title: `replacement` })
+        })
+        await transaction.commit()
+
+        const memoryRow = collection.get(`row`)!
+        const stored = JSON.parse(
+          mockStorage.getItem(`replacement-rows`)!,
+        ) as Record<string, { data: ReplacementRow }>
+        await collection.cleanup()
+        reopened = createReplacementCollection()
+        await reopened.preload()
+        const reloadedRow = reopened.get(`row`)!
+
+        expect({
+          memory: Object.hasOwn(memoryRow, `removed`),
+          storage: Object.hasOwn(stored[`s:row`]!.data, `removed`),
+          reload: Object.hasOwn(reloadedRow, `removed`),
+        }).toStrictEqual({ memory: false, storage: false, reload: false })
+      } finally {
+        if (
+          transaction.state === `pending` ||
+          transaction.state === `persisting`
+        )
+          transaction.rollback()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await reopened?.cleanup()
+        await collection.cleanup()
+      }
+    })
+
     it(`should only accept mutations for the specific collection`, async () => {
       const collection1 = createCollection(
         localStorageCollectionOptions<Todo>({

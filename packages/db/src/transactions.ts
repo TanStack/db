@@ -133,7 +133,6 @@ export class TransactionScope {
 const defaultTransactionScope = new TransactionScope()
 const transactionScopes = new WeakMap<object, TransactionScope>()
 const transactionAmbientScopes = new WeakMap<object, TransactionScope>()
-const mutationBeforeImages = new WeakMap<object, object>()
 
 function getTransactionScope(transaction: object): TransactionScope {
   const scope = transactionScopes.get(transaction)
@@ -161,7 +160,8 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
  * - (update, update) → update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
- * - (delete, insert) → null if restoring original, otherwise update
+ * - (delete, insert) → insert without an authoritative row, null if restoring
+ *   the authoritative row, otherwise update
  *
  * Note: (delete, update) should never occur as the collection layer prevents
  * update operations on deleted items within the same transaction.
@@ -202,13 +202,8 @@ function mergePendingMutations<T extends object>(
       return null
 
     case `update-delete`:
-      // Delete after update: delete dominates. Preserve the transaction's
-      // private before-image in case a later insert needs to reduce the whole
-      // sequence, without changing the established delete payload.
-      mutationBeforeImages.set(
-        incoming,
-        mutationBeforeImages.get(existing) ?? existing.original,
-      )
+    case `delete-delete`:
+      // Delete dominates an update or earlier delete.
       return incoming
 
     case `update-update`: {
@@ -225,20 +220,13 @@ function mergePendingMutations<T extends object>(
       }
     }
 
-    case `delete-delete`:
-      mutationBeforeImages.set(
-        incoming,
-        mutationBeforeImages.get(existing) ?? existing.original,
-      )
-      return incoming
-
     case `insert-insert`:
       // Same type: replace with latest
       return incoming
 
     case `delete-insert`: {
-      const original = (mutationBeforeImages.get(existing) ??
-        existing.original) as T
+      const original = existing.collection._state.syncedData.get(existing.key)
+      if (original === undefined) return incoming
       if (deepEquals(original, incoming.modified)) {
         return null
       }
