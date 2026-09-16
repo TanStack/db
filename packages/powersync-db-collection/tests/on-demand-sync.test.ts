@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
+import {
+  LogLevels,
+  PowerSyncDatabase,
+  Schema,
+  Table,
+  column,
+} from '@powersync/node'
 import {
   IR,
   and,
@@ -18,6 +24,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 import { withTestCleanup } from './with-test-cleanup'
 import type { LoadSubsetOptions } from '@tanstack/db'
+import type { PowerSyncLogger } from '@powersync/node'
 
 const APP_SCHEMA = new Schema({
   products: new Table({
@@ -28,7 +35,7 @@ const APP_SCHEMA = new Schema({
 })
 
 describe(`On-Demand Sync Mode`, () => {
-  async function createDatabase() {
+  async function createDatabase(logger?: PowerSyncLogger) {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test-on-demand-${randomUUID()}.sqlite`,
@@ -36,6 +43,7 @@ describe(`On-Demand Sync Mode`, () => {
         implementation: { type: `node:sqlite` },
       },
       schema: APP_SCHEMA,
+      logger,
     })
     onTestFinished(async () => {
       // Wait a moment for any pending cleanup operations to complete
@@ -46,6 +54,22 @@ describe(`On-Demand Sync Mode`, () => {
     })
     await db.disconnectAndClear()
     return db
+  }
+
+  // The sync handler catches its own errors and surfaces them only through the
+  // logger, so captured errors are how these tests assert it stayed healthy.
+  function errorCapturingLogger(): [Array<string>, PowerSyncLogger] {
+    const errors: Array<string> = []
+    return [
+      errors,
+      {
+        log({ level, message }) {
+          if (level >= LogLevels.error) {
+            errors.push(message)
+          }
+        },
+      },
+    ]
   }
 
   async function createTestProducts(db: PowerSyncDatabase) {
@@ -114,18 +138,13 @@ describe(`On-Demand Sync Mode`, () => {
       expect(actual).toEqual(wanted)
     }
 
-    const db = await createDatabase()
-    const reports: Array<Array<unknown>> = []
+    const [loggedErrors, logger] = errorCapturingLogger()
+    const db = await createDatabase(logger)
     const rejections: Array<unknown> = []
     const recordRejection = (error: unknown) => {
       rejections.push(error)
     }
     process.on(`unhandledRejection`, recordRejection)
-    const errors = vi
-      .spyOn(db.logger, `error`)
-      .mockImplementation((...args) => {
-        reports.push(args)
-      })
     const triggerRecords: Array<{ calls: number; settled: boolean }> = []
     const realCreateTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
     const triggers = vi
@@ -208,7 +227,7 @@ describe(`On-Demand Sync Mode`, () => {
       await vi.waitFor(() => check(capture(), wanted))
       const actual = capture()
       observations.push({ cut: name, actual, wanted })
-      expect(reports).toEqual([])
+      expect(loggedErrors).toEqual([])
       expect(rejections).toEqual([])
       return { actual, wanted }
     }
@@ -349,10 +368,9 @@ describe(`On-Demand Sync Mode`, () => {
       () => collection.cleanup(),
       expectTrackingGone,
       () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
-      () => expect(reports).toEqual([]),
+      () => expect(loggedErrors).toEqual([]),
       () => expect(rejections).toEqual([]),
       () => triggers.mockRestore(),
-      () => errors.mockRestore(),
       () => process.off(`unhandledRejection`, recordRejection),
     ])
   })
@@ -445,7 +463,8 @@ describe(`On-Demand Sync Mode`, () => {
   it.each([`apply`, `cleanup`] as const)(
     `settles staged subset baseline rows after %s`,
     async (outcome) => {
-      const db = await createDatabase()
+      const [errors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
       await createTestProducts(db)
 
       let resolvePersistence!: () => void
@@ -515,7 +534,6 @@ describe(`On-Demand Sync Mode`, () => {
         },
       )
       const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
-      const sdkErrors = vi.spyOn(db.logger, `error`)
       const unexpected: Array<unknown> = []
       const recordUnhandled = (error: unknown) => unexpected.push(error)
       process.on(`unhandledRejection`, recordUnhandled)
@@ -613,11 +631,10 @@ describe(`On-Demand Sync Mode`, () => {
         () => expectTrackingCount(0),
         () => expect(cleanupHook).toHaveBeenCalledOnce(),
         () => expect(triggerDisposals[0]).toHaveBeenCalledOnce(),
-        () => expect(sdkErrors).not.toHaveBeenCalled(),
+        () => expect(errors).toHaveLength(0),
         () => expect(unexpected).toEqual([]),
         () => process.off(`unhandledRejection`, recordUnhandled),
         () => reports.mockRestore(),
-        () => sdkErrors.mockRestore(),
         () => triggerSpy.mockRestore(),
       ])
     },
@@ -2622,16 +2639,6 @@ describe(`On-Demand Sync Mode`, () => {
         new IR.Value(category),
       ])
 
-    // The sync handler catches its own errors and surfaces them only through the
-    // logger, so captured errors are how these tests assert it stayed healthy.
-    function captureSyncErrors(db: PowerSyncDatabase) {
-      const errors: Array<string> = []
-      vi.spyOn(db.logger, `error`).mockImplementation((...args: Array<any>) => {
-        errors.push(args.map(String).join(` `))
-      })
-      return () => errors
-    }
-
     function makeCollection(db: PowerSyncDatabase) {
       return createCollection(
         powerSyncCollectionOptions({
@@ -2704,7 +2711,7 @@ describe(`On-Demand Sync Mode`, () => {
     }
 
     it(`does not publish a provisional or rejected subset`, async () => {
-      const db = await createDatabase()
+      const db = await createDatabase(errorCapturingLogger()[1])
       const firstHook = pDefer<void>()
       const hookFailure = new Error(`subset hook failed`)
       const onLoadSubset = vi
@@ -2932,7 +2939,7 @@ describe(`On-Demand Sync Mode`, () => {
         async (options) => {
           let cursor = 0
           await options.hooks?.beforeCreate?.({
-            getAll: async () => rows.slice(cursor, ++cursor),
+            getAll: () => Promise.resolve(rows.slice(cursor, ++cursor)),
           } as never)
           return vi.fn()
         },
@@ -3024,7 +3031,6 @@ describe(`On-Demand Sync Mode`, () => {
 
     it(`does not repeat release work started by a reentrant cleanup`, async () => {
       const db = await createDatabase()
-      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
       const getAll = vi.spyOn(db, `getAll`).mockResolvedValue([])
       const first = { where: categoryEquals(`electronics`) }
       const second = { where: categoryEquals(`clothing`) }
@@ -3056,9 +3062,8 @@ describe(`On-Demand Sync Mode`, () => {
     })
 
     it(`does not create tracking when change observation cannot start`, async () => {
-      const db = await createDatabase()
+      const db = await createDatabase(errorCapturingLogger()[1])
       const startupError = new Error(`change observation failed`)
-      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
       vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => {
         throw startupError
       })
@@ -3178,11 +3183,10 @@ describe(`On-Demand Sync Mode`, () => {
       `reconciles rows after a release rebuild outage with %s`,
       async (change) => {
         vi.useFakeTimers()
-        const db = await createDatabase()
+        const db = await createDatabase(errorCapturingLogger()[1])
         await db.execute(
           `INSERT INTO products (id, name, price, category) VALUES ('retained', 'Before', 10, 'clothing')`,
         )
-        vi.spyOn(db.logger, `error`).mockImplementation(() => {})
         const collection = createCollection(
           powerSyncCollectionOptions({
             database: db,
@@ -3243,8 +3247,7 @@ describe(`On-Demand Sync Mode`, () => {
 
     it(`retries a failed physical release`, async () => {
       vi.useFakeTimers()
-      const db = await createDatabase()
-      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      const db = await createDatabase(errorCapturingLogger()[1])
       vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
       const getAll = vi
         .spyOn(db, `getAll`)
@@ -3268,8 +3271,7 @@ describe(`On-Demand Sync Mode`, () => {
 
     it(`does not let one failed release block another`, async () => {
       vi.useFakeTimers()
-      const db = await createDatabase()
-      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      const db = await createDatabase(errorCapturingLogger()[1])
       vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
       const getAll = vi
         .spyOn(db, `getAll`)
@@ -3304,8 +3306,7 @@ describe(`On-Demand Sync Mode`, () => {
 
     it(`evicts a newly released demand without waiting for another demand's retry timer`, async () => {
       vi.useFakeTimers()
-      const db = await createDatabase()
-      vi.spyOn(db.logger, `error`).mockImplementation(() => {})
+      const db = await createDatabase(errorCapturingLogger()[1])
       vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
       const getAll = vi
         .spyOn(db, `getAll`)
@@ -3339,7 +3340,6 @@ describe(`On-Demand Sync Mode`, () => {
 
     it(`rechecks active demand before evicting released rows`, async () => {
       const db = await createDatabase()
-      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
       const firstEviction = pDefer<Array<{ id: string }>>()
       const getAll = vi
         .spyOn(db, `getAll`)
@@ -3373,9 +3373,9 @@ describe(`On-Demand Sync Mode`, () => {
     })
 
     it(`should start tracking again when a subset is loaded after every subset was unloaded`, async () => {
-      const db = await createDatabase()
+      const [syncErrors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
       await createTestProducts(db)
-      const syncErrors = captureSyncErrors(db)
 
       const collection = makeCollection(db)
       onTestFinished(() => collection.cleanup())
@@ -3412,13 +3412,13 @@ describe(`On-Demand Sync Mode`, () => {
         { timeout: 2000 },
       )
 
-      expect(syncErrors()).toEqual([])
+      expect(syncErrors).toEqual([])
     })
 
     it(`should stop tracking cleanly when every subset is unloaded and the collection is cleaned up`, async () => {
-      const db = await createDatabase()
+      const [syncErrors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
       await createTestProducts(db)
-      const syncErrors = captureSyncErrors(db)
 
       const collection = makeCollection(db)
       await collection.stateWhenReady()
@@ -3451,7 +3451,7 @@ describe(`On-Demand Sync Mode`, () => {
       collection.cleanup()
       await new Promise((resolve) => setTimeout(resolve, 200))
 
-      expect(syncErrors()).toEqual([])
+      expect(syncErrors).toEqual([])
     })
 
     it(`should dispose each diff trigger exactly once`, async () => {

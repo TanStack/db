@@ -56,7 +56,7 @@ const db = new PowerSyncDatabase({
 
 ```ts
 import {
-  AbstractPowerSyncDatabase,
+  CommonPowerSyncDatabase,
   PowerSyncBackendConnector,
   PowerSyncCredentials,
 } from "@powersync/web"
@@ -67,11 +67,11 @@ class Connector implements PowerSyncBackendConnector {
 
   /** Upload local changes to the app backend.
    *
-   * Use {@link AbstractPowerSyncDatabase.getCrudBatch} to get a batch of changes to upload.
+   * Use {@link CommonPowerSyncDatabase.getCrudBatch} to get a batch of changes to upload.
    *
    * Any thrown errors will result in a retry after the configured wait period (default: 5 seconds).
    */
-  uploadData: (database: AbstractPowerSyncDatabase) => Promise<void>
+  uploadData: (database: CommonPowerSyncDatabase) => Promise<void>
 }
 
 // Configure the client to connect to a PowerSync service and your backend
@@ -474,12 +474,12 @@ await documents.delete(docId, {
 The metadata is available in PowerSync `CrudEntry` records when processing uploads in the connector:
 
 ```typescript
-import { CrudEntry } from "@powersync/web"
+import type { CommonPowerSyncDatabase } from "@powersync/web"
 
 class Connector implements PowerSyncBackendConnector {
   // ...
 
-  async uploadData(database: AbstractPowerSyncDatabase) {
+  async uploadData(database: CommonPowerSyncDatabase) {
     const batch = await database.getCrudBatch()
     if (!batch) return
 
