@@ -357,9 +357,9 @@ describe(`Collection Lifecycle Management`, () => {
       )
       expect(syncStarts).toBe(1)
       expect(collection.status).toBe(`ready`)
-      expect(collection.toArray.map(({ id, value }) => ({ id, value }))).toEqual(
-        [target],
-      )
+      expect(
+        collection.toArray.map(({ id, value }) => ({ id, value })),
+      ).toEqual([target])
       expect(onInsert).not.toHaveBeenCalled()
     } finally {
       await collection.cleanup()

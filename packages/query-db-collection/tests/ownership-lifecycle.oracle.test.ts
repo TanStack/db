@@ -720,9 +720,7 @@ describe(`query collection ownership lifecycle`, () => {
         name: `3-third`,
       }
       const allVisibleIds = [...visibleIds, thirdItem.id]
-      expectedPublication = ordered
-        ? allVisibleIds
-        : [...allVisibleIds].sort()
+      expectedPublication = ordered ? allVisibleIds : [...allVisibleIds].sort()
       const third = collection.insert(thirdItem)
       expect(persistenceGates).toHaveLength(3)
       expectMutationLifecycleSnapshot(
@@ -1349,9 +1347,10 @@ describe(`query collection ownership lifecycle`, () => {
     const queryHash = hashKey(queryKey)
     const stale = { id: `stale`, category: `retained`, name: `Stale` }
     const fresh = { id: `fresh`, category: `retained`, name: `Fresh` }
-    const firstScan = createDeferred<
-      Array<{ key: string | number; value: Item; metadata?: unknown }>
-    >()
+    const firstScan =
+      createDeferred<
+        Array<{ key: string | number; value: Item; metadata?: unknown }>
+      >()
     const scanPersisted = vi
       .fn()
       .mockReturnValueOnce(firstScan.promise)

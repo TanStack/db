@@ -1944,25 +1944,12 @@ export function queryCollectionOptions(
             enqueueResultApplication(
               hashedQueryKey,
               (signal, token) =>
-                reconcileSuccessfulResult(
-                  queryKey,
-                  result,
-                  token,
-                  signal,
-                ),
+                reconcileSuccessfulResult(queryKey, result, token, signal),
               applicationToken,
             )
           } else {
-            enqueueResultApplication(
-              hashedQueryKey,
-              (signal, token) =>
-                applySuccessfulResult(
-                  queryKey,
-                  result,
-                  token,
-                  undefined,
-                  signal,
-                ),
+            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+              applySuccessfulResult(queryKey, result, token, undefined, signal),
             )
           }
         } else {
