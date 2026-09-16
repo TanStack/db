@@ -2,9 +2,7 @@
 '@tanstack/electric-db-collection': patch
 ---
 
-Preserve typed filtering, ordering, mapped fields, and distinct null/missing
-semantics when Electric subset queries reference nested JSON properties.
-
-Compile scalar membership against PostgreSQL and nested JSON arrays with the
-correct containment direction, while rejecting nullish operands and
-literal-array left operands that cannot represent scalar membership.
+Preserve PostgreSQL semantics for boolean comparisons and array membership,
+including nullable values, compatible reference-to-array types, and non-text
+array elements. Reject nullish membership operands and literal-array left
+operands, and escape quotes in mapped column names.
