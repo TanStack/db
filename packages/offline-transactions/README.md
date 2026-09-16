@@ -226,12 +226,12 @@ const tx = offlineTx.mutate(() => {
 
 console.log(tx.state) // 'pending'
 
-void offlineTx.commit().catch((error) => {
+try {
+  await Promise.all([offlineTx.commit(), tx.isPersisted.promise])
+  console.log(tx.state) // 'completed'
+} catch (error) {
   showSubmissionError(error)
-})
-
-await tx.isPersisted.promise
-console.log(tx.state) // 'completed'
+}
 ```
 
 ### Tracking Every Pending Transaction for an Item

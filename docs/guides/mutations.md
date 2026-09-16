@@ -1647,28 +1647,8 @@ const handleCreateTodo = async (text: string) => {
   // This is an authoritative-sync gate only if onInsert waits for that sync.
   await tx.isPersisted.promise
 
-  // Read the synced row's real ID before enabling operations that address it.
-}
-
-// Disable keyed operations until the row has its authoritative ID.
-const TodoItem = ({
-  todo,
-  hasAuthoritativeId,
-}: {
-  todo: Todo
-  hasAuthoritativeId: boolean
-}) => {
-  return (
-    <div>
-      {todo.text}
-      <button
-        onClick={() => todoCollection.delete(todo.id)}
-        disabled={!hasAuthoritativeId}
-      >
-        Delete
-      </button>
-    </div>
-  )
+  // Do not infer ID readiness from transaction state. Read the synced row or
+  // application-owned mapping, then enable operations with that real ID.
 }
 ```
 
