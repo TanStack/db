@@ -1130,11 +1130,18 @@ function buildCompareOptionsFromConfig(
 ): StringCollationConfig {
   if (config.defaultStringCollation) {
     const options = config.defaultStringCollation
+    if (options.stringSort === `lexical`) {
+      return { stringSort: `lexical` }
+    }
+
     return {
-      stringSort: options.stringSort ?? `locale`,
-      locale: options.stringSort === `locale` ? options.locale : undefined,
-      localeOptions:
-        options.stringSort === `locale` ? options.localeOptions : undefined,
+      stringSort: `locale`,
+      ...(`locale` in options &&
+        options.locale !== undefined && { locale: options.locale }),
+      ...(`localeOptions` in options &&
+        options.localeOptions !== undefined && {
+          localeOptions: options.localeOptions,
+        }),
     }
   } else {
     return {

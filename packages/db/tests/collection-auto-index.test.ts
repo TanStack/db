@@ -347,6 +347,58 @@ describe(`Collection Auto-Indexing`, () => {
     subscription3.unsubscribe()
   })
 
+  it(`omits unset locale fields from collection compare options`, async () => {
+    const collection = createCollection<{ id: string }, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: { stringSort: `locale` },
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    try {
+      expect(collection.compareOptions.stringSort).toBe(`locale`)
+      expect(Object.keys(collection.compareOptions).sort()).toEqual([
+        `stringSort`,
+      ])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`preserves explicit locale settings when locale mode is selected by default`, async () => {
+    const collection = createCollection<{ id: string }, string>({
+      getKey: (item) => item.id,
+      defaultStringCollation: {
+        locale: `en-US`,
+        localeOptions: { sensitivity: `base` },
+      },
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    try {
+      expect(collection.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `en-US`,
+        localeOptions: { sensitivity: `base` },
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`should create auto-indexes for different supported operations`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
