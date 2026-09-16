@@ -6,6 +6,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -38,9 +39,15 @@ function expectSuccess(result: ReturnType<typeof run>) {
 }
 
 it(`emits portable declarations for an external inferred collection factory`, () => {
-  const vite = resolve(workspaceRoot, `node_modules/.bin/vite`)
-  expectSuccess(run(vite, [`build`], resolve(packageRoot, `../db`)))
-  expectSuccess(run(vite, [`build`], packageRoot))
+  for (const declaration of [
+    resolve(packageRoot, `../db/dist/esm/index.d.ts`),
+    resolve(packageRoot, `dist/esm/index.d.ts`),
+  ]) {
+    expect(
+      existsSync(declaration),
+      `Missing built declaration: ${declaration}`,
+    ).toBe(true)
+  }
 
   const consumerRoot = mkdtempSync(
     join(tmpdir(), `powersync-portable-declarations-`),

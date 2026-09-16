@@ -1,5 +1,5 @@
 ---
-'@tanstack/powersync-db-collection': patch
+'@tanstack/powersync-db-collection': minor
 ---
 
-Fix update conservation, declared-view rows, PowerSync 2 compatibility, transformed-schema comparison, and portable inferred declarations.
+Require PowerSync 2 and fix update conservation, declared-view rows, transformed-schema comparison, and portable inferred declarations.

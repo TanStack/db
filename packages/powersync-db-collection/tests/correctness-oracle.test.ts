@@ -387,16 +387,13 @@ describePowerSync(`PowerSync correctness oracle`, () => {
     const collection = createCollection(
       powerSyncCollectionOptions({ database: db, table: schema.props.todos }),
     )
+    const ignoredMetadata = { ignored: true }
 
     try {
       await collection.preload()
-      await collection.update(
-        `t1`,
-        { metadata: { ignored: true } },
-        (draft) => {
-          draft.title = `after`
-        },
-      ).isPersisted.promise
+      await collection.update(`t1`, { metadata: ignoredMetadata }, (draft) => {
+        draft.title = `after`
+      }).isPersisted.promise
       await collection.cleanup()
 
       expect(
@@ -410,7 +407,8 @@ describePowerSync(`PowerSync correctness oracle`, () => {
         records.some(
           (record) =>
             record.level === LogLevels.warn &&
-            record.message.includes(`does not track metadata`),
+            record.message.includes(`does not track metadata`) &&
+            record.error === ignoredMetadata,
         ),
       ).toBe(true)
       expect(
