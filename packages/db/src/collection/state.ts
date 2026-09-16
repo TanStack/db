@@ -1016,10 +1016,16 @@ export class CollectionStateManager<
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
+      const firstSyncOperations = new Map<
+        TKey,
+        OptimisticChangeMessage<TOutput>
+      >()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
           changedKeys.add(key)
+          if (!firstSyncOperations.has(key))
+            firstSyncOperations.set(key, operation)
           if (operation.type !== `delete`) syncedInsertedOrUpdatedKeys.add(key)
         }
         for (const [key] of transaction.rowMetadataWrites) {
@@ -1055,26 +1061,6 @@ export class CollectionStateManager<
           const currentValue = this.get(key)
           if (currentValue !== undefined) {
             currentVisibleState.set(key, currentValue)
-          }
-        }
-      }
-
-      // Only an update that reuses the currently stored row can have changed
-      // that row's readable fields before this commit captured them. Preserve
-      // the first operation for each key so later writes cannot substitute an
-      // intermediate before-image.
-      const syncPreviousValues = new Map<TKey, TOutput | undefined>()
-      for (const transaction of committedSyncedTransactions) {
-        for (const operation of transaction.operations) {
-          const key = operation.key as TKey
-          if (!syncPreviousValues.has(key)) {
-            syncPreviousValues.set(
-              key,
-              operation.type === `update` &&
-                currentVisibleState.get(key) === operation.value
-                ? operation.previousValue
-                : undefined,
-            )
           }
         }
       }
@@ -1168,12 +1154,10 @@ export class CollectionStateManager<
               : 'remote'
           if (origin === `local`) localKeys.add(key)
 
-          if (operation.type !== `delete`) {
-            // A sync source may intentionally reuse a live-reading row object.
-            // Its user fields can change without its identity changing, so an
-            // enriched snapshot cached for an earlier publication is stale.
+          // A sync source may reuse a live-reading row object, making an
+          // enriched snapshot cached for an earlier publication stale.
+          if (operation.type !== `delete`)
             this.virtualPropsCache.delete(operation.value)
-          }
 
           // Update synced data
           switch (operation.type) {
@@ -1408,13 +1392,18 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
-        const syncPreviousValue = syncPreviousValues.get(key)
-        const hadOptimisticOverlay =
-          previousOptimisticUpserts.has(key) ||
-          previousOptimisticDeletes.has(key)
+        const firstSyncOperation = firstSyncOperations.get(key)
+        // A live-reading source can change a reused row before this commit
+        // captures it. Later writes must not substitute an intermediate value.
+        const syncPreviousValue =
+          firstSyncOperation?.type === `update` &&
+          currentVisibleState.get(key) === firstSyncOperation.value
+            ? firstSyncOperation.previousValue
+            : undefined
         const previousVisibleValue =
           !hasTruncateSync &&
-          !hadOptimisticOverlay &&
+          !previousOptimisticUpserts.has(key) &&
+          !previousOptimisticDeletes.has(key) &&
           syncPreviousValue !== undefined
             ? syncPreviousValue
             : currentVisibleState.get(key)

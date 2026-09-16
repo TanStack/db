@@ -233,21 +233,20 @@ function mergePendingMutations<T extends object>(
 
       const modified = incoming.modified
       const keys = new Set([...Object.keys(original), ...Object.keys(modified)])
-      const changes = Object.fromEntries(
-        [...keys]
-          .filter(
-            (key) =>
-              Object.hasOwn(original, key) !== Object.hasOwn(modified, key) ||
-              !deepEquals(original[key as keyof T], modified[key as keyof T]),
-          )
-          .map((key) => [key, modified[key as keyof T]]),
-      ) as Partial<T>
+      const changes: Partial<T> = {}
+      for (const key of keys) {
+        if (
+          Object.hasOwn(original, key) !== Object.hasOwn(modified, key) ||
+          !deepEquals(original[key as keyof T], modified[key as keyof T])
+        ) {
+          changes[key as keyof T] = modified[key as keyof T]
+        }
+      }
 
       return {
         ...incoming,
         type: `update`,
         original,
-        modified,
         changes,
         metadata: incoming.metadata ?? existing.metadata,
         syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
