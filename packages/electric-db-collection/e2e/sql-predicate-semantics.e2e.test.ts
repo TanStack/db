@@ -383,7 +383,7 @@ describe(`Electric predicate compiler semantics`, () => {
     )
     nestedTable = `nested_predicate_semantics_${Date.now().toString(16)}`
     await client.query(
-      `CREATE TABLE "${nestedTable}" (id INTEGER PRIMARY KEY, payload_data JSONB, roles TEXT[], required_role TEXT)`,
+      `CREATE TABLE "${nestedTable}" (id INTEGER PRIMARY KEY, payload_data JSONB, roles TEXT[], integer_roles INTEGER[], required_role TEXT)`,
     )
   })
 
@@ -572,6 +572,37 @@ describe(`Electric predicate compiler semantics`, () => {
         ),
       }),
     ).toEqual([1, 3])
+
+    await client.query(
+      `INSERT INTO "${nestedTable}" (id, payload_data) VALUES (10, '{"metrics":{"score":"not-a-number","enabled":"not-a-boolean","stringValue":true}}')`,
+    )
+    expect(
+      await selectedIds({
+        where: call(
+          `gt`,
+          nested(`payload`, `metrics`, `score`),
+          new IR.Value(10),
+        ),
+      }),
+    ).toEqual([3])
+    expect(
+      await selectedIds({
+        where: call(
+          `eq`,
+          nested(`payload`, `metrics`, `enabled`),
+          new IR.Value(true),
+        ),
+      }),
+    ).toEqual([1, 3])
+    expect(
+      await selectedIds({
+        where: call(
+          `eq`,
+          nested(`payload`, `metrics`, `stringValue`),
+          new IR.Value(`true`),
+        ),
+      }),
+    ).toEqual([])
   })
 
   it(`preserves nullable boolean ordering and membership under negation`, async () => {
@@ -613,6 +644,24 @@ describe(`Electric predicate compiler semantics`, () => {
         ),
       }),
     ).toEqual([2, 5])
+  })
+
+  it(`preserves literal membership in non-text PostgreSQL arrays`, async () => {
+    await seedNestedRows()
+    await client.query(
+      `UPDATE "${nestedTable}" SET integer_roles = CASE id WHEN 1 THEN ARRAY[1, 2] WHEN 2 THEN ARRAY[3] WHEN 4 THEN ARRAY[NULL]::INTEGER[] END WHERE id <= 4`,
+    )
+
+    const bounded = call(`lte`, nested(`id`), new IR.Value(4))
+    const membership = call(`in`, new IR.Value(2), nested(`integer_roles`))
+    expect(
+      await selectedIds({ where: call(`and`, bounded, membership) }),
+    ).toEqual([1])
+    expect(
+      await selectedIds({
+        where: call(`and`, bounded, call(`not`, membership)),
+      }),
+    ).toEqual([2, 3, 4])
   })
 
   it(`preserves reversed comparisons, null ordering, hostile keys, and nested membership negation`, async () => {

@@ -120,15 +120,18 @@ function compileNestedScalarRef(
   literal: unknown,
   encodeColumnName?: ColumnEncoder,
 ): string {
-  const text = compileNestedRef(ref.path, encodeColumnName, `text`)
+  const type = typeof literal
+  if (type !== `number` && type !== `boolean` && type !== `string`) {
+    throw new Error(
+      `Nested JSON comparisons require a string, number, or boolean literal`,
+    )
+  }
 
-  if (typeof literal === `number`) return `(${text})::double precision`
-  if (typeof literal === `boolean`) return `(${text})::boolean`
-  if (typeof literal === `string`) return text
-
-  throw new Error(
-    `Nested JSON comparisons require a string, number, or boolean literal`,
-  )
+  const json = compileNestedRef(ref.path, encodeColumnName, `jsonb`)
+  const scalar = `(CASE WHEN jsonb_typeof(${json}) = '${type}' THEN (${json} #>> '{}') END)`
+  if (type === `number`) return `${scalar}::double precision`
+  if (type === `boolean`) return `${scalar}::boolean`
+  return scalar
 }
 
 function compileNullCheck(
@@ -462,7 +465,10 @@ function compileFunction(
           return `COALESCE(${jsonArray}, '[]'::jsonb) @> jsonb_build_array(${jsonValue})`
         }
 
-        const containment = `${rhs} @> ARRAY[${lhs}] AND ${rhs} IS NOT NULL`
+        // Resolve literal parameters from the array element type before containment.
+        const typeHint =
+          valueArg.type === `val` ? `(${lhs} = ANY(${rhs}) OR TRUE) AND ` : ``
+        const containment = `${typeHint}${rhs} @> ARRAY[${lhs}] AND ${rhs} IS NOT NULL`
         return valueArg.type === `val`
           ? containment
           : `CASE WHEN ${lhs} IS NULL THEN NULL ELSE (${containment}) END`
