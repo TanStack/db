@@ -37,10 +37,7 @@ const describePowerSync = TEST_DATABASE_IMPLEMENTATION
 
 type CrudRow = { data: string }
 
-async function createDatabase(
-  schema: Schema,
-  logger?: PowerSyncLogger,
-) {
+async function createDatabase(schema: Schema, logger?: PowerSyncLogger) {
   const db = new PowerSyncDatabase({
     schema,
     database: {
