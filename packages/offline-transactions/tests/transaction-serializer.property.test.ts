@@ -339,6 +339,23 @@ class TemporalStub {
   }
 }
 
+function metadataTransaction(
+  metadata: Record<string, unknown>,
+): OfflineTransaction {
+  return {
+    id: `metadata-json`,
+    mutationFnName: `persist`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `once`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    metadata,
+    version: 1,
+  }
+}
+
 it(`rejects native scalars before storage when global restoration is unavailable`, async () => {
   const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
   const previousTemporal = temporalGlobal.Temporal
@@ -433,6 +450,123 @@ it(`preserves metadata toJSON values without changing mutation value semantics`,
   const decoded = serializer.deserialize(encoded)
   expect(decoded.metadata).toEqual(wire.metadata)
   expect(decoded.mutations[0]!.modified).toEqual(wire.mutations[0].modified)
+})
+
+it(`does not invoke toJSON again on its immediate replacement`, () => {
+  const nested = {
+    toJSON(key: string) {
+      return `nested:${key}`
+    },
+  }
+  const replacement = {
+    nested,
+    toJSON() {
+      return `incorrect second invocation`
+    },
+  }
+  const transaction = metadataTransaction({
+    value: {
+      toJSON(key: string) {
+        return key === `value` ? replacement : `incorrect key:${key}`
+      },
+    },
+  })
+
+  const wire = JSON.parse(new TransactionSerializer({}).serialize(transaction))
+
+  expect(wire.metadata).toEqual({ value: { nested: `nested:nested` } })
+})
+
+it(`treats immediate native-scalar replacements as ordinary JSON values`, () => {
+  const temporalReplacement = {
+    [Symbol.toStringTag]: `Temporal.PlainDate`,
+    toString() {
+      return `2026-09-16`
+    },
+  }
+  const transaction = metadataTransaction({
+    date: { toJSON: () => new Date(0) },
+    temporal: { toJSON: () => temporalReplacement },
+  })
+
+  const wire = JSON.parse(new TransactionSerializer({}).serialize(transaction))
+
+  expect(wire.metadata).toEqual({ date: {}, temporal: {} })
+})
+
+it(`preserves JSON array length and indexed-property semantics in metadata`, () => {
+  const values = Array(3) as Array<string | undefined>
+  Object.defineProperty(values, 0, { enumerable: false, value: `hidden` })
+  values[1] = `visible`
+  const shrinking = Array(3) as Array<string | undefined>
+  Object.defineProperty(shrinking, 0, {
+    enumerable: true,
+    get() {
+      shrinking.length = 1
+      return `first`
+    },
+  })
+  const transaction = metadataTransaction({ values, shrinking })
+
+  const wire = JSON.parse(new TransactionSerializer({}).serialize(transaction))
+
+  expect(wire.metadata).toEqual({
+    values: [`hidden`, `visible`, null],
+    shrinking: [`first`, null, null],
+  })
+})
+
+it(`retains JSON's error for boxed BigInt metadata`, () => {
+  const transaction = metadataTransaction({ value: Object(1n) })
+
+  expect(() => new TransactionSerializer({}).serialize(transaction)).toThrow(
+    TypeError,
+  )
+})
+
+it(`does not recurse through fresh toJSON replacement objects`, () => {
+  const freshReplacement = (): Record<string, unknown> => ({
+    toJSON: freshReplacement,
+  })
+  const transaction = metadataTransaction({
+    value: { toJSON: freshReplacement },
+  })
+
+  const wire = JSON.parse(new TransactionSerializer({}).serialize(transaction))
+
+  expect(wire.metadata).toEqual({ value: {} })
+})
+
+it(`reads metadata toJSON once with its object as the receiver`, () => {
+  let reads = 0
+  let selfCalls = 0
+  const value = {
+    marker: `receiver`,
+    get toJSON() {
+      reads++
+      if (reads > 1) throw new Error(`toJSON read more than once`)
+      return function (this: { marker: string }, key: string) {
+        return `${this.marker}:${key}`
+      }
+    },
+  }
+  const self = {
+    keep: `value`,
+    toJSON() {
+      selfCalls++
+      return this
+    },
+  }
+  const transaction = metadataTransaction({ value, self })
+
+  const wire = JSON.parse(new TransactionSerializer({}).serialize(transaction))
+
+  expect(wire.metadata).toEqual({
+    value: `receiver:value`,
+    self: { keep: `value` },
+  })
+  expect(reads).toBe(1)
+  expect(selfCalls).toBe(1)
 })
 
 it(`preserves native scalar identity across storage restart`, async () => {
