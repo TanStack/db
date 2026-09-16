@@ -258,6 +258,120 @@ function evaluate(value: Predicate, row: Row): Truth {
 describe(`Electric predicate compiler semantics`, () => {
   let client: Client
   let table: string
+  let nestedTable: string
+
+  async function seedNestedRows(): Promise<void> {
+    const nestedRows: Array<{
+      id: number
+      payload: unknown
+      roles: Array<string | null> | null
+      requiredRole: string | null
+      sqlNull?: boolean
+    }> = [
+      {
+        id: 1,
+        payload: {
+          metrics: {
+            score: 2,
+            enabled: true,
+            nullable: `present`,
+            "owner's tier": `bronze`,
+            tags: [`admin`, `editor`],
+          },
+        },
+        roles: [`admin`, `editor`],
+        requiredRole: `admin`,
+      },
+      {
+        id: 2,
+        payload: {
+          metrics: {
+            score: 10,
+            enabled: false,
+            nullable: `present`,
+            "owner's tier": `silver`,
+            "owner's, {odd} \\ key": `silver`,
+            tags: [`viewer`, null],
+          },
+        },
+        roles: [`viewer`],
+        requiredRole: `admin`,
+      },
+      {
+        id: 3,
+        payload: {
+          metrics: {
+            score: 100,
+            enabled: true,
+            nullable: `present`,
+            "owner's tier": `gold`,
+            tags: [`admin`],
+          },
+        },
+        roles: [`admin`],
+        requiredRole: null,
+      },
+      {
+        id: 4,
+        payload: { metrics: { enabled: false } },
+        roles: [],
+        requiredRole: null,
+      },
+      {
+        id: 5,
+        payload: {
+          metrics: { score: null, enabled: null, nullable: null, tags: null },
+        },
+        roles: null,
+        requiredRole: `admin`,
+      },
+      { id: 6, payload: null, roles: null, requiredRole: null },
+      { id: 7, payload: { metrics: null }, roles: null, requiredRole: null },
+      { id: 8, payload: {}, roles: null, requiredRole: null },
+      {
+        id: 9,
+        payload: null,
+        roles: null,
+        requiredRole: null,
+        sqlNull: true,
+      },
+    ]
+
+    await client.query(`TRUNCATE "${nestedTable}"`)
+    for (const row of nestedRows) {
+      await client.query(
+        `INSERT INTO "${nestedTable}" (id, payload_data, roles, required_role) VALUES ($1, $2::jsonb, $3::text[], $4)`,
+        [
+          row.id,
+          row.sqlNull ? null : JSON.stringify(row.payload),
+          row.roles,
+          row.requiredRole,
+        ],
+      )
+    }
+  }
+
+  async function selectedIds(options: {
+    where: IR.BasicExpression<boolean>
+    orderBy?: IR.OrderBy
+  }): Promise<Array<number>> {
+    const compiled = compileSQL(options, {
+      encodeColumnName: (name) => (name === `payload` ? `payload_data` : name),
+    })
+    const params = Object.entries(compiled.params ?? {})
+      .sort(([left], [right]) => Number(left) - Number(right))
+      .map(([, value]) => value)
+    const orderBy = compiled.orderBy ? compiled.orderBy : `id`
+    const result = await client.query<{ id: number }>(
+      `SELECT id FROM "${nestedTable}" WHERE ${compiled.where} ORDER BY ${orderBy}`,
+      params,
+    )
+    return result.rows.map(({ id }) => id)
+  }
+
+  const nested = (...path: Array<string>) => new IR.PropRef(path)
+  const call = (name: string, ...args: Array<IR.BasicExpression>) =>
+    new IR.Func<boolean>(name, args)
 
   beforeAll(async () => {
     client = makePgClient()
@@ -267,10 +381,15 @@ describe(`Electric predicate compiler semantics`, () => {
     await client.query(
       `CREATE TABLE "${table}" (id INTEGER PRIMARY KEY, count INTEGER, label TEXT, enabled BOOLEAN)`,
     )
+    nestedTable = `nested_predicate_semantics_${Date.now().toString(16)}`
+    await client.query(
+      `CREATE TABLE "${nestedTable}" (id INTEGER PRIMARY KEY, payload_data JSONB, roles TEXT[], required_role TEXT)`,
+    )
   })
 
   afterAll(async () => {
     await client.query(`DROP TABLE IF EXISTS "${table}"`)
+    await client.query(`DROP TABLE IF EXISTS "${nestedTable}"`)
     await client.end()
   })
 
@@ -386,6 +505,191 @@ describe(`Electric predicate compiler semantics`, () => {
     )
 
     expect(result.rows.map(({ id }) => id)).toEqual([2])
+  })
+
+  it(`preserves typed nested JSON filtering, ordering, and nullish fields`, async () => {
+    await seedNestedRows()
+
+    expect(
+      await selectedIds({
+        where: call(
+          `gt`,
+          nested(`payload`, `metrics`, `score`),
+          new IR.Value(10),
+        ),
+      }),
+    ).toEqual([3])
+    expect(
+      await selectedIds({
+        where: call(`lte`, nested(`id`), new IR.Value(3)),
+        orderBy: [
+          {
+            expression: nested(`payload`, `metrics`, `score`),
+            compareOptions: { direction: `asc`, nulls: `last` },
+          },
+        ],
+      }),
+    ).toEqual([1, 2, 3])
+    expect(
+      await selectedIds({
+        where: call(
+          `eq`,
+          nested(`payload`, `metrics`, `enabled`),
+          new IR.Value(true),
+        ),
+      }),
+    ).toEqual([1, 3])
+    expect(
+      await selectedIds({
+        where: call(
+          `eq`,
+          nested(`payload`, `metrics`, `owner's tier`),
+          new IR.Value(`gold`),
+        ),
+      }),
+    ).toEqual([3])
+    expect(
+      await selectedIds({
+        where: call(`isNull`, nested(`payload`, `metrics`, `nullable`)),
+      }),
+    ).toEqual([5, 6, 7, 9])
+    expect(
+      await selectedIds({
+        where: call(`isUndefined`, nested(`payload`, `metrics`, `nullable`)),
+      }),
+    ).toEqual([4, 8])
+    expect(
+      await selectedIds({
+        where: call(`in`, new IR.Value(`admin`), nested(`roles`)),
+      }),
+    ).toEqual([1, 3])
+    expect(
+      await selectedIds({
+        where: call(
+          `in`,
+          new IR.Value(`admin`),
+          nested(`payload`, `metrics`, `tags`),
+        ),
+      }),
+    ).toEqual([1, 3])
+  })
+
+  it(`preserves nullable boolean ordering and membership under negation`, async () => {
+    await seedNestedRows()
+    const enabled = nested(`payload`, `metrics`, `enabled`)
+
+    expect(
+      await selectedIds({ where: enabled as IR.BasicExpression<boolean> }),
+    ).toEqual([1, 3])
+    expect(await selectedIds({ where: call(`not`, enabled) })).toEqual([2, 4])
+
+    for (const where of [
+      call(`lte`, enabled, new IR.Value(true)),
+      call(`gte`, enabled, new IR.Value(false)),
+    ]) {
+      expect(await selectedIds({ where })).toEqual([1, 2, 3, 4])
+    }
+    expect(
+      await selectedIds({ where: call(`lte`, new IR.Value(true), enabled) }),
+    ).toEqual([1, 3])
+    expect(
+      await selectedIds({ where: call(`gte`, new IR.Value(false), enabled) }),
+    ).toEqual([2, 4])
+    expect(
+      await selectedIds({
+        where: call(
+          `and`,
+          call(`eq`, nested(`id`), new IR.Value(3)),
+          call(`lt`, new IR.Value(false), enabled),
+        ),
+      }),
+    ).toEqual([3])
+
+    expect(
+      await selectedIds({
+        where: call(
+          `not`,
+          call(`in`, nested(`required_role`), nested(`roles`)),
+        ),
+      }),
+    ).toEqual([2, 5])
+  })
+
+  it(`preserves reversed comparisons, null ordering, hostile keys, and nested membership negation`, async () => {
+    await seedNestedRows()
+
+    expect(
+      await selectedIds({
+        where: call(
+          `gt`,
+          new IR.Value(10),
+          nested(`payload`, `metrics`, `score`),
+        ),
+      }),
+    ).toEqual([1])
+    expect(
+      await selectedIds({
+        where: call(`lte`, nested(`id`), new IR.Value(5)),
+        orderBy: [
+          {
+            expression: nested(`payload`, `metrics`, `score`),
+            compareOptions: { direction: `asc`, nulls: `first` },
+          },
+          {
+            expression: nested(`id`),
+            compareOptions: { direction: `asc`, nulls: `last` },
+          },
+        ],
+      }),
+    ).toEqual([4, 5, 1, 2, 3])
+    expect(
+      await selectedIds({
+        where: call(
+          `eq`,
+          nested(`payload`, `metrics`, `owner's, {odd} \\ key`),
+          new IR.Value(`silver`),
+        ),
+      }),
+    ).toEqual([2])
+    expect(
+      await selectedIds({
+        where: call(
+          `not`,
+          call(
+            `in`,
+            new IR.Value(`admin`),
+            nested(`payload`, `metrics`, `tags`),
+          ),
+        ),
+      }),
+    ).toEqual([2, 4, 5, 6, 7, 8, 9])
+  })
+
+  it(`rejects nested-path, text-order, and containment-direction faults`, async () => {
+    await seedNestedRows()
+
+    const numericFilter = await client.query<{ id: number }>(
+      `SELECT id FROM "${nestedTable}" WHERE payload_data #>> '{metrics,score}' > $1 ORDER BY id`,
+      [`10`],
+    )
+    expect(numericFilter.rows.map(({ id }) => id)).not.toEqual([3])
+
+    const numericOrder = await client.query<{ id: number }>(
+      `SELECT id FROM "${nestedTable}" WHERE id <= 3 ORDER BY payload_data #>> '{metrics,score}'`,
+    )
+    expect(numericOrder.rows.map(({ id }) => id)).not.toEqual([1, 2, 3])
+
+    const lostPath = await client.query<{ id: number }>(
+      `SELECT id FROM "${nestedTable}" WHERE payload_data ->> 'score' = $1 ORDER BY id`,
+      [`100`],
+    )
+    expect(lostPath.rows.map(({ id }) => id)).not.toEqual([3])
+
+    const reversedContainment = await client.query<{ id: number }>(
+      `SELECT id FROM "${nestedTable}" WHERE ARRAY[$1] @> roles ORDER BY id`,
+      [`admin`],
+    )
+    expect(reversedContainment.rows.map(({ id }) => id)).not.toEqual([1, 3])
   })
 
   it(`rejects representative compiler faults against PostgreSQL`, async () => {

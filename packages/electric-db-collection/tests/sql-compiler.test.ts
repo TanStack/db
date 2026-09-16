@@ -118,6 +118,147 @@ describe(`sql-compiler`, () => {
       })
     })
 
+    describe(`array membership`, () => {
+      it(`uses containment for a scalar value in an array-valued reference`, () => {
+        const result = compileSQL({
+          where: func(`in`, [val(`admin`), ref(`roles`)]),
+        })
+
+        expect(result.where).toBe(
+          `"roles" @> ARRAY[$1] AND "roles" IS NOT NULL`,
+        )
+        expect(result.params).toEqual({ '1': `admin` })
+      })
+
+      it(`keeps the array-valued reference on the containment left side`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`requiredRole`), ref(`roles`)]),
+        })
+
+        expect(result.where).toBe(
+          `CASE WHEN "requiredRole" IS NULL THEN NULL ELSE ("roles" @> ARRAY["requiredRole"] AND "roles" IS NOT NULL) END`,
+        )
+        expect(result.params).toEqual({})
+      })
+
+      it(`uses ANY for a scalar reference in a literal list`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`status`), val([`active`, `pending`])]),
+        })
+
+        expect(result.where).toBe(`"status" = ANY($1)`)
+        expect(result.params).toEqual({ '1': `{"active","pending"}` })
+      })
+
+      it(`rejects nullish membership operands before binding parameters`, () => {
+        const invalidExpressions = [
+          func(`in`, [val(null), ref(`roles`)]),
+          func(`in`, [val(undefined), ref(`roles`)]),
+          func(`in`, [ref(`status`), val(null)]),
+          func(`in`, [ref(`status`), val(undefined)]),
+        ]
+
+        for (const where of invalidExpressions) {
+          expect(() => compileSQL({ where })).toThrow(
+            `Cannot use null/undefined value with 'in' operator`,
+          )
+        }
+      })
+
+      it(`rejects an array-valued element`, () => {
+        for (const array of [ref(`roles`), val([`admin`, `editor`])]) {
+          expect(() =>
+            compileSQL({
+              where: func(`in`, [val([`admin`, `editor`]), array]),
+            }),
+          ).toThrow(/array-valued.+left|left.+array-valued/i)
+        }
+      })
+    })
+
+    describe(`nested references`, () => {
+      it(`quotes mapped root identifiers and leaves JSON keys unmapped`, () => {
+        const encoded: Array<string> = []
+        const result = compileSQL(
+          {
+            where: func(`eq`, [
+              ref(`payload`, `owner's, {odd} \\ key`),
+              val(`gold`),
+            ]),
+          },
+          {
+            encodeColumnName: (name) => {
+              encoded.push(name)
+              return `mapped"${name}`
+            },
+          },
+        )
+
+        expect(result.where).toContain(`"mapped""payload"`)
+        expect(result.where).toContain(`owner''s, {odd} \\ key`)
+        expect(encoded).toEqual([`payload`])
+      })
+
+      it(`uses JSON containment for a scalar in a nested JSON array`, () => {
+        const result = compileSQL(
+          {
+            where: func(`in`, [
+              val(`admin`),
+              ref(`payload`, `metrics`, `tags`),
+            ]),
+          },
+          {
+            encodeColumnName: (name) =>
+              name === `payload` ? `payload_data` : name,
+          },
+        )
+
+        expect(result.where).toContain(`"payload_data"`)
+        expect(result.where).toContain(`@>`)
+        expect(result.where).not.toContain(`ANY`)
+        expect(result.params).toEqual({ '1': `admin` })
+      })
+
+      it(`lowers mapped nested references in filtering and ordering`, () => {
+        const result = compileSQL(
+          {
+            where: func(`gt`, [
+              ref(`payload`, `metrics`, `owner's score`),
+              val(10),
+            ]),
+            orderBy: [
+              {
+                expression: ref(`payload`, `metrics`, `owner's score`),
+                compareOptions: { direction: `asc`, nulls: `last` },
+              },
+            ],
+          },
+          {
+            encodeColumnName: (name) =>
+              name === `payload` ? `payload_data` : name,
+          },
+        )
+
+        expect(result.where).toContain(`"payload_data"`)
+        expect(result.where).toContain(`owner`)
+        expect(result.orderBy).toContain(`"payload_data"`)
+        expect(result.orderBy).toContain(`owner`)
+        expect(result.params).toEqual({ '1': `10` })
+      })
+
+      it(`fails fast when nested JSON types cannot be inferred safely`, () => {
+        for (const where of [
+          func(`length`, [ref(`payload`, `tags`)]),
+          func(`concat`, [ref(`payload`, `name`)]),
+          func(`eq`, [ref(`payload`, `profile`), val({ active: true })]),
+          func(`eq`, [ref(`payload`, `left`), ref(`payload`, `right`)]),
+          func(`in`, [ref(`payload`, `role`), ref(`payload`, `roles`)]),
+        ]) {
+          expect(() => compileSQL({ where })).toThrow(/Nested JSON/)
+        }
+      })
+    })
+
     describe(`compound where clauses`, () => {
       it(`preserves boolean grouping beneath a comparison`, () => {
         const result = compileSQL({

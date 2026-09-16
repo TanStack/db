@@ -37,7 +37,9 @@ export function compileSQL<T>(
   if (where) {
     // TODO: this only works when the where expression's PropRefs directly reference a column of the collection
     //       doesn't work if it goes through aliases because then we need to know the entire query to be able to follow the reference until the base collection (cf. followRef function)
-    compiledSQL.where = compileBasicExpression(where, params, encodeColumnName)
+    compiledSQL.where = isNestedRef(where)
+      ? compileNestedScalarRef(where, true, encodeColumnName)
+      : compileBasicExpression(where, params, encodeColumnName)
   }
 
   if (orderBy) {
@@ -88,7 +90,82 @@ function quoteIdentifier(
   encodeColumnName?: ColumnEncoder,
 ): string {
   const columnName = encodeColumnName ? encodeColumnName(name) : name
-  return `"${columnName}"`
+  return `"${columnName.replace(/"/g, `""`)}"`
+}
+
+function isNestedRef(
+  exp: IR.BasicExpression<unknown>,
+): exp is IR.PropRef<unknown> {
+  return exp.type === `ref` && exp.path.length > 1
+}
+
+// Only the physical root is column-mapped; the rest are JSON object keys.
+function compileNestedRef(
+  path: Array<string>,
+  encodeColumnName: ColumnEncoder | undefined,
+  output: `jsonb` | `text`,
+): string {
+  const root = quoteIdentifier(path[0]!, encodeColumnName)
+  const keys = path
+    .slice(1)
+    .map((key) => `'${key.replace(/'/g, `''`)}'`)
+    .join(`, `)
+  const operator = output === `jsonb` ? `#>` : `#>>`
+  return `(${root}::jsonb ${operator} ARRAY[${keys}])`
+}
+
+// The comparison literal is the IR's only runtime scalar type authority.
+function compileNestedScalarRef(
+  ref: IR.PropRef<unknown>,
+  literal: unknown,
+  encodeColumnName?: ColumnEncoder,
+): string {
+  const text = compileNestedRef(ref.path, encodeColumnName, `text`)
+
+  if (typeof literal === `number`) return `(${text})::double precision`
+  if (typeof literal === `boolean`) return `(${text})::boolean`
+  if (typeof literal === `string`) return text
+
+  throw new Error(
+    `Nested JSON comparisons require a string, number, or boolean literal`,
+  )
+}
+
+function compileNullCheck(
+  name: `isNull` | `isUndefined`,
+  arg: IR.BasicExpression<unknown>,
+  params: Array<unknown>,
+  encodeColumnName: ColumnEncoder | undefined,
+  negated: boolean,
+): string {
+  if (isNestedRef(arg)) {
+    const root = `${quoteIdentifier(arg.path[0]!, encodeColumnName)}::jsonb`
+    const paths = [
+      root,
+      ...arg.path
+        .slice(1)
+        .map((_, index) =>
+          compileNestedRef(
+            arg.path.slice(0, index + 2),
+            encodeColumnName,
+            `jsonb`,
+          ),
+        ),
+    ]
+    const json = paths.at(-1)!
+    const jsonNull = `(${root} IS NULL OR ${paths
+      .map((path) => `${path} = 'null'::jsonb`)
+      .join(` OR `)})`
+    const condition =
+      name === `isNull`
+        ? `${jsonNull} IS TRUE`
+        : `(${json} IS NULL AND ${jsonNull} IS NOT TRUE)`
+    return negated ? `NOT (${condition})` : condition
+  }
+
+  const compiledArg = compileBasicExpression(arg, params, encodeColumnName)
+  const value = arg.type === `func` ? `(${compiledArg})` : compiledArg
+  return `${value} IS ${negated ? `NOT ` : ``}NULL`
 }
 
 /**
@@ -108,11 +185,9 @@ function compileBasicExpression(
       params.push(exp.value)
       return `$${params.length}`
     case `ref`:
-      // TODO: doesn't yet support JSON(B) values which could be accessed with nested props
-      if (exp.path.length !== 1) {
-        throw new Error(
-          `Compiler can't handle nested properties: ${exp.path.join(`.`)}`,
-        )
+      if (exp.path.length === 0) throw new Error(`Ref path cannot be empty`)
+      if (exp.path.length > 1) {
+        return `NULLIF(${compileNestedRef(exp.path, encodeColumnName, `jsonb`)}, 'null'::jsonb)`
       }
       return quoteIdentifier(exp.path[0]!, encodeColumnName)
     case `func`:
@@ -165,6 +240,39 @@ function isNullValue(exp: IR.BasicExpression<unknown>): boolean {
   return exp.type === `val` && (exp.value === null || exp.value === undefined)
 }
 
+function compileBooleanComparison(
+  name: string,
+  args: Array<IR.BasicExpression>,
+  literalIndex: number,
+  params: Array<unknown>,
+  encodeColumnName?: ColumnEncoder,
+): string {
+  const literal = args[literalIndex] as IR.Value<boolean>
+  const valueArg = args[literalIndex === 0 ? 1 : 0]!
+  const compiled = isNestedRef(valueArg)
+    ? compileNestedScalarRef(valueArg, literal.value, encodeColumnName)
+    : compileBasicExpression(valueArg, params, encodeColumnName)
+  const value = `(${compiled})`
+  const op =
+    literalIndex === 1
+      ? name
+      : name === `lt`
+        ? `gt`
+        : name === `gt`
+          ? `lt`
+          : name === `lte`
+            ? `gte`
+            : `lte`
+
+  if ((op === `lte` && literal.value) || (op === `gte` && !literal.value)) {
+    return `${value} = ${value}`
+  }
+  if ((op === `lt` && !literal.value) || (op === `gt` && literal.value)) {
+    return `${value} <> ${value}`
+  }
+  return `${value} = ${op === `lt` || op === `lte` ? `FALSE` : `TRUE`}`
+}
+
 function compileFunction(
   exp: IR.Func<unknown>,
   params: Array<unknown> = [],
@@ -194,8 +302,91 @@ function compileFunction(
     }
   }
 
-  const compiledArgs = args.map((arg: IR.BasicExpression) => {
-    const compiled = compileBasicExpression(arg, params, encodeColumnName)
+  if (
+    args.some(isNestedRef) &&
+    !isComparisonOp(name) &&
+    ![`and`, `or`, `not`, `isNull`, `isUndefined`, `upper`, `lower`].includes(
+      name,
+    )
+  ) {
+    throw new Error(
+      `Nested JSON references are not supported with '${name}' without runtime type information`,
+    )
+  }
+
+  const nestedArgIndex = args.findIndex(isNestedRef)
+  if (nestedArgIndex !== -1 && isComparisonOp(name) && name !== `in`) {
+    const otherArg = args[nestedArgIndex === 0 ? 1 : 0]
+    if (otherArg?.type !== `val`) {
+      throw new Error(`Nested JSON comparisons require a literal`)
+    }
+  }
+
+  if (name === `isNull` || name === `isUndefined`) {
+    if (args.length !== 1) {
+      throw new Error(`${name} expects 1 argument`)
+    }
+    return compileNullCheck(name, args[0]!, params, encodeColumnName, false)
+  }
+
+  if (name === `not`) {
+    const arg = args[0]
+    if (
+      arg?.type === `func` &&
+      (arg.name === `isNull` || arg.name === `isUndefined`) &&
+      arg.args[0]?.type === `ref`
+    ) {
+      return compileNullCheck(
+        arg.name,
+        arg.args[0],
+        params,
+        encodeColumnName,
+        true,
+      )
+    }
+  }
+
+  const booleanLiteralIndex = args.findIndex(
+    (arg) => arg.type === `val` && typeof arg.value === `boolean`,
+  )
+  if (
+    args.length === 2 &&
+    isBooleanComparisonOp(name) &&
+    booleanLiteralIndex !== -1
+  ) {
+    return compileBooleanComparison(
+      name,
+      args,
+      booleanLiteralIndex,
+      params,
+      encodeColumnName,
+    )
+  }
+
+  const compiledArgs = args.map((arg: IR.BasicExpression, index) => {
+    const otherArg = args[index === 0 ? 1 : 0]
+    let compiled: string
+    if (isNestedRef(arg) && [`and`, `or`, `not`].includes(name)) {
+      compiled = compileNestedScalarRef(arg, true, encodeColumnName)
+    } else if (isNestedRef(arg) && otherArg?.type === `val` && name !== `in`) {
+      compiled = compileNestedScalarRef(arg, otherArg.value, encodeColumnName)
+    } else if (
+      isNestedRef(arg) &&
+      name === `in` &&
+      index === 0 &&
+      otherArg?.type === `val` &&
+      Array.isArray(otherArg.value)
+    ) {
+      const sample = otherArg.value.find((value) => value != null)
+      compiled = compileNestedScalarRef(arg, sample, encodeColumnName)
+    } else if (
+      isNestedRef(arg) &&
+      [`like`, `ilike`, `upper`, `lower`].includes(name)
+    ) {
+      compiled = compileNestedRef(arg.path, encodeColumnName, `text`)
+    } else {
+      compiled = compileBasicExpression(arg, params, encodeColumnName)
+    }
     // AND/OR group their children by precedence; NOT already wraps its operand.
     // In value positions, preserve any nested operator as a single expression.
     return arg.type === `func` &&
@@ -212,31 +403,10 @@ function compileFunction(
       : compiled
   })
 
-  // Special case for IS NULL / IS NOT NULL - these are postfix operators
-  if (name === `isNull` || name === `isUndefined`) {
-    if (compiledArgs.length !== 1) {
-      throw new Error(`${name} expects 1 argument`)
-    }
-    return `${compiledArgs[0]} ${opName}`
-  }
-
   // Special case for NOT - unary prefix operator
   if (name === `not`) {
     if (compiledArgs.length !== 1) {
       throw new Error(`NOT expects 1 argument`)
-    }
-    // Check if the argument is IS NULL to generate IS NOT NULL
-    const arg = args[0]
-    if (arg && arg.type === `func`) {
-      const funcArg = arg
-      if (funcArg.name === `isNull` || funcArg.name === `isUndefined`) {
-        const innerArg = compileBasicExpression(
-          funcArg.args[0]!,
-          params,
-          encodeColumnName,
-        )
-        return `${innerArg} IS NOT NULL`
-      }
     }
     return `${opName} (${compiledArgs[0]})`
   }
@@ -253,125 +423,52 @@ function compileFunction(
     }
     const [lhs, rhs] = compiledArgs
 
-    // Special case for comparison operators with boolean values
-    // PostgreSQL doesn't support < > <= >= on booleans
-    // Transform to equivalent equality checks or constant expressions
-    if (isBooleanComparisonOp(name)) {
-      const lhsArg = args[0]
-      const rhsArg = args[1]
-
-      // Check if RHS is a boolean literal value
-      if (
-        rhsArg &&
-        rhsArg.type === `val` &&
-        typeof rhsArg.value === `boolean`
-      ) {
-        const boolValue = rhsArg.value
-        // Remove the boolean param we just added since we'll transform the expression
-        params.pop()
-
-        // Transform based on operator and boolean value
-        // Boolean ordering: false < true
-        if (name === `lt`) {
-          if (boolValue === true) {
-            // lt(col, true) → col = false (only false is less than true)
-            params.push(false)
-            return `${lhs} = $${params.length}`
-          } else {
-            // lt(col, false) → nothing is less than false
-            return `false`
-          }
-        } else if (name === `gt`) {
-          if (boolValue === false) {
-            // gt(col, false) → col = true (only true is greater than false)
-            params.push(true)
-            return `${lhs} = $${params.length}`
-          } else {
-            // gt(col, true) → nothing is greater than true
-            return `false`
-          }
-        } else if (name === `lte`) {
-          if (boolValue === true) {
-            // lte(col, true) → everything is ≤ true
-            return `true`
-          } else {
-            // lte(col, false) → col = false
-            params.push(false)
-            return `${lhs} = $${params.length}`
-          }
-        } else if (name === `gte`) {
-          if (boolValue === false) {
-            // gte(col, false) → everything is ≥ false
-            return `true`
-          } else {
-            // gte(col, true) → col = true
-            params.push(true)
-            return `${lhs} = $${params.length}`
-          }
-        }
-      }
-
-      // Check if LHS is a boolean literal value (less common but handle it)
-      if (
-        lhsArg &&
-        lhsArg.type === `val` &&
-        typeof lhsArg.value === `boolean`
-      ) {
-        const boolValue = lhsArg.value
-        // Remove params for this expression and rebuild
-        params.pop() // remove RHS
-        params.pop() // remove LHS (boolean)
-
-        // Recompile RHS to get fresh param
-        const rhsCompiled = compileBasicExpression(
-          rhsArg!,
-          params,
-          encodeColumnName,
-        )
-
-        // Transform: flip the comparison (val op col → col flipped_op val)
-        if (name === `lt`) {
-          // lt(true, col) → gt(col, true) → col > true → nothing is greater than true
-          if (boolValue === true) {
-            return `false`
-          } else {
-            // lt(false, col) → gt(col, false) → col = true
-            params.push(true)
-            return `${rhsCompiled} = $${params.length}`
-          }
-        } else if (name === `gt`) {
-          // gt(true, col) → lt(col, true) → col = false
-          if (boolValue === true) {
-            params.push(false)
-            return `${rhsCompiled} = $${params.length}`
-          } else {
-            // gt(false, col) → lt(col, false) → nothing is less than false
-            return `false`
-          }
-        } else if (name === `lte`) {
-          if (boolValue === false) {
-            // lte(false, col) → gte(col, false) → everything
-            return `true`
-          } else {
-            // lte(true, col) → gte(col, true) → col = true
-            params.push(true)
-            return `${rhsCompiled} = $${params.length}`
-          }
-        } else if (name === `gte`) {
-          if (boolValue === true) {
-            // gte(true, col) → lte(col, true) → everything
-            return `true`
-          } else {
-            // gte(false, col) → lte(col, false) → col = false
-            params.push(false)
-            return `${rhsCompiled} = $${params.length}`
-          }
-        }
-      }
-    }
-
-    // Special case for = ANY operator which needs parentheses around the array parameter
     if (name === `in`) {
+      const valueArg = args[0]!
+      const arrayArg = args[1]!
+
+      if (valueArg.type === `val` && Array.isArray(valueArg.value)) {
+        throw new Error(
+          `Cannot use an array-valued left operand of 'in'. Pass a scalar value instead.`,
+        )
+      }
+
+      if (arrayArg.type === `ref`) {
+        if (isNestedRef(valueArg) && !isNestedRef(arrayArg)) {
+          throw new Error(
+            `Nested JSON membership against a PostgreSQL array requires runtime type information`,
+          )
+        }
+
+        if (isNestedRef(arrayArg)) {
+          if (valueArg.type !== `val`) {
+            throw new Error(
+              `Nested JSON array membership requires a literal scalar value`,
+            )
+          }
+          const jsonArray = rhs!
+          let jsonValue = lhs!
+          if (typeof valueArg.value === `number`) {
+            jsonValue += `::double precision`
+          } else if (typeof valueArg.value === `boolean`) {
+            jsonValue += `::boolean`
+          } else if (typeof valueArg.value === `string`) {
+            jsonValue += `::text`
+          } else {
+            throw new Error(
+              `Nested JSON array membership requires a string, number, or boolean`,
+            )
+          }
+          return `COALESCE(${jsonArray}, '[]'::jsonb) @> jsonb_build_array(${jsonValue})`
+        }
+
+        const containment = `${rhs} @> ARRAY[${lhs}] AND ${rhs} IS NOT NULL`
+        return valueArg.type === `val`
+          ? containment
+          : `CASE WHEN ${lhs} IS NULL THEN NULL ELSE (${containment}) END`
+      }
+
+      // Literal value lists retain the original = ANY form.
       return `${lhs} ${opName}(${rhs})`
     }
     return `${lhs} ${opName} ${rhs}`
@@ -402,7 +499,7 @@ function isBinaryOp(name: string): boolean {
  * (null comparisons in SQL always evaluate to UNKNOWN)
  */
 function isComparisonOp(name: string): boolean {
-  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`]
+  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`]
   return comparisonOps.includes(name)
 }
 
