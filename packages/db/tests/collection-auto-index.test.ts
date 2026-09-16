@@ -351,13 +351,8 @@ describe(`Collection Auto-Indexing`, () => {
     const collection = createCollection<{ id: string }, string>({
       getKey: (item) => item.id,
       defaultStringCollation: { stringSort: `locale` },
-      startSync: true,
       sync: {
-        sync: ({ begin, commit, markReady }) => {
-          begin()
-          commit()
-          markReady()
-        },
+        sync: () => {},
       },
     })
 
@@ -378,13 +373,8 @@ describe(`Collection Auto-Indexing`, () => {
         locale: `en-US`,
         localeOptions: { sensitivity: `base` },
       },
-      startSync: true,
       sync: {
-        sync: ({ begin, commit, markReady }) => {
-          begin()
-          commit()
-          markReady()
-        },
+        sync: () => {},
       },
     })
 
