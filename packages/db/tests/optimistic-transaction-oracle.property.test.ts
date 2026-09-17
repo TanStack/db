@@ -11,6 +11,7 @@ import {
   withHistoryCleanup,
 } from './optimistic-history-oracle.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
 type Row = { id: number; value: number; note: string }
@@ -230,12 +231,444 @@ describe(`Same-key transaction laws`, () => {
   )
 })
 
+type ReplacementRow = {
+  id: number
+  value: number | null | undefined
+  note?: string | null
+  added?: string
+  nested?: { count: number }
+}
+
+type ReplacementMutation = {
+  type: Operation
+  original: object
+  modified: object
+  changes: object
+  metadata: unknown
+  syncMetadata: Record<string, unknown>
+}
+
+async function runDeleteInsertReplacement(
+  replacements: ReadonlyArray<ReplacementRow>,
+  expected: ReplacementMutation | undefined,
+  original: ReplacementRow = { id: 1, value: 0, note: `original` },
+  author?: (collection: Collection<ReplacementRow, number>) => void,
+) {
+  const collection = createCollection<ReplacementRow, number>({
+    getKey: (row) => row.id,
+    sync: {
+      getSyncMetadata: () => ({ insert: true, shared: `insert` }),
+      sync: (actions) => {
+        actions.begin()
+        actions.write({ type: `insert`, value: original })
+        actions.metadata?.row.set(1, { delete: true, shared: `delete` })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  let calls = 0
+  let request: Array<ReplacementMutation> = []
+  const transaction = createTransaction<ReplacementRow>({
+    autoCommit: false,
+    mutationFn: ({ transaction: persisted }) => {
+      calls++
+      request = persisted.mutations.map((mutation) => ({
+        type: mutation.type,
+        original: { ...mutation.original },
+        modified: { ...mutation.modified },
+        changes: { ...mutation.changes },
+        metadata: mutation.metadata,
+        syncMetadata: { ...mutation.syncMetadata },
+      }))
+      return Promise.resolve()
+    },
+  })
+  const settlement = transaction.isPersisted.promise.catch(() => undefined)
+
+  try {
+    await collection.preload()
+    transaction.mutate(() => {
+      if (author) {
+        author(collection)
+        return
+      }
+      for (const [index, replacement] of replacements.entries()) {
+        collection.delete(1, {
+          metadata: { operation: `delete`, index },
+        })
+        collection.insert(replacement, {
+          metadata: { operation: `insert`, index },
+        })
+      }
+    })
+
+    await transaction.commit()
+    expect(request, `net delete then insert request`).toStrictEqual(
+      expected === undefined ? [] : [expected],
+    )
+    expect(calls, `persistence runs only for a net mutation`).toBe(
+      expected === undefined ? 0 : 1,
+    )
+    expect(
+      [...collection.values()].map(userRow),
+      `manual settlement releases the optimistic replacement`,
+    ).toStrictEqual([original])
+    return request
+  } finally {
+    if (transaction.state === `pending` || transaction.state === `persisting`) {
+      transaction.rollback()
+    }
+    await settlement
+    await collection.cleanup()
+  }
+}
+
+describe(`Delete then insert transaction laws`, () => {
+  it(`cancels an exact same-key restoration`, async () => {
+    await runDeleteInsertReplacement(
+      [{ id: 1, value: 0, note: `original` }],
+      undefined,
+    )
+  })
+
+  it.each([
+    {
+      name: `removed field`,
+      replacement: { id: 1, value: 0 },
+      changes: { note: undefined },
+    },
+    {
+      name: `null field`,
+      replacement: { id: 1, value: null, note: null },
+      changes: { value: null, note: null },
+    },
+    {
+      name: `undefined field`,
+      replacement: { id: 1, value: undefined, note: `original` },
+      changes: { value: undefined },
+    },
+    {
+      name: `added field`,
+      replacement: { id: 1, value: 0, note: `original`, added: `new` },
+      changes: { added: `new` },
+    },
+  ] satisfies Array<{
+    name: string
+    replacement: ReplacementRow
+    changes: object
+  }>)(
+    `converts a $name to one symmetric update`,
+    async ({ replacement, changes }) => {
+      await runDeleteInsertReplacement([replacement], {
+        type: `update`,
+        original: { id: 1, value: 0, note: `original` },
+        modified: replacement,
+        changes,
+        metadata: { operation: `insert`, index: 0 },
+        syncMetadata: {
+          delete: true,
+          shared: `insert`,
+          insert: true,
+        },
+      })
+    },
+  )
+
+  it(`reduces repeated delete and insert pairs to the final net update`, async () => {
+    const first = { id: 1, value: 1, note: `first` }
+    const final = { id: 1, value: 2, added: `final` }
+    await runDeleteInsertReplacement([first, final], {
+      type: `update`,
+      original: { id: 1, value: 0, note: `original` },
+      modified: final,
+      changes: { value: 2, note: undefined, added: `final` },
+      metadata: { operation: `insert`, index: 1 },
+      syncMetadata: {
+        delete: true,
+        shared: `insert`,
+        insert: true,
+      },
+    })
+  })
+
+  it(`preserves the first preimage through duplicate deletes before replacement`, async () => {
+    const original = { id: 1, value: 0, note: `original` }
+    const replacement = { id: 1, value: 2, note: `original` }
+    await runDeleteInsertReplacement(
+      [],
+      {
+        type: `update`,
+        original,
+        modified: replacement,
+        changes: { value: 2 },
+        metadata: { operation: `insert` },
+        syncMetadata: {
+          delete: true,
+          shared: `insert`,
+          insert: true,
+        },
+      },
+      original,
+      (collection) => {
+        collection.update(1, (draft) => {
+          draft.value = 1
+        })
+        collection.delete([1, 1])
+        collection.insert(replacement, {
+          metadata: { operation: `insert` },
+        })
+      },
+    )
+  })
+
+  it(`compares nested replacement values structurally`, async () => {
+    const original = {
+      id: 1,
+      value: 0,
+      note: `original`,
+      nested: { count: 1 },
+    }
+    await runDeleteInsertReplacement(
+      [{ ...original, nested: { count: 1 } }],
+      undefined,
+      original,
+    )
+    await runDeleteInsertReplacement(
+      [{ ...original, nested: { count: 2 } }],
+      {
+        type: `update`,
+        original,
+        modified: { ...original, nested: { count: 2 } },
+        changes: { nested: { count: 2 } },
+        metadata: { operation: `insert`, index: 0 },
+        syncMetadata: {
+          delete: true,
+          shared: `insert`,
+          insert: true,
+        },
+      },
+      original,
+    )
+  })
+
+  it(`delivers a replacement that differs only by an enumerable symbol`, async () => {
+    const field = Symbol(`replacement field`)
+    const original = { id: 1, value: 0, [field]: 0 }
+    const replacement = { id: 1, value: 0, [field]: 1 }
+    const request = await runDeleteInsertReplacement(
+      [replacement],
+      {
+        type: `update`,
+        original,
+        modified: replacement,
+        changes: {},
+        metadata: { operation: `insert`, index: 0 },
+        syncMetadata: {
+          delete: true,
+          shared: `insert`,
+          insert: true,
+        },
+      },
+      original,
+    )
+
+    expect(Reflect.ownKeys(request[0]!.changes)).toStrictEqual([])
+    expect(Reflect.get(request[0]!.modified, field)).toBe(1)
+  })
+
+  it(`uses own-string key order for a symmetric replacement diff`, async () => {
+    const original = {
+      10: `remove numeric`,
+      2: `stable numeric`,
+      id: 1,
+      value: 0,
+      before: `remove string`,
+      stable: `same`,
+    }
+    const replacement = {
+      1: `add numeric`,
+      2: `stable numeric`,
+      id: 1,
+      value: 0,
+      stable: `same`,
+      after: `add string`,
+    }
+    const request = await runDeleteInsertReplacement(
+      [replacement],
+      {
+        type: `update`,
+        original,
+        modified: replacement,
+        changes: {
+          1: `add numeric`,
+          10: undefined,
+          before: undefined,
+          after: `add string`,
+        },
+        metadata: { operation: `insert`, index: 0 },
+        syncMetadata: {
+          delete: true,
+          shared: `insert`,
+          insert: true,
+        },
+      },
+      original,
+    )
+
+    expect(Object.keys(request[0]!.changes)).toStrictEqual([
+      `1`,
+      `10`,
+      `before`,
+      `after`,
+    ])
+  })
+
+  it(`delivers a replacement after duplicate deletes of another overlay`, async () => {
+    const original = { id: 1, value: 0, note: `original` }
+    const overlaid = { id: 1, value: 1, note: `original` }
+    const collection = createCollection<ReplacementRow, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: (actions) => {
+          actions.begin()
+          actions.write({ type: `insert`, value: original })
+          actions.commit()
+          actions.markReady()
+        },
+      },
+    })
+    let rejectOverlay!: (error: Error) => void
+    const overlayGate = new Promise<void>((_resolve, reject) => {
+      rejectOverlay = reject
+    })
+    const overlay = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: () => overlayGate,
+    })
+    let deliveries = 0
+    let delivered: ReplacementRow | undefined
+    const replacement = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: ({ transaction }) => {
+        deliveries++
+        delivered = transaction.mutations[0].modified
+        return Promise.resolve()
+      },
+    })
+    const overlaySettlement = overlay.isPersisted.promise.catch(() => undefined)
+    const replacementSettlement = replacement.isPersisted.promise.catch(
+      () => undefined,
+    )
+
+    try {
+      await collection.preload()
+      overlay.mutate(() =>
+        collection.update(1, (draft) => {
+          draft.value = 1
+        }),
+      )
+      const overlayCommit = overlay.commit().catch(() => undefined)
+      await Promise.resolve()
+
+      replacement.mutate(() => {
+        collection.delete([1, 1])
+        collection.insert(overlaid)
+      })
+      await replacement.commit()
+
+      expect(deliveries, `replacement persistence delivery count`).toBe(1)
+      expect(delivered, `replacement server payload`).toStrictEqual(overlaid)
+
+      rejectOverlay(new Error(`earlier overlay failed`))
+      await overlayCommit
+    } finally {
+      if (overlay.state === `pending` || overlay.state === `persisting`)
+        overlay.rollback()
+      if (replacement.state === `pending` || replacement.state === `persisting`)
+        replacement.rollback()
+      await Promise.all([overlaySettlement, replacementSettlement])
+      await collection.cleanup()
+    }
+  })
+
+  it(`delivers a replacement equal only to another pending insert`, async () => {
+    const inserted = { id: 1, value: 1, note: `inserted` }
+    const collection = createCollection<ReplacementRow, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => markReady(),
+      },
+    })
+    let rejectInsert!: (error: Error) => void
+    const insertGate = new Promise<void>((_resolve, reject) => {
+      rejectInsert = reject
+    })
+    const pendingInsert = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: () => insertGate,
+    })
+    let deliveries = 0
+    let delivered: { type: string; modified: ReplacementRow } | undefined
+    const replacement = createTransaction<ReplacementRow>({
+      autoCommit: false,
+      mutationFn: ({ transaction }) => {
+        deliveries++
+        const mutation = transaction.mutations[0]
+        delivered = {
+          type: mutation.type,
+          modified: mutation.modified,
+        }
+        return Promise.resolve()
+      },
+    })
+    const insertSettlement = pendingInsert.isPersisted.promise.catch(
+      () => undefined,
+    )
+    const replacementSettlement = replacement.isPersisted.promise.catch(
+      () => undefined,
+    )
+
+    try {
+      await collection.preload()
+      pendingInsert.mutate(() => collection.insert(inserted))
+      const insertCommit = pendingInsert.commit().catch(() => undefined)
+      await Promise.resolve()
+
+      replacement.mutate(() => {
+        collection.delete(1)
+        collection.insert(inserted)
+      })
+      await replacement.commit()
+
+      expect(deliveries, `replacement persistence delivery count`).toBe(1)
+      expect(delivered, `replacement server mutation`).toStrictEqual({
+        type: `insert`,
+        modified: inserted,
+      })
+
+      rejectInsert(new Error(`earlier insert failed`))
+      await insertCommit
+    } finally {
+      if (
+        pendingInsert.state === `pending` ||
+        pendingInsert.state === `persisting`
+      )
+        pendingInsert.rollback()
+      if (replacement.state === `pending` || replacement.state === `persisting`)
+        replacement.rollback()
+      await Promise.all([insertSettlement, replacementSettlement])
+      await collection.cleanup()
+    }
+  })
+})
+
 // Observe user fields without discarding unexpected fields or undefined keys.
-function userRow(value: Row): Row {
-  const copy: Record<string, unknown> = { ...value }
+function userRow<T extends object>(value: T): T {
+  const copy = { ...value } as Record<string, unknown>
   for (const field of [`$synced`, `$origin`, `$key`, `$collectionId`])
     delete copy[field]
-  return copy as Row
+  return copy as T
 }
 const ordered = (rows: Iterable<Row>) =>
   [...rows].map(userRow).sort((a, b) => a.id - b.id)
