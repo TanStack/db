@@ -13,6 +13,7 @@ import {
   or,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
+import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
@@ -48,6 +49,92 @@ const sampleDepartments: Array<Department> = [
   { id: 2, name: `Sales`, budget: 80000 },
   { id: 3, name: `Marketing`, budget: 60000 },
 ]
+
+const equalityJoinCases = [
+  {
+    label: `scalar strings`,
+    createValues: () => ({ left: `match`, right: `match`, other: `other` }),
+  },
+  {
+    label: `small binary values`,
+    createValues: () => ({
+      left: new Uint8Array(16).fill(7),
+      right: new Uint8Array(16).fill(7),
+      other: new Uint8Array(16).fill(8),
+    }),
+  },
+  {
+    label: `large binary values`,
+    createValues: () => ({
+      left: new Uint8Array(200).fill(7),
+      right: new Uint8Array(200).fill(7),
+      other: new Uint8Array(200).fill(8),
+    }),
+  },
+  {
+    label: `Uint8Array and Buffer values`,
+    createValues: () => ({
+      left: new Uint8Array(16).fill(7),
+      right: Buffer.alloc(16, 7),
+      other: new Uint8Array(16).fill(8),
+    }),
+  },
+  {
+    label: `Date timestamps`,
+    createValues: () => ({
+      left: new Date(1),
+      right: new Date(1),
+      other: new Date(2),
+    }),
+  },
+  {
+    label: `Temporal values`,
+    createValues: () => ({
+      left: Temporal.PlainDate.from(`2024-04-05`),
+      right: Temporal.PlainDate.from(`2024-04-05`),
+      other: Temporal.PlainDate.from(`2024-04-06`),
+    }),
+  },
+  {
+    label: `BigInt values`,
+    createValues: () => ({
+      left: 9007199254740993n,
+      right: 9007199254740993n,
+      other: 1n,
+    }),
+  },
+  {
+    label: `NaN values`,
+    createValues: () => ({ left: Number.NaN, right: Number.NaN, other: 0 }),
+  },
+  {
+    label: `non-finite numbers`,
+    createValues: () => ({
+      left: Number.POSITIVE_INFINITY,
+      right: Number.POSITIVE_INFINITY,
+      other: Number.NEGATIVE_INFINITY,
+    }),
+  },
+  {
+    label: `opaque shared references`,
+    createValues: () => {
+      const shared = { code: 1 }
+      return { left: shared, right: shared, other: { code: 1 } }
+    },
+  },
+]
+
+type JoinPair = readonly [number | undefined, number | undefined]
+
+function sortJoinPairs(pairs: Array<JoinPair>): Array<JoinPair> {
+  return pairs.sort(
+    ([leftA, rightA], [leftB, rightB]) =>
+      (leftA ?? Number.POSITIVE_INFINITY) -
+        (leftB ?? Number.POSITIVE_INFINITY) ||
+      (rightA ?? Number.POSITIVE_INFINITY) -
+        (rightB ?? Number.POSITIVE_INFINITY),
+  )
+}
 
 function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
@@ -1045,6 +1132,287 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           leftId: 1,
           rightId: 10,
         })
+      })
+
+      test.each(equalityJoinCases)(
+        `$label joins agree with equality predicates`,
+        ({ label, createValues }) => {
+          type EqualityRow = { id: number; value: unknown }
+          const { left: leftValue, right: rightValue, other } = createValues()
+          const leftCollection = createCollection(
+            mockSyncCollectionOptions<EqualityRow>({
+              id: `equality-left-${autoIndex}-${label}`,
+              getKey: (row) => row.id,
+              initialData: [{ id: 1, value: leftValue }],
+              autoIndex,
+            }),
+          )
+          const rightCollection = createCollection(
+            mockSyncCollectionOptions<EqualityRow>({
+              id: `equality-right-${autoIndex}-${label}`,
+              getKey: (row) => row.id,
+              initialData: [
+                { id: 10, value: rightValue },
+                { id: 20, value: other },
+              ],
+              autoIndex,
+            }),
+          )
+          const joined = createLiveQueryCollection({
+            startSync: true,
+            query: (q) =>
+              q
+                .from({ left: leftCollection })
+                .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                  eq(left.value, right.value),
+                )
+                .select(({ left, right }) => ({
+                  leftId: left.id,
+                  rightId: right.id,
+                })),
+          })
+          const filtered = createLiveQueryCollection({
+            startSync: true,
+            query: (q) =>
+              q
+                .from({ right: rightCollection })
+                .where(({ right: row }) => eq(row.value, leftValue))
+                .select(({ right: row }) => ({ rightId: row.id })),
+          })
+
+          expect(joined.toArray.map(stripVirtualProps)).toEqual([
+            { leftId: 1, rightId: 10 },
+          ])
+          expect(filtered.toArray.map(stripVirtualProps)).toEqual([
+            { rightId: 10 },
+          ])
+        },
+      )
+
+      test(`binary values stay disjoint from normalization-like strings`, () => {
+        type EqualityRow = { id: number; value: unknown }
+        const bytes = new Uint8Array([65])
+        const text = `\u0000tanstack-db:binary:A`
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<EqualityRow>({
+            id: `binary-disjoint-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [{ id: 1, value: bytes }],
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<EqualityRow>({
+            id: `binary-disjoint-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 10, value: new Uint8Array(bytes) },
+              { id: 20, value: text },
+            ],
+            autoIndex,
+          }),
+        )
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.value, right.value),
+              )
+              .select(({ right }) => ({ rightId: right.id })),
+        })
+
+        expect(query.toArray.map(stripVirtualProps)).toEqual([{ rightId: 10 }])
+      })
+
+      test(`full joins leave nullish equality operands unmatched`, () => {
+        type NullishRow = { id: number; value: null | undefined | string }
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<NullishRow>({
+            id: `nullish-full-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, value: null },
+              { id: 2, value: undefined },
+              { id: 3, value: `\0m` },
+              { id: 4, value: `\0j` },
+            ],
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<NullishRow>({
+            id: `nullish-full-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, value: null },
+              { id: 2, value: undefined },
+              { id: 3, value: `\0m` },
+              { id: 4, value: `\0j` },
+            ],
+            autoIndex,
+          }),
+        )
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .fullJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.value, right.value),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+
+        const pairs = sortJoinPairs(
+          query.toArray.map(
+            ({ leftId, rightId }) => [leftId, rightId] as const,
+          ),
+        )
+        expect(pairs).toEqual([
+          [1, undefined],
+          [2, undefined],
+          [3, 3],
+          [4, 4],
+          [undefined, 1],
+          [undefined, 2],
+        ])
+      })
+
+      test(`binary join identity survives equal and unequal replacements`, () => {
+        type BinaryRow = { id: number; value: Uint8Array }
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<BinaryRow>({
+            id: `binary-lifecycle-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [{ id: 1, value: new Uint8Array([1, 2, 3]) }],
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<BinaryRow>({
+            id: `binary-lifecycle-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [{ id: 10, value: new Uint8Array([1, 2, 3]) }],
+            autoIndex,
+          }),
+        )
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .fullJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.value, right.value),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+        const pairs = () =>
+          sortJoinPairs(
+            query.toArray.map(
+              ({ leftId, rightId }) => [leftId, rightId] as const,
+            ),
+          )
+        const replaceRight = (value: Uint8Array) => {
+          rightCollection.utils.begin()
+          rightCollection.utils.write({
+            type: `update`,
+            value: { id: 10, value },
+          })
+          rightCollection.utils.commit()
+        }
+
+        expect(pairs()).toEqual([[1, 10]])
+        replaceRight(new Uint8Array([1, 2, 3]))
+        expect(pairs()).toEqual([[1, 10]])
+        replaceRight(new Uint8Array([1, 2, 4]))
+        expect(pairs()).toEqual([
+          [1, undefined],
+          [undefined, 10],
+        ])
+        replaceRight(new Uint8Array([1, 2, 3]))
+        expect(pairs()).toEqual([[1, 10]])
+      })
+
+      test(`nullish outer rows transition through a finite join key`, () => {
+        type NullableRow = { id: number; value: number | null }
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<NullableRow>({
+            id: `nullish-lifecycle-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [{ id: 1, value: null }],
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<NullableRow>({
+            id: `nullish-lifecycle-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 2, value: null },
+              { id: 1, value: null },
+            ],
+            autoIndex,
+          }),
+        )
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .fullJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.value, right.value),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+        const pairs = () =>
+          sortJoinPairs(
+            query.toArray
+              .map(({ leftId, rightId }) => [leftId, rightId] as const)
+              .reverse(),
+          )
+        const update = (
+          collection: typeof leftCollection,
+          id: number,
+          value: number | null,
+        ) => {
+          collection.utils.begin()
+          collection.utils.write({ type: `update`, value: { id, value } })
+          collection.utils.commit()
+        }
+
+        expect(pairs()).toEqual([
+          [1, undefined],
+          [undefined, 1],
+          [undefined, 2],
+        ])
+        update(rightCollection, 1, 1)
+        expect(pairs()).toEqual([
+          [1, undefined],
+          [undefined, 1],
+          [undefined, 2],
+        ])
+        update(leftCollection, 1, 1)
+        expect(pairs()).toEqual([
+          [1, 1],
+          [undefined, 2],
+        ])
+        update(leftCollection, 1, null)
+        expect(pairs()).toEqual([
+          [1, undefined],
+          [undefined, 1],
+          [undefined, 2],
+        ])
       })
 
       test(`should update Date join matches when timestamp changes`, () => {
@@ -2115,3 +2483,99 @@ describe(`Query JOIN Operations`, () => {
   createJoinTests(`off`)
   createJoinTests(`eager`)
 })
+
+test.each([`off`, `eager`] as const)(
+  `lazy binary join demand uses predicate equality with autoIndex %s`,
+  async (autoIndex) => {
+    type BinaryRow = { id: number; binaryId: Uint8Array }
+    const activeKey = new Uint8Array([1, 2, 3])
+    const active = createCollection(
+      mockSyncCollectionOptions<BinaryRow>({
+        id: `binary-demand-active-${autoIndex}`,
+        getKey: (row) => row.id,
+        initialData: [{ id: 1, binaryId: activeKey }],
+        autoIndex,
+      }),
+    )
+    const backend: Array<BinaryRow> = [
+      { id: 10, binaryId: new Uint8Array(activeKey) },
+      { id: 20, binaryId: new Uint8Array([1, 2, 4]) },
+    ]
+    let loadCalls = 0
+    let candidateChecks = 0
+    const requestedValues: Array<unknown> = []
+    const lazy = createCollection(
+      mockSyncCollectionOptions<BinaryRow>({
+        id: `binary-demand-lazy-${autoIndex}`,
+        getKey: (row) => row.id,
+        initialData: [],
+        autoIndex,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (actions) => {
+            actions.markReady()
+            return {
+              loadSubset: (options) => {
+                loadCalls++
+                expect(options.where).toBeDefined()
+                const where = options.where!
+                expect(where.type).toBe(`func`)
+                if (where.type !== `func` || where.name !== `in`) {
+                  throw new Error(`expected binary demand to use IN`)
+                }
+                const candidates = where.args[1]
+                if (
+                  candidates?.type !== `val` ||
+                  !Array.isArray(candidates.value)
+                ) {
+                  throw new Error(`expected binary demand candidates`)
+                }
+                requestedValues.push(...candidates.value)
+                const matches =
+                  createFilterFunctionFromExpression<BinaryRow>(where)
+                actions.begin()
+                for (const row of backend) {
+                  candidateChecks++
+                  if (matches(row)) {
+                    actions.write({ type: `insert`, value: row })
+                  }
+                }
+                const applied = actions.commit()
+                return applied === true ? true : applied
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      }),
+    )
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ left: active })
+          .leftJoin({ right: lazy }, ({ left, right }) =>
+            eq(left.binaryId, right.binaryId),
+          )
+          .select(({ left, right }) => ({
+            leftId: left.id,
+            rightId: right.id,
+          })),
+    })
+
+    try {
+      await query.preload()
+      expect(loadCalls).toBe(1)
+      expect(candidateChecks).toBe(2)
+      expect(requestedValues).toHaveLength(1)
+      expect(requestedValues[0]).toBeInstanceOf(Uint8Array)
+      expect(Array.from(requestedValues[0] as Uint8Array)).toEqual(
+        Array.from(activeKey),
+      )
+      const rows = query.toArray.map(stripVirtualProps)
+      const expected = [{ leftId: 1, rightId: 10 }]
+      expect(rows).toEqual(expected)
+    } finally {
+      await Promise.all([query.cleanup(), lazy.cleanup(), active.cleanup()])
+    }
+  },
+)
