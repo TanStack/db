@@ -3,8 +3,6 @@ id: SyncOperation
 title: SyncOperation
 ---
 
-# Type Alias: SyncOperation\<TRow, TKey, TInsertInput\>
-
 ```ts
 type SyncOperation<TRow, TKey, TInsertInput> = 
   | {
@@ -25,7 +23,7 @@ type SyncOperation<TRow, TKey, TInsertInput> =
 };
 ```
 
-Defined in: [packages/query-db-collection/src/manual-sync.ts:20](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/manual-sync.ts#L20)
+Defined in: [packages/query-db-collection/src/manual-sync.ts:24](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/manual-sync.ts#L24)
 
 ## Type Parameters
 

@@ -3,8 +3,6 @@ id: compileQuery
 title: compileQuery
 ---
 
-# Function: compileQuery()
-
 ```ts
 function compileQuery(
    rawQuery, 
@@ -16,10 +14,12 @@ function compileQuery(
    optimizableOrderByCollections, 
    setWindowFn, 
    cache, 
-   queryMapping): CompilationResult;
+   queryMapping, 
+   parentKeyStream?, 
+   childCorrelationField?): CompilationResult;
 ```
 
-Defined in: [packages/db/src/query/compiler/index.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L85)
+Defined in: [packages/db/src/query/compiler/index.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L364)
 
 Compiles a query IR into a D2 pipeline
 
@@ -59,13 +59,13 @@ Mapping of source aliases to lazy loading callbacks
 
 `Set`\<`string`\>
 
-Set of source aliases that should load data lazily
+Set of source identities that should load data lazily
 
 ### optimizableOrderByCollections
 
 `Record`\<`string`, `OrderByOptimizationInfo`\>
 
-Map of collection IDs to order-by optimization info
+Map of source IDs to order-by optimization info
 
 ### setWindowFn
 
@@ -82,6 +82,14 @@ Optional cache for compiled subqueries (used internally for recursion)
 `QueryMapping` = `...`
 
 Optional mapping from optimized queries to original queries
+
+### parentKeyStream?
+
+[`KeyedStream`](../type-aliases/KeyedStream.md)
+
+### childCorrelationField?
+
+[`PropRef`](../@tanstack/namespaces/IR/classes/PropRef.md)\<`any`\>
 
 ## Returns
 

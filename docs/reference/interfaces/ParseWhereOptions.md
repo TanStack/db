@@ -3,8 +3,6 @@ id: ParseWhereOptions
 title: ParseWhereOptions
 ---
 
-# Interface: ParseWhereOptions\<T\>
-
 Defined in: [packages/db/src/query/expression-helpers.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L53)
 
 Options for customizing how WHERE expressions are parsed
@@ -87,6 +85,22 @@ optional avg: (...args) => T;
 
 `T`
 
+##### caseWhen()?
+
+```ts
+optional caseWhen: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
 ##### coalesce()?
 
 ```ts
@@ -123,6 +137,22 @@ optional concat: (...args) => T;
 
 ```ts
 optional count: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
+##### divide()?
+
+```ts
+optional divide: (...args) => T;
 ```
 
 ###### Parameters
@@ -359,6 +389,22 @@ optional min: (...args) => T;
 
 `T`
 
+##### multiply()?
+
+```ts
+optional multiply: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
 ##### not()?
 
 ```ts
@@ -379,6 +425,22 @@ optional not: (...args) => T;
 
 ```ts
 optional or: (...args) => T;
+```
+
+###### Parameters
+
+###### args
+
+...`any`[]
+
+###### Returns
+
+`T`
+
+##### subtract()?
+
+```ts
+optional subtract: (...args) => T;
 ```
 
 ###### Parameters

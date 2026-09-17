@@ -1,6 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { EventEmitter } from '../src/event-emitter.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import type { Collection } from '../src/collection/index.js'
+
+class TestEventEmitter extends EventEmitter<{ event: { id: number } }> {
+  emit(id: number): void {
+    this.emitInner(`event`, { id })
+  }
+
+  clear(): void {
+    this.clearListeners()
+  }
+}
 
 describe(`Collection Events System`, () => {
   let collection: Collection
@@ -11,6 +23,7 @@ describe(`Collection Events System`, () => {
     collection = createCollection({
       id: `test-collection`,
       getKey: (item: any) => item.id,
+      defaultIndexType: BTreeIndex,
       sync: {
         sync: mockSync,
       },
@@ -45,6 +58,88 @@ describe(`Collection Events System`, () => {
         status: `loading`,
       })
     })
+
+    it(`stops an obsolete status event after a listener changes status`, () => {
+      const genericEvents: Array<{
+        previousStatus: string
+        status: string
+        current: string
+      }> = []
+      const loadingEvents: Array<string> = []
+      collection.on(`status:change`, ({ status }) => {
+        if (status === `loading`) collection._lifecycle.markReady()
+      })
+      collection.on(`status:change`, ({ previousStatus, status }) => {
+        genericEvents.push({
+          previousStatus,
+          status,
+          current: collection.status,
+        })
+      })
+      collection.on(`status:loading`, ({ status }) => {
+        loadingEvents.push(status)
+      })
+
+      collection.startSyncImmediate()
+
+      expect(genericEvents).toEqual([
+        {
+          previousStatus: `loading`,
+          status: `ready`,
+          current: `ready`,
+        },
+      ])
+      expect(loadingEvents).toEqual([])
+    })
+
+    it.each([`generic`, `specific`] as const)(
+      `keeps cross-channel order under %s-listener ABA reentry`,
+      (reentryEvent) => {
+        const trace: Array<string> = []
+        let reentered = false
+        const reenter = () => {
+          if (reentered) return
+          reentered = true
+          collection._lifecycle.setStatus(`error`)
+          collection._lifecycle.setStatus(`idle`)
+          collection._lifecycle.setStatus(`loading`)
+        }
+        if (reentryEvent === `generic`) {
+          collection.on(`status:change`, ({ status }) => {
+            if (status === `loading`) reenter()
+          })
+        } else {
+          collection.on(`status:loading`, reenter)
+        }
+        collection.on(`status:change`, ({ previousStatus, status }) => {
+          trace.push(
+            `generic:${previousStatus}->${status}:${collection.status}`,
+          )
+        })
+        collection.on(`status:loading`, () => {
+          trace.push(`specific:loading:${collection.status}`)
+        })
+
+        collection.startSyncImmediate()
+
+        expect(trace).toEqual(
+          reentryEvent === `generic`
+            ? [
+                `generic:loading->error:error`,
+                `generic:error->idle:idle`,
+                `generic:idle->loading:loading`,
+                `specific:loading:loading`,
+              ]
+            : [
+                `generic:idle->loading:loading`,
+                `generic:loading->error:error`,
+                `generic:error->idle:idle`,
+                `generic:idle->loading:loading`,
+                `specific:loading:loading`,
+              ],
+        )
+      },
+    )
   })
 
   describe(`Subscriber Count Change Events`, () => {
@@ -62,6 +157,168 @@ describe(`Collection Events System`, () => {
       })
 
       subscription.unsubscribe()
+    })
+  })
+
+  describe(`Index Lifecycle Events`, () => {
+    it(`should emit index:added with stable serializable metadata`, () => {
+      const indexAddedListener = vi.fn()
+      collection.on(`index:added`, indexAddedListener)
+
+      function customCompare(a: any, b: any) {
+        return Number(a) - Number(b)
+      }
+
+      const index = collection.createIndex((row: any) => row.id, {
+        name: `by-id`,
+        options: {
+          compareFn: customCompare,
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      })
+
+      expect(indexAddedListener).toHaveBeenCalledTimes(1)
+      const event = indexAddedListener.mock.calls[0]?.[0]
+
+      expect(event).toMatchObject({
+        type: `index:added`,
+        collection,
+        index: {
+          signatureVersion: 1,
+          indexId: index.id,
+          name: `by-id`,
+          resolver: {
+            kind: `constructor`,
+          },
+        },
+      })
+      expect(event.index.expression.type).toBe(`ref`)
+      expect(event.index.signature).toEqual(expect.any(String))
+      expect(event.index.options).toMatchObject({
+        compareOptions: {
+          direction: `asc`,
+          nulls: `last`,
+        },
+      })
+      expect(event.index.options).not.toHaveProperty(`compareFn`)
+      expect(() => JSON.stringify(event.index)).not.toThrow()
+    })
+
+    it(`should emit index:removed once and return false for duplicate removals`, () => {
+      const removedListener = vi.fn()
+      collection.on(`index:removed`, removedListener)
+
+      const index = collection.createIndex((row: any) => row.id, {
+        name: `by-id`,
+      })
+
+      expect(collection.removeIndex(index)).toBe(true)
+      expect(collection.removeIndex(index)).toBe(false)
+
+      expect(removedListener).toHaveBeenCalledTimes(1)
+      expect(removedListener).toHaveBeenCalledWith({
+        type: `index:removed`,
+        collection,
+        index: expect.objectContaining({
+          indexId: index.id,
+          name: `by-id`,
+          signatureVersion: 1,
+        }),
+      })
+    })
+
+    it(`should keep signatures stable for equivalent index definitions`, () => {
+      const signatures: Array<string> = []
+      collection.on(`index:added`, (event) => {
+        signatures.push(event.index.signature)
+      })
+
+      const firstIndex = collection.createIndex((row: any) => row.id, {
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      })
+      collection.removeIndex(firstIndex)
+
+      collection.createIndex((row: any) => row.id, {
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      })
+
+      expect(signatures).toHaveLength(2)
+      expect(signatures[0]).toBe(signatures[1])
+    })
+
+    it(`should canonicalize signatures for option key order and function identity`, () => {
+      const signatures: Array<string> = []
+      collection.on(`index:added`, (event) => {
+        signatures.push(event.index.signature)
+      })
+
+      collection.createIndex((row: any) => row.id, {
+        options: {
+          compareFn: function firstComparator(a: any, b: any) {
+            return Number(a) - Number(b)
+          },
+          compareOptions: {
+            nulls: `last`,
+            direction: `asc`,
+          },
+        },
+      })
+
+      collection.createIndex((row: any) => row.id, {
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+          compareFn: function secondComparator(a: any, b: any) {
+            return Number(a) - Number(b)
+          },
+        },
+      })
+
+      expect(signatures).toHaveLength(2)
+      expect(signatures[0]).toBe(signatures[1])
+    })
+
+    it(`should preserve deterministic event ordering during rapid create/remove`, () => {
+      const orderedEvents: Array<string> = []
+
+      collection.on(`index:added`, (event) => {
+        orderedEvents.push(`added:${event.index.indexId}`)
+      })
+      collection.on(`index:removed`, (event) => {
+        orderedEvents.push(`removed:${event.index.indexId}`)
+      })
+
+      const indexA = collection.createIndex((row: any) => row.id, {
+        name: `a`,
+      })
+      const indexB = collection.createIndex((row: any) => row.id, {
+        name: `b`,
+      })
+
+      expect(collection.removeIndex(indexA)).toBe(true)
+      expect(collection.removeIndex(indexB.id)).toBe(true)
+
+      expect(orderedEvents).toEqual([
+        `added:${indexA.id}`,
+        `added:${indexB.id}`,
+        `removed:${indexA.id}`,
+        `removed:${indexB.id}`,
+      ])
     })
   })
 
@@ -91,6 +348,169 @@ describe(`Collection Events System`, () => {
       expect(listener).toHaveBeenCalledTimes(1) // Still only called once
 
       unsubscribe()
+    })
+
+    it(`removes a once listener before invoking a throwing callback`, () => {
+      const emitter = new TestEventEmitter()
+      const failure = new Error(`once listener failed`)
+      const deferredMicrotasks: Array<VoidFunction> = []
+      const queueMicrotaskSpy = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((callback) => deferredMicrotasks.push(callback))
+      const listener = vi.fn(() => {
+        throw failure
+      })
+
+      try {
+        emitter.once(`event`, listener)
+        emitter.emit(1)
+        emitter.emit(2)
+
+        expect(listener).toHaveBeenCalledTimes(1)
+        expect(deferredMicrotasks).toHaveLength(1)
+        expect(() => deferredMicrotasks[0]!()).toThrow(failure)
+      } finally {
+        queueMicrotaskSpy.mockRestore()
+      }
+    })
+
+    it(`removes a pending once listener through off`, () => {
+      const emitter = new TestEventEmitter()
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      emitter.on(`event`, () => {
+        calls.push(`off`)
+        emitter.off(`event`, onceListener)
+      })
+      emitter.once(`event`, onceListener)
+
+      emitter.emit(1)
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes a pending once listener through its returned unsubscribe`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      const unsubscribe = emitter.once(`event`, onceListener)
+
+      unsubscribe()
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes every pending once registration for the same callback`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      emitter.once(`event`, onceListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.off(`event`, onceListener)
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`does not treat an ordinary callback property as a once registration`, () => {
+      const emitter = new TestEventEmitter()
+      const claimedOnceCallback = vi.fn()
+      const ordinaryListener = Object.assign(vi.fn(), {
+        onceCallback: claimedOnceCallback,
+      })
+      emitter.on(`event`, ordinaryListener)
+
+      emitter.off(`event`, claimedOnceCallback)
+      emitter.emit(1)
+
+      expect(ordinaryListener).toHaveBeenCalledOnce()
+    })
+
+    it(`removes a once listener before a reentrant emission`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<number> = []
+      emitter.once(`event`, ({ id }) => {
+        observed.push(id)
+        emitter.emit(2)
+      })
+
+      emitter.emit(1)
+
+      expect(observed).toEqual([1])
+    })
+
+    it(`visits a listener once when it removes and re-adds itself`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<number> = []
+      let readded = false
+      let unsubscribe = () => {}
+      const listener = ({ id }: { id: number }) => {
+        observed.push(id)
+        unsubscribe()
+        if (!readded) {
+          readded = true
+          unsubscribe = emitter.on(`event`, listener)
+        }
+      }
+      unsubscribe = emitter.on(`event`, listener)
+
+      emitter.emit(1)
+
+      expect(observed).toEqual([1])
+    })
+
+    it(`defers a pending listener that is removed and re-added`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<string> = []
+      let replaced = false
+      const pending = ({ id }: { id: number }) => {
+        observed.push(`pending:${id}`)
+      }
+      let unsubscribePending = () => {}
+      emitter.on(`event`, ({ id }) => {
+        observed.push(`first:${id}`)
+        if (replaced) return
+        replaced = true
+        unsubscribePending()
+        unsubscribePending = emitter.on(`event`, pending)
+      })
+      unsubscribePending = emitter.on(`event`, pending)
+
+      emitter.emit(1)
+      expect(observed).toEqual([`first:1`])
+
+      emitter.emit(2)
+      expect(observed).toEqual([`first:1`, `first:2`, `pending:2`])
+    })
+
+    it(`clears ordinary and once listeners together`, () => {
+      const emitter = new TestEventEmitter()
+      const ordinaryListener = vi.fn()
+      const onceListener = vi.fn()
+      emitter.on(`event`, ordinaryListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.clear()
+      emitter.emit(1)
+
+      expect(ordinaryListener).not.toHaveBeenCalled()
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`exposes the same pending-once removal law through Collection`, () => {
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      collection.on(`status:change`, () => {
+        calls.push(`off`)
+        collection.off(`status:change`, onceListener)
+      })
+      collection.once(`status:change`, onceListener)
+
+      collection.startSyncImmediate()
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
     })
   })
 

@@ -21,15 +21,16 @@ export const Route = createFileRoute(`/query`)({
 
 function QueryPage() {
   // Get data using live queries with Query collections
-  const { data: todos } = useLiveQuery((q) =>
-    q
-      .from({ todo: queryTodoCollection })
-      .orderBy(({ todo }) => todo.created_at, `asc`),
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: queryTodoCollection })
+        .orderBy(({ todo }) => todo.created_at, `asc`),
+  })
 
-  const { data: configData } = useLiveQuery((q) =>
-    q.from({ config: queryConfigCollection }),
-  )
+  const { data: configData } = useLiveQuery({
+    query: (q) => q.from({ config: queryConfigCollection }),
+  })
 
   // Query collections automatically refetch after handler completes
   const configMutationFn = async ({

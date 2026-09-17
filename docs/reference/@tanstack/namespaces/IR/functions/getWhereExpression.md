@@ -3,13 +3,11 @@ id: getWhereExpression
 title: getWhereExpression
 ---
 
-# Function: getWhereExpression()
-
 ```ts
 function getWhereExpression(where): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:155](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L155)
+Defined in: [packages/db/src/query/ir.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L321)
 
 Extract the expression from a Where clause
 

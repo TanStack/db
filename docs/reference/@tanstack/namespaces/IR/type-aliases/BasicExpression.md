@@ -3,8 +3,6 @@ id: BasicExpression
 title: BasicExpression
 ---
 
-# Type Alias: BasicExpression\<T\>
-
 ```ts
 type BasicExpression<T> = 
   | PropRef<T>
@@ -12,7 +10,7 @@ type BasicExpression<T> =
 | Func<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L123)
+Defined in: [packages/db/src/query/ir.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L172)
 
 ## Type Parameters
 

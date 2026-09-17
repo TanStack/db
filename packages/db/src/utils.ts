@@ -30,10 +30,19 @@ export function deepEquals(a: any, b: any): boolean {
   return deepEqualsInternal(a, b, new Map())
 }
 
+function enumerableOwnKeys(value: object): Array<string | symbol> {
+  const keys: Array<string | symbol> = Object.keys(value)
+  for (const key of Object.getOwnPropertySymbols(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, key)) keys.push(key)
+  }
+  return keys
+}
+
 /**
- * Internal implementation with cycle detection to prevent infinite recursion
+ * Internal implementation with cycle detection to prevent infinite recursion.
+ * Internal callers can seed already-paired roots when comparing their children.
  */
-function deepEqualsInternal(
+export function deepEqualsInternal(
   a: any,
   b: any,
   visited: Map<object, object>,
@@ -144,8 +153,8 @@ function deepEqualsInternal(
   // Handle Temporal objects
   // Check if both are Temporal objects of the same type
   if (isTemporal(a) && isTemporal(b)) {
-    const aTag = getStringTag(a)
-    const bTag = getStringTag(b)
+    const aTag = a[Symbol.toStringTag]
+    const bTag = b[Symbol.toStringTag]
 
     // If they're different Temporal types, they're not equal
     if (aTag !== bTag) return false
@@ -188,9 +197,10 @@ function deepEqualsInternal(
     }
     visited.set(a, b)
 
-    // Get all keys from both objects
-    const keysA = Object.keys(a)
-    const keysB = Object.keys(b)
+    // Compare enumerable symbol keys as well as string keys. Query results may
+    // use user-owned symbols, and a symbol-only update is still a value change.
+    const keysA = enumerableOwnKeys(a)
+    const keysB = enumerableOwnKeys(b)
 
     // Check if they have the same number of keys
     if (keysA.length !== keysB.length) {
@@ -200,7 +210,9 @@ function deepEqualsInternal(
 
     // Check if all keys exist in both objects and their values are equal
     const result = keysA.every(
-      (key) => key in b && deepEqualsInternal(a[key], b[key], visited),
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(b, key) &&
+        deepEqualsInternal(a[key], b[key], visited),
     )
 
     visited.delete(a)
@@ -211,7 +223,7 @@ function deepEqualsInternal(
   return false
 }
 
-const temporalTypes = [
+const temporalTypes = new Set([
   `Temporal.Duration`,
   `Temporal.Instant`,
   `Temporal.PlainDate`,
@@ -220,16 +232,19 @@ const temporalTypes = [
   `Temporal.PlainTime`,
   `Temporal.PlainYearMonth`,
   `Temporal.ZonedDateTime`,
-]
+])
 
-function getStringTag(a: any): any {
-  return a[Symbol.toStringTag]
+export interface TemporalLike {
+  [Symbol.toStringTag]: string
+  toString: () => string
+  equals?: (other: unknown) => boolean
 }
 
 /** Checks if the value is a Temporal object by checking for the Temporal brand */
-export function isTemporal(a: any): boolean {
-  const tag = getStringTag(a)
-  return typeof tag === `string` && temporalTypes.includes(tag)
+export function isTemporal(a: unknown): a is TemporalLike {
+  if (a == null || typeof a !== `object`) return false
+  const tag = (a as Record<symbol, unknown>)[Symbol.toStringTag]
+  return typeof tag === `string` && temporalTypes.has(tag)
 }
 
 export const DEFAULT_COMPARE_OPTIONS: CompareOptions = {

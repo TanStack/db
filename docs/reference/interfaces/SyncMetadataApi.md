@@ -1,0 +1,152 @@
+---
+id: SyncMetadataApi
+title: SyncMetadataApi
+---
+
+Defined in: [packages/db/src/types.ts:453](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L453)
+
+## Type Parameters
+
+### TKey
+
+`TKey` *extends* `string` \| `number` = `string` \| `number`
+
+## Properties
+
+### collection
+
+```ts
+collection: object;
+```
+
+Defined in: [packages/db/src/types.ts:461](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L461)
+
+#### delete()
+
+```ts
+delete: (key) => void;
+```
+
+##### Parameters
+
+###### key
+
+`string`
+
+##### Returns
+
+`void`
+
+#### get()
+
+```ts
+get: (key) => unknown;
+```
+
+##### Parameters
+
+###### key
+
+`string`
+
+##### Returns
+
+`unknown`
+
+#### list()
+
+```ts
+list: (prefix?) => readonly object[];
+```
+
+##### Parameters
+
+###### prefix?
+
+`string`
+
+##### Returns
+
+readonly `object`[]
+
+#### set()
+
+```ts
+set: (key, value) => void;
+```
+
+##### Parameters
+
+###### key
+
+`string`
+
+###### value
+
+`unknown`
+
+##### Returns
+
+`void`
+
+***
+
+### row
+
+```ts
+row: object;
+```
+
+Defined in: [packages/db/src/types.ts:456](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L456)
+
+#### delete()
+
+```ts
+delete: (key) => void;
+```
+
+##### Parameters
+
+###### key
+
+`TKey`
+
+##### Returns
+
+`void`
+
+#### get()
+
+```ts
+get: (key) => unknown;
+```
+
+##### Parameters
+
+###### key
+
+`TKey`
+
+##### Returns
+
+`unknown`
+
+#### set()
+
+```ts
+set: (key, metadata) => void;
+```
+
+##### Parameters
+
+###### key
+
+`TKey`
+
+###### metadata
+
+`unknown`
+
+##### Returns
+
+`void`

@@ -1,6 +1,8 @@
 import { assertType, describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
+import { DbClient, collectionOptions } from '../src/index.js'
+import type { OutputWithVirtual } from './utils'
 import type { OperationConfig } from '../src/types'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
@@ -59,7 +61,6 @@ describe(`Collection type resolution tests`, () => {
 
   type SchemaType = StandardSchemaV1.InferOutput<typeof testSchema>
   type ItemOf<T> = T extends Array<infer U> ? U : T
-
   it(`should use explicit type when provided without schema`, () => {
     const _collection = createCollection<ExplicitType, string>({
       getKey: (item) => {
@@ -69,7 +70,12 @@ describe(`Collection type resolution tests`, () => {
       sync: { sync: () => {} },
     })
 
-    expectTypeOf(_collection.toArray).toEqualTypeOf<Array<ExplicitType>>()
+    expectTypeOf(_collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExplicitType, string>>
+    >()
+    expectTypeOf(_collection.get(`test`)).toEqualTypeOf<
+      OutputWithVirtual<ExplicitType, string> | undefined
+    >()
 
     type Key = Parameters<typeof _collection.get>[0]
     expectTypeOf<Key>().toEqualTypeOf<string>()
@@ -88,7 +94,12 @@ describe(`Collection type resolution tests`, () => {
       schema: testSchema,
     })
 
-    expectTypeOf(_collection.toArray).toEqualTypeOf<Array<SchemaType>>()
+    expectTypeOf(_collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<SchemaType, string>>
+    >()
+    expectTypeOf(_collection.get(`test`)).toEqualTypeOf<
+      OutputWithVirtual<SchemaType, string> | undefined
+    >()
 
     type Key = Parameters<typeof _collection.get>[0]
     expectTypeOf<Key>().toEqualTypeOf<string>()
@@ -149,6 +160,42 @@ describe(`Collection type resolution tests`, () => {
 
     // Should automatically infer nullable types correctly
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
+  })
+})
+
+describe(`DbClient type tests`, () => {
+  type Todo = { id: string; text: string }
+
+  it(`materializes typed collection options`, () => {
+    const todos = collectionOptions<Todo, string>({
+      id: `todos`,
+      getKey: (todo) => todo.id,
+      sync: { sync: () => {} },
+    })
+
+    const client = new DbClient()
+    const collection = client.collection(todos)
+
+    expectTypeOf(collection.get(`1`)).toEqualTypeOf<
+      OutputWithVirtual<Todo, string> | undefined
+    >()
+  })
+
+  it(`accepts materialization initialData`, () => {
+    const todos = collectionOptions<Todo, string>({
+      id: `todos`,
+      getKey: (todo) => todo.id,
+      sync: { sync: () => {} },
+    })
+
+    const client = new DbClient()
+    const collection = client.collection(todos, {
+      initialData: [{ id: `1`, text: `Write tests` }],
+    })
+
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<Todo, string>>
+    >()
   })
 })
 
@@ -214,7 +261,9 @@ describe(`Schema Input/Output Type Distinction`, () => {
     >()
 
     // Collection items should be ExpectedOutputType
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedOutputType, string>>
+    >()
   })
 
   it(`should handle schema with transformations correctly for insert`, () => {
@@ -256,7 +305,9 @@ describe(`Schema Input/Output Type Distinction`, () => {
     >()
 
     // Collection items should be ExpectedOutputType
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedOutputType, string>>
+    >()
   })
 
   it(`should handle schema with default values correctly for update method`, () => {
@@ -302,7 +353,9 @@ describe(`Schema Input/Output Type Distinction`, () => {
     })
 
     // Collection items should be ExpectedOutputType
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedOutputType, string>>
+    >()
   })
 
   it(`should handle schema with transformations correctly for update method`, () => {
@@ -348,7 +401,9 @@ describe(`Schema Input/Output Type Distinction`, () => {
     })
 
     // Collection items should be ExpectedOutputType
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedOutputType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedOutputType, string>>
+    >()
   })
 })
 

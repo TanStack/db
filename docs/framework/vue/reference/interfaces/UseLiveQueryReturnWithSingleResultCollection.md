@@ -3,9 +3,7 @@ id: UseLiveQueryReturnWithSingleResultCollection
 title: UseLiveQueryReturnWithSingleResultCollection
 ---
 
-# Interface: UseLiveQueryReturnWithSingleResultCollection\<T, TKey, TUtils\>
-
-Defined in: [useLiveQuery.ts:68](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L68)
+Defined in: [useLiveQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L72)
 
 ## Type Parameters
 
@@ -29,7 +27,7 @@ Defined in: [useLiveQuery.ts:68](https://github.com/TanStack/db/blob/main/packag
 collection: ComputedRef<Collection<T, TKey, TUtils, StandardSchemaV1<unknown, unknown>, T> & SingleResult>;
 ```
 
-Defined in: [useLiveQuery.ts:75](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L75)
+Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L79)
 
 ***
 
@@ -39,7 +37,7 @@ Defined in: [useLiveQuery.ts:75](https://github.com/TanStack/db/blob/main/packag
 data: ComputedRef<T | undefined>;
 ```
 
-Defined in: [useLiveQuery.ts:74](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L74)
+Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L78)
 
 ***
 
@@ -49,7 +47,7 @@ Defined in: [useLiveQuery.ts:74](https://github.com/TanStack/db/blob/main/packag
 isCleanedUp: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L81)
+Defined in: [useLiveQuery.ts:85](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L85)
 
 ***
 
@@ -59,7 +57,7 @@ Defined in: [useLiveQuery.ts:81](https://github.com/TanStack/db/blob/main/packag
 isError: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L80)
+Defined in: [useLiveQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L84)
 
 ***
 
@@ -69,7 +67,7 @@ Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packag
 isIdle: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L79)
+Defined in: [useLiveQuery.ts:83](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L83)
 
 ***
 
@@ -79,7 +77,7 @@ Defined in: [useLiveQuery.ts:79](https://github.com/TanStack/db/blob/main/packag
 isLoading: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:77](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L77)
+Defined in: [useLiveQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L81)
 
 ***
 
@@ -89,7 +87,7 @@ Defined in: [useLiveQuery.ts:77](https://github.com/TanStack/db/blob/main/packag
 isReady: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L78)
+Defined in: [useLiveQuery.ts:82](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L82)
 
 ***
 
@@ -99,7 +97,7 @@ Defined in: [useLiveQuery.ts:78](https://github.com/TanStack/db/blob/main/packag
 state: ComputedRef<Map<TKey, T>>;
 ```
 
-Defined in: [useLiveQuery.ts:73](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L73)
+Defined in: [useLiveQuery.ts:77](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L77)
 
 ***
 
@@ -109,4 +107,4 @@ Defined in: [useLiveQuery.ts:73](https://github.com/TanStack/db/blob/main/packag
 status: ComputedRef<CollectionStatus>;
 ```
 
-Defined in: [useLiveQuery.ts:76](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L76)
+Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L80)

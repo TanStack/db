@@ -3,9 +3,7 @@ id: CollectionRef
 title: CollectionRef
 ---
 
-# Class: CollectionRef
-
-Defined in: [packages/db/src/query/ir.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L72)
+Defined in: [packages/db/src/query/ir.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L87)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:72](https://github.com/TanStack/db/blob
 new CollectionRef(collection, alias): CollectionRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L74)
+Defined in: [packages/db/src/query/ir.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L91)
 
 #### Parameters
 
@@ -49,7 +47,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L69)
+Defined in: [packages/db/src/query/ir.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L84)
 
 **`Internal`**
 
@@ -69,7 +67,7 @@ BaseExpression.__returnType
 alias: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L76)
+Defined in: [packages/db/src/query/ir.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L93)
 
 ***
 
@@ -79,7 +77,19 @@ Defined in: [packages/db/src/query/ir.ts:76](https://github.com/TanStack/db/blob
 collection: CollectionImpl;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L75)
+Defined in: [packages/db/src/query/ir.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L92)
+
+***
+
+### sourceId
+
+```ts
+readonly sourceId: string;
+```
+
+Defined in: [packages/db/src/query/ir.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L90)
+
+Opaque runtime identity; aliases are lexical names only.
 
 ***
 
@@ -89,7 +99,7 @@ Defined in: [packages/db/src/query/ir.ts:75](https://github.com/TanStack/db/blob
 type: "collectionRef";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L73)
+Defined in: [packages/db/src/query/ir.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L88)
 
 #### Overrides
 

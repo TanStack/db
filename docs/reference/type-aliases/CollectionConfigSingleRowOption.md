@@ -3,13 +3,11 @@ id: CollectionConfigSingleRowOption
 title: CollectionConfigSingleRowOption
 ---
 
-# Type Alias: CollectionConfigSingleRowOption\<T, TKey, TSchema, TUtils\>
-
 ```ts
 type CollectionConfigSingleRowOption<T, TKey, TSchema, TUtils> = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult;
 ```
 
-Defined in: [packages/db/src/types.ts:735](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L735)
+Defined in: [packages/db/src/types.ts:868](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L868)
 
 ## Type Parameters
 

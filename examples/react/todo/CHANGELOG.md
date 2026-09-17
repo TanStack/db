@@ -1,5 +1,45 @@
 # examples/react/todo
 
+## 0.1.28
+
+### Patch Changes
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`15c4ba0`](https://github.com/TanStack/db/commit/15c4ba044072df572d6805b76872d419f985aeeb), [`6e60d30`](https://github.com/TanStack/db/commit/6e60d30a0e19642eeda72895722afdfca6cec749)]:
+  - @tanstack/electric-db-collection@0.4.9
+  - @tanstack/trailbase-db-collection@0.1.108
+  - @tanstack/react-db@0.4.0
+  - @tanstack/query-db-collection@1.2.14
+
+## 0.1.27
+
+### Patch Changes
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/react-db@0.3.0
+  - @tanstack/electric-db-collection@0.4.0
+  - @tanstack/query-db-collection@1.2.5
+  - @tanstack/trailbase-db-collection@0.1.99
+
+## 0.1.26
+
+### Patch Changes
+
+- Updated dependencies [[`424382b`](https://github.com/TanStack/db/commit/424382b3a80c6b3556701b433c26c8a60fc8d1af)]:
+  - @tanstack/react-db@0.2.0
+  - @tanstack/electric-db-collection@0.3.17
+  - @tanstack/query-db-collection@1.2.3
+  - @tanstack/trailbase-db-collection@0.1.97
+
+## 0.1.25
+
+### Patch Changes
+
+- Updated dependencies [[`cde8af1`](https://github.com/TanStack/db/commit/cde8af1f21308e5206601f10e9aa0a7c258f66dc), [`6428fe3`](https://github.com/TanStack/db/commit/6428fe3c4dae5e126bf12ce50c0467b2f1cb6f69)]:
+  - @tanstack/electric-db-collection@0.3.0
+  - @tanstack/react-db@0.1.80
+  - @tanstack/query-db-collection@1.0.33
+  - @tanstack/trailbase-db-collection@0.1.80
+
 ## 0.1.24
 
 ### Patch Changes

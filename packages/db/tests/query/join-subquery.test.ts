@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -268,7 +269,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
-                user_name: activeUser?.name,
+                user_name: activeUser.name,
                 issue_status: issue.status,
               }))
           },
@@ -412,8 +413,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
                 issue_status: issue.status,
-                user_name: activeUser?.name,
-                user_status: activeUser?.status,
+                user_name: activeUser.name,
+                user_status: activeUser.status,
               }))
           },
         })
@@ -460,18 +461,22 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          product: stripVirtualProps(row.product),
+          tried: stripVirtualProps(row.tried),
+        }))
         expect(results).toHaveLength(1)
         expect(results[0]!.product.id).toBe(1)
         expect(results[0]!.tried).toBeDefined()
-        expect(results[0]!.tried!.userId).toBe(1)
+        expect(results[0]!.tried.userId).toBe(1)
         expect(results[0]).toEqual({
           product: { id: 1, a: `8` },
           tried: sampleTrials[0],
         })
       })
 
-      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, () => {
+      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, async () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
             return q
@@ -493,7 +498,13 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        // Initial ordered refinement may hold publication beyond startSync.
+        await joinSubquery.preload()
+        expect(joinSubquery.isReady()).toBe(true)
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          issue: stripVirtualProps(row.issue),
+        }))
         expect(results).toEqual([
           {
             issue: {
@@ -509,7 +520,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, () => {
+      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, async () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
             return q
@@ -531,7 +542,12 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        await joinSubquery.preload()
+        expect(joinSubquery.isReady()).toBe(true)
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          issue: stripVirtualProps(row.issue),
+        }))
         expect(results).toEqual([
           {
             issue: {
@@ -609,7 +625,9 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           expect(typeof result.is_high_priority).toBe(`boolean`)
         })
 
-        const sortedResults = results.sort((a, b) => a.id - b.id)
+        const sortedResults = results
+          .map((result) => stripVirtualProps(result))
+          .sort((a, b) => a.id - b.id)
         expect(sortedResults).toEqual([
           {
             id: 1,
@@ -770,8 +788,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, author }) => ({
                 issue_id: issue.id,
                 issue_title: issue.title,
-                author_name: author?.userName,
-                author_bio: author?.profileBio,
+                author_name: author.userName,
+                author_bio: author.profileBio,
               }))
           },
         })
@@ -860,4 +878,203 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
 describe(`Join with Subqueries`, () => {
   createJoinSubqueryTests(`off`)
   createJoinSubqueryTests(`eager`)
+})
+
+describe(`Lazy join: subquery whose join key resolves to an indexed collection`, () => {
+  type Team = { id: string }
+  type Member = { id: string; teamId: string }
+
+  // `teams.id` is indexed; `members` has no index.
+  const makeTeamsCollection = () =>
+    createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `lazy-join-teams`,
+        getKey: (r) => r.id,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        initialData: [{ id: `t1` }],
+      }),
+    )
+  const makeMembersCollection = () =>
+    createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `lazy-join-members`,
+        getKey: (r) => r.id,
+        autoIndex: `off`,
+        initialData: [{ id: `m1`, teamId: `t1` }],
+      }),
+    )
+
+  let teams: ReturnType<typeof makeTeamsCollection>
+  let members: ReturnType<typeof makeMembersCollection>
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    teams = makeTeamsCollection()
+    members = makeMembersCollection()
+    warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  // When a subquery used in a JOIN clause selects its join key from the
+  // *joined* side of the subquery (here `team.id`) rather than from its own
+  // FROM side (`member`), the outer join key resolves to `teams.id`, which is
+  // indexed. The lazy-join loader should therefore load through that index and
+  // must not emit a "Join requires an index" warning that points at the
+  // already-indexed `teams` collection.
+  test(`does not warn about an index that the resolved collection already has`, () => {
+    const joinQuery = createLiveQueryCollection({
+      startSync: true,
+      query: (q) => {
+        const teamByMember = q
+          .from({ member: members })
+          .leftJoin({ team: teams }, ({ team, member }) =>
+            eq(team.id, member.teamId),
+          )
+          .select(({ team }) => ({ teamId: team.id }))
+
+        return q
+          .from({ m: members })
+          .leftJoin({ memberTeam: teamByMember }, ({ m, memberTeam }) =>
+            eq(memberTeam.teamId, m.teamId),
+          )
+          .select(({ m }) => ({ id: m.id }))
+      },
+    })
+
+    // Data flows correctly regardless (via fallback full-load today).
+    expect(joinQuery.toArray.map((r) => r.id)).toEqual([`m1`])
+
+    const indexWarnings = warnSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((m) => m.includes(`Join requires an index`))
+
+    // `teams.id` is already indexed, so no warning should advise indexing it.
+    expect(indexWarnings.filter((m) => m.includes(`lazy-join-teams`))).toEqual(
+      [],
+    )
+  })
+})
+
+describe(`Lazy join index availability`, () => {
+  test(`uses an auto-index with omitted locale options`, async () => {
+    type Team = { id: string }
+    type Member = { id: string; teamId: string }
+    const teams = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `lazy-default-collation-teams`,
+        getKey: (team) => team.id,
+        initialData: [{ id: `t1` }],
+      }),
+    )
+    const members = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `lazy-default-collation-members`,
+        getKey: (member) => member.id,
+        initialData: [{ id: `m1`, teamId: `t1` }],
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        defaultStringCollation: {
+          stringSort: `locale`,
+          localeOptions: { sensitivity: undefined },
+        },
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `m1`, teamId: `t1` } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      }),
+    )
+    const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ team: teams })
+        .leftJoin({ member: members }, ({ team, member }) =>
+          eq(team.id, member.teamId),
+        )
+        .select(({ team, member }) => ({
+          id: team.id,
+          memberId: member.id,
+        })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { id: `t1`, memberId: `m1` },
+      ])
+      expect(members.indexes.size).toBe(1)
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining(`Join requires an index`),
+      )
+    } finally {
+      warnSpy.mockRestore()
+      await Promise.all([live.cleanup(), teams.cleanup(), members.cleanup()])
+    }
+  })
+
+  test(`warns when demand falls back to a full local scan`, async () => {
+    type Team = { id: string }
+    type Member = { id: string; teamId: string }
+    const teams = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `lazy-fallback-teams`,
+        getKey: (team) => team.id,
+        initialData: [{ id: `t1` }],
+      }),
+    )
+    const members = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `lazy-fallback-members`,
+        getKey: (member) => member.id,
+        initialData: [{ id: `m1`, teamId: `t1` }],
+        syncMode: `on-demand`,
+        autoIndex: `off`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `m1`, teamId: `t1` } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      }),
+    )
+    const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ team: teams })
+        .leftJoin({ member: members }, ({ team, member }) =>
+          eq(team.id, member.teamId),
+        )
+        .select(({ team, member }) => ({
+          id: team.id,
+          memberId: member.id,
+        })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { id: `t1`, memberId: `m1` },
+      ])
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `[lazy-fallback-members] Join requires an index on "teamId"`,
+        ),
+      )
+    } finally {
+      warnSpy.mockRestore()
+      await Promise.all([live.cleanup(), teams.cleanup(), members.cleanup()])
+    }
+  })
 })

@@ -212,10 +212,7 @@ describe(`Query2 Subqueries`, () => {
   })
 
   describe(`Subqueries in JOIN clause`, () => {
-    const dummyCallbacks = {
-      loadKeys: (_: any) => {},
-      loadInitialState: () => {},
-    }
+    const dummyCallbacks = {}
 
     it(`supports subquery in join clause`, () => {
       // Create a subquery for active users
@@ -232,7 +229,7 @@ describe(`Query2 Subqueries`, () => {
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: activeUser?.name,
+          userName: activeUser.name,
         }))
 
       const builtQuery = getQueryIR(query)
@@ -267,7 +264,7 @@ describe(`Query2 Subqueries`, () => {
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: activeUser?.name,
+          userName: activeUser.name,
         }))
 
       const builtQuery = getQueryIR(query)
@@ -301,10 +298,18 @@ describe(`Query2 Subqueries`, () => {
       )
       const { pipeline } = compilation
 
-      // Since we're doing a left join, the alias on the right (from the subquery) should be handled lazily
-      // The subquery uses 'user' alias, but the join uses 'activeUser' - we expect the lazy alias
-      // to be the one that's marked (which is 'activeUser' since it's the joinedTableAlias)
-      expect(lazySources).contains(`activeUser`)
+      // Since we're doing a left join, the concrete lexical source inside the
+      // right-side subquery should be handled lazily. Aliases are query-language
+      // names; the compiler tracks runtime demand by the source's opaque ID.
+      const activeUserJoin = builtQuery.join![0]!.from
+      expect(activeUserJoin.type).toBe(`queryRef`)
+      if (activeUserJoin.type === `queryRef`) {
+        const activeUserSource = activeUserJoin.query.from
+        expect(activeUserSource.type).toBe(`collectionRef`)
+        if (activeUserSource.type === `collectionRef`) {
+          expect(lazySources).contains(activeUserSource.sourceId)
+        }
+      }
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -363,7 +368,7 @@ describe(`Query2 Subqueries`, () => {
         .select(({ issue, userInfo }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: userInfo?.name,
+          userName: userInfo.name,
         }))
 
       const builtQuery = getQueryIR(outerQuery)
@@ -377,10 +382,7 @@ describe(`Query2 Subqueries`, () => {
         user: usersSubscription,
       }
 
-      const dummyCallbacks = {
-        loadKeys: (_: any) => {},
-        loadInitialState: () => {},
-      }
+      const dummyCallbacks = {}
 
       // Compile the query
       const graph = new D2()

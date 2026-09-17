@@ -1,0 +1,176 @@
+import {
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS as CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS as CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+  SingleProcessCoordinator,
+  createSQLiteCorePersistenceAdapter,
+} from '@tanstack/db-sqlite-persistence-core'
+import { BetterSqlite3SQLiteDriver } from './node-driver'
+import type {
+  PersistedCollectionCoordinator,
+  PersistedCollectionMode,
+  PersistedCollectionPersistence,
+  SQLiteCoreAdapterOptions,
+  SQLiteDriver,
+} from '@tanstack/db-sqlite-persistence-core'
+import type { BetterSqlite3Database } from './node-driver'
+
+export type { BetterSqlite3Database } from './node-driver'
+
+type NodeSQLiteCoreSchemaMismatchPolicy =
+  | `sync-present-reset`
+  | `sync-absent-error`
+  | `reset`
+
+export type NodeSQLiteSchemaMismatchPolicy =
+  | NodeSQLiteCoreSchemaMismatchPolicy
+  | `throw`
+
+type NodeSQLitePersistenceBaseOptions = Omit<
+  SQLiteCoreAdapterOptions,
+  `driver` | `schemaVersion` | `schemaMismatchPolicy`
+> & {
+  database: BetterSqlite3Database
+  pragmas?: ReadonlyArray<string>
+  coordinator?: PersistedCollectionCoordinator
+  schemaMismatchPolicy?: NodeSQLiteSchemaMismatchPolicy
+}
+
+export type NodeSQLitePersistenceOptions = NodeSQLitePersistenceBaseOptions
+
+/**
+ * Default cap on retained `applied_tx` rows per collection. The log is a
+ * replayable cache, so a bounded row count keeps SQLite files from growing
+ * without limit. Pass `appliedTxPruneMaxRows: 0` to disable the row cap.
+ */
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS =
+  CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS
+
+/**
+ * Default age backstop for retained `applied_tx` rows, in seconds (24h). Rows
+ * older than this are pruned on the next write. Pass
+ * `appliedTxPruneMaxAgeSeconds: 0` to disable the age backstop.
+ */
+export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS =
+  CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS
+
+function normalizeSchemaMismatchPolicy(
+  policy: NodeSQLiteSchemaMismatchPolicy,
+): NodeSQLiteCoreSchemaMismatchPolicy {
+  if (policy === `throw`) {
+    return `sync-absent-error`
+  }
+
+  return policy
+}
+
+function resolveSchemaMismatchPolicy(
+  explicitPolicy: NodeSQLiteSchemaMismatchPolicy | undefined,
+  mode: PersistedCollectionMode,
+): NodeSQLiteCoreSchemaMismatchPolicy {
+  if (explicitPolicy) {
+    return normalizeSchemaMismatchPolicy(explicitPolicy)
+  }
+
+  return mode === `sync-present` ? `sync-present-reset` : `sync-absent-error`
+}
+
+function createAdapterCacheKey(
+  schemaMismatchPolicy: NodeSQLiteCoreSchemaMismatchPolicy,
+  schemaVersion: number | undefined,
+): string {
+  const schemaVersionKey =
+    schemaVersion === undefined ? `schema:default` : `schema:${schemaVersion}`
+  return `${schemaMismatchPolicy}|${schemaVersionKey}`
+}
+
+function createInternalSQLiteDriver(
+  options: NodeSQLitePersistenceOptions,
+): SQLiteDriver {
+  return new BetterSqlite3SQLiteDriver({
+    database: options.database,
+    ...(options.pragmas ? { pragmas: options.pragmas } : {}),
+  })
+}
+
+function resolveAdapterBaseOptions(
+  options: NodeSQLitePersistenceOptions,
+): Omit<
+  SQLiteCoreAdapterOptions,
+  `driver` | `schemaVersion` | `schemaMismatchPolicy`
+> {
+  return {
+    appliedTxPruneMaxRows:
+      options.appliedTxPruneMaxRows ?? CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+    appliedTxPruneMaxAgeSeconds:
+      options.appliedTxPruneMaxAgeSeconds ??
+      CORE_DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+    pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+  }
+}
+
+/**
+ * Creates a shared SQLite persistence instance that can be reused by many
+ * collections on the same database. Collection-specific schema versions are
+ * resolved by `persistedCollectionOptions` via `resolvePersistenceForCollection`.
+ */
+export function createNodeSQLitePersistence(
+  options: NodeSQLitePersistenceOptions,
+): PersistedCollectionPersistence {
+  const { coordinator, schemaMismatchPolicy } = options
+  const driver = createInternalSQLiteDriver(options)
+  const adapterBaseOptions = resolveAdapterBaseOptions(options)
+  const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
+  const adapterCache = new Map<
+    string,
+    ReturnType<typeof createSQLiteCorePersistenceAdapter>
+  >()
+
+  const getAdapterForCollection = (
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ) => {
+    const resolvedSchemaMismatchPolicy = resolveSchemaMismatchPolicy(
+      schemaMismatchPolicy,
+      mode,
+    )
+    const cacheKey = createAdapterCacheKey(
+      resolvedSchemaMismatchPolicy,
+      schemaVersion,
+    )
+    const cachedAdapter = adapterCache.get(cacheKey)
+    if (cachedAdapter) {
+      return cachedAdapter
+    }
+
+    const adapter = createSQLiteCorePersistenceAdapter({
+      ...adapterBaseOptions,
+      driver,
+      schemaMismatchPolicy: resolvedSchemaMismatchPolicy,
+      ...(schemaVersion === undefined ? {} : { schemaVersion }),
+    })
+    adapterCache.set(cacheKey, adapter)
+    return adapter
+  }
+
+  const createCollectionPersistence = (
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ): PersistedCollectionPersistence => ({
+    adapter: getAdapterForCollection(mode, schemaVersion),
+    coordinator: resolvedCoordinator,
+  })
+
+  const defaultPersistence = createCollectionPersistence(
+    `sync-absent`,
+    undefined,
+  )
+
+  return {
+    ...defaultPersistence,
+    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
+      createCollectionPersistence(mode, schemaVersion),
+    // Backward compatible fallback for older callers.
+    resolvePersistenceForMode: (mode) =>
+      createCollectionPersistence(mode, undefined),
+  }
+}

@@ -1,4 +1,4 @@
-import { MurmurHashStream, randomHash } from './murmur.js'
+import { MurmurHashStream, getSymbolIdentity, randomHash } from './murmur.js'
 import type { Hasher } from './murmur.js'
 
 /*
@@ -13,11 +13,40 @@ const UNDEFINED = randomHash()
 const KEY = randomHash()
 const FUNCTIONS = randomHash()
 const DATE_MARKER = randomHash()
-const OBJECT_MARKER = randomHash()
-const ARRAY_MARKER = randomHash()
-const MAP_MARKER = randomHash()
-const SET_MARKER = randomHash()
+const REGEXP_MARKER = randomHash()
+const STRUCTURAL_MARKERS = {
+  object: randomHash(),
+  array: randomHash(),
+  map: randomHash(),
+  set: randomHash(),
+}
 const UINT8ARRAY_MARKER = randomHash()
+const TEMPORAL_MARKER = randomHash()
+// Bound structural recursion and value visits. Shared acyclic subtrees are
+// cached; cycles are rejected rather than given context-dependent hashes.
+const MAX_STRUCTURAL_HASH_WORK = 1_000_000
+const MAX_STRUCTURAL_HASH_DEPTH = 768
+
+const temporalTypes = new Set([
+  `Temporal.Duration`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
+  `Temporal.PlainDateTime`,
+  `Temporal.PlainMonthDay`,
+  `Temporal.PlainTime`,
+  `Temporal.PlainYearMonth`,
+  `Temporal.ZonedDateTime`,
+])
+
+interface TemporalLike {
+  [Symbol.toStringTag]: string
+  toString: () => string
+}
+
+function isTemporal(input: object): input is TemporalLike {
+  const tag = (input as Record<symbol, unknown>)[Symbol.toStringTag]
+  return typeof tag === `string` && temporalTypes.has(tag)
+}
 
 // Maximum byte length for Uint8Arrays to hash by content instead of reference
 // Arrays smaller than this will be hashed by content, allowing proper equality comparisons
@@ -25,6 +54,18 @@ const UINT8ARRAY_MARKER = randomHash()
 const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128
 
 const hashCache = new WeakMap<object, number>()
+const referenceValues = new WeakSet<object>()
+
+/** @internal Register a mutable handle before it enters a structural value. */
+export function registerOpaqueHash(value: object): void {
+  cachedReferenceHash(value)
+}
+
+type HashContext = {
+  activeObjects: Set<object>
+  work: number
+  pendingHashes: Map<object, number>
+}
 
 export function hash(input: any): number {
   const hasher = new MurmurHashStream()
@@ -32,55 +73,43 @@ export function hash(input: any): number {
   return hasher.digest()
 }
 
-function hashObject(input: object): number {
-  const cachedHash = hashCache.get(input)
-  if (cachedHash !== undefined) {
-    return cachedHash
+function hashObject(input: object, context: HashContext): number {
+  if (context.activeObjects.size >= MAX_STRUCTURAL_HASH_DEPTH) {
+    throw new RangeError(
+      `Value is too complex to hash safely: structural depth`,
+    )
   }
+
+  context.activeObjects.add(input)
 
   let valueHash: number | undefined
-  if (input instanceof Date) {
-    valueHash = hashDate(input)
-  } else if (
-    // Check if input is a Uint8Array or Buffer
-    (typeof Buffer !== `undefined` && input instanceof Buffer) ||
-    input instanceof Uint8Array
-  ) {
-    // For small Uint8Arrays/Buffers (e.g., ULIDs, UUIDs), hash by content
-    // to enable proper equality comparisons. For large arrays, hash by reference
-    // to avoid performance costs.
-    if (input.byteLength <= UINT8ARRAY_CONTENT_HASH_THRESHOLD) {
+  try {
+    if (input instanceof Date) {
+      valueHash = hashDate(input)
+    } else if (isBinaryValue(input)) {
       valueHash = hashUint8Array(input)
+    } else if (isTemporal(input)) {
+      valueHash = hashTemporal(input)
+    } else if (input instanceof RegExp) {
+      valueHash = hashPlainObject(input, REGEXP_MARKER, context, [
+        input.source,
+        input.flags,
+        input.lastIndex,
+      ])
     } else {
-      // Deeply hashing large arrays would be too costly
-      // so we track them by reference and cache them in a weak map
-      return cachedReferenceHash(input)
+      const [kind, plainObjectInput] = structuralShape(input)
+      valueHash = hashPlainObject(
+        plainObjectInput,
+        STRUCTURAL_MARKERS[kind],
+        context,
+        kind === `array` ? [input instanceof Array ? input.length : 0] : [],
+      )
     }
-  } else if (input instanceof File) {
-    // Files are always hashed by reference due to their potentially large size
-    return cachedReferenceHash(input)
-  } else {
-    let plainObjectInput = input
-    let marker = OBJECT_MARKER
-
-    if (input instanceof Array) {
-      marker = ARRAY_MARKER
-    }
-
-    if (input instanceof Map) {
-      marker = MAP_MARKER
-      plainObjectInput = [...input.entries()]
-    }
-
-    if (input instanceof Set) {
-      marker = SET_MARKER
-      plainObjectInput = [...input.entries()]
-    }
-
-    valueHash = hashPlainObject(plainObjectInput, marker)
+  } finally {
+    context.activeObjects.delete(input)
   }
 
-  hashCache.set(input, valueHash)
+  context.pendingHashes.set(input, valueHash)
   return valueHash
 }
 
@@ -103,23 +132,52 @@ function hashUint8Array(input: Uint8Array): number {
   return hasher.digest()
 }
 
-function hashPlainObject(input: object, marker: number): number {
+function hashTemporal(input: TemporalLike): number {
+  const hasher = new MurmurHashStream()
+  hasher.update(TEMPORAL_MARKER)
+  hasher.update(input[Symbol.toStringTag])
+  hasher.update(input.toString())
+  return hasher.digest()
+}
+
+function hashPlainObject(
+  input: object,
+  marker: number,
+  context: HashContext,
+  headerValues: ReadonlyArray<unknown> = [],
+): number {
   const hasher = new MurmurHashStream()
 
   // Mark the type of the input
   hasher.update(marker)
+  for (const value of headerValues) updateHasher(hasher, value, context)
   const keys = Object.keys(input)
   keys.sort(keySort)
   for (const key of keys) {
     hasher.update(KEY)
     hasher.update(key)
-    updateHasher(hasher, input[key as keyof typeof input])
+    updateHasher(hasher, input[key as keyof typeof input], context)
+  }
+  const symbolKeys = Object.getOwnPropertySymbols(input)
+    .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
+    .sort((left, right) => getSymbolIdentity(left) - getSymbolIdentity(right))
+  for (const key of symbolKeys) {
+    hasher.update(KEY)
+    hasher.update(key)
+    updateHasher(hasher, input[key as keyof typeof input], context)
   }
 
   return hasher.digest()
 }
 
-function updateHasher(hasher: Hasher, input: unknown): void {
+function updateHasher(
+  hasher: Hasher,
+  input: unknown,
+  context?: HashContext,
+): void {
+  if (context && ++context.work > MAX_STRUCTURAL_HASH_WORK) {
+    throw new RangeError(`Value is too complex to hash safely: structural work`)
+  }
   if (input === null) {
     hasher.update(NULL)
     return
@@ -141,7 +199,7 @@ function updateHasher(hasher: Hasher, input: unknown): void {
       hasher.update(input)
       return
     case `object`:
-      hasher.update(getCachedHash(input))
+      hasher.update(getCachedHash(input, context))
       return
     case `function`:
       // Functions are assigned a globally unique ID
@@ -155,12 +213,138 @@ function updateHasher(hasher: Hasher, input: unknown): void {
   }
 }
 
-function getCachedHash(input: object): number {
-  let valueHash = hashCache.get(input)
-  if (valueHash === undefined) {
-    valueHash = hashObject(input)
+function getCachedHash(input: object, context?: HashContext): number {
+  if (!context) {
+    const cached = hashCache.get(input)
+    if (cached !== undefined) return cached
+    if (isReferenceHashedObject(input)) return cachedReferenceHash(input)
+
+    // Only an uncached structural root needs graph traversal state. Commit its
+    // cache entries after success so a failed traversal cannot poison retries.
+    context = {
+      activeObjects: new Set(),
+      work: 0,
+      pendingHashes: new Map(),
+    }
+    const result = hashObject(input, context)
+    for (const [object, valueHash] of context.pendingHashes) {
+      hashCache.set(object, valueHash)
+    }
+    return result
   }
-  return valueHash
+
+  if (context.activeObjects.has(input)) {
+    throw new TypeError(`Cannot hash cyclic structural values`)
+  }
+
+  // Opaque leaves cannot contain structural back-references. Resolve them
+  // before entering structural recursion, even when they have user properties.
+  if (isReferenceHashedObject(input)) return cachedReferenceHash(input)
+
+  const valueHash = hashCache.get(input) ?? context.pendingHashes.get(input)
+  if (valueHash !== undefined) return valueHash
+
+  return hashObject(input, context)
+}
+
+function isReferenceHashedObject(input: object): boolean {
+  return (
+    (typeof File !== `undefined` && input instanceof File) ||
+    (isBinaryValue(input) &&
+      input.byteLength > UINT8ARRAY_CONTENT_HASH_THRESHOLD)
+  )
+}
+
+function isBinaryValue(input: object): input is Uint8Array {
+  return (
+    (typeof Buffer !== `undefined` && input instanceof Buffer) ||
+    input instanceof Uint8Array
+  )
+}
+
+function structuralShape(
+  input: object,
+): [keyof typeof STRUCTURAL_MARKERS, object] {
+  if (input instanceof Map) return [`map`, [...input.entries()]]
+  if (input instanceof Set) return [`set`, [...input.values()]]
+  return [input instanceof Array ? `array` : `object`, input]
+}
+
+/** @internal Compare immutable structural values without computing a digest.
+ * Pair memoization also permits cyclic values that structural hashing rejects.
+ * Reference-valued leaves remain opaque, including registered mutable handles.
+ */
+export function equalHashValues(left: unknown, right: unknown): boolean {
+  const compared = new Map<object, Set<object>>()
+  function equal(a: unknown, b: unknown): boolean {
+    if (a === b || (Number.isNaN(a) && Number.isNaN(b))) return true
+    if (
+      a === null ||
+      b === null ||
+      typeof a !== `object` ||
+      typeof b !== `object`
+    )
+      return false
+    if (
+      referenceValues.has(a) ||
+      referenceValues.has(b) ||
+      isReferenceHashedObject(a) ||
+      isReferenceHashedObject(b)
+    )
+      return false
+    if (a instanceof Date || b instanceof Date)
+      return (
+        a instanceof Date &&
+        b instanceof Date &&
+        equal(a.getTime(), b.getTime())
+      )
+    if (isBinaryValue(a) || isBinaryValue(b))
+      return (
+        isBinaryValue(a) &&
+        isBinaryValue(b) &&
+        a.byteLength === b.byteLength &&
+        a.every((value, index) => value === b[index])
+      )
+    if (isTemporal(a) || isTemporal(b))
+      return (
+        isTemporal(a) &&
+        isTemporal(b) &&
+        a[Symbol.toStringTag] === b[Symbol.toStringTag] &&
+        a.toString() === b.toString()
+      )
+    if (a instanceof RegExp || b instanceof RegExp) {
+      if (
+        !(a instanceof RegExp && b instanceof RegExp) ||
+        a.source !== b.source ||
+        a.flags !== b.flags ||
+        a.lastIndex !== b.lastIndex
+      )
+        return false
+    }
+    if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length)
+      return false
+
+    // Revisited pairs close cycles and avoid expanding shared subtrees.
+    const peers = compared.get(a)
+    if (peers?.has(b)) return true
+    if (peers) peers.add(b)
+    else compared.set(a, new Set([b]))
+    const [aKind, aShape] = structuralShape(a)
+    const [bKind, bShape] = structuralShape(b)
+    if (aKind !== bKind) return false
+    const keys = (value: object) =>
+      Reflect.ownKeys(value).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(value, key),
+      )
+    const aKeys = keys(aShape)
+    if (aKeys.length !== keys(bShape).length) return false
+    return aKeys.every(
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(bShape, key) &&
+        equal(aShape[key as keyof object], bShape[key as keyof object]),
+    )
+  }
+  return equal(left, right)
 }
 
 let nextRefId = 1
@@ -170,6 +354,7 @@ function cachedReferenceHash(fn: object): number {
     valueHash = nextRefId ^ FUNCTIONS
     nextRefId++
     hashCache.set(fn, valueHash)
+    referenceValues.add(fn)
   }
   return valueHash
 }

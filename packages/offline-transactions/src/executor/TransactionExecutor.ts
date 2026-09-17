@@ -4,7 +4,11 @@ import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
-import type { OfflineConfig, OfflineTransaction } from '../types'
+import type {
+  OfflineConfig,
+  OfflineTransaction,
+  TransactionSignaler,
+} from '../types'
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
@@ -15,19 +19,22 @@ export class TransactionExecutor {
   private retryPolicy: DefaultRetryPolicy
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
-  private offlineExecutor: any // Reference to OfflineExecutor for signaling
+  private offlineExecutor: TransactionSignaler
   private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     scheduler: KeyScheduler,
     outbox: OutboxManager,
     config: OfflineConfig,
-    offlineExecutor: any,
+    offlineExecutor: TransactionSignaler,
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
     this.config = config
-    this.retryPolicy = new DefaultRetryPolicy(10, config.jitter ?? true)
+    this.retryPolicy = new DefaultRetryPolicy(
+      Number.POSITIVE_INFINITY,
+      config.jitter ?? true,
+    )
     this.offlineExecutor = offlineExecutor
   }
 
@@ -53,19 +60,18 @@ export class TransactionExecutor {
   }
 
   private async runExecution(): Promise<void> {
-    const maxConcurrency = this.config.maxConcurrency ?? 3
-
     while (this.scheduler.getPendingCount() > 0) {
-      const batch = this.scheduler.getNextBatch(maxConcurrency)
-
-      if (batch.length === 0) {
+      if (!this.canExecute()) {
         break
       }
 
-      const executions = batch.map((transaction) =>
-        this.executeTransaction(transaction),
-      )
-      await Promise.allSettled(executions)
+      const transaction = this.scheduler.getNext()
+
+      if (!transaction) {
+        break
+      }
+
+      await this.executeTransaction(transaction)
     }
 
     // Schedule next retry after execution completes
@@ -94,8 +100,12 @@ export class TransactionExecutor {
           try {
             const result = await this.runMutationFn(transaction)
 
-            this.scheduler.markCompleted(transaction)
-            await this.outbox.remove(transaction.id)
+            try {
+              // Replay can still see this ID until durable deletion settles.
+              await this.outbox.remove(transaction.id)
+            } finally {
+              this.scheduler.markCompleted(transaction)
+            }
 
             span.setAttribute(`result`, `success`)
             this.offlineExecutor.resolveTransaction(transaction.id, result)
@@ -183,7 +193,10 @@ export class TransactionExecutor {
           return
         }
 
-        const delay = this.retryPolicy.calculateDelay(transaction.retryCount)
+        const delay = Math.max(
+          0,
+          this.retryPolicy.calculateDelay(transaction.retryCount),
+        )
         const updatedTransaction: OfflineTransaction = {
           ...transaction,
           retryCount: transaction.retryCount + 1,
@@ -217,33 +230,43 @@ export class TransactionExecutor {
   }
 
   async loadPendingTransactions(): Promise<void> {
-    const transactions = await this.outbox.getAll()
-    let filteredTransactions = transactions
+    let removedIds: Array<string> = []
+    await this.outbox.withAll((transactions) => {
+      const { isOfflineEnabled } = this.offlineExecutor
+      if (!isOfflineEnabled) return
+      let filteredTransactions = transactions
 
-    if (this.config.beforeRetry) {
-      filteredTransactions = this.config.beforeRetry(transactions)
-    }
+      if (this.config.beforeRetry) {
+        filteredTransactions = this.config.beforeRetry(transactions)
+      }
 
-    for (const transaction of filteredTransactions) {
-      this.scheduler.schedule(transaction)
-    }
+      // The outbox read or retry hook may outlive this owner's right to replay.
+      if (!this.offlineExecutor.isOfflineEnabled) return
 
-    // Restore optimistic state for loaded transactions
-    // This ensures the UI shows the optimistic data while transactions are pending
-    this.restoreOptimisticState(filteredTransactions)
+      const newlyLoaded = filteredTransactions.filter((transaction) =>
+        this.scheduler.schedule(transaction),
+      )
 
-    // Reset retry delays for all loaded transactions so they can run immediately
-    this.resetRetryDelays()
+      // Restore optimistic state for loaded transactions
+      // This ensures the UI shows the optimistic data while transactions are pending
+      this.restoreOptimisticState(newlyLoaded)
 
-    // Schedule retry timer for loaded transactions
-    this.scheduleNextRetry()
+      // Reset retry delays for all loaded transactions so they can run immediately
+      this.resetRetryDelays()
 
-    const removedTransactions = transactions.filter(
-      (tx) => !filteredTransactions.some((filtered) => filtered.id === tx.id),
-    )
+      // Schedule retry timer for loaded transactions
+      this.scheduleNextRetry()
 
-    if (removedTransactions.length > 0) {
-      await this.outbox.removeMany(removedTransactions.map((tx) => tx.id))
+      removedIds = transactions
+        .filter(
+          (tx) =>
+            !filteredTransactions.some((filtered) => filtered.id === tx.id),
+        )
+        .map(({ id }) => id)
+    })
+
+    if (removedIds.length > 0) {
+      await this.outbox.removeMany(removedIds)
     }
   }
 
@@ -317,6 +340,11 @@ export class TransactionExecutor {
     this.clearRetryTimer()
   }
 
+  pause(): void {
+    // Retain queued work and let the issued call finish its acknowledgment.
+    this.clearRetryTimer()
+  }
+
   getPendingCount(): number {
     return this.scheduler.getPendingCount()
   }
@@ -325,14 +353,17 @@ export class TransactionExecutor {
     // Clear existing timer
     this.clearRetryTimer()
 
-    // Find the earliest retry time among pending transactions
-    const earliestRetryTime = this.getEarliestRetryTime()
+    if (!this.canExecute()) {
+      return
+    }
 
-    if (earliestRetryTime === null) {
+    const nextRetryTime = this.getNextRetryTime()
+
+    if (nextRetryTime === null) {
       return // No transactions pending retry
     }
 
-    const delay = Math.max(0, earliestRetryTime - Date.now())
+    const delay = Math.max(0, nextRetryTime - Date.now())
 
     this.retryTimer = setTimeout(() => {
       this.executeAll().catch((error) => {
@@ -341,14 +372,15 @@ export class TransactionExecutor {
     }, delay)
   }
 
-  private getEarliestRetryTime(): number | null {
+  private getNextRetryTime(): number | null {
     const allTransactions = this.scheduler.getAllPendingTransactions()
 
     if (allTransactions.length === 0) {
       return null
     }
 
-    return Math.min(...allTransactions.map((tx) => tx.nextAttemptAt))
+    // Later transactions cannot overtake the FIFO head, even if they are ready.
+    return allTransactions[0]!.nextAttemptAt
   }
 
   private clearRetryTimer(): void {
@@ -356,6 +388,12 @@ export class TransactionExecutor {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+  }
+
+  private canExecute(): boolean {
+    return (
+      this.offlineExecutor.isOfflineEnabled && this.offlineExecutor.isOnline()
+    )
   }
 
   getRunningCount(): number {

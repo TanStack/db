@@ -14,6 +14,7 @@ import type {
   CollectionStatus,
   Context,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
 } from '@tanstack/db'
 
@@ -66,24 +67,36 @@ async function waitForAngularUpdate() {
 function createMockCollection<T extends object, K extends string | number>(
   initial: Array<T & Record<`id`, K>> = [],
   initialStatus: CollectionStatus = `ready`,
-): Collection<T, K, Record<string, never>> & {
-  __setStatus: (s: CollectionStatus) => void
-  __replaceAll: (rows: Array<T & Record<`id`, K>>) => void
-  __upsert: (row: T & Record<`id`, K>) => void
-  __delete: (key: K) => void
-} {
+): Collection<T, K, Record<string, never>> &
+  NonSingleResult & {
+    __setStatus: (s: CollectionStatus) => void
+    __replaceAll: (rows: Array<T & Record<`id`, K>>) => void
+    __upsert: (row: T & Record<`id`, K>) => void
+    __delete: (key: K) => void
+  } {
   const map = new Map<K, T>()
   for (const r of initial) {
     map.set(r.id, r)
   }
 
   let status: CollectionStatus = initialStatus
+  let stateRevision = 0
   const subs = new Set<(changes: Array<any>) => void>()
   const readySubs = new Set<() => void>()
+  const statusSubs = new Set<(event: any) => void>()
   const id = `mock-col-` + Math.random().toString(36).slice(2)
 
+  // Mirrors the real collection contract: committed changes advance the
+  // state revision before they are emitted.
   const notify = (changes: Array<any> = []) => {
+    if (changes.length > 0) stateRevision++
     for (const cb of subs) cb(changes)
+  }
+
+  const emitStatusChange = (previousStatus: CollectionStatus) => {
+    for (const cb of statusSubs) {
+      cb({ type: `status:change`, previousStatus, status })
+    }
   }
 
   const notifyReady = () => {
@@ -95,6 +108,13 @@ function createMockCollection<T extends object, K extends string | number>(
     get status() {
       return status
     },
+    get _stateRevision() {
+      return stateRevision
+    },
+    on: (event: string, cb: (e: any) => void) => {
+      if (event === `status:change`) statusSubs.add(cb)
+      return () => statusSubs.delete(cb)
+    },
     entries: () => Array.from(map.entries()),
     values: () => Array.from(map.values()),
     get: (key: K) => map.get(key),
@@ -102,6 +122,8 @@ function createMockCollection<T extends object, K extends string | number>(
     size: () => map.size,
     subscribeChanges: (cb: (changes: Array<any>) => void) => {
       subs.add(cb)
+      // Real collections start sync when the first subscriber attaches.
+      api.startSyncImmediate()
       return {
         unsubscribe: () => subs.delete(cb),
       }
@@ -116,26 +138,33 @@ function createMockCollection<T extends object, K extends string | number>(
     },
     preload: () => Promise.resolve(),
     startSyncImmediate: () => {
-      const wasNotReady = status !== `ready`
+      const previousStatus = status
       if (status === `idle`) {
         status = `ready`
-      }
-      if (wasNotReady && status === `ready`) {
+        emitStatusChange(previousStatus)
         setTimeout(notifyReady, 0)
       }
     },
     __setStatus: (s: CollectionStatus) => {
+      const previousStatus = status
       const wasNotReady = status !== `ready`
       status = s
-      notify([])
+      emitStatusChange(previousStatus)
       if (wasNotReady && status === `ready`) {
         setTimeout(notifyReady, 0)
       }
     },
     __replaceAll: (rows: Array<T & Record<`id`, K>>) => {
+      const changes: Array<any> = []
+      for (const [key, value] of map.entries()) {
+        changes.push({ type: `delete`, key, value })
+      }
       map.clear()
-      for (const r of rows) map.set(r.id, r)
-      notify([])
+      for (const r of rows) {
+        map.set(r.id, r)
+        changes.push({ type: `insert`, key: r.id, value: r })
+      }
+      notify(changes)
     },
     __upsert: (row: T & Record<`id`, K>) => {
       const isUpdate = map.has(row.id)
@@ -532,7 +561,7 @@ describe(`injectLiveQuery`, () => {
 
       await waitForAngularUpdate()
 
-      expect(res.collection().id).toEqual(expect.any(String))
+      expect(res.collection()!.id).toEqual(expect.any(String))
       expect(res.status()).toBe(`ready`)
       expect(Array.isArray(res.data())).toBe(true)
       expect(res.state() instanceof Map).toBe(true)
@@ -565,7 +594,7 @@ describe(`injectLiveQuery`, () => {
       const res = injectLiveQuery(config)
       await waitForAngularUpdate()
 
-      expect(res.collection().id).toEqual(expect.any(String))
+      expect(res.collection()!.id).toEqual(expect.any(String))
       expect(res.isReady()).toBe(true)
     })
   })
@@ -611,7 +640,7 @@ describe(`injectLiveQuery`, () => {
 
       await waitForAngularUpdate()
 
-      expect(res.collection().id).toEqual(expect.any(String))
+      expect(res.collection()!.id).toEqual(expect.any(String))
       expect(res.status()).toBe(`ready`)
       expect(Array.isArray(res.data())).toBe(true)
       expect(res.state() instanceof Map).toBe(true)
@@ -752,6 +781,40 @@ describe(`injectLiveQuery`, () => {
     })
   })
 
+  it(`should return a single object for findOne query`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { state, data } = injectLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => eq(c.id, `3`))
+          .findOne(),
+      )
+
+      await waitForAngularUpdate()
+
+      expect(state().size).toBe(1)
+      expect(state().get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      // findOne should return a single object, not an array
+      expect(Array.isArray(data())).toBe(false)
+      expect(data()).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+    })
+  })
+
   describe(`eager execution during sync`, () => {
     it(`should show state while isLoading is true during sync`, async () => {
       await TestBed.runInInjectionContext(async () => {
@@ -795,7 +858,7 @@ describe(`injectLiveQuery`, () => {
         })
 
         // Start the live query sync manually
-        liveQueryCollection().preload()
+        liveQueryCollection()!.preload()
 
         await waitForAngularUpdate()
 
@@ -907,7 +970,7 @@ describe(`injectLiveQuery`, () => {
         })
 
         // Start the live query sync manually
-        liveQueryCollection().preload()
+        liveQueryCollection()!.preload()
 
         await waitForAngularUpdate()
 
@@ -1007,7 +1070,7 @@ describe(`injectLiveQuery`, () => {
         })
 
         // Start the live query sync manually
-        liveQueryCollection().preload()
+        liveQueryCollection()!.preload()
 
         await waitForAngularUpdate()
 

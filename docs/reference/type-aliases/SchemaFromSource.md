@@ -1,0 +1,25 @@
+---
+id: SchemaFromSource
+title: SchemaFromSource
+---
+
+```ts
+type SchemaFromSource<T> = Prettify<{ [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends CollectionOptionsIdentity<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends QueryBuilder<infer TContext> ? GetRawResult<TContext> : never }>;
+```
+
+Defined in: [packages/db/src/query/builder/types.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L128)
+
+SchemaFromSource - Converts a Source definition into a ContextSchema
+
+This transforms the input to `from()` into the schema format used throughout
+the query builder. For each alias in the source:
+- Collections → their inferred TypeScript type
+- Subqueries → their result type (what they would return if executed)
+
+The `Prettify` wrapper ensures clean type display in IDEs.
+
+## Type Parameters
+
+### T
+
+`T` *extends* [`Source`](Source.md)

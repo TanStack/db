@@ -1,6 +1,13 @@
 import { compareKeys } from '@tanstack/db-ivm'
+import { compareKeysReversed } from '../utils/array-utils.js'
 import { BTree } from '../utils/btree.js'
-import { defaultComparator, normalizeValue } from '../utils/comparison.js'
+import {
+  areSameValueZeroEqual,
+  defaultComparator,
+  denormalizeUndefined,
+  makeComparator,
+  normalizeForBTree,
+} from '../utils/comparison.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -24,6 +31,12 @@ export interface RangeQueryOptions {
   toInclusive?: boolean
 }
 
+type OrderedBucket<TKey> = {
+  representative: unknown
+  exactValues: Set<unknown>
+  keys: Set<TKey>
+}
+
 /**
  * B+Tree index for sorted data with range queries
  * This maintains items in sorted order and provides efficient range operations
@@ -41,10 +54,13 @@ export class BTreeIndex<
   ])
 
   // Internal data structures - private to hide implementation details
-  // The `orderedEntries` B+ tree is used for efficient range queries
-  // The `valueMap` is used for O(1) lookups of PKs by indexed value
-  private orderedEntries: BTree<any, undefined> // we don't associate values with the keys of the B+ tree (the keys are indexed values)
-  private valueMap = new Map<any, Set<TKey>>() // instead we store a mapping of indexed values to a set of PKs
+  // The `orderedEntries` B+ tree groups values that occupy the same comparator
+  // position. The `valueMap` keeps exact values separate for equality lookups.
+  private orderedEntries: BTree<any, OrderedBucket<TKey>>
+  private valueMap = new Map<
+    unknown,
+    { keys: Set<TKey>; ordered: OrderedBucket<TKey> }
+  >()
   private indexedKeys = new Set<TKey>()
   private compareFn: (a: any, b: any) => number = defaultComparator
 
@@ -55,10 +71,22 @@ export class BTreeIndex<
     options?: any,
   ) {
     super(id, expression, name, options)
-    this.compareFn = options?.compareFn ?? defaultComparator
+
     if (options?.compareOptions) {
       this.compareOptions = options!.compareOptions
     }
+
+    // Get the base compare function
+    const baseCompareFn =
+      options?.compareFn ?? makeComparator(this.compareOptions)
+    this.hasCustomComparator = options?.compareFn != null
+
+    // Wrap it to denormalize sentinels before comparison
+    // This ensures UNDEFINED_SENTINEL is converted back to undefined
+    // before being passed to the baseCompareFn (which can be user-provided and is unaware of the UNDEFINED_SENTINEL)
+    this.compareFn = (a: any, b: any) =>
+      baseCompareFn(denormalizeUndefined(a), denormalizeUndefined(b))
+
     this.orderedEntries = new BTree(this.compareFn)
   }
 
@@ -78,21 +106,38 @@ export class BTreeIndex<
     }
 
     // Normalize the value for Map key usage
-    const normalizedValue = normalizeValue(indexedValue)
+    const normalizedValue = normalizeForBTree(indexedValue)
 
-    // Check if this value already exists
-    if (this.valueMap.has(normalizedValue)) {
-      // Add to existing set
-      this.valueMap.get(normalizedValue)!.add(key)
-    } else {
-      // Create new set for this value
-      const keySet = new Set<TKey>([key])
-      this.valueMap.set(normalizedValue, keySet)
-      this.orderedEntries.set(normalizedValue, undefined)
-    }
+    this.addToBucket(key, normalizedValue)
+    this.addRangeValue(indexedValue)
 
     this.indexedKeys.add(key)
-    this.updateTimestamp()
+  }
+
+  private addToBucket(key: TKey, normalizedValue: unknown): void {
+    const exact = this.valueMap.get(normalizedValue)
+    if (exact) {
+      exact.keys.add(key)
+      exact.ordered.keys.add(key)
+      return
+    }
+
+    let orderedBucket = this.orderedEntries.get(normalizedValue)
+    if (orderedBucket) {
+      orderedBucket.keys.add(key)
+      orderedBucket.exactValues.add(normalizedValue)
+    } else {
+      orderedBucket = {
+        representative: normalizedValue,
+        exactValues: new Set([normalizedValue]),
+        keys: new Set([key]),
+      }
+      this.orderedEntries.set(normalizedValue, orderedBucket)
+    }
+    this.valueMap.set(normalizedValue, {
+      keys: new Set([key]),
+      ordered: orderedBucket,
+    })
   }
 
   /**
@@ -111,31 +156,67 @@ export class BTreeIndex<
     }
 
     // Normalize the value for Map key usage
-    const normalizedValue = normalizeValue(indexedValue)
+    const normalizedValue = normalizeForBTree(indexedValue)
 
-    if (this.valueMap.has(normalizedValue)) {
-      const keySet = this.valueMap.get(normalizedValue)!
-      keySet.delete(key)
-
-      // If set is now empty, remove the entry entirely
-      if (keySet.size === 0) {
-        this.valueMap.delete(normalizedValue)
-
-        // Remove from ordered entries
-        this.orderedEntries.delete(normalizedValue)
-      }
-    }
+    this.removeFromBucket(key, normalizedValue)
+    this.removeRangeValue(indexedValue)
 
     this.indexedKeys.delete(key)
-    this.updateTimestamp()
+  }
+
+  private removeFromBucket(key: TKey, normalizedValue: unknown): void {
+    const exact = this.valueMap.get(normalizedValue)
+    if (!exact || !exact.keys.delete(key)) return
+    const removedExactValue = exact.keys.size === 0
+    if (removedExactValue) this.valueMap.delete(normalizedValue)
+    const orderedBucket = exact.ordered
+    orderedBucket.keys.delete(key)
+    if (removedExactValue) orderedBucket.exactValues.delete(normalizedValue)
+
+    if (orderedBucket.keys.size === 0) {
+      this.orderedEntries.delete(normalizedValue)
+    } else if (
+      removedExactValue &&
+      areSameValueZeroEqual(orderedBucket.representative, normalizedValue)
+    ) {
+      this.orderedEntries.delete(normalizedValue)
+      const representative = orderedBucket.exactValues.values().next().value
+      orderedBucket.representative = representative
+      this.orderedEntries.set(representative, orderedBucket)
+    }
   }
 
   /**
    * Updates a value in the index
    */
   update(key: TKey, oldItem: any, newItem: any): void {
-    this.remove(key, oldItem)
-    this.add(key, newItem)
+    let oldIndexedValue: unknown
+    let newIndexedValue: unknown
+    try {
+      oldIndexedValue = this.evaluateIndexExpression(oldItem)
+      newIndexedValue = this.evaluateIndexExpression(newItem)
+    } catch {
+      this.remove(key, oldItem)
+      this.add(key, newItem)
+      return
+    }
+
+    const oldValue = normalizeForBTree(oldIndexedValue)
+    const newValue = normalizeForBTree(newIndexedValue)
+    if (
+      areSameValueZeroEqual(oldValue, newValue) &&
+      this.valueMap.get(newValue)?.keys.has(key)
+    ) {
+      this.removeRangeValue(oldIndexedValue)
+      this.addRangeValue(newIndexedValue)
+      return
+    }
+
+    this.removeFromBucket(key, oldValue)
+    this.removeRangeValue(oldIndexedValue)
+    this.addToBucket(key, newValue)
+    this.addRangeValue(newIndexedValue)
+    this.indexedKeys.add(key)
   }
 
   /**
@@ -156,15 +237,13 @@ export class BTreeIndex<
     this.orderedEntries.clear()
     this.valueMap.clear()
     this.indexedKeys.clear()
-    this.updateTimestamp()
+    this.clearRangeValues()
   }
 
   /**
    * Performs a lookup operation
    */
   lookup(operation: IndexOperation, value: any): Set<TKey> {
-    const startTime = performance.now()
-
     let result: Set<TKey>
 
     switch (operation) {
@@ -189,8 +268,6 @@ export class BTreeIndex<
       default:
         throw new Error(`Operation ${operation} not supported by BTreeIndex`)
     }
-
-    this.trackLookup(startTime)
     return result
   }
 
@@ -207,8 +284,8 @@ export class BTreeIndex<
    * Performs an equality lookup
    */
   equalityLookup(value: any): Set<TKey> {
-    const normalizedValue = normalizeValue(value)
-    return new Set(this.valueMap.get(normalizedValue) ?? [])
+    const normalizedValue = normalizeForBTree(value)
+    return new Set(this.valueMap.get(normalizedValue)?.keys ?? [])
   }
 
   /**
@@ -219,26 +296,37 @@ export class BTreeIndex<
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
 
-    const normalizedFrom = normalizeValue(from)
-    const normalizedTo = normalizeValue(to)
-    const fromKey = normalizedFrom ?? this.orderedEntries.minKey()
-    const toKey = normalizedTo ?? this.orderedEntries.maxKey()
+    // Check if from/to were explicitly provided (even if undefined)
+    // vs not provided at all (should use min/max key)
+    const hasFrom = `from` in options
+    const hasTo = `to` in options
+
+    const fromKey = hasFrom
+      ? normalizeForBTree(from)
+      : this.orderedEntries.minKey()
+    const toKey = hasTo ? normalizeForBTree(to) : this.orderedEntries.maxKey()
 
     this.orderedEntries.forRange(
       fromKey,
       toKey,
       toInclusive,
-      (indexedValue, _) => {
-        if (!fromInclusive && this.compareFn(indexedValue, from) === 0) {
+      (indexedValue, bucket) => {
+        // Only exclude the boundary when an exclusive lower bound was
+        // actually provided. Without a `from` bound, `fromKey` defaults to
+        // the minimum key and must not be dropped. Compare against the
+        // normalized key since indexed values are stored normalized
+        // (e.g. dates as timestamps), so the raw `from` would never match.
+        if (
+          hasFrom &&
+          !fromInclusive &&
+          this.compareFn(indexedValue, fromKey) === 0
+        ) {
           // the B+ tree `forRange` method does not support exclusive lower bounds
           // so we need to exclude it manually
           return
         }
 
-        const keys = this.valueMap.get(indexedValue)
-        if (keys) {
-          keys.forEach((key) => result.add(key))
-        }
+        bucket.keys.forEach((key) => result.add(key))
       },
     )
 
@@ -246,44 +334,34 @@ export class BTreeIndex<
   }
 
   /**
-   * Performs a reversed range query
+   * Internal method for taking items from the index.
+   * @param n - The number of items to return
+   * @param nextPair - Function to get the next pair from the BTree
+   * @param from - Already normalized! undefined means "start from beginning/end", sentinel means "start from the key undefined"
+   * @param filterFn - Optional filter function
+   * @param reversed - Whether to reverse the order of keys within each value
    */
-  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
-    const { from, to, fromInclusive = true, toInclusive = true } = options
-    return this.rangeQuery({
-      from: to ?? this.orderedEntries.maxKey(),
-      to: from ?? this.orderedEntries.minKey(),
-      fromInclusive: toInclusive,
-      toInclusive: fromInclusive,
-    })
-  }
-
   private takeInternal(
     n: number,
-    nextPair: (k?: any) => [any, any] | undefined,
-    from?: any,
+    nextPair: (k?: any) => [any, OrderedBucket<TKey>] | undefined,
+    from: any,
     filterFn?: (key: TKey) => boolean,
     reversed: boolean = false,
   ): Array<TKey> {
-    const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
-    let pair: [any, any] | undefined
-    let key = normalizeValue(from)
+    let pair: [any, OrderedBucket<TKey>] | undefined
+    let key = from // Use as-is - it's already normalized by the caller
 
+    // Every key owns exactly one bucket, so the walk never repeats a key.
     while ((pair = nextPair(key)) !== undefined && result.length < n) {
       key = pair[0]
-      const keys = this.valueMap.get(key)
-      if (keys && keys.size > 0) {
-        // Sort keys for deterministic order, reverse if needed
-        const sorted = Array.from(keys).sort(compareKeys)
-        if (reversed) sorted.reverse()
-        for (const ks of sorted) {
-          if (result.length >= n) break
-          if (!keysInResult.has(ks) && (filterFn?.(ks) ?? true)) {
-            result.push(ks)
-            keysInResult.add(ks)
-          }
-        }
+      // Sort keys for deterministic order within a comparator position.
+      const sorted = Array.from(pair[1].keys).sort(
+        reversed ? compareKeysReversed : compareKeys,
+      )
+      for (const ks of sorted) {
+        if (result.length >= n) break
+        if (filterFn?.(ks) ?? true) result.push(ks)
       }
     }
 
@@ -291,29 +369,60 @@ export class BTreeIndex<
   }
 
   /**
-   * Returns the next n items after the provided item or the first n items if no from item is provided.
+   * Returns the next n items after the provided item.
    * @param n - The number of items to return
-   * @param from - The item to start from (exclusive). Starts from the smallest item (inclusive) if not provided.
-   * @returns The next n items after the provided key. Returns the first n items if no from item is provided.
+   * @param from - The item to start from (exclusive).
+   * @returns The next n items after the provided key.
    */
-  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+  take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
-    return this.takeInternal(n, nextPair, from, filterFn)
+    // Normalize the from value
+    const normalizedFrom = normalizeForBTree(from)
+    return this.takeInternal(n, nextPair, normalizedFrom, filterFn)
   }
 
   /**
-   * Returns the next n items **before** the provided item (in descending order) or the last n items if no from item is provided.
+   * Returns the first n items from the beginning.
    * @param n - The number of items to return
-   * @param from - The item to start from (exclusive). Starts from the largest item (inclusive) if not provided.
-   * @returns The next n items **before** the provided key. Returns the last n items if no from item is provided.
+   * @param filterFn - Optional filter function
+   * @returns The first n items
+   */
+  takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
+    // Pass undefined to mean "start from beginning" (BTree's native behavior)
+    return this.takeInternal(n, nextPair, undefined, filterFn)
+  }
+
+  /**
+   * Returns the next n items **before** the provided item (in descending order).
+   * @param n - The number of items to return
+   * @param from - The item to start from (exclusive). Required.
+   * @returns The next n items **before** the provided key.
    */
   takeReversed(
     n: number,
-    from?: any,
+    from: any,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
     const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
-    return this.takeInternal(n, nextPair, from, filterFn, true)
+    // Normalize the from value
+    const normalizedFrom = normalizeForBTree(from)
+    return this.takeInternal(n, nextPair, normalizedFrom, filterFn, true)
+  }
+
+  /**
+   * Returns the last n items from the end.
+   * @param n - The number of items to return
+   * @param filterFn - Optional filter function
+   * @returns The last n items
+   */
+  takeReversedFromEnd(
+    n: number,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey> {
+    const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
+    // Pass undefined to mean "start from end" (BTree's native behavior)
+    return this.takeInternal(n, nextPair, undefined, filterFn, true)
   }
 
   /**
@@ -323,35 +432,13 @@ export class BTreeIndex<
     const result = new Set<TKey>()
 
     for (const value of values) {
-      const normalizedValue = normalizeValue(value)
-      const keys = this.valueMap.get(normalizedValue)
+      const normalizedValue = normalizeForBTree(value)
+      const keys = this.valueMap.get(normalizedValue)?.keys
       if (keys) {
         keys.forEach((key) => result.add(key))
       }
     }
 
     return result
-  }
-
-  // Getter methods for testing compatibility
-  get indexedKeysSet(): Set<TKey> {
-    return this.indexedKeys
-  }
-
-  get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.orderedEntries
-      .keysArray()
-      .map((key) => [key, this.valueMap.get(key) ?? new Set()])
-  }
-
-  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    return this.takeReversed(this.orderedEntries.size).map((key) => [
-      key,
-      this.valueMap.get(key) ?? new Set(),
-    ])
-  }
-
-  get valueMapData(): Map<any, Set<TKey>> {
-    return this.valueMap
   }
 }

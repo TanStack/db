@@ -5,10 +5,11 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { BTreeIndex, createCollection } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 import { queryCollectionOptions } from '../src/query'
 import {
+  captureSeedData,
   createCollationTestSuite,
   createDeduplicationTestSuite,
   createJoinsTestSuite,
@@ -31,8 +32,12 @@ describe(`Query Collection E2E Tests`, () => {
   let queryClient: QueryClient
 
   beforeAll(async () => {
-    // Make seed data mutable so mutations can modify it
-    const seedData = generateSeedData()
+    const fixture = captureSeedData(generateSeedData(), {
+      registration: 'packages/query-db-collection/e2e/query.e2e.test.ts',
+      provider: 'QueryClient with finite in-memory backend',
+    })
+    // Backend writes never modify the independently retained initial authority.
+    const seedData = fixture()
 
     queryClient = new QueryClient({
       defaultOptions: {
@@ -51,10 +56,12 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: [`e2e`, `users`, `eager`],
         queryFn: () => {
           // Mock query function that returns seed data
-          return Promise.resolve(seedData.users)
+          return Promise.resolve(structuredClone(seedData.users))
         },
         getKey: (item: E2EUser) => item.id,
         startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -64,10 +71,12 @@ describe(`Query Collection E2E Tests`, () => {
         queryClient,
         queryKey: [`e2e`, `posts`, `eager`],
         queryFn: () => {
-          return Promise.resolve(seedData.posts)
+          return Promise.resolve(structuredClone(seedData.posts))
         },
         getKey: (item: E2EPost) => item.id,
         startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -77,10 +86,12 @@ describe(`Query Collection E2E Tests`, () => {
         queryClient,
         queryKey: [`e2e`, `comments`, `eager`],
         queryFn: () => {
-          return Promise.resolve(seedData.comments)
+          return Promise.resolve(structuredClone(seedData.comments))
         },
         getKey: (item: E2EComment) => item.id,
         startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -95,10 +106,12 @@ describe(`Query Collection E2E Tests`, () => {
         queryFn: (ctx) => {
           const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.users, options)
-          return Promise.resolve(filtered)
+          return Promise.resolve(structuredClone(filtered))
         },
         getKey: (item: E2EUser) => item.id,
         startSync: false,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -111,10 +124,12 @@ describe(`Query Collection E2E Tests`, () => {
         queryFn: (ctx) => {
           const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.posts, options)
-          return Promise.resolve(filtered)
+          return Promise.resolve(structuredClone(filtered))
         },
         getKey: (item: E2EPost) => item.id,
         startSync: false,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -127,10 +142,12 @@ describe(`Query Collection E2E Tests`, () => {
         queryFn: (ctx) => {
           const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.comments, options)
-          return Promise.resolve(filtered)
+          return Promise.resolve(structuredClone(filtered))
         },
         getKey: (item: E2EComment) => item.id,
         startSync: false,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
       }),
     )
 
@@ -145,6 +162,7 @@ describe(`Query Collection E2E Tests`, () => {
     await onDemandComments.preload()
 
     config = {
+      fixture,
       collections: {
         eager: {
           users: eagerUsers as any,
@@ -161,7 +179,7 @@ describe(`Query Collection E2E Tests`, () => {
       mutations: {
         insertUser: async (user) => {
           console.log(`[mutation] insertUser called, id=${user.id}`)
-          seedData.users.push(user)
+          seedData.users.push(structuredClone(user))
           console.log(`[mutation] calling invalidateQueries`)
           await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
           console.log(`[mutation] invalidateQueries completed`)
@@ -172,7 +190,7 @@ describe(`Query Collection E2E Tests`, () => {
           if (userIndex !== -1) {
             seedData.users[userIndex] = {
               ...seedData.users[userIndex]!,
-              ...updates,
+              ...structuredClone(updates),
             }
             console.log(`[mutation] calling invalidateQueries`)
             await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
@@ -190,8 +208,15 @@ describe(`Query Collection E2E Tests`, () => {
           }
         },
         insertPost: async (post) => {
-          seedData.posts.push(post)
+          seedData.posts.push(structuredClone(post))
           await queryClient.invalidateQueries({ queryKey: [`e2e`, `posts`] })
+        },
+        deletePost: async (id) => {
+          const postIndex = seedData.posts.findIndex((post) => post.id === id)
+          if (postIndex !== -1) {
+            seedData.posts.splice(postIndex, 1)
+            await queryClient.invalidateQueries({ queryKey: [`e2e`, `posts`] })
+          }
         },
       },
       setup: async () => {},

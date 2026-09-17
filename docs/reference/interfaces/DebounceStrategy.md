@@ -3,8 +3,6 @@ id: DebounceStrategy
 title: DebounceStrategy
 ---
 
-# Interface: DebounceStrategy
-
 Defined in: [packages/db/src/strategies/types.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L42)
 
 Debounce strategy that delays execution until activity stops

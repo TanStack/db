@@ -3,25 +3,23 @@ id: or
 title: or
 ---
 
-# Function: or()
-
 ## Call Signature
 
 ```ts
 function or(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:203](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L203)
+Defined in: [packages/db/src/query/builder/functions.ts:225](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L225)
 
 ### Parameters
 
 #### left
 
-`any`
+`ExpressionLike`
 
 #### right
 
-`any`
+`ExpressionLike`
 
 ### Returns
 
@@ -36,21 +34,21 @@ function or(
 rest): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L207)
+Defined in: [packages/db/src/query/builder/functions.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L229)
 
 ### Parameters
 
 #### left
 
-`any`
+`ExpressionLike`
 
 #### right
 
-`any`
+`ExpressionLike`
 
 #### rest
 
-...`any`[]
+...`ExpressionLike`[]
 
 ### Returns
 

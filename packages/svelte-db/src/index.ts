@@ -1,5 +1,8 @@
 // Re-export all public APIs
 export * from './useLiveQuery.svelte.js'
+export * from './useLiveInfiniteQuery.svelte.js'
+export { useDbClient, useOptionalDbClient } from './db-context.js'
+export { default as DbProvider } from './DbProvider.svelte'
 
 // Re-export everything from @tanstack/db
 export * from '@tanstack/db'

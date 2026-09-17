@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
+import { createCollection } from '../src/collection/index'
 import {
   createArrayChangeProxy,
   createChangeProxy,
@@ -7,7 +9,272 @@ import {
   withChangeTracking,
 } from '../src/proxy'
 
+const callbackMethods = [
+  `forEach`,
+  `some`,
+  `every`,
+  `map`,
+  `reduce`,
+  `reduceRight`,
+  `find`,
+  `filter`,
+] as const
+type CallbackMethod = (typeof callbackMethods)[number]
+type CallbackRow = { items: Array<{ id: number; value: number }>; peer: string }
+type CallbackStep = { method: CallbackMethod; target: number; delta: number }
+
+// The same authored operation runs on separate native and draft rows. Neither
+// the native interpreter nor its observations use production tracking helpers.
+function runArrayCallback(row: CallbackRow, step: CallbackStep) {
+  const visits: Array<number> = []
+  const target = step.target % row.items.length
+  const visit = (item: CallbackRow[`items`][number]) => {
+    visits.push(item.id)
+    if (item.id === target) item.value += step.delta
+    return item.id === target
+  }
+  let result: number | boolean | Array<number> | void
+  switch (step.method) {
+    case `forEach`:
+      result = row.items.forEach(visit)
+      break
+    case `some`:
+      result = row.items.some(visit)
+      break
+    case `every`:
+      result = row.items.every((item) => !visit(item))
+      break
+    case `map`:
+      result = row.items.map((item) => {
+        visit(item)
+        return item.value
+      })
+      break
+    case `reduce`:
+      result = row.items.reduce((sum, item) => {
+        visit(item)
+        return sum + item.value
+      }, 0)
+      break
+    case `reduceRight`:
+      result = row.items.reduceRight((sum, item) => {
+        visit(item)
+        return sum + item.value
+      }, 0)
+      break
+    case `find`:
+      result = row.items.find(visit)?.id
+      break
+    case `filter`:
+      result = row.items.filter(visit).map((item) => item.id)
+      break
+  }
+  return { visits, result }
+}
+
+function copyCallbackRow(row: CallbackRow): CallbackRow {
+  return { items: row.items.map((item) => ({ ...item })), peer: row.peer }
+}
+
+function observeArrayCallbacks(
+  values: Array<number>,
+  steps: Array<CallbackStep>,
+) {
+  const initial: CallbackRow = {
+    items: values.map((value, id) => ({ id, value })),
+    peer: `untouched`,
+  }
+  const original = copyCallbackRow(initial)
+  const native = copyCallbackRow(initial)
+  const { proxy, getChanges } = createChangeProxy(original)
+  return steps.map((step) => {
+    const expectedCall = runArrayCallback(native, step)
+    const actualCall = runArrayCallback(proxy, step)
+    const expectedRow = copyCallbackRow(native)
+    const changed = native.items.some(
+      (item, index) => item.value !== values[index],
+    )
+    const changes: Partial<CallbackRow> = getChanges()
+    return {
+      expectedCall,
+      actualCall,
+      expectedRow,
+      actualRow: copyCallbackRow({ ...original, ...changes }),
+      expectedChanges: changed ? { items: expectedRow.items } : {},
+      actualChanges: {
+        ...changes,
+        ...(changes.items !== undefined
+          ? { items: changes.items.map((item) => ({ ...item })) }
+          : {}),
+      },
+      initial,
+      original: copyCallbackRow(original),
+    }
+  })
+}
+
+function assertArrayCallbacks(cuts: ReturnType<typeof observeArrayCallbacks>) {
+  for (const cut of cuts) {
+    expect(cut.actualCall).toStrictEqual(cut.expectedCall)
+    expect(cut.actualRow).toStrictEqual(cut.expectedRow)
+    expect(cut.actualChanges).toStrictEqual(cut.expectedChanges)
+    expect(cut.original).toStrictEqual(cut.initial)
+  }
+}
+
+describe(`native array callback oracle`, () => {
+  it(`keeps the shared baseline independent of every captured actual cut`, () => {
+    const cuts = observeArrayCallbacks(
+      [1, 2],
+      [
+        { method: `forEach`, target: 0, delta: 3 },
+        { method: `forEach`, target: 0, delta: -3 },
+      ],
+    )
+    assertArrayCallbacks(cuts)
+    cuts[0]!.actualRow.items[0]!.value = 99
+    cuts[0]!.original.items[0]!.value = 98
+    expect(cuts[0]!.initial.items[0]!.value).toBe(1)
+    expect(cuts[0]!.expectedRow.items[0]!.value).toBe(4)
+    expect(cuts[1]!.actualRow.items[0]!.value).toBe(1)
+    expect(cuts[1]!.original.items[0]!.value).toBe(1)
+    expect(() => assertArrayCallbacks(cuts)).toThrow()
+  })
+  it.each([`element`, `array`, `accumulator`, `values`, `entries`] as const)(
+    `preserves native writes through the %s access path`,
+    async (path) => {
+      for (const delta of [0, 3, -2]) {
+        const make = () => ({ id: 1, items: [{ value: 1 }, { value: 2 }] })
+        const run = (row: ReturnType<typeof make>) => {
+          if (path === `accumulator`)
+            row.items.reduce((first) => {
+              first.value += delta
+              return first
+            })
+          else if (path === `values`)
+            row.items.values().next().value!.value += delta
+          else if (path === `entries`)
+            row.items.entries().next().value![1].value += delta
+          else
+            row.items.forEach((item, index, array) => {
+              expect(array).toBe(row.items)
+              if (index === 0)
+                (path === `element` ? item : array[index]!).value += delta
+            })
+        }
+        const expected = make()
+        run(expected)
+        const original = make()
+        const changes = withChangeTracking(original, run)
+        expect({ ...original, ...changes }).toStrictEqual(expected)
+        expect(original).toStrictEqual(make())
+        const collection = createCollection({
+          getKey: (row: ReturnType<typeof make>) => row.id,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              write({ type: `insert`, value: make() })
+              commit()
+              markReady()
+            },
+          },
+          onUpdate: () => Promise.resolve(),
+        })
+        try {
+          const tx = collection.update(1, run)
+          await tx.isPersisted.promise
+          const saved = collection.get(1)!
+          // This oracle covers row data, not collection-owned virtual fields.
+          expect({ id: saved.id, items: saved.items }).toStrictEqual(expected)
+        } finally {
+          await collection.cleanup()
+        }
+      }
+    },
+  )
+  it.each(callbackMethods)(
+    `matches native %s reads, writes and reverts`,
+    (method) => {
+      for (const target of [0, 1, 2]) {
+        for (const deltas of [
+          [0, 0],
+          [3, 5],
+          [3, -3],
+        ]) {
+          assertArrayCallbacks(
+            observeArrayCallbacks(
+              [4, -2, 7],
+              deltas.map((delta) => ({ method, target, delta })),
+            ),
+          )
+        }
+      }
+    },
+  )
+
+  const step = fc.record({
+    method: fc.constantFrom(...callbackMethods),
+    target: fc.integer({ min: 0, max: 5 }),
+    delta: fc.integer({ min: -5, max: 5 }),
+  })
+  fcTest.prop(
+    {
+      values: fc.array(fc.integer({ min: -10, max: 10 }), {
+        minLength: 1,
+        maxLength: 6,
+      }),
+      steps: fc.tuple(step, step),
+    },
+    { numRuns: 200 },
+  )(`matches native two-step callback histories`, ({ values, steps }) => {
+    assertArrayCallbacks(observeArrayCallbacks(values, steps))
+  })
+
+  it.each([`lost-write`, `extra-visit`, `wrong-peer`] as const)(
+    `rejects a captured %s independently of the native authority`,
+    (fault) => {
+      const cuts = observeArrayCallbacks(
+        [4, -2, 7],
+        [{ method: `forEach`, target: 1, delta: 3 }],
+      )
+      assertArrayCallbacks(cuts)
+      const cut = cuts[0]!
+      if (fault === `lost-write`) cut.actualRow.items[1]!.value = -2
+      if (fault === `extra-visit`) cut.actualCall.visits.push(1)
+      if (fault === `wrong-peer`) cut.actualRow.peer = `corrupted`
+      expect(() => assertArrayCallbacks(cuts)).toThrowError(/expected/)
+    },
+  )
+})
+
 describe(`Proxy Library`, () => {
+  it.each([null, `true`])(
+    `tracks reads, writes and reverts without consulting DEBUG=%s`,
+    (debug) => {
+      const getItem = vi.fn(() => debug)
+      const log = vi.spyOn(console, `log`).mockImplementation(() => {})
+      vi.stubGlobal(`localStorage`, { getItem })
+      try {
+        const original = { value: 1, nested: { value: 2 } }
+        const { proxy, getChanges } = createChangeProxy(original)
+        expect(proxy.value).toBe(1)
+        proxy.value = 3
+        proxy.nested.value = 4
+        expect(getChanges()).toEqual({ value: 3, nested: { value: 4 } })
+        proxy.value = 1
+        proxy.nested.value = 2
+        expect(getChanges()).toEqual({})
+        expect(original).toEqual({ value: 1, nested: { value: 2 } })
+        expect(getItem).not.toHaveBeenCalled()
+        expect(log).not.toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+        log.mockRestore()
+      }
+    },
+  )
+
   describe(`createChangeProxy`, () => {
     it(`should track changes to an object`, () => {
       const obj = { name: `John`, age: 30 }
@@ -111,7 +378,7 @@ describe(`Proxy Library`, () => {
 
       delete proxy.role
 
-      expect(getChanges()).toEqual({
+      expect(getChanges()).toStrictEqual({
         role: undefined,
       })
       expect(obj).toEqual({
@@ -709,6 +976,17 @@ describe(`Proxy Library`, () => {
           { id: 2, value: `two` },
         ]),
       )
+      expect(changes).toEqual({
+        mySet: new Set([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ]),
+      })
+      expect(changes.mySet.size).toBe(2)
+      expect([...set]).toEqual([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
     })
 
     it(`should track changes when Map values are modified via forEach`, () => {
@@ -777,6 +1055,17 @@ describe(`Proxy Library`, () => {
           { id: 2, value: `modified two` },
         ]),
       )
+      expect(changes).toEqual({
+        mySet: new Set([
+          { id: 1, value: `one` },
+          { id: 2, value: `modified two` },
+        ]),
+      })
+      expect(changes.mySet.size).toBe(2)
+      expect([...set]).toEqual([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
     })
 
     it(`should handle multiple modifications to the same object via different iterators`, () => {
@@ -862,6 +1151,16 @@ describe(`Proxy Library`, () => {
         ]),
       )
       expect(obj1.value).toBe(`one`) // Original unchanged
+      expect(changes).toEqual({
+        mySet: new Set([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ]),
+      })
+      expect([...set]).toEqual([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
     })
 
     it(`should handle reverting changes made via iterators`, () => {
@@ -1559,11 +1858,29 @@ describe(`Proxy Library`, () => {
 
       // Should still show other changes
       expect(Object.keys(getChanges()).length).toBeGreaterThan(0)
+      expect(getChanges()).toEqual({
+        user: {
+          profile: {
+            name: `John`,
+            settings: { theme: `light`, notifications: true },
+          },
+          stats: { visits: 15 },
+        },
+      })
 
       proxy.user.profile.settings.theme = `dark`
 
       // Should still show other changes
       expect(Object.keys(getChanges()).length).toBeGreaterThan(0)
+      expect(getChanges()).toEqual({
+        user: {
+          profile: {
+            name: `John`,
+            settings: { theme: `dark`, notifications: true },
+          },
+          stats: { visits: 15 },
+        },
+      })
 
       // Revert final change
       proxy.user.stats.visits = 10
@@ -1829,9 +2146,7 @@ describe(`Proxy Library`, () => {
         const { proxy, getChanges } = createChangeProxy(obj)
 
         // Use find() to get an array item and modify it
-        const order = proxy.job.orders.find(
-          (order) => order.orderId === `order-1`,
-        )
+        const order = proxy.job.orders.find((o) => o.orderId === `order-1`)
         if (order) {
           order.orderBinInt = 99
         }
@@ -1839,6 +2154,22 @@ describe(`Proxy Library`, () => {
         const changes = getChanges()
         expect(Object.keys(changes).length).toBeGreaterThan(0)
         expect(changes.job?.orders?.[0]?.orderBinInt).toBe(99)
+        expect(changes).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 99 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        })
+        expect(obj).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        })
       })
 
       it(`should track changes when modifying array items via forEach`, () => {
@@ -1850,12 +2181,28 @@ describe(`Proxy Library`, () => {
         }
         const { proxy, getChanges } = createChangeProxy(obj)
 
-        proxy.items.forEach((item) => {
+        const visits: Array<number> = []
+        const result = proxy.items.forEach((item) => {
+          visits.push(item.id)
           item.value = item.value * 2
         })
 
         const changes = getChanges()
         expect(Object.keys(changes).length).toBeGreaterThan(0)
+        expect(result).toBeUndefined()
+        expect(visits).toEqual([1, 2])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 20 },
+            { id: 2, value: 40 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
       })
 
       it(`should track changes when modifying array items via for...of`, () => {
@@ -1873,6 +2220,18 @@ describe(`Proxy Library`, () => {
 
         const changes = getChanges()
         expect(Object.keys(changes).length).toBeGreaterThan(0)
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 20 },
+            { id: 2, value: 40 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
       })
 
       it(`should track changes when modifying array items via index access`, () => {
@@ -1892,6 +2251,18 @@ describe(`Proxy Library`, () => {
 
         const changes = getChanges()
         expect(Object.keys(changes).length).toBeGreaterThan(0)
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 100 },
+            { id: 2, value: 20 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
       })
 
       it(`should track changes when modifying items from filter() result`, () => {
@@ -1911,6 +2282,19 @@ describe(`Proxy Library`, () => {
 
         const changes = getChanges()
         expect(changes.items?.[0]?.value).toBe(42)
+        expect(filtered.map((item) => item.id)).toEqual([1])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 42 },
+            { id: 2, value: 20 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
       })
 
       it(`should track changes when modifying array items retrieved via findLast()`, () => {
@@ -1936,6 +2320,22 @@ describe(`Proxy Library`, () => {
 
         const changes = getChanges()
         expect(changes.job?.orders?.[1]?.orderBinInt).toBe(123)
+        expect(changes).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 123 },
+            ],
+          },
+        })
+        expect(obj).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        })
       })
 
       it(`should track changes when modifying array items inside some() callback`, () => {
@@ -1947,7 +2347,9 @@ describe(`Proxy Library`, () => {
         }
         const { proxy, getChanges } = createChangeProxy(obj)
 
-        proxy.items.some((item) => {
+        const visits: Array<number> = []
+        const result = proxy.items.some((item) => {
+          visits.push(item.id)
           item.value = item.value * 2
           return false
         })
@@ -1955,6 +2357,20 @@ describe(`Proxy Library`, () => {
         const changes = getChanges()
         expect(changes.items?.[0]?.value).toBe(20)
         expect(changes.items?.[1]?.value).toBe(40)
+        expect(result).toBe(false)
+        expect(visits).toEqual([1, 2])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 20 },
+            { id: 2, value: 40 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
       })
 
       it(`should track changes when modifying array items inside reduce() callback`, () => {
@@ -1966,7 +2382,9 @@ describe(`Proxy Library`, () => {
         }
         const { proxy, getChanges } = createChangeProxy(obj)
 
-        proxy.items.reduce((acc, item) => {
+        const visits: Array<number> = []
+        const result = proxy.items.reduce((acc, item) => {
+          visits.push(item.id)
           item.value = item.value + 1
           return acc + item.value
         }, 0)
@@ -1974,6 +2392,20 @@ describe(`Proxy Library`, () => {
         const changes = getChanges()
         expect(changes.items?.[0]?.value).toBe(11)
         expect(changes.items?.[1]?.value).toBe(21)
+        expect(result).toBe(32)
+        expect(visits).toEqual([1, 2])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 11 },
+            { id: 2, value: 21 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
       })
     })
   })

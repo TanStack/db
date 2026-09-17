@@ -14,9 +14,36 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
-import { expectIndexUsage, withIndexTracking } from './utils'
+import { BasicIndex } from '../src/indexes/basic-index.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
+import { findIndexForField } from '../src/utils/index-optimization.js'
+import { makeComparator } from '../src/utils/comparison.js'
+import {
+  expectIndexUsage,
+  indexedKeysSet,
+  orderedEntriesArray,
+  orderedEntriesArrayReversed,
+  stripVirtualProps,
+  valueMapData,
+  withIndexTracking,
+} from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
+
+const normalizeChange = (change: any) => ({
+  ...change,
+  value: stripVirtualProps(change.value),
+  previousValue: stripVirtualProps(change.previousValue),
+})
+
+const stripVirtualOnlyUpdates = (changes: Array<any>) =>
+  changes.map(normalizeChange).filter((change) => {
+    if (change.type !== `update`) {
+      return true
+    }
+    return JSON.stringify(change.value) !== JSON.stringify(change.previousValue)
+  })
 
 interface TestItem {
   id: string
@@ -87,6 +114,8 @@ describe(`Collection Indexes`, () => {
     collection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           // Provide initial data through sync
@@ -132,7 +161,7 @@ describe(`Collection Indexes`, () => {
       expect(index.id).toBeGreaterThan(0)
       expect(index.name).toBeUndefined()
       expect(index.expression.type).toBe(`ref`)
-      expect(index.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(index).size).toBe(5)
     })
 
     it(`should create a named index`, () => {
@@ -141,7 +170,75 @@ describe(`Collection Indexes`, () => {
       })
 
       expect(index.name).toBe(`ageIndex`)
-      expect(index.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(index).size).toBe(5)
+    })
+
+    it(`should match compare options by collation semantics`, () => {
+      const index = collection.createIndex((row) => row.status)
+
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          locale: undefined,
+          localeOptions: undefined,
+        }),
+      ).toBe(true)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          localeOptions: { sensitivity: undefined },
+        }),
+      ).toBe(true)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          direction: `desc`,
+        }),
+      ).toBe(true)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          locale: `de-DE`,
+        }),
+      ).toBe(false)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          localeOptions: { sensitivity: `base` },
+        }),
+      ).toBe(false)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          nulls: `last`,
+        }),
+      ).toBe(false)
+      expect(
+        index.matchesCompareOptions({
+          ...DEFAULT_COMPARE_OPTIONS,
+          stringSort: `lexical`,
+        }),
+      ).toBe(false)
+    })
+
+    it(`should reuse an index for equivalent locale identifiers`, () => {
+      const indexCompareOptions = {
+        ...DEFAULT_COMPARE_OPTIONS,
+        locale: `en-us`,
+      }
+      const index = collection.createIndex((row) => row.name, {
+        options: {
+          compareOptions: indexCompareOptions,
+          compareFn: makeComparator(indexCompareOptions),
+        },
+      })
+
+      expect(
+        findIndexForField(collection, [`name`], {
+          ...DEFAULT_COMPARE_OPTIONS,
+          locale: `en-US`,
+        }),
+      ).toBe(index)
     })
 
     it(`should create multiple indexes`, () => {
@@ -149,15 +246,15 @@ describe(`Collection Indexes`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       expect(statusIndex.id).not.toBe(ageIndex.id)
-      expect(statusIndex.indexedKeysSet.size).toBe(5)
-      expect(ageIndex.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(statusIndex).size).toBe(5)
+      expect(indexedKeysSet(ageIndex).size).toBe(5)
     })
 
     it(`should maintain ordered entries`, () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Ages should be ordered: 22, 25, 28, 30, 35
-      const orderedAges = ageIndex.orderedEntriesArray.map(([age]) => age)
+      const orderedAges = orderedEntriesArray(ageIndex).map(([age]) => age)
       expect(orderedAges).toEqual([22, 25, 28, 30, 35])
     })
 
@@ -165,10 +262,10 @@ describe(`Collection Indexes`, () => {
       const statusIndex = collection.createIndex((row) => row.status)
 
       // Should have 3 unique status values
-      expect(statusIndex.orderedEntriesArray.length).toBe(3)
+      expect(orderedEntriesArray(statusIndex).length).toBe(3)
 
       // "active" status should have 3 items
-      const activeKeys = statusIndex.valueMapData.get(`active`)
+      const activeKeys = valueMapData(statusIndex).get(`active`)
       expect(activeKeys?.size).toBe(3)
     })
 
@@ -176,11 +273,132 @@ describe(`Collection Indexes`, () => {
       const scoreIndex = collection.createIndex((row) => row.score)
 
       // Should include the item with undefined score
-      expect(scoreIndex.indexedKeysSet.size).toBe(5)
+      expect(indexedKeysSet(scoreIndex).size).toBe(5)
 
       // undefined should be first in ordered entries
-      const firstValue = scoreIndex.orderedEntriesArray[0]?.[0]
+      const firstValue = orderedEntriesArray(scoreIndex)[0]?.[0]
       expect(firstValue).toBeUndefined()
+    })
+  })
+
+  describe(`Index Removal`, () => {
+    it(`should remove indexes by proxy and by id`, () => {
+      const ageIndex = collection.createIndex((row) => row.age)
+      const statusIndex = collection.createIndex((row) => row.status)
+
+      expect(collection.removeIndex(ageIndex)).toBe(true)
+      expect(collection.removeIndex(statusIndex.id)).toBe(true)
+      expect(collection.removeIndex(ageIndex.id)).toBe(false)
+    })
+
+    it(`should ignore removeIndex calls from other collections`, async () => {
+      const otherCollection = createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        startSync: true,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: testData[0]!,
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await otherCollection.stateWhenReady()
+
+      const otherIndex = otherCollection.createIndex((row) => row.status)
+
+      collection.createIndex((row) => row.status)
+      expect(collection.removeIndex(otherIndex)).toBe(false)
+      expect(collection.indexes.size).toBe(1)
+    })
+
+    it(`should emit one auto-index lifecycle event per auto-created index`, () => {
+      const addedEvents: Array<string | undefined> = []
+      collection.on(`index:added`, (event) => {
+        addedEvents.push(event.index.name)
+      })
+
+      const activeItems: Array<any> = []
+      const subscription = collection.subscribeChanges(
+        (items) => {
+          activeItems.push(...items)
+        },
+        {
+          includeInitialState: true,
+          whereExpression: eq(new PropRef([`status`]), `active`),
+        },
+      )
+      subscription.unsubscribe()
+
+      expect(activeItems).toHaveLength(3)
+      expect(addedEvents.filter((name) => name === `auto:status`)).toHaveLength(
+        1,
+      )
+    })
+
+    it(`should expose index metadata snapshot for pre-sync bootstrap`, () => {
+      const lazyCollection = createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const item of testData) {
+              write({
+                type: `insert`,
+                value: item,
+              })
+            }
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      const preSyncIndex = lazyCollection.createIndex((row) => row.status, {
+        name: `statusIndex`,
+        indexType: BTreeIndex,
+      })
+      const snapshot = lazyCollection.getIndexMetadata()
+
+      expect(snapshot).toHaveLength(1)
+      expect(snapshot[0]).toMatchObject({
+        indexId: preSyncIndex.id,
+        name: `statusIndex`,
+        signatureVersion: 1,
+      })
+    })
+
+    it(`should return a defensive metadata snapshot copy`, () => {
+      collection.createIndex((row) => row.status, {
+        name: `statusIndex`,
+      })
+
+      const snapshotA = collection.getIndexMetadata()
+      expect(snapshotA).toHaveLength(1)
+
+      const originalSignature = snapshotA[0]!.signature
+      snapshotA[0]!.signature = `tampered`
+      snapshotA[0]!.resolver.kind = `async`
+
+      const snapshotB = collection.getIndexMetadata()
+      expect(snapshotB[0]!.signature).toBe(originalSignature)
+      expect(snapshotB[0]!.resolver.kind).toBe(`constructor`)
+    })
+
+    it(`should remove index from collection`, () => {
+      const statusIndex = collection.createIndex((row) => row.status)
+
+      expect(collection.removeIndex(statusIndex)).toBe(true)
+      expect(collection.indexes.has(statusIndex.id)).toBe(false)
+    })
+
+    it(`should return false when removing non-existent index`, () => {
+      expect(collection.removeIndex(999)).toBe(false)
     })
   })
 
@@ -212,12 +430,13 @@ describe(`Collection Indexes`, () => {
 
       // Item should be in collection state
       expect(collection.size).toBe(6)
-      expect(collection.get(`6`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`6`))).toEqual(newItem)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`insert`)
-      expect(changes[0]?.value.name).toBe(`Frank`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`insert`)
+      expect(dataChanges[0]?.value.name).toBe(`Frank`)
 
       subscription.unsubscribe()
     })
@@ -251,10 +470,11 @@ describe(`Collection Indexes`, () => {
       expect(updatedItem?.status).toBe(`inactive`)
       expect(updatedItem?.age).toBe(26)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`update`)
-      expect(changes[0]?.value.status).toBe(`inactive`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`update`)
+      expect(dataChanges[0]?.value.status).toBe(`inactive`)
 
       subscription.unsubscribe()
     })
@@ -280,10 +500,11 @@ describe(`Collection Indexes`, () => {
       expect(updatedItem?.status).toBe(`inactive`)
       expect(updatedItem?.age).toBe(26)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`insert`)
-      expect(changes[0]?.value.status).toBe(`inactive`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`insert`)
+      expect(dataChanges[0]?.value.status).toBe(`inactive`)
 
       subscription.unsubscribe()
     })
@@ -371,8 +592,9 @@ describe(`Collection Indexes`, () => {
       )
       await tx1.isPersisted.promise
 
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.value.name).toBe(`Bob`)
+      const dataChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.value.name).toBe(`Bob`)
 
       // Change active item to inactive (should trigger delete event for item leaving filter)
       activeChanges.length = 0
@@ -385,10 +607,11 @@ describe(`Collection Indexes`, () => {
       await tx2.isPersisted.promise
 
       // Should trigger delete event for item that no longer matches filter
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.type).toBe(`delete`)
-      expect(activeChanges[0]?.key).toBe(`1`)
-      expect(activeChanges[0]?.value.status).toBe(`active`) // Should be the previous value
+      const filteredChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(filteredChanges).toHaveLength(1)
+      expect(filteredChanges[0]?.type).toBe(`delete`)
+      expect(filteredChanges[0]?.key).toBe(`1`)
+      expect(filteredChanges[0]?.value.status).toBe(`active`) // Should be the previous value
 
       subscription.unsubscribe()
     })
@@ -414,8 +637,9 @@ describe(`Collection Indexes`, () => {
       )
       await tx1.isPersisted.promise
 
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.value.name).toBe(`Bob`)
+      const dataChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.value.name).toBe(`Bob`)
 
       // Change active item to inactive (should trigger delete event for item leaving filter)
       activeChanges.length = 0
@@ -430,7 +654,8 @@ describe(`Collection Indexes`, () => {
       // Subscriber shoiuld not receive any changes
       // because it is not aware of that key
       // so it should also not receive the delete of that key
-      expect(activeChanges).toHaveLength(0)
+      const filteredChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(filteredChanges).toHaveLength(0)
 
       subscription.unsubscribe()
     })
@@ -478,6 +703,19 @@ describe(`Collection Indexes`, () => {
           fullScanCallCount: 0,
         })
       })
+    })
+
+    it(`should exclude the boundary value from greater than queries on dates`, () => {
+      // gt must be strict for date fields: Bob was created exactly on
+      // 2023-01-02, so only rows created strictly later may be returned.
+      collection.createIndex((row) => row.createdAt)
+
+      const result = collection.currentStateAsChanges({
+        where: gt(new PropRef([`createdAt`]), new Date(`2023-01-02`)),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Charlie`, `Diana`, `Eve`])
     })
 
     it(`should perform greater than or equal queries`, () => {
@@ -1034,6 +1272,675 @@ describe(`Collection Indexes`, () => {
         })
       })
     })
+
+    it(`should include rows matched by any OR condition when conditions mix indexed and non-indexed expressions`, () => {
+      // An OR query must return the union of rows matching each condition:
+      //   eq(age, 25)           matches Alice (age 25)
+      //   gt(length(name), 6)   matches Charlie (name length 7)
+      // `age` has an index while `length(name)` is a computed expression
+      // without one, but the chosen execution strategy must not change the
+      // result: both Alice and Charlie satisfy the OR and must be returned.
+      const result = collection.currentStateAsChanges({
+        where: or(
+          eq(new PropRef([`age`]), 25),
+          gt(length(new PropRef([`name`])), 6),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Alice`, `Charlie`])
+    })
+
+    it(`should only return rows matching every AND condition when conditions mix indexed and non-indexed expressions`, () => {
+      // An AND query must return only the rows matching all conditions:
+      //   eq(status, 'active')  matches Alice, Charlie and Eve
+      //   gt(length(name), 6)   matches only Charlie (name length 7)
+      // `status` has an index while `length(name)` is a computed expression
+      // without one, but every condition must still be enforced: only
+      // Charlie satisfies both.
+      const result = collection.currentStateAsChanges({
+        where: and(
+          eq(new PropRef([`status`]), `active`),
+          gt(length(new PropRef([`name`])), 6),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Charlie`])
+    })
+
+    it(`should apply the strictest lower bound when range conditions share the same value`, () => {
+      // gte(age, 25) AND gt(age, 25) reduces to age > 25: the strict
+      // comparison wins at the shared boundary, so Alice (age 25) must be
+      // excluded regardless of the order the conditions appear in.
+      const result = collection.currentStateAsChanges({
+        where: and(gte(new PropRef([`age`]), 25), gt(new PropRef([`age`]), 25)),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`, `Charlie`, `Diana`])
+    })
+
+    it(`should apply the strictest upper bound when range conditions share the same value`, () => {
+      // lte(age, 30) AND lt(age, 30) reduces to age < 30: the strict
+      // comparison wins at the shared boundary, so Bob (age 30) must be
+      // excluded.
+      const result = collection.currentStateAsChanges({
+        where: and(lte(new PropRef([`age`]), 30), lt(new PropRef([`age`]), 30)),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Alice`, `Diana`, `Eve`])
+    })
+
+    it(`should apply the strictest bound for date ranges sharing the same value`, () => {
+      // Distinct Date instances representing the same point in time must be
+      // treated as equal values: gte(createdAt, jan2) AND gt(createdAt, jan2)
+      // reduces to createdAt > jan2, so Bob (created 2023-01-02) must be
+      // excluded.
+      collection.createIndex((row) => row.createdAt)
+
+      const result = collection.currentStateAsChanges({
+        where: and(
+          gte(new PropRef([`createdAt`]), new Date(`2023-01-02`)),
+          gt(new PropRef([`createdAt`]), new Date(`2023-01-02`)),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Charlie`, `Diana`, `Eve`])
+    })
+
+    it(`should enforce every AND condition when a range on one field is combined with conditions on other fields`, () => {
+      // An AND query that contains a compound range on one field plus a
+      // condition on another field must enforce all of them:
+      //   gt(age, 24) AND lt(age, 36)  matches Alice (25), Bob (30),
+      //                                Charlie (35) and Diana (28)
+      //   eq(status, 'active')         matches Alice, Charlie and Eve
+      // Only Alice and Charlie satisfy the full conjunction.
+      const result = collection.currentStateAsChanges({
+        where: and(
+          gt(new PropRef([`age`]), 24),
+          lt(new PropRef([`age`]), 36),
+          eq(new PropRef([`status`]), `active`),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Alice`, `Charlie`])
+    })
+
+    it(`should match a full scan when a range condition uses an undefined bound`, () => {
+      // A comparison against `undefined` matches no rows (a comparison with
+      // null/undefined is never true), so `gt(score, undefined)` excludes
+      // every row and the whole AND must return nothing. The index-optimized
+      // path must agree with a plain full scan and not leak rows.
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: and(
+          gt(new PropRef([`score`]), undefined),
+          lt(new PropRef([`score`]), 90),
+        ),
+      })!
+
+      expect(result).toEqual([])
+    })
+
+    it(`should not match rows with a missing value for an equality on undefined`, () => {
+      // An equality comparison against `undefined` is never true, so
+      // `eq(score, undefined)` must return no rows even though Eve has an
+      // undefined score. The index-optimized path must agree with a full
+      // predicate scan.
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: eq(new PropRef([`score`]), undefined),
+      })!
+
+      expect(result).toEqual([])
+    })
+
+    it(`should ignore an undefined member when matching an IN list`, () => {
+      // A row only matches `IN` when its value equals one of the listed
+      // values; a comparison with `undefined` is never true. So
+      // `inArray(score, [undefined, 80])` must match only Bob (score 80)
+      // and must not match Eve (undefined score).
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: inArray(new PropRef([`score`]), [undefined, 80]),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`])
+    })
+
+    it(`should not match rows with a missing value for a range comparison`, () => {
+      // A range comparison against a row with an undefined value is never
+      // true, so `lt(score, 85)` must match only Bob (score 80) and must
+      // not match Eve (undefined score).
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: lt(new PropRef([`score`]), 85),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`])
+    })
+
+    it(`should not match rows with a missing value for an upper-bounded compound range`, () => {
+      // A compound range with only upper bounds (e.g. score <= 90) must not
+      // match a row with an undefined value, since a comparison against
+      // undefined is never true. Only Bob (80), Charlie (90) and Diana (85)
+      // satisfy `score <= 90`; Eve (undefined) must be excluded.
+      collection.createIndex((row) => row.score)
+
+      const result = collection.currentStateAsChanges({
+        where: and(
+          lte(new PropRef([`score`]), 90),
+          lte(new PropRef([`score`]), 95),
+        ),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`Bob`, `Charlie`, `Diana`])
+    })
+
+    it(`should match a string range predicate using the same ordering as a full scan`, async () => {
+      // String comparisons in the WHERE evaluator use JS relational operators
+      // (code-point order), where `'ö' > 'z'` is true. A row named `ö` must
+      // therefore be returned by `name > 'z'`, even though a locale-collated
+      // index orders `ö` before `z`. The index-optimized result must agree
+      // with a full predicate scan.
+      const stringCollection = createCollection<
+        { id: string; name: string },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, name: `apple` } })
+            write({ type: `insert`, value: { id: `2`, name: `ö` } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await stringCollection.stateWhenReady()
+      stringCollection.createIndex((row) => row.name)
+
+      const result = stringCollection.currentStateAsChanges({
+        where: gt(new PropRef([`name`]), `z`),
+      })!
+
+      const names = result.map((r) => r.value.name).sort()
+      expect(names).toEqual([`ö`])
+    })
+
+    it(`should match a row with a NaN value for an equality on NaN`, async () => {
+      // Under PostgreSQL float semantics NaN is equal to itself, so
+      // `eq(score, NaN)` matches the NaN-valued row (and the index, which
+      // stores and returns it, agrees with a full scan).
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, score: 5 } })
+            write({ type: `insert`, value: { id: `2`, score: NaN } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: eq(new PropRef([`score`]), NaN),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`2`])
+    })
+
+    it(`should match a row with a NaN value for an IN list containing NaN`, async () => {
+      // A row matches `IN` when its value equals a listed value. Under
+      // PostgreSQL float semantics NaN is equal to itself, so
+      // `inArray(score, [NaN, 5])` matches both the score-5 row and the
+      // NaN-valued row.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, score: 5 } })
+            write({ type: `insert`, value: { id: `2`, score: NaN } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: inArray(new PropRef([`score`]), [NaN, 5]),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`1`, `2`])
+    })
+
+    it(`should return array-valued rows for a range predicate consistently with a full scan`, async () => {
+      // Range predicates are evaluated with standard relational comparison,
+      // under which `[2] > [10]` is true (arrays compare as their string
+      // form). An index on an array-valued field must return the same rows as
+      // a full scan and must not drop this match.
+      const arrayCollection = createCollection<
+        { id: string; value: Array<number> },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `1`, value: [2] } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await arrayCollection.stateWhenReady()
+      arrayCollection.createIndex((row) => row.value)
+
+      const result = arrayCollection.currentStateAsChanges({
+        where: gt(new PropRef([`value`]), [10]),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`1`])
+    })
+
+    it(`should match symbol range predicates consistently with a full scan`, async () => {
+      const boundary = Symbol(`boundary`)
+      const symbolCollection = createCollection<
+        { id: string; group: symbol },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `1`, group: Symbol(`first`) },
+            })
+            write({
+              type: `insert`,
+              value: { id: `2`, group: Symbol(`second`) },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await symbolCollection.stateWhenReady()
+
+      const where = gt(new PropRef([`group`]), boundary)
+      const scanned = symbolCollection.currentStateAsChanges({ where })!
+
+      symbolCollection.createIndex((row) => row.group)
+      withIndexTracking(symbolCollection, (tracker) => {
+        const indexed = symbolCollection.currentStateAsChanges({ where })!
+
+        expect(indexed.map((change) => change.key).sort()).toEqual(
+          scanned.map((change) => change.key).sort(),
+        )
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: false,
+          shouldUseFullScan: true,
+        })
+      })
+    })
+
+    it.each(
+      [BasicIndex, BTreeIndex].flatMap((IndexType) => [
+        {
+          name: `a symbol row under a numeric lower bound`,
+          IndexType,
+          rows: [
+            { id: `number`, value: 1 as unknown },
+            { id: `other`, value: Symbol(`other`) as unknown },
+          ],
+          where: gt(new PropRef([`value`]), 0),
+        },
+        {
+          name: `an array row under a numeric upper bound`,
+          IndexType,
+          rows: [
+            { id: `number`, value: 50 as unknown },
+            { id: `other`, value: [20] as unknown },
+          ],
+          where: lt(new PropRef([`value`]), 100),
+        },
+      ]),
+    )(
+      `should scan mixed domains for $name with $IndexType.name`,
+      async ({ rows, where, IndexType }) => {
+        const mixedCollection = createCollection<
+          { id: string; value: unknown },
+          string
+        >({
+          getKey: (row) => row.id,
+          startSync: true,
+          autoIndex: `off`,
+          defaultIndexType: IndexType,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              for (const value of rows) write({ type: `insert`, value })
+              commit()
+              markReady()
+            },
+          },
+        })
+        await mixedCollection.stateWhenReady()
+
+        const scanned = mixedCollection.currentStateAsChanges({ where })!
+        mixedCollection.createIndex((row) => row.value)
+
+        withIndexTracking(mixedCollection, (tracker) => {
+          const indexed = mixedCollection.currentStateAsChanges({ where })!
+          expect(indexed.map((change) => change.key).sort()).toEqual(
+            scanned.map((change) => change.key).sort(),
+          )
+          expectIndexUsage(tracker.stats, {
+            shouldUseIndex: false,
+            shouldUseFullScan: true,
+          })
+        })
+      },
+    )
+
+    it(`should retain every row whose index values share one comparator position`, async () => {
+      const shared = Symbol(`shared`)
+      const groupedCollection = createCollection<
+        { id: string; value: Array<symbol> },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `first`, value: [shared] } })
+            write({ type: `insert`, value: { id: `second`, value: [shared] } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await groupedCollection.stateWhenReady()
+
+      const index = groupedCollection.createIndex((row) => row.value)
+
+      expect(index.takeFromStart(2)).toEqual([`first`, `second`])
+      expect(orderedEntriesArray(index)[0]?.[1]).toEqual(
+        new Set([`first`, `second`]),
+      )
+      expect(orderedEntriesArrayReversed(index)[0]?.[1]).toEqual(
+        new Set([`first`, `second`]),
+      )
+    })
+
+    it(`should return all matching rows for a range predicate on a custom-comparator index`, async () => {
+      // A range predicate must return every row that satisfies it regardless
+      // of the comparator the index was created with. With scores 5 and 20,
+      // `score > 10` matches only the row with score 20.
+      const customCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `low`, score: 5 } })
+            write({ type: `insert`, value: { id: `high`, score: 20 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await customCollection.stateWhenReady()
+      customCollection.createIndex((row) => row.score, {
+        options: { compareFn: (a: number, b: number) => b - a },
+      })
+
+      const result = customCollection.currentStateAsChanges({
+        where: gt(new PropRef([`score`]), 10),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`high`])
+    })
+
+    it(`should return all matching rows for a range predicate when the field also contains NaN`, async () => {
+      // A range predicate must return every matching row even when other rows
+      // hold a NaN value for the field. Under PostgreSQL float semantics NaN is
+      // the greatest value, so with scores NaN, 1, 3, 5 and 7, `score > 2`
+      // matches the rows with scores 3, 5, 7 and NaN.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `nan`, score: NaN } })
+            write({ type: `insert`, value: { id: `one`, score: 1 } })
+            write({ type: `insert`, value: { id: `three`, score: 3 } })
+            write({ type: `insert`, value: { id: `five`, score: 5 } })
+            write({ type: `insert`, value: { id: `seven`, score: 7 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: gt(new PropRef([`score`]), 2),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`five`, `nan`, `seven`, `three`])
+    })
+
+    it(`should use the index for a range query on a field that also contains NaN`, async () => {
+      // A NaN value has a well-defined sort position (greatest, under
+      // PostgreSQL float semantics), so a range query on the field can still be
+      // served by the index and does not need to fall back to a full scan.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `nan`, score: NaN } })
+            write({ type: `insert`, value: { id: `one`, score: 1 } })
+            write({ type: `insert`, value: { id: `three`, score: 3 } })
+            write({ type: `insert`, value: { id: `five`, score: 5 } })
+            write({ type: `insert`, value: { id: `seven`, score: 7 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      withIndexTracking(nanCollection, (tracker) => {
+        const result = nanCollection.currentStateAsChanges({
+          where: gt(new PropRef([`score`]), 2),
+        })!
+
+        const ids = result.map((r) => r.value.id).sort()
+        expect(ids).toEqual([`five`, `nan`, `seven`, `three`])
+
+        expectIndexUsage(tracker.stats, {
+          shouldUseIndex: true,
+          shouldUseFullScan: false,
+        })
+      })
+    })
+
+    it(`should exclude NaN from a less-than range query`, async () => {
+      // Under PostgreSQL float semantics NaN is the greatest value, so
+      // `score < 4` matches the rows with scores 1 and 3 but never the
+      // NaN-valued row.
+      const nanCollection = createCollection<
+        { id: string; score: number },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `nan`, score: NaN } })
+            write({ type: `insert`, value: { id: `one`, score: 1 } })
+            write({ type: `insert`, value: { id: `three`, score: 3 } })
+            write({ type: `insert`, value: { id: `five`, score: 5 } })
+            write({ type: `insert`, value: { id: `seven`, score: 7 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await nanCollection.stateWhenReady()
+      nanCollection.createIndex((row) => row.score)
+
+      const result = nanCollection.currentStateAsChanges({
+        where: lt(new PropRef([`score`]), 4),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`one`, `three`])
+    })
+
+    // Invalid Dates have a NaN timestamp, so they follow the same PostgreSQL
+    // float semantics as NaN: equal to one another and greater than every valid
+    // Date. The index-served and full-scan results must agree.
+    const makeInvalidDateCollection = async () => {
+      const dateCollection = createCollection<
+        { id: string; createdAt: Date },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `invalid`, createdAt: new Date(`not a date`) },
+            })
+            write({
+              type: `insert`,
+              value: { id: `valid`, createdAt: new Date(`2023-01-01`) },
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await dateCollection.stateWhenReady()
+      dateCollection.createIndex((row) => row.createdAt)
+      return dateCollection
+    }
+
+    it(`should match an invalid-Date row for an equality on an invalid Date`, async () => {
+      const dateCollection = await makeInvalidDateCollection()
+
+      const result = dateCollection.currentStateAsChanges({
+        where: eq(new PropRef([`createdAt`]), new Date(`not a date`)),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`invalid`])
+    })
+
+    it(`should match an invalid-Date member of an IN list`, async () => {
+      const dateCollection = await makeInvalidDateCollection()
+
+      const result = dateCollection.currentStateAsChanges({
+        where: inArray(new PropRef([`createdAt`]), [
+          new Date(`not a date`),
+          new Date(`2023-01-01`),
+        ]),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`invalid`, `valid`])
+    })
+
+    it(`should treat an invalid Date as greater than valid Dates in a range query`, async () => {
+      // `createdAt > 2022` matches the valid Date and the invalid Date (which
+      // is the greatest value under PostgreSQL float semantics).
+      const dateCollection = await makeInvalidDateCollection()
+
+      const result = dateCollection.currentStateAsChanges({
+        where: gt(new PropRef([`createdAt`]), new Date(`2022-01-01`)),
+      })!
+
+      const ids = result.map((r) => r.value.id).sort()
+      expect(ids).toEqual([`invalid`, `valid`])
+    })
   })
 
   describe(`Index Usage Verification`, () => {
@@ -1175,8 +2082,9 @@ describe(`Collection Indexes`, () => {
         )
         await tx1.isPersisted.promise
 
-        expect(changes).toHaveLength(1)
-        expect(changes[0]?.value.name).toBe(`Frank`)
+        const dataChanges = stripVirtualOnlyUpdates(changes)
+        expect(dataChanges).toHaveLength(1)
+        expect(dataChanges[0]?.value.name).toBe(`Frank`)
 
         // Add an inactive item (should not trigger)
         changes.length = 0
@@ -1251,8 +2159,9 @@ describe(`Collection Indexes`, () => {
         )
         await tx.isPersisted.promise
 
-        expect(changes).toHaveLength(1)
-        expect(changes[0]?.value.name).toBe(`Diana`)
+        const dataChanges = stripVirtualOnlyUpdates(changes)
+        expect(dataChanges).toHaveLength(1)
+        expect(dataChanges[0]?.value.name).toBe(`Diana`)
 
         subscription.unsubscribe()
       })
@@ -1320,6 +2229,7 @@ describe(`Collection Indexes`, () => {
       const specialCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
         startSync: true,
+        defaultIndexType: BTreeIndex,
         sync: {
           sync: ({ begin, write, commit }) => {
             begin()
@@ -1339,11 +2249,11 @@ describe(`Collection Indexes`, () => {
       const ageIndex = specialCollection.createIndex((row) => row.age)
 
       // Verify index contains all items including special values
-      expect(ageIndex.indexedKeysSet.size).toBe(8) // Original 5 + 3 special
-      expect(ageIndex.orderedEntriesArray).toHaveLength(8) // 8 unique age values (including null)
+      expect(indexedKeysSet(ageIndex).size).toBe(8) // Original 5 + 3 special
+      expect(orderedEntriesArray(ageIndex)).toHaveLength(8) // 8 unique age values (including null)
 
       // Null/undefined should be ordered first
-      const firstValue = ageIndex.orderedEntriesArray[0]?.[0]
+      const firstValue = orderedEntriesArray(ageIndex)[0]?.[0]
       expect(firstValue == null).toBe(true)
 
       // Test that queries with special values use indexes correctly
@@ -1381,22 +2291,23 @@ describe(`Collection Indexes`, () => {
     it(`should handle index creation on empty collection`, () => {
       const emptyCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
+        defaultIndexType: BTreeIndex,
         sync: { sync: () => {} },
       })
 
       const index = emptyCollection.createIndex((row) => row.age)
 
-      expect(index.indexedKeysSet.size).toBe(0)
-      expect(index.orderedEntriesArray).toHaveLength(0)
-      expect(index.valueMapData.size).toBe(0)
+      expect(indexedKeysSet(index).size).toBe(0)
+      expect(orderedEntriesArray(index)).toHaveLength(0)
+      expect(valueMapData(index).size).toBe(0)
     })
 
     it(`should handle index updates when data changes through sync`, async () => {
       const ageIndex = collection.createIndex((row) => row.age)
 
       // Original index should have 5 items
-      expect(ageIndex.indexedKeysSet.size).toBe(5)
-      expect(ageIndex.orderedEntriesArray).toHaveLength(5)
+      expect(indexedKeysSet(ageIndex).size).toBe(5)
+      expect(orderedEntriesArray(ageIndex)).toHaveLength(5)
 
       // Perform mutations that will sync back and update indexes
       const tx1 = createTransaction({ mutationFn })
@@ -1430,7 +2341,7 @@ describe(`Collection Indexes`, () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       // Verify that indexes are updated after sync
-      expect(ageIndex.indexedKeysSet.size).toBe(5) // 5 original - 1 deleted + 1 inserted
+      expect(indexedKeysSet(ageIndex).size).toBe(5) // 5 original - 1 deleted + 1 inserted
 
       // Test that index-optimized queries work with the updated data
       withIndexTracking(collection, (tracker) => {

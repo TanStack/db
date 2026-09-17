@@ -1,4 +1,7 @@
+import { registerOpaqueHash } from '@tanstack/db-ivm'
+import { safeRandomUUID } from '../utils/uuid'
 import {
+  CollectionConfigurationError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
@@ -11,9 +14,14 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
-import type { AllCollectionEvents, CollectionEventHandler } from './events.js'
-import type { BaseIndex, IndexResolver } from '../indexes/base-index.js'
+import type {
+  AllCollectionEvents,
+  CollectionEventHandler,
+  CollectionIndexMetadata,
+} from './events.js'
+import type { BaseIndex, IndexConstructor } from '../indexes/base-index.js'
 import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
@@ -35,8 +43,76 @@ import type {
 } from '../types'
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { BTreeIndex } from '../indexes/btree-index.js'
-import type { IndexProxy } from '../indexes/lazy-index.js'
+import type { WithVirtualProps } from '../virtual-props.js'
+import type { TransactionScope } from '../transactions.js'
+
+export type { CollectionIndexMetadata } from './events.js'
+
+const collectionSyncConfigFactory: unique symbol = Symbol.for(
+  `@tanstack/db.collectionSyncConfig.factory`,
+) as never
+const collectionSyncConfigCleanup: unique symbol = Symbol.for(
+  `@tanstack/db.collectionSyncConfig.cleanup`,
+) as never
+
+type CollectionSyncConfigWithFactory<TSync extends object> = TSync & {
+  readonly [collectionSyncConfigFactory]: (
+    this: TSync,
+    utilities: object,
+  ) => TSync
+}
+
+/** @internal Lets adapters bind a sync config to each collection instance. */
+export function withCollectionSyncConfigFactory<TSync extends object>(
+  sync: TSync,
+  factory: (source: TSync, utilities: object) => TSync,
+): CollectionSyncConfigWithFactory<TSync> {
+  Object.defineProperty(sync, collectionSyncConfigFactory, {
+    value(this: TSync, utilities: object) {
+      return factory(this, utilities)
+    },
+    // Preserve the hook when callers wrap a sync config with object spread.
+    enumerable: true,
+  })
+  return sync as CollectionSyncConfigWithFactory<TSync>
+}
+
+/** @internal Registers work owned before an adapter sync starts. */
+export function withCollectionSyncConfigCleanup<TSync extends object>(
+  sync: TSync,
+  cleanup: () => void,
+): TSync {
+  Object.defineProperty(sync, collectionSyncConfigCleanup, {
+    value: cleanup,
+    enumerable: false,
+  })
+  return sync
+}
+
+function materializeCollectionSyncConfig<
+  TSync extends object,
+  TUtils extends object,
+>(sync: TSync, utilities: TUtils): { sync: TSync; utilities: TUtils } {
+  const factory = (
+    sync as unknown as Partial<CollectionSyncConfigWithFactory<TSync>>
+  )[collectionSyncConfigFactory]
+  if (!factory) return { sync, utilities }
+  // Binding mutates adapter utilities. Reused/spread descriptors must not
+  // retarget helpers that already belong to another Collection. Preserve
+  // accessors and the prototype rather than evaluating them during a spread.
+  const ownedUtilities = Object.create(
+    Object.getPrototypeOf(utilities),
+    Object.getOwnPropertyDescriptors(utilities),
+  ) as TUtils
+  return { sync: factory.call(sync, ownedUtilities), utilities: ownedUtilities }
+}
+
+function cleanupCollectionSyncConfig(sync: object): void {
+  const cleanup = (
+    sync as unknown as { [collectionSyncConfigCleanup]?: () => void }
+  )[collectionSyncConfigCleanup]
+  cleanup?.()
+}
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -252,14 +328,6 @@ export function createCollection(
   const collection = new CollectionImpl<any, string | number, any, any, any>(
     options,
   )
-
-  // Attach utils to collection
-  if (options.utils) {
-    collection.utils = options.utils
-  } else {
-    collection.utils = {}
-  }
-
   return collection
 }
 
@@ -294,6 +362,13 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
+  /**
+   * When set, collection consumers should defer processing incoming data
+   * refreshes until this promise resolves. This prevents stale data from
+   * overwriting optimistic state while pending writes are being applied.
+   */
+  public deferDataRefresh: Promise<void> | null = null
+
   private comparisonOpts: StringCollationConfig
 
   /**
@@ -316,22 +391,43 @@ export class CollectionImpl<
     if (config.id) {
       this.id = config.id
     } else {
-      this.id = crypto.randomUUID()
+      this.id = safeRandomUUID()
     }
 
     // Set default values for optional config properties
+    const { sync: collectionSync, utilities: collectionUtils } =
+      materializeCollectionSyncConfig(config.sync, config.utils ?? {})
     this.config = {
       ...config,
-      autoIndex: config.autoIndex ?? `eager`,
+      sync: collectionSync,
+      autoIndex: config.autoIndex ?? `off`,
+      utils: collectionUtils,
+    }
+    // Attach utilities before eager sync starts so adapters can bind helpers
+    // during sync setup. Preserve the adapter's object identity by default.
+    this.utils = collectionUtils
+
+    if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
+      throw new CollectionConfigurationError(
+        `autoIndex: 'eager' requires defaultIndexType to be set. ` +
+          `Import an index type and set it:\n` +
+          `  import { BasicIndex } from '@tanstack/db'\n` +
+          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
+      )
     }
 
+    // Collections are mutable handles, not structural rows. Downstream queries
+    // must not hash their internal state or follow its ownership cycles.
+    registerOpaqueHash(this)
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
-    this._lifecycle = new CollectionLifecycleManager(config, this.id)
-    this._mutations = new CollectionMutationsManager(config, this.id)
-    this._state = new CollectionStateManager(config)
-    this._sync = new CollectionSyncManager(config, this.id)
+    this._lifecycle = new CollectionLifecycleManager(this.config, this.id, () =>
+      cleanupCollectionSyncConfig(this.config.sync),
+    )
+    this._mutations = new CollectionMutationsManager(this.config, this.id)
+    this._state = new CollectionStateManager(this.config)
+    this._sync = new CollectionSyncManager(this.config, this.id)
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
@@ -340,6 +436,7 @@ export class CollectionImpl<
       lifecycle: this._lifecycle,
       sync: this._sync,
       events: this._events,
+      state: this._state, // Required for enriching changes with virtual properties
     })
     this._events.setDeps({
       collection: this, // Required for adding to emitted events
@@ -347,6 +444,8 @@ export class CollectionImpl<
     this._indexes.setDeps({
       state: this._state,
       lifecycle: this._lifecycle,
+      defaultIndexType: config.defaultIndexType,
+      events: this._events,
     })
     this._lifecycle.setDeps({
       changes: this._changes,
@@ -395,8 +494,45 @@ export class CollectionImpl<
   }
 
   /**
+   * Monotonic revision of the collection's visible state; advances once per
+   * committed batch of changes and cleanup, even while nothing is subscribed.
+   * Internal — used by the live-query observer's snapshot cache.
+   */
+  public get _stateRevision(): number {
+    return this._changes.stateRevision
+  }
+
+  /**
+   * Monotonic revision of explicit layout-only publications.
+   * Internal — used to distinguish them from empty ready events.
+   */
+  public get _layoutRevision(): number {
+    return this._changes.layoutRevision
+  }
+
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public _subscribeLayoutChanges(listener: () => void): () => void {
+    return this._changes.subscribeLayoutChanges(listener)
+  }
+
+  /** Mark the active sync transaction as layout-changing. Internal. */
+  public _markLayoutChange(): void {
+    this._sync.markLayoutChange()
+  }
+
+  /** Defer subscriber events until a coherent multi-Collection commit ends. */
+  public _deferPublication(): PublicationDeferral {
+    return this._changes.deferPublication()
+  }
+
+  /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
+   * Every callback queued before the transition runs. Because ready state is
+   * established first, callbacks registered during or after delivery run
+   * immediately. If one throws, the collection remains ready. Direct sync
+   * startup rethrows the first failure; preload resolves from ready state.
+   * Cleanup discards pending callbacks without invoking them.
    * @param callback Function to call when the collection first becomes ready
    * @example
    * collection.onFirstReady(() => {
@@ -404,7 +540,7 @@ export class CollectionImpl<
    *   // Safe to access collection.state now
    * })
    */
-  public onFirstReady(callback: () => void): void {
+  public onFirstReady(callback: () => void): () => void {
     return this._lifecycle.onFirstReady(callback)
   }
 
@@ -435,9 +571,30 @@ export class CollectionImpl<
   /**
    * Start sync immediately - internal method for compiled queries
    * This bypasses lazy loading for special cases like live query results
+   * Throws during active cleanup; restart after cleanup completes instead.
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
+  }
+
+  /** @internal */
+  public _setTransactionScope(transactionScope: TransactionScope): void {
+    this._mutations.setTransactionScope(transactionScope)
+  }
+
+  /** @internal */
+  public _hasHydratedKey(key: TKey): boolean {
+    return this._state.hydratedKeys.has(key)
+  }
+
+  /** @internal */
+  public _deferSyncStart(): boolean {
+    return this._sync.deferStart()
+  }
+
+  /** @internal */
+  public _resumeSyncStart(): void {
+    this._sync.resumeStart()
   }
 
   /**
@@ -451,8 +608,8 @@ export class CollectionImpl<
   /**
    * Get the current value for a key (virtual derived state)
    */
-  public get(key: TKey): TOutput | undefined {
-    return this._state.get(key)
+  public get(key: TKey): WithVirtualProps<TOutput, TKey> | undefined {
+    return this._state.getWithVirtualProps(key)
   }
 
   /**
@@ -479,40 +636,68 @@ export class CollectionImpl<
   /**
    * Get all values (virtual derived state)
    */
-  public *values(): IterableIterator<TOutput> {
-    yield* this._state.values()
+  public *values(): IterableIterator<WithVirtualProps<TOutput, TKey>> {
+    for (const key of this._state.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield value
+      }
+    }
   }
 
   /**
    * Get all entries (virtual derived state)
    */
-  public *entries(): IterableIterator<[TKey, TOutput]> {
-    yield* this._state.entries()
+  public *entries(): IterableIterator<[TKey, WithVirtualProps<TOutput, TKey>]> {
+    for (const key of this._state.keys()) {
+      const value = this.get(key)
+      if (value !== undefined) {
+        yield [key, value]
+      }
+    }
   }
 
   /**
    * Get all entries (virtual derived state)
    */
-  public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {
-    yield* this._state[Symbol.iterator]()
+  public *[Symbol.iterator](): IterableIterator<
+    [TKey, WithVirtualProps<TOutput, TKey>]
+  > {
+    yield* this.entries()
   }
 
   /**
    * Execute a callback for each entry in the collection
    */
   public forEach(
-    callbackfn: (value: TOutput, key: TKey, index: number) => void,
+    callbackfn: (
+      value: WithVirtualProps<TOutput, TKey>,
+      key: TKey,
+      index: number,
+    ) => void,
   ): void {
-    return this._state.forEach(callbackfn)
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      callbackfn(value, key, index++)
+    }
   }
 
   /**
    * Create a new array with the results of calling a function for each entry in the collection
    */
   public map<U>(
-    callbackfn: (value: TOutput, key: TKey, index: number) => U,
+    callbackfn: (
+      value: WithVirtualProps<TOutput, TKey>,
+      key: TKey,
+      index: number,
+    ) => U,
   ): Array<U> {
-    return this._state.map(callbackfn)
+    const result: Array<U> = []
+    let index = 0
+    for (const [key, value] of this.entries()) {
+      result.push(callbackfn(value, key, index++))
+    }
+    return result
   }
 
   public getKeyFromItem(item: TOutput): TKey {
@@ -524,39 +709,49 @@ export class CollectionImpl<
    * Indexes significantly improve query performance by allowing constant time lookups
    * and logarithmic time range queries instead of full scans.
    *
-   * @template TResolver - The type of the index resolver (constructor or async loader)
    * @param indexCallback - Function that extracts the indexed value from each item
    * @param config - Configuration including index type and type-specific options
-   * @returns An index proxy that provides access to the index when ready
+   * @returns The created index
    *
    * @example
-   * // Create a default B+ tree index
-   * const ageIndex = collection.createIndex((row) => row.age)
+   * ```ts
+   * import { BasicIndex } from '@tanstack/db'
    *
-   * // Create a ordered index with custom options
+   * // Create an index with explicit type
    * const ageIndex = collection.createIndex((row) => row.age, {
-   *   indexType: BTreeIndex,
-   *   options: {
-   *     compareFn: customComparator,
-   *     compareOptions: { direction: 'asc', nulls: 'first', stringSort: 'lexical' }
-   *   },
-   *   name: 'age_btree'
+   *   indexType: BasicIndex
    * })
    *
-   * // Create an async-loaded index
-   * const textIndex = collection.createIndex((row) => row.content, {
-   *   indexType: async () => {
-   *     const { FullTextIndex } = await import('./indexes/fulltext.js')
-   *     return FullTextIndex
-   *   },
-   *   options: { language: 'en' }
-   * })
+   * // Create an index with collection's default type
+   * const nameIndex = collection.createIndex((row) => row.name)
+   * ```
    */
-  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
+  public createIndex<TIndexType extends IndexConstructor<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TResolver> = {},
-  ): IndexProxy<TKey> {
+    config: IndexOptions<TIndexType> = {},
+  ): BaseIndex<TKey> {
     return this._indexes.createIndex(indexCallback, config)
+  }
+
+  /**
+   * Removes an index created with createIndex.
+   * Returns true when an index existed and was removed.
+   *
+   * Best-effort semantics: removing an index guarantees it is detached from
+   * collection query planning. Existing index proxy references should be treated
+   * as invalid after removal.
+   */
+  public removeIndex(indexOrId: BaseIndex<TKey> | number): boolean {
+    return this._indexes.removeIndex(indexOrId)
+  }
+
+  /**
+   * Returns a snapshot of current index metadata sorted by indexId.
+   * Persistence wrappers can use this to bootstrap index state if indexes were
+   * created before event listeners were attached.
+   */
+  public getIndexMetadata(): Array<CollectionIndexMetadata> {
+    return this._indexes.getIndexMetadataSnapshot()
   }
 
   /**
@@ -755,7 +950,7 @@ export class CollectionImpl<
    * }
    */
   get state() {
-    const result = new Map<TKey, TOutput>()
+    const result = new Map<TKey, WithVirtualProps<TOutput, TKey>>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
     }
@@ -768,7 +963,7 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to a Map containing all items in the collection
    */
-  stateWhenReady(): Promise<Map<TKey, TOutput>> {
+  stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.state)
@@ -793,7 +988,7 @@ export class CollectionImpl<
    *
    * @returns Promise that resolves to an Array containing all items in the collection
    */
-  toArrayWhenReady(): Promise<Array<TOutput>> {
+  toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
       return Promise.resolve(this.toArray)
@@ -823,7 +1018,7 @@ export class CollectionImpl<
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions = {},
-  ): Array<ChangeMessage<TOutput>> | void {
+  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>> | void {
     return currentStateAsChanges(this, options)
   }
 
@@ -870,8 +1065,10 @@ export class CollectionImpl<
    * })
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions<TOutput> = {},
+    callback: (
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+    ) => void,
+    options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
   }
@@ -919,6 +1116,8 @@ export class CollectionImpl<
   /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
+   * Cleanup callbacks must not restart this collection or call its preload().
+   * Wait until cleanup completes before starting a new sync session.
    */
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()
@@ -929,17 +1128,22 @@ export class CollectionImpl<
 function buildCompareOptionsFromConfig(
   config: CollectionConfig<any, any, any>,
 ): StringCollationConfig {
-  if (config.defaultStringCollation) {
-    const options = config.defaultStringCollation
-    return {
-      stringSort: options.stringSort ?? `locale`,
-      locale: options.stringSort === `locale` ? options.locale : undefined,
-      localeOptions:
-        options.stringSort === `locale` ? options.localeOptions : undefined,
-    }
-  } else {
-    return {
-      stringSort: `locale`,
-    }
+  const options = config.defaultStringCollation
+  if (!options) {
+    return { stringSort: `locale` }
+  }
+
+  if (options.stringSort === `lexical`) {
+    return { stringSort: `lexical` }
+  }
+
+  return {
+    stringSort: `locale`,
+    ...(`locale` in options &&
+      options.locale !== undefined && { locale: options.locale }),
+    ...(`localeOptions` in options &&
+      options.localeOptions !== undefined && {
+        localeOptions: options.localeOptions,
+      }),
   }
 }

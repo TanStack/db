@@ -18,10 +18,11 @@ jobs:
       actions: read # Required for Claude to read CI results on PRs
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0 # required for Claude Code
-      - uses: anthropics/claude-code-action@v1
+          persist-credentials: false
+      - uses: anthropics/claude-code-action@f4fb5c6cdccc1ee7af63692f5d08d56efaa64cc8 # v1.0.121
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Responds to @claude mentions in comments

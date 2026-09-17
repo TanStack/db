@@ -1,8 +1,4 @@
 import {
-  createSingleRowRefProxy,
-  toExpression,
-} from '../query/builder/ref-proxy'
-import {
   compileSingleRowExpression,
   toBooleanPredicate,
 } from '../query/compiler/evaluators.js'
@@ -20,8 +16,8 @@ import type {
   SubscribeChangesOptions,
 } from '../types'
 import type { CollectionImpl } from './index.js'
-import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { WithVirtualProps } from '../virtual-props.js'
 
 /**
  * Returns the current state of the collection as an array of changes
@@ -58,14 +54,14 @@ export function currentStateAsChanges<
   T extends object,
   TKey extends string | number,
 >(
-  collection: CollectionLike<T, TKey>,
+  collection: CollectionLike<WithVirtualProps<T, TKey>, TKey>,
   options: CurrentStateAsChangesOptions = {},
-): Array<ChangeMessage<T>> | void {
+): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> | void {
   // Helper function to collect filtered results
   const collectFilteredResults = (
-    filterFn?: (value: T) => boolean,
-  ): Array<ChangeMessage<T>> => {
-    const result: Array<ChangeMessage<T>> = []
+    filterFn?: (value: WithVirtualProps<T, TKey>) => boolean,
+  ): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> => {
+    const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
     for (const [key, value] of collection.entries()) {
       // If no filter function is provided, include all items
       if (filterFn?.(value) ?? true) {
@@ -106,7 +102,7 @@ export function currentStateAsChanges<
     }
 
     // Convert keys to change messages
-    const result: Array<ChangeMessage<T>> = []
+    const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
     for (const key of orderedKeys) {
       const value = collection.get(key)
       if (value !== undefined) {
@@ -137,11 +133,16 @@ export function currentStateAsChanges<
     )
 
     if (optimizationResult.canOptimize) {
-      // Use index optimization
-      const result: Array<ChangeMessage<T>> = []
+      // Use index optimization. When the index lookup is inexact, the keys
+      // are a superset of the true result (some conditions could not be
+      // served by an index), so re-check each row against the full expression.
+      const filterFn = optimizationResult.isExact
+        ? undefined
+        : createFilterFunctionFromExpression(expression)
+      const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
       for (const key of optimizationResult.matchingKeys) {
         const value = collection.get(key)
-        if (value !== undefined) {
+        if (value !== undefined && (filterFn?.(value) ?? true)) {
           result.push({
             type: `insert`,
             key,
@@ -176,44 +177,6 @@ export function currentStateAsChanges<
 }
 
 /**
- * Creates a filter function from a where callback
- * @param whereCallback - The callback function that defines the filter condition
- * @returns A function that takes an item and returns true if it matches the filter
- */
-export function createFilterFunction<T extends object>(
-  whereCallback: (row: SingleRowRefProxy<T>) => any,
-): (item: T) => boolean {
-  return (item: T): boolean => {
-    try {
-      // First try the RefProxy approach for query builder functions
-      const singleRowRefProxy = createSingleRowRefProxy<T>()
-      const whereExpression = whereCallback(singleRowRefProxy)
-      const expression = toExpression(whereExpression)
-      const evaluator = compileSingleRowExpression(expression)
-      const result = evaluator(item as Record<string, unknown>)
-      // WHERE clauses should always evaluate to boolean predicates (Kevin's feedback)
-      return toBooleanPredicate(result)
-    } catch {
-      // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
-      try {
-        // Create a simple proxy that returns actual values for arithmetic operations
-        const simpleProxy = new Proxy(item as any, {
-          get(target, prop) {
-            return target[prop]
-          },
-        }) as SingleRowRefProxy<T>
-
-        const result = whereCallback(simpleProxy)
-        return toBooleanPredicate(result)
-      } catch {
-        // If both approaches fail, exclude the item
-        return false
-      }
-    }
-  }
-}
-
-/**
  * Creates a filter function from a pre-compiled expression
  * @param expression - The pre-compiled expression to evaluate
  * @returns A function that takes an item and returns true if it matches the filter
@@ -241,10 +204,13 @@ export function createFilterFunctionFromExpression<T extends object>(
  * @param options - The subscription options containing the where clause
  * @returns A filtered callback function
  */
-export function createFilteredCallback<T extends object>(
+export function createFilteredCallback<
+  T extends object,
+  TKey extends string | number = string | number,
+>(
   originalCallback: (changes: Array<ChangeMessage<T>>) => void,
-  options: SubscribeChangesOptions,
-): (changes: Array<ChangeMessage<T>>) => void {
+  options: SubscribeChangesOptions<T, TKey>,
+): (changes: Array<ChangeMessage<T>>) => boolean {
   const filterFn = createFilterFunctionFromExpression(options.whereExpression!)
 
   return (changes: Array<ChangeMessage<T>>) => {
@@ -294,7 +260,9 @@ export function createFilteredCallback<T extends object>(
     // if the original changes array was empty (which indicates a ready signal)
     if (filteredChanges.length > 0 || changes.length === 0) {
       originalCallback(filteredChanges)
+      return true
     }
+    return false
   }
 }
 
@@ -347,7 +315,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         // Take the keys that match the filter and limit
         // if no limit is provided `index.keyCount` is used,
         // i.e. we will take all keys that match the filter
-        return index.take(limit ?? index.keyCount, undefined, filterFn)
+        return index.takeFromStart(limit ?? index.keyCount, filterFn)
       }
     }
   }

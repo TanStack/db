@@ -7,7 +7,7 @@ import {
   upper,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -546,7 +546,9 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       expect(results[0]).toHaveProperty(`active`)
 
       // Verify the data matches exactly
-      expect(results).toEqual(expect.arrayContaining(sampleUsers))
+      expect(results.map((row) => stripVirtualProps(row))).toEqual(
+        expect.arrayContaining(sampleUsers),
+      )
 
       // Insert a new user
       const newUser = {
@@ -564,7 +566,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(5)
-      expect(liveCollection.get(5)).toEqual(newUser)
+      expect(stripVirtualProps(liveCollection.get(5))).toEqual(newUser)
 
       // Update the new user
       const updatedUser = { ...newUser, name: `Eve Updated` }
@@ -576,7 +578,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(5)
-      expect(liveCollection.get(5)).toEqual(updatedUser)
+      expect(stripVirtualProps(liveCollection.get(5))).toEqual(updatedUser)
 
       // Delete the new user
       usersCollection.utils.begin()
@@ -634,7 +636,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(activeLiveCollection.size).toBe(4) // Should include the new active user
-      expect(activeLiveCollection.get(5)).toEqual(newUser)
+      expect(stripVirtualProps(activeLiveCollection.get(5))).toEqual(newUser)
 
       // Update the new user to inactive (should remove from active collection)
       const inactiveUser = { ...newUser, active: false }

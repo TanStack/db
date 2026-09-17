@@ -1,0 +1,204 @@
+import { MultiSet } from '@tanstack/db-ivm'
+import { UnsupportedRootScalarSelectError } from '../../errors.js'
+import { normalizeOrderByPaths } from '../compiler/expressions.js'
+import { buildQuery, getQueryIR } from '../builder/index.js'
+import { collectCollectionSources, isExpressionLike } from '../ir.js'
+import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
+import type { Collection } from '../../collection/index.js'
+import type { ChangeMessage } from '../../types.js'
+import type { InitialQueryBuilder, QueryBuilder } from '../builder/index.js'
+import type { Context } from '../builder/types.js'
+import type { OrderBy, QueryIR } from '../ir.js'
+
+/**
+ * Helper function to extract collections from a compiled query.
+ * Traverses the query IR to find all collection references.
+ * Maps collections by their ID (not alias) as expected by the compiler.
+ */
+export function extractCollectionsFromQuery(
+  query: QueryIR,
+): Record<string, Collection<any, any, any>> {
+  const collections: Record<string, Collection<any, any, any>> = {}
+  for (const source of collectCollectionSources(query)) {
+    collections[source.collection.id] = source.collection
+  }
+  return collections
+}
+
+export { collectCollectionSources as extractCollectionSources }
+
+/**
+ * Helper function to extract the collection that is referenced in the query's FROM clause.
+ * The FROM clause may refer directly to a collection or indirectly to a subquery.
+ */
+export function extractCollectionFromSource(
+  query: any,
+): Collection<any, any, any> {
+  const from = query.from
+
+  if (from.type === `collectionRef`) {
+    return from.collection
+  } else if (from.type === `queryRef`) {
+    // Recursively extract from subquery
+    return extractCollectionFromSource(from.query)
+  } else if (from.type === `unionFrom`) {
+    return extractCollectionFromSource({ from: from.sources[0] })
+  } else if (from.type === `unionAll`) {
+    return extractCollectionFromSource(from.queries[0])
+  }
+
+  throw new Error(
+    `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`,
+  )
+}
+
+/**
+ * Check if a value is a nested select object (plain object, not an expression)
+ */
+function isNestedSelectObject(obj: any): boolean {
+  if (obj === null || typeof obj !== `object`) return false
+  if (isExpressionLike(obj)) return false
+  // Ref proxies from spread operations
+  if (obj.__refProxy) return false
+  return true
+}
+
+/**
+ * Builds a query IR from a config object that contains either a query builder
+ * function or a QueryBuilder instance.
+ */
+export function buildQueryFromConfig<TContext extends Context>(config: {
+  query:
+    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
+    | QueryBuilder<TContext>
+  requireObjectResult?: boolean
+}): QueryIR {
+  // Build the query using the provided query builder function or instance
+  const query =
+    typeof config.query === `function`
+      ? buildQuery<TContext>(config.query)
+      : getQueryIR(config.query)
+
+  if (
+    config.requireObjectResult &&
+    query.select &&
+    !isNestedSelectObject(query.select)
+  ) {
+    throw new UnsupportedRootScalarSelectError()
+  }
+
+  return query
+}
+
+/**
+ * Helper function to send changes to a D2 input stream.
+ * Converts ChangeMessages to D2 MultiSet data and sends to the input.
+ *
+ * @returns The number of multiset entries sent
+ */
+export function sendChangesToInput(
+  input: RootStreamBuilder<unknown>,
+  changes: Iterable<ChangeMessage>,
+): number {
+  const multiSetArray: MultiSetArray<unknown> = []
+  for (const change of changes) {
+    const key = change.key
+    if (change.type === `insert`) {
+      multiSetArray.push([[key, change.value], 1])
+    } else if (change.type === `update`) {
+      multiSetArray.push([[key, change.previousValue], -1])
+      multiSetArray.push([[key, change.value], 1])
+    } else {
+      // change.type === `delete`
+      multiSetArray.push([[key, change.value], -1])
+    }
+  }
+
+  if (multiSetArray.length !== 0) {
+    input.sendData(new MultiSet(multiSetArray))
+  }
+
+  return multiSetArray.length
+}
+
+/** Splits updates into a delete of the old value and an insert of the new value */
+export function* splitUpdates<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+>(
+  changes: Iterable<ChangeMessage<T, TKey>>,
+): Generator<ChangeMessage<T, TKey>> {
+  for (const change of changes) {
+    if (change.type === `update`) {
+      yield { type: `delete`, key: change.key, value: change.previousValue! }
+      yield { type: `insert`, key: change.key, value: change.value }
+    } else {
+      yield change
+    }
+  }
+}
+
+/** Keep each source key at one exact D2 contribution. */
+export function reconcileChangesForD2<
+  T extends object,
+  TKey extends string | number,
+>(
+  changes: Array<ChangeMessage<T, TKey>>,
+  sentRows: Map<TKey, T>,
+): Array<ChangeMessage<T, TKey>> {
+  const reconciled: Array<ChangeMessage<T, TKey>> = []
+  for (const change of changes) {
+    const previousValue = sentRows.get(change.key)
+    if (change.type === `insert`) {
+      if (previousValue !== undefined) continue
+      sentRows.set(change.key, change.value)
+      reconciled.push(change)
+    } else if (change.type === `delete`) {
+      if (previousValue === undefined) continue
+      sentRows.delete(change.key)
+      reconciled.push({ ...change, value: previousValue })
+    } else {
+      sentRows.set(change.key, change.value)
+      reconciled.push(
+        previousValue === undefined
+          ? { type: `insert`, key: change.key, value: change.value }
+          : { ...change, previousValue },
+      )
+    }
+  }
+  return reconciled
+}
+
+/**
+ * Compute orderBy/limit subscription hints for an alias.
+ * Returns normalised orderBy and effective limit suitable for passing to
+ * `subscribeChanges`, or `undefined` values when the query's orderBy cannot
+ * be scoped to the given alias (e.g. cross-collection refs or aggregates).
+ */
+export function computeSubscriptionOrderByHints(
+  query: { orderBy?: OrderBy; limit?: number; offset?: number },
+  alias: string,
+): { orderBy: OrderBy | undefined; limit: number | undefined } {
+  const { orderBy, limit, offset } = query
+  const effectiveLimit =
+    limit !== undefined && offset !== undefined ? limit + offset : limit
+
+  const normalizedOrderBy = orderBy
+    ? normalizeOrderByPaths(orderBy, alias)
+    : undefined
+
+  // Only pass orderBy when it is scoped to this alias and uses simple refs,
+  // to avoid leaking cross-collection paths into backend-specific compilers.
+  const canPassOrderBy =
+    normalizedOrderBy?.every((clause) => {
+      const exp = clause.expression
+      if (exp.type !== `ref`) return false
+      const path = exp.path
+      return Array.isArray(path) && path.length === 1
+    }) ?? false
+
+  return {
+    orderBy: canPassOrderBy ? normalizedOrderBy : undefined,
+    limit: canPassOrderBy ? effectiveLimit : undefined,
+  }
+}

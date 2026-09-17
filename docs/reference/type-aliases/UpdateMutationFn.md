@@ -3,13 +3,11 @@ id: UpdateMutationFn
 title: UpdateMutationFn
 ---
 
-# Type Alias: UpdateMutationFn()\<T, TKey, TUtils, TReturn\>
-
 ```ts
 type UpdateMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:456](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L456)
+Defined in: [packages/db/src/types.ts:569](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L569)
 
 ## Type Parameters
 

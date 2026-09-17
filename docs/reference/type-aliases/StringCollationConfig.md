@@ -3,8 +3,6 @@ id: StringCollationConfig
 title: StringCollationConfig
 ---
 
-# Type Alias: StringCollationConfig
-
 ```ts
 type StringCollationConfig = 
   | {
@@ -17,7 +15,7 @@ type StringCollationConfig =
 };
 ```
 
-Defined in: [packages/db/src/types.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L30)
+Defined in: [packages/db/src/types.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L32)
 
 StringSortOpts - Options for string sorting behavior
 

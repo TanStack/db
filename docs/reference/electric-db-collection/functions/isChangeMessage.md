@@ -3,13 +3,11 @@ id: isChangeMessage
 title: isChangeMessage
 ---
 
-# Function: isChangeMessage()
-
 ```ts
 function isChangeMessage<T>(message): message is ChangeMessage<T>;
 ```
 
-Defined in: node\_modules/.pnpm/@electric-sql+client@1.3.1/node\_modules/@electric-sql/client/dist/index.d.ts:816
+Defined in: node\_modules/.pnpm/@electric-sql+client@1.5.15/node\_modules/@electric-sql/client/dist/index.d.ts:922
 
 Type guard for checking Message is ChangeMessage.
 

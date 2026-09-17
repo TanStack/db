@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample types for subquery testing
 type Issue = {
@@ -270,7 +270,9 @@ function createSubqueryTests(autoIndex: `off` | `eager`): void {
           expect(result.hours).toBeGreaterThan(10)
         })
 
-        const sortedResults = results.sort((a, b) => a.key - b.key)
+        const sortedResults = results
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.key - b.key)
         expect(sortedResults).toEqual([
           { key: 3, title: `Feature 1`, hours: 12, type: `closed` },
           { key: 5, title: `Feature 2`, hours: 15, type: `in_progress` },

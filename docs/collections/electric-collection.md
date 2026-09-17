@@ -2,8 +2,6 @@
 title: Electric Collection
 ---
 
-# Electric Collection
-
 Electric collections provide seamless integration between TanStack DB and ElectricSQL, enabling real-time data synchronization with your Postgres database through Electric's sync engine.
 
 ## Overview
@@ -130,7 +128,7 @@ const todosCollection = createCollection(
                  message.headers.operation === 'insert' &&
                  message.value.text === newItem.text
         },
-        5000 // timeout in ms (optional, defaults to 3000)
+        5000 // timeout in ms (optional, defaults to 15000)
       )
     }
   })
@@ -188,9 +186,9 @@ async function generateTxId(tx) {
 Electric is typically deployed behind a proxy server that handles shape configuration, authentication and authorization. This provides better security and allows you to control what data users can access without exposing Electric to the client.
 
 
-Here is an example proxy implementation using TanStack Starter:
+Here is an example proxy implementation using TanStack Start:
 
-```js
+```typescript
 import { createServerFileRoute } from "@tanstack/react-start/server"
 import { ELECTRIC_PROTOCOL_QUERY_PARAMS } from "@electric-sql/client"
 
@@ -335,6 +333,46 @@ await todosCollection.utils.awaitMatch(
   5000 // timeout in ms
 )
 ```
+
+### Cleanup and resume safety
+
+Transaction evidence and pending `awaitTxId`/`awaitMatch` calls belong to one
+collection lifecycle. Explicit cleanup and automatic garbage collection reject
+pending waits with `StreamAbortedError`; callbacks from the retired stream cannot
+settle waits in a restarted collection. Observe these promises even when the
+component or collection may be disposed before they settle.
+
+Persisted resumes wait for the cached row baseline to finish hydrating. If the
+persistence wrapper cannot verify hydration completion, Electric starts a fresh
+snapshot instead of using the saved offset and handle. It warns once per options
+descriptor; update the persistence adapter alongside Electric to enable safe resume.
+Fresh eager snapshots wait for hydration, then replace the cached rows at the
+snapshot's commit boundary. Rows omitted from that snapshot do not survive in
+the collection or its persisted cache, even when the fresh snapshot is empty.
+
+Tag membership is kept in memory, not restored from cached row headers. A cold
+restart therefore fetches a full snapshot when the saved state needs tags, or
+comes from an older version that did not record whether tags were used. Untagged
+shapes can still resume from their saved offset. Cached rows remain visible until
+the replacement snapshot completes; a partial batch or subset completion cannot
+publish that replacement early. Interrupting recovery leaves a durable reset
+marker so the next start still refetches. This recovery also requests a full shape
+snapshot in on-demand mode, at the cost of fetching more than the active subsets.
+
+An eager or progressive resume cannot apply a partial update to an unknown row.
+The adapter rejects that batch, enters an error state, and records a reset so the
+next sync starts from a full snapshot. This does not silently retry the failed
+stream. Complete updates from an explicit `replica: 'full'` stream remain valid.
+On-demand streams can observe updates outside their loaded subsets; unknown
+partial rows are ignored, while transaction acknowledgement evidence is retained.
+Complete rows published by persistence reloads or another tab are valid baselines
+for subsequent partial updates. Pending deletions and resets still take precedence
+over an older row that remains publicly visible.
+
+Reusing Electric collection options, including a spread of those options, does
+not share transaction waiters or tag visibility between collections. Tag state
+survives a compatible resume of the same collection and clears on a fresh
+snapshot or `must-refetch`.
 
 ### Helper Functions
 

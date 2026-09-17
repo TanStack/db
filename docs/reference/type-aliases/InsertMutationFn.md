@@ -3,13 +3,11 @@ id: InsertMutationFn
 title: InsertMutationFn
 ---
 
-# Type Alias: InsertMutationFn()\<T, TKey, TUtils, TReturn\>
-
 ```ts
 type InsertMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:449](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L449)
+Defined in: [packages/db/src/types.ts:562](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L562)
 
 ## Type Parameters
 

@@ -1,4 +1,6 @@
-import { DiffTriggerOperation, sanitizeSQL } from '@powersync/common'
+import { DiffTriggerOperation, LogLevels, sanitizeSQL } from '@powersync/common'
+import { or, withCollectionConfigFactory } from '@tanstack/db'
+import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 import { DEFAULT_BATCH_SIZE } from './definitions'
@@ -6,10 +8,15 @@ import { asPowerSyncRecord, mapOperation } from './helpers'
 import { convertTableToSchema } from './schema'
 import { serializeForSQLite } from './serialization'
 import type {
+  CleanupFn,
+  LoadSubsetOptions,
+  OperationType,
+  SyncAppliedReceipt,
+  SyncConfig,
+} from '@tanstack/db'
+import type {
   AnyTableColumnType,
   ExtractedTable,
-  ExtractedTableColumns,
-  MapBaseColumnType,
   OptionalExtractedTable,
 } from './helpers'
 import type {
@@ -17,16 +24,14 @@ import type {
   ConfigWithArbitraryCollectionTypes,
   ConfigWithSQLiteInputType,
   ConfigWithSQLiteTypes,
-  CustomSQLiteSerializer,
   EnhancedPowerSyncCollectionConfig,
   InferPowerSyncOutputType,
   PowerSyncCollectionConfig,
   PowerSyncCollectionUtils,
 } from './definitions'
 import type { PendingOperation } from './PendingOperationStore'
-import type { SyncConfig } from '@tanstack/db'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { Table, TriggerDiffRecord } from '@powersync/common'
+import type { LockContext, Table, TriggerDiffRecord } from '@powersync/common'
 
 /**
  * Creates PowerSync collection options for use with a standard Collection.
@@ -219,12 +224,25 @@ export function powerSyncCollectionOptions<
 export function powerSyncCollectionOptions<
   TTable extends Table,
   TSchema extends StandardSchemaV1<any> = never,
+>(
+  config: PowerSyncCollectionConfig<TTable, TSchema>,
+): ReturnType<typeof createPowerSyncCollectionConfig<TTable, TSchema>> {
+  const outputConfig = createPowerSyncCollectionConfig(config)
+  return withCollectionConfigFactory(outputConfig, () =>
+    createPowerSyncCollectionConfig(config),
+  )
+}
+
+function createPowerSyncCollectionConfig<
+  TTable extends Table,
+  TSchema extends StandardSchemaV1<any> = never,
 >(config: PowerSyncCollectionConfig<TTable, TSchema>) {
   const {
     database,
     table,
     schema: inputSchema,
     syncBatchSize = DEFAULT_BATCH_SIZE,
+    syncMode = 'eager',
     ...restConfig
   } = config
 
@@ -254,12 +272,15 @@ export function powerSyncCollectionOptions<
       return validation.value
     } else if (`issues` in validation) {
       const issueMessage = `Failed to validate incoming data for ${viewName}. Issues: ${validation.issues.map((issue) => `${issue.path} - ${issue.message}`)}`
-      database.logger.error(issueMessage)
+      database.logger.log({ level: LogLevels.error, message: issueMessage })
       onDeserializationError!(validation)
       throw new Error(issueMessage)
     } else {
       const unknownErrorMessage = `Unknown deserialization error for ${viewName}`
-      database.logger.error(unknownErrorMessage)
+      database.logger.log({
+        level: LogLevels.error,
+        message: unknownErrorMessage,
+      })
       onDeserializationError!({ issues: [{ message: unknownErrorMessage }] })
       throw new Error(unknownErrorMessage)
     }
@@ -296,63 +317,213 @@ export function powerSyncCollectionOptions<
    */
   const sync: SyncConfig<OutputType, string> = {
     sync: (params) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, collection, commit, markReady, markError } = params
       const abortController = new AbortController()
 
-      // The sync function needs to be synchronous
-      async function start() {
-        database.logger.info(
-          `Sync is starting for ${viewName} into ${trackedTableName}`,
-        )
+      let disposeTracking:
+        | ((options?: { context?: LockContext }) => Promise<void>)
+        | null = null
+      let trackingSetup: Promise<void> | null = null
+
+      if (syncMode === `eager`) {
+        return runEagerSync()
+      } else {
+        return runOnDemandSync()
+      }
+
+      /**
+       * Disposes the current diff trigger, if one is active, and clears the
+       * tracking state.
+       */
+      async function safelyDisposeTracking(
+        context?: LockContext,
+      ): Promise<void> {
+        // Cleanup can race trigger creation. Wait until the disposer has been
+        // published so an abort cannot strand a freshly-created trigger.
+        const setup = trackingSetup
+        if (setup) {
+          await setup.catch(() => undefined)
+        }
+
+        const dispose = disposeTracking
+        if (!dispose) {
+          return
+        }
+
+        disposeTracking = null
+        await dispose(context ? { context } : undefined)
+      }
+
+      async function establishTracking(
+        options: Parameters<typeof createDiffTrigger>[0],
+        appliedReceipts: Array<SyncAppliedReceipt>,
+      ): Promise<void> {
+        const setup = (async () => {
+          const dispose = await createDiffTrigger(options, appliedReceipts)
+          disposeTracking = dispose
+        })()
+        trackingSetup = setup
+
+        try {
+          await setup
+        } finally {
+          if (trackingSetup === setup) {
+            trackingSetup = null
+          }
+        }
+      }
+
+      async function createDiffTrigger(
+        options: {
+          setupContext?: LockContext
+          immediate?: boolean
+          when: Record<DiffTriggerOperation, string>
+          writeType: (rowId: string) => OperationType
+          batchQuery: (
+            lockContext: LockContext,
+            batchSize: number,
+            cursor: number,
+          ) => Promise<Array<TableType>>
+        },
+        appliedReceipts: Array<SyncAppliedReceipt>,
+      ) {
+        const { setupContext, immediate, when, writeType, batchQuery } = options
+
+        return await database.triggers.createDiffTrigger({
+          source: viewName,
+          destination: trackedTableName,
+          columns: table.columns.map((column) => column.name),
+          setupContext,
+          when,
+          hooks: {
+            beforeCreate: async (context) => {
+              let currentBatchCount = syncBatchSize
+              let cursor = 0
+              while (currentBatchCount == syncBatchSize) {
+                begin(immediate ? { immediate: true } : undefined)
+
+                const batchItems = await batchQuery(
+                  context,
+                  syncBatchSize,
+                  cursor,
+                )
+                currentBatchCount = batchItems.length
+                cursor += currentBatchCount
+                for (const row of batchItems) {
+                  write({
+                    type: writeType(row.id),
+                    value: deserializeSyncRow(row),
+                  })
+                }
+                appliedReceipts.push(commit())
+              }
+              database.logger.log({
+                level: LogLevels.info,
+                message: `Sync is ready for ${viewName} into ${trackedTableName}`,
+              })
+            },
+          },
+        })
+      }
+
+      async function flushDiffRecords(): Promise<void> {
+        // PowerSync can notify after creating the tracking table but before its
+        // create call returns. Preserve that notification until the disposer,
+        // which proves the trigger is usable, has been published.
+        const setup = trackingSetup
+        if (setup) {
+          await setup.catch(() => undefined)
+        }
+        if (!disposeTracking) {
+          return
+        }
+
+        const ignoredReceipts: Array<SyncAppliedReceipt> = []
+        await database
+          .writeTransaction(async (context) => {
+            await flushDiffRecordsWithContext(context, ignoredReceipts)
+          })
+          .catch((error) => {
+            database.logger.log({
+              level: LogLevels.error,
+              message: `An error has been detected in the sync handler`,
+              error,
+            })
+          })
+      }
+
+      // We can use this directly if we want to pair a flush with dispose+recreate diff trigger.
+      async function flushDiffRecordsWithContext(
+        context: LockContext,
+        appliedReceipts: Array<SyncAppliedReceipt>,
+      ): Promise<void> {
+        // There is nothing to flush if no tracking table is currently active.
+        if (!disposeTracking) {
+          return
+        }
+
+        try {
+          begin()
+          const operations = await context.getAll<TriggerDiffRecord>(
+            `SELECT * FROM ${trackedTableName} ORDER BY operation_id ASC`,
+          )
+          const pendingOperations: Array<PendingOperation> = []
+
+          for (const op of operations) {
+            const { id, operation, timestamp, value } = op
+            const parsedValue = deserializeSyncRow({
+              id,
+              ...JSON.parse(value),
+            })
+            const parsedPreviousValue =
+              op.operation == DiffTriggerOperation.UPDATE
+                ? deserializeSyncRow({
+                    id,
+                    ...JSON.parse(op.previous_value),
+                  })
+                : undefined
+            write({
+              type: mapOperation(operation),
+              value: parsedValue,
+              previousValue: parsedPreviousValue,
+            })
+            pendingOperations.push({
+              id,
+              operation,
+              timestamp,
+              tableName: viewName,
+            })
+          }
+
+          // clear the current operations
+          await context.execute(`DELETE FROM ${trackedTableName}`)
+
+          const applied = commit()
+          appliedReceipts.push(applied)
+          // Mutation persistence is what releases the Collection's FIFO gate.
+          // Confirm these local operations after the sync transaction is
+          // staged; waiting for its applied receipt would deadlock the user
+          // transaction that currently parks it.
+          pendingOperationStore.resolvePendingFor(pendingOperations)
+        } catch (error) {
+          database.logger.log({
+            level: LogLevels.error,
+            message: `An error has been detected in the sync handler`,
+            error,
+          })
+        }
+      }
+
+      // The sync function needs to be synchronous.
+      async function start(afterOnChangeRegistered?: () => Promise<void>) {
+        database.logger.log({
+          level: LogLevels.info,
+          message: `Sync is starting for ${viewName} into ${trackedTableName}`,
+        })
         database.onChangeWithCallback(
           {
             onChange: async () => {
-              await database
-                .writeTransaction(async (context) => {
-                  begin()
-                  const operations = await context.getAll<TriggerDiffRecord>(
-                    `SELECT * FROM ${trackedTableName} ORDER BY timestamp ASC`,
-                  )
-                  const pendingOperations: Array<PendingOperation> = []
-
-                  for (const op of operations) {
-                    const { id, operation, timestamp, value } = op
-                    const parsedValue = deserializeSyncRow({
-                      id,
-                      ...JSON.parse(value),
-                    })
-                    const parsedPreviousValue =
-                      op.operation == DiffTriggerOperation.UPDATE
-                        ? deserializeSyncRow({
-                            id,
-                            ...JSON.parse(op.previous_value),
-                          })
-                        : undefined
-                    write({
-                      type: mapOperation(operation),
-                      value: parsedValue,
-                      previousValue: parsedPreviousValue,
-                    })
-                    pendingOperations.push({
-                      id,
-                      operation,
-                      timestamp,
-                      tableName: viewName,
-                    })
-                  }
-
-                  // clear the current operations
-                  await context.execute(`DELETE FROM ${trackedTableName}`)
-
-                  commit()
-                  pendingOperationStore.resolvePendingFor(pendingOperations)
-                })
-                .catch((error) => {
-                  database.logger.error(
-                    `An error has been detected in the sync handler`,
-                    error,
-                  )
-                })
+              await flushDiffRecords()
             },
           },
           {
@@ -362,68 +533,411 @@ export function powerSyncCollectionOptions<
           },
         )
 
-        const disposeTracking = await database.triggers.createDiffTrigger({
-          source: viewName,
-          destination: trackedTableName,
-          when: {
-            [DiffTriggerOperation.INSERT]: `TRUE`,
-            [DiffTriggerOperation.UPDATE]: `TRUE`,
-            [DiffTriggerOperation.DELETE]: `TRUE`,
-          },
-          hooks: {
-            beforeCreate: async (context) => {
-              let currentBatchCount = syncBatchSize
-              let cursor = 0
-              while (currentBatchCount == syncBatchSize) {
-                begin()
-                const batchItems = await context.getAll<TableType>(
-                  sanitizeSQL`SELECT * FROM ${viewName} LIMIT ? OFFSET ?`,
-                  [syncBatchSize, cursor],
-                )
-                currentBatchCount = batchItems.length
-                cursor += currentBatchCount
-                for (const row of batchItems) {
-                  write({
-                    type: `insert`,
-                    value: deserializeSyncRow(row),
-                  })
-                }
-                commit()
-              }
-              markReady()
-              database.logger.info(
-                `Sync is ready for ${viewName} into ${trackedTableName}`,
-              )
-            },
-          },
-        })
+        await afterOnChangeRegistered?.()
 
         // If the abort controller was aborted while processing the request above
         if (abortController.signal.aborted) {
-          await disposeTracking()
+          await safelyDisposeTracking()
         } else {
           abortController.signal.addEventListener(
             `abort`,
-            () => {
-              disposeTracking()
+            async () => {
+              await safelyDisposeTracking()
             },
             { once: true },
           )
         }
       }
 
-      start().catch((error) =>
-        database.logger.error(
-          `Could not start syncing process for ${viewName} into ${trackedTableName}`,
-          error,
-        ),
-      )
+      // Eager mode.
+      // Registers a diff trigger for the entire table.
+      function runEagerSync() {
+        let onUnload: CleanupFn | void | null = null
 
-      return () => {
-        database.logger.info(
-          `Sync has been stopped for ${viewName} into ${trackedTableName}`,
+        start(async () => {
+          const cleanup = await restConfig.onLoad?.()
+          if (abortController.signal.aborted) {
+            cleanup?.()
+            return
+          }
+          onUnload = cleanup
+
+          const appliedReceipts: Array<SyncAppliedReceipt> = []
+          await establishTracking(
+            {
+              // Initial eager hydration must make the source usable before
+              // PowerSync can persist a mutation queued during startup.
+              immediate: true,
+              when: {
+                [DiffTriggerOperation.INSERT]: `TRUE`,
+                [DiffTriggerOperation.UPDATE]: `TRUE`,
+                [DiffTriggerOperation.DELETE]: `TRUE`,
+              },
+              writeType: (_rowId: string) => `insert`,
+              batchQuery: (
+                lockContext: LockContext,
+                batchSize: number,
+                cursor: number,
+              ) =>
+                lockContext.getAll<TableType>(
+                  sanitizeSQL`SELECT * FROM ${viewName} LIMIT ? OFFSET ?`,
+                  [batchSize, cursor],
+                ),
+            },
+            appliedReceipts,
+          )
+          await Promise.all(appliedReceipts)
+          markReady()
+        }).catch((error) => {
+          database.logger.log({
+            level: LogLevels.error,
+            message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
+            error,
+          })
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+        })
+
+        return () => {
+          database.logger.log({
+            level: LogLevels.info,
+            message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
+          })
+          abortController.abort()
+          onUnload?.()
+        }
+      }
+
+      // On-demand mode.
+      // Registers a diff trigger for the active WHERE expressions.
+      function runOnDemandSync() {
+        type DemandRecord = {
+          options: LoadSubsetOptions
+          active: boolean
+          cleanup?: CleanupFn
+        }
+        type PendingRelease = {
+          options: LoadSubsetOptions
+          failures: number
+        }
+
+        const demands = new Map<LoadSubsetOptions, DemandRecord>()
+        const releasedSubsets = new WeakSet<LoadSubsetOptions>()
+        const pendingReleases: Array<PendingRelease> = []
+        let stopped = false
+        let trackingRevision = 0
+        let reconciledTrackingRevision = 0
+        let rebuildPromise: Promise<void> | null = null
+        let drainingReleases = false
+        let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
+        const startup = start()
+        void startup.catch((error) =>
+          database.logger.log({
+            level: LogLevels.error,
+            message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
+            error,
+          }),
         )
-        abortController.abort()
+
+        const activeWhereExpressions = () =>
+          Array.from(demands.values())
+            .filter((demand) => demand.active)
+            .map((demand) => demand.options.where)
+
+        // One reconciliation owns every queued revision so callers cannot
+        // settle against a stale trigger configuration.
+        const reconcileTracking = async (): Promise<void> => {
+          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
+            const revision = trackingRevision
+            const isCurrent = () => !stopped && trackingRevision === revision
+            const appliedReceipts: Array<SyncAppliedReceipt> = []
+
+            await database.writeLock(async (ctx) => {
+              if (!isCurrent()) return
+              await flushDiffRecordsWithContext(ctx, appliedReceipts)
+              if (!isCurrent()) return
+              await safelyDisposeTracking(ctx)
+              if (!isCurrent()) return
+
+              const active = activeWhereExpressions()
+              // Tracking was absent during an error. Positive baseline rows
+              // alone cannot reveal deletes or predicate exits from that gap.
+              const missing =
+                collection.status === `error`
+                  ? new Set(collection.keys())
+                  : undefined
+              if (active.length > 0) {
+                const combinedWhere =
+                  active.length === 1
+                    ? active[0]
+                    : or(active[0], active[1], ...active.slice(2))
+                const compiledNewData = compileSQLite(
+                  { where: combinedWhere },
+                  { jsonColumn: 'NEW.data' },
+                )
+                const compiledOldData = compileSQLite(
+                  { where: combinedWhere },
+                  { jsonColumn: 'OLD.data' },
+                )
+                const compiledView = compileSQLite({ where: combinedWhere })
+                const newDataWhenClause = toInlinedWhereClause(compiledNewData)
+                const oldDataWhenClause = toInlinedWhereClause(compiledOldData)
+                const viewWhereClause = toInlinedWhereClause(compiledView)
+                await establishTracking(
+                  {
+                    setupContext: ctx,
+                    when: {
+                      [DiffTriggerOperation.INSERT]: newDataWhenClause,
+                      [DiffTriggerOperation.UPDATE]: `(${newDataWhenClause}) OR (${oldDataWhenClause})`,
+                      [DiffTriggerOperation.DELETE]: oldDataWhenClause,
+                    },
+                    writeType: (rowId: string) =>
+                      collection.has(rowId) ? `update` : `insert`,
+                    batchQuery: (
+                      lockContext: LockContext,
+                      batchSize: number,
+                      cursor: number,
+                    ) =>
+                      lockContext
+                        .getAll<TableType>(
+                          `SELECT * FROM ${viewName} WHERE ${viewWhereClause} LIMIT ? OFFSET ?`,
+                          [batchSize, cursor],
+                        )
+                        .then((rows) => {
+                          for (const row of rows) missing?.delete(row.id)
+                          return rows
+                        }),
+                  },
+                  appliedReceipts,
+                )
+              }
+              if (!isCurrent()) await safelyDisposeTracking(ctx)
+              else if (missing?.size) {
+                begin()
+                for (const key of missing) write({ type: `delete`, key })
+                appliedReceipts.push(commit())
+              }
+            })
+            await Promise.all(appliedReceipts)
+            if (isCurrent()) {
+              reconciledTrackingRevision = revision
+              // Replacing the trigger alone is not recovery: its baseline
+              // writes must also be applied before the source is ready again.
+              if (collection.status === `error`) markReady()
+            }
+          }
+        }
+
+        const rebuildTracking = async (): Promise<void> => {
+          // New demand can join after reconciliation exits but before its
+          // shared promise clears. Each waiter must check its revision again.
+          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
+            await (rebuildPromise ??= reconcileTracking()
+              .catch((error) => {
+                // A rebuild may already have removed every active diff trigger.
+                // Do not leave healthy consumers ready against a stale source.
+                if (!stopped) markError(error)
+                throw error
+              })
+              .finally(() => {
+                rebuildPromise = null
+              }))
+          }
+        }
+
+        const loadSubset = async (
+          options: LoadSubsetOptions,
+        ): Promise<void> => {
+          if (stopped) return
+          // Never create a trigger that has no observer to drain its diff table.
+          await startup
+          if (
+            // Cleanup can run while startup is pending.
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            stopped ||
+            releasedSubsets.has(options) ||
+            options.signal?.aborted
+          ) {
+            return
+          }
+
+          const demand: DemandRecord = { options, active: false }
+          demands.set(options, demand)
+          try {
+            const cleanup = await restConfig.onLoadSubset?.(options)
+            if (cleanup) demand.cleanup = cleanup
+          } catch (error) {
+            demands.delete(options)
+            throw error
+          }
+
+          if (
+            // The user hook can reenter cleanup.
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            stopped ||
+            releasedSubsets.has(options) ||
+            options.signal?.aborted ||
+            demands.get(options) !== demand
+          ) {
+            demands.delete(options)
+            demand.cleanup?.()
+            return
+          }
+
+          demand.active = true
+          trackingRevision++
+          await rebuildTracking()
+        }
+
+        const toInlinedWhereClause = (compiled: {
+          where?: string
+          params: Array<unknown>
+        }): string => {
+          if (!compiled.where) return 'TRUE'
+          const sqlParts = compiled.where.split('?')
+          return sanitizeSQL(
+            sqlParts as unknown as TemplateStringsArray,
+            ...compiled.params,
+          )
+        }
+
+        const cleanupDemand = (demand: DemandRecord): void => {
+          demands.delete(demand.options)
+          try {
+            demand.cleanup?.()
+          } catch (error) {
+            database.logger.log({
+              level: LogLevels.error,
+              message: `Could not clean up subset hook for ${viewName}`,
+              error,
+            })
+          }
+        }
+
+        const performPhysicalRelease = async (
+          options: LoadSubsetOptions,
+        ): Promise<void> => {
+          const compiledDeparting = compileSQLite({ where: options.where })
+          const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
+          let rowsToEvict: Array<{ id: string }>
+          for (;;) {
+            if (stopped) return
+            const revision = trackingRevision
+            const active = activeWhereExpressions()
+            let evictionSQL: string
+            if (active.length === 0) {
+              evictionSQL = `SELECT id FROM ${viewName} WHERE ${departingWhereSQL}`
+            } else {
+              const combinedRemaining =
+                active.length === 1
+                  ? active[0]!
+                  : or(active[0], active[1], ...active.slice(2))
+              const compiledRemaining = compileSQLite({
+                where: combinedRemaining,
+              })
+              const remainingWhereSQL = toInlinedWhereClause(compiledRemaining)
+              evictionSQL = `SELECT id FROM ${viewName} WHERE (${departingWhereSQL}) AND NOT (${remainingWhereSQL})`
+            }
+
+            rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can run during the query
+            if (stopped) return
+            if (trackingRevision === revision) break
+          }
+          if (rowsToEvict.length > 0) {
+            begin()
+            for (const { id } of rowsToEvict) {
+              write({ type: `delete`, key: id })
+            }
+            void commit()
+          }
+          await rebuildTracking()
+        }
+
+        function scheduleReleaseDrain(delay = 0): void {
+          if (stopped || drainingReleases || releaseRetryTimer) return
+          if (delay > 0) {
+            releaseRetryTimer = setTimeout(() => {
+              releaseRetryTimer = undefined
+              void drainReleases()
+            }, delay)
+            return
+          }
+          void drainReleases()
+        }
+
+        async function drainReleases(): Promise<void> {
+          if (stopped || drainingReleases) return
+          drainingReleases = true
+          let retryDelay = 0
+          try {
+            const attempts = pendingReleases.length
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- each release can reenter cleanup
+            for (let index = 0; !stopped && index < attempts; index++) {
+              const pending = pendingReleases.shift()!
+              try {
+                await performPhysicalRelease(pending.options)
+              } catch (error) {
+                pending.failures++
+                pendingReleases.push(pending)
+                const delay = Math.min(
+                  1000 * 2 ** (pending.failures - 1),
+                  30000,
+                )
+                retryDelay =
+                  retryDelay === 0 ? delay : Math.min(retryDelay, delay)
+                database.logger.log({
+                  level: LogLevels.error,
+                  message: `Could not release subset tracking for ${viewName}; retrying`,
+                  error,
+                })
+              }
+            }
+          } finally {
+            drainingReleases = false
+          }
+          if (pendingReleases.length > 0) scheduleReleaseDrain(retryDelay)
+        }
+
+        const unloadSubset = (options: LoadSubsetOptions): void => {
+          releasedSubsets.add(options)
+          const demand = demands.get(options)
+          if (!demand) return
+
+          const wasActive = demand.active
+          if (wasActive) trackingRevision++
+          cleanupDemand(demand)
+
+          if (wasActive) {
+            pendingReleases.push({ options, failures: 0 })
+            // New work must not wait for another release's backoff.
+            clearTimeout(releaseRetryTimer)
+            releaseRetryTimer = undefined
+            scheduleReleaseDrain()
+          }
+        }
+
+        markReady()
+
+        return {
+          cleanup: () => {
+            stopped = true
+            clearTimeout(releaseRetryTimer)
+            releaseRetryTimer = undefined
+            database.logger.log({
+              level: LogLevels.info,
+              message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
+            })
+            abortController.abort()
+            for (const demand of demands.values()) {
+              cleanupDemand(demand)
+            }
+            pendingReleases.length = 0
+          },
+          loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
+          unloadSubset,
+        }
       }
     },
     // Expose the getSyncMetadata function
@@ -442,6 +956,7 @@ export function powerSyncCollectionOptions<
     getKey,
     // Syncing should start immediately since we need to monitor the changes for mutations
     startSync: true,
+    syncMode,
     sync,
     onInsert: async (params) => {
       // The transaction here should only ever contain a single insert mutation
@@ -461,18 +976,7 @@ export function powerSyncCollectionOptions<
         trackedTableName,
         metadataIsTracked,
         serializeValue: (value) =>
-          serializeForSQLite(
-            value,
-            // This is required by the input generic
-            table as Table<
-              MapBaseColumnType<InferPowerSyncOutputType<TTable, TSchema>>
-            >,
-            // Coerce serializer to the shape that corresponds to the Table constructed from OutputType
-            serializer as CustomSQLiteSerializer<
-              OutputType,
-              ExtractedTableColumns<Table<MapBaseColumnType<OutputType>>>
-            >,
-          ),
+          serializeForSQLite<TTable>(value, table, serializer),
       }),
     },
   }

@@ -1,0 +1,593 @@
+---
+name: db-core/live-queries
+description: >
+  Query builder fluent API: from, where, join, leftJoin, rightJoin, innerJoin,
+  fullJoin, select, fn.select, groupBy, having, orderBy, limit, offset, distinct,
+  findOne. Operators: eq, gt, gte, lt, lte, like, ilike, inArray, isNull,
+  isUndefined, and, or, not. Aggregates: count, sum, avg, min, max. String
+  functions: upper, lower, length, concat. Utility: coalesce, caseWhen. Math:
+  add, subtract, multiply, divide.
+  $selected namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
+  Incremental view maintenance via differential dataflow (d2ts). Virtual
+  properties ($synced, $origin, $key, $collectionId). Includes subqueries
+  for hierarchical data. Collection, toArray, materialize, and
+  concat(toArray(...)) include modes.
+  queryOnce for one-shot queries. createEffect for reactive side effects
+  (onEnter, onUpdate, onExit, onBatch).
+type: sub-skill
+library: db
+library_version: '0.6.17'
+sources:
+  - 'TanStack/db:docs/guides/live-queries.md'
+  - 'TanStack/db:packages/db/src/query/builder/index.ts'
+  - 'TanStack/db:packages/db/src/query/compiler/index.ts'
+---
+
+# Live Queries
+
+> This skill builds on db-core.
+
+TanStack DB live queries use a SQL-like fluent query builder to create **reactive derived collections** that automatically update when underlying data changes. The query engine compiles queries into incremental view maintenance (IVM) pipelines using differential dataflow (d2ts), so only deltas are recomputed.
+
+All operators, string functions, math functions, and aggregates are incrementally maintained. Prefer them over equivalent JS code.
+
+## Setup
+
+Minimal example using the core API (no framework hooks):
+
+```ts
+import {
+  createCollection,
+  createLiveQueryCollection,
+  liveQueryCollectionOptions,
+  eq,
+} from '@tanstack/db'
+
+// Assume usersCollection is already created via createCollection(...)
+
+// Option 1: createLiveQueryCollection shorthand
+const activeUsers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .select(({ user }) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+    })),
+)
+
+// Option 2: full options via liveQueryCollectionOptions
+const activeUsers2 = createCollection(
+  liveQueryCollectionOptions({
+    query: (q) =>
+      q
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true))
+        .select(({ user }) => ({
+          id: user.id,
+          name: user.name,
+        })),
+    getKey: (user) => user.id,
+  }),
+)
+
+// The result is a live collection -- iterate, subscribe, or use as source
+for (const user of activeUsers) {
+  console.log(user.name)
+}
+```
+
+## Core Patterns
+
+### 1. Filtering with where + operators
+
+Chain `.where()` calls (ANDed together) using expression operators. Use `and()`, `or()`, `not()` for complex logic.
+
+```ts
+import { eq, gt, or, and, not, inArray, like } from '@tanstack/db'
+
+const results = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .where(({ user }) =>
+      and(
+        gt(user.age, 18),
+        or(eq(user.role, 'admin'), eq(user.role, 'moderator')),
+        not(inArray(user.id, bannedIds)),
+      ),
+    ),
+)
+```
+
+Boolean column references work directly:
+
+```ts
+.where(({ user }) => user.active)        // bare boolean ref
+.where(({ user }) => not(user.suspended)) // negated boolean ref
+```
+
+Comparisons follow PostgreSQL semantics. Comparisons involving `null` or
+`undefined` are unknown and do not match; use `isNull()` or `isUndefined()`.
+`NaN` (and an invalid `Date`) equals itself and sorts after every other
+non-null value.
+
+### 2. Joining two collections
+
+Join conditions **must** use `eq()` (equality only -- IVM constraint). Default join type is `left`. Convenience methods: `leftJoin`, `rightJoin`, `innerJoin`, `fullJoin`.
+
+```ts
+import { eq } from '@tanstack/db'
+
+const userPosts = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .innerJoin({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
+    )
+    .select(({ user, post }) => ({
+      userName: user.name,
+      postTitle: post.title,
+    })),
+)
+```
+
+Multiple joins:
+
+```ts
+q.from({ user: usersCollection })
+  .join({ post: postsCollection }, ({ user, post }) => eq(user.id, post.userId))
+  .join({ comment: commentsCollection }, ({ post, comment }) =>
+    eq(post.id, comment.postId),
+  )
+```
+
+### 3. Aggregation with groupBy + having
+
+Use `groupBy` to group rows, then aggregate in `select`. Filter groups with `having`. The `$selected` namespace lets `having` and `orderBy` reference fields defined in `select`.
+
+```ts
+import { count, sum, gt } from '@tanstack/db'
+
+const topCustomers = createLiveQueryCollection((q) =>
+  q
+    .from({ order: ordersCollection })
+    .groupBy(({ order }) => order.customerId)
+    .select(({ order }) => ({
+      customerId: order.customerId,
+      totalSpent: sum(order.amount),
+      orderCount: count(order.id),
+    }))
+    .having(({ $selected }) => gt($selected.totalSpent, 1000))
+    .orderBy(({ $selected }) => $selected.totalSpent, 'desc')
+    .limit(10),
+)
+```
+
+Without `groupBy`, aggregates in `select` treat the entire collection as one group:
+
+```ts
+const stats = createLiveQueryCollection((q) =>
+  q.from({ user: usersCollection }).select(({ user }) => ({
+    totalUsers: count(user.id),
+    avgAge: avg(user.age),
+  })),
+)
+```
+
+### 4. Standalone derived collection with createLiveQueryCollection
+
+Derived collections are themselves collections. Use one as a source for another query to cache intermediate results:
+
+```ts
+// Base derived collection
+const activeUsers = createLiveQueryCollection((q) =>
+  q.from({ user: usersCollection }).where(({ user }) => eq(user.active, true)),
+)
+
+// Second query uses the derived collection as its source
+const activeUserPosts = createLiveQueryCollection((q) =>
+  q
+    .from({ user: activeUsers })
+    .join({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
+    )
+    .select(({ user, post }) => ({
+      userName: user.name,
+      postTitle: post.title,
+    })),
+)
+```
+
+Create derived collections once at module scope and reuse them. Do not recreate on every render or navigation.
+
+Live query collections default to `gcTime: 5_000`. An explicit `gcTime: 0` is
+preserved and disables garbage collection for that derived collection --
+including the reclamation of a collection that started syncing and never gained
+a subscriber. Note this is the opposite of `gcTime: 0` in TanStack Query, where
+it collects as soon as the query goes inactive; use a small positive value if
+you want prompt collection here.
+
+Sync started without subscribers has a minimum 50ms GC grace period. Pending
+`preload()` calls retain the collection until they settle; the unused retention
+period then starts. Preloading an already-ready collection refreshes that
+period. Explicit `cleanup()` can still abort a pending preload.
+
+## Virtual Properties
+
+Live query results include computed, read-only virtual properties on every row:
+
+- `$synced`: `true` when no pending local optimistic write affects the row;
+  `false` while one does. This is local mutation status, not proof that a
+  backend uploaded, confirmed, or read back the row.
+- `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
+- `$key`: the row key for the result.
+- `$collectionId`: the source collection ID.
+
+These props are added automatically and can be used in `where`, `select`, and `orderBy` clauses. Do not persist them back to storage.
+
+## Includes (Subqueries in Select)
+
+Embed a correlated subquery inside `select()` to produce hierarchical (nested)
+data. The subquery must contain a `where` with an `eq()` that correlates a
+parent field with a child field.
+
+### Collection includes (default)
+
+Return a child `Collection` on each parent row:
+
+```ts
+import { eq, createLiveQueryCollection } from '@tanstack/db'
+
+const projectsWithIssues = createLiveQueryCollection((q) =>
+  q.from({ p: projectsCollection }).select(({ p }) => ({
+    id: p.id,
+    name: p.name,
+    issues: q
+      .from({ i: issuesCollection })
+      .where(({ i }) => eq(i.projectId, p.id))
+      .select(({ i }) => ({
+        id: i.id,
+        title: i.title,
+      })),
+  })),
+)
+
+// Each row's `issues` is a live Collection
+for (const project of projectsWithIssues) {
+  console.log(project.name, project.issues.toArray)
+}
+```
+
+### Array includes with toArray()
+
+Wrap the subquery in `toArray()` to get a plain array instead of a Collection:
+
+```ts
+import { eq, toArray, createLiveQueryCollection } from '@tanstack/db'
+
+const messagesWithParts = createLiveQueryCollection((q) =>
+  q.from({ m: messagesCollection }).select(({ m }) => ({
+    id: m.id,
+    contentParts: toArray(
+      q
+        .from({ c: chunksCollection })
+        .where(({ c }) => eq(c.messageId, m.id))
+        .orderBy(({ c }) => c.timestamp)
+        .select(({ c }) => c.text),
+    ),
+  })),
+)
+// row.contentParts is string[]
+```
+
+### Plain values with materialize()
+
+Use `materialize()` when the parent row should hold a plain snapshot rather
+than a child collection:
+
+```ts
+import { eq, materialize, createLiveQueryCollection } from '@tanstack/db'
+
+const issuesWithProject = createLiveQueryCollection((q) =>
+  q.from({ issue: issuesCollection }).select(({ issue }) => ({
+    ...issue,
+    project: materialize(
+      q
+        .from({ project: projectsCollection })
+        .where(({ project }) => eq(project.id, issue.projectId))
+        .findOne(),
+    ),
+  })),
+)
+// row.project is Project | undefined
+```
+
+For a multi-row subquery, `materialize()` returns `Array<T>` like `toArray()`.
+For a subquery ending in `findOne()`, it returns `T | undefined`. In both cases,
+the parent row is re-emitted when the child result changes.
+
+### Concatenated scalar with concat(toArray())
+
+Wrap `toArray()` in `concat()` to join the scalar results into a single string:
+
+```ts
+import { eq, toArray, concat, createLiveQueryCollection } from '@tanstack/db'
+
+const messagesWithContent = createLiveQueryCollection((q) =>
+  q.from({ m: messagesCollection }).select(({ m }) => ({
+    id: m.id,
+    content: concat(
+      toArray(
+        q
+          .from({ c: chunksCollection })
+          .where(({ c }) => eq(c.messageId, m.id))
+          .orderBy(({ c }) => c.timestamp)
+          .select(({ c }) => c.text),
+      ),
+    ),
+  })),
+)
+// row.content is a single concatenated string
+```
+
+### Includes rules
+
+- The subquery **must** have a `where` clause with an `eq()` correlating a parent alias with a child alias. The library extracts this automatically as the join condition.
+- `toArray()` works with both scalar selects (e.g., `select(({ c }) => c.text)` → `string[]`) and object selects (e.g., `select(({ c }) => ({ id: c.id, title: c.title }))` → `Array<{id, title}>`).
+- `materialize()` returns an array, or one value for a `findOne()` subquery.
+  Like `toArray()`, it must be a top-level value in `select()` and cannot be
+  nested inside `coalesce()`, `eq()`, or another expression.
+- `concat(toArray())` requires a **scalar** `select` to concatenate into a string.
+- Collection includes (bare subquery) require an **object** `select`.
+- Includes subqueries are compiled into the same incremental pipeline as the parent query -- they are not separate live queries.
+
+## One-Shot Queries with queryOnce
+
+For non-reactive, one-time snapshots use `queryOnce`. It creates a live query collection, preloads it, extracts the results, and cleans up automatically.
+
+```ts
+import { eq, queryOnce } from '@tanstack/db'
+
+const activeUsers = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .select(({ user }) => ({ id: user.id, name: user.name })),
+)
+
+// With findOne — resolves to T | undefined
+const user = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.id, userId))
+    .findOne(),
+)
+```
+
+Use `queryOnce` for scripts, loaders, data export, tests, or AI/LLM context building. For UI bindings and reactive updates, use live queries instead.
+
+## Reactive Effects (createEffect)
+
+Reactive effects respond to query result _changes_ without materializing the full result set. Effects fire callbacks when rows enter, exit, or update within a query result — like a database trigger on an arbitrary live query.
+
+```ts
+import { createEffect, eq } from '@tanstack/db'
+
+const effect = createEffect({
+  query: (q) =>
+    q
+      .from({ msg: messagesCollection })
+      .where(({ msg }) => eq(msg.role, 'user')),
+  skipInitial: true,
+  onEnter: async (event, ctx) => {
+    await processNewMessage(event.value, { signal: ctx.signal })
+  },
+  onExit: (event) => {
+    console.log('Message left result set:', event.key)
+  },
+  onError: (error, event) => {
+    console.error(`Failed to process ${event.key}:`, error)
+  },
+})
+
+// Dispose when no longer needed
+await effect.dispose()
+```
+
+| Use case                        | Approach                                              |
+| ------------------------------- | ----------------------------------------------------- |
+| Display query results in UI     | Live query collection + `useLiveQuery`                |
+| React to changes (side effects) | `createEffect` with `onEnter` / `onUpdate` / `onExit` |
+| Inspect full batch of changes   | `createEffect` with `onBatch`                         |
+
+Key options: `id` (optional), `query`, `skipInitial` (skip existing rows on init), `onEnter`, `onUpdate`, `onExit`, `onBatch`, `onError`, `onSourceError`. The `ctx.signal` aborts when the effect is disposed.
+
+## Common Mistakes
+
+### CRITICAL: Using === instead of eq()
+
+JavaScript `===` in a where callback returns a boolean primitive, not an expression object. Throws `InvalidWhereExpressionError`.
+
+```ts
+// WRONG
+q.from({ user: usersCollection }).where(({ user }) => user.active === true)
+
+// CORRECT
+q.from({ user: usersCollection }).where(({ user }) => eq(user.active, true))
+```
+
+### CRITICAL: Filtering in JS instead of query operators
+
+JS `.filter()` / `.map()` on the result array throws away incremental maintenance -- the JS code re-runs from scratch on every change.
+
+```ts
+// WRONG -- re-runs filter on every change
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection }),
+})
+const active = data.filter((t) => t.completed === false)
+
+// CORRECT -- incrementally maintained
+const { data } = useLiveQuery({
+  query: (q) =>
+    q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.completed, false)),
+})
+```
+
+### HIGH: Not using the full operator set
+
+The library provides string functions (`upper`, `lower`, `length`, `concat`),
+math (`add`, `subtract`, `multiply`, `divide`), utility functions (`coalesce`,
+`caseWhen`), and aggregates (`count`, `sum`, `avg`, `min`, `max`). All are
+incrementally maintained. Prefer them over JS equivalents.
+
+```ts
+// WRONG
+.fn.select((row) => ({
+  name: row.user.name.toUpperCase(),
+  total: row.order.price + row.order.tax,
+}))
+
+// CORRECT
+.select(({ user, order }) => ({
+  name: upper(user.name),
+  total: add(order.price, order.tax),
+  displayName: coalesce(user.displayName, user.name, 'Unknown'),
+}))
+```
+
+Math expressions also work in `orderBy()`. When a computed expression is used
+with `limit()`, lazy-loading optimization is skipped and all matching rows load
+before sorting. Literal values such as `Date.now()` are captured when the query
+is created; recreate the query when the value must advance.
+
+### HIGH: Missing conditional expression helpers
+
+Use `coalesce()` for null/undefined fallbacks and `caseWhen()` for conditional
+computed fields. JavaScript operators like `||` or ternaries do not build query
+expressions inside standard `.select()` callbacks.
+
+```ts
+// WRONG -- document.title is a query ref, not a runtime string
+.select(({ document }) => ({
+  displayTitle: document.title || 'Untitled document',
+}))
+
+// CORRECT -- fallback for null/undefined
+.select(({ document }) => ({
+  displayTitle: coalesce(document.title, 'Untitled document'),
+}))
+
+// CORRECT -- fallback for null/undefined and empty string
+.select(({ document }) => ({
+  displayTitle: caseWhen(
+    eq(coalesce(document.title, ''), ''),
+    'Untitled document',
+    document.title,
+  ),
+}))
+```
+
+Use `fn.select()` only when you genuinely need arbitrary JavaScript; it cannot
+be optimized like expression-based `.select()`.
+
+### HIGH: .distinct() without .select()
+
+`distinct()` deduplicates by the selected columns. Without `select()`, throws `DistinctRequiresSelectError`.
+
+```ts
+// WRONG
+q.from({ user: usersCollection }).distinct()
+
+// CORRECT
+q.from({ user: usersCollection })
+  .select(({ user }) => ({ country: user.country }))
+  .distinct()
+```
+
+### HIGH: .having() without .groupBy()
+
+`having` filters aggregated groups. Without `groupBy`, there are no groups. Throws `HavingRequiresGroupByError`.
+
+```ts
+// WRONG
+q.from({ order: ordersCollection }).having(({ order }) =>
+  gt(count(order.id), 5),
+)
+
+// CORRECT
+q.from({ order: ordersCollection })
+  .groupBy(({ order }) => order.customerId)
+  .having(({ order }) => gt(count(order.id), 5))
+```
+
+### HIGH: .limit() / .offset() without .orderBy()
+
+Without deterministic ordering, limit/offset results are non-deterministic and cannot be incrementally maintained. Throws `LimitOffsetRequireOrderByError`.
+
+```ts
+// WRONG
+q.from({ user: usersCollection }).limit(10)
+
+// CORRECT
+q.from({ user: usersCollection })
+  .orderBy(({ user }) => user.name)
+  .limit(10)
+```
+
+### HIGH: Join condition using non-eq() operator
+
+The differential dataflow join operator only supports equality joins. Using `gt()`, `like()`, etc. throws `JoinConditionMustBeEqualityError`.
+
+```ts
+// WRONG
+q.from({ user: usersCollection }).join(
+  { post: postsCollection },
+  ({ user, post }) => gt(user.id, post.userId),
+)
+
+// CORRECT
+q.from({ user: usersCollection }).join(
+  { post: postsCollection },
+  ({ user, post }) => eq(user.id, post.userId),
+)
+```
+
+### MEDIUM: Passing source directly instead of {alias: collection}
+
+`from()` and `join()` require sources wrapped as `{alias: collection}`. Passing the collection directly throws `InvalidSourceTypeError`.
+
+```ts
+// WRONG
+q.from(usersCollection)
+
+// CORRECT
+q.from({ users: usersCollection })
+```
+
+### MEDIUM: Using unsafe select alias paths
+
+Select alias path segments named `__proto__`, `prototype`, or `constructor`
+throw `UnsafeAliasPathError`. Use ordinary data-field names; do not suppress
+this prototype-pollution guard.
+
+## Tension: Query expressiveness vs. IVM constraints
+
+The query builder looks like SQL but has constraints that SQL does not:
+
+- **Equality joins only** -- `eq()` is the only allowed join condition operator.
+- **orderBy required for limit/offset** -- non-deterministic pagination cannot be incrementally maintained.
+- **distinct requires select** -- deduplication needs an explicit projection.
+- **fn.select() cannot be used with groupBy()** -- the compiler must statically analyze select to discover aggregate functions.
+
+These constraints exist because the underlying d2ts differential dataflow engine requires them for correct incremental view maintenance.
+
+See also: react-db/SKILL.md for React hooks (`useLiveQuery`, `useLiveSuspenseQuery`, `useLiveInfiniteQuery`).
+
+## References
+
+- [Query Operators Reference](./references/operators.md) -- full signatures and examples for all operators, functions, and aggregates.

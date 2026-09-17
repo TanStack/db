@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import { defineConfig } from 'vite'
@@ -13,6 +14,14 @@ function watchWorkspacePackages() {
       const watchPaths = [
         path.resolve(__dirname, `../../../packages/db/dist`),
         path.resolve(__dirname, `../../../packages/offline-transactions/dist`),
+        path.resolve(
+          __dirname,
+          `../../../packages/browser-db-sqlite-persistence/dist`,
+        ),
+        path.resolve(
+          __dirname,
+          `../../../packages/db-sqlite-persistence-core/dist`,
+        ),
       ]
 
       console.log(`[watch-workspace] Starting to watch paths:`)
@@ -21,20 +30,22 @@ function watchWorkspacePackages() {
       console.log(`[watch-workspace] Resolved paths:`)
       watchPaths.forEach((p) => console.log(`  - ${path.resolve(p)}`))
 
+      let ready = false
+
       const watcher = chokidar.watch(watchPaths, {
         ignored: /node_modules/,
         persistent: true,
       })
 
       watcher.on(`ready`, () => {
+        ready = true
         console.log(
           `[watch-workspace] Initial scan complete. Watching for changes...`,
         )
-        const watchedPaths = watcher.getWatched()
-        console.log(`[watch-workspace] Currently watching:`, watchedPaths)
       })
 
       watcher.on(`add`, (filePath) => {
+        if (!ready) return
         console.log(`[watch-workspace] File added: ${filePath}`)
         server.ws.send({
           type: `full-reload`,
@@ -42,6 +53,7 @@ function watchWorkspacePackages() {
       })
 
       watcher.on(`change`, (filePath) => {
+        if (!ready) return
         console.log(`[watch-workspace] File changed: ${filePath}`)
         server.ws.send({
           type: `full-reload`,
@@ -63,16 +75,61 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: [`@tanstack/db`, `@tanstack/offline-transactions`],
+    exclude: [
+      `@tanstack/db`,
+      `@tanstack/offline-transactions`,
+      `@tanstack/browser-db-sqlite-persistence`,
+      `@tanstack/db-sqlite-persistence-core`,
+      `@journeyapps/wa-sqlite`,
+    ],
   },
   plugins: [
+    // Serve .wasm files before TanStack Start's catch-all handler intercepts them.
+    // We use configureServer returning a function (post-hook) and unshift onto the
+    // stack so this runs before any other middleware including TanStack Start.
+    {
+      name: `serve-wasm-files`,
+      configureServer(server: any) {
+        const wasmHandler = (req: any, res: any, next: () => void) => {
+          // Strip query string before checking extension
+          const urlWithoutQuery = (req.url ?? ``).split(`?`)[0]
+          if (!urlWithoutQuery.endsWith(`.wasm`)) {
+            return next()
+          }
+
+          // Handle /@fs/ paths used by Vite for serving node_modules files
+          const fsPrefix = `/@fs`
+          let filePath: string | undefined
+          if (urlWithoutQuery.startsWith(fsPrefix)) {
+            filePath = urlWithoutQuery.slice(fsPrefix.length)
+          }
+
+          if (!filePath || !fs.existsSync(filePath)) {
+            return next()
+          }
+
+          const content = fs.readFileSync(filePath)
+          res.writeHead(200, {
+            'Content-Type': `application/wasm`,
+            'Content-Length': content.byteLength,
+            'Cache-Control': `no-cache`,
+          })
+          res.end(content)
+        }
+
+        // Prepend to the middleware stack so it runs before TanStack Start
+        server.middlewares.stack.unshift({
+          route: ``,
+          handle: wasmHandler,
+        })
+      },
+    },
     watchWorkspacePackages(),
     tsConfigPaths({
       projects: [`./tsconfig.json`],
     }),
     tanstackStart({
-      customViteReactPlugin: true,
-      mode: `spa`, // SPA mode for client-side only offline features
+      spa: { enabled: true },
     }),
     viteReact(),
     tailwindcss(),

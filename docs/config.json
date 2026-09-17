@@ -31,6 +31,10 @@
           "to": "guides/live-queries"
         },
         {
+          "label": "SSR and Hydration",
+          "to": "guides/ssr"
+        },
+        {
           "label": "Mutations",
           "to": "guides/mutations"
         },

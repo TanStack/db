@@ -167,7 +167,7 @@ describe(`Optional Fields - Runtime Tests`, () => {
           .select(({ user, dept }) => ({
             user_name: user.name,
 
-            dept_name: dept?.name, // Should be undefined for Bob
+            dept_name: dept.name, // Should be undefined for Bob
           })),
     })
 

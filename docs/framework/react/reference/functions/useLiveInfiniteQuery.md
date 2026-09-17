@@ -3,17 +3,15 @@ id: useLiveInfiniteQuery
 title: useLiveInfiniteQuery
 ---
 
-# Function: useLiveInfiniteQuery()
-
 ## Call Signature
 
 ```ts
 function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturn<any>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:113](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L113)
+Defined in: [useLiveInfiniteQuery.ts:107](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L107)
 
-Create an infinite query using a query function with live updates
+Create an infinite query using a query function with live updates.
 
 Uses `utils.setWindow()` to dynamically adjust the limit/offset window
 without recreating the live query collection on each page change.
@@ -42,72 +40,13 @@ without recreating the live query collection on each page change.
 
 [`UseLiveInfiniteQueryConfig`](../type-aliases/UseLiveInfiniteQueryConfig.md)\<`any`\>
 
-Configuration including pageSize and getNextPageParam
+Configuration including pageSize and an optional initial page label
 
 ### Returns
 
 [`UseLiveInfiniteQueryReturn`](../type-aliases/UseLiveInfiniteQueryReturn.md)\<`any`\>
 
 Object with pages, data, and pagination controls
-
-### Examples
-
-```ts
-// Basic infinite query
-const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
-  (q) => q
-    .from({ posts: postsCollection })
-    .orderBy(({ posts }) => posts.createdAt, 'desc')
-    .select(({ posts }) => ({
-      id: posts.id,
-      title: posts.title
-    })),
-  {
-    pageSize: 20,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === 20 ? allPages.length : undefined
-  }
-)
-```
-
-```ts
-// With dependencies
-const { pages, fetchNextPage } = useLiveInfiniteQuery(
-  (q) => q
-    .from({ posts: postsCollection })
-    .where(({ posts }) => eq(posts.category, category))
-    .orderBy(({ posts }) => posts.createdAt, 'desc'),
-  {
-    pageSize: 10,
-    getNextPageParam: (lastPage) =>
-      lastPage.length === 10 ? lastPage.length : undefined
-  },
-  [category]
-)
-```
-
-```ts
-// Router loader pattern with pre-created collection
-// In loader:
-const postsQuery = createLiveQueryCollection({
-  query: (q) => q
-    .from({ posts: postsCollection })
-    .orderBy(({ posts }) => posts.createdAt, 'desc')
-    .limit(20)
-})
-await postsQuery.preload()
-return { postsQuery }
-
-// In component:
-const { postsQuery } = useLoaderData()
-const { data, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
-  postsQuery,
-  {
-    pageSize: 20,
-    getNextPageParam: (lastPage) => lastPage.length === 20 ? lastPage.length : undefined
-  }
-)
-```
 
 ## Call Signature
 
@@ -118,9 +57,9 @@ function useLiveInfiniteQuery<TContext>(
 deps?): UseLiveInfiniteQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:123](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L123)
+Defined in: [useLiveInfiniteQuery.ts:117](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L117)
 
-Create an infinite query using a query function with live updates
+Create an infinite query using a query function with live updates.
 
 Uses `utils.setWindow()` to dynamically adjust the limit/offset window
 without recreating the live query collection on each page change.
@@ -143,75 +82,16 @@ Query function that defines what data to fetch. Must include `.orderBy()` for se
 
 [`UseLiveInfiniteQueryConfig`](../type-aliases/UseLiveInfiniteQueryConfig.md)\<`TContext`\>
 
-Configuration including pageSize and getNextPageParam
+Configuration including pageSize and an optional initial page label
 
 #### deps?
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
 [`UseLiveInfiniteQueryReturn`](../type-aliases/UseLiveInfiniteQueryReturn.md)\<`TContext`\>
 
 Object with pages, data, and pagination controls
-
-### Examples
-
-```ts
-// Basic infinite query
-const { data, pages, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
-  (q) => q
-    .from({ posts: postsCollection })
-    .orderBy(({ posts }) => posts.createdAt, 'desc')
-    .select(({ posts }) => ({
-      id: posts.id,
-      title: posts.title
-    })),
-  {
-    pageSize: 20,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === 20 ? allPages.length : undefined
-  }
-)
-```
-
-```ts
-// With dependencies
-const { pages, fetchNextPage } = useLiveInfiniteQuery(
-  (q) => q
-    .from({ posts: postsCollection })
-    .where(({ posts }) => eq(posts.category, category))
-    .orderBy(({ posts }) => posts.createdAt, 'desc'),
-  {
-    pageSize: 10,
-    getNextPageParam: (lastPage) =>
-      lastPage.length === 10 ? lastPage.length : undefined
-  },
-  [category]
-)
-```
-
-```ts
-// Router loader pattern with pre-created collection
-// In loader:
-const postsQuery = createLiveQueryCollection({
-  query: (q) => q
-    .from({ posts: postsCollection })
-    .orderBy(({ posts }) => posts.createdAt, 'desc')
-    .limit(20)
-})
-await postsQuery.preload()
-return { postsQuery }
-
-// In component:
-const { postsQuery } = useLoaderData()
-const { data, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
-  postsQuery,
-  {
-    pageSize: 20,
-    getNextPageParam: (lastPage) => lastPage.length === 20 ? lastPage.length : undefined
-  }
-)
-```

@@ -3,8 +3,6 @@ id: deepEquals
 title: deepEquals
 ---
 
-# Function: deepEquals()
-
 ```ts
 function deepEquals(a, b): boolean;
 ```

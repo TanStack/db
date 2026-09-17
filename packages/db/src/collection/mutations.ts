@@ -1,4 +1,5 @@
 import { withArrayChangeTracking, withChangeTracking } from '../proxy'
+import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
 import {
   DeleteKeyNotFoundError,
@@ -17,6 +18,7 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from '../errors'
+import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { Collection, CollectionImpl } from './index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -25,11 +27,13 @@ import type {
   OperationConfig,
   PendingMutation,
   StandardSchema,
+  TransactionConfig,
   Transaction as TransactionType,
   TransactionWithMutations,
   UtilsRecord,
   WritableDeep,
 } from '../types'
+import type { TransactionScope } from '../transactions'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionStateManager } from './state'
 
@@ -44,6 +48,7 @@ export class CollectionMutationsManager<
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private collection!: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
   private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private transactionScope?: TransactionScope
   private id: string
 
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
@@ -59,6 +64,22 @@ export class CollectionMutationsManager<
     this.lifecycle = deps.lifecycle
     this.state = deps.state
     this.collection = deps.collection
+  }
+
+  setTransactionScope(transactionScope: TransactionScope): void {
+    this.transactionScope = transactionScope
+  }
+
+  private getActiveTransaction() {
+    return this.transactionScope
+      ? this.transactionScope.getActiveTransactionForCollection()
+      : getActiveTransaction()
+  }
+
+  private createTransaction<T extends object>(config: TransactionConfig<T>) {
+    return this.transactionScope
+      ? this.transactionScope.createTransaction(config)
+      : createTransaction(config)
   }
 
   private ensureStandardSchema(schema: unknown): StandardSchema<TOutput> {
@@ -91,7 +112,7 @@ export class CollectionMutationsManager<
         typeof existingData === `object`
       ) {
         // Merge the update with the existing data
-        const mergedData = Object.assign({}, existingData, data)
+        const mergedData = { ...existingData, ...data }
 
         // Validate the merged data
         const result = standardSchema[`~standard`].validate(mergedData)
@@ -153,13 +174,23 @@ export class CollectionMutationsManager<
     return `KEY::${this.id}/${key}`
   }
 
+  private markPendingLocalChanges(
+    mutations: Array<PendingMutation<TOutput>>,
+  ): void {
+    for (const mutation of mutations) {
+      // The handler can sync synchronously before its transaction is registered.
+      // This is provisional; only completed mutations retain a local origin.
+      this.state.pendingLocalChanges.add(mutation.key as TKey)
+    }
+  }
+
   /**
    * Inserts one or more items into the collection
    */
   insert = (data: TInput | Array<TInput>, config?: InsertConfig) => {
     this.lifecycle.validateCollectionUsable(`insert`)
     const state = this.state
-    const ambientTransaction = getActiveTransaction()
+    const ambientTransaction = this.getActiveTransaction()
 
     // If no ambient transaction exists, check for an onInsert handler early
     if (!ambientTransaction && !this.config.onInsert) {
@@ -184,7 +215,7 @@ export class CollectionMutationsManager<
       const globalKey = this.generateGlobalKey(key, item)
 
       const mutation: PendingMutation<TOutput, `insert`> = {
-        mutationId: crypto.randomUUID(),
+        mutationId: safeRandomUUID(),
         original: {},
         modified: validatedData,
         // Pick the values from validatedData based on what's passed in - this is for cases
@@ -221,7 +252,8 @@ export class CollectionMutationsManager<
       return ambientTransaction
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
-      const directOpTransaction = createTransaction<TOutput>({
+      const directOpTransaction = this.createTransaction<TOutput>({
+        metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction and collection
           return await this.config.onInsert!({
@@ -237,6 +269,7 @@ export class CollectionMutationsManager<
 
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
+      this.markPendingLocalChanges(mutations)
       // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
       directOpTransaction.commit().catch(() => undefined)
 
@@ -269,7 +302,7 @@ export class CollectionMutationsManager<
     const state = this.state
     this.lifecycle.validateCollectionUsable(`update`)
 
-    const ambientTransaction = getActiveTransaction()
+    const ambientTransaction = this.getActiveTransaction()
 
     // If no ambient transaction exists, check for an onUpdate handler early
     if (!ambientTransaction && !this.config.onUpdate) {
@@ -338,11 +371,7 @@ export class CollectionMutationsManager<
         )
 
         // Construct the full modified item by applying the validated update payload to the original item
-        const modifiedItem = Object.assign(
-          {},
-          originalItem,
-          validatedUpdatePayload,
-        )
+        const modifiedItem = { ...originalItem, ...validatedUpdatePayload }
 
         // Check if the ID of the item is being changed
         const originalItemId = this.config.getKey(originalItem)
@@ -355,7 +384,7 @@ export class CollectionMutationsManager<
         const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
 
         return {
-          mutationId: crypto.randomUUID(),
+          mutationId: safeRandomUUID(),
           original: originalItem,
           modified: modifiedItem,
           // Pick the values from modifiedItem based on what's passed in - this is for cases
@@ -392,7 +421,7 @@ export class CollectionMutationsManager<
 
     // If no changes were made, return an empty transaction early
     if (mutations.length === 0) {
-      const emptyTransaction = createTransaction({
+      const emptyTransaction = this.createTransaction({
         mutationFn: async () => {},
       })
       // Errors still propagate through tx.isPersisted.promise; suppress the background commit from warning
@@ -416,7 +445,8 @@ export class CollectionMutationsManager<
     // No need to check for onUpdate handler here as we've already checked at the beginning
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
-    const directOpTransaction = createTransaction<TOutput>({
+    const directOpTransaction = this.createTransaction<TOutput>({
+      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
@@ -432,6 +462,7 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
+    this.markPendingLocalChanges(mutations)
     // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
     directOpTransaction.commit().catch(() => undefined)
 
@@ -454,7 +485,7 @@ export class CollectionMutationsManager<
     const state = this.state
     this.lifecycle.validateCollectionUsable(`delete`)
 
-    const ambientTransaction = getActiveTransaction()
+    const ambientTransaction = this.getActiveTransaction()
 
     // If no ambient transaction exists, check for an onDelete handler early
     if (!ambientTransaction && !this.config.onDelete) {
@@ -484,7 +515,7 @@ export class CollectionMutationsManager<
         `delete`,
         CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
       > = {
-        mutationId: crypto.randomUUID(),
+        mutationId: safeRandomUUID(),
         original: this.state.get(key)!,
         modified: this.state.get(key)!,
         changes: this.state.get(key)!,
@@ -517,8 +548,9 @@ export class CollectionMutationsManager<
     }
 
     // Create a new transaction with a mutation function that calls the onDelete handler
-    const directOpTransaction = createTransaction<TOutput>({
+    const directOpTransaction = this.createTransaction<TOutput>({
       autoCommit: true,
+      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
@@ -534,6 +566,7 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
+    this.markPendingLocalChanges(mutations)
     // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
     directOpTransaction.commit().catch(() => undefined)
 

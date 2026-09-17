@@ -6,7 +6,7 @@ export class DefaultRetryPolicy implements RetryPolicy {
   private backoffCalculator: BackoffCalculator
   private maxRetries: number
 
-  constructor(maxRetries = 10, jitter = true) {
+  constructor(maxRetries = Number.POSITIVE_INFINITY, jitter = true) {
     this.backoffCalculator = new BackoffCalculator(jitter)
     this.maxRetries = maxRetries
   }

@@ -3,15 +3,13 @@ id: getHavingExpression
 title: getHavingExpression
 ---
 
-# Function: getHavingExpression()
-
 ```ts
 function getHavingExpression(having): 
-  | Aggregate<any>
-| BasicExpression<any>;
+  | BasicExpression<any>
+| Aggregate<any>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:165](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L165)
+Defined in: [packages/db/src/query/ir.ts:331](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L331)
 
 Extract the expression from a HAVING clause
 HAVING clauses can contain aggregates, unlike regular WHERE clauses
@@ -24,5 +22,5 @@ HAVING clauses can contain aggregates, unlike regular WHERE clauses
 
 ## Returns
 
-  \| [`Aggregate`](../classes/Aggregate.md)\<`any`\>
   \| [`BasicExpression`](../type-aliases/BasicExpression.md)\<`any`\>
+  \| [`Aggregate`](../classes/Aggregate.md)\<`any`\>

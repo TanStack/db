@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, test } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import {
   concat,
   createLiveQueryCollection,
   eq,
   gt,
+  inArray,
   isNull,
   isUndefined,
   lt,
@@ -11,7 +13,12 @@ import {
   or,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import {
+  flushPromises,
+  mockSyncCollectionOptions,
+  mockSyncCollectionOptionsNoInitialState,
+  stripVirtualProps,
+} from '../utils.js'
 
 // Sample data types for join testing
 type User = {
@@ -118,9 +125,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType,
             )
             .select(({ user, dept }) => ({
-              user_name: user?.name,
-              department_name: dept?.name,
-              budget: dept?.budget,
+              user_name: user.name,
+              department_name: dept.name,
+              budget: dept.budget,
             })),
       })
 
@@ -299,8 +306,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType,
             )
             .select(({ user, dept }) => ({
-              user_name: user?.name,
-              department_name: dept?.name,
+              user_name: user.name,
+              department_name: dept.name,
             })),
       })
 
@@ -342,8 +349,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType,
             )
             .select(({ user, dept }) => ({
-              user_name: user?.name,
-              department_name: dept?.name,
+              user_name: user.name,
+              department_name: dept.name,
             })),
       })
 
@@ -381,8 +388,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType,
               )
               .select(({ user, dept }) => ({
-                user_name: user?.name,
-                department_name: dept?.name,
+                user_name: user.name,
+                department_name: dept.name,
               })),
         })
 
@@ -430,8 +437,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType,
               )
               .select(({ user, dept }) => ({
-                user_name: user?.name,
-                department_name: dept?.name,
+                user_name: user.name,
+                department_name: dept.name,
               })),
         })
 
@@ -530,12 +537,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .leftJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id),
               )
-              .where(({ member }) => eq(member?.user_id, 100))
+              .where(({ member }) => eq(member.user_id, 100))
               .select(({ team, member }) => ({
                 team_id: team.id,
                 team_name: team.name,
-                user_id: member?.user_id,
-                role: member?.role,
+                user_id: member.user_id,
+                role: member.role,
               })),
         })
       } else if (joinType === `right`) {
@@ -550,10 +557,10 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 { member: teamMembersCollection },
                 ({ team, member }) => eq(team.id, member.team_id),
               )
-              .where(({ team }) => eq(team?.active, true))
+              .where(({ team }) => eq(team.active, true))
               .select(({ team, member }) => ({
-                team_id: team?.id,
-                team_name: team?.name,
+                team_id: team.id,
+                team_name: team.name,
                 user_id: member.user_id,
                 role: member.role,
               })),
@@ -569,12 +576,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .fullJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id),
               )
-              .where(({ member }) => eq(member?.role, `admin`))
+              .where(({ member }) => eq(member.role, `admin`))
               .select(({ team, member }) => ({
-                team_id: team?.id,
-                team_name: team?.name,
-                user_id: member?.user_id,
-                role: member?.role,
+                team_id: team.id,
+                team_name: team.name,
+                user_id: member.user_id,
+                role: member.role,
               })),
         })
       } else {
@@ -733,13 +740,13 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             )
             .join(
               { task: tasksCollection },
-              ({ task, project }) => eq(task.project_id, project?.id),
+              ({ task, project }) => eq(task.project_id, project.id),
               joinType,
             )
             .select(({ company, project, task }) => ({
-              company_name: company?.name,
-              project_name: project?.name,
-              task_name: task?.name,
+              company_name: company.name,
+              project_name: project.name,
+              task_name: task.name,
             })),
       })
 
@@ -938,7 +945,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 user_id: user.id,
                 user_name: user.name,
                 department_id: user.department_id,
-                department_name: dept?.name,
+                department_name: dept.name,
               })),
         })
 
@@ -981,6 +988,128 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(joinQuery.size).toBe(3)
+      })
+
+      test(`should match Date join keys by timestamp instead of object reference`, () => {
+        type DateLeft = { id: number; joinedAt: Date; name: string }
+        type DateRight = { id: number; joinedAt: Date; label: string }
+
+        const baseTimestamp = Date.parse(`2025-01-15T12:34:56.789Z`)
+
+        const leftData: Array<DateLeft> = [
+          { id: 1, joinedAt: new Date(baseTimestamp), name: `left-1` },
+        ]
+        const rightData: Array<DateRight> = [
+          { id: 10, joinedAt: new Date(baseTimestamp), label: `right-10` },
+        ]
+
+        // Guard against accidentally sharing the same Date object instance.
+        expect(leftData[0]!.joinedAt).not.toBe(rightData[0]!.joinedAt)
+        expect(leftData[0]!.joinedAt.getTime()).toBe(
+          rightData[0]!.joinedAt.getTime(),
+        )
+
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<DateLeft>({
+            id: `join-date-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: leftData,
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<DateRight>({
+            id: `join-date-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: rightData,
+            autoIndex,
+          }),
+        )
+
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+
+        expect(query.toArray).toHaveLength(1)
+        expect(stripVirtualProps(query.toArray[0])).toEqual({
+          leftId: 1,
+          rightId: 10,
+        })
+      })
+
+      test(`should update Date join matches when timestamp changes`, () => {
+        type DateLeft = { id: number; joinedAt: Date; name: string }
+        type DateRight = { id: number; joinedAt: Date; label: string }
+
+        const baseTimestamp = Date.parse(`2025-01-15T12:34:56.789Z`)
+
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<DateLeft>({
+            id: `join-date-update-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, joinedAt: new Date(baseTimestamp), name: `left-1` },
+            ],
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<DateRight>({
+            id: `join-date-update-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              {
+                id: 10,
+                joinedAt: new Date(baseTimestamp + 1),
+                label: `right-10`,
+              },
+            ],
+            autoIndex,
+          }),
+        )
+
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+
+        expect(query.toArray).toHaveLength(0)
+
+        rightCollection.utils.begin()
+        rightCollection.utils.write({
+          type: `update`,
+          value: {
+            id: 10,
+            joinedAt: new Date(baseTimestamp),
+            label: `right-10`,
+          },
+        })
+        rightCollection.utils.commit()
+
+        expect(query.toArray).toHaveLength(1)
+        expect(stripVirtualProps(query.toArray[0])).toEqual({
+          leftId: 1,
+          rightId: 10,
+        })
       })
     })
 
@@ -1291,7 +1420,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             })),
       })
 
-      const forwardResults = forwardJoinQuery.toArray
+      const forwardResults = forwardJoinQuery.toArray.map((row) =>
+        stripVirtualProps(row),
+      )
       expect(forwardResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
 
       // Test reverse direction: eq(parentUsers.id, users.parentId)
@@ -1311,7 +1442,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             })),
       })
 
-      const reverseResults = reverseJoinQuery.toArray
+      const reverseResults = reverseJoinQuery.toArray.map((row) =>
+        stripVirtualProps(row),
+      )
       expect(reverseResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
 
       // Both should produce identical results
@@ -1534,7 +1667,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               id: event.id,
               parent_id: event.parent_id,
               parent: {
-                id: parent?.id,
+                id: parent.id,
               },
             })),
       })
@@ -1595,16 +1728,14 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               ({ employee, manager }) => eq(employee.manager_id, manager.id),
               `left`,
             )
-            .where(({ manager }) =>
-              or(isNull(manager?.id), gt(manager?.age, 35)),
-            )
+            .where(({ manager }) => or(isNull(manager.id), gt(manager.age, 35)))
             .select(({ employee, manager }) => ({
               employeeId: employee.id,
               employeeName: employee.name,
               employeeAge: employee.age,
-              managerId: manager?.id,
-              managerName: manager?.name,
-              managerAge: manager?.age,
+              managerId: manager.id,
+              managerName: manager.name,
+              managerAge: manager.age,
             })),
       })
 
@@ -1723,6 +1854,260 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
     expect(result.join2!.id).toBe(2)
     expect(result.join2!.value).toBe(1)
     expect(result.join2!.other).toBe(30)
+  })
+
+  test(`where with isUndefined on right-side field should filter entire joined rows`, () => {
+    type Left = {
+      id: string
+      rightId: string | null
+    }
+
+    type Right = {
+      id: string
+      payload: string | null | undefined
+    }
+
+    const leftCollection = createCollection(
+      mockSyncCollectionOptions<Left>({
+        id: `test-left-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `l1`, rightId: `r1` },
+          { id: `l2`, rightId: `r2` },
+          { id: `l3`, rightId: `r3` },
+          { id: `l4`, rightId: null },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const rightCollection = createCollection(
+      mockSyncCollectionOptions<Right>({
+        id: `test-right-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `r1`, payload: `ok` },
+          { id: `r2`, payload: null },
+          { id: `r3`, payload: undefined },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const lq = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ l: leftCollection })
+          .leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id))
+          .where(({ r }) => isUndefined(r.payload))
+          .select(({ l, r }) => ({ leftId: l.id, right: r })),
+    })
+
+    const data = lq.toArray.map((row) => ({
+      leftId: row.leftId,
+      right: stripVirtualProps(row.right),
+    }))
+
+    // l1 joins r1 (payload='ok') → payload is defined → exclude
+    // l2 joins r2 (payload=null) → payload is null, not undefined → exclude
+    // l3 joins r3 (payload=undefined) → payload is undefined → include
+    // l4 has no match (rightId=null) → right is undefined, so r?.payload is undefined → include
+    expect(data.sort((a, b) => a.leftId.localeCompare(b.leftId))).toEqual([
+      { leftId: `l3`, right: { id: `r3`, payload: undefined } },
+      { leftId: `l4`, right: undefined },
+    ])
+  })
+
+  // Regression test for https://github.com/TanStack/db/issues/677
+  // When a custom getKey is provided to a left join live query and the right
+  // collection is populated after initial sync, the system should not throw
+  // DuplicateKeySyncError. The old row (with undefined right side) should be
+  // deleted before the new row (with populated right side) is inserted.
+  test(`left join with custom getKey should not throw DuplicateKeySyncError when right collection is populated after initial sync (autoIndex: ${autoIndex})`, () => {
+    type Player = {
+      name: string
+      club_id: string
+      position: string
+    }
+
+    type Client = {
+      name: string
+      player: string
+      email: string
+    }
+
+    type Balance = {
+      name: string
+      client: string
+      amount: number
+    }
+
+    const samplePlayers: Array<Player> = [
+      { name: `player1`, club_id: `club1`, position: `forward` },
+      { name: `player2`, club_id: `club1`, position: `midfielder` },
+      { name: `player3`, club_id: `club1`, position: `defender` },
+    ]
+
+    const sampleClients: Array<Client> = [
+      { name: `client1`, player: `player1`, email: `client1@example.com` },
+      { name: `client2`, player: `player2`, email: `client2@example.com` },
+      { name: `client3`, player: `player3`, email: `client3@example.com` },
+    ]
+
+    const sampleBalances: Array<Balance> = [
+      { name: `balance1`, client: `client1`, amount: 1000 },
+      { name: `balance2`, client: `client2`, amount: 2000 },
+      { name: `balance3`, client: `client3`, amount: 1500 },
+    ]
+
+    const playersCollection = createCollection(
+      mockSyncCollectionOptions<Player>({
+        id: `test-players-getkey-collision-${autoIndex}`,
+        getKey: (player) => player.name,
+        initialData: samplePlayers,
+        autoIndex,
+      }),
+    )
+
+    const clientsCollection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<Client>({
+        id: `test-clients-getkey-collision-${autoIndex}`,
+        getKey: (client) => client.name,
+        autoIndex,
+      }),
+    )
+
+    const balancesCollection = createCollection(
+      mockSyncCollectionOptions<Balance>({
+        id: `test-balances-getkey-collision-${autoIndex}`,
+        getKey: (balance) => balance.name,
+        initialData: sampleBalances,
+        autoIndex,
+      }),
+    )
+
+    const chainedJoinQuery = createLiveQueryCollection({
+      startSync: true,
+      getKey: (r) => r.player_name,
+      query: (q) =>
+        q
+          .from({ player: playersCollection })
+          .join(
+            { client: clientsCollection },
+            ({ client, player }) => eq(client.player, player.name),
+            `left`,
+          )
+          .join(
+            { balance: balancesCollection },
+            ({ balance, client }) => eq(balance.client, client.name),
+            `left`,
+          )
+          .select(({ player, client, balance }) => ({
+            player_name: player.name,
+            client_name: client.name,
+            balance_amount: balance.amount,
+          })),
+    })
+
+    // Initial state: 3 players, no clients, so left join gives undefined for client and balance
+    expect(chainedJoinQuery.toArray).toHaveLength(3)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.client_name === undefined),
+    ).toBe(true)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.balance_amount === undefined),
+    ).toBe(true)
+
+    // Populating the clients collection should not throw DuplicateKeySyncError.
+    // The IVM retracts old rows (key e.g. player1 with undefined client) and inserts
+    // new rows (key e.g. player1 with populated client). Since both map to the same
+    // custom getKey, deletes must be processed before inserts to avoid a collision.
+    clientsCollection.utils.begin()
+    sampleClients.forEach((client) => {
+      clientsCollection.utils.write({ type: `insert`, value: client })
+    })
+    clientsCollection.utils.commit()
+    clientsCollection.utils.markReady()
+
+    // Should still have 3 results, now with client and balance data populated
+    expect(chainedJoinQuery.toArray).toHaveLength(3)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.client_name !== undefined),
+    ).toBe(true)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.balance_amount !== undefined),
+    ).toBe(true)
+  })
+
+  // Regression test for https://github.com/TanStack/db/issues/1367
+  // Temporal objects (PlainDate, ZonedDateTime, etc.) have no enumerable own
+  // properties, so Object.keys() returns []. Without special handling in the
+  // hash function, all Temporal instances produce identical hashes, causing the
+  // IVM join Index to treat old and new rows as equal and silently swallow updates.
+  test(`join should propagate Temporal field updates through live queries`, async () => {
+    type Task = {
+      id: number
+      name: string
+      project_id: number
+      dueDate: Temporal.PlainDate
+    }
+
+    type Project = {
+      id: number
+      name: string
+    }
+
+    const taskCollection = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `test-temporal-join-${autoIndex}`,
+        getKey: (task) => task.id,
+        initialData: [
+          {
+            id: 1,
+            name: `Task A`,
+            project_id: 10,
+            dueDate: Temporal.PlainDate.from(`2024-01-15`),
+          },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const projectCollection = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `test-temporal-join-projects-${autoIndex}`,
+        getKey: (project) => project.id,
+        initialData: [{ id: 10, name: `Project Alpha` }],
+        autoIndex,
+      }),
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ task: taskCollection })
+          .where(({ task }) => inArray(task.id, [1]))
+          .innerJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
+          )
+          .select(({ task, project }) => ({
+            task,
+            project,
+          })),
+    })
+
+    await liveQuery.preload()
+    expect(liveQuery.toArray).toHaveLength(1)
+    expect(String(liveQuery.toArray[0]!.task.dueDate)).toBe(`2024-01-15`)
+
+    taskCollection.update(1, (draft: Task) => {
+      draft.dueDate = Temporal.PlainDate.from(`2024-06-15`)
+    })
+    await flushPromises()
+
+    expect(String(liveQuery.toArray[0]!.task.dueDate)).toBe(`2024-06-15`)
   })
 }
 

@@ -43,6 +43,49 @@ const { data, isLoading } = useLiveQuery((q) =>
 
 **Note:** All return values (`data`, `isLoading`, `status`, etc.) are computed refs, so access them with `.value` in `<script>` but directly in `<template>`.
 
+### useLiveInfiniteQuery
+
+For ordered, paginated data with live updates, use `useLiveInfiniteQuery`:
+
+```vue
+<script setup>
+import { ref } from 'vue'
+import { useLiveInfiniteQuery } from '@tanstack/vue-db'
+import { eq } from '@tanstack/db'
+
+const category = ref('news')
+const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  useLiveInfiniteQuery(
+    (q) =>
+      q
+        .from({ posts: postsCollection })
+        .where(({ posts }) => eq(posts.category, category.value))
+        .orderBy(({ posts }) => posts.createdAt, 'desc'),
+    { pageSize: 20 },
+    [category],
+  )
+</script>
+
+<template>
+  <article v-for="post in data" :key="post.id">
+    {{ post.title }}
+  </article>
+  <button
+    v-if="hasNextPage"
+    :disabled="isFetchingNextPage"
+    @click="fetchNextPage()"
+  >
+    Load more
+  </button>
+</template>
+```
+
+`fetchNextPage()` returns a promise that resolves after the page request settles. Failures are exposed through the returned `error` ref and do not reject the promise.
+
+The query must include `orderBy`. The dependency array is available only with
+the query-function form. You can also pass an ordered, pre-created live query
+collection directly.
+
 ### Dependency Arrays
 
 The `useLiveQuery` composable accepts an optional dependency array as its last parameter. When any reactive value in the array changes, the query is recreated and re-executed.

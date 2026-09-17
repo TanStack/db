@@ -1,0 +1,212 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, expect, it, vi } from 'vitest'
+import { CapacitorSQLiteDriver } from '../src/capacitor-sqlite-driver'
+import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
+import { createCapacitorSQLiteTestDatabase } from './helpers/capacitor-sqlite-test-db'
+import type { CapacitorSQLiteDatabaseLike } from '../src/capacitor-sqlite-driver'
+
+const activeCleanupFns: Array<() => void | Promise<void>> = []
+
+afterEach(async () => {
+  while (activeCleanupFns.length > 0) {
+    const cleanupFn = activeCleanupFns.pop()
+    await Promise.resolve(cleanupFn?.())
+  }
+})
+
+function createTempSqlitePath(): string {
+  const tempDirectory = mkdtempSync(join(tmpdir(), `db-capacitor-driver-test-`))
+  const dbPath = join(tempDirectory, `state.sqlite`)
+  activeCleanupFns.push(() => {
+    rmSync(tempDirectory, { recursive: true, force: true })
+  })
+  return dbPath
+}
+
+it(`reads query rows from Capacitor values payloads`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createCapacitorSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => database.close())
+
+  const driver = new CapacitorSQLiteDriver({ database })
+  await driver.exec(
+    `CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL, score INTEGER NOT NULL)`,
+  )
+  await driver.run(`INSERT INTO todos (id, title, score) VALUES (?, ?, ?)`, [
+    `1`,
+    `From Capacitor`,
+    7,
+  ])
+
+  const rows = await driver.query<{
+    id: string
+    title: string
+    score: number
+  }>(`SELECT id, title, score FROM todos ORDER BY id ASC`)
+  expect(rows).toEqual([
+    {
+      id: `1`,
+      title: `From Capacitor`,
+      score: 7,
+    },
+  ])
+})
+
+it(`rolls back top-level transactions on failure`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createCapacitorSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => database.close())
+
+  const driver = new CapacitorSQLiteDriver({ database })
+  await driver.exec(
+    `CREATE TABLE tx_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
+  )
+
+  await expect(
+    driver.transactionWithDriver(async (transactionDriver) => {
+      await transactionDriver.run(
+        `INSERT INTO tx_test (id, title) VALUES (?, ?)`,
+        [`1`, `First`],
+      )
+      await transactionDriver.run(
+        `INSERT INTO tx_test (missing_column) VALUES (?)`,
+        [`x`],
+      )
+    }),
+  ).rejects.toThrow()
+
+  const rows = await driver.query<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM tx_test`,
+  )
+  expect(rows[0]?.count).toBe(0)
+})
+
+it(`supports nested savepoint rollback without losing the outer transaction`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createCapacitorSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => database.close())
+
+  const driver = new CapacitorSQLiteDriver({ database })
+  await driver.exec(
+    `CREATE TABLE nested_tx_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
+  )
+
+  await driver.transactionWithDriver(async (outerTransactionDriver) => {
+    await outerTransactionDriver.run(
+      `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
+      [`1`, `Outer before`],
+    )
+
+    await expect(
+      outerTransactionDriver.transaction(async (innerTransactionDriver) => {
+        await innerTransactionDriver.run(
+          `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
+          [`2`, `Inner failing`],
+        )
+        throw new Error(`nested-failure`)
+      }),
+    ).rejects.toThrow(`nested-failure`)
+
+    await outerTransactionDriver.run(
+      `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
+      [`3`, `Outer after`],
+    )
+  })
+
+  const rows = await driver.query<{ id: string; title: string }>(
+    `SELECT id, title FROM nested_tx_test ORDER BY id ASC`,
+  )
+  expect(rows).toEqual([
+    { id: `1`, title: `Outer before` },
+    { id: `3`, title: `Outer after` },
+  ])
+})
+
+it(`serializes unrelated operations behind an active transaction`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createCapacitorSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => database.close())
+
+  const driver = new CapacitorSQLiteDriver({ database })
+  await driver.exec(
+    `CREATE TABLE tx_scope_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
+  )
+
+  let resolveOuterTransaction: (() => void) | undefined
+  const outerTransactionGate = new Promise<void>((resolve) => {
+    resolveOuterTransaction = resolve
+  })
+
+  let signalOuterInsertComplete: (() => void) | undefined
+  const outerInsertComplete = new Promise<void>((resolve) => {
+    signalOuterInsertComplete = resolve
+  })
+
+  const outerTransaction = driver.transactionWithDriver(
+    async (transactionDriver) => {
+      await transactionDriver.run(
+        `INSERT INTO tx_scope_test (id, title) VALUES (?, ?)`,
+        [`outer`, `Inside transaction`],
+      )
+      signalOuterInsertComplete?.()
+      await outerTransactionGate
+      throw new Error(`rollback-outer-transaction`)
+    },
+  )
+
+  await outerInsertComplete
+
+  let unrelatedWriteCompleted = false
+  const unrelatedWrite = driver
+    .run(`INSERT INTO tx_scope_test (id, title) VALUES (?, ?)`, [
+      `outside`,
+      `Outside transaction`,
+    ])
+    .then(() => {
+      unrelatedWriteCompleted = true
+    })
+
+  await Promise.resolve()
+  expect(unrelatedWriteCompleted).toBe(false)
+
+  resolveOuterTransaction?.()
+
+  await expect(outerTransaction).rejects.toThrow(`rollback-outer-transaction`)
+  await unrelatedWrite
+
+  const rows = await driver.query<{ id: string; title: string }>(
+    `SELECT id, title FROM tx_scope_test ORDER BY id ASC`,
+  )
+  expect(rows).toEqual([{ id: `outside`, title: `Outside transaction` }])
+})
+
+it(`throws config error when db methods are missing`, () => {
+  expect(
+    () => new CapacitorSQLiteDriver({ database: {} as never }),
+  ).toThrowError(InvalidPersistedCollectionConfigError)
+})
+
+it(`does not throw when process is polyfilled without versions`, async () => {
+  vi.stubGlobal(`process`, {
+    env: {},
+  })
+  activeCleanupFns.push(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const database = {
+    execute: async () => undefined,
+    query: async () => ({
+      values: [] as Array<unknown>,
+    }),
+    run: async () => undefined,
+    close: async () => undefined,
+  }
+
+  const driver = new CapacitorSQLiteDriver({
+    database: database as unknown as CapacitorSQLiteDatabaseLike,
+  })
+  await expect(driver.query(`SELECT 1`)).resolves.toEqual([])
+})

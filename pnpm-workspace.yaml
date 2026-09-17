@@ -1,7 +1,41 @@
 cleanupUnusedCatalogs: true
 linkWorkspacePackages: true
 preferWorkspacePackages: true
+blockExoticSubdeps: false
 
 packages:
   - packages/**
   - examples/**/*
+
+overrides:
+  metro: '0.82.5'
+  metro-babel-transformer: '0.82.5'
+  metro-cache: '0.82.5'
+  metro-cache-key: '0.82.5'
+  metro-config: '0.82.5'
+  metro-core: '0.82.5'
+  metro-file-map: '0.82.5'
+  metro-minify-terser: '0.82.5'
+  metro-resolver: '0.82.5'
+  metro-runtime: '0.82.5'
+  metro-source-map: '0.82.5'
+  metro-symbolicate: '0.82.5'
+  metro-transform-plugins: '0.82.5'
+  metro-transform-worker: '0.82.5'
+
+allowBuilds:
+  better-sqlite3: true
+  electron: true
+
+  '@firebase/util': false
+  '@journeyapps/wa-sqlite': false
+  '@parcel/watcher': false
+
+  esbuild: false
+  lmdb: false
+  msgpackr-extract: false
+  protobufjs: false
+  rxdb: false
+  sharp: false
+  unrs-resolver: false
+  workerd: false
