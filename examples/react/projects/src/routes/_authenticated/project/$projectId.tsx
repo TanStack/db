@@ -86,7 +86,7 @@ function ProjectPage() {
     todoCollection.delete(id)
   }
 
-   
+
   if (!project || !usersInProject) {
     return null
   }
