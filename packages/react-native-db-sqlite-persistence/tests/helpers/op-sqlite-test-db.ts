@@ -8,6 +8,7 @@ export type OpSQLiteTestResultShape =
   | `rows-object`
   | `rows-list`
   | `statement-array`
+  | `execute-async-columnar`
 
 type OpSQLiteRowsListLike<T> = {
   length: number
@@ -54,6 +55,8 @@ function formatQueryRows<T>(
       }
     case `statement-array`:
       return [{ rows }]
+    case `execute-async-columnar`:
+      throw new Error(`Columnar query rows require statement column metadata`)
     default:
       return { rows }
   }
@@ -62,6 +65,7 @@ function formatQueryRows<T>(
 function formatWriteResult(
   rowsAffected: number,
   resultShape: OpSQLiteTestResultShape,
+  insertId?: number,
 ): unknown {
   switch (resultShape) {
     case `rows-array`:
@@ -83,6 +87,11 @@ function formatWriteResult(
           rowsAffected,
         },
       ]
+    case `execute-async-columnar`:
+      return {
+        rowsAffected,
+        insertId,
+      }
     default:
       return {
         rows: [],
@@ -109,6 +118,21 @@ export function createOpSQLiteTestDatabase(options: {
     const parameterValues = [...params]
 
     if (QUERY_SQL_PATTERN.test(sql)) {
+      if (resultShape === `execute-async-columnar`) {
+        const columnNames = statement
+          .columns()
+          .map((column: { name: string }) => column.name)
+        const rawRows =
+          parameterValues.length > 0
+            ? statement.raw(true).all(...parameterValues)
+            : statement.raw(true).all()
+        return {
+          rowsAffected: 0,
+          rawRows,
+          columnNames,
+        }
+      }
+
       const rows =
         parameterValues.length > 0
           ? statement.all(...parameterValues)
@@ -120,14 +144,26 @@ export function createOpSQLiteTestDatabase(options: {
       parameterValues.length > 0
         ? statement.run(...parameterValues)
         : statement.run()
-    return formatWriteResult(runResult.changes, resultShape)
+    return formatWriteResult(
+      runResult.changes,
+      resultShape,
+      Number(runResult.lastInsertRowid),
+    )
   }
 
-  return {
-    execute,
+  const database: OpSQLiteTestDatabase = {
     close: () => {
       nativeDatabase.close()
     },
     getNativeDatabase: () => nativeDatabase,
   }
+
+  if (resultShape === `execute-async-columnar`) {
+    database.executeAsync = (sql, params) =>
+      Promise.resolve(execute(sql, params))
+  } else {
+    database.execute = execute
+  }
+
+  return database
 }

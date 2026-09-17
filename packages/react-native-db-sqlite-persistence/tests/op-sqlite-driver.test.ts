@@ -1,17 +1,34 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fc } from '@fast-check/vitest'
 import { afterEach, expect, it } from 'vitest'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
+import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
+import type { OpSQLiteDatabaseLike } from '../src/op-sqlite-driver'
+import type { SQLiteDriverContractHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 
 const activeCleanupFns: Array<() => void | Promise<void>> = []
 
 afterEach(async () => {
+  const cleanupErrors: Array<unknown> = []
   while (activeCleanupFns.length > 0) {
     const cleanupFn = activeCleanupFns.pop()
-    await Promise.resolve(cleanupFn?.())
+    try {
+      await Promise.resolve(cleanupFn?.())
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  if (cleanupErrors.length === 1) {
+    throw cleanupErrors[0]
+  }
+  if (cleanupErrors.length > 1) {
+    throw new AggregateError(cleanupErrors, `op-sqlite test cleanup failed`, {
+      cause: cleanupErrors[0],
+    })
   }
 })
 
@@ -24,40 +41,564 @@ function createTempSqlitePath(): string {
   return dbPath
 }
 
-it.each([`rows-array`, `rows-object`, `rows-list`, `statement-array`] as const)(
-  `reads query rows across result shape: %s`,
-  async (resultShape) => {
-    const dbPath = createTempSqlitePath()
-    const database = createOpSQLiteTestDatabase({
-      filename: dbPath,
-      resultShape,
+type ColumnarDriverHarness = {
+  database: ReturnType<typeof createOpSQLiteTestDatabase>
+  driver: OpSQLiteDriver
+  queryExecutions: () => number
+}
+
+async function withColumnarDriver<T>(
+  fn: (harness: ColumnarDriverHarness) => Promise<T>,
+): Promise<T> {
+  const tempDirectory = mkdtempSync(
+    join(tmpdir(), `db-rn-op-sqlite-alias-contract-`),
+  )
+  let database: ReturnType<typeof createOpSQLiteTestDatabase> | undefined
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown }
+  try {
+    database = createOpSQLiteTestDatabase({
+      filename: join(tempDirectory, `state.sqlite`),
+      resultShape: `execute-async-columnar`,
     })
-    activeCleanupFns.push(() => Promise.resolve(database.close()))
-
+    const queryExecutions = trackQueryExecutions(database)
     const driver = new OpSQLiteDriver({ database })
-    await driver.exec(
-      `CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL, score INTEGER NOT NULL)`,
-    )
-    await driver.run(`INSERT INTO todos (id, title, score) VALUES (?, ?, ?)`, [
-      `1`,
-      `From test`,
-      7,
-    ])
+    outcome = {
+      ok: true,
+      value: await fn({ database, driver, queryExecutions }),
+    }
+  } catch (error) {
+    outcome = { ok: false, error }
+  }
 
-    const rows = await driver.query<{
-      id: string
-      title: string
-      score: number
-    }>(`SELECT id, title, score FROM todos ORDER BY id ASC`)
-    expect(rows).toEqual([
+  const cleanupErrors: Array<unknown> = []
+  if (database) {
+    try {
+      await Promise.resolve(database.close())
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  try {
+    rmSync(tempDirectory, { recursive: true, force: true })
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+
+  if (!outcome.ok) {
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [outcome.error, ...cleanupErrors],
+        `op-sqlite alias law and cleanup failed`,
+        { cause: outcome.error },
+      )
+    }
+    throw outcome.error
+  }
+  if (cleanupErrors.length === 1) throw cleanupErrors[0]
+  if (cleanupErrors.length > 1) {
+    throw new AggregateError(cleanupErrors, `op-sqlite alias cleanup failed`, {
+      cause: cleanupErrors[0],
+    })
+  }
+  return outcome.value
+}
+
+/**
+ * Law: SQLiteDriver.query returns the complete ordered object rows supplied by
+ * the database after exec/run writes. SQL aliases remain row data even when
+ * their names match envelope fields; malformed result envelopes reject.
+ * Source: SQLiteDriver's public query contract and op-sqlite v14's documented
+ * executeAsync `{ rawRows, columnNames, rowsAffected }` envelope.
+ * Domain: deterministic object-row wrappers and v14 columnar rows, including
+ * empty, asymmetric/reordered multirow, legal reserved-looking SQL aliases,
+ * and malformed or conflicting envelopes.
+ * Path/checkpoint: OpSQLiteDriver over a real better-sqlite3 shim, observed
+ * when each query Promise settles. Exact row values, keys, order, and count are
+ * compared.
+ * Limit: this shim establishes adapter normalization, not native device/host
+ * execution; native op-sqlite v14 still needs a separate runtime receipt.
+ */
+it.each([
+  `rows-array`,
+  `rows-object`,
+  `rows-list`,
+  `statement-array`,
+  `execute-async-columnar`,
+] as const)(`reads query rows across result shape: %s`, async (resultShape) => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({
+    filename: dbPath,
+    resultShape,
+  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
+
+  const driver = new OpSQLiteDriver({ database })
+  await driver.exec(
+    `CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL, score INTEGER NOT NULL)`,
+  )
+  await driver.run(`INSERT INTO todos (id, title, score) VALUES (?, ?, ?)`, [
+    `1`,
+    `Lower score`,
+    7,
+  ])
+  await driver.run(`INSERT INTO todos (id, title, score) VALUES (?, ?, ?)`, [
+    `2`,
+    `Higher score`,
+    41,
+  ])
+
+  const rows = await driver.query<{
+    id: string
+    title: string
+    score: number
+  }>(`SELECT title, score, id FROM todos ORDER BY score DESC`)
+  expectExactRows(rows, [
+    {
+      title: `Higher score`,
+      score: 41,
+      id: `2`,
+    },
+    {
+      title: `Lower score`,
+      score: 7,
+      id: `1`,
+    },
+  ])
+})
+
+function expectExactRows<T>(
+  actual: ReadonlyArray<T>,
+  expected: ReadonlyArray<T>,
+): void {
+  expect(actual).toEqual(expected)
+}
+
+function expectExactAliasRows(
+  actual: ReadonlyArray<Record<string, unknown>>,
+  expected: ReadonlyArray<Record<string, unknown>>,
+): void {
+  try {
+    expect(actual).toHaveLength(expected.length)
+    expected.forEach((row, rowIndex) => {
+      expect(Object.keys(actual[rowIndex] ?? {})).toEqual(Object.keys(row))
+      expect(actual[rowIndex]).toEqual(row)
+    })
+  } catch (cause) {
+    throw new Error(`op-sqlite reserved-alias exact-row law violated`, {
+      cause,
+    })
+  }
+}
+
+const statementResultAliasNames = [
+  `rows`,
+  `resultRows`,
+  `rawRows`,
+  `columnNames`,
+  `results`,
+  `rowsAffected`,
+  `changes`,
+  `insertId`,
+  `lastInsertRowId`,
+  `ordinary_name`,
+  `another_value`,
+] as const
+
+const aliasOracleSeed = Number(
+  process.env.TANSTACK_DB_OP_SQLITE_ORACLE_SEED ?? 165903,
+)
+const aliasOracleRuns = Number(
+  process.env.TANSTACK_DB_OP_SQLITE_ORACLE_RUNS ?? 50,
+)
+const aliasOraclePath = process.env.TANSTACK_DB_OP_SQLITE_ORACLE_PATH
+if (!Number.isSafeInteger(aliasOracleSeed)) {
+  throw new Error(`Invalid TANSTACK_DB_OP_SQLITE_ORACLE_SEED`)
+}
+if (!Number.isSafeInteger(aliasOracleRuns) || aliasOracleRuns < 1) {
+  throw new Error(`Invalid TANSTACK_DB_OP_SQLITE_ORACLE_RUNS`)
+}
+if (aliasOraclePath !== undefined && !/^\d+(?::\d+)*$/.test(aliasOraclePath)) {
+  throw new Error(
+    `TANSTACK_DB_OP_SQLITE_ORACLE_PATH requires a numeric shrink path`,
+  )
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll(`"`, `""`)}"`
+}
+
+function aliasValue(alias: string, rowIndex: number, columnIndex: number) {
+  return `${rowIndex === 0 ? `left` : `right`}:${columnIndex}:${alias}`
+}
+
+function aliasQueryCase(aliases: ReadonlyArray<string>): {
+  sql: string
+  params: Array<unknown>
+  expected: Array<Record<string, unknown>>
+} {
+  const rowValues = [0, 1].map((rowIndex) =>
+    aliases.map((alias, columnIndex) =>
+      aliasValue(alias, rowIndex, columnIndex),
+    ),
+  )
+  const selectList = aliases
+    .map((alias) => `? AS ${quoteIdentifier(alias)}`)
+    .join(`, `)
+  return {
+    sql: `SELECT ${selectList} UNION ALL SELECT ${selectList}`,
+    params: [...rowValues[0]!, ...rowValues[1]!],
+    expected: rowValues.map((values) =>
+      Object.fromEntries(aliases.map((alias, index) => [alias, values[index]])),
+    ),
+  }
+}
+
+function trackQueryExecutions(
+  database: ReturnType<typeof createOpSQLiteTestDatabase>,
+): () => number {
+  const executeAsync = database.executeAsync
+  if (!executeAsync) {
+    throw new Error(`columnar fixture must expose executeAsync`)
+  }
+  let queryExecutions = 0
+  database.executeAsync = (sql, params) => {
+    if (/^\s*SELECT\b/i.test(sql)) queryExecutions++
+    return executeAsync.call(database, sql, params)
+  }
+  return () => queryExecutions
+}
+
+it(`preserves every statement-result field name when used as a SQL alias`, async () => {
+  await withColumnarDriver(async ({ driver, queryExecutions }) => {
+    const aliases = statementResultAliasNames.slice(0, 9)
+    const { sql, params, expected } = aliasQueryCase(aliases)
+
+    const actual = await driver.query<Record<string, unknown>>(sql, params)
+    expect(queryExecutions()).toBe(1)
+    expectExactAliasRows(actual, expected)
+  })
+})
+
+it(`preserves statement-result field names in direct row arrays`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({
+    filename: dbPath,
+    resultShape: `rows-array`,
+  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
+  const aliases = statementResultAliasNames.slice(0, 9)
+  const { sql, params, expected } = aliasQueryCase(aliases)
+
+  expectExactAliasRows(
+    await new OpSQLiteDriver({ database }).query<Record<string, unknown>>(
+      sql,
+      params,
+    ),
+    expected,
+  )
+})
+
+it(`preserves generated legal SQL aliases through v14 columnar rows`, async () => {
+  await withColumnarDriver(async ({ driver, queryExecutions }) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.uniqueArray(fc.constantFrom(...statementResultAliasNames), {
+          minLength: 1,
+          maxLength: statementResultAliasNames.length,
+        }),
+        async (aliases) => {
+          const executionsBefore = queryExecutions()
+          const { sql, params, expected } = aliasQueryCase(aliases)
+          let actual: ReadonlyArray<Record<string, unknown>>
+          try {
+            actual = await driver.query<Record<string, unknown>>(sql, params)
+          } catch (error) {
+            expect(queryExecutions()).toBe(executionsBefore + 1)
+            throw error
+          }
+          expect(queryExecutions()).toBe(executionsBefore + 1)
+          expectExactAliasRows(actual, expected)
+        },
+      ),
       {
-        id: `1`,
-        title: `From test`,
-        score: 7,
+        seed: aliasOracleSeed,
+        numRuns: aliasOracleRuns,
+        ...(aliasOraclePath ? { path: aliasOraclePath } : {}),
+        examples: [[statementResultAliasNames.slice(0, 9)]],
       },
+    )
+  })
+})
+
+it(`returns an exact empty row set for an empty columnar SELECT`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({
+    filename: dbPath,
+    resultShape: `execute-async-columnar`,
+  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
+  const executeAsync = database.executeAsync
+  if (!executeAsync) {
+    throw new Error(`columnar fixture must expose executeAsync`)
+  }
+  let emptySelectExecutions = 0
+  database.executeAsync = (sql, params) => {
+    if (/^\s*SELECT\b/i.test(sql)) emptySelectExecutions++
+    return executeAsync.call(database, sql, params)
+  }
+  const driver = new OpSQLiteDriver({ database })
+  await driver.exec(`CREATE TABLE empty_rows (id TEXT PRIMARY KEY)`)
+
+  expectExactRows(
+    await driver.query<{ id: string }>(`SELECT id FROM empty_rows`),
+    [],
+  )
+  expect(emptySelectExecutions).toBe(1)
+})
+
+const malformedColumnarResults: ReadonlyArray<{
+  name: string
+  result: unknown
+}> = [
+  {
+    name: `null result`,
+    result: null,
+  },
+  {
+    name: `undefined result`,
+    result: undefined,
+  },
+  {
+    name: `empty object`,
+    result: {},
+  },
+  {
+    name: `primitive result`,
+    result: 42,
+  },
+  {
+    name: `rawRows without columnNames`,
+    result: { rowsAffected: 0, rawRows: [[`1`]] },
+  },
+  {
+    name: `columnNames without rawRows`,
+    result: { rowsAffected: 0, columnNames: [`id`] },
+  },
+  {
+    name: `wrapped rawRows without columnNames`,
+    result: [{ rowsAffected: 0, rawRows: [[`1`]] }],
+  },
+  {
+    name: `wrapped columnNames without rawRows`,
+    result: [{ rowsAffected: 0, columnNames: [`id`] }],
+  },
+  {
+    name: `row shorter than columnNames`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [[`1`]],
+      columnNames: [`id`, `title`],
+    },
+  },
+  {
+    name: `row wider than columnNames`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [[`1`, `extra`]],
+      columnNames: [`id`],
+    },
+  },
+  {
+    name: `non-array raw row`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [{ id: `1` }],
+      columnNames: [`id`],
+    },
+  },
+  {
+    name: `duplicate column names`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [[`left`, `right`]],
+      columnNames: [`id`, `id`],
+    },
+  },
+  {
+    name: `unknown row carrier beside a write marker`,
+    result: { rowsAffected: 0, mysteryRows: [[`1`]] },
+  },
+  {
+    name: `unknown envelope without a write marker`,
+    result: { mysteryRows: [[`1`]] },
+  },
+  {
+    name: `columnar rows with a conflicting rows carrier`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [[`columnar`]],
+      columnNames: [`id`],
+      rows: [{ id: `conflict` }],
+    },
+  },
+  {
+    name: `columnar rows with a conflicting resultRows carrier`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [[`columnar`]],
+      columnNames: [`id`],
+      resultRows: [{ id: `conflict` }],
+    },
+  },
+  {
+    name: `columnar rows with a conflicting nested results carrier`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [[`columnar`]],
+      columnNames: [`id`],
+      results: [{ rows: [{ id: `conflict` }] }],
+    },
+  },
+]
+
+function expectMalformedQueryRejected(
+  outcome: PromiseSettledResult<ReadonlyArray<unknown>>,
+): void {
+  expect(outcome.status).toBe(`rejected`)
+  if (outcome.status === `rejected`) {
+    expect(outcome.reason).toBeInstanceOf(InvalidPersistedCollectionConfigError)
+  }
+}
+
+it.each(malformedColumnarResults)(
+  `throws for malformed or unknown SELECT result: $name`,
+  async ({ result }) => {
+    let queryExecutions = 0
+    const database: OpSQLiteDatabaseLike = {
+      executeAsync: () => {
+        queryExecutions++
+        return Promise.resolve(result)
+      },
+    }
+    const driver = new OpSQLiteDriver({ database })
+
+    const [outcome] = await Promise.allSettled([
+      driver.query(`SELECT id FROM malformed_result`),
     ])
+    expect(queryExecutions).toBe(1)
+    expectMalformedQueryRejected(outcome)
   },
 )
+
+it(`reserved-alias checker rejects exact-row mutants`, () => {
+  const aliases = [`rows`, `rowsAffected`, `ordinary_name`]
+  const { expected } = aliasQueryCase(aliases)
+  const first = expected[0]!
+  const second = expected[1]!
+  const mutants: Array<Array<Record<string, unknown>>> = [
+    [],
+    [
+      Object.fromEntries(
+        Object.entries(first).filter(([alias]) => alias !== `rowsAffected`),
+      ),
+      second,
+    ],
+    [{ ...first, rows: first.rowsAffected, rowsAffected: first.rows }, second],
+    [first, first],
+  ]
+
+  mutants.forEach((mutant) => {
+    expect(() => expectExactAliasRows(mutant, expected)).toThrow(
+      `op-sqlite reserved-alias exact-row law violated`,
+    )
+  })
+  expectExactAliasRows(expected, expected)
+})
+
+it(`reserved-alias checker shrinks and replays the same row-law violation`, () => {
+  const challenge = (aliases: ReadonlyArray<string>) => {
+    const { expected } = aliasQueryCase(aliases)
+    expectExactAliasRows([], expected)
+  }
+  const originalAliases = statementResultAliasNames.slice(0, 9)
+  expect(() => challenge(originalAliases)).toThrow(
+    `op-sqlite reserved-alias exact-row law violated`,
+  )
+
+  const property = fc.property(
+    fc.uniqueArray(fc.constantFrom(...statementResultAliasNames), {
+      minLength: 1,
+      maxLength: statementResultAliasNames.length,
+    }),
+    challenge,
+  )
+  const original = fc.check(property, {
+    seed: 165903,
+    numRuns: 20,
+  })
+  expect(original.failed).toBe(true)
+  expect(original.error).toContain(
+    `op-sqlite reserved-alias exact-row law violated`,
+  )
+  if (original.counterexamplePath === null) {
+    throw new Error(`Missing reserved-alias calibration replay path`)
+  }
+  const reduced = fc.check(property, {
+    seed: original.seed,
+    path: original.counterexamplePath,
+    numRuns: 1,
+    endOnFailure: true,
+  })
+  expect(reduced.failed).toBe(true)
+  expect(reduced.error).toContain(
+    `op-sqlite reserved-alias exact-row law violated`,
+  )
+  expect(reduced.counterexample).toEqual(original.counterexample)
+  expect(reduced.counterexample?.[0].length).toBeLessThan(
+    originalAliases.length,
+  )
+})
+
+it(`malformed-envelope checker rejects an accepted conflicting carrier`, () => {
+  expect(() =>
+    expectMalformedQueryRejected({
+      status: `fulfilled`,
+      value: [{ id: `conflict` }],
+    }),
+  ).toThrow()
+  expectMalformedQueryRejected({
+    status: `rejected`,
+    reason: new InvalidPersistedCollectionConfigError(`invalid result`),
+  })
+})
+
+it.each([
+  {
+    name: `silently empty`,
+    actual: [],
+  },
+  {
+    name: `rows swapped`,
+    actual: [
+      { title: `Lower score`, score: 7, id: `1` },
+      { title: `Higher score`, score: 41, id: `2` },
+    ],
+  },
+  {
+    name: `first row copied into the second`,
+    actual: [
+      { title: `Higher score`, score: 41, id: `2` },
+      { title: `Higher score`, score: 41, id: `2` },
+    ],
+  },
+])(`exact-row oracle rejects hostile output: $name`, ({ actual }) => {
+  const expected = [
+    { title: `Higher score`, score: 41, id: `2` },
+    { title: `Lower score`, score: 7, id: `1` },
+  ]
+  expect(() => expectExactRows(actual, expected)).toThrow()
+  expectExactRows(expected, expected)
+})
 
 it(`rolls back transaction on failure`, async () => {
   const dbPath = createTempSqlitePath()
@@ -195,7 +736,7 @@ it(`throws when transaction callback omits transaction driver argument`, async (
   const driver = new OpSQLiteDriver({ database })
 
   await expect(
-    driver.transaction((async () => undefined) as never),
+    driver.transaction((() => Promise.resolve()) as never),
   ).rejects.toThrow(`transaction driver argument`)
 })
 
@@ -261,3 +802,42 @@ it(`throws config error when db execute methods are missing`, () => {
     InvalidPersistedCollectionConfigError,
   )
 })
+
+const createColumnarDriverHarness: SQLiteDriverContractHarnessFactory = () => {
+  const tempDirectory = mkdtempSync(join(tmpdir(), `db-rn-op-sqlite-contract-`))
+  const database = createOpSQLiteTestDatabase({
+    filename: join(tempDirectory, `state.sqlite`),
+    resultShape: `execute-async-columnar`,
+  })
+  const driver = new OpSQLiteDriver({ database })
+
+  return {
+    driver,
+    cleanup: async () => {
+      const cleanupErrors: Array<unknown> = []
+      try {
+        await Promise.resolve(database.close())
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+      try {
+        rmSync(tempDirectory, { recursive: true, force: true })
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+      if (cleanupErrors.length === 1) throw cleanupErrors[0]
+      if (cleanupErrors.length > 1) {
+        throw new AggregateError(
+          cleanupErrors,
+          `op-sqlite contract cleanup failed`,
+          { cause: cleanupErrors[0] },
+        )
+      }
+    },
+  }
+}
+
+runSQLiteDriverContractSuite(
+  `op-sqlite executeAsync columnar driver`,
+  createColumnarDriverHarness,
+)
