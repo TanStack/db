@@ -1,4 +1,4 @@
-import { DiffTriggerOperation, sanitizeSQL } from '@powersync/common'
+import { DiffTriggerOperation, LogLevels, sanitizeSQL } from '@powersync/common'
 import { or, withCollectionConfigFactory } from '@tanstack/db'
 import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
@@ -17,8 +17,6 @@ import type {
 import type {
   AnyTableColumnType,
   ExtractedTable,
-  ExtractedTableColumns,
-  MapBaseColumnType,
   OptionalExtractedTable,
 } from './helpers'
 import type {
@@ -26,7 +24,6 @@ import type {
   ConfigWithArbitraryCollectionTypes,
   ConfigWithSQLiteInputType,
   ConfigWithSQLiteTypes,
-  CustomSQLiteSerializer,
   EnhancedPowerSyncCollectionConfig,
   InferPowerSyncOutputType,
   PowerSyncCollectionConfig,
@@ -275,12 +272,15 @@ function createPowerSyncCollectionConfig<
       return validation.value
     } else if (`issues` in validation) {
       const issueMessage = `Failed to validate incoming data for ${viewName}. Issues: ${validation.issues.map((issue) => `${issue.path} - ${issue.message}`)}`
-      database.logger.error(issueMessage)
+      database.logger.log({ level: LogLevels.error, message: issueMessage })
       onDeserializationError!(validation)
       throw new Error(issueMessage)
     } else {
       const unknownErrorMessage = `Unknown deserialization error for ${viewName}`
-      database.logger.error(unknownErrorMessage)
+      database.logger.log({
+        level: LogLevels.error,
+        message: unknownErrorMessage,
+      })
       onDeserializationError!({ issues: [{ message: unknownErrorMessage }] })
       throw new Error(unknownErrorMessage)
     }
@@ -392,6 +392,7 @@ function createPowerSyncCollectionConfig<
         return await database.triggers.createDiffTrigger({
           source: viewName,
           destination: trackedTableName,
+          columns: table.columns.map((column) => column.name),
           setupContext,
           when,
           hooks: {
@@ -416,9 +417,10 @@ function createPowerSyncCollectionConfig<
                 }
                 appliedReceipts.push(commit())
               }
-              database.logger.info(
-                `Sync is ready for ${viewName} into ${trackedTableName}`,
-              )
+              database.logger.log({
+                level: LogLevels.info,
+                message: `Sync is ready for ${viewName} into ${trackedTableName}`,
+              })
             },
           },
         })
@@ -442,10 +444,11 @@ function createPowerSyncCollectionConfig<
             await flushDiffRecordsWithContext(context, ignoredReceipts)
           })
           .catch((error) => {
-            database.logger.error(
-              `An error has been detected in the sync handler`,
+            database.logger.log({
+              level: LogLevels.error,
+              message: `An error has been detected in the sync handler`,
               error,
-            )
+            })
           })
       }
 
@@ -503,18 +506,20 @@ function createPowerSyncCollectionConfig<
           // transaction that currently parks it.
           pendingOperationStore.resolvePendingFor(pendingOperations)
         } catch (error) {
-          database.logger.error(
-            `An error has been detected in the sync handler`,
+          database.logger.log({
+            level: LogLevels.error,
+            message: `An error has been detected in the sync handler`,
             error,
-          )
+          })
         }
       }
 
       // The sync function needs to be synchronous.
       async function start(afterOnChangeRegistered?: () => Promise<void>) {
-        database.logger.info(
-          `Sync is starting for ${viewName} into ${trackedTableName}`,
-        )
+        database.logger.log({
+          level: LogLevels.info,
+          message: `Sync is starting for ${viewName} into ${trackedTableName}`,
+        })
         database.onChangeWithCallback(
           {
             onChange: async () => {
@@ -584,19 +589,21 @@ function createPowerSyncCollectionConfig<
           await Promise.all(appliedReceipts)
           markReady()
         }).catch((error) => {
-          database.logger.error(
-            `Could not start syncing process for ${viewName} into ${trackedTableName}`,
+          database.logger.log({
+            level: LogLevels.error,
+            message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
-          )
+          })
           if (collection.status === `loading`) {
             markError(error)
           }
         })
 
         return () => {
-          database.logger.info(
-            `Sync has been stopped for ${viewName} into ${trackedTableName}`,
-          )
+          database.logger.log({
+            level: LogLevels.info,
+            message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
+          })
           abortController.abort()
           onUnload?.()
         }
@@ -626,10 +633,11 @@ function createPowerSyncCollectionConfig<
         let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
         const startup = start()
         void startup.catch((error) =>
-          database.logger.error(
-            `Could not start syncing process for ${viewName} into ${trackedTableName}`,
+          database.logger.log({
+            level: LogLevels.error,
+            message: `Could not start syncing process for ${viewName} into ${trackedTableName}`,
             error,
-          ),
+          }),
         )
 
         const activeWhereExpressions = () =>
@@ -799,10 +807,11 @@ function createPowerSyncCollectionConfig<
           try {
             demand.cleanup?.()
           } catch (error) {
-            database.logger.error(
-              `Could not clean up subset hook for ${viewName}`,
+            database.logger.log({
+              level: LogLevels.error,
+              message: `Could not clean up subset hook for ${viewName}`,
               error,
-            )
+            })
           }
         }
 
@@ -878,10 +887,11 @@ function createPowerSyncCollectionConfig<
                 )
                 retryDelay =
                   retryDelay === 0 ? delay : Math.min(retryDelay, delay)
-                database.logger.error(
-                  `Could not release subset tracking for ${viewName}; retrying`,
+                database.logger.log({
+                  level: LogLevels.error,
+                  message: `Could not release subset tracking for ${viewName}; retrying`,
                   error,
-                )
+                })
               }
             }
           } finally {
@@ -915,9 +925,10 @@ function createPowerSyncCollectionConfig<
             stopped = true
             clearTimeout(releaseRetryTimer)
             releaseRetryTimer = undefined
-            database.logger.info(
-              `Sync has been stopped for ${viewName} into ${trackedTableName}`,
-            )
+            database.logger.log({
+              level: LogLevels.info,
+              message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
+            })
             abortController.abort()
             for (const demand of demands.values()) {
               cleanupDemand(demand)
@@ -965,18 +976,7 @@ function createPowerSyncCollectionConfig<
         trackedTableName,
         metadataIsTracked,
         serializeValue: (value) =>
-          serializeForSQLite(
-            value,
-            // This is required by the input generic
-            table as Table<
-              MapBaseColumnType<InferPowerSyncOutputType<TTable, TSchema>>
-            >,
-            // Coerce serializer to the shape that corresponds to the Table constructed from OutputType
-            serializer as CustomSQLiteSerializer<
-              OutputType,
-              ExtractedTableColumns<Table<MapBaseColumnType<OutputType>>>
-            >,
-          ),
+          serializeForSQLite<TTable>(value, table, serializer),
       }),
     },
   }
