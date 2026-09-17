@@ -241,6 +241,8 @@ export class CollectionMutationsManager<
       mutations.push(mutation)
     })
 
+    // Reject duplicates already visible before explicitly starting sync; startup may
+    // synchronously reveal additional keys, so check again afterward.
     let duplicate = mutations.find(({ key }) => this.state.has(key))
     if (duplicate) throw new DuplicateKeyError(duplicate.key)
     this.collection._sync.startSync()
