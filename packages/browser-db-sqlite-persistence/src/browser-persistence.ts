@@ -131,22 +131,28 @@ export function createBrowserWASQLitePersistence(
     })
     adapterCache.set(cacheKey, adapter)
 
-    // Wire the adapter into the multi-tab coordinator so it can handle
-    // leader-side RPCs (applyCommittedTx, pullSince, ensureIndex, etc.)
-    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
-      resolvedCoordinator.setAdapter(adapter)
-    }
-
     return adapter
   }
 
   const createCollectionPersistence = (
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence => ({
-    adapter: getAdapterForCollection(mode, schemaVersion),
-    coordinator: resolvedCoordinator,
-  })
+    collectionId?: string,
+  ): PersistedCollectionPersistence => {
+    const adapter = getAdapterForCollection(mode, schemaVersion)
+    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
+      if (collectionId === undefined) {
+        resolvedCoordinator.setAdapter(adapter)
+      } else {
+        resolvedCoordinator.setAdapterForCollection(collectionId, adapter)
+      }
+    }
+
+    return {
+      adapter,
+      coordinator: resolvedCoordinator,
+    }
+  }
 
   const defaultPersistence = createCollectionPersistence(
     `sync-absent`,
@@ -155,8 +161,8 @@ export function createBrowserWASQLitePersistence(
 
   return {
     ...defaultPersistence,
-    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
-      createCollectionPersistence(mode, schemaVersion),
+    resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
+      createCollectionPersistence(mode, schemaVersion, collectionId),
     resolvePersistenceForMode: (mode) =>
       createCollectionPersistence(mode, undefined),
   }

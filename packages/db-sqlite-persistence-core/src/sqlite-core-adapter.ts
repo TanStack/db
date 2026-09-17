@@ -1884,10 +1884,15 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
-  private async ensureCollectionReadyInternal(
-    collectionId: string,
-  ): Promise<CollectionTableMapping> {
-    const existingRows = await this.driver.query<{
+  private async loadCollectionRegistration(collectionId: string): Promise<
+    | {
+        table_name: string
+        tombstone_table_name: string
+        schema_version: number
+      }
+    | undefined
+  > {
+    const rows = await this.driver.query<{
       table_name: string
       tombstone_table_name: string
       schema_version: number
@@ -1899,25 +1904,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       [collectionId],
     )
 
-    let tableName: string
-    let tombstoneTableName: string
+    return rows[0]
+  }
 
-    if (existingRows.length > 0) {
-      tableName = existingRows[0]!.table_name
-      tombstoneTableName = existingRows[0]!.tombstone_table_name
+  private async ensureCollectionReadyInternal(
+    collectionId: string,
+  ): Promise<CollectionTableMapping> {
+    let registration = await this.loadCollectionRegistration(collectionId)
 
-      if (existingRows[0]!.schema_version !== this.schemaVersion) {
-        await this.handleSchemaMismatch(
-          collectionId,
-          existingRows[0]!.schema_version,
-          this.schemaVersion,
-          tableName,
-          tombstoneTableName,
-        )
-      }
-    } else {
-      tableName = createPersistedTableName(collectionId, `c`)
-      tombstoneTableName = createPersistedTableName(collectionId, `t`)
+    if (!registration) {
+      const tableName = createPersistedTableName(collectionId, `c`)
+      const tombstoneTableName = createPersistedTableName(collectionId, `t`)
       await this.driver.run(
         `INSERT INTO collection_registry (
            collection_id,
@@ -1926,8 +1923,28 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
            schema_version,
            updated_at
          )
-         VALUES (?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`,
+         VALUES (?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+         ON CONFLICT DO NOTHING`,
         [collectionId, tableName, tombstoneTableName, this.schemaVersion],
+      )
+
+      registration = await this.loadCollectionRegistration(collectionId)
+      if (!registration) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Unable to register persistence tables for collection "${collectionId}"`,
+        )
+      }
+    }
+
+    const tableName = registration.table_name
+    const tombstoneTableName = registration.tombstone_table_name
+    if (registration.schema_version !== this.schemaVersion) {
+      await this.handleSchemaMismatch(
+        collectionId,
+        registration.schema_version,
+        this.schemaVersion,
+        tableName,
+        tombstoneTableName,
       )
     }
 
