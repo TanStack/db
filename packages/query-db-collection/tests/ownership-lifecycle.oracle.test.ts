@@ -1157,6 +1157,56 @@ describe(`query collection ownership lifecycle`, () => {
     ).toEqual([])
   })
 
+  it(`reports a reentrant initial replacement failure before readiness`, async () => {
+    const id = `failed-initial-result-replacement`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `result`, name: `A` }
+    const invalid = { id: `invalid`, category: `result`, name: `Invalid` }
+    const applicationError = new Error(`Replacement application failed`)
+    const firstResult = createDeferred<Array<Item>>()
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => firstResult.promise)
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => {
+          if (item.id === invalid.id) throw applicationError
+          return item.id
+        },
+        startSync: false,
+      }),
+    )
+    cleanups.push(async () => {
+      firstResult.resolve([initial])
+      consoleError.mockRestore()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    collection.startSyncImmediate()
+    expect(collection.status).toBe(`loading`)
+    let replaced = false
+    const subscription = collection.subscribeChanges(() => {
+      if (!replaced && collection.has(initial.id)) {
+        replaced = true
+        queryClient.setQueryData(queryKey, [invalid])
+      }
+    })
+    cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+
+    firstResult.resolve([initial])
+    await vi.waitFor(() => expect(collection.status).toBe(`error`))
+
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(replaced).toBe(true)
+    expect(collection.utils.lastError).toBe(applicationError)
+    expect(itemIds(collection.toArray)).toEqual([initial.id])
+  })
+
   it(`retires a publishing result when its final subset unloads`, async () => {
     const id = `reentrant-result-unload`
     const queryKey = [id] as const
