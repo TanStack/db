@@ -1207,6 +1207,71 @@ describe(`query collection ownership lifecycle`, () => {
     expect(itemIds(collection.toArray)).toEqual([initial.id])
   })
 
+  it(`releases provisional ownership when commit fails before publication`, async () => {
+    const id = `failed-prepublication-commit`
+    const detailSubset = { where: eq(`category`, `detail`) }
+    const listSubset = { where: eq(`category`, `list`) }
+    const detailKey = [id, getLoadSubsetDemandKey(detailSubset)] as const
+    const detail = { id: `a`, category: `detail`, name: `A` }
+    const list = { id: `c`, category: `list`, name: `C` }
+    const commitError = new Error(`Commit failed before publication`)
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([detail])
+      .mockResolvedValueOnce([list])
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const baseOptions = queryCollectionOptions<Item>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+    })
+    const originalSync = baseOptions.sync
+    let failNextCommit = false
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({
+            ...params,
+            commit: (signal) => {
+              if (failNextCommit) {
+                failNextCommit = false
+                throw commitError
+              }
+              return params.commit(signal)
+            },
+          }),
+      },
+    })
+    cleanups.push(async () => {
+      collection._sync.unloadSubset(detailSubset)
+      collection._sync.unloadSubset(listSubset)
+      consoleError.mockRestore()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset(detailSubset)
+    expect(itemIds(collection.toArray)).toEqual([detail.id])
+
+    failNextCommit = true
+    queryClient.setQueryData(detailKey, [detail, list])
+    await vi.waitFor(() => expect(collection.utils.lastError).toBe(commitError))
+    expect(itemIds(collection.toArray)).toEqual([detail.id])
+
+    await collection._sync.loadSubset(listSubset)
+    expect(itemIds(collection.toArray)).toEqual([detail.id, list.id])
+    collection._sync.unloadSubset(listSubset)
+    await vi.waitFor(() =>
+      expect(itemIds(collection.toArray)).toEqual([detail.id]),
+    )
+  })
+
   it(`retires a publishing result when its final subset unloads`, async () => {
     const id = `reentrant-result-unload`
     const queryKey = [id] as const
