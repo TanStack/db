@@ -1028,7 +1028,11 @@ export function queryCollectionOptions(
         try {
           await application
         } catch (error) {
-          if (pendingResultApplications.get(hashedQueryKey) === application) {
+          if (
+            pendingResultApplications.get(hashedQueryKey) === application ||
+            (failedResultApplications.has(hashedQueryKey) &&
+              failedResultApplications.get(hashedQueryKey) === error)
+          ) {
             throw error
           }
         }

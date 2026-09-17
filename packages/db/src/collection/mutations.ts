@@ -241,8 +241,10 @@ export class CollectionMutationsManager<
       mutations.push(mutation)
     })
 
+    let duplicate = mutations.find(({ key }) => this.state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
     this.collection._sync.startSync()
-    const duplicate = mutations.find(({ key }) => this.state.has(key))
+    duplicate = mutations.find(({ key }) => this.state.has(key))
     if (duplicate) throw new DuplicateKeyError(duplicate.key)
 
     // If an ambient transaction exists, use it

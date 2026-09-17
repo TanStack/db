@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
+import { DbClient, collectionOptions } from '../src/client.js'
 import { CleanupQueue } from '../src/collection/cleanup-queue.js'
 import {
   DuplicateKeyError,
@@ -387,6 +388,40 @@ describe(`Collection Lifecycle Management`, () => {
       ).toThrow(DuplicateKeyError)
       expect(syncStarts).toBe(0)
       expect(collection.status).toBe(`idle`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not start idle sync when an insert duplicates initial data`, async () => {
+    type Row = { id: string; value: string }
+    const existing = { id: `existing`, value: `initial` }
+    const startupError = new Error(`sync startup failed`)
+    let syncStarts = 0
+    const descriptor = collectionOptions({
+      id: `rejected-insert-initial-duplicate`,
+      getKey: (row: Row) => row.id,
+      startSync: false,
+      sync: {
+        sync: () => {
+          syncStarts++
+          throw startupError
+        },
+      },
+      onInsert: async () => {},
+    })
+    const collection = new DbClient().collection(descriptor, {
+      initialData: [existing],
+    })
+
+    try {
+      expect(collection.status).toBe(`idle`)
+      expect(() =>
+        collection.insert({ id: existing.id, value: `duplicate` }),
+      ).toThrow(DuplicateKeyError)
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
+      expect(collection.get(existing.id)).toMatchObject(existing)
     } finally {
       await collection.cleanup()
     }

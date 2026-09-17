@@ -1099,16 +1099,22 @@ describe(`query collection ownership lifecycle`, () => {
 
     await collection._sync.loadSubset({})
     let injected = false
+    let pendingWaiter: Promise<void> | undefined
     const subscription = collection.subscribeChanges(() => {
       if (!injected && collection.has(outer.id)) {
         injected = true
         queryClient.setQueryData(queryKey, [invalid])
+        pendingWaiter = expect(
+          Promise.resolve(collection._sync.loadSubset({})),
+        ).rejects.toBe(applicationError)
+        void pendingWaiter.catch(() => {})
       }
     })
     cleanups.push(async () => subscription.unsubscribe())
 
     queryClient.setQueryData(queryKey, [outer])
     await vi.waitFor(() => expect(collection.utils.errorCount).toBe(1))
+    await pendingWaiter
     await expect(Promise.resolve(collection._sync.loadSubset({}))).rejects.toBe(
       applicationError,
     )
