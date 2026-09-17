@@ -112,7 +112,7 @@ function ProjectPage() {
           onClick={() => {
             const newDescription = prompt(
               `Edit project description:`,
-              project.description || ``,
+              project.description || ``
             )
             if (newDescription !== null) {
               projectCollection.update(project.id, (draft) => {
@@ -206,7 +206,7 @@ function ProjectPage() {
                           projectCollection.update(project.id, (draft) => {
                             draft.shared_user_ids =
                               draft.shared_user_ids.filter(
-                                (id) => id !== user.id,
+                                (id) => id !== user.id
                               )
                           })
                         } else if (!isInProject) {
