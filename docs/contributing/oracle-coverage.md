@@ -97,6 +97,7 @@ pnpm --filter @tanstack/db-ivm build
 pnpm --filter @tanstack/db build
 pnpm --filter @tanstack/db test:oracles
 pnpm --filter @tanstack/powersync-db-collection test:oracles
+# Service-dependent: requires Electric and PostgreSQL to be running.
 pnpm --filter @tanstack/electric-db-collection test:e2e
 pnpm run typecheck:tests
 pnpm exec tsc --noEmit -p packages/db/tsconfig.json

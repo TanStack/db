@@ -537,6 +537,7 @@ describe.each([`off`, `eager`] as const)(
         [
           { id: 10, value: new Uint8Array([1, 2, 3]) },
           { id: 20, value: null },
+          { id: 30, value: null },
         ],
         autoIndex,
       )
@@ -559,9 +560,16 @@ describe.each([`off`, `eager`] as const)(
             ({ leftId, rightId }) => [leftId, rightId] as const,
           ),
         )
+      const duplicateNullPair: JoinPair = [undefined, 30]
+      const expectPairs = (expected: Array<JoinPair>) => {
+        expect(
+          pairs(),
+          `duplicate same-side null outer row must remain observable`,
+        ).toEqual([...expected, duplicateNullPair])
+      }
       try {
         await joined.preload()
-        expect(pairs()).toEqual([
+        expectPairs([
           [1, 10],
           [2, undefined],
           [undefined, 20],
@@ -570,7 +578,7 @@ describe.each([`off`, `eager`] as const)(
           id: 10,
           value: new Uint8Array([1, 2, 3]),
         })
-        expect(pairs()).toEqual([
+        expectPairs([
           [1, 10],
           [2, undefined],
           [undefined, 20],
@@ -579,7 +587,7 @@ describe.each([`off`, `eager`] as const)(
           id: 10,
           value: new Uint8Array([1, 2, 4]),
         })
-        expect(pairs()).toEqual([
+        expectPairs([
           [1, undefined],
           [2, undefined],
           [undefined, 10],
@@ -589,24 +597,24 @@ describe.each([`off`, `eager`] as const)(
           id: 10,
           value: new Uint8Array([1, 2, 3]),
         })
-        expect(pairs()).toEqual([
+        expectPairs([
           [1, 10],
           [2, undefined],
           [undefined, 20],
         ])
         await right.oracleReplace({ id: 20, value: 1 })
-        expect(pairs()).toEqual([
+        expectPairs([
           [1, 10],
           [2, undefined],
           [undefined, 20],
         ])
         await left.oracleReplace({ id: 2, value: 1 })
-        expect(pairs()).toEqual([
+        expectPairs([
           [1, 10],
           [2, 20],
         ])
         await left.oracleReplace({ id: 2, value: null })
-        expect(pairs()).toEqual([
+        expectPairs([
           [1, 10],
           [2, undefined],
           [undefined, 20],
