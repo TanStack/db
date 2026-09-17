@@ -1257,10 +1257,13 @@ async function runAdversarialOrderedProviderScenario(
     limit: number
     expectedIds: ReadonlyArray<number>
     useOffsetWhenAvailable?: boolean
+    inheritSourceLocale?: boolean
+    autoIndex?: `off` | `eager`
   },
   fault?: `post-cleanup-request`,
 ): Promise<Array<LoadSubsetOptions>> {
   const loads: Array<LoadSubsetOptions> = []
+  const autoIndex = options.autoIndex ?? `eager`
   let recordedProvider!: (options: LoadSubsetOptions) => Promise<void>
   const delivered = new Set(options.initialRows?.map(({ id }) => id) ?? [])
   const source = createCollection<AdversarialOrderedRow>({
@@ -1268,8 +1271,14 @@ async function runAdversarialOrderedProviderScenario(
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
+    autoIndex,
+    defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
+    defaultStringCollation: options.inheritSourceLocale
+      ? {
+          locale: `en-US`,
+          localeOptions: { numeric: true },
+        }
+      : undefined,
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
         if (options.initialRows?.length) {
@@ -1327,13 +1336,15 @@ async function runAdversarialOrderedProviderScenario(
     const from = query.from({ row: source })
     const ordered =
       options.order.kind === `locale`
-        ? from.orderBy(({ row }) => row.label, {
-            direction: `asc`,
-            nulls: `first`,
-            stringSort: `locale`,
-            locale: `en-US`,
-            localeOptions: { numeric: true },
-          })
+        ? options.inheritSourceLocale
+          ? from.orderBy(({ row }) => row.label)
+          : from.orderBy(({ row }) => row.label, {
+              direction: `asc`,
+              nulls: `first`,
+              stringSort: `locale`,
+              locale: `en-US`,
+              localeOptions: { numeric: true },
+            })
         : from.orderBy(
             ({ row }) => row.rank,
             options.order.kind === `reference`
@@ -1355,6 +1366,24 @@ async function runAdversarialOrderedProviderScenario(
       expect(Array.from(live.values(), ({ id }) => id)).toEqual(
         options.expectedIds,
       )
+      if (options.inheritSourceLocale) {
+        expect(Reflect.ownKeys(source.compareOptions).sort()).toEqual([
+          `locale`,
+          `localeOptions`,
+          `stringSort`,
+        ])
+        expect(source.compareOptions).toStrictEqual({
+          stringSort: `locale`,
+          locale: `en-US`,
+          localeOptions: { numeric: true },
+        })
+        if (autoIndex === `eager`)
+          expect(
+            source.indexes.size,
+            `auto-index path reached`,
+          ).toBeGreaterThan(0)
+        else expect(source.indexes.size, `scan path reached`).toBe(0)
+      }
       // Keep the pre-cleanup snapshot, but judge disposal against the live recorder.
       return [...loads]
     },
@@ -5338,6 +5367,59 @@ describe(`pagination recomputation oracle`, () => {
     expect(loads[1]?.limit).toBeUndefined()
     expect(loads[1]?.offset).toBeUndefined()
     expect(loads[1]?.cursor).toBeUndefined()
+  })
+
+  it(`inherits collection locale options through scan and auto-index ordering`, async () => {
+    const defaultOnly = createCollection<{ id: number }>({
+      getKey: (row) => row.id,
+      defaultStringCollation: { stringSort: `locale` },
+      sync: { sync: () => {} },
+    })
+    try {
+      expect(defaultOnly.compareOptions).toStrictEqual({
+        stringSort: `locale`,
+      })
+    } finally {
+      await defaultOnly.cleanup()
+    }
+
+    const labels = [`item10`, `item2`]
+    expect(
+      [...labels].sort(new Intl.Collator(`en-US`, { numeric: true }).compare),
+      `numeric locale control`,
+    ).toEqual([`item2`, `item10`])
+    expect([...labels].sort(), `lexical hostile control`).toEqual([
+      `item10`,
+      `item2`,
+    ])
+
+    for (const autoIndex of [`off`, `eager`] as const) {
+      const loads = await runAdversarialOrderedProviderScenario({
+        // The provider's lexical prefix disagrees with inherited locale order.
+        providerRows: [
+          { id: 2, rank: 0, label: `item10` },
+          { id: 1, rank: 0, label: `item2` },
+        ],
+        order: { kind: `locale` },
+        limit: 1,
+        expectedIds: [1],
+        useOffsetWhenAvailable: true,
+        inheritSourceLocale: true,
+        autoIndex,
+      })
+
+      expect(loads).toHaveLength(2)
+      expect(loads[0]?.orderBy?.[0]?.compareOptions).toStrictEqual({
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `locale`,
+        locale: `en-US`,
+        localeOptions: { numeric: true },
+      })
+      expect(loads[1]?.limit).toBeUndefined()
+      expect(loads[1]?.offset).toBeUndefined()
+      expect(loads[1]?.cursor).toBeUndefined()
+    }
   })
 
   it(`refines an initial reference-ordered window locally`, async () => {
