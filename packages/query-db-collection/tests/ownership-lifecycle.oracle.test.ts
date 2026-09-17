@@ -293,10 +293,7 @@ function selectOwnershipRows(
     .map((item) => structuredClone(item))
 }
 
-function createOwnershipStorage(
-  seed?: StoredOwnership,
-  gateFirstCommit = false,
-) {
+function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
   const state: StoredOwnership = structuredClone(
     seed ?? {
       rows: new Map(),
@@ -335,7 +332,7 @@ function createOwnershipStorage(
     applyCommittedTx: async (_id, transaction) => {
       const tx = structuredClone(transaction)
       commitCount++
-      if (gateFirstCommit && commitCount === 1) {
+      if (commitCount === gatedCommit) {
         entered.resolve()
         await released.promise
       }
@@ -429,7 +426,7 @@ function createPersistedOwnershipFixture(
       queryClient.clear()
     }
   })
-  return { collection, queryFn }
+  return { collection, queryClient, queryFn }
 }
 
 function storedItems(
@@ -445,7 +442,7 @@ type ColdOwnershipObservation = { stored: Array<Item>; visible: Array<Item> }
 async function observeColdOwnerRevalidation(
   dropMetadata = false,
 ): Promise<Array<ColdOwnershipObservation>> {
-  const hotStorage = createOwnershipStorage(undefined, true)
+  const hotStorage = createOwnershipStorage(undefined, 1)
   const hot = createPersistedOwnershipFixture(
     `cold-owner-revalidation`,
     hotStorage,
@@ -1023,6 +1020,285 @@ describe(`query collection ownership lifecycle`, () => {
         derived: itemIds(derived.toArray),
       }).toEqual({ synced: [], source: [], derived: [] })
     })
+  })
+
+  it(`removes rows superseded while an older result is publishing`, async () => {
+    const id = `reentrant-committed-result-supersession`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `result`, name: `A` }
+    const sibling = { id: `b`, category: `result`, name: `B` }
+    const updated = { ...initial, name: `A from server` }
+    const orphaned = { id: `c`, category: `result`, name: `C` }
+    const handlerEntered = createDeferred<void>()
+    const releaseHandler = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([initial, sibling]))
+    const onUpdate = vi.fn(async () => {
+      handlerEntered.resolve()
+      await releaseHandler.promise
+      return { refetch: false }
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+        onUpdate,
+      }),
+    )
+    cleanups.push(async () => {
+      releaseHandler.resolve()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    const mutation = collection.update(initial.id, (draft) => {
+      draft.name = `A optimistic`
+    })
+    await handlerEntered.promise
+
+    const publications: Array<Array<string>> = []
+    let superseded = false
+    const subscription = collection.subscribeChanges(() => {
+      const ids = itemIds(collection.toArray)
+      publications.push(ids)
+      if (!superseded && ids.includes(orphaned.id)) {
+        superseded = true
+        queryClient.setQueryData(queryKey, [updated, sibling])
+      }
+    })
+    cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+
+    queryClient.setQueryData(queryKey, [updated, sibling, orphaned])
+    expect(itemIds(collection._state.syncedData.values())).toEqual([
+      initial.id,
+      sibling.id,
+    ])
+
+    releaseHandler.resolve()
+    await mutation.isPersisted.promise
+    await collection._sync.loadSubset({})
+
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(onUpdate).toHaveBeenCalledOnce()
+    expect(superseded).toBe(true)
+    expect(publications).toContainEqual([initial.id, sibling.id, orphaned.id])
+    expect({
+      cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
+      synced: itemIds(collection._state.syncedData.values()),
+      source: itemIds(collection.toArray),
+    }).toEqual({
+      cache: [initial.id, sibling.id],
+      synced: [initial.id, sibling.id],
+      source: [initial.id, sibling.id],
+    })
+    expect(
+      persistedOwners(collection._state.syncedMetadata, orphaned.id),
+    ).toEqual([])
+  })
+
+  it(`retains ownership after a publication listener throws`, async () => {
+    const id = `failed-result-publication`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `result`, name: `A` }
+    const sibling = { id: `b`, category: `result`, name: `B` }
+    const transient = { id: `c`, category: `result`, name: `C` }
+    const publicationError = new Error(`Publication failed`)
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([initial, sibling]))
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      consoleError.mockRestore()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    let threw = false
+    const subscription = collection.subscribeChanges(() => {
+      if (!threw && collection.has(transient.id)) {
+        threw = true
+        throw publicationError
+      }
+    })
+    cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+
+    queryClient.setQueryData(queryKey, [initial, sibling, transient])
+    await vi.waitFor(() => expect(threw).toBe(true))
+    queryClient.setQueryData(queryKey, [initial, sibling])
+    await collection._sync.loadSubset({})
+
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect({
+      cache: itemIds(queryClient.getQueryData<Array<Item>>(queryKey) ?? []),
+      synced: itemIds(collection._state.syncedData.values()),
+      source: itemIds(collection.toArray),
+    }).toEqual({
+      cache: [initial.id, sibling.id],
+      synced: [initial.id, sibling.id],
+      source: [initial.id, sibling.id],
+    })
+    expect(
+      persistedOwners(collection._state.syncedMetadata, transient.id),
+    ).toEqual([])
+  })
+
+  it(`retires a publishing result when its final subset unloads`, async () => {
+    const id = `reentrant-result-unload`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `result`, name: `A` }
+    const sibling = { id: `b`, category: `result`, name: `B` }
+    const updated = { ...initial, name: `A from server` }
+    const orphaned = { id: `c`, category: `result`, name: `C` }
+    const handlerEntered = createDeferred<void>()
+    const releaseHandler = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([initial, sibling]))
+    const onUpdate = vi.fn(async () => {
+      handlerEntered.resolve()
+      await releaseHandler.promise
+      return { refetch: false }
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        onUpdate,
+      }),
+    )
+    cleanups.push(async () => {
+      releaseHandler.resolve()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    let unloaded = false
+    const subscription = collection.subscribeChanges(() => {
+      if (!unloaded && collection.has(orphaned.id)) {
+        unloaded = true
+        collection._sync.unloadSubset({})
+      }
+    })
+    cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+
+    const mutation = collection.update(initial.id, (draft) => {
+      draft.name = `A optimistic`
+    })
+    await handlerEntered.promise
+    queryClient.setQueryData(queryKey, [updated, sibling, orphaned])
+    expect(itemIds(collection._state.syncedData.values())).toEqual([
+      initial.id,
+      sibling.id,
+    ])
+
+    releaseHandler.resolve()
+    await mutation.isPersisted.promise
+    await vi.waitFor(() => expect(unloaded).toBe(true))
+    await vi.waitFor(() => {
+      expect({
+        synced: itemIds(collection._state.syncedData.values()),
+        source: itemIds(collection.toArray),
+      }).toEqual({ synced: [], source: [] })
+    })
+
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(onUpdate).toHaveBeenCalledOnce()
+    expect(
+      persistedOwners(collection._state.syncedMetadata, orphaned.id),
+    ).toEqual([])
+  })
+
+  it(`retains post-publication ownership through durable persistence`, async () => {
+    const id = `persisted-post-application-unload`
+    const queryKey = [id] as const
+    const initial = { id: `a`, category: `result`, name: `A` }
+    const sibling = { id: `b`, category: `result`, name: `B` }
+    const transient = { id: `c`, category: `result`, name: `C` }
+    const storage = createOwnershipStorage(undefined, 2)
+    const { collection, queryClient, queryFn } =
+      createPersistedOwnershipFixture(id, storage, [initial, sibling])
+    const createDerived = () =>
+      createLiveQueryCollection((query) =>
+        query.from({ item: collection }).select(({ item }) => ({ ...item })),
+      )
+    const firstDerived = createDerived()
+    let secondDerived: ReturnType<typeof createDerived> | undefined
+
+    try {
+      await firstDerived.preload()
+      expect(queryFn).toHaveBeenCalledOnce()
+      expect(itemIds(storage.snapshot().rows.values())).toEqual([
+        initial.id,
+        sibling.id,
+      ])
+
+      queryClient.setQueryData(queryKey, [initial, sibling, transient])
+      await storage.entered
+      expect({
+        synced: itemIds(collection._state.syncedData.values()),
+        derived: itemIds(firstDerived.toArray),
+        stored: itemIds(storage.snapshot().rows.values()),
+      }).toEqual({
+        synced: [initial.id, sibling.id, transient.id],
+        derived: [initial.id, sibling.id, transient.id],
+        stored: [initial.id, sibling.id],
+      })
+
+      await firstDerived.cleanup()
+      storage.release()
+      await vi.waitFor(() =>
+        expect(itemIds(storage.snapshot().rows.values())).toEqual([
+          initial.id,
+          sibling.id,
+          transient.id,
+        ]),
+      )
+
+      queryClient.removeQueries({ queryKey, exact: true })
+      secondDerived = createDerived()
+      await secondDerived.preload()
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => {
+        expect({
+          synced: itemIds(collection._state.syncedData.values()),
+          source: itemIds(collection.toArray),
+          derived: itemIds(secondDerived?.toArray ?? []),
+          stored: itemIds(storage.snapshot().rows.values()),
+        }).toEqual({
+          synced: [initial.id, sibling.id],
+          source: [initial.id, sibling.id],
+          derived: [initial.id, sibling.id],
+          stored: [initial.id, sibling.id],
+        })
+      })
+      expect(
+        persistedOwners(storage.snapshot().rowMetadata, transient.id),
+      ).toEqual([])
+    } finally {
+      storage.release()
+      await secondDerived?.cleanup()
+      if (firstDerived.status !== `cleaned-up`) await firstDerived.cleanup()
+    }
   })
 
   it(`keeps only the newest cache result when publication reenters application`, async () => {

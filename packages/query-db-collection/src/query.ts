@@ -997,7 +997,8 @@ export function queryCollectionOptions(
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
     type ResultApplicationController = AbortController & {
-      restoreOwnershipTracking?: () => void
+      tx?: { applicationStarted: boolean }
+      rollback?: () => void
     }
     const resultApplicationControllers = new Map<
       string,
@@ -1012,7 +1013,8 @@ export function queryCollectionOptions(
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
       const controller = resultApplicationControllers.get(hashedQueryKey)
-      controller?.restoreOwnershipTracking?.()
+      // Core flips this at its no-cancel point before publication can reenter.
+      if (!controller?.tx?.applicationStarted) controller?.rollback?.()
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
       resultApplicationControllers.delete(hashedQueryKey)
@@ -1022,7 +1024,7 @@ export function queryCollectionOptions(
     const waitForCurrentResultApplication = async (
       hashedQueryKey: string,
     ): Promise<void> => {
-      while (true) {
+      for (;;) {
         const application = pendingResultApplications.get(hashedQueryKey)
         if (!application) return
         try {
@@ -1699,7 +1701,7 @@ export function queryCollectionOptions(
           }
         })
       }
-      applicationToken.restoreOwnershipTracking = restoreOwnershipTracking
+      applicationToken.rollback = restoreOwnershipTracking
 
       try {
         // From this point onward the result, including an empty result, is the
@@ -1756,7 +1758,7 @@ export function queryCollectionOptions(
           }
         })
 
-        applicationToken.restoreOwnershipTracking = undefined
+        applicationToken.tx = collection._state.pendingSyncedTransactions.at(-1)
         const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -1764,19 +1766,12 @@ export function queryCollectionOptions(
 
         // Readiness is publication: do not expose it until the establishing
         // transaction's rows and events are visible.
-        if (applied !== true) {
-          applicationToken.restoreOwnershipTracking = restoreOwnershipTracking
-          await applied
-        }
-        if (signal?.aborted) {
-          restoreOwnershipTracking()
-          return
-        }
-        applicationToken.restoreOwnershipTracking = undefined
-        markReady()
+        if (applied !== true) await applied
+        if (!signal?.aborted) markReady()
       } catch (error) {
-        restoreOwnershipTracking()
-        applicationToken.restoreOwnershipTracking = undefined
+        if (!applicationToken.tx?.applicationStarted) {
+          restoreOwnershipTracking()
+        }
 
         if (transactionActive) {
           const cancellation = new AbortController()
