@@ -112,7 +112,8 @@ The route preserves truncation, row changes, row metadata, collection metadata,
 and stream position as one `PersistedTx`. It does not feature-detect a partial
 route or fall back to row-only mutation RPC. A custom coordinator that omits
 `requestApplyCommittedTx` is rejected while the collection is configured,
-before its sync source can publish rows.
+before its sync source can publish rows. An effect-free source commit neither
+publishes nor consumes a coordinator sequence.
 
 Single-tab mode uses the same complete transaction contract. Its
 `SingleProcessCoordinator` skips election and channel traffic but still routes
@@ -144,6 +145,10 @@ exact acquired options once. Leadership loss unloads the retiring owner's live
 leases, and requesters replay still-live acquisitions against the next leader.
 Registering a second owner for one collection throws
 `DuplicateRemoteSubsetOwnerError`; no adapter fallback replaces the owner.
+Remote follower transport/admission failures reject and retain demand for its
+normal retry without entering the follower's local owner lifecycle. Terminal
+release identities expire after the existing RPC dedupe horizon while delayed
+duplicates inside that horizon remain idempotent.
 
 ## Notes
 

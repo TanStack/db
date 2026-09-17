@@ -1063,6 +1063,69 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`surfaces duplicate remote-subset owner registration through the collection lifecycle`, async () => {
+    const coordinator = new SingleProcessCoordinator()
+    const unhandled: Array<unknown> = []
+    const sourceLoads: Array<string> = []
+    const onUnhandled = (error: unknown) => unhandled.push(error)
+    process.on(`unhandledRejection`, onUnhandled)
+    const create = (label: string) =>
+      createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `duplicate-owner-lifecycle`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {
+                loadSubset: () => {
+                  sourceLoads.push(label)
+                  return true
+                },
+                unloadSubset: () => {},
+              }
+            },
+          },
+          persistence: { adapter: createRecordingAdapter(), coordinator },
+        }),
+      )
+    const first = create(`first`)
+    let duplicate: ReturnType<typeof create> | undefined
+
+    try {
+      first.startSyncImmediate()
+      await first.stateWhenReady()
+      await vi.waitFor(() =>
+        expect(
+          (
+            coordinator as unknown as {
+              remoteSubsetOwners: Map<string, RemoteSubsetOwner>
+            }
+          ).remoteSubsetOwners.size,
+        ).toBe(1),
+      )
+      duplicate = create(`duplicate`)
+      duplicate.startSyncImmediate()
+      const readinessError = await duplicate.stateWhenReady().then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      await flushAsyncWork()
+
+      expect(readinessError).toMatchObject({
+        name: `DuplicateRemoteSubsetOwnerError`,
+        collectionId: `duplicate-owner-lifecycle`,
+      })
+      expect(duplicate.status).toBe(`error`)
+      expect(sourceLoads).toEqual([])
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off(`unhandledRejection`, onUnhandled)
+      await duplicate?.cleanup()
+      await first.cleanup()
+    }
+  })
+
   it(`resolves persistence per collection and forwards schemaVersion`, () => {
     const baseAdapter = createNoopAdapter()
     const syncAdapter = createNoopAdapter()
@@ -1332,6 +1395,100 @@ describe(`persistedCollectionOptions`, () => {
 
       expect(collection.get(`aborted`)).toBeUndefined()
       expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not publish or allocate a sequence for an empty external source transaction`, async () => {
+    const adapter = Object.assign(createRecordingAdapter(), {
+      getStreamPosition: () =>
+        Promise.resolve({
+          latestTerm: 1,
+          latestSeq: 10,
+          latestRowVersion: 10,
+        }),
+    })
+    let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+    const published: Array<ProtocolEnvelope<unknown>> = []
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `empty-source-follower`,
+      subscribe: (_collectionId, onMessage) => {
+        subscriber = onMessage
+        return () => {
+          subscriber = undefined
+        }
+      },
+      publish: (_collectionId, message) => published.push(message),
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestEnsureRemoteSubset: async () => {},
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+    }
+    let sourceBegin: (() => void) | undefined
+    let sourceCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `empty-source-sequence`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            sourceBegin = begin
+            sourceCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    try {
+      await collection.stateWhenReady()
+      sourceBegin?.()
+      await sourceCommit?.()
+      await flushAsyncWork()
+
+      expect(published).toEqual([])
+
+      subscriber?.({
+        v: 1,
+        dbName: `empty-source-sequence`,
+        collectionId: `empty-source-sequence`,
+        senderId: `elected-owner`,
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: 11,
+          txId: `first-real-coordinator-sequence`,
+          latestRowVersion: 11,
+          requiresFullReload: false,
+          changedRows: [
+            {
+              key: `kept`,
+              value: { id: `kept`, title: `First real write` },
+            },
+          ],
+          deletedKeys: [],
+        },
+      })
+      await flushAsyncWork()
+
+      expect(stripVirtualProps(collection.get(`kept`))).toEqual({
+        id: `kept`,
+        title: `First real write`,
+      })
     } finally {
       await collection.cleanup()
     }

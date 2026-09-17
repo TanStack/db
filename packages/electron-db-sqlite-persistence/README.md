@@ -101,7 +101,8 @@ Truncation, row changes, row metadata, collection metadata, and stream position
 stay in the same transaction. Electron does not feature-detect a partial route
 or fall back to row-only mutation RPC. A custom coordinator that omits
 `requestApplyCommittedTx` is rejected while the collection is configured,
-before its sync source can publish rows.
+before its sync source can publish rows. An effect-free source commit neither
+publishes nor consumes a coordinator sequence.
 
 If a mutating RPC loses its response, Electron coordination replays it only
 while the requester still knows the same non-null leader id and term. An
@@ -124,7 +125,11 @@ remain independent, and release unloads the exact transported options once.
 Leadership loss unloads the retiring renderer's leases; still-live requester
 leases replay against the next leader. A second owner registration for one
 collection throws `DuplicateRemoteSubsetOwnerError`, and there is no adapter
-fallback for a missing owner.
+fallback for a missing owner. Remote follower transport/admission failures
+reject and retain demand for its normal retry without entering the follower's
+local owner lifecycle. Terminal release identities expire after the existing
+RPC dedupe horizon while delayed duplicates inside that horizon remain
+idempotent.
 
 ## Notes
 

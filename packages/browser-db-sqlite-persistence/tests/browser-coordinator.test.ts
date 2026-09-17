@@ -3313,7 +3313,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
-    it(`reports a failed remote Browser follower replay to its local owner once`, async () => {
+    it(`keeps a failed remote Browser follower replay out of its local owner lifecycle`, async () => {
       const coordinator = createCoordinator()
       coordinator.subscribe(`todos`, () => {})
       const internals = coordinator as unknown as {
@@ -3379,12 +3379,50 @@ describe(`BrowserCollectionCoordinator`, () => {
           acquiredLeaderId: acquisition?.acquiredLeaderId,
           retained: internals.outboundRemoteSubsetAcquisitions.size,
         }).toEqual({
-          ownerErrors: [replayError],
+          ownerErrors: [],
           attempts: 1,
           acquiredLeaderId: `remote-browser-a`,
           retained: 1,
         })
       } finally {
+        unregisterOwner()
+        coordinator.dispose()
+      }
+    })
+
+    it(`expires Browser release tombstones after the existing RPC dedupe horizon`, async () => {
+      const coordinator = createCoordinator()
+      coordinator.subscribe(`todos`, () => {})
+      await flush(50)
+      expect(coordinator.isLeader(`todos`)).toBe(true)
+      const owner = Object.assign(vi.fn(), {
+        unloadSubset: vi.fn(),
+        onError: vi.fn(),
+      })
+      const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+        `todos`,
+        owner,
+      )
+      const now = vi.spyOn(Date, `now`)
+      const internals = coordinator as unknown as {
+        inboundRemoteSubsetAcquisitions: Map<string, unknown>
+      }
+
+      try {
+        for (let index = 0; index < 8; index++) {
+          now.mockReturnValue(index * 60_001)
+          const options = { offset: index }
+          await coordinator.requestEnsureRemoteSubset(`todos`, options)
+          await coordinator.requestReleaseRemoteSubset(`todos`, options)
+        }
+
+        expect({
+          loads: owner.mock.calls.length,
+          unloads: owner.unloadSubset.mock.calls.length,
+          retained: internals.inboundRemoteSubsetAcquisitions.size,
+        }).toEqual({ loads: 8, unloads: 8, retained: 1 })
+      } finally {
+        now.mockRestore()
         unregisterOwner()
         coordinator.dispose()
       }

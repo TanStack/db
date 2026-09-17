@@ -36,6 +36,7 @@ const HEARTBEAT_INTERVAL_MS = 3_000
 const RPC_TIMEOUT_MS = 10_000
 const RPC_RETRY_ATTEMPTS = 2
 const RPC_RETRY_DELAY_MS = 200
+const RPC_DEDUPE_RETENTION_MS = 60_000
 const WRITER_LOCK_BUSY_RETRY_MS = 50
 const WRITER_LOCK_MAX_RETRIES = 20
 
@@ -217,6 +218,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private readonly inboundRemoteSubsetAcquisitions = new Map<
     string,
     RemoteSubsetAcquisition
+  >()
+  private readonly releasedRemoteSubsetAcquisitionTimes = new Map<
+    string,
+    number
   >()
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
@@ -431,12 +436,6 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     try {
       await work
       acquired = true
-    } catch (error) {
-      if (!route.localOwner) {
-        const owner = this.remoteSubsetOwners.get(acquisition.collectionId)
-        if (owner) reportRemoteSubsetOwnerError(owner, error)
-      }
-      throw error
     } finally {
       if (acquisition.inFlight === work) acquisition.inFlight = null
       const current = this.collections.get(acquisition.collectionId)
@@ -456,7 +455,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       ) {
         acquisition.forceReplay = false
         void this.acquireRemoteSubset(acquisition).catch(() => {
-          // Failure is already reported; only new demand or ownership change retries.
+          // Demand stays retained; only new demand or ownership change retries.
         })
       }
     }
@@ -583,6 +582,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     }
     this.remoteSubsetOwners.clear()
     this.inboundRemoteSubsetAcquisitions.clear()
+    this.releasedRemoteSubsetAcquisitionTimes.clear()
     this.appliedEnvelopes.clear()
     this.inFlightEnvelopes.clear()
   }
@@ -754,7 +754,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       acquisition.forceReplay = false
       replays.push(
         this.acquireRemoteSubset(acquisition).catch(() => {
-          // Failure is already reported; only new demand or ownership change retries.
+          // Demand stays retained; only new demand or ownership change retries.
         }),
       )
     }
@@ -1057,6 +1057,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     request: Extract<RPCRequest, { type: `rpc:ensureRemoteSubset:req` }>,
     requesterId: string,
   ): Promise<EnsureRemoteSubsetResponse> {
+    this.pruneReleasedRemoteSubsetAcquisitions()
     const key = inboundRemoteSubsetAcquisitionKey(
       collectionId,
       requesterId,
@@ -1117,6 +1118,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       terminalRelease: false,
       release: null,
     }
+    this.releasedRemoteSubsetAcquisitionTimes.delete(key)
     this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
     let resolveLoad!: () => void
     let rejectLoad!: (error: unknown) => void
@@ -1160,6 +1162,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     request: Extract<RPCRequest, { type: `rpc:releaseRemoteSubset:req` }>,
     requesterId: string,
   ): Promise<ReleaseRemoteSubsetResponse> {
+    this.pruneReleasedRemoteSubsetAcquisitions()
     const key = inboundRemoteSubsetAcquisitionKey(
       collectionId,
       requesterId,
@@ -1167,7 +1170,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     )
     const acquisition = this.inboundRemoteSubsetAcquisitions.get(key)
     if (!acquisition) {
-      this.inboundRemoteSubsetAcquisitions.set(key, {
+      this.setReleasedRemoteSubsetAcquisition(key, {
         collectionId,
         requesterId,
         acquisitionId: request.acquisitionId,
@@ -1177,7 +1180,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       acquisition.terminalRelease = true
       await this.releaseRemoteSubsetAcquisition(acquisition)
       if (this.inboundRemoteSubsetAcquisitions.get(key) === acquisition) {
-        this.inboundRemoteSubsetAcquisitions.set(key, {
+        this.setReleasedRemoteSubsetAcquisition(key, {
           collectionId,
           requesterId,
           acquisitionId: request.acquisitionId,
@@ -1185,7 +1188,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         })
       }
     } else if (`awaitingOwner` in acquisition) {
-      this.inboundRemoteSubsetAcquisitions.set(key, {
+      this.setReleasedRemoteSubsetAcquisition(key, {
         collectionId,
         requesterId,
         acquisitionId: request.acquisitionId,
@@ -1814,10 +1817,28 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
   private pruneAppliedEnvelopes(): void {
     // Keep envelopes for 60 seconds for dedup
-    const cutoff = Date.now() - 60_000
+    const cutoff = Date.now() - RPC_DEDUPE_RETENTION_MS
     for (const [key, envelope] of this.appliedEnvelopes) {
       if (envelope.appliedAt < cutoff) {
         this.appliedEnvelopes.delete(key)
+      }
+    }
+  }
+
+  private setReleasedRemoteSubsetAcquisition(
+    key: string,
+    acquisition: RemoteSubsetAcquisition,
+  ): void {
+    this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
+    this.releasedRemoteSubsetAcquisitionTimes.set(key, Date.now())
+  }
+
+  private pruneReleasedRemoteSubsetAcquisitions(): void {
+    const cutoff = Date.now() - RPC_DEDUPE_RETENTION_MS
+    for (const [key, releasedAt] of this.releasedRemoteSubsetAcquisitionTimes) {
+      if (releasedAt < cutoff) {
+        this.releasedRemoteSubsetAcquisitionTimes.delete(key)
+        this.inboundRemoteSubsetAcquisitions.delete(key)
       }
     }
   }

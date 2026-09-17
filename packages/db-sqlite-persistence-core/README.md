@@ -94,8 +94,9 @@ effects is routed in full to the persistence adapter owned by that collection.
 The `PersistedTx` includes any truncate, row mutations, row metadata mutations,
 collection metadata mutations, and stream position. Multiprocess coordinators
 must preserve the complete transaction when they forward it to the elected
-writer. This contract does not decide whether an effect-free source commit
-should produce a persistence call.
+writer. An effect-free source commit does not allocate a stream position,
+publish an invalidation, or call persistence; the next durable transaction
+retains the next coordinator-owned sequence.
 
 This is a required invariant, not a capability to detect at commit time. The
 TypeScript interface requires the method, and `persistedCollectionOptions(...)`
@@ -162,18 +163,24 @@ acquisition; `ReleaseRemoteSubsetRequest.acquisitionId` must carry that same
 identity so the elected owner releases the matching lease.
 
 The owner also provides a required `onError(error)` callback. A load or unload
-throw, or a runtime thenable rejection from either operation, is reported
-through that callback with the original value before the awaited request
-rejects. Retirement and disposal observe and report the same failure while
-continuing cleanup of sibling leases; they do not retry or silently recover
-the failed lifecycle.
+throw by the actual elected owner, or a runtime thenable rejection from either
+operation, is reported through that callback with the original value before
+the awaited request rejects. A follower transport or remote-owner admission
+failure rejects the acquisition and remains eligible for the existing demand
+retry; it is not a failure of that follower's local owner lifecycle. Retirement
+and disposal observe and report actual owner failures while continuing cleanup
+of sibling leases; they do not retry or silently recover the failed lifecycle.
 
 Only one remote subset owner may be registered per collection in a coordinator.
 A second live registration throws `DuplicateRemoteSubsetOwnerError` instead of
-replacing the first. When a leader loses ownership or is disposed, it unloads
-every transferred lease. A requester that still owns a lease replays that same
-acquisition when the next leader is observed. There is no adapter fallback or
-direct-writer escape hatch for missing ownership.
+replacing the first, and startup reports the named failure before readiness
+rather than leaving a rejected registration promise unobserved. Released
+acquisition identities remain as dedupe tombstones for the coordinator's
+existing RPC dedupe horizon, then expire during later subset traffic. When a
+leader loses ownership or is disposed, it unloads every transferred lease. A
+requester that still owns a lease replays that same acquisition when the next
+leader is observed. There is no adapter fallback or direct-writer escape hatch
+for missing ownership.
 
 The named-error and exact-path guarantee covers values the boundary can
 identify with standard JavaScript reflection. A fully transparent `Proxy` is

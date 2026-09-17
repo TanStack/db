@@ -37,6 +37,7 @@ const HEARTBEAT_INTERVAL_MS = 3_000
 const RPC_TIMEOUT_MS = 10_000
 const RPC_RETRY_ATTEMPTS = 2
 const RPC_RETRY_DELAY_MS = 200
+const RPC_DEDUPE_RETENTION_MS = 60_000
 const WRITER_LOCK_BUSY_RETRY_MS = 50
 const WRITER_LOCK_MAX_RETRIES = 20
 
@@ -191,6 +192,10 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
   private readonly inboundRemoteSubsetAcquisitions = new Map<
     string,
     RemoteSubsetAcquisition
+  >()
+  private readonly releasedRemoteSubsetAcquisitionTimes = new Map<
+    string,
+    number
   >()
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
@@ -417,12 +422,6 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     try {
       await work
       acquired = true
-    } catch (error) {
-      if (!routedToLocalOwner) {
-        const owner = this.remoteSubsetOwners.get(acquisition.collectionId)
-        if (owner) reportRemoteSubsetOwnerError(owner, error)
-      }
-      throw error
     } finally {
       if (acquisition.inFlight === work) acquisition.inFlight = null
       const current = this.collections.get(acquisition.collectionId)
@@ -442,7 +441,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       ) {
         acquisition.forceReplay = false
         void this.acquireRemoteSubset(acquisition).catch(() => {
-          // Failure is already reported; only new demand or ownership change retries.
+          // Demand stays retained; only new demand or ownership change retries.
         })
       }
     }
@@ -569,6 +568,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     }
     this.remoteSubsetOwners.clear()
     this.inboundRemoteSubsetAcquisitions.clear()
+    this.releasedRemoteSubsetAcquisitionTimes.clear()
     this.appliedEnvelopeIds.clear()
     this.inFlightLocalMutationEnvelopes.clear()
     this.appliedCommittedTxEnvelopes.clear()
@@ -742,7 +742,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       acquisition.forceReplay = false
       replays.push(
         this.acquireRemoteSubset(acquisition).catch(() => {
-          // Failure is already reported; only new demand or ownership change retries.
+          // Demand stays retained; only new demand or ownership change retries.
         }),
       )
     }
@@ -1045,6 +1045,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     request: Extract<RPCRequest, { type: `rpc:ensureRemoteSubset:req` }>,
     requesterId: string,
   ): Promise<EnsureRemoteSubsetResponse> {
+    this.pruneReleasedRemoteSubsetAcquisitions()
     const key = inboundRemoteSubsetAcquisitionKey(
       collectionId,
       requesterId,
@@ -1105,6 +1106,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       terminalRelease: false,
       release: null,
     }
+    this.releasedRemoteSubsetAcquisitionTimes.delete(key)
     this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
     let resolveLoad!: () => void
     let rejectLoad!: (error: unknown) => void
@@ -1148,6 +1150,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     request: Extract<RPCRequest, { type: `rpc:releaseRemoteSubset:req` }>,
     requesterId: string,
   ): Promise<ReleaseRemoteSubsetResponse> {
+    this.pruneReleasedRemoteSubsetAcquisitions()
     const key = inboundRemoteSubsetAcquisitionKey(
       collectionId,
       requesterId,
@@ -1155,7 +1158,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     )
     const acquisition = this.inboundRemoteSubsetAcquisitions.get(key)
     if (!acquisition) {
-      this.inboundRemoteSubsetAcquisitions.set(key, {
+      this.setReleasedRemoteSubsetAcquisition(key, {
         collectionId,
         requesterId,
         acquisitionId: request.acquisitionId,
@@ -1165,7 +1168,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       acquisition.terminalRelease = true
       await this.releaseRemoteSubsetAcquisition(acquisition)
       if (this.inboundRemoteSubsetAcquisitions.get(key) === acquisition) {
-        this.inboundRemoteSubsetAcquisitions.set(key, {
+        this.setReleasedRemoteSubsetAcquisition(key, {
           collectionId,
           requesterId,
           acquisitionId: request.acquisitionId,
@@ -1173,7 +1176,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
         })
       }
     } else if (`awaitingOwner` in acquisition) {
-      this.inboundRemoteSubsetAcquisitions.set(key, {
+      this.setReleasedRemoteSubsetAcquisition(key, {
         collectionId,
         requesterId,
         acquisitionId: request.acquisitionId,
@@ -1755,7 +1758,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
 
   private pruneAppliedEnvelopeIds(): void {
     // Keep envelopes for 60 seconds for dedup
-    const cutoff = Date.now() - 60_000
+    const cutoff = Date.now() - RPC_DEDUPE_RETENTION_MS
     for (const [id, envelope] of this.appliedEnvelopeIds) {
       if (envelope.appliedAt < cutoff) {
         this.appliedEnvelopeIds.delete(id)
@@ -1764,6 +1767,24 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     for (const [key, envelope] of this.appliedCommittedTxEnvelopes) {
       if (envelope.appliedAt < cutoff) {
         this.appliedCommittedTxEnvelopes.delete(key)
+      }
+    }
+  }
+
+  private setReleasedRemoteSubsetAcquisition(
+    key: string,
+    acquisition: RemoteSubsetAcquisition,
+  ): void {
+    this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
+    this.releasedRemoteSubsetAcquisitionTimes.set(key, Date.now())
+  }
+
+  private pruneReleasedRemoteSubsetAcquisitions(): void {
+    const cutoff = Date.now() - RPC_DEDUPE_RETENTION_MS
+    for (const [key, releasedAt] of this.releasedRemoteSubsetAcquisitionTimes) {
+      if (releasedAt < cutoff) {
+        this.releasedRemoteSubsetAcquisitionTimes.delete(key)
+        this.inboundRemoteSubsetAcquisitions.delete(key)
       }
     }
   }

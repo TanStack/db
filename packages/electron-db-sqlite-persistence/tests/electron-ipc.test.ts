@@ -2876,7 +2876,7 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`reports a failed remote Electron follower replay to its local owner once`, async () => {
+  it(`keeps a failed remote Electron follower replay out of its local owner lifecycle`, async () => {
     const dbName = `electron-remote-replay-error`
     const coordinator = new ElectronCollectionCoordinator({
       dbName,
@@ -2947,12 +2947,52 @@ describe(`electron sqlite persistence bridge`, () => {
         acquiredLeaderId: acquisition?.acquiredLeaderId,
         retained: internals.outboundRemoteSubsetAcquisitions.size,
       }).toEqual({
-        ownerErrors: [replayError],
+        ownerErrors: [],
         attempts: 1,
         acquiredLeaderId: `remote-electron-a`,
         retained: 1,
       })
     } finally {
+      unregisterOwner()
+      coordinator.dispose()
+    }
+  })
+
+  it(`expires Electron release tombstones after the existing RPC dedupe horizon`, async () => {
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `electron-release-tombstone-expiry`,
+      adapter: createElectronCoordinatorTestAdapter(),
+    })
+    registerCleanup(() => coordinator.dispose())
+    coordinator.isLeader = () => true
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(),
+      onError: vi.fn(),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const now = vi.spyOn(Date, `now`)
+    const internals = coordinator as unknown as {
+      inboundRemoteSubsetAcquisitions: Map<string, unknown>
+    }
+
+    try {
+      for (let index = 0; index < 8; index++) {
+        now.mockReturnValue(index * 60_001)
+        const options = { offset: index }
+        await coordinator.requestEnsureRemoteSubset(`todos`, options)
+        await coordinator.requestReleaseRemoteSubset(`todos`, options)
+      }
+
+      expect({
+        loads: owner.mock.calls.length,
+        unloads: owner.unloadSubset.mock.calls.length,
+        retained: internals.inboundRemoteSubsetAcquisitions.size,
+      }).toEqual({ loads: 8, unloads: 8, retained: 1 })
+    } finally {
+      now.mockRestore()
       unregisterOwner()
       coordinator.dispose()
     }

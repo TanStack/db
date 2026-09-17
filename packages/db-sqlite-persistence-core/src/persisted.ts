@@ -1855,28 +1855,16 @@ class PersistedCollectionRuntime<
       return
     }
 
-    const streamPosition = this.nextLocalStreamPosition()
-
     if (
       !transaction.truncate &&
       transaction.operations.length === 0 &&
       transaction.rowMetadataWrites.size === 0 &&
       transaction.collectionMetadataWrites.size === 0
     ) {
-      this.publishTxCommittedEvent(
-        this.createTxCommittedPayload({
-          term: streamPosition.term,
-          seq: streamPosition.seq,
-          txId: safeRandomUUID(),
-          latestRowVersion: streamPosition.rowVersion,
-          changedRows: [],
-          deletedKeys: [],
-          requiresFullReload: true,
-        }),
-      )
       return
     }
 
+    const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
     let response: ApplyCommittedTxResponse
     try {
@@ -2700,7 +2688,13 @@ function createWrappedSyncConfig<
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
+      let sourceResultPromise: Promise<SyncConfigRes> | null = null
+      let resolveSourceResultAssigned!: () => void
+      const sourceResultAssigned = new Promise<void>((resolve) => {
+        resolveSourceResultAssigned = resolve
+      })
       const startupState = { cleanedUp: false }
+      const isCleanedUp = () => startupState.cleanedUp
       const acquisitions = new Map<LoadSubsetOptions, { forwarded: boolean }>()
       runtime.setSyncControls({
         begin: params.begin,
@@ -2719,8 +2713,16 @@ function createWrappedSyncConfig<
         markReady: () => {
           if (startupState.cleanedUp) return
           void (fullStartPromise ?? runtime.ensureStarted())
-            .then(() => {
-              if (startupState.cleanedUp) return
+            .then(async () => {
+              if (isCleanedUp()) return
+              await sourceResultAssigned
+              try {
+                await sourceResultPromise
+              } catch (error) {
+                runtime.reportSyncError(error)
+                return
+              }
+              if (isCleanedUp()) return
               params.markReady()
             })
             .catch((error) => {
@@ -3002,7 +3004,7 @@ function createWrappedSyncConfig<
 
       let sourceResult: SyncConfigRes = {}
       fullStartPromise = runtime.ensureStarted()
-      const sourceResultPromise = (async () => {
+      sourceResultPromise = (async () => {
         await runtime.ensureStartupMetadataLoaded()
 
         if (startupState.cleanedUp) {
@@ -3033,6 +3035,10 @@ function createWrappedSyncConfig<
         }
         return sourceResult
       })()
+      resolveSourceResultAssigned()
+      void sourceResultPromise.catch((error) => {
+        runtime.reportSyncError(error)
+      })
 
       return {
         cleanup: () => {
