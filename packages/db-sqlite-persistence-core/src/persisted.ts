@@ -6,13 +6,18 @@ import {
   withCollectionConfigFactory,
 } from '@tanstack/db'
 import {
+  DuplicateRemoteSubsetOwnerError,
   InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
   InvalidPersistenceAdapterError,
   InvalidSyncConfigError,
+  PersistedCollectionDurabilityError,
+  toPersistedCollectionDurabilityError,
 } from './errors'
+import { toTransportedLoadSubsetOptions } from './remote-subset-wire'
+import type { TransportedLoadSubsetOptions } from './remote-subset-wire'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -38,12 +43,16 @@ export type PersistedMutationEnvelope =
       type: `insert`
       key: string | number
       value: Record<string, unknown>
+      metadata?: unknown
+      metadataChanged?: boolean
     }
   | {
       mutationId: string
       type: `update`
       key: string | number
       value: Record<string, unknown>
+      metadata?: unknown
+      metadataChanged?: boolean
     }
   | {
       mutationId: string
@@ -96,7 +105,8 @@ export type TxCommitted = {
 export type EnsureRemoteSubsetRequest = {
   type: `rpc:ensureRemoteSubset:req`
   rpcId: string
-  options: LoadSubsetOptions
+  acquisitionId: string
+  options: TransportedLoadSubsetOptions
 }
 
 export type EnsureRemoteSubsetResponse =
@@ -104,9 +114,29 @@ export type EnsureRemoteSubsetResponse =
       type: `rpc:ensureRemoteSubset:res`
       rpcId: string
       ok: true
+      leaderId: string
     }
   | {
       type: `rpc:ensureRemoteSubset:res`
+      rpcId: string
+      ok: false
+      error: string
+    }
+
+export type ReleaseRemoteSubsetRequest = {
+  type: `rpc:releaseRemoteSubset:req`
+  rpcId: string
+  acquisitionId: string
+}
+
+export type ReleaseRemoteSubsetResponse =
+  | {
+      type: `rpc:releaseRemoteSubset:res`
+      rpcId: string
+      ok: true
+    }
+  | {
+      type: `rpc:releaseRemoteSubset:res`
       rpcId: string
       ok: false
       error: string
@@ -135,6 +165,48 @@ export type ApplyLocalMutationsResponse =
       ok: false
       code: `NOT_LEADER` | `VALIDATION_ERROR` | `CONFLICT` | `TIMEOUT`
       error: string
+    }
+  | {
+      type: `rpc:applyLocalMutations:res`
+      rpcId: string
+      ok: false
+      code: `PERSISTENCE_ERROR`
+      error: string
+      sourceCode?: string | number
+      path?: string | ReadonlyArray<string | number>
+    }
+
+export type ApplyCommittedTxRequest = {
+  type: `rpc:applyCommittedTx:req`
+  rpcId: string
+  envelopeId: string
+  tx: PersistedTx
+}
+
+export type ApplyCommittedTxResponse =
+  | {
+      type: `rpc:applyCommittedTx:res`
+      rpcId: string
+      ok: true
+      term: number
+      seq: number
+      latestRowVersion: number
+    }
+  | {
+      type: `rpc:applyCommittedTx:res`
+      rpcId: string
+      ok: false
+      code: `NOT_LEADER` | `CONFLICT` | `TIMEOUT`
+      error: string
+    }
+  | {
+      type: `rpc:applyCommittedTx:res`
+      rpcId: string
+      ok: false
+      code: `PERSISTENCE_ERROR`
+      error: string
+      sourceCode?: string | number
+      path?: string | ReadonlyArray<string | number>
     }
 
 export type PullSinceRequest = {
@@ -282,6 +354,47 @@ export interface PersistenceAdapter {
   }>
 }
 
+export type RemoteSubsetOwner = ((
+  options: TransportedLoadSubsetOptions,
+) => Promise<void> | void) & {
+  unloadSubset: (options: TransportedLoadSubsetOptions) => void
+  onError: (error: unknown) => void
+}
+
+function reportRemoteSubsetOwnerError(
+  owner: RemoteSubsetOwner,
+  error: unknown,
+): void {
+  try {
+    owner.onError(error)
+  } catch {
+    // Reporting must not replace the original owner failure.
+  }
+}
+
+async function unloadRemoteSubsetOwner(
+  owner: RemoteSubsetOwner,
+  options: TransportedLoadSubsetOptions,
+): Promise<void> {
+  try {
+    const result = (
+      owner.unloadSubset as unknown as (
+        options: TransportedLoadSubsetOptions,
+      ) => unknown
+    )(options)
+    await Promise.resolve(result)
+  } catch (error) {
+    reportRemoteSubsetOwnerError(owner, error)
+    throw error
+  }
+}
+
+type SingleProcessRemoteSubsetAcquisition = {
+  owner: RemoteSubsetOwner
+  options: TransportedLoadSubsetOptions
+  load: Promise<void>
+}
+
 export interface SQLiteDriver {
   exec: (sql: string) => Promise<void>
   query: <T>(
@@ -306,10 +419,18 @@ export interface PersistedCollectionCoordinator {
   publish: (collectionId: string, message: ProtocolEnvelope<unknown>) => void
   isLeader: (collectionId: string) => boolean
   ensureLeadership: (collectionId: string) => Promise<void>
-  requestEnsureRemoteSubset?: (
+  requestEnsureRemoteSubset: (
     collectionId: string,
     options: LoadSubsetOptions,
   ) => Promise<void>
+  requestReleaseRemoteSubset: (
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ) => Promise<void>
+  registerRemoteSubsetOwner: (
+    collectionId: string,
+    owner: RemoteSubsetOwner,
+  ) => () => void
   requestEnsurePersistedIndex: (
     collectionId: string,
     signature: string,
@@ -319,6 +440,10 @@ export interface PersistedCollectionCoordinator {
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ) => Promise<ApplyLocalMutationsResponse>
+  requestApplyCommittedTx: (
+    collectionId: string,
+    tx: PersistedTx,
+  ) => Promise<ApplyCommittedTxResponse>
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,
@@ -405,7 +530,11 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
     | `publish`
     | `isLeader`
     | `ensureLeadership`
+    | `requestEnsureRemoteSubset`
+    | `requestReleaseRemoteSubset`
+    | `registerRemoteSubsetOwner`
     | `requestEnsurePersistedIndex`
+    | `requestApplyCommittedTx`
   >
 > = [
   `getNodeId`,
@@ -413,7 +542,11 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
   `publish`,
   `isLeader`,
   `ensureLeadership`,
+  `requestEnsureRemoteSubset`,
+  `requestReleaseRemoteSubset`,
+  `registerRemoteSubsetOwner`,
   `requestEnsurePersistedIndex`,
+  `requestApplyCommittedTx`,
 ]
 
 const REQUIRED_ADAPTER_METHODS: ReadonlyArray<
@@ -440,6 +573,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
   truncate: (() => void) | null
   metadata: SyncMetadataApi<TKey> | null
+  markError: ((error: unknown) => void) | null
 }
 
 /**
@@ -448,6 +582,12 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
  */
 export class SingleProcessCoordinator implements PersistedCollectionCoordinator {
   private readonly nodeId: string
+  private readonly collectionAdapters = new Map<string, PersistenceAdapter>()
+  private readonly remoteSubsetOwners = new Map<string, RemoteSubsetOwner>()
+  private readonly remoteSubsetAcquisitions = new Map<
+    string,
+    Map<LoadSubsetOptions, SingleProcessRemoteSubsetAcquisition>
+  >()
 
   constructor(nodeId: string = safeRandomUUID()) {
     this.nodeId = nodeId
@@ -469,9 +609,127 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
 
   public async ensureLeadership(): Promise<void> {}
 
-  public async requestEnsureRemoteSubset(): Promise<void> {}
+  public async requestEnsureRemoteSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    const transported = toTransportedLoadSubsetOptions(options)
+    const owner = this.remoteSubsetOwners.get(collectionId)
+    if (!owner) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SingleProcessCoordinator has no remote subset owner configured for collection "${collectionId}"`,
+      )
+    }
+    let acquisitions = this.remoteSubsetAcquisitions.get(collectionId)
+    if (!acquisitions) {
+      acquisitions = new Map()
+      this.remoteSubsetAcquisitions.set(collectionId, acquisitions)
+    }
+    const existing = acquisitions.get(options)
+    if (existing) {
+      await existing.load
+      return
+    }
+
+    let resolveLoad!: () => void
+    let rejectLoad!: (error: unknown) => void
+    const load = new Promise<void>((resolve, reject) => {
+      resolveLoad = resolve
+      rejectLoad = reject
+    })
+    acquisitions.set(options, { owner, options: transported, load })
+    try {
+      const ownerLoad = owner(transported)
+      void Promise.resolve(ownerLoad).then(resolveLoad, (error) => {
+        reportRemoteSubsetOwnerError(owner, error)
+        rejectLoad(error)
+      })
+    } catch (error) {
+      reportRemoteSubsetOwnerError(owner, error)
+      rejectLoad(error)
+    }
+    await load
+  }
+
+  public async requestReleaseRemoteSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    const acquisitions = this.remoteSubsetAcquisitions.get(collectionId)
+    const acquisition = acquisitions?.get(options)
+    if (!acquisition) return
+    acquisitions!.delete(options)
+    if (acquisitions!.size === 0) {
+      this.remoteSubsetAcquisitions.delete(collectionId)
+    }
+    try {
+      await acquisition.load
+    } catch {
+      // Calling the owner transferred the lease even when its load rejected.
+    }
+    await unloadRemoteSubsetOwner(acquisition.owner, acquisition.options)
+  }
+
+  public registerRemoteSubsetOwner(
+    collectionId: string,
+    owner: RemoteSubsetOwner,
+  ): () => void {
+    if (this.remoteSubsetOwners.has(collectionId)) {
+      throw new DuplicateRemoteSubsetOwnerError(collectionId)
+    }
+    this.remoteSubsetOwners.set(collectionId, owner)
+    return () => {
+      if (this.remoteSubsetOwners.get(collectionId) !== owner) return
+      const acquisitions = this.remoteSubsetAcquisitions.get(collectionId)
+      this.remoteSubsetAcquisitions.delete(collectionId)
+      this.remoteSubsetOwners.delete(collectionId)
+      for (const acquisition of acquisitions?.values() ?? []) {
+        void (async () => {
+          try {
+            await acquisition.load
+          } catch {
+            // Calling the owner transferred the lease even when its load rejected.
+          }
+          await unloadRemoteSubsetOwner(owner, acquisition.options)
+        })().catch(() => undefined)
+      }
+    }
+  }
 
   public async requestEnsurePersistedIndex(): Promise<void> {}
+
+  public setAdapterForCollection(
+    collectionId: string,
+    adapter: PersistenceAdapter,
+  ): void {
+    this.collectionAdapters.set(collectionId, adapter)
+  }
+
+  public async requestApplyCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+  ): Promise<ApplyCommittedTxResponse> {
+    const adapter = this.collectionAdapters.get(collectionId)
+    if (!adapter) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SingleProcessCoordinator has no persistence adapter configured for collection "${collectionId}"`,
+      )
+    }
+
+    try {
+      await adapter.applyCommittedTx(collectionId, tx)
+    } catch (error) {
+      throw toPersistedCollectionDurabilityError(collectionId, error)
+    }
+    return {
+      type: `rpc:applyCommittedTx:res`,
+      rpcId: safeRandomUUID(),
+      ok: true,
+      term: tx.term,
+      seq: tx.seq,
+      latestRowVersion: tx.rowVersion,
+    }
+  }
 
   public pullSince(): Promise<PullSinceResponse> {
     return Promise.resolve({
@@ -509,10 +767,14 @@ function validatePersistenceAdapter(adapter: PersistenceAdapter): void {
 
 function resolvePersistence(
   persistence: PersistedCollectionPersistence,
+  collectionId: string,
 ): PersistedResolvedPersistence {
   validatePersistenceAdapter(persistence.adapter)
 
   const coordinator = persistence.coordinator ?? new SingleProcessCoordinator()
+  if (coordinator instanceof SingleProcessCoordinator) {
+    coordinator.setAdapterForCollection(collectionId, persistence.adapter)
+  }
   validatePersistedCollectionCoordinator(coordinator)
 
   return {
@@ -524,9 +786,13 @@ function resolvePersistence(
 function resolvePersistenceForMode(
   persistence: PersistedCollectionPersistence,
   mode: PersistedCollectionMode,
+  collectionId: string,
 ): PersistedResolvedPersistence {
   const modeSpecificPersistence = persistence.resolvePersistenceForMode?.(mode)
-  return resolvePersistence(modeSpecificPersistence ?? persistence)
+  return resolvePersistence(
+    modeSpecificPersistence ?? persistence,
+    collectionId,
+  )
 }
 
 function resolvePersistenceForCollection(
@@ -540,10 +806,17 @@ function resolvePersistenceForCollection(
   const collectionSpecificPersistence =
     persistence.resolvePersistenceForCollection?.(options)
   if (collectionSpecificPersistence) {
-    return resolvePersistence(collectionSpecificPersistence)
+    return resolvePersistence(
+      collectionSpecificPersistence,
+      options.collectionId,
+    )
   }
 
-  return resolvePersistenceForMode(persistence, options.mode)
+  return resolvePersistenceForMode(
+    persistence,
+    options.mode,
+    options.collectionId,
+  )
 }
 
 function hasOwnSyncKey(options: object): options is { sync: unknown } {
@@ -801,6 +1074,7 @@ class PersistedCollectionRuntime<
     commit: null,
     truncate: null,
     metadata: null,
+    markError: null,
   }
   private started = false
   private startupMetadataPromise: Promise<void> | null = null
@@ -809,9 +1083,11 @@ class PersistedCollectionRuntime<
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
   private appliedReceiptSequence = 0
+  private syncErrorReported = false
   private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private hydratingGeneration: number | null = null
   private coordinatorUnsubscribe: (() => void) | null = null
+  private remoteSubsetOwnerUnsubscribe: (() => void) | null = null
   private indexAddedUnsubscribe: (() => void) | null = null
   private indexRemovedUnsubscribe: (() => void) | null = null
   private remoteEnsureRetryTimer: ReturnType<typeof setTimeout> | null = null
@@ -834,6 +1110,7 @@ class PersistedCollectionRuntime<
 
   setSyncControls(syncControls: SyncControlFns<T, TKey>): void {
     this.advanceLifecycle()
+    this.syncErrorReported = false
 
     const commit = syncControls.commit
     this.syncControls = {
@@ -842,6 +1119,27 @@ class PersistedCollectionRuntime<
         ? (signal) => this.trackAppliedReceipt(commit(signal))
         : null,
     }
+  }
+
+  reportSyncError(error: unknown): void {
+    const markError = this.syncControls.markError
+    if (this.syncErrorReported || !markError) return
+
+    this.syncErrorReported = true
+    try {
+      markError(error)
+    } catch {
+      // Reporting must not replace the original asynchronous failure.
+    }
+  }
+
+  registerRemoteSubsetOwner(owner: RemoteSubsetOwner): void {
+    this.remoteSubsetOwnerUnsubscribe?.()
+    this.remoteSubsetOwnerUnsubscribe =
+      this.persistence.coordinator.registerRemoteSubsetOwner(
+        this.collectionId,
+        owner,
+      )
   }
 
   private trackAppliedReceipt(receipt: SyncAppliedReceipt): SyncAppliedReceipt {
@@ -870,6 +1168,7 @@ class PersistedCollectionRuntime<
       commit: null,
       truncate: null,
       metadata: null,
+      markError: null,
     }
   }
 
@@ -1045,17 +1344,44 @@ class PersistedCollectionRuntime<
     upstreamLoadSubset?: LoadSubsetFn,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
+    const routeRemoteDemandThroughCoordinator =
+      this.mode === `sync-present` &&
+      !(this.persistence.coordinator instanceof SingleProcessCoordinator)
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
     const appliedCursor = this.appliedReceiptSequence
     await this.applyMutex.run(() =>
       this.hydrateSubsetUnsafe(options, {
-        requestRemoteEnsure: this.mode === `sync-present`,
+        requestRemoteEnsure:
+          this.mode === `sync-present` && !routeRemoteDemandThroughCoordinator,
         lifecycleGeneration,
       }),
     )
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.waitForAppliedReceiptsAfter(appliedCursor)
+
+    if (routeRemoteDemandThroughCoordinator) {
+      try {
+        await this.persistence.coordinator.requestEnsureRemoteSubset(
+          this.collectionId,
+          options,
+        )
+      } catch (error) {
+        if (
+          options.signal?.aborted ||
+          (typeof error === `object` &&
+            error !== null &&
+            `name` in error &&
+            error.name === `AbortError`)
+        ) {
+          this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+          throw error
+        }
+        this.queueRemoteSubsetEnsure(options)
+        throw error
+      }
+      return
+    }
 
     if (upstreamLoadSubset) {
       try {
@@ -1085,7 +1411,27 @@ class PersistedCollectionRuntime<
   ): void {
     this.activeSubsets.delete(this.getSubsetKey(options))
     this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
-    upstreamUnloadSubset?.(options)
+    if (this.mode === `sync-present`) {
+      void this.persistence.coordinator
+        .requestReleaseRemoteSubset(this.collectionId, options)
+        .catch((error) => {
+          this.reportSyncError(error)
+        })
+    }
+    if (upstreamUnloadSubset) {
+      try {
+        const result = (
+          upstreamUnloadSubset as unknown as (
+            options: LoadSubsetOptions,
+          ) => unknown
+        )(options)
+        void Promise.resolve(result).catch((error) => {
+          this.reportSyncError(error)
+        })
+      } catch (error) {
+        this.reportSyncError(error)
+      }
+    }
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
@@ -1216,8 +1562,21 @@ class PersistedCollectionRuntime<
   cleanup(): void {
     this.advanceLifecycle()
 
+    if (this.mode === `sync-present`) {
+      for (const options of this.activeSubsets.values()) {
+        void this.persistence.coordinator
+          .requestReleaseRemoteSubset(this.collectionId, options)
+          .catch((error) => {
+            this.reportSyncError(error)
+          })
+      }
+    }
+
     this.coordinatorUnsubscribe?.()
     this.coordinatorUnsubscribe = null
+
+    this.remoteSubsetOwnerUnsubscribe?.()
+    this.remoteSubsetOwnerUnsubscribe = null
 
     this.indexAddedUnsubscribe?.()
     this.indexAddedUnsubscribe = null
@@ -1519,27 +1878,39 @@ class PersistedCollectionRuntime<
     }
 
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
-
-    await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
-    this.publishTxCommittedEvent(
-      this.createTxCommittedPayload({
-        term: tx.term,
-        seq: tx.seq,
-        txId: tx.txId,
-        latestRowVersion: tx.rowVersion,
-        requiresFullReload: transaction.truncate,
-        changedRows: transaction.operations
-          .filter((operation) => operation.type === `update`)
-          .map((operation) => ({
-            key: operation.key,
-            value: operation.value as Record<string, unknown>,
-          })),
-        deletedKeys: transaction.operations
-          .filter((operation) => operation.type === `delete`)
-          .map((operation) => operation.key),
-        rowMetadataMutations: tx.rowMetadataMutations,
-        collectionMetadataMutations: tx.collectionMetadataMutations,
-      }),
+    let response: ApplyCommittedTxResponse
+    try {
+      response = await this.persistence.coordinator.requestApplyCommittedTx(
+        this.collectionId,
+        tx,
+      )
+    } catch (error) {
+      if (error instanceof PersistedCollectionDurabilityError) {
+        this.reportSyncError(error)
+      }
+      throw error
+    }
+    if (!response.ok) {
+      if (response.code === `PERSISTENCE_ERROR`) {
+        const error = new PersistedCollectionDurabilityError(
+          `Failed to durably persist collection "${this.collectionId}": ${response.error}`,
+          {
+            cause: response,
+            code: response.sourceCode ?? response.code,
+            path: response.path,
+          },
+        )
+        this.reportSyncError(error)
+        throw error
+      }
+      throw new Error(
+        `failed to apply external sync transaction through coordinator: ${response.error}`,
+      )
+    }
+    this.observeStreamPosition(
+      response.term,
+      response.seq,
+      response.latestRowVersion,
     )
   }
 
@@ -1871,7 +2242,7 @@ class PersistedCollectionRuntime<
   private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset ||
+      this.persistence.coordinator instanceof SingleProcessCoordinator ||
       this.activeSubsets.get(this.getSubsetKey(options)) !== options
     ) {
       return
@@ -1884,7 +2255,7 @@ class PersistedCollectionRuntime<
   private scheduleRemoteEnsureRetry(): void {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset
+      this.persistence.coordinator instanceof SingleProcessCoordinator
     ) {
       return
     }
@@ -1905,7 +2276,7 @@ class PersistedCollectionRuntime<
   private async flushPendingRemoteSubsetEnsures(): Promise<void> {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset
+      this.persistence.coordinator instanceof SingleProcessCoordinator
     ) {
       return
     }
@@ -2337,6 +2708,7 @@ function createWrappedSyncConfig<
         commit: params.commit,
         truncate: params.truncate,
         metadata: params.metadata ?? null,
+        markError: params.markError,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
@@ -2640,6 +3012,25 @@ function createWrappedSyncConfig<
         sourceResult = normalizeSyncFnResult(
           sourceSyncConfig.sync(wrappedParams),
         )
+        if (sourceResult.loadSubset) {
+          const loadSubset = async (options: TransportedLoadSubsetOptions) => {
+            if (startupState.cleanedUp) {
+              throw new Error(`persisted sync source is no longer active`)
+            }
+            await sourceResult.loadSubset?.(
+              options as unknown as LoadSubsetOptions,
+            )
+          }
+          runtime.registerRemoteSubsetOwner(
+            Object.assign(loadSubset, {
+              unloadSubset: (options: TransportedLoadSubsetOptions) =>
+                sourceResult.unloadSubset?.(
+                  options as unknown as LoadSubsetOptions,
+                ),
+              onError: (error: unknown) => runtime.reportSyncError(error),
+            }),
+          )
+        }
         return sourceResult
       })()
 
@@ -2708,6 +3099,7 @@ function createLoopbackSyncConfig<
         commit: params.commit,
         truncate: params.truncate,
         metadata: params.metadata ?? null,
+        markError: params.markError,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,

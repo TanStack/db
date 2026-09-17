@@ -1,12 +1,30 @@
-import { safeRandomUUID } from '@tanstack/db-sqlite-persistence-core'
+import {
+  DuplicateRemoteSubsetOwnerError,
+  IndeterminateCommitError,
+  PersistedCollectionDurabilityError,
+  safeRandomUUID,
+  toPersistedCollectionDurabilityError,
+  toTransportedLoadSubsetOptions,
+} from '@tanstack/db-sqlite-persistence-core'
 import type {
+  ApplyCommittedTxResponse,
   ApplyLocalMutationsResponse,
+  EnsureRemoteSubsetRequest,
+  EnsureRemoteSubsetResponse,
+  IndeterminateCommitRequestType,
   PersistedCollectionCoordinator,
   PersistedIndexSpec,
   PersistedMutationEnvelope,
+  PersistedRowMetadataMutation,
+  PersistedTx,
   PersistenceAdapter,
   ProtocolEnvelope,
   PullSinceResponse,
+  ReleaseRemoteSubsetRequest,
+  ReleaseRemoteSubsetResponse,
+  RemoteSubsetOwner,
+  TransportedLoadSubsetOptions,
+  TxCommitted,
 } from '@tanstack/db-sqlite-persistence-core'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
@@ -26,11 +44,8 @@ const WRITER_LOCK_MAX_RETRIES = 20
 // ---------------------------------------------------------------------------
 
 type RPCRequest =
-  | {
-      type: `rpc:ensureRemoteSubset:req`
-      rpcId: string
-      options: LoadSubsetOptions
-    }
+  | EnsureRemoteSubsetRequest
+  | ReleaseRemoteSubsetRequest
   | {
       type: `rpc:ensurePersistedIndex:req`
       rpcId: string
@@ -44,18 +59,20 @@ type RPCRequest =
       mutations: Array<PersistedMutationEnvelope>
     }
   | {
+      type: `rpc:applyCommittedTx:req`
+      rpcId: string
+      envelopeId: string
+      tx: PersistedTx
+    }
+  | {
       type: `rpc:pullSince:req`
       rpcId: string
       fromRowVersion: number
     }
 
 type RPCResponse =
-  | {
-      type: `rpc:ensureRemoteSubset:res`
-      rpcId: string
-      ok: boolean
-      error?: string
-    }
+  | EnsureRemoteSubsetResponse
+  | ReleaseRemoteSubsetResponse
   | {
       type: `rpc:ensurePersistedIndex:res`
       rpcId: string
@@ -63,6 +80,7 @@ type RPCResponse =
       error?: string
     }
   | ApplyLocalMutationsResponse
+  | ApplyCommittedTxResponse
   | PullSinceResponse
 
 type PendingRPC = {
@@ -73,6 +91,7 @@ type PendingRPC = {
 
 type CollectionState = {
   isLeader: boolean
+  leaderId: string | null
   lockAbortController: AbortController | null
   heartbeatTimer: ReturnType<typeof setInterval> | null
   latestTerm: number
@@ -81,8 +100,8 @@ type CollectionState = {
   subscribers: Set<(message: ProtocolEnvelope<unknown>) => void>
 }
 
-// Adapter with pullSince support
-type AdapterWithPullSince = PersistenceAdapter & {
+// Adapter capabilities used by coordinator-side operations
+type CoordinatorAdapter = PersistenceAdapter & {
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,
@@ -105,13 +124,76 @@ type AdapterWithPullSince = PersistenceAdapter & {
   }>
 }
 
+type ActiveRemoteSubsetAcquisition = {
+  collectionId: string
+  requesterId: string
+  acquisitionId: string
+  owner: RemoteSubsetOwner
+  options: TransportedLoadSubsetOptions
+  load: Promise<void>
+  transferred: boolean
+  released: boolean
+  terminalRelease: boolean
+  release: Promise<void> | null
+}
+
+type AwaitingRemoteSubsetOwnerAcquisition = {
+  collectionId: string
+  requesterId: string
+  acquisitionId: string
+  options: TransportedLoadSubsetOptions
+  released: true
+  awaitingOwner: true
+}
+
+type RemoteSubsetAcquisition =
+  | ActiveRemoteSubsetAcquisition
+  | AwaitingRemoteSubsetOwnerAcquisition
+  | {
+      collectionId: string
+      requesterId: string
+      acquisitionId: string
+      released: true
+    }
+
+type OutboundRemoteSubsetAcquisition = {
+  collectionId: string
+  acquisitionId: string
+  options: TransportedLoadSubsetOptions
+  acquiredLeaderId: string | null
+  inFlight: Promise<void> | null
+  forceReplay: boolean
+}
+
+type AppliedEnvelope =
+  | {
+      appliedAt: number
+      requestType: `rpc:applyLocalMutations:req`
+      response: ApplyLocalMutationsResponse
+    }
+  | {
+      appliedAt: number
+      requestType: `rpc:applyCommittedTx:req`
+      response: ApplyCommittedTxResponse
+    }
+
+type InFlightEnvelope =
+  | {
+      requestType: `rpc:applyLocalMutations:req`
+      response: Promise<ApplyLocalMutationsResponse>
+    }
+  | {
+      requestType: `rpc:applyCommittedTx:req`
+      response: Promise<ApplyCommittedTxResponse>
+    }
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
 
 export type BrowserCollectionCoordinatorOptions = {
   dbName: string
-  adapter?: AdapterWithPullSince
+  adapter?: CoordinatorAdapter
 }
 
 // ---------------------------------------------------------------------------
@@ -121,11 +203,26 @@ export type BrowserCollectionCoordinatorOptions = {
 export class BrowserCollectionCoordinator implements PersistedCollectionCoordinator {
   private readonly nodeId = safeRandomUUID()
   private readonly dbName: string
-  private adapter: AdapterWithPullSince | null
+  private defaultAdapter: CoordinatorAdapter | null
+  private readonly collectionAdapters = new Map<string, CoordinatorAdapter>()
+  private readonly remoteSubsetOwners = new Map<string, RemoteSubsetOwner>()
+  private readonly remoteSubsetIds = new Map<
+    string,
+    WeakMap<LoadSubsetOptions, string>
+  >()
+  private readonly outboundRemoteSubsetAcquisitions = new Map<
+    string,
+    OutboundRemoteSubsetAcquisition
+  >()
+  private readonly inboundRemoteSubsetAcquisitions = new Map<
+    string,
+    RemoteSubsetAcquisition
+  >()
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
-  private readonly appliedEnvelopeIds = new Map<string, number>()
+  private readonly appliedEnvelopes = new Map<string, AppliedEnvelope>()
+  private readonly inFlightEnvelopes = new Map<string, InFlightEnvelope>()
   private disposed = false
 
   /** Method indirection to prevent TypeScript from narrowing `disposed` across awaits */
@@ -133,18 +230,20 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     return this.disposed
   }
 
-  private requireAdapter(): AdapterWithPullSince {
-    if (!this.adapter) {
+  private requireAdapter(collectionId: string): CoordinatorAdapter {
+    const adapter =
+      this.collectionAdapters.get(collectionId) ?? this.defaultAdapter
+    if (!adapter) {
       throw new Error(
-        `BrowserCollectionCoordinator: adapter not set. Call setAdapter() before using leader-side operations.`,
+        `BrowserCollectionCoordinator: adapter not set for collection "${collectionId}". Call setAdapterForCollection() before using leader-side operations.`,
       )
     }
-    return this.adapter
+    return adapter
   }
 
   constructor(options: BrowserCollectionCoordinatorOptions) {
     this.dbName = options.dbName
-    this.adapter = options.adapter ?? null
+    this.defaultAdapter = options.adapter ?? null
     this.channel = new BroadcastChannel(`tsdb:coord:${this.dbName}`)
     this.channel.onmessage = (event: MessageEvent) => {
       this.onChannelMessage(event.data)
@@ -156,8 +255,38 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
    * Called by `createBrowserWASQLitePersistence` to wire the internally-created
    * adapter into the coordinator.
    */
-  setAdapter(adapter: AdapterWithPullSince): void {
-    this.adapter = adapter
+  setAdapter(adapter: CoordinatorAdapter): void {
+    this.defaultAdapter = adapter
+  }
+
+  /** Register the persistence adapter that owns one collection. */
+  setAdapterForCollection(
+    collectionId: string,
+    adapter: CoordinatorAdapter,
+  ): void {
+    this.collectionAdapters.set(collectionId, adapter)
+  }
+
+  registerRemoteSubsetOwner(
+    collectionId: string,
+    owner: RemoteSubsetOwner,
+  ): () => void {
+    if (this.remoteSubsetOwners.has(collectionId)) {
+      throw new DuplicateRemoteSubsetOwnerError(collectionId)
+    }
+    this.remoteSubsetOwners.set(collectionId, owner)
+    for (const acquisition of this.outboundRemoteSubsetAcquisitions.values()) {
+      if (acquisition.collectionId !== collectionId) continue
+      acquisition.acquiredLeaderId = null
+      acquisition.forceReplay = true
+    }
+    void this.replayRemoteSubsetAcquisitions(collectionId)
+    this.rebindRemoteInboundSubsetAcquisitions(collectionId, owner)
+    return () => {
+      if (this.remoteSubsetOwners.get(collectionId) !== owner) return
+      this.remoteSubsetOwners.delete(collectionId)
+      this.releaseInboundRemoteSubsetAcquisitions(collectionId, owner)
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -197,23 +326,139 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     collectionId: string,
     options: LoadSubsetOptions,
   ): Promise<void> {
-    if (this.isLeader(collectionId)) return
+    const transportedOptions = toTransportedLoadSubsetOptions(options)
+    let collectionIds = this.remoteSubsetIds.get(collectionId)
+    if (!collectionIds) {
+      collectionIds = new WeakMap()
+      this.remoteSubsetIds.set(collectionId, collectionIds)
+    }
+    let acquisitionId = collectionIds.get(options)
+    let acquisition = acquisitionId
+      ? this.outboundRemoteSubsetAcquisitions.get(
+          remoteSubsetAcquisitionKey(collectionId, acquisitionId),
+        )
+      : undefined
+    if (!acquisition) {
+      acquisitionId = safeRandomUUID()
+      collectionIds.set(options, acquisitionId)
+      acquisition = {
+        collectionId,
+        acquisitionId,
+        options: transportedOptions,
+        acquiredLeaderId: null,
+        inFlight: null,
+        forceReplay: false,
+      }
+      this.outboundRemoteSubsetAcquisitions.set(
+        remoteSubsetAcquisitionKey(collectionId, acquisitionId),
+        acquisition,
+      )
+    }
 
-    const response = await this.sendRPC<{
-      type: `rpc:ensureRemoteSubset:res`
-      rpcId: string
-      ok: boolean
-      error?: string
-    }>(collectionId, {
-      type: `rpc:ensureRemoteSubset:req`,
+    await this.acquireRemoteSubset(acquisition)
+  }
+
+  async requestReleaseRemoteSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    const collectionIds = this.remoteSubsetIds.get(collectionId)
+    const acquisitionId = collectionIds?.get(options)
+    if (!acquisitionId) return
+    const key = remoteSubsetAcquisitionKey(collectionId, acquisitionId)
+    if (!this.outboundRemoteSubsetAcquisitions.delete(key)) return
+    collectionIds!.delete(options)
+
+    const request: Extract<
+      RPCRequest,
+      { type: `rpc:releaseRemoteSubset:req` }
+    > = {
+      type: `rpc:releaseRemoteSubset:req`,
       rpcId: safeRandomUUID(),
-      options,
-    })
+      acquisitionId,
+    }
+    const response = this.isLeader(collectionId)
+      ? await this.handleReleaseRemoteSubset(collectionId, request, this.nodeId)
+      : await this.sendRPC<ReleaseRemoteSubsetResponse>(collectionId, request)
 
     if (!response.ok) {
-      throw new Error(
-        `ensureRemoteSubset failed: ${response.error ?? `unknown error`}`,
+      throw new Error(`releaseRemoteSubset failed: ${response.error}`)
+    }
+  }
+
+  private async acquireRemoteSubset(
+    acquisition: OutboundRemoteSubsetAcquisition,
+  ): Promise<void> {
+    if (acquisition.inFlight) return acquisition.inFlight
+
+    const route = { localOwner: false }
+    let resolveWork!: () => void
+    let rejectWork!: (error: unknown) => void
+    const work = new Promise<void>((resolve, reject) => {
+      resolveWork = resolve
+      rejectWork = reject
+    })
+    acquisition.inFlight = work
+    const run = async (): Promise<void> => {
+      const request: Extract<
+        RPCRequest,
+        { type: `rpc:ensureRemoteSubset:req` }
+      > = {
+        type: `rpc:ensureRemoteSubset:req`,
+        rpcId: safeRandomUUID(),
+        acquisitionId: acquisition.acquisitionId,
+        options: acquisition.options,
+      }
+      route.localOwner = this.isLeader(acquisition.collectionId)
+      const response = route.localOwner
+        ? await this.handleEnsureRemoteSubset(
+            acquisition.collectionId,
+            request,
+            this.nodeId,
+          )
+        : await this.sendRPC<EnsureRemoteSubsetResponse>(
+            acquisition.collectionId,
+            request,
+          )
+
+      if (!response.ok) {
+        throw new Error(`ensureRemoteSubset failed: ${response.error}`)
+      }
+      acquisition.acquiredLeaderId = response.leaderId
+    }
+    void run().then(resolveWork, rejectWork)
+    let acquired = false
+    try {
+      await work
+      acquired = true
+    } catch (error) {
+      if (!route.localOwner) {
+        const owner = this.remoteSubsetOwners.get(acquisition.collectionId)
+        if (owner) reportRemoteSubsetOwnerError(owner, error)
+      }
+      throw error
+    } finally {
+      if (acquisition.inFlight === work) acquisition.inFlight = null
+      const current = this.collections.get(acquisition.collectionId)
+      const currentLeaderId = current?.isLeader
+        ? this.nodeId
+        : (current?.leaderId ?? null)
+      const key = remoteSubsetAcquisitionKey(
+        acquisition.collectionId,
+        acquisition.acquisitionId,
       )
+      if (
+        acquired &&
+        this.outboundRemoteSubsetAcquisitions.get(key) === acquisition &&
+        (acquisition.forceReplay ||
+          (currentLeaderId !== null &&
+            acquisition.acquiredLeaderId !== currentLeaderId))
+      ) {
+        acquisition.forceReplay = false
+        void this.acquireRemoteSubset(acquisition).catch(() => {
+          // Failure is already reported; only new demand or ownership change retries.
+        })
+      }
     }
   }
 
@@ -223,7 +468,11 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     spec: PersistedIndexSpec,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
-      await this.requireAdapter().ensureIndex(collectionId, signature, spec)
+      await this.requireAdapter(collectionId).ensureIndex(
+        collectionId,
+        signature,
+        spec,
+      )
       return
     }
 
@@ -267,6 +516,23 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     })
   }
 
+  async requestApplyCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+  ): Promise<ApplyCommittedTxResponse> {
+    const request: Extract<RPCRequest, { type: `rpc:applyCommittedTx:req` }> = {
+      type: `rpc:applyCommittedTx:req`,
+      rpcId: safeRandomUUID(),
+      envelopeId: safeRandomUUID(),
+      tx,
+    }
+    if (this.isLeader(collectionId)) {
+      return this.handleApplyCommittedTx(collectionId, request)
+    }
+
+    return this.sendRPC<ApplyCommittedTxResponse>(collectionId, request)
+  }
+
   async pullSince(
     collectionId: string,
     fromRowVersion: number,
@@ -293,6 +559,12 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   dispose(): void {
     this.disposed = true
 
+    for (const acquisition of this.outboundRemoteSubsetAcquisitions.values()) {
+      this.postRemoteSubsetRelease(acquisition)
+    }
+    this.outboundRemoteSubsetAcquisitions.clear()
+    this.remoteSubsetIds.clear()
+
     for (const [collectionId, state] of this.collections) {
       this.releaseLeadership(collectionId, state)
     }
@@ -305,6 +577,14 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
     this.channel.close()
     this.collections.clear()
+    this.collectionAdapters.clear()
+    for (const collectionId of this.remoteSubsetOwners.keys()) {
+      this.releaseInboundRemoteSubsetAcquisitions(collectionId)
+    }
+    this.remoteSubsetOwners.clear()
+    this.inboundRemoteSubsetAcquisitions.clear()
+    this.appliedEnvelopes.clear()
+    this.inFlightEnvelopes.clear()
   }
 
   // -----------------------------------------------------------------------
@@ -316,6 +596,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     if (!state) {
       state = {
         isLeader: false,
+        leaderId: null,
         lockAbortController: null,
         heartbeatTimer: null,
         latestTerm: 0,
@@ -348,7 +629,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
           try {
             // Restore stream position from DB before claiming leadership
-            const adapter = this.requireAdapter()
+            const adapter = this.requireAdapter(collectionId)
             if (adapter.getStreamPosition) {
               const pos = await adapter.getStreamPosition(collectionId)
               state.latestTerm = pos.latestTerm
@@ -358,8 +639,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
             state.latestTerm++
             state.isLeader = true
+            state.leaderId = this.nodeId
 
             this.emitHeartbeat(collectionId, state)
+            void this.replayRemoteSubsetAcquisitions(collectionId)
             state.heartbeatTimer = setInterval(() => {
               this.emitHeartbeat(collectionId, state)
             }, HEARTBEAT_INTERVAL_MS)
@@ -377,7 +660,9 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
               abortController.signal.addEventListener(`abort`, onAbort)
             })
           } finally {
+            this.releaseInboundRemoteSubsetAcquisitions(collectionId)
             state.isLeader = false
+            state.leaderId = null
             if (state.heartbeatTimer) {
               clearInterval(state.heartbeatTimer)
               state.heartbeatTimer = null
@@ -399,9 +684,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   }
 
   private releaseLeadership(
-    _collectionId: string,
+    collectionId: string,
     state: CollectionState,
   ): void {
+    this.releaseInboundRemoteSubsetAcquisitions(collectionId)
     if (state.lockAbortController) {
       state.lockAbortController.abort()
       state.lockAbortController = null
@@ -411,6 +697,68 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       state.heartbeatTimer = null
     }
     state.isLeader = false
+    state.leaderId = null
+  }
+
+  private postRemoteSubsetRelease(
+    acquisition: OutboundRemoteSubsetAcquisition,
+  ): void {
+    const request: Extract<
+      RPCRequest,
+      { type: `rpc:releaseRemoteSubset:req` }
+    > = {
+      type: `rpc:releaseRemoteSubset:req`,
+      rpcId: safeRandomUUID(),
+      acquisitionId: acquisition.acquisitionId,
+    }
+    if (this.isLeader(acquisition.collectionId)) {
+      void this.handleReleaseRemoteSubset(
+        acquisition.collectionId,
+        request,
+        this.nodeId,
+      ).catch(() => {
+        // The owner already received the exact unload failure through onError.
+      })
+      return
+    }
+    this.channel.postMessage({
+      v: 1,
+      dbName: this.dbName,
+      collectionId: acquisition.collectionId,
+      senderId: this.nodeId,
+      ts: Date.now(),
+      payload: request,
+    } satisfies ProtocolEnvelope<unknown>)
+  }
+
+  private async replayRemoteSubsetAcquisitions(
+    collectionId: string,
+  ): Promise<void> {
+    if (this.isDisposed()) return
+    const state = this.collections.get(collectionId)
+    const leaderId = state?.isLeader ? this.nodeId : state?.leaderId
+    if (!leaderId) return
+
+    const replays: Array<Promise<void>> = []
+    for (const acquisition of this.outboundRemoteSubsetAcquisitions.values()) {
+      if (
+        acquisition.collectionId !== collectionId ||
+        (!acquisition.forceReplay && acquisition.acquiredLeaderId === leaderId)
+      ) {
+        continue
+      }
+      if (acquisition.inFlight) {
+        acquisition.forceReplay = true
+        continue
+      }
+      acquisition.forceReplay = false
+      replays.push(
+        this.acquireRemoteSubset(acquisition).catch(() => {
+          // Failure is already reported; only new demand or ownership change retries.
+        }),
+      )
+    }
+    await Promise.all(replays)
   }
 
   private emitHeartbeat(collectionId: string, state: CollectionState): void {
@@ -448,6 +796,35 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
     const type = (payload as Record<string, unknown>).type as string | undefined
 
+    if (type === `leader:heartbeat`) {
+      const heartbeat = payload as {
+        leaderId?: unknown
+        term?: unknown
+        latestSeq?: unknown
+        latestRowVersion?: unknown
+      }
+      if (
+        typeof heartbeat.leaderId === `string` &&
+        typeof heartbeat.term === `number` &&
+        typeof heartbeat.latestSeq === `number` &&
+        typeof heartbeat.latestRowVersion === `number`
+      ) {
+        const state = this.ensureCollectionState(envelope.collectionId)
+        if (heartbeat.term < state.latestTerm) return
+        const changedLeader = state.leaderId !== heartbeat.leaderId
+        state.leaderId = heartbeat.leaderId
+        state.latestTerm = Math.max(state.latestTerm, heartbeat.term)
+        state.latestSeq = Math.max(state.latestSeq, heartbeat.latestSeq)
+        state.latestRowVersion = Math.max(
+          state.latestRowVersion,
+          heartbeat.latestRowVersion,
+        )
+        if (changedLeader) {
+          void this.replayRemoteSubsetAcquisitions(envelope.collectionId)
+        }
+      }
+    }
+
     // Handle RPC responses (for pending outbound RPCs)
     if (type && type.endsWith(`:res`)) {
       const rpcId = (payload as { rpcId?: string }).rpcId
@@ -464,7 +841,11 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     if (type && type.endsWith(`:req`)) {
       const collectionId = envelope.collectionId
       if (this.isLeader(collectionId)) {
-        void this.handleRPCRequest(collectionId, payload as RPCRequest)
+        void this.handleRPCRequest(
+          collectionId,
+          payload as RPCRequest,
+          envelope.senderId,
+        )
       }
       return
     }
@@ -487,20 +868,95 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     request: RPCRequest,
   ): Promise<T> {
     let lastError: Error | undefined
+    let firstTransportCause: unknown
+    const mutationRequestType = isMutatingRPCRequest(request)
+      ? request.type
+      : undefined
+    const mutationRoute = mutationRequestType
+      ? this.captureMutationRoute(collectionId)
+      : undefined
 
     for (let attempt = 0; attempt <= RPC_RETRY_ATTEMPTS; attempt++) {
       if (attempt > 0) {
         await sleep(RPC_RETRY_DELAY_MS * attempt)
       }
 
+      if (
+        mutationRoute &&
+        mutationRequestType &&
+        firstTransportCause !== undefined
+      ) {
+        this.assertMutationRouteUnchanged(
+          collectionId,
+          mutationRequestType,
+          mutationRoute,
+          firstTransportCause,
+        )
+      }
+
+      if (this.isLeader(collectionId)) {
+        return (await this.dispatchRPCRequest(
+          collectionId,
+          request,
+          this.nodeId,
+        )) as T
+      }
+
       try {
         return await this.sendRPCOnce<T>(collectionId, request)
       } catch (error) {
+        if (this.isDisposed()) throw error
+        firstTransportCause ??= error
+        if (mutationRoute && mutationRequestType) {
+          this.assertMutationRouteUnchanged(
+            collectionId,
+            mutationRequestType,
+            mutationRoute,
+            firstTransportCause,
+          )
+        }
         lastError = error instanceof Error ? error : new Error(String(error))
       }
     }
 
     throw lastError ?? new Error(`RPC failed after retries`)
+  }
+
+  private captureMutationRoute(collectionId: string): {
+    leaderId: string | null
+    term: number | null
+  } {
+    const state = this.collections.get(collectionId)
+    return {
+      leaderId: state?.isLeader ? this.nodeId : (state?.leaderId ?? null),
+      term: state?.latestTerm ?? null,
+    }
+  }
+
+  private assertMutationRouteUnchanged(
+    collectionId: string,
+    requestType: IndeterminateCommitRequestType,
+    previous: { leaderId: string | null; term: number | null },
+    cause: unknown,
+  ): void {
+    const current = this.captureMutationRoute(collectionId)
+    if (
+      previous.leaderId !== null &&
+      previous.term !== null &&
+      current.leaderId === previous.leaderId &&
+      current.term === previous.term
+    ) {
+      return
+    }
+    throw new IndeterminateCommitError({
+      collectionId,
+      requestType,
+      previousLeaderId: previous.leaderId,
+      previousTerm: previous.term,
+      currentLeaderId: current.leaderId,
+      currentTerm: current.term,
+      cause,
+    })
   }
 
   private sendRPCOnce<T extends RPCResponse>(
@@ -542,38 +998,22 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private async handleRPCRequest(
     collectionId: string,
     request: RPCRequest,
+    requesterId: string,
   ): Promise<void> {
     let response: RPCResponse
 
     try {
-      switch (request.type) {
-        case `rpc:ensureRemoteSubset:req`:
-          response = await this.handleEnsureRemoteSubset(collectionId, request)
-          break
-        case `rpc:ensurePersistedIndex:req`:
-          response = await this.handleEnsurePersistedIndex(
-            collectionId,
-            request,
-          )
-          break
-        case `rpc:applyLocalMutations:req`:
-          response = await this.handleApplyLocalMutations(collectionId, request)
-          break
-        case `rpc:pullSince:req`:
-          response = await this.handlePullSince(collectionId, request)
-          break
-        default:
-          return
-      }
+      response = await this.dispatchRPCRequest(
+        collectionId,
+        request,
+        requesterId,
+      )
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      response = {
-        type: request.type.replace(`:req`, `:res`) as RPCResponse[`type`],
-        rpcId: request.rpcId,
-        ok: false,
-        error: errorMessage,
-      } as RPCResponse
+      response = createRPCErrorResponse(request, error)
+    }
+
+    if (this.isDisposed()) {
+      return
     }
 
     const envelope: ProtocolEnvelope<unknown> = {
@@ -587,16 +1027,357 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     this.channel.postMessage(envelope)
   }
 
-  private handleEnsureRemoteSubset(
-    _collectionId: string,
-    request: { type: `rpc:ensureRemoteSubset:req`; rpcId: string },
-  ): RPCResponse {
-    // Leader doesn't need to do anything special — the remote subset
-    // is ensured by the leader's own sync connection
+  private dispatchRPCRequest(
+    collectionId: string,
+    request: RPCRequest,
+    requesterId: string,
+  ): Promise<RPCResponse> {
+    switch (request.type) {
+      case `rpc:ensureRemoteSubset:req`:
+        return this.handleEnsureRemoteSubset(collectionId, request, requesterId)
+      case `rpc:releaseRemoteSubset:req`:
+        return this.handleReleaseRemoteSubset(
+          collectionId,
+          request,
+          requesterId,
+        )
+      case `rpc:ensurePersistedIndex:req`:
+        return this.handleEnsurePersistedIndex(collectionId, request)
+      case `rpc:applyLocalMutations:req`:
+        return this.handleApplyLocalMutations(collectionId, request)
+      case `rpc:applyCommittedTx:req`:
+        return this.handleApplyCommittedTx(collectionId, request)
+      case `rpc:pullSince:req`:
+        return this.handlePullSince(collectionId, request)
+    }
+  }
+
+  private async handleEnsureRemoteSubset(
+    collectionId: string,
+    request: Extract<RPCRequest, { type: `rpc:ensureRemoteSubset:req` }>,
+    requesterId: string,
+  ): Promise<EnsureRemoteSubsetResponse> {
+    const key = inboundRemoteSubsetAcquisitionKey(
+      collectionId,
+      requesterId,
+      request.acquisitionId,
+    )
+    const existing = this.inboundRemoteSubsetAcquisitions.get(key)
+    const awaitingOwner =
+      existing && `awaitingOwner` in existing ? existing : undefined
+    if (existing) {
+      if (`owner` in existing) {
+        if (!existing.released) {
+          await existing.load
+          return {
+            type: `rpc:ensureRemoteSubset:res`,
+            rpcId: request.rpcId,
+            ok: true,
+            leaderId: this.nodeId,
+          }
+        }
+        await existing.release
+        if (existing.terminalRelease) {
+          return {
+            type: `rpc:ensureRemoteSubset:res`,
+            rpcId: request.rpcId,
+            ok: true,
+            leaderId: this.nodeId,
+          }
+        }
+        if (this.inboundRemoteSubsetAcquisitions.get(key) === existing) {
+          this.inboundRemoteSubsetAcquisitions.delete(key)
+        }
+      } else if (!(`awaitingOwner` in existing)) {
+        return {
+          type: `rpc:ensureRemoteSubset:res`,
+          rpcId: request.rpcId,
+          ok: true,
+          leaderId: this.nodeId,
+        }
+      }
+    }
+
+    const owner = this.remoteSubsetOwners.get(collectionId)
+    if (!owner) {
+      throw new Error(
+        `BrowserCollectionCoordinator: no remote subset owner registered for collection "${collectionId}"`,
+      )
+    }
+
+    const acquisition: ActiveRemoteSubsetAcquisition = {
+      collectionId,
+      requesterId,
+      acquisitionId: request.acquisitionId,
+      owner,
+      options: awaitingOwner?.options ?? request.options,
+      load: Promise.resolve(),
+      transferred: false,
+      released: false,
+      terminalRelease: false,
+      release: null,
+    }
+    this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
+    let resolveLoad!: () => void
+    let rejectLoad!: (error: unknown) => void
+    acquisition.load = new Promise<void>((resolve, reject) => {
+      resolveLoad = resolve
+      rejectLoad = reject
+    })
+    try {
+      const load = owner(acquisition.options)
+      acquisition.transferred = true
+      void Promise.resolve(load).then(resolveLoad, rejectLoad)
+    } catch (error) {
+      rejectLoad(error)
+    }
+    try {
+      await acquisition.load
+    } catch (error) {
+      if (
+        !acquisition.transferred &&
+        this.inboundRemoteSubsetAcquisitions.get(key) === acquisition
+      ) {
+        if (awaitingOwner) {
+          this.inboundRemoteSubsetAcquisitions.set(key, awaitingOwner)
+        } else {
+          this.inboundRemoteSubsetAcquisitions.delete(key)
+        }
+      }
+      reportRemoteSubsetOwnerError(owner, error)
+      throw error
+    }
     return {
       type: `rpc:ensureRemoteSubset:res`,
       rpcId: request.rpcId,
       ok: true,
+      leaderId: this.nodeId,
+    }
+  }
+
+  private async handleReleaseRemoteSubset(
+    collectionId: string,
+    request: Extract<RPCRequest, { type: `rpc:releaseRemoteSubset:req` }>,
+    requesterId: string,
+  ): Promise<ReleaseRemoteSubsetResponse> {
+    const key = inboundRemoteSubsetAcquisitionKey(
+      collectionId,
+      requesterId,
+      request.acquisitionId,
+    )
+    const acquisition = this.inboundRemoteSubsetAcquisitions.get(key)
+    if (!acquisition) {
+      this.inboundRemoteSubsetAcquisitions.set(key, {
+        collectionId,
+        requesterId,
+        acquisitionId: request.acquisitionId,
+        released: true,
+      })
+    } else if (`owner` in acquisition) {
+      acquisition.terminalRelease = true
+      await this.releaseRemoteSubsetAcquisition(acquisition)
+      if (this.inboundRemoteSubsetAcquisitions.get(key) === acquisition) {
+        this.inboundRemoteSubsetAcquisitions.set(key, {
+          collectionId,
+          requesterId,
+          acquisitionId: request.acquisitionId,
+          released: true,
+        })
+      }
+    } else if (`awaitingOwner` in acquisition) {
+      this.inboundRemoteSubsetAcquisitions.set(key, {
+        collectionId,
+        requesterId,
+        acquisitionId: request.acquisitionId,
+        released: true,
+      })
+    }
+    return {
+      type: `rpc:releaseRemoteSubset:res`,
+      rpcId: request.rpcId,
+      ok: true,
+    }
+  }
+
+  private releaseRemoteSubsetAcquisition(
+    acquisition: ActiveRemoteSubsetAcquisition,
+  ): Promise<void> {
+    if (acquisition.release) return acquisition.release
+    acquisition.released = true
+    acquisition.release = (async () => {
+      try {
+        await acquisition.load
+      } catch {
+        // A returned promise transfers the lease even when initial loading fails.
+      }
+      try {
+        if (acquisition.transferred) {
+          await unloadRemoteSubsetOwner(acquisition.owner, acquisition.options)
+        }
+      } finally {
+        if (!acquisition.terminalRelease) {
+          const key = inboundRemoteSubsetAcquisitionKey(
+            acquisition.collectionId,
+            acquisition.requesterId,
+            acquisition.acquisitionId,
+          )
+          if (this.inboundRemoteSubsetAcquisitions.get(key) === acquisition) {
+            this.inboundRemoteSubsetAcquisitions.set(key, {
+              collectionId: acquisition.collectionId,
+              requesterId: acquisition.requesterId,
+              acquisitionId: acquisition.acquisitionId,
+              options: acquisition.options,
+              released: true,
+              awaitingOwner: true,
+            })
+          }
+        }
+      }
+    })()
+    return acquisition.release
+  }
+
+  private releaseInboundRemoteSubsetAcquisitions(
+    collectionId: string,
+    owner?: RemoteSubsetOwner,
+  ): void {
+    for (const acquisition of this.inboundRemoteSubsetAcquisitions.values()) {
+      if (
+        !(`owner` in acquisition) ||
+        acquisition.collectionId !== collectionId ||
+        (owner && acquisition.owner !== owner)
+      ) {
+        continue
+      }
+      void this.releaseRemoteSubsetAcquisition(acquisition).catch(
+        () => undefined,
+      )
+    }
+  }
+
+  private rebindRemoteInboundSubsetAcquisitions(
+    collectionId: string,
+    owner: RemoteSubsetOwner,
+  ): void {
+    for (const acquisition of this.inboundRemoteSubsetAcquisitions.values()) {
+      if (`awaitingOwner` in acquisition) {
+        if (
+          acquisition.collectionId === collectionId &&
+          acquisition.requesterId !== this.nodeId
+        ) {
+          void this.bindAwaitingRemoteSubsetAcquisition(
+            acquisition,
+            owner,
+          ).catch(() => {
+            // The owner receives the exact load failure through onError.
+          })
+        }
+        continue
+      }
+      if (
+        !(`owner` in acquisition) ||
+        acquisition.collectionId !== collectionId ||
+        acquisition.requesterId === this.nodeId ||
+        !acquisition.released ||
+        acquisition.terminalRelease
+      ) {
+        continue
+      }
+
+      void this.rebindRemoteInboundSubsetAcquisition(acquisition, owner).catch(
+        () => undefined,
+      )
+    }
+  }
+
+  private async rebindRemoteInboundSubsetAcquisition(
+    previous: ActiveRemoteSubsetAcquisition,
+    owner: RemoteSubsetOwner,
+  ): Promise<void> {
+    await previous.release
+    if (
+      previous.terminalRelease ||
+      this.remoteSubsetOwners.get(previous.collectionId) !== owner
+    ) {
+      return
+    }
+
+    const key = inboundRemoteSubsetAcquisitionKey(
+      previous.collectionId,
+      previous.requesterId,
+      previous.acquisitionId,
+    )
+    const current = this.inboundRemoteSubsetAcquisitions.get(key)
+    if (current && current !== previous) {
+      if (`awaitingOwner` in current) {
+        await this.bindAwaitingRemoteSubsetAcquisition(current, owner)
+      }
+      return
+    }
+
+    const awaitingOwner: AwaitingRemoteSubsetOwnerAcquisition = {
+      collectionId: previous.collectionId,
+      requesterId: previous.requesterId,
+      acquisitionId: previous.acquisitionId,
+      options: previous.options,
+      released: true,
+      awaitingOwner: true,
+    }
+    this.inboundRemoteSubsetAcquisitions.set(key, awaitingOwner)
+    await this.bindAwaitingRemoteSubsetAcquisition(awaitingOwner, owner)
+  }
+
+  private async bindAwaitingRemoteSubsetAcquisition(
+    awaitingOwner: AwaitingRemoteSubsetOwnerAcquisition,
+    owner: RemoteSubsetOwner,
+  ): Promise<void> {
+    if (this.remoteSubsetOwners.get(awaitingOwner.collectionId) !== owner) {
+      return
+    }
+    const key = inboundRemoteSubsetAcquisitionKey(
+      awaitingOwner.collectionId,
+      awaitingOwner.requesterId,
+      awaitingOwner.acquisitionId,
+    )
+    if (this.inboundRemoteSubsetAcquisitions.get(key) !== awaitingOwner) return
+
+    const acquisition: ActiveRemoteSubsetAcquisition = {
+      collectionId: awaitingOwner.collectionId,
+      requesterId: awaitingOwner.requesterId,
+      acquisitionId: awaitingOwner.acquisitionId,
+      owner,
+      options: awaitingOwner.options,
+      load: Promise.resolve(),
+      transferred: false,
+      released: false,
+      terminalRelease: false,
+      release: null,
+    }
+    this.inboundRemoteSubsetAcquisitions.set(key, acquisition)
+    let resolveLoad!: () => void
+    let rejectLoad!: (error: unknown) => void
+    acquisition.load = new Promise<void>((resolve, reject) => {
+      resolveLoad = resolve
+      rejectLoad = reject
+    })
+    try {
+      const load = owner(acquisition.options)
+      acquisition.transferred = true
+      void Promise.resolve(load).then(resolveLoad, rejectLoad)
+    } catch (error) {
+      rejectLoad(error)
+    }
+    try {
+      await acquisition.load
+    } catch (error) {
+      if (
+        !acquisition.transferred &&
+        this.inboundRemoteSubsetAcquisitions.get(key) === acquisition
+      ) {
+        this.inboundRemoteSubsetAcquisitions.set(key, awaitingOwner)
+      }
+      reportRemoteSubsetOwnerError(owner, error)
+      throw error
     }
   }
 
@@ -610,7 +1391,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     },
   ): Promise<RPCResponse> {
     await this.withWriterLock(() =>
-      this.requireAdapter().ensureIndex(
+      this.requireAdapter(collectionId).ensureIndex(
         collectionId,
         request.signature,
         request.spec,
@@ -632,8 +1413,12 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       mutations: Array<PersistedMutationEnvelope>
     },
   ): Promise<ApplyLocalMutationsResponse> {
-    // Dedupe by envelopeId
-    if (this.appliedEnvelopeIds.has(request.envelopeId)) {
+    const envelopeKey = appliedEnvelopeKey(collectionId, request.envelopeId)
+    const appliedEnvelope = this.appliedEnvelopes.get(envelopeKey)
+    if (appliedEnvelope?.requestType === `rpc:applyLocalMutations:req`) {
+      return { ...appliedEnvelope.response, rpcId: request.rpcId }
+    }
+    if (appliedEnvelope) {
       return {
         type: `rpc:applyLocalMutations:res`,
         rpcId: request.rpcId,
@@ -643,6 +1428,40 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       }
     }
 
+    const inFlightEnvelope = this.inFlightEnvelopes.get(envelopeKey)
+    if (inFlightEnvelope?.requestType === `rpc:applyLocalMutations:req`) {
+      const response = await inFlightEnvelope.response
+      return { ...response, rpcId: request.rpcId }
+    }
+    if (inFlightEnvelope) {
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `CONFLICT`,
+        error: `envelope ${request.envelopeId} is already in flight`,
+      }
+    }
+
+    const response = this.applyLocalMutationsOnce(collectionId, request)
+    const pendingEnvelope: InFlightEnvelope = {
+      requestType: request.type,
+      response,
+    }
+    this.inFlightEnvelopes.set(envelopeKey, pendingEnvelope)
+    try {
+      return await response
+    } finally {
+      if (this.inFlightEnvelopes.get(envelopeKey) === pendingEnvelope) {
+        this.inFlightEnvelopes.delete(envelopeKey)
+      }
+    }
+  }
+
+  private async applyLocalMutationsOnce(
+    collectionId: string,
+    request: Extract<RPCRequest, { type: `rpc:applyLocalMutations:req` }>,
+  ): Promise<ApplyLocalMutationsResponse> {
     const state = this.collections.get(collectionId)
     if (!state || !state.isLeader) {
       return {
@@ -663,6 +1482,21 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     const rowVersion = state.latestRowVersion
 
     // Build and apply the persisted transaction
+    const rowMetadataMutations: Array<PersistedRowMetadataMutation> = []
+    for (const mutation of request.mutations) {
+      if (!(`metadataChanged` in mutation) || !mutation.metadataChanged) {
+        continue
+      }
+      rowMetadataMutations.push(
+        mutation.metadata === undefined
+          ? { type: `delete`, key: mutation.key }
+          : {
+              type: `set`,
+              key: mutation.key,
+              value: mutation.metadata,
+            },
+      )
+    }
     const tx = {
       txId: safeRandomUUID(),
       term,
@@ -672,16 +1506,42 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         type: m.type,
         key: m.key,
         value: m.value,
+        ...(`metadataChanged` in m
+          ? { metadata: m.metadata, metadataChanged: m.metadataChanged }
+          : {}),
       })),
+      rowMetadataMutations,
     }
 
-    await this.withWriterLock(() =>
-      this.requireAdapter().applyCommittedTx(collectionId, tx),
-    )
+    try {
+      await this.withWriterLock(() =>
+        this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx),
+      )
+    } catch (error) {
+      throw toPersistedCollectionDurabilityError(collectionId, error)
+    }
 
-    // Track envelope for dedup
-    this.appliedEnvelopeIds.set(request.envelopeId, Date.now())
-    this.pruneAppliedEnvelopeIds()
+    const response: ApplyLocalMutationsResponse = {
+      type: `rpc:applyLocalMutations:res`,
+      rpcId: request.rpcId,
+      ok: true,
+      term,
+      seq,
+      latestRowVersion: rowVersion,
+      acceptedMutationIds: request.mutations.map((m) => m.mutationId),
+    }
+    if (this.isDisposed()) {
+      return response
+    }
+    this.appliedEnvelopes.set(
+      appliedEnvelopeKey(collectionId, request.envelopeId),
+      {
+        appliedAt: Date.now(),
+        requestType: request.type,
+        response,
+      },
+    )
+    this.pruneAppliedEnvelopes()
 
     // Broadcast tx:committed to all tabs
     const changedRows = request.mutations
@@ -706,6 +1566,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         requiresFullReload: false,
         changedRows,
         deletedKeys,
+        rowMetadataMutations,
       },
     }
     this.channel.postMessage(txCommitted)
@@ -715,15 +1576,151 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       subscriber(txCommitted)
     }
 
-    return {
-      type: `rpc:applyLocalMutations:res`,
+    return response
+  }
+
+  private async handleApplyCommittedTx(
+    collectionId: string,
+    request: Extract<RPCRequest, { type: `rpc:applyCommittedTx:req` }>,
+  ): Promise<ApplyCommittedTxResponse> {
+    const envelopeKey = appliedEnvelopeKey(collectionId, request.envelopeId)
+    const appliedEnvelope = this.appliedEnvelopes.get(envelopeKey)
+    if (appliedEnvelope?.requestType === `rpc:applyCommittedTx:req`) {
+      return { ...appliedEnvelope.response, rpcId: request.rpcId }
+    }
+    if (appliedEnvelope) {
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `CONFLICT`,
+        error: `envelope ${request.envelopeId} already applied`,
+      }
+    }
+
+    const inFlightEnvelope = this.inFlightEnvelopes.get(envelopeKey)
+    if (inFlightEnvelope?.requestType === `rpc:applyCommittedTx:req`) {
+      const response = await inFlightEnvelope.response
+      return { ...response, rpcId: request.rpcId }
+    }
+    if (inFlightEnvelope) {
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `CONFLICT`,
+        error: `envelope ${request.envelopeId} is already in flight`,
+      }
+    }
+
+    const response = this.applyCommittedTxOnce(collectionId, request)
+    const pendingEnvelope: InFlightEnvelope = {
+      requestType: request.type,
+      response,
+    }
+    this.inFlightEnvelopes.set(envelopeKey, pendingEnvelope)
+    try {
+      return await response
+    } finally {
+      if (this.inFlightEnvelopes.get(envelopeKey) === pendingEnvelope) {
+        this.inFlightEnvelopes.delete(envelopeKey)
+      }
+    }
+  }
+
+  private async applyCommittedTxOnce(
+    collectionId: string,
+    request: Extract<RPCRequest, { type: `rpc:applyCommittedTx:req` }>,
+  ): Promise<ApplyCommittedTxResponse> {
+    const state = this.collections.get(collectionId)
+    if (!state || !state.isLeader) {
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `NOT_LEADER`,
+        error: `not the leader for ${collectionId}`,
+      }
+    }
+
+    state.latestSeq++
+    state.latestRowVersion++
+    const tx: PersistedTx = {
+      ...request.tx,
+      term: state.latestTerm,
+      seq: state.latestSeq,
+      rowVersion: state.latestRowVersion,
+    }
+
+    try {
+      await this.withWriterLock(() =>
+        this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx),
+      )
+    } catch (error) {
+      throw toPersistedCollectionDurabilityError(collectionId, error)
+    }
+    const response: ApplyCommittedTxResponse = {
+      type: `rpc:applyCommittedTx:res`,
       rpcId: request.rpcId,
       ok: true,
-      term,
-      seq,
-      latestRowVersion: rowVersion,
-      acceptedMutationIds: request.mutations.map((m) => m.mutationId),
+      term: tx.term,
+      seq: tx.seq,
+      latestRowVersion: tx.rowVersion,
     }
+    if (this.isDisposed()) {
+      return response
+    }
+    this.appliedEnvelopes.set(
+      appliedEnvelopeKey(collectionId, request.envelopeId),
+      {
+        appliedAt: Date.now(),
+        requestType: request.type,
+        response,
+      },
+    )
+    this.pruneAppliedEnvelopes()
+
+    const committedBase = {
+      type: `tx:committed` as const,
+      term: tx.term,
+      seq: tx.seq,
+      txId: tx.txId,
+      latestRowVersion: tx.rowVersion,
+    }
+    const committedPayload: TxCommitted = tx.truncate
+      ? {
+          ...committedBase,
+          requiresFullReload: true,
+        }
+      : {
+          ...committedBase,
+          requiresFullReload: false,
+          changedRows: tx.mutations
+            .filter((mutation) => mutation.type !== `delete`)
+            .map((mutation) => ({
+              key: mutation.key,
+              value: mutation.value,
+            })),
+          deletedKeys: tx.mutations
+            .filter((mutation) => mutation.type === `delete`)
+            .map((mutation) => mutation.key),
+          rowMetadataMutations: tx.rowMetadataMutations,
+          collectionMetadataMutations: tx.collectionMetadataMutations,
+        }
+    const committed: ProtocolEnvelope<TxCommitted> = {
+      v: 1,
+      dbName: this.dbName,
+      collectionId,
+      senderId: this.nodeId,
+      ts: Date.now(),
+      payload: committedPayload,
+    }
+    this.channel.postMessage(committed)
+    for (const subscriber of state.subscribers) {
+      subscriber(committed)
+    }
+
+    return response
   }
 
   private async handlePullSince(
@@ -736,7 +1733,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   ): Promise<PullSinceResponse> {
     const state = this.collections.get(collectionId)
 
-    const adapter = this.requireAdapter()
+    const adapter = this.requireAdapter(collectionId)
     if (!adapter.pullSince) {
       return {
         type: `rpc:pullSince:res`,
@@ -784,9 +1781,16 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     const lockName = `tsdb:writer:${this.dbName}`
 
     for (let attempt = 0; attempt <= WRITER_LOCK_MAX_RETRIES; attempt++) {
+      const callbackState = { entered: false }
       try {
-        return await navigator.locks.request(lockName, async () => fn())
+        return await navigator.locks.request(lockName, async () => {
+          callbackState.entered = true
+          return fn()
+        })
       } catch (error) {
+        if (callbackState.entered) {
+          throw error
+        }
         if (error instanceof DOMException && error.name === `AbortError`) {
           throw error
         }
@@ -808,12 +1812,12 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   // Helpers
   // -----------------------------------------------------------------------
 
-  private pruneAppliedEnvelopeIds(): void {
+  private pruneAppliedEnvelopes(): void {
     // Keep envelopes for 60 seconds for dedup
     const cutoff = Date.now() - 60_000
-    for (const [id, ts] of this.appliedEnvelopeIds) {
-      if (ts < cutoff) {
-        this.appliedEnvelopeIds.delete(id)
+    for (const [key, envelope] of this.appliedEnvelopes) {
+      if (envelope.appliedAt < cutoff) {
+        this.appliedEnvelopes.delete(key)
       }
     }
   }
@@ -837,4 +1841,158 @@ function isProtocolEnvelope(data: unknown): data is ProtocolEnvelope<unknown> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function unloadRemoteSubsetOwner(
+  owner: RemoteSubsetOwner,
+  options: TransportedLoadSubsetOptions,
+): Promise<void> {
+  try {
+    const result = (
+      owner.unloadSubset as unknown as (
+        options: TransportedLoadSubsetOptions,
+      ) => unknown
+    )(options)
+    await Promise.resolve(result)
+  } catch (error) {
+    reportRemoteSubsetOwnerError(owner, error)
+    throw error
+  }
+}
+
+function reportRemoteSubsetOwnerError(
+  owner: RemoteSubsetOwner,
+  error: unknown,
+): void {
+  try {
+    owner.onError(error)
+  } catch {
+    // Reporting must not replace the original owner failure.
+  }
+}
+
+function appliedEnvelopeKey(collectionId: string, envelopeId: string): string {
+  return JSON.stringify([collectionId, envelopeId])
+}
+
+function remoteSubsetAcquisitionKey(
+  collectionId: string,
+  acquisitionId: string,
+): string {
+  return JSON.stringify([collectionId, acquisitionId])
+}
+
+function inboundRemoteSubsetAcquisitionKey(
+  collectionId: string,
+  requesterId: string,
+  acquisitionId: string,
+): string {
+  return JSON.stringify([collectionId, requesterId, acquisitionId])
+}
+
+function createRPCErrorResponse(
+  request: RPCRequest,
+  cause: unknown,
+): RPCResponse {
+  const error = cause instanceof Error ? cause.message : String(cause)
+  switch (request.type) {
+    case `rpc:ensureRemoteSubset:req`:
+      return {
+        type: `rpc:ensureRemoteSubset:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        error,
+      }
+    case `rpc:releaseRemoteSubset:req`:
+      return {
+        type: `rpc:releaseRemoteSubset:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        error,
+      }
+    case `rpc:ensurePersistedIndex:req`:
+      return {
+        type: `rpc:ensurePersistedIndex:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        error,
+      }
+    case `rpc:applyLocalMutations:req`:
+      if (cause instanceof PersistedCollectionDurabilityError) {
+        return {
+          type: `rpc:applyLocalMutations:res`,
+          rpcId: request.rpcId,
+          ok: false,
+          code: `PERSISTENCE_ERROR`,
+          error,
+          ...toSafeDurabilityDetails(cause),
+        }
+      }
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `CONFLICT`,
+        error,
+      }
+    case `rpc:applyCommittedTx:req`:
+      if (cause instanceof PersistedCollectionDurabilityError) {
+        return {
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: request.rpcId,
+          ok: false,
+          code: `PERSISTENCE_ERROR`,
+          error,
+          ...toSafeDurabilityDetails(cause),
+        }
+      }
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `CONFLICT`,
+        error,
+      }
+    case `rpc:pullSince:req`:
+      return {
+        type: `rpc:pullSince:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        error,
+      }
+  }
+}
+
+function isMutatingRPCRequest(request: RPCRequest): request is Extract<
+  RPCRequest,
+  {
+    type: IndeterminateCommitRequestType
+  }
+> {
+  return (
+    request.type === `rpc:applyLocalMutations:req` ||
+    request.type === `rpc:applyCommittedTx:req`
+  )
+}
+
+function toSafeDurabilityDetails(error: PersistedCollectionDurabilityError): {
+  sourceCode?: string | number
+  path?: string | ReadonlyArray<string | number>
+} {
+  const sourceCode =
+    typeof error.code === `string` || typeof error.code === `number`
+      ? error.code
+      : undefined
+  const path =
+    typeof error.path === `string` ||
+    (Array.isArray(error.path) &&
+      error.path.every(
+        (part) => typeof part === `string` || typeof part === `number`,
+      ))
+      ? (error.path as string | ReadonlyArray<string | number>)
+      : undefined
+  return {
+    ...(sourceCode === undefined ? {} : { sourceCode }),
+    ...(path === undefined ? {} : { path }),
+  }
 }

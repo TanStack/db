@@ -8,6 +8,7 @@ import {
   createTransaction,
 } from '@tanstack/db'
 import {
+  IndeterminateCommitError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
@@ -25,9 +26,10 @@ import type {
   PersistenceAdapter,
   ProtocolEnvelope,
   PullSinceResponse,
+  RemoteSubsetOwner,
   TxCommitted,
 } from '../src'
-import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 
 type Todo = {
   id: string
@@ -218,6 +220,18 @@ function createCoordinatorHarness(): CoordinatorHarness {
     ensureLeadership: async () => {},
     requestEnsurePersistedIndex: async () => {},
     requestEnsureRemoteSubset: async () => {},
+    // Remote subset ownership is outside this protocol-delivery harness.
+    requestReleaseRemoteSubset: async () => {},
+    registerRemoteSubsetOwner: () => () => {},
+    requestApplyCommittedTx: (_collectionId, tx) =>
+      Promise.resolve({
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }),
     pullSince: () => {
       harness.pullSinceCalls++
       return Promise.resolve(pullSinceResponse)
@@ -259,6 +273,34 @@ async function flushAsyncWork(delayMs: number = 0): Promise<void> {
 }
 
 describe(`persistedCollectionOptions`, () => {
+  it(`preserves exact reconciliation context for an indeterminate commit`, () => {
+    const cause = new Error(`response channel closed`)
+    const error = new IndeterminateCommitError({
+      collectionId: `todos`,
+      requestType: `rpc:applyCommittedTx:req`,
+      previousLeaderId: `leader-a`,
+      previousTerm: 4,
+      currentLeaderId: `leader-b`,
+      currentTerm: 5,
+      cause,
+    })
+
+    expect(error).toMatchObject({
+      name: `IndeterminateCommitError`,
+      code: `INDETERMINATE_COMMIT`,
+      collectionId: `todos`,
+      requestType: `rpc:applyCommittedTx:req`,
+      previousLeaderId: `leader-a`,
+      previousTerm: 4,
+      currentLeaderId: `leader-b`,
+      currentTerm: 5,
+      cause,
+    })
+    expect(error.message).toContain(
+      `rpc:applyCommittedTx:req crossed leadership from leader-a (term 4) to leader-b (term 5)`,
+    )
+  })
+
   it(`provides a sync-absent loopback configuration with persisted utils`, async () => {
     const adapter = createRecordingAdapter()
     const collection = createCollection(
@@ -701,6 +743,326 @@ describe(`persistedCollectionOptions`, () => {
     )
   })
 
+  it(`coalesces duplicate single-process subset acknowledgements until owner work finishes`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-coalesced`)
+    let releaseLoad = (): void => {}
+    const loadGate = new Promise<void>((resolve) => {
+      releaseLoad = resolve
+    })
+    const owner = Object.assign(
+      vi.fn(() => loadGate),
+      { unloadSubset: vi.fn(), onError: vi.fn() },
+    )
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+
+    try {
+      let firstSettled = false
+      let duplicateSettled = false
+      const first = coordinator
+        .requestEnsureRemoteSubset(`todos`, options)
+        .then(() => {
+          firstSettled = true
+        })
+      await Promise.resolve()
+      const duplicate = coordinator
+        .requestEnsureRemoteSubset(`todos`, options)
+        .then(() => {
+          duplicateSettled = true
+        })
+      await Promise.resolve()
+
+      expect({
+        ownerCalls: owner.mock.calls.length,
+        firstSettled,
+        duplicateSettled,
+      }).toEqual({
+        ownerCalls: 1,
+        firstSettled: false,
+        duplicateSettled: false,
+      })
+
+      releaseLoad()
+      await Promise.all([first, duplicate])
+    } finally {
+      releaseLoad()
+      unregisterOwner()
+    }
+  })
+
+  it(`coalesces same-stack single-process subset reentry until owner work finishes`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-reentrant`)
+    let releaseLoad = (): void => {}
+    const loadGate = new Promise<void>((resolve) => {
+      releaseLoad = resolve
+    })
+    const options: LoadSubsetOptions = { limit: 1 }
+    let duplicate: Promise<void> | undefined
+    let didReenter = false
+    const owner = Object.assign(
+      vi.fn(() => {
+        if (!didReenter) {
+          didReenter = true
+          duplicate = coordinator.requestEnsureRemoteSubset(`todos`, options)
+        }
+        return loadGate
+      }),
+      { unloadSubset: vi.fn(), onError: vi.fn() },
+    )
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+
+    try {
+      let firstSettled = false
+      let duplicateSettled = false
+      const first = coordinator
+        .requestEnsureRemoteSubset(`todos`, options)
+        .then(() => {
+          firstSettled = true
+        })
+      await Promise.resolve()
+      const duplicateResult = duplicate!.then(() => {
+        duplicateSettled = true
+      })
+      await Promise.resolve()
+
+      expect({
+        ownerCalls: owner.mock.calls.length,
+        firstSettled,
+        duplicateSettled,
+      }).toEqual({
+        ownerCalls: 1,
+        firstSettled: false,
+        duplicateSettled: false,
+      })
+
+      releaseLoad()
+      await Promise.all([first, duplicateResult])
+    } finally {
+      releaseLoad()
+      unregisterOwner()
+    }
+  })
+
+  it(`waits for a pending single-process subset load before unloading it`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-release-order`)
+    let releaseLoad = (): void => {}
+    const loadGate = new Promise<void>((resolve) => {
+      releaseLoad = resolve
+    })
+    const events: Array<string> = []
+    const owner = Object.assign(
+      vi.fn(async () => {
+        events.push(`load-start`)
+        await loadGate
+        events.push(`load-finish`)
+      }),
+      {
+        unloadSubset: vi.fn(() => {
+          events.push(`unload`)
+        }),
+        onError: vi.fn(),
+      },
+    )
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+
+    try {
+      const load = coordinator.requestEnsureRemoteSubset(`todos`, options)
+      await Promise.resolve()
+      let releaseSettled = false
+      const release = coordinator
+        .requestReleaseRemoteSubset(`todos`, options)
+        .then(() => {
+          releaseSettled = true
+        })
+      await Promise.resolve()
+
+      const beforeLoadRelease = { events: [...events], releaseSettled }
+      expect(beforeLoadRelease).toEqual({
+        events: [`load-start`],
+        releaseSettled: false,
+      })
+
+      releaseLoad()
+      await Promise.all([load, release])
+      expect(events).toEqual([`load-start`, `load-finish`, `unload`])
+    } finally {
+      releaseLoad()
+      unregisterOwner()
+    }
+  })
+
+  it(`rejects unsupported single-process subset values before owner work`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-wire-domain`)
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(),
+      onError: vi.fn(),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+
+    try {
+      await expect(
+        coordinator.requestEnsureRemoteSubset(`todos`, {
+          where: new IR.Func(`in`, [
+            new IR.PropRef([`todos`, `status`]),
+            new IR.Value([`kept`, () => {}]),
+          ]),
+        }),
+      ).rejects.toMatchObject({
+        name: `RemoteSubsetWireValueError`,
+        path: `options.where.args[1].value[1]`,
+      })
+      expect(owner).not.toHaveBeenCalled()
+    } finally {
+      unregisterOwner()
+    }
+  })
+
+  it(`rejects a sparse function argument at its exact expression path`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-wire-hole`)
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(),
+      onError: vi.fn(),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const args = [new IR.PropRef([`todos`, `status`])]
+    args.length = 2
+
+    try {
+      await expect(
+        coordinator.requestEnsureRemoteSubset(`todos`, {
+          where: new IR.Func(`eq`, args),
+        }),
+      ).rejects.toMatchObject({
+        name: `RemoteSubsetWireValueError`,
+        path: `options.where.args[1]`,
+      })
+      expect(owner).not.toHaveBeenCalled()
+    } finally {
+      unregisterOwner()
+    }
+  })
+
+  it(`reports and rethrows a single-process owner unload rejection`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-unload-error`)
+    const unloadError = new Error(`single-process owner unload failed`)
+    const ownerErrors: Array<unknown> = []
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(() =>
+        Promise.reject(unloadError),
+      ) as unknown as RemoteSubsetOwner[`unloadSubset`],
+      onError: (error: unknown) => ownerErrors.push(error),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+
+    try {
+      await coordinator.requestEnsureRemoteSubset(`todos`, options)
+      await expect(
+        coordinator.requestReleaseRemoteSubset(`todos`, options),
+      ).rejects.toBe(unloadError)
+      expect(ownerErrors).toEqual([unloadError])
+    } finally {
+      unregisterOwner()
+    }
+  })
+
+  it(`reports one fail-stop lifecycle error when a single-process async unload rejects`, async () => {
+    const unloadError = new Error(`remote owner unload failed`)
+    let unloadThenCalls = 0
+    const rejectingThenable = {
+      then: (
+        _resolve: (value?: void) => void,
+        reject: (error: unknown) => void,
+      ) => {
+        unloadThenCalls++
+        queueMicrotask(() => reject(unloadError))
+      },
+    }
+    const sourceUnloadMock = vi.fn((options: LoadSubsetOptions) =>
+      options.limit === 1 ? rejectingThenable : undefined,
+    )
+    const sourceUnload = sourceUnloadMock as unknown as (
+      options: LoadSubsetOptions,
+    ) => void
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `owner-unload-error`,
+        getKey: (todo) => todo.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => true,
+              unloadSubset: sourceUnload,
+            }
+          },
+        },
+        persistence: {
+          adapter: createRecordingAdapter(),
+        },
+      }),
+    )
+    const failing: LoadSubsetOptions = { limit: 1 }
+    const sibling: LoadSubsetOptions = { limit: 2 }
+    const markError = vi.spyOn(collection._lifecycle, `markError`)
+    const unhandled: Array<unknown> = []
+    const captureUnhandled = (error: unknown) => unhandled.push(error)
+    process.on(`unhandledRejection`, captureUnhandled)
+
+    try {
+      collection.startSyncImmediate()
+      await collection._sync.loadSubset(failing)
+      await collection._sync.loadSubset(sibling)
+      collection._sync.unloadSubset(failing)
+      collection._sync.unloadSubset(sibling)
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      expect({
+        status: collection.status,
+        error: collection._lifecycle.getSyncError(),
+        unloadThenCalls,
+        unloadOptions: sourceUnloadMock.mock.calls.map(([options]) => options),
+        lifecycleErrors: markError.mock.calls.map(([error]) => error),
+        unhandled,
+      }).toEqual({
+        status: `error`,
+        error: unloadError,
+        unloadThenCalls: 1,
+        unloadOptions: [failing, sibling],
+        lifecycleErrors: [unloadError],
+        unhandled: [],
+      })
+
+      await flushAsyncWork()
+      expect(sourceUnloadMock).toHaveBeenCalledTimes(2)
+      expect(markError).toHaveBeenCalledTimes(1)
+    } finally {
+      process.off(`unhandledRejection`, captureUnhandled)
+      await collection.cleanup()
+    }
+  })
+
   it(`resolves persistence per collection and forwards schemaVersion`, () => {
     const baseAdapter = createNoopAdapter()
     const syncAdapter = createNoopAdapter()
@@ -776,6 +1138,114 @@ describe(`persistedCollectionOptions`, () => {
         },
       }),
     ).toThrow(InvalidPersistedCollectionCoordinatorError)
+  })
+
+  it(`rejects an incomplete coordinator before starting a rich sync source`, async () => {
+    type SourceParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
+
+    const adapter = createRecordingAdapter()
+    const applyCommittedTx = adapter.applyCommittedTx
+    let adapterApplies = 0
+    adapter.applyCommittedTx = (...args) => {
+      adapterApplies++
+      return applyCommittedTx(...args)
+    }
+    let sourceCalls = 0
+    let legacyCalls = 0
+    let sourceParams: SourceParams | undefined
+    let collectionConstructed = false
+    let visible = false
+    let configurationError: { name: string; message: string } | null = null
+    let collection: Collection<Todo, string> | undefined
+
+    const incompleteCoordinator = {
+      getNodeId: () => `incomplete-rich-sync`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: () => Promise.resolve(),
+      requestEnsurePersistedIndex: () => Promise.resolve(),
+      // Remote subset routing is complete so this fixture isolates the
+      // required committed-transaction method named by the assertion.
+      requestEnsureRemoteSubset: () => Promise.resolve(),
+      requestReleaseRemoteSubset: () => Promise.resolve(),
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyLocalMutations: () => {
+        legacyCalls++
+        return Promise.resolve({
+          type: `rpc:applyLocalMutations:res` as const,
+          rpcId: `legacy`,
+          ok: true as const,
+          term: 1,
+          seq: 1,
+          latestRowVersion: 1,
+          acceptedMutationIds: [],
+        })
+      },
+    } as unknown as PersistedCollectionCoordinator
+
+    try {
+      try {
+        const options = persistedCollectionOptions<Todo, string>({
+          id: `incomplete-rich-sync`,
+          getKey: (todo) => todo.id,
+          sync: {
+            sync: (params) => {
+              sourceCalls++
+              sourceParams = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter, coordinator: incompleteCoordinator },
+        })
+        collection = createCollection(options)
+        collectionConstructed = true
+      } catch (error) {
+        const resolvedError =
+          error instanceof Error ? error : new Error(String(error))
+        configurationError = {
+          name: resolvedError.name,
+          message: resolvedError.message,
+        }
+      }
+
+      if (collection) {
+        collection.startSyncImmediate()
+        await vi.waitFor(() => expect(sourceParams).toBeDefined())
+        sourceParams!.begin()
+        sourceParams!.metadata?.collection.set(`resume`, { offset: 7 })
+        sourceParams!.truncate()
+        sourceParams!.write({
+          type: `insert`,
+          value: { id: `rich`, title: `Visible before rejection` },
+          metadata: { source: `remote` },
+        })
+        await Promise.resolve(sourceParams!.commit()).catch(() => undefined)
+        visible = collection.has(`rich`)
+      }
+    } finally {
+      await collection?.cleanup()
+    }
+
+    expect({
+      configurationError,
+      sourceCalls,
+      collectionConstructed,
+      visible,
+      adapterApplies,
+      legacyCalls,
+    }).toEqual({
+      configurationError: {
+        name: `InvalidPersistedCollectionCoordinatorError`,
+        message:
+          'Invalid persisted collection coordinator: missing required "requestApplyCommittedTx" method',
+      },
+      sourceCalls: 0,
+      collectionConstructed: false,
+      visible: false,
+      adapterApplies: 0,
+      legacyCalls: 0,
+    })
   })
 
   it(`preserves valid sync config in sync-present mode`, async () => {
@@ -943,10 +1413,17 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`rejects a wrapped sync receipt when persistence fails`, async () => {
+  it(`publishes before persistence settles, then fails with the named durability error`, async () => {
     const adapter = createRecordingAdapter()
-    const persistenceError = new Error(`persistence failed`)
-    adapter.applyCommittedTx = () => Promise.reject(persistenceError)
+    const persistenceError = Object.assign(new Error(`persistence failed`), {
+      code: `SQLITE_IOERR_WRITE`,
+      path: `todos.sqlite-wal`,
+    })
+    let rejectPersistence: ((error: unknown) => void) | undefined
+    adapter.applyCommittedTx = () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectPersistence = reject
+      })
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
       | ((message: { type: `insert`; value: Todo }) => void)
@@ -978,12 +1455,206 @@ describe(`persistedCollectionOptions`, () => {
         type: `insert`,
         value: { id: `failed`, title: `Not durable` },
       })
-
-      await expect(Promise.resolve(remoteCommit?.())).rejects.toBe(
-        persistenceError,
+      const receipt = Promise.resolve(remoteCommit?.())
+      let settled = false
+      void receipt.then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        },
       )
+
+      expect(stripVirtualProps(collection.get(`failed`))).toEqual({
+        id: `failed`,
+        title: `Not durable`,
+      })
+      expect(settled).toBe(false)
+      await vi.waitFor(() => expect(rejectPersistence).toBeTypeOf(`function`))
+
+      rejectPersistence!(persistenceError)
+      const rejection = await receipt.then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+
+      expect(rejection).not.toBe(persistenceError)
+      expect(rejection).toMatchObject({
+        name: `PersistedCollectionDurabilityError`,
+        code: `SQLITE_IOERR_WRITE`,
+        path: `todos.sqlite-wal`,
+        cause: persistenceError,
+      })
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(rejection)
+    } finally {
+      rejectPersistence?.(persistenceError)
+      await collection.cleanup()
+    }
+  })
+
+  it(`preserves a coordinator persistence classification without converting it to conflict`, async () => {
+    const coordinator = createCoordinatorHarness()
+    const persistenceResponse = {
+      type: `rpc:applyCommittedTx:res` as const,
+      rpcId: `persistence-response`,
+      ok: false as const,
+      code: `PERSISTENCE_ERROR` as const,
+      error: `disk write failed`,
+      sourceCode: `SQLITE_IOERR_FSYNC`,
+      path: [`database`, `wal`] as const,
+    }
+    coordinator.requestApplyCommittedTx = () =>
+      Promise.resolve(persistenceResponse)
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `coordinator-persistence-error`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter: createRecordingAdapter(), coordinator },
+      }),
+    )
+
+    try {
+      await collection.stateWhenReady()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `remote-failure`, title: `Published once` },
+      })
+      const rejection = await Promise.resolve(remoteCommit?.()).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+
+      expect(rejection).toMatchObject({
+        name: `PersistedCollectionDurabilityError`,
+        code: `SQLITE_IOERR_FSYNC`,
+        path: [`database`, `wal`],
+        cause: persistenceResponse,
+      })
+      expect(String(rejection)).not.toContain(`CONFLICT`)
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       await collection.cleanup()
+    }
+  })
+
+  it(`replays a hydration-buffered write before its named durability rejection`, async () => {
+    const adapter = createRecordingAdapter()
+    let releaseHydration: (() => void) | undefined
+    adapter.loadSubset = () =>
+      new Promise<Array<{ key: string; value: Todo }>>((resolve) => {
+        releaseHydration = () => resolve([])
+      })
+    const persistenceError = Object.assign(
+      new Error(`buffered persistence failed`),
+      {
+        code: `SQLITE_FULL`,
+        path: `todos.sqlite`,
+      },
+    )
+    let rejectPersistence: ((error: unknown) => void) | undefined
+    adapter.applyCommittedTx = () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectPersistence = reject
+      })
+
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydration-buffered-persistence-error`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      void collection.stateWhenReady().catch(() => undefined)
+      await vi.waitFor(() => {
+        expect(releaseHydration).toBeTypeOf(`function`)
+        expect(remoteCommit).toBeTypeOf(`function`)
+      })
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `buffered`, title: `Published before failure` },
+      })
+      const receipt = Promise.resolve(remoteCommit?.())
+      let settled = false
+      void receipt.then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        },
+      )
+
+      expect(collection.get(`buffered`)).toBeUndefined()
+      expect(settled).toBe(false)
+      releaseHydration!()
+      await vi.waitFor(() => expect(rejectPersistence).toBeTypeOf(`function`))
+
+      expect(stripVirtualProps(collection.get(`buffered`))).toEqual({
+        id: `buffered`,
+        title: `Published before failure`,
+      })
+      expect(settled).toBe(false)
+
+      rejectPersistence!(persistenceError)
+      const rejection = await receipt.then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+
+      expect(rejection).not.toBe(persistenceError)
+      expect(rejection).toMatchObject({
+        name: `PersistedCollectionDurabilityError`,
+        code: `SQLITE_FULL`,
+        path: `todos.sqlite`,
+        cause: persistenceError,
+      })
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(rejection)
+    } finally {
+      releaseHydration?.()
+      rejectPersistence?.(persistenceError)
+      await collection.cleanup()
+      warning.mockRestore()
     }
   })
 
@@ -2181,6 +2852,107 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`hydrates a multiprocess follower locally while only the elected owner acquires remote demand`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `persisted`, title: `Persisted follower row` },
+    ])
+    let releaseRemoteLoad = (): void => {}
+    const remoteLoadGate = new Promise<void>((resolve) => {
+      releaseRemoteLoad = resolve
+    })
+    let registeredOwner: RemoteSubsetOwner | undefined
+    const ensureRemote = vi.fn(() => remoteLoadGate)
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `follower-node`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      requestEnsureRemoteSubset: ensureRemote,
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: (_collectionId, owner) => {
+        registeredOwner = owner
+        return () => {
+          if (registeredOwner === owner) registeredOwner = undefined
+        }
+      },
+    }
+    const followerUpstreamLoad = vi.fn(() => Promise.resolve())
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `multiprocess-follower-subset`,
+        getKey: (todo) => todo.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: followerUpstreamLoad,
+              unloadSubset: vi.fn(),
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+
+    try {
+      collection.startSyncImmediate()
+      let settled = false
+      const load = Promise.resolve(collection._sync.loadSubset(options)).then(
+        () => {
+          settled = true
+        },
+      )
+
+      await vi.waitFor(() => {
+        expect(adapter.loadSubsetCalls.length).toBeGreaterThan(0)
+        expect(ensureRemote).toHaveBeenCalledWith(
+          `multiprocess-follower-subset`,
+          options,
+        )
+      })
+      const persistedRow = collection.get(`persisted`)
+      expect({
+        persistedRow: persistedRow
+          ? { id: persistedRow.id, title: persistedRow.title }
+          : undefined,
+        followerUpstreamCalls: followerUpstreamLoad.mock.calls.length,
+        registeredOwner: registeredOwner !== undefined,
+        settled,
+      }).toEqual({
+        persistedRow: { id: `persisted`, title: `Persisted follower row` },
+        followerUpstreamCalls: 0,
+        registeredOwner: true,
+        settled: false,
+      })
+
+      releaseRemoteLoad()
+      await load
+      expect({
+        routedEnsures: ensureRemote.mock.calls.length,
+        followerUpstreamCalls: followerUpstreamLoad.mock.calls.length,
+      }).toEqual({
+        routedEnsures: 1,
+        followerUpstreamCalls: 0,
+      })
+    } finally {
+      releaseRemoteLoad()
+      await collection.cleanup()
+    }
+  })
+
   it.each([`abort`, `release`, `offline`] as const)(
     `handles remote ensure after %s without resurrecting cancelled demand`,
     async (action) => {
@@ -2190,7 +2962,10 @@ describe(`persistedCollectionOptions`, () => {
         name: action === `abort` ? `AbortError` : `Error`,
       })
       const ensure = vi.fn(async () => {
-        throw new Error(`offline`)
+        throw failure
+      })
+      const followerUpstreamLoad = vi.fn(async () => {
+        throw new Error(`follower-local source must not own remote demand`)
       })
       const coordinator: PersistedCollectionCoordinator = {
         getNodeId: () => `cancel-ensure`,
@@ -2199,7 +2974,19 @@ describe(`persistedCollectionOptions`, () => {
         isLeader: () => true,
         ensureLeadership: async () => {},
         requestEnsurePersistedIndex: async () => {},
+        requestApplyCommittedTx: (_collectionId, tx) =>
+          Promise.resolve({
+            type: `rpc:applyCommittedTx:res`,
+            rpcId: tx.txId,
+            ok: true,
+            term: tx.term,
+            seq: tx.seq,
+            latestRowVersion: tx.rowVersion,
+          }),
         requestEnsureRemoteSubset: ensure,
+        // This fixture isolates ensure retry/cancellation, not ownership.
+        requestReleaseRemoteSubset: async () => {},
+        registerRemoteSubsetOwner: () => () => {},
       }
       const collection = createCollection(
         persistedCollectionOptions<Todo, string>({
@@ -2210,9 +2997,7 @@ describe(`persistedCollectionOptions`, () => {
             sync: ({ markReady }) => {
               markReady()
               return {
-                loadSubset: async () => {
-                  throw failure
-                },
+                loadSubset: followerUpstreamLoad,
               }
             },
           },
@@ -2231,11 +3016,11 @@ describe(`persistedCollectionOptions`, () => {
         if (action === `release`) collection._sync.unloadSubset(options)
         const callsBeforeRetry = ensure.mock.calls.length
         await vi.advanceTimersByTimeAsync(200)
+        expect(result).toBe(failure)
+        expect(followerUpstreamLoad).not.toHaveBeenCalled()
         if (action === `offline`) {
-          expect(result).toBe(failure)
           expect(ensure.mock.calls.length).toBeGreaterThan(callsBeforeRetry)
         } else {
-          if (action === `abort`) expect(result).toBe(failure)
           expect(ensure).toHaveBeenCalledTimes(callsBeforeRetry)
         }
       } finally {
@@ -2249,6 +3034,7 @@ describe(`persistedCollectionOptions`, () => {
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()
     let ensureCalls = 0
+    const offline = new Error(`offline`)
 
     const coordinator: PersistedCollectionCoordinator = {
       getNodeId: () => `retry-node`,
@@ -2257,12 +3043,24 @@ describe(`persistedCollectionOptions`, () => {
       isLeader: () => true,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
       requestEnsureRemoteSubset: async () => {
         ensureCalls++
         if (ensureCalls === 1) {
-          throw new Error(`offline`)
+          throw offline
         }
       },
+      // This fixture isolates ensure retry behavior, not ownership.
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
     }
 
     const collection = createCollection(
@@ -2286,9 +3084,15 @@ describe(`persistedCollectionOptions`, () => {
     collection.startSyncImmediate()
     await flushAsyncWork()
 
-    await (collection as any)._sync.loadSubset({ limit: 1 })
+    const firstResult = await Promise.resolve(
+      (collection as any)._sync.loadSubset({ limit: 1 }),
+    ).then(
+      () => `ready`,
+      (error: unknown) => error,
+    )
     await flushAsyncWork(120)
 
+    expect(firstResult).toBe(offline)
     expect(ensureCalls).toBeGreaterThanOrEqual(2)
   })
 
@@ -2301,6 +3105,19 @@ describe(`persistedCollectionOptions`, () => {
       isLeader: () => false,
       ensureLeadership: async () => {},
       requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      // This fixture isolates follower transaction acknowledgements.
+      requestEnsureRemoteSubset: async () => {},
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
       requestApplyLocalMutations: async () => ({
         type: `rpc:applyLocalMutations:res`,
         rpcId: `ack-1`,
