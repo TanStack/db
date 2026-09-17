@@ -997,7 +997,6 @@ export function queryCollectionOptions(
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
     type ResultApplicationController = AbortController & {
-      tx?: { applicationStarted: boolean }
       rollback?: () => void
     }
     const resultApplicationControllers = new Map<
@@ -1013,8 +1012,7 @@ export function queryCollectionOptions(
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
       const controller = resultApplicationControllers.get(hashedQueryKey)
-      // Core flips this at its no-cancel point before publication can reenter.
-      if (!controller?.tx?.applicationStarted) controller?.rollback?.()
+      controller?.rollback?.()
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
       resultApplicationControllers.delete(hashedQueryKey)
@@ -1679,8 +1677,11 @@ export function queryCollectionOptions(
         previousOwnersByRow.set(key, owners ? new Set(owners) : undefined)
       })
       let transactionActive = false
+      let resultTransaction: { applicationStarted: boolean } | undefined
 
       const restoreOwnershipTracking = () => {
+        // Core flips this at its no-cancel point before publication can reenter.
+        if (resultTransaction?.applicationStarted) return
         if (!state.observers.has(hashedQueryKey)) return
         if (
           resultApplicationControllers.get(hashedQueryKey) !== applicationToken
@@ -1758,7 +1759,7 @@ export function queryCollectionOptions(
           }
         })
 
-        applicationToken.tx = collection._state.pendingSyncedTransactions.at(-1)
+        resultTransaction = collection._state.pendingSyncedTransactions.at(-1)
         const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -1769,9 +1770,7 @@ export function queryCollectionOptions(
         if (applied !== true) await applied
         if (!signal?.aborted) markReady()
       } catch (error) {
-        if (!applicationToken.tx?.applicationStarted) {
-          restoreOwnershipTracking()
-        }
+        restoreOwnershipTracking()
 
         if (transactionActive) {
           const cancellation = new AbortController()
