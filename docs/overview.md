@@ -452,11 +452,14 @@ const todoCollection = collectionOptions("todos", (client) =>
     queryFn: async () => fetch("/api/todos").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { changes: newTodo } = transaction.mutations[0]
 
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
+      await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
@@ -470,11 +473,14 @@ const listCollection = collectionOptions("todo-lists", (client) =>
       fetch("/api/todo-lists").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoListSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { changes: newTodo } = transaction.mutations[0]
 
       // Handle the local write by sending it to your API.
       await api.todoLists.create(newTodo)
+      await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
