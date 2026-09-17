@@ -69,6 +69,37 @@ describe(`sql-compiler`, () => {
         expect(result.params).toEqual({ '1': `5` })
       })
 
+      it.each([
+        [`gt`, false, `left`, `("enabled") <> ("enabled")`],
+        [`gt`, false, `right`, `("enabled") = TRUE`],
+        [`gt`, true, `left`, `("enabled") = FALSE`],
+        [`gt`, true, `right`, `("enabled") <> ("enabled")`],
+        [`gte`, false, `left`, `("enabled") = FALSE`],
+        [`gte`, false, `right`, `("enabled") = ("enabled")`],
+        [`gte`, true, `left`, `("enabled") = ("enabled")`],
+        [`gte`, true, `right`, `("enabled") = TRUE`],
+        [`lt`, false, `left`, `("enabled") = TRUE`],
+        [`lt`, false, `right`, `("enabled") <> ("enabled")`],
+        [`lt`, true, `left`, `("enabled") <> ("enabled")`],
+        [`lt`, true, `right`, `("enabled") = FALSE`],
+        [`lte`, false, `left`, `("enabled") = ("enabled")`],
+        [`lte`, false, `right`, `("enabled") = FALSE`],
+        [`lte`, true, `left`, `("enabled") = TRUE`],
+        [`lte`, true, `right`, `("enabled") = ("enabled")`],
+      ] as const)(
+        `folds boolean %s with %s on the %s`,
+        (operator, literal, literalSide, expected) => {
+          const column = ref(`enabled`)
+          const value = val(literal)
+          const args =
+            literalSide === `left` ? [value, column] : [column, value]
+          const result = compileSQL({ where: func(operator, args) })
+
+          expect(result.where).toBe(expected)
+          expect(result.params).toEqual({})
+        },
+      )
+
       // Regression test for https://github.com/TanStack/db/issues/1147
       it(`should compile eq with empty string value`, () => {
         const result = compileSQL({
@@ -115,6 +146,96 @@ describe(`sql-compiler`, () => {
         })
         expect(result.where).toBe(`"title" ILIKE $1`)
         expect(result.params).toEqual({ '1': `` })
+      })
+    })
+
+    describe(`array membership`, () => {
+      it(`uses containment for a scalar value in an array-valued reference`, () => {
+        const result = compileSQL({
+          where: func(`in`, [val(`admin`), ref(`roles`)]),
+        })
+
+        expect(result.where).toBe(
+          `$1 = ANY("roles") AND "roles" @> ARRAY[$1] AND "roles" IS NOT NULL`,
+        )
+        expect(result.params).toEqual({ '1': `admin` })
+      })
+
+      it(`uses ANY for compatible reference-to-array membership`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`requiredRole`), ref(`roles`)]),
+        })
+
+        expect(result.where).toBe(`"requiredRole" = ANY("roles")`)
+        expect(result.params).toEqual({})
+      })
+
+      it(`uses ANY for a scalar reference in a literal list`, () => {
+        const result = compileSQL({
+          where: func(`in`, [ref(`status`), val([`active`, `pending`])]),
+        })
+
+        expect(result.where).toBe(`"status" = ANY($1)`)
+        expect(result.params).toEqual({ '1': `{"active","pending"}` })
+      })
+
+      it(`rejects nullish membership operands before binding parameters`, () => {
+        const invalidExpressions = [
+          func(`in`, [val(null), ref(`roles`)]),
+          func(`in`, [val(undefined), ref(`roles`)]),
+          func(`in`, [ref(`status`), val(null)]),
+          func(`in`, [ref(`status`), val(undefined)]),
+        ]
+
+        for (const where of invalidExpressions) {
+          expect(() => compileSQL({ where })).toThrow(
+            `Cannot use null/undefined value with 'in' operator`,
+          )
+        }
+      })
+
+      it(`rejects an array-valued element`, () => {
+        for (const array of [ref(`roles`), val([`admin`, `editor`])]) {
+          expect(() =>
+            compileSQL({
+              where: func(`in`, [val([`admin`, `editor`]), array]),
+            }),
+          ).toThrow(/array-valued.+left|left.+array-valued/i)
+        }
+      })
+    })
+
+    describe(`unsupported nested references`, () => {
+      it(`fails before emitting unsupported subset predicates`, () => {
+        for (const where of [
+          ref(`payload`, `enabled`),
+          func(`eq`, [ref(`payload`, `score`), val(10)]),
+          func(`isNull`, [ref(`payload`, `nullable`)]),
+          func(`in`, [val(`admin`), ref(`payload`, `roles`)]),
+          func(`in`, [ref(`payload`, `score`), val([])]),
+          func(`in`, [ref(`payload`, `score`), val([null])]),
+          func(`in`, [ref(`payload`, `score`), val([1, `one`])]),
+          func(`in`, [ref(`payload`, `role`), ref(`roles`)]),
+          func(`upper`, [ref(`payload`, `name`)]),
+          func(`lower`, [ref(`payload`, `name`)]),
+        ]) {
+          expect(() => compileSQL({ where })).toThrow(
+            `Compiler can't handle nested properties: payload.`,
+          )
+        }
+      })
+
+      it(`fails before emitting unsupported subset ordering`, () => {
+        expect(() =>
+          compileSQL({
+            orderBy: [
+              {
+                expression: ref(`payload`, `score`),
+                compareOptions: { direction: `asc`, nulls: `last` },
+              },
+            ],
+          }),
+        ).toThrow(`Compiler can't handle nested properties: payload.score`)
       })
     })
 
@@ -368,6 +489,33 @@ describe(`sql-compiler`, () => {
         expect(result.where).toBe(`"name" IS NOT NULL`)
         expect(result.params).toEqual({})
       })
+
+      it(`validates negated null-check arity before simplifying it`, () => {
+        expect(() =>
+          compileSQL({
+            where: func(`not`, [func(`isNull`, [ref(`name`)]), val(true)]),
+          }),
+        ).toThrow(`NOT expects 1 argument`)
+
+        expect(() =>
+          compileSQL({
+            where: func(`not`, [
+              func(`isNull`, [ref(`name`), ref(`fallback`)]),
+            ]),
+          }),
+        ).toThrow(`isNull expects 1 argument`)
+      })
+
+      it(`binds negated expression null checks once`, () => {
+        const result = compileSQL({
+          where: func(`not`, [
+            func(`isNull`, [func(`eq`, [ref(`enabled`), val(true)])]),
+          ]),
+        })
+
+        expect(result.where).toBe(`("enabled" = $1) IS NOT NULL`)
+        expect(result.params).toEqual({ '1': `true` })
+      })
     })
 
     describe(`empty where clause`, () => {
@@ -399,6 +547,15 @@ describe(`sql-compiler`, () => {
         )
         expect(result.where).toBe(`"program_template_id" = $1`)
         expect(result.params).toEqual({ '1': `uuid-123` })
+      })
+
+      it(`escapes quotes introduced by a column encoder`, () => {
+        const result = compileSQL(
+          { where: func(`eq`, [ref(`payload`), val(`gold`)]) },
+          { encodeColumnName: (name) => `mapped"${name}` },
+        )
+
+        expect(result.where).toBe(`"mapped""payload" = $1`)
       })
 
       it(`should encode column names in compound where clauses`, () => {
