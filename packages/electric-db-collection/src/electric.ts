@@ -300,7 +300,7 @@ export type MatchFunction<T extends Row<unknown>> = (
 /**
  * Matching strategies for Electric synchronization
  * Handlers can return:
- * - Txid strategy: { txid: number | number[], timeout?: number } (recommended)
+ * - Txid strategy: { txid: number | number[], timeout?: number } (deprecated compatibility behavior)
  * - Void (no return value) - mutation completes without waiting
  *
  * The optional timeout property specifies how long to wait for the txid(s) in milliseconds.

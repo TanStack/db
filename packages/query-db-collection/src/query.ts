@@ -2724,9 +2724,13 @@ export function queryCollectionOptions(
 
   // Helper to handle deprecated auto-refetch behavior with warnings
   async function handleDeprecatedAutoRefetch(
-    handlerResult: object,
+    handlerResult: unknown,
   ): Promise<void> {
+    const canHaveProperties =
+      (typeof handlerResult === `object` && handlerResult !== null) ||
+      typeof handlerResult === `function`
     const explicitRefetchFalse =
+      canHaveProperties &&
       'refetch' in handlerResult &&
       (handlerResult as Record<string, unknown>).refetch === false
 

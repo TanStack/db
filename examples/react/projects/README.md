@@ -215,7 +215,7 @@ export const todoCollection = createCollection(
       return { refetch: false }
     },
     // You can also implement onUpdate, onDelete as needed
-  })
+  }),
 )
 ```
 
@@ -255,7 +255,7 @@ const Todos = () => {
         on: [`@l.id`, `=`, `@t.list_id`],
       })
       .where('@l.active', '=', true)
-      .select('@t.id', '@t.text', '@t.status', '@l.name')
+      .select('@t.id', '@t.text', '@t.status', '@l.name'),
   )
 
   return (

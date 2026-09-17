@@ -2111,12 +2111,16 @@ describe(`QueryCollection`, () => {
       // Create handlers with different return values
       const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch
       const onInsertFalse = vi.fn().mockResolvedValue({ refetch: false }) // No refetch
+      const onInsertPrimitive = vi.fn().mockResolvedValue(`legacy-result`) // Legacy values should still refetch
 
       // Create configs with the handlers
       const queryFnDefault = vi
         .fn()
         .mockResolvedValue([{ id: `1`, name: `Item 1` }])
       const queryFnFalse = vi
+        .fn()
+        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const queryFnPrimitive = vi
         .fn()
         .mockResolvedValue([{ id: `1`, name: `Item 1` }])
 
@@ -2137,6 +2141,16 @@ describe(`QueryCollection`, () => {
         queryFn: queryFnFalse,
         getKey,
         onInsert: onInsertFalse,
+        startSync: true,
+      }
+
+      const configPrimitive: QueryCollectionConfig<TestItem> = {
+        id: `test-primitive`,
+        queryClient,
+        queryKey: [`refetchTest`, `primitive`],
+        queryFn: queryFnPrimitive,
+        getKey,
+        onInsert: onInsertPrimitive,
         startSync: true,
       }
 
@@ -2198,9 +2212,36 @@ describe(`QueryCollection`, () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(queryFnFalse).not.toHaveBeenCalled()
 
+      // Test case 3: Legacy primitive returns should retain auto-refetch behavior
+      const optionsPrimitive = queryCollectionOptions(configPrimitive)
+      const collectionPrimitive = createCollection(optionsPrimitive)
+
+      await vi.waitFor(() => {
+        expect(collectionPrimitive.status).toBe(`ready`)
+      })
+
+      queryFnPrimitive.mockClear()
+
+      const insertParamsPrimitive = {
+        transaction: insertTransaction,
+        collection: collectionPrimitive,
+      } satisfies InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+
+      await optionsPrimitive.onInsert!(insertParamsPrimitive)
+
+      expect(onInsertPrimitive).toHaveBeenCalledWith(insertParamsPrimitive)
+      await vi.waitFor(() => {
+        expect(queryFnPrimitive).toHaveBeenCalledTimes(1)
+      })
+
       await Promise.all([
         collectionDefault.cleanup(),
         collectionFalse.cleanup(),
+        collectionPrimitive.cleanup(),
       ])
     })
   })

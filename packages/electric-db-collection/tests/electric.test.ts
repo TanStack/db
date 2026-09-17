@@ -5,6 +5,7 @@ import {
   IR,
   createCollection,
   createTransaction,
+  resetWarnings,
 } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
@@ -584,6 +585,39 @@ describe(`Electric Integration`, () => {
       await expect(collection.utils.awaitTxId(testTxid)).resolves.toBe(true)
     })
 
+    it(`uses 15-second defaults for txid and message waits`, async () => {
+      vi.useFakeTimers()
+      let txidError: unknown
+      let matchError: unknown
+
+      try {
+        void collection.utils.awaitTxId(999_999).catch((error: unknown) => {
+          txidError = error
+        })
+        void collection.utils
+          .awaitMatch(() => false)
+          .catch((error: unknown) => {
+            matchError = error
+          })
+
+        await vi.advanceTimersByTimeAsync(14_999)
+        expect(txidError).toBeUndefined()
+        expect(matchError).toBeUndefined()
+
+        await vi.advanceTimersByTimeAsync(1)
+        expect(txidError).toMatchObject({
+          message: expect.stringContaining(`999999`),
+        })
+        expect(matchError).toMatchObject({
+          message: expect.stringContaining(
+            `Timeout waiting for custom match function`,
+          ),
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it(`should track multiple txids`, async () => {
       const txid1 = 100
       const txid2 = 200
@@ -878,7 +912,49 @@ describe(`Electric Integration`, () => {
       expect(options.onDelete).toBeDefined()
     })
 
-    it(`should throw an error if handler doesn't return a txid`, async () => {
+    it(`warns once while continuing to handle legacy txid returns`, async () => {
+      resetWarnings()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const awaitTxId = vi.fn().mockResolvedValue(true)
+      const onInsert = vi.fn().mockResolvedValue({ txid: 123 })
+      const options = electricCollectionOptions({
+        id: `legacy-handler-warning`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      })
+      const params = {
+        transaction: {
+          id: `legacy-handler-transaction`,
+          mutations: [],
+        },
+        collection: { utils: { awaitTxId } },
+      } as unknown as InsertMutationFnParams<
+        Row,
+        string | number,
+        ElectricCollectionUtils<Row>
+      >
+
+      try {
+        await options.onInsert!(params)
+        await options.onInsert!(params)
+
+        expect(onInsert).toHaveBeenCalledTimes(2)
+        expect(awaitTxId).toHaveBeenCalledTimes(2)
+        expect(warning).toHaveBeenCalledTimes(1)
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining(`Returning { txid }`),
+        )
+      } finally {
+        resetWarnings()
+        warning.mockRestore()
+      }
+    })
+
+    it(`treats an empty handler result as no synchronization strategy`, async () => {
       // Create a mock transaction for testing
       const mockTransaction = {
         id: `test-transaction`,
@@ -911,9 +987,7 @@ describe(`Electric Integration`, () => {
 
       const options = electricCollectionOptions(config)
 
-      // Call the wrapped handler and expect it to throw
-      // With the new matching strategies, empty object triggers void strategy (3-second wait)
-      // So we expect it to resolve, not throw
+      // Empty objects retain the existing no-wait behavior.
       await expect(options.onInsert!(mockParams)).resolves.not.toThrow()
     })
 

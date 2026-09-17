@@ -803,15 +803,12 @@ if (message.headers.txids) {
   })
 }
 
-// Electric-specific: Wrap user handlers to coordinate txid-based sync
+// Electric-specific: expose awaitTxId through collection.utils so handlers
+// can coordinate txid-based sync before they complete
 const wrappedOnInsert = async (params) => {
-  // User handler returns { txid } for Electric collections
-  const result = await config.onInsert!(params)
-
-  // Electric-specific: Wait for the txid to appear in synced data
-  if (result?.txid) {
-    await awaitTxId(result.txid)
-  }
+  // The user handler persists the mutation, then calls
+  // await params.collection.utils.awaitTxId(txid) internally.
+  await config.onInsert!(params)
 }
 
 // Utility function to wait for a txid

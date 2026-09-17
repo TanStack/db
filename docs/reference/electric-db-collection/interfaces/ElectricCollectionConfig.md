@@ -62,12 +62,13 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid, timeout? } or void
+Promise that should resolve after synchronization is complete. Returning
+`{ txid }` is deprecated; await `collection.utils.awaitTxId(txid)` instead.
 
 #### Examples
 
 ```ts
-// Basic Electric delete handler with txid (recommended)
+// Basic Electric delete handler with explicit synchronization
 onDelete: async ({ transaction, collection }) => {
   const mutation = transaction.mutations[0]
   const result = await api.todos.delete({
@@ -115,12 +116,13 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid, timeout? } or void
+Promise that should resolve after synchronization is complete. Returning
+`{ txid }` is deprecated; await `collection.utils.awaitTxId(txid)` instead.
 
 #### Examples
 
 ```ts
-// Basic Electric insert handler with txid (recommended)
+// Basic Electric insert handler with explicit synchronization
 onInsert: async ({ transaction, collection }) => {
   const newItem = transaction.mutations[0].modified
   const result = await api.todos.create({
@@ -194,12 +196,13 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid, timeout? } or void
+Promise that should resolve after synchronization is complete. Returning
+`{ txid }` is deprecated; await `collection.utils.awaitTxId(txid)` instead.
 
 #### Examples
 
 ```ts
-// Basic Electric update handler with txid (recommended)
+// Basic Electric update handler with explicit synchronization
 onUpdate: async ({ transaction, collection }) => {
   const { original, changes } = transaction.mutations[0]
   const result = await api.todos.update({
