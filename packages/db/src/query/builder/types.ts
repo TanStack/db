@@ -709,7 +709,11 @@ type RefForContextSchemaValue<
       : RefForContextValue<T>
 
 type RefsForBranchResult<T, ForceNullable extends boolean> = T extends unknown
-  ? { [K in keyof T]: RefForContextSchemaValue<T[K], ForceNullable> }
+  ? {
+      [K in keyof T]: ForceNullable extends true
+        ? RefForContextValue<T[K], true>
+        : RefForContextSchemaValue<T[K], false>
+    }
   : never
 
 type BranchUnionResultRefs<TContext extends Context> =
@@ -731,15 +735,10 @@ type JoinedRefsForContext<TContext extends Context> =
       }
     : object
 
-type JoinedRefKey<TContext extends Context> =
-  TContext[`joinTypes`] extends Record<string, any>
-    ? keyof TContext[`joinTypes`]
-    : never
-
 export type RefsForContext<TContext extends Context> = {
   [K in Exclude<
     KeysOfUnion<RefsSchemaForContext<TContext>>,
-    JoinedRefKey<TContext>
+    keyof JoinedRefsForContext<TContext> | keyof BranchUnionResultRefs<TContext>
   >]: RefForContextSchemaValue<
     ValueOfUnion<RefsSchemaForContext<TContext>, K>,
     IsNullableContextKey<TContext, K>

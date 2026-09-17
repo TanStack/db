@@ -391,6 +391,82 @@ describe(`query API type algebra`, () => {
     void projectNullishLeaves
   })
 
+  test(`branch unions preserve intrinsic nullish fields through nullable joins`, () => {
+    type BranchRow = {
+      id: string
+      exactNull: null
+      exactUndefined: undefined
+      nullableText: string | null
+      nullableObject: { label: string } | null
+    }
+
+    function projectNullableBranchUnion(
+      a: Collection<BranchRow, string>,
+      b: Collection<BranchRow, string>,
+      rows: Collection<{ id: string }, string>,
+    ) {
+      const branch = (source: Collection<BranchRow, string>) =>
+        new Query().from({ source }).select(({ source: value }) => ({
+          id: value.id,
+          exactNull: value.exactNull,
+          exactUndefined: value.exactUndefined,
+          nullableText: value.nullableText,
+          nullableObject: value.nullableObject,
+        }))
+      const union = new Query().unionAll(branch(a), branch(b))
+      const rightJoined = union
+        .rightJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
+        .select(
+          ({ exactNull, exactUndefined, nullableText, nullableObject }) => ({
+            exactNull,
+            exactUndefined,
+            nullableText,
+            nullableObject,
+          }),
+        )
+      const fullJoined = union
+        .fullJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
+        .select(
+          ({ exactNull, exactUndefined, nullableText, nullableObject }) => ({
+            exactNull,
+            exactUndefined,
+            nullableText,
+            nullableObject,
+          }),
+        )
+
+      type RightResult = QueryResult<typeof rightJoined>
+      type FullResult = QueryResult<typeof fullJoined>
+      expectTypeOf<RightResult[`exactNull`]>().toEqualTypeOf<null | undefined>()
+      expectTypeOf<RightResult[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<RightResult[`nullableText`]>().toEqualTypeOf<
+        string | null | undefined
+      >()
+      expectTypeOf<RightResult[`nullableObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
+      expectTypeOf<FullResult[`exactNull`]>().toEqualTypeOf<null | undefined>()
+      expectTypeOf<FullResult[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<FullResult[`nullableText`]>().toEqualTypeOf<
+        string | null | undefined
+      >()
+      expectTypeOf<FullResult[`nullableObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
+
+      const result = null as unknown as RightResult
+      if (result.nullableObject) {
+        expectTypeOf(result.nullableObject.label).toEqualTypeOf<string>()
+        // @ts-expect-error Nested user objects do not gain row virtual props.
+        result.nullableObject.$key
+      }
+
+      return { rightJoined, fullJoined }
+    }
+
+    void projectNullableBranchUnion
+  })
+
   test(`an explicit undefined refs schema falls back to the query schema`, () => {
     type ExplicitUndefinedRefsContext = {
       baseSchema: { row: Row }
