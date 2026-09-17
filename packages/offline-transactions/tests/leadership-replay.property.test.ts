@@ -4,6 +4,8 @@ import { expect, it, vi } from 'vitest'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { OfflineExecutor } from '../src/OfflineExecutor'
 import { TransactionExecutor } from '../src/executor/TransactionExecutor'
+import { KeyScheduler } from '../src/executor/KeyScheduler'
+import { NonRetriableError } from '../src/types'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import type { OfflineTransaction } from '../src/types'
@@ -17,6 +19,18 @@ function gate() {
 }
 
 const turn = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+const storedTransaction = (id: string): OfflineTransaction => ({
+  id,
+  mutationFnName: `syncData`,
+  mutations: [],
+  keys: [],
+  idempotencyKey: `${id}/once`,
+  createdAt: new Date(0),
+  retryCount: 0,
+  nextAttemptAt: 0,
+  version: 1,
+})
 
 it.each([`construction`, `leadership`, `outbox read`, `retry hook`] as const)(
   `does not revive a disposed executor after %s`,
@@ -517,6 +531,366 @@ it.each(
   },
 )
 
+it(`does not readmit a permanently rejected row from a stale outbox read`, async () => {
+  // Law: once durable removal and rejection complete, an older read cannot
+  // schedule that ID or restore its optimistic state.
+  const captured = gate()
+  const delivery = gate()
+  let hold = true
+  let capturedOnce = false
+  class Storage extends FakeStorageAdapter {
+    override async get(key: string) {
+      const value = await super.get(key)
+      if (hold && !capturedOnce && key === `tx:rejected`) {
+        capturedOnce = true
+        captured.resolve()
+        await delivery.promise
+      }
+      return value
+    }
+  }
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  const rejected = storedTransaction(`rejected`)
+  await outbox.add(rejected)
+  const scheduler = new KeyScheduler()
+  let online = false
+  let observedRejection: Error | undefined
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: () => Promise.reject(new NonRetriableError(`permanent`)),
+      },
+      jitter: false,
+    },
+    {
+      isOfflineEnabled: true,
+      isOnline: () => online,
+      resolveTransaction: () => {},
+      rejectTransaction: (_id, error) => {
+        observedRejection = error
+      },
+      registerRestorationTransaction: () => {},
+    },
+  )
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  try {
+    const loading = executor.loadPendingTransactions()
+    await atOracleCheckpoint(captured.promise, `stale read captured row`)
+    online = true
+    await executor.execute(rejected)
+    online = false
+    expect(observedRejection).toBeInstanceOf(NonRetriableError)
+    expect(await outbox.get(rejected.id)).toBeNull()
+    hold = false
+    delivery.resolve()
+    await atOracleCheckpoint(loading, `stale read delivered`)
+
+    expect(scheduler.getAllPendingTransactions()).toEqual([])
+  } finally {
+    hold = false
+    delivery.resolve()
+    executor.clear()
+    warning.mockRestore()
+  }
+})
+
+it.each([`remove`, `removeMany`, `clear`] as const)(
+  `filters %s from an outbox read already in flight`,
+  async (operation) => {
+    const captured = gate()
+    const delivery = gate()
+    let hold = true
+    class Storage extends FakeStorageAdapter {
+      override async get(key: string) {
+        const value = await super.get(key)
+        if (hold && key === `tx:removed`) {
+          captured.resolve()
+          await delivery.promise
+        }
+        return value
+      }
+    }
+    const outbox = new OutboxManager(new Storage(), {})
+    const removed = storedTransaction(`removed`)
+    await outbox.add(removed)
+    try {
+      const reading = outbox.getAll()
+      await atOracleCheckpoint(captured.promise, `outbox read captured row`)
+      if (operation === `remove`) await outbox.remove(removed.id)
+      else if (operation === `removeMany`) await outbox.removeMany([removed.id])
+      else await outbox.clear()
+      hold = false
+      delivery.resolve()
+
+      await expect(
+        atOracleCheckpoint(reading, `outbox read delivered`),
+      ).resolves.toEqual([])
+    } finally {
+      hold = false
+      delivery.resolve()
+    }
+  },
+)
+
+it.each([1, 4])(
+  `loads once while %s concurrent acknowledgments finish`,
+  async (acknowledgments) => {
+    // Work law: one replay request performs one outbox scan. Concurrent
+    // removals filter that scan's result instead of restarting O(N) reads.
+    const captured = gate()
+    const delivery = gate()
+    let hold = true
+    let scans = 0
+    class Storage extends FakeStorageAdapter {
+      override async keys() {
+        scans++
+        return super.keys()
+      }
+      override async get(key: string) {
+        const value = await super.get(key)
+        if (hold && key === `tx:peer`) {
+          captured.resolve()
+          await delivery.promise
+        }
+        return value
+      }
+    }
+    const storage = new Storage()
+    const outbox = new OutboxManager(storage, {})
+    const peer = storedTransaction(`peer`)
+    await outbox.add(peer)
+    const scheduler = new KeyScheduler()
+    let online = false
+    const completed: Array<string> = []
+    const executor = new TransactionExecutor(
+      scheduler,
+      outbox,
+      {
+        collections: {},
+        mutationFns: { syncData: async () => {} },
+        jitter: false,
+      },
+      {
+        isOfflineEnabled: true,
+        isOnline: () => online,
+        resolveTransaction: (id) => completed.push(id),
+        rejectTransaction: () => {},
+        registerRestorationTransaction: () => {},
+      },
+    )
+    try {
+      const loading = executor.loadPendingTransactions()
+      await atOracleCheckpoint(captured.promise, `replay scan captured peer`)
+      online = true
+      for (let index = 0; index < acknowledgments; index++) {
+        const active = storedTransaction(`active-${index}`)
+        await outbox.add(active)
+        await executor.execute(active)
+      }
+      online = false
+      hold = false
+      delivery.resolve()
+      await atOracleCheckpoint(loading, `replay scan delivered`)
+
+      expect(completed).toEqual(
+        Array.from(
+          { length: acknowledgments },
+          (_, index) => `active-${index}`,
+        ),
+      )
+      expect(scans).toBe(1)
+      expect(scheduler.getAllPendingTransactions().map(({ id }) => id)).toEqual(
+        [peer.id],
+      )
+    } finally {
+      hold = false
+      delivery.resolve()
+      executor.clear()
+    }
+  },
+)
+
+// A replay scan can capture A, then block on another storage read until A's
+// successful deletion. Pending-only dedupe no longer remembers A at admission.
+// Peers admitted only through this scan must still execute exactly once.
+it.each([20260919, undefined])(
+  `admits only unfinished work from delayed replay reads (seed %s)`,
+  async (seed) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          peers: fc.integer({ min: 1, max: 4 }),
+          scans: fc.integer({ min: 1, max: 3 }),
+          afterAcknowledgment: fc.boolean(),
+          payload: fc.string({ maxLength: 12 }),
+        }),
+        async ({ peers, scans, afterAcknowledgment, payload }) => {
+          const entered = gate()
+          const provider = gate()
+          const captured = gate()
+          const delivery = gate()
+          let hold = false
+          let captures = 0
+          class Storage extends FakeStorageAdapter {
+            override async get(key: string) {
+              const value = await super.get(key)
+              if (hold && key === `tx:peer-0`) {
+                if (++captures === scans) captured.resolve()
+                await delivery.promise
+              }
+              return value
+            }
+          }
+          const storage = new Storage()
+          const outbox = new OutboxManager(storage, {})
+          const transactions: Array<OfflineTransaction> = [
+            `active`,
+            ...Array.from({ length: peers }, (_, index) => `peer-${index}`),
+          ].map((id, index) => ({
+            id,
+            mutationFnName: `syncData`,
+            mutations: [],
+            keys: [],
+            idempotencyKey: `${id}/once`,
+            createdAt: new Date(index),
+            retryCount: 0,
+            nextAttemptAt: 0,
+            version: 1,
+            metadata: { payload },
+          }))
+          await outbox.add(transactions[0]!)
+          const loads = vi.spyOn(
+            TransactionExecutor.prototype,
+            `loadPendingTransactions`,
+          )
+          const executions = vi.spyOn(
+            TransactionExecutor.prototype,
+            `executeAll`,
+          )
+          const env = createTestOfflineEnvironment({
+            storage,
+            mutationFn: async ({ transaction }) => {
+              if (transaction.id === `active`) {
+                entered.resolve()
+                await provider.promise
+              }
+            },
+          })
+          const outcomes = transactions.map(({ id }) =>
+            env.executor.waitForTransactionCompletion(id),
+          )
+          // Observe rejection now, even if a preceding reach assertion fails.
+          for (const outcome of outcomes) void outcome.catch(() => {})
+          let hasPrimaryFailure = false
+          try {
+            await atOracleCheckpoint(
+              env.executor.waitForInit(),
+              `initial replay`,
+            )
+            await atOracleCheckpoint(entered.promise, `provider entered`)
+            for (const transaction of transactions.slice(1))
+              await outbox.add(transaction)
+            hold = true
+            const reads: Array<Promise<void>> = []
+            for (let index = 0; index < scans; index++) {
+              env.leader.setLeader(false)
+              env.leader.setLeader(true)
+              reads.push(loads.mock.results.at(-1)!.value)
+            }
+            await atOracleCheckpoint(
+              captured.promise,
+              `all reads captured active row`,
+            )
+            expect(captures).toBe(scans)
+            if (afterAcknowledgment) {
+              provider.resolve()
+              await atOracleCheckpoint(outcomes[0]!, `active row acknowledged`)
+              expect(await outbox.get(`active`)).toBeNull()
+              expect(
+                env.mutationCalls.map((call) => call.transaction.id),
+              ).toEqual([`active`])
+            }
+            hold = false
+            delivery.resolve()
+            await atOracleCheckpoint(
+              Promise.all(reads),
+              `replay reads delivered`,
+            )
+            provider.resolve()
+            await atOracleCheckpoint(
+              Promise.all(outcomes),
+              `all callers completed`,
+            )
+            await atOracleCheckpoint(
+              executions.mock.results.at(-1)!.value,
+              `replay drained`,
+            )
+            expect(
+              env.mutationCalls.map(({ transaction, idempotencyKey }) => ({
+                id: transaction.id,
+                key: idempotencyKey,
+                metadata: transaction.metadata,
+              })),
+            ).toEqual(
+              transactions.map(({ id, idempotencyKey, metadata }) => ({
+                id,
+                key: idempotencyKey,
+                metadata,
+              })),
+            )
+            expect(storage.snapshot()).toEqual({})
+            expect(env.executor.getPendingCount()).toBe(0)
+          } catch (error) {
+            hasPrimaryFailure = true
+            throw error
+          } finally {
+            hold = false
+            provider.resolve()
+            delivery.resolve()
+            await cleanupOfflineOracle(
+              [
+                () => env.executor.dispose(),
+                () => env.collection.cleanup(),
+                () => {
+                  loads.mockRestore()
+                  executions.mockRestore()
+                },
+              ],
+              hasPrimaryFailure,
+            )
+          }
+        },
+      ),
+      {
+        seed,
+        numRuns: 30,
+        examples: [
+          [
+            {
+              peers: 1,
+              scans: 1,
+              afterAcknowledgment: true,
+              payload: `witness`,
+            },
+          ],
+          [
+            {
+              peers: 1,
+              scans: 1,
+              afterAcknowledgment: false,
+              payload: `control`,
+            },
+          ],
+        ],
+      },
+    )
+  },
+)
+
 it.each([`keys`, `get`] as const)(
   `rejects initialization when storage %s fails without losing records`,
   async (operation) => {
@@ -571,5 +945,58 @@ it.each([`keys`, `get`] as const)(
       }),
       { seed: 20260916, numRuns: 10 },
     )
+  },
+)
+
+it.each([false, true])(
+  `fences each successful clear deletion while a peer is pending or fails, failure=%s`,
+  async (failure) => {
+    const captured = gate(),
+      delivery = gate(),
+      removed = gate(),
+      release = gate()
+    let hold = true
+    class Storage extends FakeStorageAdapter {
+      override async get(key: string) {
+        const value = await super.get(key)
+        if (hold && key === `tx:removed`) {
+          captured.resolve()
+          await delivery.promise
+        }
+        return value
+      }
+      override async delete(key: string) {
+        if (key === `tx:peer`) {
+          await release.promise
+          if (failure) throw new Error(`storage deletion failed`)
+        }
+        await super.delete(key)
+        if (key === `tx:removed`) removed.resolve()
+      }
+    }
+    const outbox = new OutboxManager(new Storage(), {})
+    await outbox.add(storedTransaction(`removed`))
+    await outbox.add(storedTransaction(`peer`))
+    const reading = outbox.getAll()
+    await atOracleCheckpoint(captured.promise, `read captured removed row`)
+    const clearing = outbox.clear().then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    try {
+      await atOracleCheckpoint(removed.promise, `first deletion finished`)
+      if (failure) {
+        release.resolve()
+        expect(await clearing).toBeInstanceOf(Error)
+      }
+      hold = false
+      delivery.resolve()
+      expect((await reading).map(({ id }) => id)).toEqual([`peer`])
+    } finally {
+      hold = false
+      delivery.resolve()
+      release.resolve()
+      await clearing
+    }
   },
 )

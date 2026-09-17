@@ -124,7 +124,13 @@ export class CollectionChangesManager<
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
-      this.batchedEvents.push(...changes)
+      this.batchedEvents.push(
+        ...changes.map((change) =>
+          change.type === `delete`
+            ? this.enrichChangeWithVirtualProps(change)
+            : change,
+        ),
+      )
       return
     }
 
@@ -146,7 +152,11 @@ export class CollectionChangesManager<
           combined.set(
             change.key,
             pending?.type === `delete` && change.type === `insert`
-              ? { ...change, type: `update`, previousValue: pending.value }
+              ? {
+                  ...change,
+                  type: `update`,
+                  previousValue: pending.value,
+                }
               : change,
           )
         }

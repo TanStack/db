@@ -84,6 +84,36 @@ const valueRelations: Array<{
     pair: (n) => [new Set([n, n + 1]), new Set([n + 1, n]), false],
   },
   { name: `array versus object`, pair: (n) => [[n], { 0: n }, false] },
+  { name: `sparse array length`, pair: (n) => [[], Array(n + 1), false] },
+  { name: `equal sparse arrays`, pair: (n) => [Array(n), Array(n), true] },
+  { name: `hole versus undefined`, pair: () => [Array(1), [undefined], false] },
+  {
+    name: `regexp source`,
+    pair: (n) => [
+      new RegExp(`old${n}`, `g`),
+      new RegExp(`new${n}`, `g`),
+      false,
+    ],
+  },
+  { name: `regexp flags`, pair: () => [/same/g, /same/i, false] },
+  {
+    name: `regexp position`,
+    pair: (n) => {
+      const left = /same/g
+      const right = /same/g
+      right.lastIndex = n + 1
+      return [left, right, false]
+    },
+  },
+  {
+    name: `equal regexp state`,
+    pair: (n) => {
+      const left = /same/g
+      const right = /same/g
+      left.lastIndex = right.lastIndex = n
+      return [left, right, true]
+    },
+  },
   {
     name: `shared symbol property`,
     pair: (n) => {
@@ -145,13 +175,18 @@ it.each(
   ({ pair, largeGroup, collision }) => {
     if (collision) vi.spyOn(hashing, `hash`).mockReturnValue(7)
     fc.assert(
-      fc.property(fc.integer({ min: 0, max: 254 }), (n) => {
-        const [left, right, equivalent] = pair(n)
-        const before: [number, { value: unknown }] = [1, { value: left }]
-        const after: [number, { value: unknown }] = [1, { value: right }]
-        const transient: [number, { value: unknown }] = [1, { value: Symbol() }]
-        const actual = [
-          ...topKBatch([
+      fc.property(
+        fc.integer({ min: 0, max: 254 }),
+        fc.boolean(),
+        (n, retractFirst) => {
+          const [left, right, equivalent] = pair(n)
+          const before: [number, { value: unknown }] = [1, { value: left }]
+          const after: [number, { value: unknown }] = [1, { value: right }]
+          const transient: [number, { value: unknown }] = [
+            1,
+            { value: Symbol() },
+          ]
+          const messages = [
             new MultiSet([[after, 1]]),
             ...(largeGroup
               ? [
@@ -162,20 +197,116 @@ it.each(
                 ]
               : []),
             new MultiSet([[before, -1]]),
-          ]),
-        ]
-        if (equivalent) expect(actual).toEqual([])
-        else {
-          expect(actual).toHaveLength(2)
-          expect(actual[0]![0]).toBe(before)
-          expect(actual[0]![1]).toBe(-1)
-          expect(actual[1]![0]).toBe(after)
-          expect(actual[1]![1]).toBe(1)
-        }
-      }),
+          ]
+          if (retractFirst) messages.reverse()
+          const actual = [...topKBatch(messages)]
+          if (equivalent) expect(actual).toEqual([])
+          else {
+            expect(actual).toHaveLength(2)
+            expect(actual[0]![0]).toBe(before)
+            expect(actual[0]![1]).toBe(-1)
+            expect(actual[1]![0]).toBe(after)
+            expect(actual[1]![1]).toBe(1)
+          }
+          // A correct helper alone does not prove the ordered graph retains the
+          // replacement. Keep raw signed output; never erase a missed retraction.
+          const graph = new D2()
+          const input = graph.newInput<typeof before>()
+          const retained = new Map<(typeof before)[1], number>()
+          input.pipe(
+            topKWithFractionalIndex(() => 0, { limit: 1 }),
+            output((message) => {
+              for (const [[, [row]], weight] of message.getInner())
+                retained.set(row, (retained.get(row) ?? 0) + weight)
+            }),
+          )
+          graph.finalize()
+          input.sendData(new MultiSet([[before, 1]]))
+          graph.run()
+          for (const message of messages) input.sendData(message)
+          graph.run()
+          const live = [...retained].filter(([, weight]) => weight !== 0)
+          expect(live).toHaveLength(1)
+          expect(live[0]![0]).toBe(equivalent ? before[1] : after[1])
+          expect(live[0]![1]).toBe(1)
+        },
+      ),
       { seed: 409033, numRuns: 25 },
     )
     if (collision) expect(hashing.hash).not.toHaveBeenCalled()
+  },
+)
+
+it.each([
+  { name: `RegExp source`, before: /old/g, after: /new/g },
+  { name: `RegExp flags`, before: /same/g, after: /same/i },
+  {
+    name: `RegExp position`,
+    before: Object.assign(/same/g, { lastIndex: 0 }),
+    after: Object.assign(/same/g, { lastIndex: 1 }),
+  },
+  { name: `sparse-array length`, before: [], after: Array(2) },
+])(
+  `keeps a $name replacement through hash consolidation`,
+  ({ before, after }) => {
+    // Relation: a retraction and a distinct addition must remain observable to
+    // an ordered operator even when an earlier stage consolidates the batch.
+    const previous = { id: 1, value: before }
+    const next = { id: 1, value: after }
+    expect(
+      new MultiSet([
+        [previous, -1],
+        [next, 1],
+      ])
+        .consolidate()
+        .getInner(),
+    ).toEqual([
+      [previous, -1],
+      [next, 1],
+    ])
+  },
+)
+
+it.each([true, false])(
+  `replaces ordinary rows with File available=%s`,
+  (available) => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, `File`)
+    if (!available) Reflect.deleteProperty(globalThis, `File`)
+    try {
+      fc.assert(
+        fc.property(fc.integer(), fc.boolean(), (rank, retractFirst) => {
+          const graph = new D2()
+          const input = graph.newInput<[number, { rank: number }]>()
+          const rows = new Map<object, number>()
+          input.pipe(
+            topKWithFractionalIndex((a, b) => a.rank - b.rank, { limit: 1 }),
+            output((message) => {
+              for (const [[, [row]], weight] of message.getInner())
+                rows.set(row, (rows.get(row) ?? 0) + weight)
+            }),
+          )
+          graph.finalize()
+          const before = { rank }
+          const after = { rank: rank + 1 }
+          input.sendData(new MultiSet([[[1, before], 1]]))
+          graph.run()
+          const changes: Array<[[number, typeof before], number]> = [
+            [[1, after], 1],
+            [[1, before], -1],
+          ]
+          if (retractFirst) changes.reverse()
+          input.sendData(new MultiSet(changes))
+          graph.run()
+          const live = [...rows].filter(([, weight]) => weight !== 0)
+          expect(live).toHaveLength(1)
+          expect(live[0]![0]).toBe(after)
+          expect(live[0]![1]).toBe(1)
+        }),
+        { seed: 409039, numRuns: 25 },
+      )
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, `File`, descriptor)
+    }
   },
 )
 

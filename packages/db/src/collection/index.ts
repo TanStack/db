@@ -1128,17 +1128,22 @@ export class CollectionImpl<
 function buildCompareOptionsFromConfig(
   config: CollectionConfig<any, any, any>,
 ): StringCollationConfig {
-  if (config.defaultStringCollation) {
-    const options = config.defaultStringCollation
-    return {
-      stringSort: options.stringSort ?? `locale`,
-      locale: options.stringSort === `locale` ? options.locale : undefined,
-      localeOptions:
-        options.stringSort === `locale` ? options.localeOptions : undefined,
-    }
-  } else {
-    return {
-      stringSort: `locale`,
-    }
+  const options = config.defaultStringCollation
+  if (!options) {
+    return { stringSort: `locale` }
+  }
+
+  if (options.stringSort === `lexical`) {
+    return { stringSort: `lexical` }
+  }
+
+  return {
+    stringSort: `locale`,
+    ...(`locale` in options &&
+      options.locale !== undefined && { locale: options.locale }),
+    ...(`localeOptions` in options &&
+      options.localeOptions !== undefined && {
+        localeOptions: options.localeOptions,
+      }),
   }
 }

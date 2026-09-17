@@ -340,9 +340,9 @@ derived Query cache entries instead.
 
 If a stale initial response triggers a fetch, the initial rows remain available
 while it is in flight. A successful response reconciles them through the normal
-row ownership pipeline; an error retains the initial rows. Direct writes use the
-same Query cache-patching rules as fetched data, and a later successful server
-response may reconcile or replace those writes.
+row ownership pipeline; an error retains the initial rows. Direct writes patch
+the eager Query cache in place. On-demand direct writes revalidate scoped
+entries as described below.
 
 ### Selecting Rows from Wrapped Responses
 
@@ -382,7 +382,7 @@ preserving the envelope in the Query cache.
 
 This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
 
-Direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata.
+In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. In on-demand mode, they revalidate active scoped queries and remove inactive or disabled cache entries instead of patching them with the full collection snapshot.
 
 This works automatically for simple wrappers such as:
 
@@ -599,7 +599,7 @@ The collection provides these utility methods via `collection.utils`:
 
 ## Direct Writes
 
-Direct writes are intended for scenarios where the normal query/mutation flow doesn't fit your needs. They allow you to write directly to the synced data store, bypassing the optimistic update system and query refetch mechanism.
+Direct writes are intended for scenarios where the normal query/mutation flow doesn't fit your needs. They write directly to the synced data store and bypass the optimistic update system. Their Query cache behavior depends on the collection's sync mode.
 
 ### Understanding the Data Stores
 
@@ -615,7 +615,7 @@ Normal collection operations (insert, update, delete) create optimistic mutation
 - Rolled back automatically if the server request fails
 - Replaced with server data when the query refetches
 
-Direct writes bypass this system entirely and write directly to the synced data store, making them ideal for handling real-time updates from alternative sources.
+Direct writes bypass this system entirely and write directly to the synced data store, making them useful for handling real-time updates from alternative sources. Active on-demand queries still refetch so each scoped cache remains authoritative for its own request.
 
 ### When to Use Direct Writes
 
@@ -654,9 +654,9 @@ These operations:
 
 - Write directly to the synced data store
 - Do NOT create optimistic mutations
-- Do NOT trigger automatic query refetches
-- Update the TanStack Query cache immediately
 - Are immediately visible in the UI
+- In eager mode, update the full-result TanStack Query cache in place without refetching
+- In on-demand mode, refetch active enabled queries and remove inactive or disabled cache entries
 
 ### Batch Operations
 
@@ -831,15 +831,154 @@ const { data, fetchNextPage, hasNextPage } = useLiveInfiniteQuery(
 ```
 
 Reject failed requests instead of returning partial rows as success. An
-unlimited request must drain until the endpoint reports exhaustion. If the
-endpoint uses opaque cursors instead of page numbers, keep that cursor handling
-inside `queryFn` or its adapter; honoring a new offset may require starting at
-the beginning again. The hook does not maintain remote cursor history.
+unlimited request must drain until the endpoint reports exhaustion. For an
+endpoint with opaque cursors, use `createCursorPager` as shown below. The hook
+does not maintain remote cursor history on its own.
 
 Manually appending rows with `writeUpsert` is a separate, lower-level loading
 strategy. It does not make an eager `queryFn` incremental: a later successful
 refetch still replaces its complete state and can remove appended rows.
 `staleTime: Infinity` does not prevent explicit refetch or invalidation.
+
+#### Endpoints with opaque cursors
+
+Query Collections ask for arbitrary windows, such as rows 40–59. An
+opaque-cursor API cannot jump to row 40. It can only fetch the first page, then
+follow the continuation token returned with each page.
+
+`createCursorPager` bridges those two protocols. It stores complete backend
+pages in your existing QueryClient and follows their cursors until it has enough
+rows for the requested `offset` and `limit`. A later request can reuse that
+fresh run of pages and fetch only the missing suffix. The hook still requests
+an extra row to decide `hasNextPage`; the pager just fulfills the resulting
+window.
+
+```typescript
+import { createCollection } from '@tanstack/db'
+import { createCursorPager, queryCollectionOptions } from '@tanstack/query-db-collection'
+
+type Post = { id: number; createdAt: number; title: string }
+
+const postsCollection = createCollection(
+  queryCollectionOptions({
+    queryClient,
+    queryKey: ['posts', 'rows'],
+    syncMode: 'on-demand',
+    getKey: (post: Post) => post.id,
+    queryFn: async (ctx) => {
+      const { where, orderBy, offset = 0, limit } = ctx.meta?.loadSubsetOptions ?? {}
+
+      // Translate every filter and sort, or reject unsupported expressions.
+      // This stable, serializable value identifies one ordered result sequence.
+      const request = api.translatePostQuery({ where, orderBy })
+
+      const pager = createCursorPager<Post>({
+        queryClient,
+        queryKey: ['posts', 'cursor-pages', request],
+        staleTime: 60_000,
+        gcTime: 5 * 60_000,
+        fetchPage: async (cursor, signal) => {
+          const response = await api.listPosts({ ...request, cursor, signal })
+
+          // Only null means that the source is exhausted.
+          return { rows: response.items, nextCursor: response.nextCursor ?? null }
+        },
+      })
+
+      return pager.read({ offset, limit }, ctx.signal)
+    },
+  }),
+)
+```
+
+##### Give each result sequence its own key
+
+The pager's query key identifies one ordered backend result, not one requested
+window. Leave `offset` and `limit` out of the key so wider reads can extend the
+same cached prefix. Include everything that changes the result—such as the
+tenant, source, filters, and order.
+
+Keep row data and cursor pages under sibling keys:
+
+```text
+['posts', 'rows']                         QueryCollection row array
+['posts', 'cursor-pages', request]        backend pages and cursors
+```
+
+They cannot share a key because the two cache entries have different shapes.
+Do not put cursor pages beneath the row key either: manual collection writes
+target entries under the row prefix. A shared resource prefix such as
+`['posts']` still lets you cancel or invalidate both kinds of data together.
+
+The example creates a small pager object for each `queryFn` call. Those objects
+still share cached pages and in-flight fetches through QueryClient. Each pager
+serializes its own reads. Retain one pager per result sequence only if calls
+must also share that queue or you need to call `pager.reset()` later.
+
+##### What happens when the collection asks for rows
+
+For fresh data, the pager uses every cached page it can and fetches only the
+missing suffix. `nextCursor: null` is the sole exhaustion signal: a short or
+empty page with another cursor does not end the sequence. An omitted `limit`
+drains the source; a zero limit performs no fetch. Repeated continuation tokens
+throw instead of looping forever.
+
+Query owns freshness, garbage collection, retries, and invalidation. Pass
+`staleTime` and `gcTime` to the pager or let it inherit QueryClient defaults.
+Configure retries through QueryClient defaults for the page-key prefix;
+imperative Query fetches do not retry by default. The pager keeps every page in
+its original form, so Query defaults for `maxPages` and `select` do not apply.
+
+When cached pages are stale, the next read refetches every page loaded so far,
+starting with the first. It does this even for a shallow window because old
+continuation tokens belong to the old sequence. Staleness does not start a
+background timer. The page query has no lasting observer, so its `gcTime` may
+expire while the collection's published rows remain visible.
+
+A failed read rejects rather than returning a partial window. Query keeps the
+last successful pages, so a later read can retry. Treat their rows as immutable,
+just like other Query data. `read()` returns references from the cached pages,
+not detached copies, and does not promise the same array or object identity
+across calls.
+
+##### Refresh or cancel the sequence
+
+After a mutation—or whenever you need a forced refresh—cancel the shared
+resource prefix before invalidating it:
+
+```typescript
+await queryClient.cancelQueries({ queryKey: ['posts'] })
+await queryClient.invalidateQueries({ queryKey: ['posts'] })
+```
+
+Cancelling first stops an old page append from completing after invalidation and
+marking the old sequence fresh again. It rejects readers waiting on that fetch
+with an `AbortError` and prevents a late result from entering the cache. The
+backend must honor the signal if you also want to stop its network work.
+
+Aborting the signal passed to `read()` rejects only that reader; it does not
+cancel a page fetch shared with another reader. A cancelling Query refetch moves
+waiting readers to the replacement fetch. `collection.utils.refetch()` refreshes
+the row queries but may reuse fresh cursor pages. `pager.reset()` removes one
+pager's exact page key and cancels its queued reads, but does not refresh the
+collection's row query.
+
+##### Backend contract
+
+The helper handles cursor traversal only. Your adapter must:
+
+- translate every requested `where` and `orderBy`, or reject unsupported
+  expressions;
+- apply filters and ordering before pagination;
+- use a deterministic total order, including a unique tie-breaker;
+- keep that ordered result consistent while its cursor sequence is read; and
+- return `nextCursor: null` only when the result is authoritatively exhausted.
+
+`LoadSubsetOptions.cursor` contains query-expression hints, not the backend's
+opaque token. `createCursorPager` therefore addresses the cursor sequence by
+offset and deliberately does not consume those hints. No client-side pager can
+make a stable snapshot from an endpoint whose ordering changes between pages;
+the endpoint must define its own consistency and cursor-expiry rules.
 
 ## Important Behaviors
 
@@ -933,13 +1072,15 @@ This pattern allows you to:
 
 ### Direct Writes and Query Sync
 
-Direct writes update the collection immediately and also update the TanStack Query cache. However, they do not prevent the normal query sync behavior. If your `queryFn` returns data that conflicts with your direct writes, the query data will take precedence.
+Direct writes update the collection immediately. In eager mode, they also patch the full-result TanStack Query cache in place.
+
+In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A full collection snapshot cannot safely replace those scoped results. Direct writes therefore refetch active enabled queries and remove inactive or disabled entries. A successful `queryFn` result remains authoritative and may reconcile or replace a direct write.
 
 To handle this properly:
 
-1. Use `{ refetch: false }` in your persistence handlers when using direct writes
-2. Set appropriate `staleTime` to prevent unnecessary refetches
-3. Design your `queryFn` to be aware of incremental updates (e.g., only fetch new data)
+1. Use `{ refetch: false }` in persistence handlers to avoid the handler's additional refetch after a direct write. On-demand cache revalidation still runs.
+2. Make sure an on-demand `queryFn` returns the current server result for its pushed-down predicate, order, limit, and offset.
+3. Use eager mode when direct writes must update one complete cached result without a network request.
 
 ## Complete Direct Write API Reference
 

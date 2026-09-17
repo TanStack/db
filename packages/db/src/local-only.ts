@@ -314,6 +314,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
   let collection: Collection<T, TKey, LocalOnlyCollectionUtils> | null = null
 
   const sync: SyncConfig<T, TKey> = {
+    rowUpdateMode: `full`,
     /**
      * Sync function that captures sync parameters and applies initial data
      * @param params - Sync parameters containing begin, write, and commit functions
