@@ -57,20 +57,23 @@ const collectionSyncConfigCleanup: unique symbol = Symbol.for(
 
 type CollectionSyncConfigWithFactory<TSync extends object> = TSync & {
   readonly [collectionSyncConfigFactory]: (
-    this: TSync,
+    source: TSync,
     utilities: object,
+    startSyncIfIdle: () => void,
   ) => TSync
 }
 
-/** @internal Lets adapters bind a sync config to each collection instance. */
+/** @internal The factory must defer `startSyncIfIdle` until construction ends. */
 export function withCollectionSyncConfigFactory<TSync extends object>(
   sync: TSync,
-  factory: (source: TSync, utilities: object) => TSync,
+  factory: (
+    source: TSync,
+    utilities: object,
+    startSyncIfIdle: () => void,
+  ) => TSync,
 ): CollectionSyncConfigWithFactory<TSync> {
   Object.defineProperty(sync, collectionSyncConfigFactory, {
-    value(this: TSync, utilities: object) {
-      return factory(this, utilities)
-    },
+    value: factory,
     // Preserve the hook when callers wrap a sync config with object spread.
     enumerable: true,
   })
@@ -92,7 +95,11 @@ export function withCollectionSyncConfigCleanup<TSync extends object>(
 function materializeCollectionSyncConfig<
   TSync extends object,
   TUtils extends object,
->(sync: TSync, utilities: TUtils): { sync: TSync; utilities: TUtils } {
+>(
+  sync: TSync,
+  utilities: TUtils,
+  startSyncIfIdle: () => void,
+): { sync: TSync; utilities: TUtils } {
   const factory = (
     sync as unknown as Partial<CollectionSyncConfigWithFactory<TSync>>
   )[collectionSyncConfigFactory]
@@ -104,7 +111,10 @@ function materializeCollectionSyncConfig<
     Object.getPrototypeOf(utilities),
     Object.getOwnPropertyDescriptors(utilities),
   ) as TUtils
-  return { sync: factory.call(sync, ownedUtilities), utilities: ownedUtilities }
+  return {
+    sync: factory(sync, ownedUtilities, startSyncIfIdle),
+    utilities: ownedUtilities,
+  }
 }
 
 function cleanupCollectionSyncConfig(sync: object): void {
@@ -396,7 +406,9 @@ export class CollectionImpl<
 
     // Set default values for optional config properties
     const { sync: collectionSync, utilities: collectionUtils } =
-      materializeCollectionSyncConfig(config.sync, config.utils ?? {})
+      materializeCollectionSyncConfig(config.sync, config.utils ?? {}, () => {
+        if (this._lifecycle.status === `idle`) this._sync.startSync()
+      })
     this.config = {
       ...config,
       sync: collectionSync,
