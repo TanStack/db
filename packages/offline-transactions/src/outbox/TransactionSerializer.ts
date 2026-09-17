@@ -185,16 +185,14 @@ export class TransactionSerializer {
   }
 
   private serializeValue(value: any, jsonKey?: string | false): any {
-    if (value === null || value === undefined) {
-      return value
-    }
+    if (value === null || typeof value !== `object`) return value
 
     if (jsonKey !== false && value instanceof Date) {
       return { __type: `Date`, value: value.toISOString() }
     }
 
     const temporalConstructorName =
-      jsonKey !== false && typeof value === `object`
+      jsonKey !== false
         ? getTemporalConstructorName(value[Symbol.toStringTag])
         : undefined
     if (temporalConstructorName) {
@@ -206,42 +204,38 @@ export class TransactionSerializer {
       }
     }
 
-    if (typeof value === `object`) {
-      const toJSON = typeof jsonKey === `string` && value.toJSON
-      if (typeof toJSON === `function`)
-        return this.serializeValue(toJSON.call(value, jsonKey), false)
-      if (
-        jsonKey !== undefined &&
-        (value instanceof Boolean ||
-          value instanceof BigInt ||
-          value instanceof Number ||
-          value instanceof String)
-      ) {
-        return value.valueOf()
-      }
-      const isArray = Array.isArray(value)
-      const result: any = isArray ? [] : {}
-      const keys = isArray
-        ? Array.from({ length: value.length }, (_, index) => String(index))
-        : Object.keys(value)
-      for (const key of keys) {
-        setDataProperty(
-          result,
-          key,
-          this.serializeValue(
-            value[key],
-            jsonKey === undefined ? undefined : key,
-          ),
-        )
-      }
-      if (jsonKey === false && typeof result.toJSON === `function`)
-        delete result.toJSON
-      return !isArray && Object.prototype.hasOwnProperty.call(value, `__type`)
-        ? { __type: `Object`, value: result }
-        : result
+    const toJSON = typeof jsonKey === `string` && value.toJSON
+    if (typeof toJSON === `function`)
+      return this.serializeValue(toJSON.call(value, jsonKey), false)
+    if (
+      jsonKey !== undefined &&
+      (value instanceof Boolean ||
+        value instanceof BigInt ||
+        value instanceof Number ||
+        value instanceof String)
+    ) {
+      return value.valueOf()
     }
-
-    return value
+    const isArray = Array.isArray(value)
+    const result: any = isArray ? [] : {}
+    const keys = isArray
+      ? Array.from({ length: value.length }, (_, index) => String(index))
+      : Object.keys(value)
+    for (const key of keys) {
+      setDataProperty(
+        result,
+        key,
+        this.serializeValue(
+          value[key],
+          jsonKey === undefined ? undefined : key,
+        ),
+      )
+    }
+    if (jsonKey === false && typeof result.toJSON === `function`)
+      delete result.toJSON
+    return !isArray && Object.prototype.hasOwnProperty.call(value, `__type`)
+      ? { __type: `Object`, value: result }
+      : result
   }
 
   private deserializeValue(value: any, valueEncoding: 2 | 3 | undefined): any {

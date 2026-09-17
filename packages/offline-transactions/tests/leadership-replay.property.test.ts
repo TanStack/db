@@ -243,6 +243,189 @@ it(`settles replay work discarded by the retry hook`, async () => {
   }
 })
 
+it.each([0, 1])(
+  `settles each discarded replay after its durable removal succeeds when deletion %i fails`,
+  async (failedIndex) => {
+    const successfulIndex = 1 - failedIndex
+    const persisted = gate()
+    const removing = gate()
+    const releaseRemoval = gate()
+    const removed = gate()
+    const failed = gate()
+    const retried = gate()
+    const storageError = new Error(`discard removal failed`)
+    let writes = 0
+    let failedKey = ``
+    let failRemoval = false
+    let failedOnce = false
+    class Storage extends FakeStorageAdapter {
+      override async set(key: string, value: string) {
+        await super.set(key, value)
+        if (++writes === 2) persisted.resolve()
+      }
+
+      override async delete(key: string) {
+        if (failRemoval && key !== failedKey) {
+          removing.resolve()
+          await releaseRemoval.promise
+        }
+        if (failRemoval && key === failedKey && !failedOnce) {
+          failedOnce = true
+          failed.resolve()
+          throw storageError
+        }
+        await super.delete(key)
+        if (key === failedKey) retried.resolve()
+        else removed.resolve()
+      }
+    }
+    const onlineDetector: OnlineDetector = {
+      subscribe: () => () => {},
+      notifyOnline: () => {},
+      isOnline: () => false,
+      dispose: () => {},
+    }
+    let discardReplay = false
+    const storage = new Storage()
+    const env = createTestOfflineEnvironment({
+      storage,
+      config: {
+        onlineDetector,
+        beforeRetry: (transactions) => (discardReplay ? [] : transactions),
+      },
+    })
+    const ids: Array<string> = []
+    const commitStatuses: Array<unknown> = [`pending`, `pending`]
+    const waitStatuses: Array<unknown> = [`pending`, `pending`]
+    const commitObserved: Array<Promise<void>> = []
+    const waitObserved: Array<Promise<void>> = []
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let hasPrimaryFailure = false
+    try {
+      await env.waitForLeader()
+      for (let index = 0; index < 2; index++) {
+        const transaction = env.executor.createOfflineTransaction({
+          mutationFnName: env.mutationFnName,
+          autoCommit: false,
+        })
+        ids.push(transaction.id)
+        waitObserved.push(
+          env.executor.waitForTransactionCompletion(transaction.id).then(
+            () => {
+              waitStatuses[index] = `fulfilled`
+            },
+            (error: unknown) => {
+              waitStatuses[index] = error
+            },
+          ),
+        )
+        transaction.mutate(() => {
+          env.collection.insert({
+            id: `discarded-${index}`,
+            value: `optimistic-${index}`,
+            completed: false,
+            updatedAt: new Date(index),
+          })
+        })
+        commitObserved.push(
+          transaction.commit().then(
+            () => {
+              commitStatuses[index] = `fulfilled`
+            },
+            (error: unknown) => {
+              commitStatuses[index] = error
+            },
+          ),
+        )
+      }
+      await atOracleCheckpoint(persisted.promise, `discarded work persisted`)
+
+      env.leader.setLeader(false)
+      discardReplay = true
+      failedKey = `tx:${ids[failedIndex]}`
+      failRemoval = true
+      env.leader.setLeader(true)
+      await atOracleCheckpoint(
+        Promise.all([removing.promise, failed.promise]),
+        `mixed discard removals started`,
+      )
+      await turn()
+
+      expect(commitStatuses).toEqual([`pending`, `pending`])
+      expect(waitStatuses).toEqual([`pending`, `pending`])
+      expect(warning).toHaveBeenCalledWith(
+        `Failed to load and replay transactions:`,
+        storageError,
+      )
+      expect(env.executor.getPendingCount()).toBe(0)
+      expect(storage.snapshot()).toHaveProperty(`tx:${ids[0]}`)
+      expect(storage.snapshot()).toHaveProperty(failedKey)
+      expect(env.collection.get(`discarded-0`)?.value).toBe(`optimistic-0`)
+      expect(env.collection.get(`discarded-1`)?.value).toBe(`optimistic-1`)
+      expect(env.mutationCalls).toHaveLength(0)
+
+      releaseRemoval.resolve()
+      await atOracleCheckpoint(removed.promise, `successful discard removed`)
+      await turn()
+
+      expect(commitStatuses[successfulIndex]).toBeInstanceOf(NonRetriableError)
+      expect(waitStatuses[successfulIndex]).toBe(
+        commitStatuses[successfulIndex],
+      )
+      expect(commitStatuses[failedIndex]).toBe(`pending`)
+      expect(waitStatuses[failedIndex]).toBe(`pending`)
+      expect({
+        queued: env.executor.getPendingCount(),
+        durable: Object.keys(storage.snapshot()),
+        optimistic: [
+          env.collection.get(`discarded-${successfulIndex}`),
+          env.collection.get(`discarded-${failedIndex}`)?.value,
+        ],
+        calls: env.mutationCalls.length,
+      }).toEqual({
+        queued: 0,
+        durable: [failedKey],
+        optimistic: [undefined, `optimistic-${failedIndex}`],
+        calls: 0,
+      })
+
+      env.leader.setLeader(false)
+      env.leader.setLeader(true)
+      await atOracleCheckpoint(retried.promise, `failed discard retried`)
+      await turn()
+
+      expect(commitStatuses[failedIndex]).toBeInstanceOf(NonRetriableError)
+      expect(waitStatuses[failedIndex]).toBe(commitStatuses[failedIndex])
+      expect({
+        queued: env.executor.getPendingCount(),
+        durable: storage.snapshot(),
+        optimistic: env.collection.get(`discarded-${failedIndex}`),
+        calls: env.mutationCalls.length,
+      }).toEqual({ queued: 0, durable: {}, optimistic: undefined, calls: 0 })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseRemoval.resolve()
+      for (let index = 0; index < ids.length; index++)
+        if (commitStatuses[index] === `pending`)
+          env.executor.rejectTransaction(
+            ids[index]!,
+            new NonRetriableError(`oracle cleanup`),
+          )
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all([...commitObserved, ...waitObserved]),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+      warning.mockRestore()
+    }
+  },
+)
+
 it(`keeps retry timers live when a retry record update fails`, async () => {
   vi.useFakeTimers()
   vi.setSystemTime(0)

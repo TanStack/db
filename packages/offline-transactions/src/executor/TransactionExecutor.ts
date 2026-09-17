@@ -267,10 +267,14 @@ export class TransactionExecutor {
     })
 
     if (removedIds.length > 0) {
-      await this.outbox.removeMany(removedIds)
       const error = new NonRetriableError(`Transaction excluded by beforeRetry`)
-      for (const id of removedIds)
-        this.offlineExecutor.rejectTransaction(id, error)
+      await Promise.all(
+        removedIds.map((id) =>
+          this.outbox
+            .remove(id)
+            .then(() => this.offlineExecutor.rejectTransaction(id, error)),
+        ),
+      )
     }
   }
 
