@@ -847,35 +847,175 @@ it.each([
   },
 )
 
-it(`snapshots a buffered delete before its row object is reused`, async () => {
+it(`keeps the first queued before-image when metadata reserves the key`, async () => {
+  let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
+  let liveValue: LivePreviousRow[`value`] = 0
+  const liveRow = {
+    id: 1,
+    get value() {
+      return liveValue
+    },
+  }
   const collection = createCollection<LivePreviousRow, number>({
     getKey: (row) => row.id,
     startSync: true,
     sync: {
-      sync: ({ markReady }) => markReady(),
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        actions.write({ type: `insert`, value: liveRow })
+        actions.write({ type: `insert`, value: { id: 2, value: 0 } })
+        actions.commit()
+        actions.markReady()
+      },
     },
   })
+  let release!: () => void
+  const hold = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const blocker = createTransaction<LivePreviousRow>({
+    autoCommit: false,
+    mutationFn: () => hold,
+  })
+  await collection.stateWhenReady()
   const { publications, subscription } = observeValuePublications(collection)
+  const receipts: Array<Promise<void>> = []
+  let blockerCommit: Promise<unknown> | undefined
+
+  const commitQueuedSync = () => {
+    const receipt = sync.commit()
+    expect(receipt, `persisting work queues sync`).not.toBe(true)
+    if (receipt === true) throw new Error(`sync was not queued`)
+    void receipt.catch(() => undefined)
+    receipts.push(receipt)
+  }
+
+  try {
+    blocker.mutate(() =>
+      collection.update(2, (draft) => {
+        draft.value = 20
+      }),
+    )
+    publications.length = 0
+    blockerCommit = blocker.commit()
+    await Promise.resolve()
+
+    sync.begin()
+    sync.metadata!.row.set(1, { phase: `metadata-first` })
+    commitQueuedSync()
+
+    liveValue = 1
+    sync.begin()
+    sync.write({
+      type: `update`,
+      value: liveRow,
+      previousValue: { id: 1, value: 0 },
+    })
+    commitQueuedSync()
+
+    liveValue = 2
+    sync.begin()
+    sync.write({
+      type: `update`,
+      value: liveRow,
+      previousValue: { id: 1, value: 1 },
+    })
+    commitQueuedSync()
+
+    release()
+    await blockerCommit
+    await Promise.all(receipts)
+
+    expect(
+      publications.flat().filter(({ key }) => key === 1),
+      `the queued drain publishes one complete key transition`,
+    ).toStrictEqual([{ type: `update`, key: 1, value: 2, previousValue: 0 }])
+    expect(collection._state.syncedMetadata.get(1)).toStrictEqual({
+      phase: `metadata-first`,
+    })
+  } finally {
+    release()
+    if (blocker.state === `pending` || blocker.state === `persisting`)
+      blocker.rollback()
+    await blockerCommit?.catch(() => undefined)
+    subscription.unsubscribe()
+    await collection.cleanup()
+    await Promise.allSettled(receipts)
+  }
+})
+
+it(`snapshots a buffered delete before its row object is reused`, async () => {
+  const reusedRow: LivePreviousRow = { id: 1, value: 0 }
+  const collection = createCollection<LivePreviousRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (actions) => {
+        actions.begin()
+        actions.write({ type: `insert`, value: reusedRow })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const publications: Array<
+    Array<{
+      type: string
+      value: LivePreviousRow[`value`]
+      previousValue: LivePreviousRow[`value`]
+      previousSynced: boolean | undefined
+      previousOrigin: string | undefined
+    }>
+  > = []
+  const subscription = collection.subscribeChanges(
+    (changes) =>
+      publications.push(
+        changes.map((change) => {
+          const previous = change.previousValue as
+            | (LivePreviousRow & { $synced: boolean; $origin: string })
+            | undefined
+          return {
+            type: change.type,
+            value: change.value.value,
+            previousValue: previous?.value,
+            previousSynced: previous?.$synced,
+            previousOrigin: previous?.$origin,
+          }
+        }),
+      ),
+    { includeInitialState: true },
+  )
   const changes = (
     collection as unknown as {
       _changes: CollectionChangesManager<LivePreviousRow, number>
     }
   )._changes
-  const reusedRow: LivePreviousRow = { id: 1, value: 0 }
 
   try {
     await collection.stateWhenReady()
+    publications.length = 0
     changes.shouldBatchEvents = true
     changes.emitEvents([{ type: `delete`, key: 1, value: reusedRow }])
     expect(publications, `delete remains buffered`).toStrictEqual([])
 
     reusedRow.value = 1
+    collection._state.optimisticUpserts.set(1, reusedRow)
     changes.emitEvents(
       [{ type: `insert`, key: 1, value: { ...reusedRow } }],
       true,
     )
     expect(publications).toStrictEqual([
-      [{ type: `update`, key: 1, value: 1, previousValue: 0 }],
+      [
+        {
+          type: `update`,
+          value: 1,
+          previousValue: 0,
+          previousSynced: true,
+          previousOrigin: `remote`,
+        },
+      ],
     ])
   } finally {
     subscription.unsubscribe()

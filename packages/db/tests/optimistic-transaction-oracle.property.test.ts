@@ -314,6 +314,7 @@ async function runDeleteInsertReplacement(
       [...collection.values()].map(userRow),
       `manual settlement releases the optimistic replacement`,
     ).toStrictEqual([original])
+    return request
   } finally {
     if (transaction.state === `pending` || transaction.state === `persisting`) {
       transaction.rollback()
@@ -449,6 +450,78 @@ describe(`Delete then insert transaction laws`, () => {
       },
       original,
     )
+  })
+
+  it(`delivers a replacement that differs only by an enumerable symbol`, async () => {
+    const field = Symbol(`replacement field`)
+    const original = { id: 1, value: 0, [field]: 0 }
+    const replacement = { id: 1, value: 0, [field]: 1 }
+    const request = await runDeleteInsertReplacement(
+      [replacement],
+      {
+        type: `update`,
+        original,
+        modified: replacement,
+        changes: {},
+        metadata: { operation: `insert`, index: 0 },
+        syncMetadata: {
+          delete: true,
+          shared: `insert`,
+          insert: true,
+        },
+      },
+      original,
+    )
+
+    expect(Reflect.ownKeys(request[0]!.changes)).toStrictEqual([])
+    expect(Reflect.get(request[0]!.modified, field)).toBe(1)
+  })
+
+  it(`uses own-string key order for a symmetric replacement diff`, async () => {
+    const original = {
+      10: `remove numeric`,
+      2: `stable numeric`,
+      id: 1,
+      value: 0,
+      before: `remove string`,
+      stable: `same`,
+    }
+    const replacement = {
+      1: `add numeric`,
+      2: `stable numeric`,
+      id: 1,
+      value: 0,
+      stable: `same`,
+      after: `add string`,
+    }
+    const request = await runDeleteInsertReplacement(
+      [replacement],
+      {
+        type: `update`,
+        original,
+        modified: replacement,
+        changes: {
+          1: `add numeric`,
+          10: undefined,
+          before: undefined,
+          after: `add string`,
+        },
+        metadata: { operation: `insert`, index: 0 },
+        syncMetadata: {
+          delete: true,
+          shared: `insert`,
+          insert: true,
+        },
+      },
+      original,
+    )
+
+    expect(Object.keys(request[0]!.changes)).toStrictEqual([
+      `1`,
+      `10`,
+      `before`,
+      `after`,
+    ])
   })
 
   it(`delivers a replacement after duplicate deletes of another overlay`, async () => {
