@@ -206,9 +206,9 @@ export class CollectionMutationsManager<
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
 
-      // Check if an item with this ID already exists in the collection or in the current batch
+      // Reject duplicate keys within this batch before starting sync.
       const key = this.config.getKey(validatedData)
-      if (this.state.has(key) || keysInCurrentBatch.has(key)) {
+      if (keysInCurrentBatch.has(key)) {
         throw new DuplicateKeyError(key)
       }
       keysInCurrentBatch.add(key)
@@ -240,6 +240,14 @@ export class CollectionMutationsManager<
 
       mutations.push(mutation)
     })
+
+    // Reject duplicates already visible before explicitly starting sync; startup may
+    // synchronously reveal additional keys, so check again afterward.
+    let duplicate = mutations.find(({ key }) => state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
+    this.collection._sync.startSync()
+    duplicate = mutations.find(({ key }) => state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
@@ -317,9 +325,12 @@ export class CollectionMutationsManager<
     }
 
     const callback =
-      typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
+      typeof configOrCallback === `function` ? configOrCallback : maybeCallback
+    if (typeof callback !== `function`) throw new TypeError()
     const config =
       typeof configOrCallback === `function` ? {} : configOrCallback
+
+    this.collection._sync.startSync()
 
     // Get the current objects or empty objects if they don't exist
     const currentObjects = keysArray.map((key) => {
@@ -497,6 +508,7 @@ export class CollectionMutationsManager<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
+    this.collection._sync.startSync()
     const mutations: Array<
       PendingMutation<
         TOutput,
