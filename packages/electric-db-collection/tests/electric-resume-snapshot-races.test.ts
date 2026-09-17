@@ -20,8 +20,10 @@ type Item = Row & { id: number; name: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 
 const subscribers: Array<Subscriber> = []
+let synchronousMessages: Array<Message<Item>> | undefined
 const mockSubscribe = vi.fn((subscriber: Subscriber) => {
   subscribers.push(subscriber)
+  if (synchronousMessages) subscriber(synchronousMessages)
   return vi.fn()
 })
 
@@ -123,12 +125,13 @@ async function runRace(
   syncMode: `eager` | `on-demand` = `eager`,
   legacyUnknown = false,
   missingKeySetEvidence = false,
+  startupReset: `none` | `tag-state` | `shape-identity` = `none`,
 ): Promise<void> {
   const database = new DatabaseSync(`:memory:`)
   const driver = createDriver(database)
   const collectionId =
     `resume-snapshot-${syncMode}-${transition}-` +
-    `${legacyUnknown}-${missingKeySetEvidence}`
+    `${legacyUnknown}-${missingKeySetEvidence}-${startupReset}`
   const laterSnapshotEntered = deferred()
   const releaseLaterSnapshot = deferred()
   let collection:
@@ -157,10 +160,13 @@ async function runRace(
           key: `electric:resume`,
           value: {
             kind: `resume`,
-            requiresTagState: false,
+            requiresTagState: startupReset === `tag-state`,
             offset: `10_0`,
             handle: `shape-old`,
-            shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+            shapeId:
+              startupReset === `shape-identity`
+                ? `{"params":{"table":"other_table"},"url":"http://test-url"}`
+                : `{"params":{"table":"test_table"},"url":"http://test-url"}`,
             updatedAt: 1,
           },
         },
@@ -193,6 +199,7 @@ async function runRace(
     })
     let snapshotCalls = 0
     let laterSnapshotIncludedRows: boolean | undefined
+    let resumeStateAtLaterSnapshot: unknown
     let reportReceiverFailure!: (error: Error) => void
     const receiverFailure = new Promise<Error>((resolve) => {
       reportReceiverFailure = resolve
@@ -214,6 +221,11 @@ async function runRace(
             snapshotCalls++
             if (snapshotCalls > 1) {
               laterSnapshotIncludedRows = args[1]?.includeRows
+              if (startupReset !== `none`) {
+                resumeStateAtLaterSnapshot = (
+                  await target.loadCollectionMetadata(collectionId)
+                ).find(({ key }) => key === `electric:resume`)?.value
+              }
               laterSnapshotEntered.resolve()
               await releaseLaterSnapshot.promise
             }
@@ -250,6 +262,13 @@ async function runRace(
     )
 
     let publications = 0
+    if (startupReset !== `none`) {
+      synchronousMessages = [
+        change(`insert`, { id: 1, name: `one` }),
+        change(`insert`, { id: 2, name: `two` }),
+        { headers: { control: `up-to-date` } },
+      ]
+    }
     collection.startSyncImmediate()
     const subscription = collection.subscribeChanges(
       () => {
@@ -273,22 +292,28 @@ async function runRace(
       offset?: string
       handle?: string
     }
-    const replacesUncertifiedBaseline = legacyUnknown || missingKeySetEvidence
+    const replacesUncertifiedBaseline =
+      legacyUnknown || missingKeySetEvidence || startupReset !== `none`
+    if (startupReset !== `none`) {
+      expect(resumeStateAtLaterSnapshot).toMatchObject({ kind: `reset` })
+    }
 
-    subscriber(
-      request.offset === undefined
-        ? [
-            change(`insert`, { id: 1, name: `one` }),
-            change(`insert`, { id: 2, name: `two` }),
-            { headers: { control: `up-to-date` } },
-          ]
-        : transition === `none`
-          ? [{ headers: { control: `up-to-date` } }]
-          : [
-              change(`update`, { id: 2, name: `new-two` }),
+    if (startupReset === `none`) {
+      subscriber(
+        request.offset === undefined
+          ? [
+              change(`insert`, { id: 1, name: `one` }),
+              change(`insert`, { id: 2, name: `two` }),
               { headers: { control: `up-to-date` } },
-            ],
-    )
+            ]
+          : transition === `none`
+            ? [{ headers: { control: `up-to-date` } }]
+            : [
+                change(`update`, { id: 2, name: `new-two` }),
+                { headers: { control: `up-to-date` } },
+              ],
+      )
+    }
     if (transition === `external-row-loss`) {
       const tableName = createPersistedTableName(collectionId, `c`)
       await driver.run(
@@ -647,7 +672,16 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
 describe(`Electric resume snapshot races`, () => {
   beforeEach(() => {
     subscribers.length = 0
+    synchronousMessages = undefined
     vi.clearAllMocks()
+  })
+
+  it(`keeps a healthy tagged cache when a fresh reset commits before hydration`, async () => {
+    await runRace(`none`, `eager`, false, false, `tag-state`)
+  })
+
+  it(`keeps a healthy cache when a changed shape commits its reset before hydration`, async () => {
+    await runRace(`none`, `eager`, false, false, `shape-identity`)
   })
 
   it(`rejects row loss between resume metadata and baseline hydration`, async () => {

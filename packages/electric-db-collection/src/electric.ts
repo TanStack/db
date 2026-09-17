@@ -76,6 +76,7 @@ type ElectricSyncMetadataWithHydration = SyncMetadataApi<string | number> & {
     getPersistedKeySetEvidence?: () =>
       | { status: `unknown` | `consistent` | `incompatible` }
       | undefined
+    expectCurrentCommitInResumeSnapshot?: () => void
   }
 }
 
@@ -1692,6 +1693,8 @@ function createElectricSync<T extends Row<unknown>>(
         persistedMetadata?.row.certifyPersistedResume
       const getPersistedKeySetEvidence =
         persistedMetadata?.row.getPersistedKeySetEvidence
+      const expectCurrentCommitInResumeSnapshot =
+        persistedMetadata?.row.expectCurrentCommitInResumeSnapshot
       const persistedKeySetEvidence = getPersistedKeySetEvidence?.()
 
       const persistedResumeState = getNewestElectricResumeState(
@@ -1904,7 +1907,9 @@ function createElectricSync<T extends Row<unknown>>(
         metadata?.collection.set(`electric:resume`, resumeState)
       }
 
-      const commitResetResumeMetadataImmediately = () => {
+      const commitResetResumeMetadataImmediately = (
+        expectInResumeSnapshot = false,
+      ) => {
         const resetState: ElectricResumeState = {
           kind: `reset`,
           updatedAt: Date.now(),
@@ -1914,6 +1919,9 @@ function createElectricSync<T extends Row<unknown>>(
         if (metadata) {
           begin({ immediate: true })
           metadata.collection.set(`electric:resume`, resetState)
+          if (expectInResumeSnapshot) {
+            expectCurrentCommitInResumeSnapshot?.()
+          }
           commit()
         }
       }
@@ -1923,7 +1931,10 @@ function createElectricSync<T extends Row<unknown>>(
         hasUnverifiablePersistedResume ||
         (needsFullSnapshot && persistedResumeState.kind === `resume`)
       ) {
-        commitResetResumeMetadataImmediately()
+        // This reset is part of the current runtime's startup decision. The
+        // persisted wrapper may commit it before loading the atomic baseline,
+        // so carry ownership of exactly this generation into certification.
+        commitResetResumeMetadataImmediately(true)
       }
 
       /**

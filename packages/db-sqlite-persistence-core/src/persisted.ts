@@ -223,6 +223,13 @@ export type PersistedKeySetEvidence = {
   status: `unknown` | `consistent` | `incompatible`
 }
 
+type PersistedResumeGeneration = {
+  latestTerm: number
+  latestSeq: number
+  latestRowVersion: number
+  resetEpoch: number
+}
+
 export type PersistedTx<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -614,6 +621,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   >
   truncate: boolean
   internal: boolean
+  expectedResumeGenerationOwner?: symbol
   signal?: AbortSignal
   resolveApplied?: () => void
   rejectApplied?: (error: unknown) => void
@@ -832,7 +840,8 @@ class PersistedCollectionRuntime<
   private resumeBaselinePromise: Promise<void> | null = null
   private resumeCertificationPromise: Promise<void> | null = null
   private persistedKeySetEvidence: PersistedKeySetEvidence | undefined
-  private persistedResumeGeneration: string | undefined
+  private persistedResumeGeneration: PersistedResumeGeneration | undefined
+  private resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
   private appliedReceiptSequence = 0
@@ -980,6 +989,10 @@ class PersistedCollectionRuntime<
 
   supportsResumeSnapshot(): boolean {
     return this.persistence.adapter.loadResumeSnapshot !== undefined
+  }
+
+  getResumeGenerationOwner(): symbol {
+    return this.resumeGenerationOwner
   }
 
   private async hydrateBaseline(lifecycleGeneration: number): Promise<void> {
@@ -1330,6 +1343,7 @@ class PersistedCollectionRuntime<
     this.resumeCertificationPromise = null
     this.persistedKeySetEvidence = undefined
     this.persistedResumeGeneration = undefined
+    this.resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   }
 
   private withInternalApply<TResult>(task: () => TResult): TResult {
@@ -1463,8 +1477,26 @@ class PersistedCollectionRuntime<
     latestSeq: number
     latestRowVersion: number
     resetEpoch: number
-  }): string {
-    return `${snapshot.resetEpoch}:${snapshot.latestTerm}:${snapshot.latestSeq}:${snapshot.latestRowVersion}`
+  }): PersistedResumeGeneration {
+    return {
+      latestTerm: snapshot.latestTerm,
+      latestSeq: snapshot.latestSeq,
+      latestRowVersion: snapshot.latestRowVersion,
+      resetEpoch: snapshot.resetEpoch,
+    }
+  }
+
+  private isExpectedResumeGeneration(
+    generation: PersistedResumeGeneration,
+  ): boolean {
+    const expected = this.persistedResumeGeneration
+    return (
+      expected !== undefined &&
+      expected.latestTerm === generation.latestTerm &&
+      expected.latestSeq === generation.latestSeq &&
+      expected.latestRowVersion === generation.latestRowVersion &&
+      expected.resetEpoch === generation.resetEpoch
+    )
   }
 
   private bindResumeSnapshotEvidence(snapshot: {
@@ -1486,7 +1518,7 @@ class PersistedCollectionRuntime<
       snapshot.latestRowVersion,
     )
     this.persistedKeySetEvidence =
-      this.persistedResumeGeneration === generation || remainsUncertified
+      this.isExpectedResumeGeneration(generation) || remainsUncertified
         ? snapshot.keySet
         : { status: `incompatible` }
   }
@@ -1661,6 +1693,18 @@ class PersistedCollectionRuntime<
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
 
     await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
+    if (
+      transaction.expectedResumeGenerationOwner ===
+        this.resumeGenerationOwner &&
+      this.persistedResumeGeneration !== undefined
+    ) {
+      this.persistedResumeGeneration = {
+        ...this.persistedResumeGeneration,
+        latestTerm: tx.term,
+        latestSeq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
     this.publishTxCommittedEvent(
       this.createTxCommittedPayload({
         term: tx.term,
@@ -2599,6 +2643,20 @@ function createWrappedSyncConfig<
                         ? undefined
                         : runtime.getPersistedKeySetEvidence()
                   : undefined,
+                expectCurrentCommitInResumeSnapshot:
+                  runtime.supportsResumeSnapshot()
+                    ? () => {
+                        if (startupState.cleanedUp) return
+                        const openTransaction = getOpenTransaction()
+                        if (!openTransaction) {
+                          throw new InvalidPersistedCollectionConfigError(
+                            `expectCurrentCommitInResumeSnapshot must be called within an open sync transaction`,
+                          )
+                        }
+                        openTransaction.expectedResumeGenerationOwner =
+                          runtime.getResumeGenerationOwner()
+                      }
+                    : undefined,
                 set: (key: TKey, value: unknown) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
@@ -2752,6 +2810,8 @@ function createWrappedSyncConfig<
                 openTransaction.collectionMetadataWrites,
               truncate: openTransaction.truncate,
               internal: openTransaction.internal,
+              expectedResumeGenerationOwner:
+                openTransaction.expectedResumeGenerationOwner,
               signal,
               resolveApplied,
               rejectApplied,
@@ -2770,6 +2830,8 @@ function createWrappedSyncConfig<
                   openTransaction.collectionMetadataWrites,
                 truncate: openTransaction.truncate,
                 internal: false,
+                expectedResumeGenerationOwner:
+                  openTransaction.expectedResumeGenerationOwner,
               })
             }
             const persisted = persistAfterApplication()
