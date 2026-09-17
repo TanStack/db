@@ -991,6 +991,44 @@ describe(`Electric Integration`, () => {
       await expect(options.onInsert!(mockParams)).resolves.not.toThrow()
     })
 
+    it.each([
+      [`string`, `legacy-result`],
+      [`number`, 42],
+      [`null`, null],
+      [`function`, () => undefined],
+      [`object`, {}],
+      [`void`, undefined],
+    ])(`tolerates an out-of-contract %s handler result`, async (_, result) => {
+      const awaitTxId = vi.fn().mockResolvedValue(true)
+      const options = electricCollectionOptions({
+        id: `out-of-contract-handler-result`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item: Row) => item.id as number,
+        onInsert: vi.fn().mockResolvedValue(result),
+      })
+      const params = {
+        transaction: { id: `test-transaction`, mutations: [] },
+        collection: { utils: { awaitTxId } },
+      } as unknown as InsertMutationFnParams<
+        Row,
+        string | number,
+        ElectricCollectionUtils<Row>
+      >
+
+      let thrown: unknown
+      try {
+        await options.onInsert!(params)
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBeUndefined()
+      expect(awaitTxId).not.toHaveBeenCalled()
+    })
+
     it(`should simulate complete flow with direct persistence handlers`, async () => {
       // Create a fake backend store to simulate server-side storage
       const fakeBackend = {

@@ -560,33 +560,33 @@ export type DeleteMutationFnParams<
 }
 
 /**
- * @typeParam TReturn - @internal DEPRECATED: Defaults to void. Only kept for backward compatibility. Will be removed in v1.0.
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
  */
 export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = void,
+  TReturn = any,
 > = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 /**
- * @typeParam TReturn - @internal DEPRECATED: Defaults to void. Only kept for backward compatibility. Will be removed in v1.0.
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
  */
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = void,
+  TReturn = any,
 > = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 /**
- * @typeParam TReturn - @internal DEPRECATED: Defaults to void. Only kept for backward compatibility. Will be removed in v1.0.
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
  */
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = void,
+  TReturn = any,
 > = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 /**
@@ -628,6 +628,7 @@ export interface BaseCollectionConfig<
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
+  TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -709,6 +710,7 @@ export interface BaseCollectionConfig<
   syncMode?: SyncMode
   /**
    * Optional asynchronous handler function called before an insert operation
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
    *
    * @example
    * // Basic insert handler
@@ -724,6 +726,8 @@ export interface BaseCollectionConfig<
    *   await api.createTodo(newItem)
    *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -742,6 +746,7 @@ export interface BaseCollectionConfig<
    *   await api.createTodos(items)
    *   // Refetch to get updated data from server
    *   await collection.utils.refetch()
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -758,13 +763,12 @@ export interface BaseCollectionConfig<
    */
   onInsert?:
     | InsertMutationFn<T, TKey, TUtils, void>
-    /**
-     * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
-     */
-    | InsertMutationFn<T, TKey, TUtils, unknown>
+    // Return-value compatibility will be removed in v1.0.
+    | InsertMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Optional asynchronous handler function called before an update operation
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
    *
    * @example
    * // Basic update handler
@@ -781,6 +785,8 @@ export interface BaseCollectionConfig<
    *   await api.updateTodo(mutation.original.id, changes)
    *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -801,6 +807,7 @@ export interface BaseCollectionConfig<
    *   }))
    *   await api.updateTodos(updates)
    *   await collection.utils.refetch()
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -818,12 +825,11 @@ export interface BaseCollectionConfig<
    */
   onUpdate?:
     | UpdateMutationFn<T, TKey, TUtils, void>
-    /**
-     * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
-     */
-    | UpdateMutationFn<T, TKey, TUtils, unknown>
+    // Return-value compatibility will be removed in v1.0.
+    | UpdateMutationFn<T, TKey, TUtils, TReturn>
   /**
    * Optional asynchronous handler function called before a delete operation
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
    *
    * @example
    * // Basic delete handler
@@ -839,6 +845,8 @@ export interface BaseCollectionConfig<
    *   await api.deleteTodos(keysToDelete)
    *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -876,10 +884,8 @@ export interface BaseCollectionConfig<
    */
   onDelete?:
     | DeleteMutationFn<T, TKey, TUtils, void>
-    /**
-     * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
-     */
-    | DeleteMutationFn<T, TKey, TUtils, unknown>
+    // Return-value compatibility will be removed in v1.0.
+    | DeleteMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Specifies how to compare data in the collection.

@@ -263,6 +263,8 @@ const warnedKeys = new Set<string>()
  * Log a warning message only once per unique key.
  * Subsequent calls with the same key will be silently ignored.
  *
+ * @internal Used by first-party collection adapters.
+ *
  * @param key - Unique identifier for this warning
  * @param message - The warning message to display
  *
@@ -285,6 +287,8 @@ export function warnOnce(key: string, message: string): void {
 
 /**
  * Reset all warning states. Primarily useful for testing.
+ *
+ * @internal Used by first-party collection adapter tests.
  */
 export function resetWarnings(): void {
   warnedKeys.clear()

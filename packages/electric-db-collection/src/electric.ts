@@ -1201,11 +1201,16 @@ export function electricCollectionOptions<T extends Row<unknown>>(
    * Process matching strategy and wait for synchronization
    */
   const processMatchingStrategy = async (
-    result: MatchingStrategy,
+    result: unknown,
     waitForTxId: AwaitTxIdFn,
   ): Promise<void> => {
+    const canHaveProperties =
+      (typeof result === `object` && result !== null) ||
+      typeof result === `function`
+
     // Only wait if result contains txid
-    if (result && `txid` in result) {
+    if (canHaveProperties && `txid` in result) {
+      const strategy = result as Exclude<MatchingStrategy, void>
       // Warn about deprecated return value pattern
       warnOnce(
         'electric-collection-txid-return',
@@ -1214,12 +1219,14 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization',
       )
 
-      const timeout = result.timeout
+      const timeout = strategy.timeout
       // Handle both single txid and array of txids
-      if (Array.isArray(result.txid)) {
-        await Promise.all(result.txid.map((txid) => waitForTxId(txid, timeout)))
+      if (Array.isArray(strategy.txid)) {
+        await Promise.all(
+          strategy.txid.map((txid) => waitForTxId(txid, timeout)),
+        )
       } else {
-        await waitForTxId(result.txid, timeout)
+        await waitForTxId(strategy.txid, timeout)
       }
     }
     // If result is void/undefined, don't wait - mutation completes immediately

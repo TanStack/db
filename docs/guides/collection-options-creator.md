@@ -923,6 +923,8 @@ const collection = createCollection(
       await api.createTodos(transaction.mutations.map(m => m.modified))
       // User explicitly triggers refetch
       await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
     }
   })
 )

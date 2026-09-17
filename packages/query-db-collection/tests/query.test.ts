@@ -18,6 +18,7 @@ import {
   ilike,
   inArray,
   or,
+  resetWarnings,
 } from '@tanstack/db'
 import {
   mockSyncCollectionOptions,
@@ -2243,6 +2244,47 @@ describe(`QueryCollection`, () => {
         collectionFalse.cleanup(),
         collectionPrimitive.cleanup(),
       ])
+    })
+
+    it(`supports a warning-free single-refetch migration path`, async () => {
+      resetWarnings()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const options = queryCollectionOptions<TestItem>({
+        id: `explicit-refetch-migration`,
+        queryClient,
+        queryKey: [`explicit-refetch-migration`],
+        queryFn,
+        getKey,
+        startSync: true,
+        onInsert: async ({ collection }) => {
+          await collection.utils.refetch()
+          return { refetch: false }
+        },
+      })
+      const collection = createCollection(options)
+
+      try {
+        await vi.waitFor(() => {
+          expect(collection.status).toBe(`ready`)
+        })
+        queryFn.mockClear()
+
+        await options.onInsert!({
+          transaction: {
+            id: `explicit-refetch-transaction`,
+            mutations: [],
+          } as unknown as TransactionWithMutations<TestItem, `insert`>,
+          collection,
+        })
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(warning).not.toHaveBeenCalled()
+      } finally {
+        await collection.cleanup()
+        resetWarnings()
+        warning.mockRestore()
+      }
     })
   })
 

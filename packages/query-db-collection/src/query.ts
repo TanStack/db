@@ -2764,19 +2764,13 @@ export function queryCollectionOptions(
       (handlerResult as Record<string, unknown>).refetch === false
 
     if (explicitRefetchFalse) {
-      warnOnce(
-        'query-collection-refetch-false',
-        '[TanStack DB] Note: `return { refetch: false }` is the correct way to skip auto-refetch for now. ' +
-          'In v1.0, auto-refetch will be removed entirely and you should call `await collection.utils.refetch()` explicitly when needed, ' +
-          'or omit it to skip refetching. ' +
-          'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-      )
+      return
     } else {
       warnOnce(
         'query-collection-auto-refetch',
         '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
           'This behavior will be removed in v1.0. To prepare: ' +
-          '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
+          '(1) Add `await collection.utils.refetch()` and temporarily return `{ refetch: false }` to avoid a second refetch, or ' +
           "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
           'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
       )
