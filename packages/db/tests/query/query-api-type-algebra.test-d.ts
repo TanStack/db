@@ -422,7 +422,10 @@ describe(`query API type algebra`, () => {
     function eraseBuilder<T extends { id: string }>(
       source: Collection<T, string>,
     ) {
-      const specific = new Query().from({ source })
+      const specific = new Query().unionAll(
+        new Query().from({ source }),
+        new Query().from({ source }),
+      )
       const erased: QueryBuilder<any> = specific
       return erased
     }
