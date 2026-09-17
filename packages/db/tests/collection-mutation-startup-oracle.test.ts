@@ -435,10 +435,15 @@ describe(`Collection mutation startup oracle`, () => {
     })
 
     try {
+      expect(syncStarts).toBe(0)
+      expect(collection.status).toBe(`idle`)
       const first = collection.insert({ id: `first`, value: `first` })
+      expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`ready`)
       const second = collection.insert({ id: `second`, value: `second` })
       await Promise.all([first.isPersisted.promise, second.isPersisted.promise])
       expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`ready`)
       expect(handlerCalls).toBe(2)
       expect(collection.toArray.map(({ id }) => id).sort()).toEqual([
         `first`,
