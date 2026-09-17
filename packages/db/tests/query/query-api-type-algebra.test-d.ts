@@ -1,9 +1,10 @@
 /**
  * Oracle owner: the query-builder compile-time suites.
  *
- * Laws and sources: nullable join refs stay nullable when selected whole, and
- * unresolved generic constraints survive joins and both union forms. These
- * laws preserve the reports and prior art from issues 1467 and 1679.
+ * Laws and sources: nullable join refs stay nullable when selected whole. In
+ * the separately enumerated generic callback cells, unresolved constraints
+ * survive direct queries, joins, and both union forms. These laws preserve the
+ * reports and prior art from issues 1467 and 1679.
  *
  * Reference and observation: TypeScript structural assignability and
  * `@ts-expect-error` are the independent judges. Product-contract cells cross
@@ -107,6 +108,73 @@ describe(`query API type algebra`, () => {
     }
 
     void projectNullableDepartment
+  })
+
+  test(`branch unions preserve nullable whole-object fields`, () => {
+    type Address = { city: string }
+    type Person = Row & { address: Address; optionalAddress?: Address }
+
+    function projectNullableBranchFields(
+      rowsA: Collection<Person, string>,
+      rowsB: Collection<Person, string>,
+      othersA: Collection<Person, string>,
+      othersB: Collection<Person, string>,
+    ) {
+      const joinedBranchA = new Query()
+        .from({ rowA: rowsA })
+        .leftJoin({ otherA: othersA }, ({ rowA, otherA }) =>
+          eq(rowA.id, otherA.id),
+        )
+        .select(({ otherA }) => ({ other: otherA }))
+      const joinedBranchB = new Query()
+        .from({ rowB: rowsB })
+        .leftJoin({ otherB: othersB }, ({ rowB, otherB }) =>
+          eq(rowB.id, otherB.id),
+        )
+        .select(({ otherB }) => ({ other: otherB }))
+      const joinedUnion = new Query()
+        .unionAll(joinedBranchA, joinedBranchB)
+        .select(({ other }) => ({
+          other,
+          otherAddress: other.address,
+        }))
+
+      type JoinedResult = QueryResult<typeof joinedUnion>
+      const joinedResult = null as unknown as JoinedResult
+      expectTypeOf(joinedResult.other).toEqualTypeOf<
+        WithVirtualProps<Person, string> | undefined
+      >()
+      expectTypeOf(joinedResult.otherAddress).toEqualTypeOf<
+        Address | undefined
+      >()
+      // @ts-expect-error An unmatched branch whole object requires a guard.
+      joinedResult.other.id
+      if (joinedResult.other) {
+        expectTypeOf(joinedResult.other.id).toEqualTypeOf<string>()
+        // @ts-expect-error Nested user objects do not gain row virtual props.
+        joinedResult.other.address.$key
+      }
+
+      const optionalBranchA = new Query()
+        .from({ rowA: rowsA })
+        .select(({ rowA }) => ({ address: rowA.optionalAddress }))
+      const optionalBranchB = new Query()
+        .from({ rowB: rowsB })
+        .select(({ rowB }) => ({ address: rowB.optionalAddress }))
+      const optionalUnion = new Query()
+        .unionAll(optionalBranchA, optionalBranchB)
+        .select(({ address }) => ({ address }))
+
+      type OptionalResult = QueryResult<typeof optionalUnion>
+      const optionalResult = null as unknown as OptionalResult
+      expectTypeOf(optionalResult.address).toEqualTypeOf<Address | undefined>()
+      // @ts-expect-error An absent selected object requires a guard.
+      optionalResult.address.city
+
+      return { joinedUnion, optionalUnion }
+    }
+
+    void projectNullableBranchFields
   })
 
   test(`spreading a nullable join ref widens its leaves`, () => {
@@ -221,6 +289,11 @@ describe(`query API type algebra`, () => {
         })
         .select(({ id: itemId, row }) => ({ id: itemId, rowId: row.id }))
 
+      const rightJoinedBranchUnion = new Query()
+        .unionAll(aRows, bRows)
+        .rightJoin({ row: rows }, ({ id: itemId, row }) => eq(itemId, row.id))
+        .select(({ id: itemId }) => ({ id: itemId }))
+
       return {
         direct,
         joined,
@@ -228,6 +301,7 @@ describe(`query API type algebra`, () => {
         branchUnion,
         selectedBranchUnion,
         joinedBranchUnion,
+        rightJoinedBranchUnion,
       }
     }
 
@@ -252,6 +326,9 @@ describe(`query API type algebra`, () => {
     >[`renamed`]
     type JoinedBranchId = QueryResult<Concrete[`joinedBranchUnion`]>[`id`]
     type JoinedBranchRowId = QueryResult<Concrete[`joinedBranchUnion`]>[`rowId`]
+    type RightJoinedBranchId = QueryResult<
+      Concrete[`rightJoinedBranchUnion`]
+    >[`id`]
     expectTypeOf<DirectConcrete>().toEqualTypeOf<number>()
     expectTypeOf<IsAny<JoinedId>>().toEqualTypeOf<false>()
     expectTypeOf<JoinedId>().toEqualTypeOf<string | undefined>()
@@ -266,6 +343,7 @@ describe(`query API type algebra`, () => {
     expectTypeOf<SelectedBranchId>().toEqualTypeOf<string>()
     expectTypeOf<JoinedBranchId>().toEqualTypeOf<string>()
     expectTypeOf<JoinedBranchRowId>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<RightJoinedBranchId>().toEqualTypeOf<string | undefined>()
 
     void composeGenericSources
   })

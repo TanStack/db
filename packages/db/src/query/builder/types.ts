@@ -708,9 +708,16 @@ type RefForContextSchemaValue<
       ? RefForContextValue<NonNull<T>, true>
       : RefForContextValue<T>
 
+type RefsForBranchResult<T, ForceNullable extends boolean> = T extends unknown
+  ? { [K in keyof T]: RefForContextSchemaValue<T[K], ForceNullable> }
+  : never
+
 type BranchUnionResultRefs<TContext extends Context> =
   typeof BranchUnionRefs extends keyof TContext
-    ? Ref<TContext[typeof BranchUnionRefs], HasRightOrFullJoin<TContext>>
+    ? RefsForBranchResult<
+        TContext[typeof BranchUnionRefs],
+        HasRightOrFullJoin<TContext>
+      >
     : object
 
 type JoinedRefsForContext<TContext extends Context> =
