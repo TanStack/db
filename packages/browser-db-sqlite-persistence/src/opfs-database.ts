@@ -130,6 +130,7 @@ export async function openBrowserWASQLiteOPFSDatabase(
       return
     }
     disposed = true
+    globalThis.removeEventListener(`pagehide`, onPageHide)
     worker.removeEventListener(`message`, onMessage)
     worker.removeEventListener(`error`, onError)
     worker.removeEventListener(`messageerror`, onMessageError)
@@ -177,9 +178,22 @@ export async function openBrowserWASQLiteOPFSDatabase(
     disposeWorker()
   }
 
+  const onPageHide = (): void => {
+    // A document entering the back/forward cache can be frozen before an
+    // asynchronous close completes, including while initialization is pending.
+    rejectAllPendingRequests(
+      new DOMException(
+        `The page is closing its SQLite connection`,
+        `AbortError`,
+      ),
+    )
+    disposeWorker()
+  }
+
   worker.addEventListener(`message`, onMessage)
   worker.addEventListener(`error`, onError)
   worker.addEventListener(`messageerror`, onMessageError)
+  globalThis.addEventListener(`pagehide`, onPageHide)
 
   const sendWorkerRequest = <T>(
     request: BrowserOPFSWorkerRequestWithoutId,

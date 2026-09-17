@@ -102,8 +102,18 @@ for a full multi-tab example.
 - `openBrowserWASQLiteOPFSDatabase(...)` starts a dedicated Web Worker and
   routes SQL operations through it. OPFS sync access handle APIs are used in
   that worker context.
+- On `pagehide`, the connection terminates its worker synchronously and rejects
+  pending initialization and queries with `AbortError`. This also applies when
+  the document enters the back/forward cache. Applications restored through
+  `pageshow` with `event.persisted` must create fresh database connections and
+  persistence/collection instances (or reload the application).
+- Flush application writes and await `database.close()` before navigating when
+  possible. The `pagehide` cleanup releases resources; it cannot await pending
+  writes or serve as a durability guarantee.
 - Single-tab mode does not require `BroadcastChannel` or Web Locks for
   correctness.
 - Multi-tab mode requires `BroadcastChannel` and the Web Locks API; both are
   available in all modern browsers.
 - OPFS capability failures are surfaced as `PersistenceUnavailableError`.
+- SQLite open failures include the underlying VFS error name and message when
+  available, so native file contention can be distinguished from other errors.
