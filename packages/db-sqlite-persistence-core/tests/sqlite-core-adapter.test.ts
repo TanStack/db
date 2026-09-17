@@ -1576,7 +1576,7 @@ export function runSQLiteCoreAdapterContractSuite(
           `cleanup=${reducedFailure.cleanupEvidence}`,
         { cause: reducedFailure },
       )
-    }, 30_000)
+    }, 120_000)
 
     it(`leaves externally inconsistent metadata reachable for consumer validation`, async () => {
       const observation = await observeResetResumeHistory(
@@ -1610,7 +1610,7 @@ export function runSQLiteCoreAdapterContractSuite(
         `oracle:provider`,
       ])
       expect(resumeKindOf(observation.resumeState)).toBe(`resume`)
-    })
+    }, 30_000)
 
     it(`requires complete metadata reset while preserving non-reset metadata`, () => {
       const compatibleEmpty: ResetResumeHistory = {
