@@ -15,6 +15,7 @@ import {
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   PersistedIndexSpec,
+  PersistedKeySetEvidence,
   PersistedRowScanOptions,
   PersistedScannedRow,
   PersistedTx,
@@ -1159,36 +1160,150 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }))
   }
 
+  async loadResumeSnapshot(
+    collectionId: string,
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      includeRows?: boolean
+    },
+  ): Promise<{
+    rows: Array<{
+      key: string | number
+      value: Record<string, unknown>
+      metadata?: unknown
+    }>
+    keySet: PersistedKeySetEvidence
+    collectionMetadata: Array<{ key: string; value: unknown }>
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }> {
+    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const includeRows = ctx?.includeRows !== false
+    if (includeRows) {
+      await this.touchRequiredIndexes(
+        collectionId,
+        ctx?.requiredIndexSignatures,
+      )
+    }
+
+    return this.runInTransaction(async (transactionDriver) => {
+      const rows = includeRows
+        ? await this.loadSubsetInternal(tableMapping, {}, transactionDriver)
+        : []
+      const { latestRowVersion, keySet } = await this.readKeySetEvidence(
+        collectionId,
+        tableMapping,
+        transactionDriver,
+      )
+      const collectionMetadataRows = await transactionDriver.query<{
+        key: string
+        value: string
+      }>(
+        `SELECT key, value
+         FROM collection_metadata
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      const termRows = await transactionDriver.query<{ latest_term: number }>(
+        `SELECT latest_term
+         FROM leader_term
+         WHERE collection_id = ?
+         LIMIT 1`,
+        [collectionId],
+      )
+      const seqRows = await transactionDriver.query<{ max_seq: number }>(
+        `SELECT MAX(seq) AS max_seq
+         FROM applied_tx
+         WHERE collection_id = ? AND term = (
+           SELECT latest_term FROM leader_term WHERE collection_id = ? LIMIT 1
+         )`,
+        [collectionId, collectionId],
+      )
+      const resetRows = await transactionDriver.query<{ reset_epoch: number }>(
+        `SELECT reset_epoch
+         FROM collection_reset_epoch
+         WHERE collection_id = ?
+         LIMIT 1`,
+        [collectionId],
+      )
+
+      return {
+        rows: rows.map((row) => ({
+          key: row.key,
+          value: row.value,
+          metadata: row.metadata,
+        })),
+        keySet,
+        collectionMetadata: collectionMetadataRows.map((row) => ({
+          key: row.key,
+          value: deserializePersistedRowValue(row.value),
+        })),
+        latestTerm: termRows[0]?.latest_term ?? 0,
+        latestSeq: seqRows[0]?.max_seq ?? 0,
+        latestRowVersion,
+        resetEpoch: resetRows[0]?.reset_epoch ?? 0,
+      }
+    })
+  }
+
   async applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
     await this.runInTransaction(async (transactionDriver) => {
-      const alreadyApplied = await transactionDriver.query<{ applied: number }>(
-        `SELECT 1 AS applied
-         FROM applied_tx
-         WHERE collection_id = ? AND term = ? AND seq = ?
-         LIMIT 1`,
-        [collectionId, tx.term, tx.seq],
-      )
-
-      if (alreadyApplied.length > 0) {
-        return
-      }
-
       const versionRows = await transactionDriver.query<{
         latest_row_version: number
+        key_set_evidence_available: number
+        schema_version: number
+        already_applied: number
       }>(
-        `SELECT latest_row_version
+        `SELECT
+           latest_row_version,
+           key_set_evidence_available,
+           (
+             SELECT schema_version
+             FROM collection_registry
+             WHERE collection_id = ?
+             LIMIT 1
+           ) AS schema_version,
+           EXISTS (
+             SELECT 1
+             FROM applied_tx
+             WHERE collection_id = ? AND term = ? AND seq = ?
+           ) AS already_applied
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-        [collectionId],
+        [collectionId, collectionId, tx.term, tx.seq, collectionId],
       )
-      const currentRowVersion = versionRows[0]?.latest_row_version ?? 0
+      const version = versionRows[0]
+
+      if (!version) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Missing persisted version state for collection "${collectionId}"`,
+        )
+      }
+      if (version.schema_version !== this.schemaVersion) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Schema version mismatch for collection "${collectionId}": ` +
+            `found ${version.schema_version}, expected ${this.schemaVersion}. ` +
+            `Refusing to apply a committed transaction through a stale cached adapter.`,
+        )
+      }
+
+      if (version.already_applied === 1) {
+        return
+      }
+
+      const currentRowVersion = version.latest_row_version
       const nextRowVersion = Math.max(currentRowVersion + 1, tx.rowVersion)
-      const replayDelta: ReplayableTxDelta | null = tx.truncate
+      const replacesPersistedBaseline = tx.truncate === true
+      const tracksPersistedKeySet =
+        version.key_set_evidence_available === 1 || replacesPersistedBaseline
+      const replayDelta: ReplayableTxDelta | null = replacesPersistedBaseline
         ? null
         : {
             txId: tx.txId,
@@ -1206,7 +1321,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
             collectionMetadataMutations: tx.collectionMetadataMutations ?? [],
           }
 
-      if (tx.truncate) {
+      if (replacesPersistedBaseline) {
+        await transactionDriver.run(
+          `DELETE FROM collection_expected_keys
+           WHERE collection_id = ?`,
+          [collectionId],
+        )
         await transactionDriver.run(`DELETE FROM ${collectionTableSql}`)
         await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       }
@@ -1214,6 +1334,13 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       for (const mutation of tx.mutations) {
         const encodedKey = encodePersistedStorageKey(mutation.key)
         if (mutation.type === `delete`) {
+          if (tracksPersistedKeySet) {
+            await transactionDriver.run(
+              `DELETE FROM collection_expected_keys
+               WHERE collection_id = ? AND key = ?`,
+              [collectionId, encodedKey],
+            )
+          }
           await transactionDriver.run(
             `DELETE FROM ${collectionTableSql}
              WHERE key = ?`,
@@ -1262,6 +1389,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
             ? mutation.metadata
             : existingMetadata
 
+        if (tracksPersistedKeySet) {
+          await transactionDriver.run(
+            `INSERT INTO collection_expected_keys (collection_id, key)
+             VALUES (?, ?)
+             ON CONFLICT(collection_id, key) DO NOTHING`,
+            [collectionId, encodedKey],
+          )
+        }
         await transactionDriver.run(
           `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
            VALUES (?, ?, ?, ?)
@@ -1333,11 +1468,23 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       }
 
       await transactionDriver.run(
-        `INSERT INTO collection_version (collection_id, latest_row_version)
-         VALUES (?, ?)
-         ON CONFLICT(collection_id) DO UPDATE SET
-           latest_row_version = excluded.latest_row_version`,
-        [collectionId, nextRowVersion],
+        `UPDATE collection_version
+         SET latest_row_version = ?,
+             key_set_evidence_available = CASE
+               WHEN ? = 1 THEN 1
+               ELSE key_set_evidence_available
+             END,
+             key_set_evidence_incompatible = CASE
+               WHEN ? = 1 THEN 0
+               ELSE key_set_evidence_incompatible
+             END
+         WHERE collection_id = ?`,
+        [
+          nextRowVersion,
+          replacesPersistedBaseline ? 1 : 0,
+          replacesPersistedBaseline ? 1 : 0,
+          collectionId,
+        ],
       )
 
       await transactionDriver.run(
@@ -1371,7 +1518,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           tx.txId,
           nextRowVersion,
           replayDelta ? stableStringify(replayDelta) : null,
-          tx.truncate ? 1 : 0,
+          replacesPersistedBaseline ? 1 : 0,
         ],
       )
 
@@ -1512,10 +1659,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
+    keySet?: PersistedKeySetEvidence
   }> {
-    await this.ensureCollectionReady(collectionId)
-
-    const [termRows, versionRows, seqRows] = await Promise.all([
+    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const [termRows, version, seqRows] = await Promise.all([
       this.driver.query<{ latest_term: number }>(
         `SELECT latest_term
          FROM leader_term
@@ -1523,13 +1670,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          LIMIT 1`,
         [collectionId],
       ),
-      this.driver.query<{ latest_row_version: number }>(
-        `SELECT latest_row_version
-         FROM collection_version
-         WHERE collection_id = ?
-         LIMIT 1`,
-        [collectionId],
-      ),
+      this.readKeySetEvidence(collectionId, tableMapping, this.driver),
       this.driver.query<{ max_seq: number }>(
         `SELECT MAX(seq) AS max_seq
          FROM applied_tx
@@ -1543,7 +1684,66 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     return {
       latestTerm: termRows[0]?.latest_term ?? 0,
       latestSeq: seqRows[0]?.max_seq ?? 0,
-      latestRowVersion: versionRows[0]?.latest_row_version ?? 0,
+      latestRowVersion: version.latestRowVersion,
+      keySet: version.keySet,
+    }
+  }
+
+  private async readKeySetEvidence(
+    collectionId: string,
+    tableMapping: CollectionTableMapping,
+    driver: SQLiteDriver,
+  ): Promise<{
+    latestRowVersion: number
+    keySet: PersistedKeySetEvidence
+  }> {
+    const collectionTableSql = quoteIdentifier(tableMapping.tableName)
+    const versionRows = await driver.query<{
+      latest_row_version: number
+      key_set_evidence_available: number
+      key_set_incompatible: number
+    }>(
+      `SELECT
+         latest_row_version,
+         key_set_evidence_available,
+         CASE
+           WHEN key_set_evidence_available = 0 THEN 0
+           WHEN key_set_evidence_incompatible = 1 THEN 1
+           WHEN EXISTS (
+             SELECT 1
+             FROM ${collectionTableSql} AS actual
+             LEFT JOIN collection_expected_keys AS expected
+               ON expected.collection_id = ?
+              AND expected.key = actual.key
+             WHERE expected.key IS NULL
+             UNION ALL
+             SELECT 1
+             FROM collection_expected_keys AS expected
+             LEFT JOIN ${collectionTableSql} AS actual
+               ON actual.key = expected.key
+             WHERE expected.collection_id = ?
+               AND actual.key IS NULL
+             LIMIT 1
+           ) THEN 1
+           ELSE 0
+         END AS key_set_incompatible
+       FROM collection_version
+       WHERE collection_id = ?
+       LIMIT 1`,
+      [collectionId, collectionId, collectionId],
+    )
+    const version = versionRows[0]
+
+    return {
+      latestRowVersion: version?.latest_row_version ?? 0,
+      keySet: {
+        status:
+          version?.key_set_evidence_available !== 1
+            ? `unknown`
+            : version.key_set_incompatible === 1
+              ? `incompatible`
+              : `consistent`,
+      },
     }
   }
 
@@ -1685,6 +1885,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private async loadSubsetInternal(
     tableMapping: CollectionTableMapping,
     options: LoadSubsetOptions,
+    driver: SQLiteDriver = this.driver,
   ): Promise<Array<InMemoryRow<string | number, Record<string, unknown>>>> {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const whereCompiled = options.where
@@ -1705,10 +1906,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       queryParams.push(...orderByCompiled.params)
     }
 
-    const storedRows = await this.driver.query<StoredSqliteRow>(
-      sql,
-      queryParams,
-    )
+    const storedRows = await driver.query<StoredSqliteRow>(sql, queryParams)
     const parsedRows = decodeStoredSqliteRows(storedRows)
 
     const filteredRows = this.applyInMemoryWhere(parsedRows, options.where)
@@ -1959,8 +2157,13 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
        ON ${tombstoneTableSql} (row_version)`,
     )
     await this.driver.run(
-      `INSERT INTO collection_version (collection_id, latest_row_version)
-       VALUES (?, 0)
+      `INSERT INTO collection_version (
+         collection_id,
+         latest_row_version,
+         key_set_evidence_available,
+         key_set_evidence_incompatible
+       )
+       VALUES (?, 0, 1, 0)
        ON CONFLICT(collection_id) DO NOTHING`,
       [collectionId],
     )
@@ -1970,13 +2173,82 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
        ON CONFLICT(collection_id) DO NOTHING`,
       [collectionId],
     )
-
+    await this.ensureCollectionKeyEvidenceTriggers(tableName)
     const mapping = {
       tableName,
       tombstoneTableName,
     }
     this.collectionTableCache.set(collectionId, mapping)
     return mapping
+  }
+
+  private async ensureCollectionKeyEvidenceTriggers(
+    tableName: string,
+  ): Promise<void> {
+    const collectionTableSql = quoteIdentifier(tableName)
+    const tableNameLiteral = toSqliteLiteral(tableName)
+    const insertTriggerSql = quoteIdentifier(`${tableName}_key_evidence_insert`)
+    const deleteTriggerSql = quoteIdentifier(`${tableName}_key_evidence_delete`)
+    const updateTriggerSql = quoteIdentifier(`${tableName}_key_evidence_update`)
+
+    await this.driver.exec(
+      `CREATE TRIGGER IF NOT EXISTS ${insertTriggerSql}
+       AFTER INSERT ON ${collectionTableSql}
+       WHEN NOT EXISTS (
+         SELECT 1
+         FROM collection_expected_keys
+         WHERE collection_id = (
+           SELECT collection_id
+           FROM collection_registry
+           WHERE table_name = ${tableNameLiteral}
+         ) AND key = NEW.key
+       )
+       BEGIN
+         UPDATE collection_version
+         SET key_set_evidence_incompatible = 1
+         WHERE collection_id = (
+           SELECT collection_id
+           FROM collection_registry
+           WHERE table_name = ${tableNameLiteral}
+         );
+       END`,
+    )
+    await this.driver.exec(
+      `CREATE TRIGGER IF NOT EXISTS ${deleteTriggerSql}
+       AFTER DELETE ON ${collectionTableSql}
+       WHEN EXISTS (
+         SELECT 1
+         FROM collection_expected_keys
+         WHERE collection_id = (
+           SELECT collection_id
+           FROM collection_registry
+           WHERE table_name = ${tableNameLiteral}
+         ) AND key = OLD.key
+       )
+       BEGIN
+         UPDATE collection_version
+         SET key_set_evidence_incompatible = 1
+         WHERE collection_id = (
+           SELECT collection_id
+           FROM collection_registry
+           WHERE table_name = ${tableNameLiteral}
+         );
+       END`,
+    )
+    await this.driver.exec(
+      `CREATE TRIGGER IF NOT EXISTS ${updateTriggerSql}
+       AFTER UPDATE OF key ON ${collectionTableSql}
+       WHEN OLD.key <> NEW.key
+       BEGIN
+         UPDATE collection_version
+         SET key_set_evidence_incompatible = 1
+         WHERE collection_id = (
+           SELECT collection_id
+           FROM collection_registry
+           WHERE table_name = ${tableNameLiteral}
+         );
+       END`,
+    )
   }
 
   private async handleSchemaMismatch(
@@ -1997,6 +2269,27 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const tombstoneTableSql = quoteIdentifier(tombstoneTableName)
 
     await this.runInTransaction(async (transactionDriver) => {
+      const currentSchemaRows = await transactionDriver.query<{
+        schema_version: number
+      }>(
+        `SELECT schema_version
+         FROM collection_registry
+         WHERE collection_id = ?
+         LIMIT 1`,
+        [collectionId],
+      )
+      const currentSchemaVersion = currentSchemaRows[0]?.schema_version
+      if (currentSchemaVersion === nextSchemaVersion) {
+        return
+      }
+      if (currentSchemaVersion !== previousSchemaVersion) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Schema version changed concurrently for collection "${collectionId}": ` +
+            `found ${currentSchemaVersion ?? `no registry entry`} after observing ${previousSchemaVersion}; ` +
+            `refusing to reset it to ${nextSchemaVersion}.`,
+        )
+      }
+
       const persistedIndexes = await transactionDriver.query<{
         index_name: string
       }>(
@@ -2011,6 +2304,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
+      await transactionDriver.run(
+        `DELETE FROM collection_expected_keys
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
       await transactionDriver.run(`DELETE FROM ${collectionTableSql}`)
       await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       await transactionDriver.run(
@@ -2024,6 +2322,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         [collectionId],
       )
       await transactionDriver.run(
+        `DELETE FROM collection_metadata
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      await transactionDriver.run(
         `UPDATE collection_registry
          SET schema_version = ?,
              updated_at = CAST(strftime('%s', 'now') AS INTEGER)
@@ -2031,10 +2334,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         [nextSchemaVersion, collectionId],
       )
       await transactionDriver.run(
-        `INSERT INTO collection_version (collection_id, latest_row_version)
-         VALUES (?, 0)
+        `INSERT INTO collection_version (
+           collection_id,
+           latest_row_version,
+           key_set_evidence_available,
+           key_set_evidence_incompatible
+         )
+         VALUES (?, 0, 1, 0)
          ON CONFLICT(collection_id) DO UPDATE SET
-           latest_row_version = 0`,
+           latest_row_version = 0,
+           key_set_evidence_available = 1,
+           key_set_evidence_incompatible = 0`,
         [collectionId],
       )
       await transactionDriver.run(
@@ -2110,7 +2420,37 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_version (
          collection_id TEXT PRIMARY KEY,
-         latest_row_version INTEGER NOT NULL
+         latest_row_version INTEGER NOT NULL,
+         key_set_evidence_available INTEGER NOT NULL DEFAULT 0,
+         key_set_evidence_incompatible INTEGER NOT NULL DEFAULT 0
+       )`,
+    )
+    const collectionVersionColumns = await this.driver.query<{ name: string }>(
+      `PRAGMA table_info(collection_version)`,
+    )
+    const keyEvidenceColumns = [
+      `key_set_evidence_available`,
+      `key_set_evidence_incompatible`,
+    ] as const
+    for (const columnName of keyEvidenceColumns) {
+      if (collectionVersionColumns.some(({ name }) => name === columnName)) {
+        continue
+      }
+      try {
+        await this.driver.exec(
+          `ALTER TABLE collection_version ADD COLUMN ${columnName} INTEGER NOT NULL DEFAULT 0`,
+        )
+      } catch (error) {
+        if (!isDuplicateColumnAddError(error, columnName)) {
+          throw error
+        }
+      }
+    }
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS collection_expected_keys (
+         collection_id TEXT NOT NULL,
+         key TEXT NOT NULL,
+         PRIMARY KEY (collection_id, key)
        )`,
     )
     await this.driver.exec(

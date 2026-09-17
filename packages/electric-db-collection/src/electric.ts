@@ -72,6 +72,10 @@ type ElectricSyncMetadataWithHydration = SyncMetadataApi<string | number> & {
     whenHydrated?: () => Promise<void>
     // Capability marker for wrappers predating the hydration barrier.
     scanPersisted?: unknown
+    certifyPersistedResume?: () => Promise<void>
+    getPersistedKeySetEvidence?: () =>
+      | { status: `unknown` | `consistent` | `incompatible` }
+      | undefined
   }
 }
 
@@ -1684,6 +1688,11 @@ function createElectricSync<T extends Row<unknown>>(
         | undefined
       const scanPersisted = persistedMetadata?.row.scanPersisted
       const whenHydrated = persistedMetadata?.row.whenHydrated
+      const certifyPersistedResume =
+        persistedMetadata?.row.certifyPersistedResume
+      const getPersistedKeySetEvidence =
+        persistedMetadata?.row.getPersistedKeySetEvidence
+      const persistedKeySetEvidence = getPersistedKeySetEvidence?.()
 
       const persistedResumeState = getNewestElectricResumeState(
         readPersistedResumeState(),
@@ -1702,6 +1711,12 @@ function createElectricSync<T extends Row<unknown>>(
         persistedResumeState?.kind === `resume` &&
         scanPersisted !== undefined &&
         whenHydrated === undefined
+      // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
+      // One fresh replacement establishes consistent evidence for later resumes.
+      const lacksCompletePersistedKeySet =
+        persistedResumeState?.kind === `resume` &&
+        getPersistedKeySetEvidence !== undefined &&
+        persistedKeySetEvidence?.status !== `consistent`
       if (hasUnverifiablePersistedResume && !warnedUnverifiableResume) {
         warnedUnverifiableResume = true
         console.warn(
@@ -1713,6 +1728,7 @@ function createElectricSync<T extends Row<unknown>>(
         shapeOptions.handle === undefined &&
         persistedResumeState !== undefined &&
         (persistedResumeState.kind === `reset` ||
+          lacksCompletePersistedKeySet ||
           (!retainsTagState && persistedResumeState.requiresTagState !== false))
       const canUsePersistedResume =
         shapeOptions.offset === undefined &&
@@ -1721,7 +1737,7 @@ function createElectricSync<T extends Row<unknown>>(
         !hasIncompatiblePersistedResume &&
         !hasUnverifiablePersistedResume &&
         // Cached rows do not contain authoritative tag/active-condition state.
-        // Unknown (older) metadata is conservative; untagged shapes still resume.
+        // Only a complete adapter ledger can justify a persisted cursor.
         !needsFullSnapshot
       const hasExplicitResumeOffset =
         shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
@@ -1729,6 +1745,8 @@ function createElectricSync<T extends Row<unknown>>(
         clearTagTrackingState()
       }
       const receivesCompleteRows = shapeOptions.params?.replica === `full`
+      const requiresKeySetCertification =
+        canUsePersistedResume && certifyPersistedResume !== undefined
       // Eager and progressive streams that start after the initial offset can
       // only apply partial updates when the local materialization is complete.
       const requiresCompleteResume =
@@ -1986,8 +2004,29 @@ function createElectricSync<T extends Row<unknown>>(
 
       const resumeKeysPromise =
         requiresCompleteResume || freshSnapshotPending
-          ? whenHydrated?.()
-          : undefined
+          ? whenHydrated
+            ? (async () => {
+                await whenHydrated()
+                if (
+                  persistedKeySetEvidence?.status !== `incompatible` &&
+                  getPersistedKeySetEvidence?.()?.status === `incompatible`
+                ) {
+                  throw new Error(
+                    `Electric persisted resume baseline became incompatible during hydration`,
+                  )
+                }
+              })()
+            : undefined
+          : requiresKeySetCertification
+            ? (async () => {
+                await certifyPersistedResume()
+                if (getPersistedKeySetEvidence?.()?.status === `incompatible`) {
+                  throw new Error(
+                    `Electric persisted resume baseline became incompatible during certification`,
+                  )
+                }
+              })()
+            : undefined
       let areResumeKeysReady = !resumeKeysPromise
       const pendingResumeBatches: Array<Array<Message<T>>> = []
       let unsubscribeStream: () => void = () => {}

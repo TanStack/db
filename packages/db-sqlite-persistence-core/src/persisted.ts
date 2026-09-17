@@ -219,6 +219,10 @@ export type PersistedRowScanOptions = {
   metadataOnly?: boolean
 }
 
+export type PersistedKeySetEvidence = {
+  status: `unknown` | `consistent` | `incompatible`
+}
+
 export type PersistedTx<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -261,6 +265,25 @@ export interface PersistenceAdapter {
       metadata?: unknown
     }>
   >
+  loadResumeSnapshot?: (
+    collectionId: string,
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      includeRows?: boolean
+    },
+  ) => Promise<{
+    rows: Array<{
+      key: string | number
+      value: Record<string, unknown>
+      metadata?: unknown
+    }>
+    keySet?: PersistedKeySetEvidence
+    collectionMetadata: Array<{ key: string; value: unknown }>
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }>
   applyCommittedTx: (collectionId: string, tx: PersistedTx) => Promise<void>
   loadCollectionMetadata?: (
     collectionId: string,
@@ -279,6 +302,7 @@ export interface PersistenceAdapter {
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
+    keySet?: PersistedKeySetEvidence
   }>
 }
 
@@ -806,6 +830,9 @@ class PersistedCollectionRuntime<
   private startupMetadataPromise: Promise<void> | null = null
   private startPromise: Promise<void> | null = null
   private resumeBaselinePromise: Promise<void> | null = null
+  private resumeCertificationPromise: Promise<void> | null = null
+  private persistedKeySetEvidence: PersistedKeySetEvidence | undefined
+  private persistedResumeGeneration: string | undefined
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
   private appliedReceiptSequence = 0
@@ -925,6 +952,36 @@ class PersistedCollectionRuntime<
     return this.resumeBaselinePromise
   }
 
+  ensureResumeBaselineCertified(): Promise<void> {
+    if (this.resumeCertificationPromise) {
+      return this.resumeCertificationPromise
+    }
+
+    const lifecycleGeneration = this.lifecycleGeneration
+    this.resumeCertificationPromise = (async () => {
+      await this.ensureStarted()
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+
+      const adapter = this.persistence.adapter
+      if (!adapter.loadResumeSnapshot) return
+      const snapshot = await adapter.loadResumeSnapshot(this.collectionId, {
+        requiredIndexSignatures: this.getRequiredIndexSignatures(),
+        includeRows: false,
+      })
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+      this.bindResumeSnapshotEvidence(snapshot)
+    })()
+    return this.resumeCertificationPromise
+  }
+
+  getPersistedKeySetEvidence(): PersistedKeySetEvidence | undefined {
+    return this.persistedKeySetEvidence
+  }
+
+  supportsResumeSnapshot(): boolean {
+    return this.persistence.adapter.loadResumeSnapshot !== undefined
+  }
+
   private async hydrateBaseline(lifecycleGeneration: number): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
 
@@ -936,6 +993,7 @@ class PersistedCollectionRuntime<
       await this.hydrateSubsetUnsafe(baseline, {
         requestRemoteEnsure: false,
         lifecycleGeneration,
+        bindKeySetEvidence: true,
       })
     })
     if (lifecycleGeneration !== this.lifecycleGeneration) return
@@ -976,6 +1034,24 @@ class PersistedCollectionRuntime<
   private async loadStartupMetadataInternal(
     lifecycleGeneration: number,
   ): Promise<void> {
+    if (this.persistence.adapter.loadResumeSnapshot) {
+      const snapshot = await this.persistence.adapter.loadResumeSnapshot(
+        this.collectionId,
+        { includeRows: false },
+      )
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+      this.persistedResumeGeneration =
+        this.getResumeSnapshotGeneration(snapshot)
+      this.persistedKeySetEvidence = snapshot.keySet
+      this.observeStreamPosition(
+        snapshot.latestTerm,
+        snapshot.latestSeq,
+        snapshot.latestRowVersion,
+      )
+      this.replaceCollectionMetadataSnapshot(snapshot.collectionMetadata)
+      return
+    }
+
     // Restore stream position from the database so that new mutations
     // don't collide with previously applied transactions.
     if (this.persistence.adapter.getStreamPosition) {
@@ -983,6 +1059,10 @@ class PersistedCollectionRuntime<
         this.collectionId,
       )
       if (lifecycleGeneration !== this.lifecycleGeneration) return
+      this.persistedKeySetEvidence =
+        position.keySet?.status === `consistent`
+          ? { status: `unknown` }
+          : position.keySet
       this.observeStreamPosition(
         position.latestTerm,
         position.latestSeq,
@@ -1247,6 +1327,9 @@ class PersistedCollectionRuntime<
     this.startupMetadataPromise = null
     this.startPromise = null
     this.resumeBaselinePromise = null
+    this.resumeCertificationPromise = null
+    this.persistedKeySetEvidence = undefined
+    this.persistedResumeGeneration = undefined
   }
 
   private withInternalApply<TResult>(task: () => TResult): TResult {
@@ -1300,14 +1383,38 @@ class PersistedCollectionRuntime<
     config: {
       requestRemoteEnsure: boolean
       lifecycleGeneration: number
+      bindKeySetEvidence?: boolean
     },
   ): Promise<void> {
     this.hydratingGeneration = config.lifecycleGeneration
     try {
-      const rows = await this.loadSubsetRowsUnsafe(options)
+      let rows: Array<{ key: TKey; value: T; metadata?: unknown }>
+      if (
+        config.bindKeySetEvidence &&
+        this.persistence.adapter.loadResumeSnapshot
+      ) {
+        const snapshot = await this.persistence.adapter.loadResumeSnapshot(
+          this.collectionId,
+          {
+            requiredIndexSignatures: this.getRequiredIndexSignatures(),
+            includeRows: true,
+          },
+        )
+        rows = snapshot.rows as Array<{
+          key: TKey
+          value: T
+          metadata?: unknown
+        }>
+        if (config.lifecycleGeneration !== this.lifecycleGeneration) return
+        this.bindResumeSnapshotEvidence(snapshot)
+      } else {
+        rows = await this.loadSubsetRowsUnsafe(options)
+      }
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
 
-      this.applyRowsToCollection(rows)
+      if (this.persistedKeySetEvidence?.status !== `incompatible`) {
+        this.applyRowsToCollection(rows)
+      }
     } finally {
       if (this.hydratingGeneration === config.lifecycleGeneration) {
         this.hydratingGeneration = null
@@ -1349,6 +1456,39 @@ class PersistedCollectionRuntime<
 
       this.syncControls.commit?.()
     })
+  }
+
+  private getResumeSnapshotGeneration(snapshot: {
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }): string {
+    return `${snapshot.resetEpoch}:${snapshot.latestTerm}:${snapshot.latestSeq}:${snapshot.latestRowVersion}`
+  }
+
+  private bindResumeSnapshotEvidence(snapshot: {
+    keySet?: PersistedKeySetEvidence
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }): void {
+    const generation = this.getResumeSnapshotGeneration(snapshot)
+    // Moving between equally uncertified snapshots cannot make either
+    // trustworthy; preserve that status so sync performs a fresh replacement.
+    const remainsUncertified =
+      this.persistedKeySetEvidence?.status === snapshot.keySet?.status &&
+      snapshot.keySet?.status !== `consistent`
+    this.observeStreamPosition(
+      snapshot.latestTerm,
+      snapshot.latestSeq,
+      snapshot.latestRowVersion,
+    )
+    this.persistedKeySetEvidence =
+      this.persistedResumeGeneration === generation || remainsUncertified
+        ? snapshot.keySet
+        : { status: `incompatible` }
   }
 
   private replaceCollectionSnapshot(
@@ -2428,6 +2568,12 @@ function createWrappedSyncConfig<
                   startupState.cleanedUp
                     ? Promise.resolve()
                     : runtime.ensureResumeBaselineHydrated(),
+                certifyPersistedResume: runtime.supportsResumeSnapshot()
+                  ? () =>
+                      startupState.cleanedUp
+                        ? Promise.resolve()
+                        : runtime.ensureResumeBaselineCertified()
+                  : undefined,
                 get: (key: TKey) => {
                   if (startupState.cleanedUp) return undefined
                   const openTransaction = getOpenTransaction()
@@ -2447,6 +2593,12 @@ function createWrappedSyncConfig<
                   startupState.cleanedUp
                     ? Promise.resolve([])
                     : runtime.scanPersistedRows(options),
+                getPersistedKeySetEvidence: runtime.supportsResumeSnapshot()
+                  ? () =>
+                      startupState.cleanedUp
+                        ? undefined
+                        : runtime.getPersistedKeySetEvidence()
+                  : undefined,
                 set: (key: TKey, value: unknown) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
