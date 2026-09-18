@@ -1320,7 +1320,7 @@ export type Prettify<T> = {
  * - Objects with `Symbol.toStringTag` (class instances like Temporal types,
  *   TypedArrays not already in JsBuiltIns, etc.) — these are not plain data objects
  */
-type IsPlainObject<T> = T extends unknown
+export type IsPlainObject<T> = T extends unknown
   ? T extends object
     ? T extends ReadonlyArray<any>
       ? false
