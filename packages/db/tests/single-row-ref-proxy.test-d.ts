@@ -51,9 +51,9 @@ describe(`SingleRowRefProxy type algebra`, () => {
       expectTypeOf(row.optionalTimestamp?.seconds).toEqualTypeOf<
         RefLeaf<number> | undefined
       >()
-      expectTypeOf(row.nullableTimestamp).toEqualTypeOf<
-        SingleRowRefProxy<Timestamp> | null
-      >()
+      expectTypeOf(
+        row.nullableTimestamp,
+      ).toEqualTypeOf<SingleRowRefProxy<Timestamp> | null>()
       expectTypeOf(row.nullableTimestamp?.seconds).toEqualTypeOf<
         RefLeaf<number> | undefined
       >()
