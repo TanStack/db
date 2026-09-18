@@ -12,18 +12,6 @@ type OpSQLiteRowListLike = {
   _array?: unknown
 }
 
-type OpSQLiteStatementResultLike = {
-  rows?: unknown
-  resultRows?: unknown
-  rawRows?: unknown
-  columnNames?: unknown
-  results?: unknown
-  rowsAffected?: unknown
-  changes?: unknown
-  insertId?: unknown
-  lastInsertRowId?: unknown
-}
-
 const WRITE_RESULT_KEYS = new Set([
   `rowsAffected`,
   `changes`,
@@ -216,6 +204,12 @@ function decodeColumnarRows(
       `columnar results contain duplicate column names`,
     )
   }
+  if (rawRows.length > 0 && columnNames.length === 0) {
+    unsupportedQueryResult(
+      sql,
+      `nonempty columnar results require at least one column name`,
+    )
+  }
 
   return rawRows.map((rawRow) => {
     if (!Array.isArray(rawRow) || rawRow.length !== columnNames.length) {
@@ -232,10 +226,10 @@ function decodeColumnarRows(
 }
 
 function extractRowsFromStatementResult(
-  value: OpSQLiteStatementResultLike,
+  record: Record<string, unknown>,
   sql: string,
+  allowResultsWrapper: boolean,
 ): Array<unknown> {
-  const record = value as Record<string, unknown>
   const columnarRows = decodeColumnarRows(record, sql)
   if (columnarRows) {
     return columnarRows
@@ -260,6 +254,9 @@ function extractRowsFromStatementResult(
   }
 
   if (hasOwnKey(record, `results`)) {
+    if (!allowResultsWrapper) {
+      unsupportedQueryResult(sql, `unsupported nested results depth`)
+    }
     const nestedResults = record.results
     if (
       !Array.isArray(nestedResults) ||
@@ -268,7 +265,7 @@ function extractRowsFromStatementResult(
     ) {
       unsupportedQueryResult(sql, `invalid nested results carrier`)
     }
-    return extractRowsFromStatementResult(nestedResults[0], sql)
+    return extractRowsFromStatementResult(nestedResults[0], sql, false)
   }
 
   if (
@@ -302,14 +299,14 @@ function extractRowsFromExecuteResult(
           `statement-result arrays must contain exactly one result`,
         )
       }
-      return extractRowsFromStatementResult(firstEntry, sql)
+      return extractRowsFromStatementResult(firstEntry, sql, false)
     }
 
     return result
   }
 
   if (isObjectRecord(result)) {
-    return extractRowsFromStatementResult(result, sql)
+    return extractRowsFromStatementResult(result, sql, true)
   }
 
   return unsupportedQueryResult(sql)

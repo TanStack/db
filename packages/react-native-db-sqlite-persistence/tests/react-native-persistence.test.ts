@@ -15,23 +15,23 @@ type Todo = {
   score: number
 }
 
-const activeCleanupFns: Array<() => void | Promise<void>> = []
-
 type Cleanup = () => void | Promise<void>
+
+const activeCleanupFns: Array<Cleanup> = []
 
 async function withFailurePreservingCleanup<T>(
   run: (cleanups: Array<Cleanup>) => Promise<T>,
-  initialCleanups: Array<Cleanup>,
+  cleanups: Array<Cleanup>,
 ): Promise<T> {
   let outcome: { ok: true; value: T } | { ok: false; error: unknown }
   try {
-    outcome = { ok: true, value: await run(initialCleanups) }
+    outcome = { ok: true, value: await run(cleanups) }
   } catch (error) {
     outcome = { ok: false, error }
   }
 
   const cleanupErrors: Array<unknown> = []
-  for (const cleanup of initialCleanups) {
+  for (const cleanup of cleanups) {
     try {
       await cleanup()
     } catch (error) {
@@ -61,10 +61,10 @@ async function withFailurePreservingCleanup<T>(
 }
 
 function once(cleanup: Cleanup): Cleanup {
-  let complete = false
+  let attempted = false
   return async () => {
-    if (complete) return
-    complete = true
+    if (attempted) return
+    attempted = true
     await cleanup()
   }
 }
@@ -84,6 +84,16 @@ function createTempSqlitePath(): string {
   })
   return dbPath
 }
+
+const collectionRegistryQuery = `SELECT collection_id, table_name, tombstone_table_name, schema_version
+  FROM collection_registry
+  WHERE collection_id = ?`
+
+const restartStreamPosition = {
+  latestTerm: 5,
+  latestSeq: 8,
+  latestRowVersion: 13,
+} as const
 
 /**
  * Restart law: an existing collection_registry mapping is authoritative after
@@ -133,11 +143,7 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
         throw new Error(`restart oracle requires the local SQLite shim`)
       }
       const registryBeforeRestart = firstNativeDatabase
-        .prepare(
-          `SELECT collection_id, table_name, tombstone_table_name, schema_version
-           FROM collection_registry
-           WHERE collection_id = ?`,
-        )
+        .prepare(collectionRegistryQuery)
         .all(collectionId)
       expect(registryBeforeRestart).toEqual([
         {
@@ -152,11 +158,9 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
       if (!firstAdapter.getStreamPosition) {
         throw new Error(`restart oracle requires stream-position support`)
       }
-      expect(await firstAdapter.getStreamPosition(collectionId)).toEqual({
-        latestTerm: 5,
-        latestSeq: 8,
-        latestRowVersion: 13,
-      })
+      expect(await firstAdapter.getStreamPosition(collectionId)).toEqual(
+        restartStreamPosition,
+      )
 
       await closeFirstDatabase()
 
@@ -170,13 +174,7 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
         throw new Error(`restart oracle requires the reopened SQLite shim`)
       }
       expect(
-        secondNativeDatabase
-          .prepare(
-            `SELECT collection_id, table_name, tombstone_table_name, schema_version
-             FROM collection_registry
-             WHERE collection_id = ?`,
-          )
-          .all(collectionId),
+        secondNativeDatabase.prepare(collectionRegistryQuery).all(collectionId),
       ).toEqual(registryBeforeRestart)
 
       const secondAdapter = createReactNativeSQLitePersistence({
@@ -185,11 +183,9 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
       if (!secondAdapter.getStreamPosition) {
         throw new Error(`restart oracle requires stream-position support`)
       }
-      expect(await secondAdapter.getStreamPosition(collectionId)).toEqual({
-        latestTerm: 5,
-        latestSeq: 8,
-        latestRowVersion: 13,
-      })
+      expect(await secondAdapter.getStreamPosition(collectionId)).toEqual(
+        restartStreamPosition,
+      )
       await expect(secondAdapter.loadSubset(collectionId, {})).resolves.toEqual(
         [
           {
@@ -203,13 +199,7 @@ it(`reuses a pre-populated registry with exact stream and rows after close and r
         ],
       )
       expect(
-        secondNativeDatabase
-          .prepare(
-            `SELECT collection_id, table_name, tombstone_table_name, schema_version
-             FROM collection_registry
-             WHERE collection_id = ?`,
-          )
-          .all(collectionId),
+        secondNativeDatabase.prepare(collectionRegistryQuery).all(collectionId),
       ).toEqual(registryBeforeRestart)
     },
     [() => rmSync(tempDirectory, { recursive: true, force: true })],

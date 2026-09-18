@@ -42,7 +42,6 @@ function createTempSqlitePath(): string {
 }
 
 type ColumnarDriverHarness = {
-  database: ReturnType<typeof createOpSQLiteTestDatabase>
   driver: OpSQLiteDriver
   queryExecutions: () => number
 }
@@ -64,7 +63,7 @@ async function withColumnarDriver<T>(
     const driver = new OpSQLiteDriver({ database })
     outcome = {
       ok: true,
-      value: await fn({ database, driver, queryExecutions }),
+      value: await fn({ driver, queryExecutions }),
     }
   } catch (error) {
     outcome = { ok: false, error }
@@ -190,7 +189,7 @@ function expectExactAliasRows(
   }
 }
 
-const statementResultAliasNames = [
+const statementResultFieldNames = [
   `rows`,
   `resultRows`,
   `rawRows`,
@@ -200,6 +199,10 @@ const statementResultAliasNames = [
   `changes`,
   `insertId`,
   `lastInsertRowId`,
+] as const
+
+const statementResultAliasNames = [
+  ...statementResultFieldNames,
   `ordinary_name`,
   `another_value`,
 ] as const
@@ -227,7 +230,11 @@ function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll(`"`, `""`)}"`
 }
 
-function aliasValue(alias: string, rowIndex: number, columnIndex: number) {
+function aliasValue(
+  alias: string,
+  rowIndex: number,
+  columnIndex: number,
+): string {
   return `${rowIndex === 0 ? `left` : `right`}:${columnIndex}:${alias}`
 }
 
@@ -270,7 +277,7 @@ function trackQueryExecutions(
 
 it(`preserves every statement-result field name when used as a SQL alias`, async () => {
   await withColumnarDriver(async ({ driver, queryExecutions }) => {
-    const aliases = statementResultAliasNames.slice(0, 9)
+    const aliases = statementResultFieldNames
     const { sql, params, expected } = aliasQueryCase(aliases)
 
     const actual = await driver.query<Record<string, unknown>>(sql, params)
@@ -286,7 +293,7 @@ it(`preserves statement-result field names in direct row arrays`, async () => {
     resultShape: `rows-array`,
   })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
-  const aliases = statementResultAliasNames.slice(0, 9)
+  const aliases = statementResultFieldNames
   const { sql, params, expected } = aliasQueryCase(aliases)
 
   expectExactAliasRows(
@@ -324,36 +331,22 @@ it(`preserves generated legal SQL aliases through v14 columnar rows`, async () =
         seed: aliasOracleSeed,
         numRuns: aliasOracleRuns,
         ...(aliasOraclePath ? { path: aliasOraclePath } : {}),
-        examples: [[statementResultAliasNames.slice(0, 9)]],
+        examples: [[[...statementResultFieldNames]]],
       },
     )
   })
 })
 
 it(`returns an exact empty row set for an empty columnar SELECT`, async () => {
-  const dbPath = createTempSqlitePath()
-  const database = createOpSQLiteTestDatabase({
-    filename: dbPath,
-    resultShape: `execute-async-columnar`,
-  })
-  activeCleanupFns.push(() => Promise.resolve(database.close()))
-  const executeAsync = database.executeAsync
-  if (!executeAsync) {
-    throw new Error(`columnar fixture must expose executeAsync`)
-  }
-  let emptySelectExecutions = 0
-  database.executeAsync = (sql, params) => {
-    if (/^\s*SELECT\b/i.test(sql)) emptySelectExecutions++
-    return executeAsync.call(database, sql, params)
-  }
-  const driver = new OpSQLiteDriver({ database })
-  await driver.exec(`CREATE TABLE empty_rows (id TEXT PRIMARY KEY)`)
+  await withColumnarDriver(async ({ driver, queryExecutions }) => {
+    await driver.exec(`CREATE TABLE empty_rows (id TEXT PRIMARY KEY)`)
 
-  expectExactRows(
-    await driver.query<{ id: string }>(`SELECT id FROM empty_rows`),
-    [],
-  )
-  expect(emptySelectExecutions).toBe(1)
+    expectExactRows(
+      await driver.query<{ id: string }>(`SELECT id FROM empty_rows`),
+      [],
+    )
+    expect(queryExecutions()).toBe(1)
+  })
 })
 
 const malformedColumnarResults: ReadonlyArray<{
@@ -414,6 +407,14 @@ const malformedColumnarResults: ReadonlyArray<{
       rowsAffected: 0,
       rawRows: [{ id: `1` }],
       columnNames: [`id`],
+    },
+  },
+  {
+    name: `nonempty rawRows with no column names`,
+    result: {
+      rowsAffected: 0,
+      rawRows: [[]],
+      columnNames: [],
     },
   },
   {
@@ -490,6 +491,56 @@ it.each(malformedColumnarResults)(
   },
 )
 
+it(`supports exactly one results wrapper`, async () => {
+  let queryExecutions = 0
+  const database: OpSQLiteDatabaseLike = {
+    executeAsync: () => {
+      queryExecutions++
+      return Promise.resolve({
+        results: [{ rows: [{ id: `one-level` }] }],
+      })
+    },
+  }
+
+  await expect(
+    new OpSQLiteDriver({ database }).query(`SELECT id FROM wrapped_result`),
+  ).resolves.toEqual([{ id: `one-level` }])
+  expect(queryExecutions).toBe(1)
+})
+
+it.each([
+  {
+    name: `second results wrapper`,
+    createResult: () => ({
+      results: [{ results: [{ rows: [{ id: `too-deep` }] }] }],
+    }),
+  },
+  {
+    name: `cyclic second-level results wrapper`,
+    createResult: () => {
+      const cyclicResult: Record<string, unknown> = {}
+      cyclicResult.results = [cyclicResult]
+      return cyclicResult
+    },
+  },
+])(`rejects unsupported results depth: $name`, async ({ createResult }) => {
+  let queryExecutions = 0
+  const database: OpSQLiteDatabaseLike = {
+    executeAsync: () => {
+      queryExecutions++
+      return Promise.resolve(createResult())
+    },
+  }
+  const [outcome] = await Promise.allSettled([
+    new OpSQLiteDriver({ database }).query(
+      `SELECT id FROM unsupported_results_depth`,
+    ),
+  ])
+
+  expect(queryExecutions).toBe(1)
+  expectMalformedQueryRejected(outcome)
+})
+
 it(`reserved-alias checker rejects exact-row mutants`, () => {
   const aliases = [`rows`, `rowsAffected`, `ordinary_name`]
   const { expected } = aliasQueryCase(aliases)
@@ -520,7 +571,7 @@ it(`reserved-alias checker shrinks and replays the same row-law violation`, () =
     const { expected } = aliasQueryCase(aliases)
     expectExactAliasRows([], expected)
   }
-  const originalAliases = statementResultAliasNames.slice(0, 9)
+  const originalAliases = statementResultFieldNames
   expect(() => challenge(originalAliases)).toThrow(
     `op-sqlite reserved-alias exact-row law violated`,
   )

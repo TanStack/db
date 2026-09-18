@@ -26,7 +26,7 @@ async function withHarness<T>(
     ok: true,
   }
   try {
-    await Promise.resolve(harness.cleanup())
+    await harness.cleanup()
   } catch (error) {
     cleanupOutcome = { ok: false, error }
   }
