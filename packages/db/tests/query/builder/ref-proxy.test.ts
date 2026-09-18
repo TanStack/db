@@ -19,6 +19,16 @@ describe(`ref-proxy`, () => {
       expect(expression).toBeInstanceOf(PropRef)
       expect((expression as PropRef).path).toEqual([`timestamp`, `seconds`])
     })
+
+    it(`records built-in method paths only when the type boundary is bypassed`, () => {
+      type Row = { updatedAt?: Date }
+      const proxy = createSingleRowRefProxy<Row>()
+
+      const expression = toExpression((proxy as any).updatedAt?.getTime)
+
+      expect(expression).toBeInstanceOf(PropRef)
+      expect((expression as PropRef).path).toEqual([`updatedAt`, `getTime`])
+    })
   })
 
   describe(`createRefProxy`, () => {

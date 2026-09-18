@@ -1,6 +1,6 @@
 import { PropRef, Value } from '../ir.js'
 import type { BasicExpression } from '../ir.js'
-import type { RefLeaf } from './types.js'
+import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
 
 export interface RefProxy<T = any> {
@@ -25,12 +25,12 @@ export type VirtualPropsRefProxy<
 // Strip nullish members before deciding whether a schema field is traversable,
 // then restore them outside the proxy so the schema still requires a guard.
 // The tuple guard keeps exact null/undefined fields as leaves: `never` would
-// otherwise satisfy the Record check.
+// otherwise satisfy the plain-object check.
 type SingleRowField<V, TKey extends string | number> = [
   NonNullable<V>,
 ] extends [never]
   ? RefLeaf<V>
-  : NonNullable<V> extends Record<string, any>
+  : IsPlainObject<NonNullable<V>> extends true
     ? SingleRowRefProxy<NonNullable<V>, TKey> | Extract<V, null | undefined>
     : RefLeaf<V>
 

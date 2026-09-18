@@ -8,7 +8,7 @@
  */
 import { describe, expectTypeOf, test } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { eq } from '../src/query/builder/functions.js'
+import { eq, isNull } from '../src/query/builder/functions.js'
 import type { Collection } from '../src/collection/index.js'
 import type { SingleRowRefProxy } from '../src/query/builder/ref-proxy.js'
 import type { RefLeaf } from '../src/query/builder/types.js'
@@ -35,6 +35,19 @@ type Row = {
   exactUndefined: undefined
   variant?: Variant
   mixed: Timestamp | string | undefined
+  requiredDate: Date
+  optionalDate?: Date
+  nullableDate: Date | null
+  requiredTags: Array<string>
+  optionalTags?: Array<string>
+  nullableTags: Array<string> | null
+  requiredMap: Map<string, number>
+  optionalMap?: Map<string, number>
+  nullableMap: Map<string, number> | null
+  requiredCallback: () => string
+  optionalCallback?: () => string
+  nullableCallback: (() => string) | null
+  mixedObjects: Timestamp | Date | null
 }
 
 const collection = createCollection<Row, string>({
@@ -94,6 +107,94 @@ describe(`SingleRowRefProxy type algebra`, () => {
     })
   })
 
+  test(`JavaScript built-ins and functions remain scalar leaves`, () => {
+    collection.createIndex((row) => {
+      expectTypeOf(row.requiredDate).toEqualTypeOf<RefLeaf<Date>>()
+      expectTypeOf(row.optionalDate).toEqualTypeOf<
+        RefLeaf<Date | undefined> | undefined
+      >()
+      expectTypeOf(row.nullableDate).toEqualTypeOf<RefLeaf<Date | null>>()
+
+      expectTypeOf(row.requiredTags).toEqualTypeOf<RefLeaf<Array<string>>>()
+      expectTypeOf(row.optionalTags).toEqualTypeOf<
+        RefLeaf<Array<string> | undefined> | undefined
+      >()
+      expectTypeOf(row.nullableTags).toEqualTypeOf<
+        RefLeaf<Array<string> | null>
+      >()
+
+      expectTypeOf(row.requiredMap).toEqualTypeOf<
+        RefLeaf<Map<string, number>>
+      >()
+      expectTypeOf(row.optionalMap).toEqualTypeOf<
+        RefLeaf<Map<string, number> | undefined> | undefined
+      >()
+      expectTypeOf(row.nullableMap).toEqualTypeOf<
+        RefLeaf<Map<string, number> | null>
+      >()
+
+      expectTypeOf(row.requiredCallback).toEqualTypeOf<RefLeaf<() => string>>()
+      expectTypeOf(row.optionalCallback).toEqualTypeOf<
+        RefLeaf<(() => string) | undefined> | undefined
+      >()
+      expectTypeOf(row.nullableCallback).toEqualTypeOf<
+        RefLeaf<(() => string) | null>
+      >()
+
+      // @ts-expect-error Date methods are value behavior, not query paths.
+      row.requiredDate.getTime
+      // @ts-expect-error Optional Date methods are not traversable query paths.
+      row.optionalDate?.toISOString
+      // @ts-expect-error Array members are not traversable query paths.
+      row.optionalTags?.length
+      // @ts-expect-error Map methods are not traversable query paths.
+      row.nullableMap.get
+      // @ts-expect-error Function values remain leaves, not callable proxies.
+      row.requiredCallback()
+
+      return row.requiredDate
+    })
+  })
+
+  test(`leaf-compatible helpers retain required and nullish built-ins`, () => {
+    collection.createIndex((row) => {
+      const requiredDate: RefLeaf<Date> = row.requiredDate
+      const nullableDate: RefLeaf<Date | null> = row.nullableDate
+      const optionalDate: RefLeaf<Date | undefined> | undefined =
+        row.optionalDate
+      const requiredTags: RefLeaf<Array<string>> = row.requiredTags
+      const optionalTags: RefLeaf<Array<string> | undefined> | undefined =
+        row.optionalTags
+      const nullableMap: RefLeaf<Map<string, number> | null> = row.nullableMap
+      const optionalCallback: RefLeaf<(() => string) | undefined> | undefined =
+        row.optionalCallback
+
+      void [
+        requiredDate,
+        nullableDate,
+        optionalDate,
+        requiredTags,
+        optionalTags,
+        nullableMap,
+        optionalCallback,
+      ]
+      return row.id
+    })
+  })
+
+  test(`direct expression consumers continue accepting built-in leaves`, () => {
+    collection.createIndex((row) => {
+      const equality = eq(row.nullableDate, new Date(0))
+      const nullCheck = isNull(row.optionalDate)
+      void [equality, nullCheck]
+      return row.requiredDate
+    })
+
+    collection.subscribeChanges(() => {}, {
+      where: (row) => isNull(row.nullableMap),
+    })
+  })
+
   test(`object unions expose shared structure without inventing variant keys`, () => {
     collection.createIndex((row) => {
       expectTypeOf(row.variant?.kind).toEqualTypeOf<
@@ -106,6 +207,11 @@ describe(`SingleRowRefProxy type algebra`, () => {
       row.variant?.payload.author
       // @ts-expect-error Mixed object/scalar unions are opaque leaves.
       row.mixed.seconds
+      expectTypeOf(row.mixedObjects).toEqualTypeOf<
+        RefLeaf<Timestamp | Date | null>
+      >()
+      // @ts-expect-error Mixed plain/built-in object unions stay opaque.
+      row.mixedObjects.seconds
 
       return row.variant?.kind
     })
@@ -122,6 +228,23 @@ describe(`SingleRowRefProxy type algebra`, () => {
     }
 
     void addTimestampIndex
+
+    function keepBuiltInLeaves<
+      T extends {
+        id: string
+        date?: Date
+        tags: Array<string> | null
+      },
+    >(rows: Collection<T, string>) {
+      rows.createIndex((row) => {
+        const date: RefLeaf<Date | undefined> | undefined = row.date
+        const tags: RefLeaf<Array<string> | null> = row.tags
+        void [date, tags]
+        return row.id
+      })
+    }
+
+    void keepBuiltInLeaves
   })
 
   test(`all public SingleRowRefProxy callback paths share the same projection`, () => {
