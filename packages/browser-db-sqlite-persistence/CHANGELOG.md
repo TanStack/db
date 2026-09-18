@@ -1,5 +1,14 @@
 # @tanstack/browser-db-sqlite-persistence
 
+## 0.2.24
+
+### Patch Changes
+
+- Terminate OPFS workers on pagehide, including during initialization, and reject pending requests with AbortError. Include available VFS error details in SQLite open failures. Connections must be recreated when restoring a document from the back/forward cache. ([#1844](https://github.com/TanStack/db/pull/1844))
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.24
+
 ## 0.2.23
 
 ### Patch Changes

@@ -1,5 +1,65 @@
 # @tanstack/electric-db-collection
 
+## 0.5.0
+
+### Minor Changes
+
+- **Deprecation**: Mutation handler return values and QueryCollection auto-refetch behavior. ([#843](https://github.com/TanStack/db/pull/843))
+
+  **What's changed:**
+  - Handler return values remain type-compatible during the deprecation window
+  - **Deprecation warnings** are logged when deprecated patterns are used
+
+  **QueryCollection changes:**
+  - Auto-refetch after handlers is **deprecated** and will be removed in v1.0
+  - To skip auto-refetch now, return `{ refetch: false }` from your handler
+  - To migrate to explicit refetch now, await `collection.utils.refetch()` and return `{ refetch: false }` to prevent a second fetch; remove the return in v1.0
+  - In v1.0, call `await collection.utils.refetch()` explicitly when needed, or omit it to skip
+
+  **ElectricCollection changes:**
+  - Returning `{ txid }` is deprecated - use `await collection.utils.awaitTxId(txid)` instead
+  - The default `awaitTxId` and `awaitMatch` timeouts increase to 15 seconds
+
+  **Migration guide:**
+
+  ```typescript
+  // QueryCollection - skip refetch (current)
+  onInsert: async ({ transaction }) => {
+    await api.create(transaction.mutations[0].modified)
+    return { refetch: false } // Opt out of auto-refetch
+  }
+
+  // QueryCollection - migrate to explicit refetch now
+  onInsert: async ({ transaction, collection }) => {
+    await api.create(transaction.mutations[0].modified)
+    await collection.utils.refetch() // Explicit refetch
+    return { refetch: false } // Prevent a second pre-1.0 refetch; remove in v1.0
+  }
+
+  // ElectricCollection - before
+  onInsert: async ({ transaction }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    return { txid: result.txid } // Deprecated
+  }
+
+  // ElectricCollection - after
+  onInsert: async ({ transaction, collection }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    await collection.utils.awaitTxId(result.txid) // Explicit
+  }
+  ```
+
+- Preserve collection key and adapter utility types throughout mutation handlers and nested transaction mutations. Mutation keys now use the collection's declared key type instead of `any`; collections that use the default key type expose `string | number`. Prevent Query and Electric collections from exposing nonexistent cross-adapter utilities. ([#1849](https://github.com/TanStack/db/pull/1849))
+
+### Patch Changes
+
+- Preserve PostgreSQL semantics for boolean comparisons and array membership, ([#1832](https://github.com/TanStack/db/pull/1832))
+  including nullable values, compatible reference-to-array types, and non-text
+  array elements. Reject nullish membership operands and literal-array left
+  operands, and escape quotes in mapped column names.
+- Updated dependencies [[`84fc44b`](https://github.com/TanStack/db/commit/84fc44b559c94139f28b3cec526ebfe05290b95e), [`1ab1cd3`](https://github.com/TanStack/db/commit/1ab1cd35d0549735a864e1cd9260f5b1374d8191), [`7f6b643`](https://github.com/TanStack/db/commit/7f6b6438cd3a5b2cfc54ea1d8ad8a2102ea9d699), [`76d766e`](https://github.com/TanStack/db/commit/76d766e84afbfcde2900a661233dd59e1decd5c2), [`1e54c6a`](https://github.com/TanStack/db/commit/1e54c6a2820ef5f1a87c6f4236311259c041fc24), [`d698b90`](https://github.com/TanStack/db/commit/d698b90579fd5ce3a4bf122ddd30fd4fe9f8d2b6), [`3ad64a4`](https://github.com/TanStack/db/commit/3ad64a42a0088e1272176fb33c953526fed9b868), [`fc1adde`](https://github.com/TanStack/db/commit/fc1adde85be0ed3570912688712ccc15875be906), [`71ad428`](https://github.com/TanStack/db/commit/71ad4284922c2355eb723fc5a00f26c72296aef9)]:
+  - @tanstack/db@0.10.0
+
 ## 0.4.10
 
 ### Patch Changes

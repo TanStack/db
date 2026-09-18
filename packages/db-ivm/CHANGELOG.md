@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.23
+
+### Patch Changes
+
+- Preserve only captured accepted local inserts across a truncate. Preserve sparse-array length and RegExp state through ordered-query hashing, including hosts without a global File constructor. Prevent delayed replay reads from rerunning any transaction removed while the read was in flight, without rescanning the outbox. ([#1822](https://github.com/TanStack/db/pull/1822))
+
 ## 0.1.22
 
 ### Patch Changes

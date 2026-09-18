@@ -1,5 +1,75 @@
 # @tanstack/db
 
+## 0.10.0
+
+### Minor Changes
+
+- **Deprecation**: Mutation handler return values and QueryCollection auto-refetch behavior. ([#843](https://github.com/TanStack/db/pull/843))
+
+  **What's changed:**
+  - Handler return values remain type-compatible during the deprecation window
+  - **Deprecation warnings** are logged when deprecated patterns are used
+
+  **QueryCollection changes:**
+  - Auto-refetch after handlers is **deprecated** and will be removed in v1.0
+  - To skip auto-refetch now, return `{ refetch: false }` from your handler
+  - To migrate to explicit refetch now, await `collection.utils.refetch()` and return `{ refetch: false }` to prevent a second fetch; remove the return in v1.0
+  - In v1.0, call `await collection.utils.refetch()` explicitly when needed, or omit it to skip
+
+  **ElectricCollection changes:**
+  - Returning `{ txid }` is deprecated - use `await collection.utils.awaitTxId(txid)` instead
+  - The default `awaitTxId` and `awaitMatch` timeouts increase to 15 seconds
+
+  **Migration guide:**
+
+  ```typescript
+  // QueryCollection - skip refetch (current)
+  onInsert: async ({ transaction }) => {
+    await api.create(transaction.mutations[0].modified)
+    return { refetch: false } // Opt out of auto-refetch
+  }
+
+  // QueryCollection - migrate to explicit refetch now
+  onInsert: async ({ transaction, collection }) => {
+    await api.create(transaction.mutations[0].modified)
+    await collection.utils.refetch() // Explicit refetch
+    return { refetch: false } // Prevent a second pre-1.0 refetch; remove in v1.0
+  }
+
+  // ElectricCollection - before
+  onInsert: async ({ transaction }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    return { txid: result.txid } // Deprecated
+  }
+
+  // ElectricCollection - after
+  onInsert: async ({ transaction, collection }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    await collection.utils.awaitTxId(result.txid) // Explicit
+  }
+  ```
+
+- Preserve collection key and adapter utility types throughout mutation handlers and nested transaction mutations. Mutation keys now use the collection's declared key type instead of `any`; collections that use the default key type expose `string | number`. Prevent Query and Electric collections from exposing nonexistent cross-adapter utilities. ([#1849](https://github.com/TanStack/db/pull/1849))
+
+### Patch Changes
+
+- Preserve explicit locale settings when locale sorting is selected by default and omit unset locale fields from collection comparison options. ([#1833](https://github.com/TanStack/db/pull/1833))
+
+- Fix same-key delete-then-insert reduction, preserve whole-row replacements through local adapters, and publish immutable previous values for live-object and replacement-object sync updates. Same-reference live rows still require an immutable provider `previousValue`; stale or partial values on that reused reference remain unsupported. ([#1835](https://github.com/TanStack/db/pull/1835))
+
+- Start idle collections only after locally decidable mutation validation succeeds, and publish authoritative Query Collection refetch results without stale intermediate snapshots. ([#1840](https://github.com/TanStack/db/pull/1840))
+
+- Align live-query join keys with established predicate equality for binary, temporal, Date, and opaque values, including on-demand collection loading, and prevent nullish operands from matching in full and correlated joins. ([#1834](https://github.com/TanStack/db/pull/1834))
+
+- Preserve whole-object nullability through supported join and `unionAll` projections, retain intrinsic nullish fields when right/full joins follow branch unions, and preserve constrained generic fields through supported join and `unionAll` query chains. ([#1843](https://github.com/TanStack/db/pull/1843))
+
+- Preserve only captured accepted local inserts across a truncate. Preserve sparse-array length and RegExp state through ordered-query hashing, including hosts without a global File constructor. Prevent delayed replay reads from rerunning any transaction removed while the read was in flight, without rescanning the outbox. ([#1822](https://github.com/TanStack/db/pull/1822))
+
+- Allow collection index and change-filter callbacks to traverse optional or nullable nested plain objects with optional chaining while preserving built-in values and functions as query leaves. ([#1850](https://github.com/TanStack/db/pull/1850))
+
+- Updated dependencies [[`3ad64a4`](https://github.com/TanStack/db/commit/3ad64a42a0088e1272176fb33c953526fed9b868)]:
+  - @tanstack/db-ivm@0.1.23
+
 ## 0.9.2
 
 ### Patch Changes
