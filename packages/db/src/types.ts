@@ -108,7 +108,9 @@ export interface PendingMutation<
   changes: ResolveTransactionChanges<T, TOperation>
   globalKey: string
 
-  key: any
+  key: TCollection extends Collection<any, infer TKey, any, any, any>
+    ? TKey
+    : never
   type: TOperation
   metadata: unknown
   syncMetadata: Record<string, unknown>
@@ -148,6 +150,13 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TCollection extends Collection<T, any, any, any, any> = Collection<
+    T,
+    any,
+    any,
+    any,
+    any
+  >,
 > = Omit<Transaction<T>, `mutations`> & {
   /**
    * We must omit the `mutations` property from `Transaction<T>` before intersecting
@@ -168,7 +177,7 @@ export type TransactionWithMutations<
    * - TypeScript can properly narrow `TOperation` to the specific literal type
    * - This ensures `mutation.original` is correctly typed as `T` (not `{} | T`) when mapping
    */
-  mutations: NonEmptyArray<PendingMutation<T, TOperation>>
+  mutations: NonEmptyArray<PendingMutation<T, TOperation, TCollection>>
 }
 
 export interface TransactionConfig<T extends object = Record<string, unknown>> {
@@ -538,7 +547,11 @@ export type UpdateMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `update`>
+  transaction: TransactionWithMutations<
+    T,
+    `update`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 
@@ -547,7 +560,11 @@ export type InsertMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `insert`>
+  transaction: TransactionWithMutations<
+    T,
+    `insert`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 export type DeleteMutationFnParams<
@@ -555,7 +572,11 @@ export type DeleteMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `delete`>
+  transaction: TransactionWithMutations<
+    T,
+    `delete`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 

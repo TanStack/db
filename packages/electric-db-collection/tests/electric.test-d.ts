@@ -9,6 +9,7 @@ import {
 } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import type {
+  AwaitTxIdFn,
   ElectricCollectionConfig,
   ElectricCollectionUtils,
 } from '../src/electric'
@@ -149,16 +150,9 @@ describe(`Electric collection type resolution tests`, () => {
 
     const todosCollection = createCollection(options)
 
-    // Test that todosCollection.utils is ElectricCollectionUtils<TodoType>
-    // Note: We can't use expectTypeOf(...).toEqualTypeOf<ElectricCollectionUtils<T>> because
-    // expectTypeOf's toEqualTypeOf has a constraint that requires { [x: string]: any; [x: number]: never; },
-    // but ElectricCollectionUtils extends UtilsRecord which is Record<string, any> (no number index signature).
-    // This causes a constraint error instead of a type mismatch error.
-    // Instead, we test via type assignment which will show a proper type error if the types don't match.
-    const testTodosUtils: ElectricCollectionUtils<TodoType> =
-      todosCollection.utils
-
-    expectTypeOf(testTodosUtils.awaitTxId).toBeFunction
+    expectTypeOf(todosCollection.utils).toEqualTypeOf<
+      ElectricCollectionUtils<TodoType>
+    >()
 
     // Verify the specific properties that define ElectricCollectionUtils exist and are functions
     expectTypeOf(todosCollection.utils.awaitTxId).toBeFunction
@@ -215,6 +209,14 @@ describe(`Electric collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.awaitTxId,
+        ).toEqualTypeOf<AwaitTxIdFn>()
+        // @ts-expect-error Electric Collection does not expose Query refetch utilities
+        params.transaction.mutations[0].collection.utils.refetch()
         return Promise.resolve({ txid: 1 })
       },
       onUpdate: (params) => {
@@ -222,6 +224,12 @@ describe(`Electric collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.awaitTxId,
+        ).toEqualTypeOf<AwaitTxIdFn>()
         return Promise.resolve({ txid: 1 })
       },
       onDelete: (params) => {
@@ -229,6 +237,12 @@ describe(`Electric collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.awaitTxId,
+        ).toEqualTypeOf<AwaitTxIdFn>()
         return Promise.resolve({ txid: 1 })
       },
     })

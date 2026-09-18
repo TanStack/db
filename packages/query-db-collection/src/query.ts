@@ -19,14 +19,10 @@ import type {
   BaseCollectionConfig,
   ChangeMessage,
   CollectionConfig,
-  DeleteMutationFnParams,
-  InsertMutationFnParams,
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
   SyncMetadataApi,
-  UpdateMutationFnParams,
-  UtilsRecord,
 } from '@tanstack/db'
 import type {
   FetchStatus,
@@ -111,7 +107,17 @@ export interface QueryCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
-> extends BaseCollectionConfig<T, TKey, TSchema> {
+> extends BaseCollectionConfig<
+  T,
+  TKey,
+  TSchema,
+  QueryCollectionUtils<
+    T,
+    TKey,
+    [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+    TError
+  >
+> {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
@@ -267,7 +273,9 @@ export interface QueryCollectionUtils<
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
   TError = unknown,
-> extends UtilsRecord {
+> {
+  // Keep this interface closed: extending UtilsRecord would make every
+  // nonexistent adapter utility appear as `any`.
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
   /** Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
@@ -2781,21 +2789,27 @@ export function queryCollectionOptions(
   // Create wrapper handlers for direct persistence operations that handle refetching
   // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<any>): Promise<void> => {
+    ? async (
+        params: Parameters<NonNullable<typeof onInsert>>[0],
+      ): Promise<void> => {
         const handlerResult = (await onInsert(params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: UpdateMutationFnParams<any>): Promise<void> => {
+    ? async (
+        params: Parameters<NonNullable<typeof onUpdate>>[0],
+      ): Promise<void> => {
         const handlerResult = (await onUpdate(params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: DeleteMutationFnParams<any>): Promise<void> => {
+    ? async (
+        params: Parameters<NonNullable<typeof onDelete>>[0],
+      ): Promise<void> => {
         const handlerResult = (await onDelete(params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }

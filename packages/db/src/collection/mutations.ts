@@ -268,9 +268,14 @@ export class CollectionMutationsManager<
             transaction:
               params.transaction as unknown as TransactionWithMutations<
                 TOutput,
-                `insert`
+                `insert`,
+                Collection<TOutput, TKey, TUtils>
               >,
-            collection: this.collection as unknown as Collection<TOutput, TKey>,
+            collection: this.collection as unknown as Collection<
+              TOutput,
+              TKey,
+              TUtils
+            >,
           })
         },
       })
@@ -464,9 +469,14 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `update`
+              `update`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })
@@ -569,9 +579,14 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `delete`
+              `delete`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })
