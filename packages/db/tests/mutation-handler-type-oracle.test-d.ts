@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
 import { CollectionImpl, createCollection } from '../src/collection/index.js'
 import type { Transaction, TransactionState } from '../src/index.js'
 
@@ -8,8 +9,9 @@ import type { Transaction, TransactionState } from '../src/index.js'
  * as the sibling `collection` parameter. `isPersisted.promise` remains the
  * documented local transaction-settlement receipt, not backend confirmation.
  *
- * Domain: insert/update/delete; branded-string and numeric keys; incompatible
- * authoritative-sync and refetch utility records.
+ * Domain: insert/update/delete; default, explicit, schema-inferred,
+ * branded-string, and numeric keys; incompatible authoritative-sync and
+ * refetch utility records.
  * Judgment: compare each inferred boundary with independently declared types.
  * Production path: contextual handler types produced by `createCollection`.
  * Observe: operation, row, key, collection key/utilities, state, and receipt.
@@ -33,6 +35,49 @@ type RefetchUtils = {
 type BrandedKey = string & { readonly __brand: `row-key` }
 
 describe(`mutation handler type oracle`, () => {
+  it(`distinguishes default, explicit, and schema-inferred key types`, () => {
+    type Todo = Row<string>
+    const acceptsString = (_key: string) => {}
+
+    createCollection<Todo>({
+      getKey: (row) => row.id,
+      sync: { sync: () => {} },
+      onDelete: ({ transaction }) => {
+        const { key } = transaction.mutations[0]
+
+        expectTypeOf(key).toEqualTypeOf<string | number>()
+        // @ts-expect-error an explicit row type leaves the key at its default union
+        acceptsString(key)
+        return Promise.resolve()
+      },
+    })
+
+    createCollection<Todo, string>({
+      getKey: (row) => row.id,
+      sync: { sync: () => {} },
+      onDelete: ({ transaction }) => {
+        const { key } = transaction.mutations[0]
+
+        expectTypeOf(key).toEqualTypeOf<string>()
+        acceptsString(key)
+        return Promise.resolve()
+      },
+    })
+
+    createCollection({
+      schema: z.object({ id: z.string(), value: z.string() }),
+      getKey: (row) => row.id,
+      sync: { sync: () => {} },
+      onDelete: ({ transaction }) => {
+        const { key } = transaction.mutations[0]
+
+        expectTypeOf(key).toEqualTypeOf<string>()
+        acceptsString(key)
+        return Promise.resolve()
+      },
+    })
+  })
+
   it(`preserves the utility namespace on the concrete collection implementation`, () => {
     const collection = new CollectionImpl<
       Row<BrandedKey>,
