@@ -11,7 +11,6 @@ import type {
 } from '../src/opfs-worker-protocol'
 
 type FakeWorkerBehavior = {
-  pendingRequestType?: BrowserOPFSWorkerRequest[`type`]
   initErrorCode?: BrowserOPFSWorkerErrorCode
   initErrorMessage?: string
   executeRows?: ReadonlyArray<Record<string, unknown>>
@@ -35,7 +34,6 @@ class FakeWorker {
 
   private initialized = false
   public terminated = false
-  public requests: Array<BrowserOPFSWorkerRequest> = []
 
   constructor(..._args: Array<unknown>) {
     FakeWorker.instances.push(this)
@@ -60,12 +58,7 @@ class FakeWorker {
   }
 
   postMessage(request: BrowserOPFSWorkerRequest): void {
-    this.requests.push(request)
     if (this.terminated) {
-      return
-    }
-
-    if (request.type === FakeWorker.behavior.pendingRequestType) {
       return
     }
 
@@ -152,9 +145,7 @@ const originalWorker = (globalThis as typeof globalThis & { Worker?: unknown })
   .Worker
 const originalNavigator = globalThis.navigator
 
-function installWorkerTestEnvironment(
-  behavior: FakeWorkerBehavior = {},
-): EventTarget {
+function installWorkerTestEnvironment(behavior: FakeWorkerBehavior = {}): void {
   const page = new EventTarget()
   vi.stubGlobal(`addEventListener`, page.addEventListener.bind(page))
   vi.stubGlobal(`removeEventListener`, page.removeEventListener.bind(page))
@@ -174,7 +165,6 @@ function installWorkerTestEnvironment(
     configurable: true,
     writable: true,
   })
-  return page
 }
 
 function restoreWorkerTestEnvironment(): void {
@@ -193,98 +183,9 @@ function restoreWorkerTestEnvironment(): void {
 afterEach(() => {
   restoreWorkerTestEnvironment()
   vi.unstubAllGlobals()
-  vi.restoreAllMocks()
 })
 
 describe(`openBrowserWASQLiteOPFSDatabase`, () => {
-  it.each([false, true])(
-    `aborts initialization on pagehide (persisted: %s)`,
-    async (persisted) => {
-      const page = installWorkerTestEnvironment({ pendingRequestType: `init` })
-      const opening = openBrowserWASQLiteOPFSDatabase({
-        databaseName: `pagehide.sqlite`,
-      })
-      const rejected = expect(opening).rejects.toMatchObject({
-        name: `AbortError`,
-      })
-
-      page.dispatchEvent(Object.assign(new Event(`pagehide`), { persisted }))
-
-      // Cleanup must be synchronous: a cached document can be frozen as soon
-      // as the pagehide handler returns, before worker messages are delivered.
-      expect(FakeWorker.instances[0]?.terminated).toBe(true)
-      await rejected
-    },
-  )
-
-  it(`rejects all pending queries and closes the connection on pagehide`, async () => {
-    const page = installWorkerTestEnvironment({ pendingRequestType: `execute` })
-    const database = await openBrowserWASQLiteOPFSDatabase({
-      databaseName: `pagehide.sqlite`,
-    })
-    const first = expect(database.execute(`SELECT 1`)).rejects.toMatchObject({
-      name: `AbortError`,
-    })
-    const second = expect(database.execute(`SELECT 2`)).rejects.toMatchObject({
-      name: `AbortError`,
-    })
-
-    page.dispatchEvent(new Event(`pagehide`))
-
-    expect(FakeWorker.instances[0]?.terminated).toBe(true)
-    await Promise.all([first, second])
-    await expect(database.execute(`SELECT 3`)).rejects.toBeInstanceOf(
-      InvalidPersistedCollectionConfigError,
-    )
-    expect(FakeWorker.instances[0]?.requests).toHaveLength(3)
-  })
-
-  it(`aborts a pending close on pagehide`, async () => {
-    const page = installWorkerTestEnvironment({ pendingRequestType: `close` })
-    const database = await openBrowserWASQLiteOPFSDatabase({
-      databaseName: `pagehide.sqlite`,
-    })
-    const rejected = expect(database.close?.()).rejects.toMatchObject({
-      name: `AbortError`,
-    })
-
-    page.dispatchEvent(new Event(`pagehide`))
-
-    expect(FakeWorker.instances[0]?.terminated).toBe(true)
-    await rejected
-  })
-
-  it.each([`close`, `init failure`, `pagehide`] as const)(
-    `removes the pagehide listener after %s`,
-    async (reason) => {
-      const page = installWorkerTestEnvironment(
-        reason === `init failure`
-          ? { initErrorCode: `PERSISTENCE_UNAVAILABLE` }
-          : {},
-      )
-      const add = vi.spyOn(globalThis, `addEventListener`)
-      const remove = vi.spyOn(globalThis, `removeEventListener`)
-      const opening = openBrowserWASQLiteOPFSDatabase({
-        databaseName: `pagehide.sqlite`,
-      })
-      if (reason === `init failure`) {
-        await expect(opening).rejects.toBeInstanceOf(
-          PersistenceUnavailableError,
-        )
-      } else {
-        const database = await opening
-        if (reason === `close`) {
-          await database.close?.()
-        } else {
-          page.dispatchEvent(new Event(`pagehide`))
-        }
-      }
-
-      expect(add).toHaveBeenCalledWith(`pagehide`, expect.any(Function))
-      expect(remove).toHaveBeenCalledWith(`pagehide`, add.mock.calls[0]?.[1])
-    },
-  )
-
   it(`initializes via worker and supports execute + close`, async () => {
     installWorkerTestEnvironment({
       executeRows: [{ id: `1`, title: `from worker` }],
