@@ -347,24 +347,27 @@ export type ResultTypeFromSelectValue<TSelectValue> =
                               > extends true
                               ? T | null | undefined
                               : T | null
-                            : TSelectValue extends Ref<infer _T> | undefined
-                              ?
-                                  | ExtractRef<Exclude<TSelectValue, undefined>>
+                            : TSelectValue extends
+                                  | Ref<infer _T>
+                                  | null
                                   | undefined
-                              : TSelectValue extends Ref<infer _T> | null
-                                ? ExtractRef<Exclude<TSelectValue, null>> | null
-                                : TSelectValue extends Aggregate<infer T>
-                                  ? T
-                                  : TSelectValue extends
-                                        | string
-                                        | number
-                                        | boolean
-                                        | null
-                                        | undefined
-                                    ? TSelectValue
-                                    : TSelectValue extends Record<string, any>
-                                      ? ResultTypeFromSelect<TSelectValue>
-                                      : never
+                              ?
+                                  | ExtractRef<
+                                      Exclude<TSelectValue, null | undefined>
+                                    >
+                                  | Extract<TSelectValue, null | undefined>
+                              : TSelectValue extends Aggregate<infer T>
+                                ? T
+                                : TSelectValue extends
+                                      | string
+                                      | number
+                                      | boolean
+                                      | null
+                                      | undefined
+                                  ? TSelectValue
+                                  : TSelectValue extends Record<string, any>
+                                    ? ResultTypeFromSelect<TSelectValue>
+                                    : never
       >
 
 /**
@@ -452,35 +455,37 @@ export type ResultTypeFromSelect<TSelectObject> =
                                 > extends true
                                 ? T | null | undefined
                                 : T | null
-                              : // Ref | undefined (optional object-type schema field)
+                              : // Nullable and/or optional object-type schema field
                                 TSelectObject[K] extends
                                     | Ref<infer _T>
+                                    | null
                                     | undefined
                                 ?
                                     | ExtractRef<
-                                        Exclude<TSelectObject[K], undefined>
+                                        Exclude<
+                                          TSelectObject[K],
+                                          null | undefined
+                                        >
                                       >
-                                    | undefined
-                                : // Ref | null (nullable object-type schema field)
-                                  TSelectObject[K] extends Ref<infer _T> | null
-                                  ? ExtractRef<
-                                      Exclude<TSelectObject[K], null>
-                                    > | null
-                                  : TSelectObject[K] extends Aggregate<infer T>
-                                    ? T
-                                    : TSelectObject[K] extends
-                                          | string
-                                          | number
-                                          | boolean
-                                          | null
-                                          | undefined
-                                      ? TSelectObject[K]
-                                      : TSelectObject[K] extends Record<
-                                            string,
-                                            any
-                                          >
-                                        ? ResultTypeFromSelect<TSelectObject[K]>
-                                        : never
+                                    | Extract<
+                                        TSelectObject[K],
+                                        null | undefined
+                                      >
+                                : TSelectObject[K] extends Aggregate<infer T>
+                                  ? T
+                                  : TSelectObject[K] extends
+                                        | string
+                                        | number
+                                        | boolean
+                                        | null
+                                        | undefined
+                                    ? TSelectObject[K]
+                                    : TSelectObject[K] extends Record<
+                                          string,
+                                          any
+                                        >
+                                      ? ResultTypeFromSelect<TSelectObject[K]>
+                                      : never
         }>
       >
 
@@ -702,11 +707,15 @@ type RefForContextSchemaValue<
   ? RefForContextValue<NonNullable<T>, true>
   : IsNonExactOptional<T> extends true
     ? IsNonExactNullable<T> extends true
-      ? RefForContextValue<NonNullable<T>, true>
+      ? RefForOptionalNullableContextValue<NonUndefined<T>>
       : RefForContextValue<NonUndefined<T>, true>
     : IsNonExactNullable<T> extends true
       ? RefForContextValue<NonNull<T>, true>
       : RefForContextValue<T>
+
+type RefForOptionalNullableContextValue<T> = T extends null
+  ? null
+  : RefForContextValue<T, true>
 
 type RefsForBranchResult<T, ForceNullable extends boolean> = T extends unknown
   ? {
@@ -873,8 +882,8 @@ type RefBranch<T, Nullable extends boolean> = {
     ? IsNonExactNullable<T[K]> extends true
       ? // Both optional and nullable
         IsPlainObject<NonNullable<T[K]>> extends true
-        ? Ref<NonNullable<T[K]>, Nullable> | undefined
-        : RefLeaf<NonNullable<T[K]>, Nullable> | undefined
+        ? Ref<NonNullable<T[K]>, Nullable> | null | undefined
+        : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined
       : // Optional only
         IsPlainObject<NonUndefined<T[K]>> extends true
         ? Ref<NonUndefined<T[K]>, Nullable> | undefined

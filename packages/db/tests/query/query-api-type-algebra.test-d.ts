@@ -19,9 +19,11 @@ import type {
   Context,
   QueryBuilder,
   QueryResult,
+  Ref,
   RefsForContext,
   WithResult,
 } from '../../src/query/index.js'
+import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 type Row = { id: string; departmentId: string }
@@ -389,6 +391,91 @@ describe(`query API type algebra`, () => {
     expectTypeOf<ExactNullishRefs[`nullValue`]>().not.toBeNever()
     expectTypeOf<ExactNullishRefs[`undefinedValue`]>().not.toBeNever()
     void projectNullishLeaves
+  })
+
+  test(`optional nullable fields preserve both nullish branches`, () => {
+    type OptionalNullableRow = {
+      id: string
+      required: number
+      optional?: number
+      nullable: number | null
+      nullish?: number | null
+      exactNull: null
+      exactUndefined: undefined
+      nullishObject?: { label: string } | null
+    }
+
+    function projectOptionalNullableFields(
+      source: Collection<OptionalNullableRow, string>,
+    ) {
+      const query = new Query()
+        .from({ row: source })
+        .orderBy(({ row }) => {
+          expectTypeOf(row.required).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(row.optional).toEqualTypeOf<
+            RefLeaf<number> | undefined
+          >()
+          expectTypeOf(row.nullable).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(row.nullish).toEqualTypeOf<
+            RefLeaf<number | null> | undefined
+          >()
+          expectTypeOf(row.exactNull).toEqualTypeOf<RefLeaf<null>>()
+          expectTypeOf(row.exactUndefined).toEqualTypeOf<RefLeaf<undefined>>()
+          expectTypeOf(row.nullishObject).toEqualTypeOf<
+            Ref<{ label: string }> | null | undefined
+          >()
+          return row.nullish
+        })
+        .select(({ row }) => ({
+          required: row.required,
+          optional: row.optional,
+          nullable: row.nullable,
+          nullish: row.nullish,
+          exactNull: row.exactNull,
+          exactUndefined: row.exactUndefined,
+          nullishObject: row.nullishObject,
+        }))
+
+      type Result = QueryResult<typeof query>
+      expectTypeOf<Result[`required`]>().toEqualTypeOf<number>()
+      expectTypeOf<Result[`optional`]>().toEqualTypeOf<number | undefined>()
+      expectTypeOf<Result[`nullable`]>().toEqualTypeOf<number | null>()
+      expectTypeOf<Result[`nullish`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
+      expectTypeOf<Result[`exactNull`]>().toEqualTypeOf<null>()
+      expectTypeOf<Result[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<Result[`nullishObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
+
+      const branch = () =>
+        new Query().from({ row: source }).select(({ row }) => ({
+          nullish: row.nullish,
+          nullishObject: row.nullishObject,
+        }))
+      const union = new Query()
+        .unionAll(branch(), branch())
+        .orderBy(({ nullish }) => {
+          expectTypeOf(nullish).toEqualTypeOf<RefLeaf<number, true> | null>()
+          return nullish
+        })
+        .select(({ nullish, nullishObject }) => ({
+          nullish,
+          nullishObject,
+        }))
+      type UnionResult = QueryResult<typeof union>
+      expectTypeOf<UnionResult[`nullish`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
+      expectTypeOf<UnionResult[`nullishObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
+
+      return { query, union }
+    }
+
+    void projectOptionalNullableFields
   })
 
   test(`branch unions preserve intrinsic nullish fields through nullable joins`, () => {
