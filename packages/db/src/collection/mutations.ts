@@ -47,11 +47,14 @@ export class CollectionMutationsManager<
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private collection!: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
-  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private config!: CollectionConfig<TOutput, TKey, TSchema, TUtils>
   private transactionScope?: TransactionScope
   private id: string
 
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, TUtils>,
+    id: string,
+  ) {
     this.id = id
     this.config = config
   }

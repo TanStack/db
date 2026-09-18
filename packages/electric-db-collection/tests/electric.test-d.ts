@@ -514,6 +514,10 @@ describe(`Electric collection type resolution tests`, () => {
         })),
     })
 
+    expectTypeOf(electricCollection.utils).toEqualTypeOf<
+      ElectricCollectionUtils<UserType>
+    >()
+
     const electricResults = electricQuery.toArray
     expectTypeOf(electricResults).toMatchTypeOf<
       Array<

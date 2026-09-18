@@ -1153,7 +1153,7 @@ export class CollectionImpl<
 }
 
 function buildCompareOptionsFromConfig(
-  config: CollectionConfig<any, any, any>,
+  config: CollectionConfig<any, any, any, any>,
 ): StringCollationConfig {
   const options = config.defaultStringCollation
   if (!options) {
