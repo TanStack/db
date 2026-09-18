@@ -253,6 +253,10 @@ export async function openBrowserWASQLiteOPFSDatabase(
         params,
       }),
     close: async () => {
+      if (disposed) {
+        return
+      }
+
       let closeError: unknown
       try {
         await sendWorkerRequest<void>({

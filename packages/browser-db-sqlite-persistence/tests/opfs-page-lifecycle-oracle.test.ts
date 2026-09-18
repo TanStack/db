@@ -503,8 +503,8 @@ async function expectPostDisposalNoReach(
     },
     {
       label: `post-disposal-close`,
-      status: `rejected` as const,
-      observation: closedConnection,
+      status: `fulfilled` as const,
+      observation: `closed`,
     },
   ]
   expectSettlementSet(postDisposal, expected)

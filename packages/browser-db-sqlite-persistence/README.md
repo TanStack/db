@@ -117,4 +117,6 @@ for a full multi-tab example.
   available in all modern browsers.
 - OPFS capability failures are surfaced as `PersistenceUnavailableError`.
 - SQLite open failures include the underlying VFS error name and message when
-  available, so native file contention can be distinguished from other errors.
+  wa-sqlite exposes them. Some failures, including native access-handle
+  contention, are not currently exposed by wa-sqlite and retain SQLite's
+  generic open error.
