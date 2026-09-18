@@ -91,7 +91,7 @@ export type ContextSchema = Record<string, unknown>
  */
 export type Source = {
   [alias: string]:
-    | CollectionImpl<any, any>
+    | CollectionImpl<any, any, any, any, any>
     | CollectionOptionsIdentity<any, any, any, any, any>
     | QueryBuilder<any>
 }

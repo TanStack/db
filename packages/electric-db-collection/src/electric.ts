@@ -55,7 +55,6 @@ import type {
   SyncMetadataApi,
   SyncMode,
   UpdateMutationFnParams,
-  UtilsRecord,
 } from '@tanstack/db'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -879,7 +878,9 @@ export type AwaitMatchFn<T extends Row<unknown>> = (
  */
 export interface ElectricCollectionUtils<
   T extends Row<unknown> = Row<unknown>,
-> extends UtilsRecord {
+> {
+  // Keep this interface closed: extending UtilsRecord would make every
+  // nonexistent adapter utility appear as `any`.
   awaitTxId: AwaitTxIdFn
   awaitMatch: AwaitMatchFn<T>
 }

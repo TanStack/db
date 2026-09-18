@@ -28,7 +28,6 @@ import type {
   CollectionConfig,
   CollectionStatus,
   CurrentStateAsChangesOptions,
-  Fn,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -341,6 +340,18 @@ export function createCollection(
   return collection
 }
 
+type CollectionImplConfig<
+  TOutput extends object,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+  TSchema extends StandardSchemaV1,
+> = CollectionConfig<TOutput, TKey, TSchema, TUtils> &
+  (string extends keyof TUtils
+    ? object
+    : keyof TUtils extends never
+      ? object
+      : { utils: TUtils })
+
 export class CollectionImpl<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -349,11 +360,11 @@ export class CollectionImpl<
   TInput extends object = TOutput,
 > {
   public id: string
-  public config: CollectionConfig<TOutput, TKey, TSchema>
+  public config: CollectionConfig<TOutput, TKey, TSchema, TUtils>
 
   // Utilities namespace
   // This is populated by createCollection
-  public utils: Record<string, Fn> = {}
+  public utils: TUtils = {} as TUtils
 
   // Managers
   private _events: CollectionEventsManager
@@ -387,7 +398,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+  constructor(config: CollectionImplConfig<TOutput, TKey, TUtils, TSchema>) {
     // eslint-disable-next-line
     if (!config) {
       throw new CollectionRequiresConfigError()
@@ -406,9 +417,13 @@ export class CollectionImpl<
 
     // Set default values for optional config properties
     const { sync: collectionSync, utilities: collectionUtils } =
-      materializeCollectionSyncConfig(config.sync, config.utils ?? {}, () => {
-        if (this._lifecycle.status === `idle`) this._sync.startSync()
-      })
+      materializeCollectionSyncConfig(
+        config.sync,
+        config.utils ?? ({} as TUtils),
+        () => {
+          if (this._lifecycle.status === `idle`) this._sync.startSync()
+        },
+      )
     this.config = {
       ...config,
       sync: collectionSync,
@@ -1138,7 +1153,7 @@ export class CollectionImpl<
 }
 
 function buildCompareOptionsFromConfig(
-  config: CollectionConfig<any, any, any>,
+  config: CollectionConfig<any, any, any, any>,
 ): StringCollationConfig {
   const options = config.defaultStringCollation
   if (!options) {
