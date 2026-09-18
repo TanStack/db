@@ -569,7 +569,7 @@ describe(`Collection`, () => {
     // Test bulk update
     tx6.mutate(() =>
       collection.update(
-        [keys[2], keys[3]],
+        [keys[2]!, keys[3]!],
         { metadata: { bulkUpdate: true } },
         (drafts) => {
           drafts.forEach((draft) => {
