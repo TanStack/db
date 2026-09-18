@@ -103,8 +103,9 @@ for a full multi-tab example.
   routes SQL operations through it. OPFS sync access handle APIs are used in
   that worker context.
 - On `pagehide`, the connection terminates its worker synchronously and rejects
-  pending initialization and queries with `AbortError`. This also applies when
-  the document enters the back/forward cache. Applications restored through
+  pending initialization, queries, and close operations with `AbortError`. This
+  also applies when the document enters the back/forward cache. Applications
+  restored through
   `pageshow` with `event.persisted` must create fresh database connections and
   persistence/collection instances (or reload the application).
 - Flush application writes and await `database.close()` before navigating when
