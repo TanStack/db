@@ -12,15 +12,6 @@ type OpSQLiteRowListLike = {
   _array?: unknown
 }
 
-type OpSQLiteStatementResultLike = {
-  rows?: unknown
-  resultRows?: unknown
-  rowsAffected?: unknown
-  changes?: unknown
-  insertId?: unknown
-  lastInsertRowId?: unknown
-}
-
 const WRITE_RESULT_KEYS = new Set([
   `rowsAffected`,
   `changes`,
@@ -112,13 +103,25 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === `object` && value !== null
 }
 
+function hasOwnKey(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
 function hasWriteResultMarker(value: Record<string, unknown>): boolean {
   for (const key of WRITE_RESULT_KEYS) {
-    if (key in value) {
+    if (hasOwnKey(value, key)) {
       return true
     }
   }
   return false
+}
+
+function unsupportedQueryResult(sql: string, details?: string): never {
+  throw new InvalidPersistedCollectionConfigError(
+    `Unsupported op-sqlite query result shape for SQL "${sql}"${
+      details ? `: ${details}` : ``
+    }`,
+  )
 }
 
 function toRowArray(rowsValue: unknown): Array<unknown> | null {
@@ -150,24 +153,129 @@ function toRowArray(rowsValue: unknown): Array<unknown> | null {
   return null
 }
 
+function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
+  return (
+    toRowArray(value.rows) !== null ||
+    toRowArray(value.resultRows) !== null ||
+    Array.isArray(value.rawRows) ||
+    Array.isArray(value.columnNames) ||
+    Array.isArray(value.results)
+  )
+}
+
+function decodeColumnarRows(
+  value: Record<string, unknown>,
+  sql: string,
+): Array<Record<string, unknown>> | null {
+  const hasRawRows = hasOwnKey(value, `rawRows`)
+  const hasColumnNames = hasOwnKey(value, `columnNames`)
+  if (!hasRawRows && !hasColumnNames) {
+    return null
+  }
+
+  if (!hasRawRows || !hasColumnNames) {
+    unsupportedQueryResult(
+      sql,
+      `columnar results require both rawRows and columnNames`,
+    )
+  }
+  if (
+    hasOwnKey(value, `rows`) ||
+    hasOwnKey(value, `resultRows`) ||
+    hasOwnKey(value, `results`)
+  ) {
+    unsupportedQueryResult(sql, `columnar results contain conflicting carriers`)
+  }
+
+  const rawRows = value.rawRows
+  const columnNames = value.columnNames
+  if (
+    !Array.isArray(rawRows) ||
+    !Array.isArray(columnNames) ||
+    !columnNames.every((columnName) => typeof columnName === `string`)
+  ) {
+    unsupportedQueryResult(sql, `invalid columnar row or column metadata`)
+  }
+
+  const uniqueColumnNames = new Set(columnNames)
+  if (uniqueColumnNames.size !== columnNames.length) {
+    unsupportedQueryResult(
+      sql,
+      `columnar results contain duplicate column names`,
+    )
+  }
+  if (rawRows.length > 0 && columnNames.length === 0) {
+    unsupportedQueryResult(
+      sql,
+      `nonempty columnar results require at least one column name`,
+    )
+  }
+
+  return rawRows.map((rawRow) => {
+    if (!Array.isArray(rawRow) || rawRow.length !== columnNames.length) {
+      unsupportedQueryResult(
+        sql,
+        `columnar row width does not match columnNames`,
+      )
+    }
+
+    return Object.fromEntries(
+      columnNames.map((columnName, index) => [columnName, rawRow[index]]),
+    )
+  })
+}
+
 function extractRowsFromStatementResult(
-  value: OpSQLiteStatementResultLike,
-): Array<unknown> | null {
-  const rowsFromRows = toRowArray(value.rows)
-  if (rowsFromRows) {
-    return rowsFromRows
+  record: Record<string, unknown>,
+  sql: string,
+  allowResultsWrapper: boolean,
+): Array<unknown> {
+  const columnarRows = decodeColumnarRows(record, sql)
+  if (columnarRows) {
+    return columnarRows
   }
 
-  const rowsFromResultRows = toRowArray(value.resultRows)
-  if (rowsFromResultRows) {
-    return rowsFromResultRows
+  const rowCarrierKeys = [`rows`, `resultRows`].filter((key) =>
+    hasOwnKey(record, key),
+  )
+  if (
+    rowCarrierKeys.length > 1 ||
+    (rowCarrierKeys.length > 0 && hasOwnKey(record, `results`))
+  ) {
+    unsupportedQueryResult(sql, `query result contains conflicting carriers`)
   }
 
-  if (hasWriteResultMarker(value as Record<string, unknown>)) {
+  if (rowCarrierKeys.length === 1) {
+    const rows = toRowArray(record[rowCarrierKeys[0]!])
+    if (!rows) {
+      unsupportedQueryResult(sql, `invalid ${rowCarrierKeys[0]} carrier`)
+    }
+    return rows
+  }
+
+  if (hasOwnKey(record, `results`)) {
+    if (!allowResultsWrapper) {
+      unsupportedQueryResult(sql, `unsupported nested results depth`)
+    }
+    const nestedResults = record.results
+    if (
+      !Array.isArray(nestedResults) ||
+      nestedResults.length !== 1 ||
+      !isObjectRecord(nestedResults[0])
+    ) {
+      unsupportedQueryResult(sql, `invalid nested results carrier`)
+    }
+    return extractRowsFromStatementResult(nestedResults[0], sql, false)
+  }
+
+  if (
+    hasWriteResultMarker(record) &&
+    Object.keys(record).every((key) => WRITE_RESULT_KEYS.has(key))
+  ) {
     return []
   }
 
-  return null
+  return unsupportedQueryResult(sql)
 }
 
 function extractRowsFromExecuteResult(
@@ -175,7 +283,7 @@ function extractRowsFromExecuteResult(
   sql: string,
 ): Array<unknown> {
   if (result == null) {
-    return []
+    return unsupportedQueryResult(sql)
   }
 
   if (Array.isArray(result)) {
@@ -184,37 +292,24 @@ function extractRowsFromExecuteResult(
     }
 
     const firstEntry = result[0]
-    if (isObjectRecord(firstEntry)) {
-      const rowsFromStatement = extractRowsFromStatementResult(firstEntry)
-      if (rowsFromStatement) {
-        return rowsFromStatement
+    if (isObjectRecord(firstEntry) && isStatementResultEnvelope(firstEntry)) {
+      if (result.length !== 1) {
+        return unsupportedQueryResult(
+          sql,
+          `statement-result arrays must contain exactly one result`,
+        )
       }
+      return extractRowsFromStatementResult(firstEntry, sql, false)
     }
 
     return result
   }
 
   if (isObjectRecord(result)) {
-    const rowsFromStatement = extractRowsFromStatementResult(result)
-    if (rowsFromStatement) {
-      return rowsFromStatement
-    }
-
-    const nestedResults = result.results
-    if (Array.isArray(nestedResults) && nestedResults.length > 0) {
-      const firstResult = nestedResults[0]
-      if (isObjectRecord(firstResult)) {
-        const rowsFromNested = extractRowsFromStatementResult(firstResult)
-        if (rowsFromNested) {
-          return rowsFromNested
-        }
-      }
-    }
+    return extractRowsFromStatementResult(result, sql, true)
   }
 
-  throw new InvalidPersistedCollectionConfigError(
-    `Unsupported op-sqlite query result shape for SQL "${sql}"`,
-  )
+  return unsupportedQueryResult(sql)
 }
 
 function hasExistingDatabase(

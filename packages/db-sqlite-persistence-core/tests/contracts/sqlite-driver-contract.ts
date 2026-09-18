@@ -15,11 +15,36 @@ async function withHarness<T>(
   fn: (harness: SQLiteDriverContractHarness) => Promise<T>,
 ): Promise<T> {
   const harness = createHarness()
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown }
   try {
-    return await fn(harness)
-  } finally {
-    await Promise.resolve(harness.cleanup())
+    outcome = { ok: true, value: await fn(harness) }
+  } catch (error) {
+    outcome = { ok: false, error }
   }
+
+  let cleanupOutcome: { ok: true } | { ok: false; error: unknown } = {
+    ok: true,
+  }
+  try {
+    await harness.cleanup()
+  } catch (error) {
+    cleanupOutcome = { ok: false, error }
+  }
+
+  if (!outcome.ok) {
+    if (!cleanupOutcome.ok) {
+      throw new AggregateError(
+        [outcome.error, cleanupOutcome.error],
+        `SQLite driver contract and cleanup failed`,
+        { cause: outcome.error },
+      )
+    }
+    throw outcome.error
+  }
+  if (!cleanupOutcome.ok) {
+    throw cleanupOutcome.error
+  }
+  return outcome.value
 }
 
 export function runSQLiteDriverContractSuite(
@@ -51,6 +76,89 @@ export function runSQLiteDriverContractSuite(
         expect(rows).toEqual([
           { id: `1`, title: `First` },
           { id: `2`, title: `Second` },
+        ])
+      })
+    })
+
+    it(`preserves exact query rows after exec and run write results`, async () => {
+      await withHarness(createHarness, async ({ driver }) => {
+        await driver.exec(
+          `CREATE TABLE write_then_read (
+             id TEXT PRIMARY KEY,
+             title TEXT NOT NULL,
+             score INTEGER NOT NULL
+           )`,
+        )
+        await driver.run(
+          `INSERT INTO write_then_read (id, title, score) VALUES (?, ?, ?)`,
+          [`run-row`, `Inserted by run`, 17],
+        )
+        await driver.exec(
+          `INSERT INTO write_then_read (id, title, score)
+           VALUES ('exec-row', 'Inserted by exec', 29)`,
+        )
+
+        expect(
+          await driver.query<{ id: string; title: string; score: number }>(
+            `SELECT title, id, score
+             FROM write_then_read
+             ORDER BY score DESC`,
+          ),
+        ).toEqual([
+          { title: `Inserted by exec`, id: `exec-row`, score: 29 },
+          { title: `Inserted by run`, id: `run-row`, score: 17 },
+        ])
+      })
+    })
+
+    it(`preserves SQL aliases that match statement-result field names`, async () => {
+      await withHarness(createHarness, async ({ driver }) => {
+        const rows = await driver.query<{
+          rows: string
+          resultRows: string
+          rawRows: string
+          columnNames: string
+          results: string
+          rowsAffected: number
+          changes: number
+          insertId: number
+          lastInsertRowId: number
+        }>(
+          `SELECT
+             'rows-value' AS "rows",
+             'resultRows-value' AS "resultRows",
+             'rawRows-value' AS "rawRows",
+             'columnNames-value' AS "columnNames",
+             'results-value' AS "results",
+             7 AS "rowsAffected",
+             8 AS "changes",
+             9 AS "insertId",
+             10 AS "lastInsertRowId"`,
+        )
+
+        expect(rows).toEqual([
+          {
+            rows: `rows-value`,
+            resultRows: `resultRows-value`,
+            rawRows: `rawRows-value`,
+            columnNames: `columnNames-value`,
+            results: `results-value`,
+            rowsAffected: 7,
+            changes: 8,
+            insertId: 9,
+            lastInsertRowId: 10,
+          },
+        ])
+        expect(Object.keys(rows[0] ?? {})).toEqual([
+          `rows`,
+          `resultRows`,
+          `rawRows`,
+          `columnNames`,
+          `results`,
+          `rowsAffected`,
+          `changes`,
+          `insertId`,
+          `lastInsertRowId`,
         ])
       })
     })
@@ -234,11 +342,9 @@ export function runSQLiteDriverContractSuite(
     it(`requires transaction callbacks to accept a driver argument`, async () => {
       await withHarness(createHarness, async ({ driver }) => {
         await expect(
-          driver.transaction(
-            (async () => undefined) as unknown as (
-              transactionDriver: SQLiteDriver,
-            ) => Promise<void>,
-          ),
+          driver.transaction((() => Promise.resolve()) as unknown as (
+            transactionDriver: SQLiteDriver,
+          ) => Promise<void>),
         ).rejects.toThrow(`transaction driver argument`)
       })
     })
