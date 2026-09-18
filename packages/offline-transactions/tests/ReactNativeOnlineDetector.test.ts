@@ -38,36 +38,49 @@ vi.mock(`react-native`, () => {
 
 // Mock the @react-native-community/netinfo module
 vi.mock(`@react-native-community/netinfo`, () => {
-  const listeners: Array<
-    (state: {
-      isConnected: boolean
-      isInternetReachable: boolean | null
-    }) => void
-  > = []
+  type NetworkState = {
+    isConnected: boolean
+    isInternetReachable: boolean | null
+  }
+  const listeners: Array<(state: NetworkState) => void> = []
+  let latestState: NetworkState = {
+    isConnected: true,
+    isInternetReachable: true,
+  }
+  let deliverNextSubscriptionAsync = false
   return {
     default: {
-      addEventListener: vi.fn(
-        (
-          callback: (state: {
-            isConnected: boolean
-            isInternetReachable: boolean | null
-          }) => void,
-        ) => {
-          listeners.push(callback)
-          return () => {
-            const index = listeners.indexOf(callback)
-            if (index > -1) {
-              listeners.splice(index, 1)
-            }
+      fetch: vi.fn(() => Promise.resolve(latestState)),
+      addEventListener: vi.fn((callback: (state: NetworkState) => void) => {
+        listeners.push(callback)
+        // NetInfo promises the latest information soon after subscription.
+        const state = latestState
+        if (deliverNextSubscriptionAsync) {
+          deliverNextSubscriptionAsync = false
+          void Promise.resolve().then(() => {
+            if (listeners.includes(callback)) callback(state)
+          })
+        } else callback(state)
+        return () => {
+          const index = listeners.indexOf(callback)
+          if (index > -1) {
+            listeners.splice(index, 1)
           }
-        },
-      ),
+        }
+      }),
+      __setLatestState: (state: NetworkState) => {
+        latestState = state
+      },
+      __deliverNextSubscriptionAsync: () => {
+        deliverNextSubscriptionAsync = true
+      },
+      __resetSubscriptionDelivery: () => {
+        deliverNextSubscriptionAsync = false
+      },
       // Expose for testing
       __listeners: listeners,
-      __triggerState: (state: {
-        isConnected: boolean
-        isInternetReachable: boolean | null
-      }) => {
+      __triggerState: (state: NetworkState) => {
+        latestState = state
         for (const listener of listeners) {
           listener(state)
         }
@@ -82,6 +95,11 @@ describe(`ReactNativeOnlineDetector`, () => {
     // Clear internal listener arrays
     ;(AppState as any).__listeners.length = 0
     ;(NetInfo as any).__listeners.length = 0
+    ;(NetInfo as any).__resetSubscriptionDelivery()
+    ;(NetInfo as any).__setLatestState({
+      isConnected: true,
+      isInternetReachable: true,
+    })
   })
 
   describe(`initialization`, () => {
@@ -110,6 +128,60 @@ describe(`ReactNativeOnlineDetector`, () => {
   })
 
   describe(`network connectivity changes`, () => {
+    it(`uses the initial state delivered by the network subscription`, () => {
+      ;(NetInfo as any).__setLatestState({
+        isConnected: false,
+        isInternetReachable: false,
+      })
+      const detector = new ReactNativeOnlineDetector()
+      try {
+        expect(detector.isOnline()).toBe(false)
+        expect(NetInfo.fetch).not.toHaveBeenCalled()
+      } finally {
+        detector.dispose()
+      }
+    })
+
+    it(`accepts an asynchronously delivered initial subscription state`, async () => {
+      ;(NetInfo as any).__setLatestState({
+        isConnected: false,
+        isInternetReachable: false,
+      })
+      ;(NetInfo as any).__deliverNextSubscriptionAsync()
+      const detector = new ReactNativeOnlineDetector()
+      try {
+        expect(detector.isOnline()).toBe(true)
+        await Promise.resolve()
+        expect(detector.isOnline()).toBe(false)
+        expect(NetInfo.fetch).not.toHaveBeenCalled()
+      } finally {
+        detector.dispose()
+      }
+    })
+
+    it(`notifies for changes after the subscription's initial state`, () => {
+      ;(NetInfo as any).__setLatestState({
+        isConnected: false,
+        isInternetReachable: false,
+      })
+      const detector = new ReactNativeOnlineDetector()
+      const callback = vi.fn()
+      detector.subscribe(callback)
+      try {
+        ;(NetInfo as any).__triggerState({
+          isConnected: true,
+          isInternetReachable: true,
+        })
+
+        expect({
+          notifications: callback.mock.calls.length,
+          isOnline: detector.isOnline(),
+        }).toEqual({ notifications: 1, isOnline: true })
+      } finally {
+        detector.dispose()
+      }
+    })
+
     it(`should notify subscribers when transitioning from offline to online`, () => {
       const detector = new ReactNativeOnlineDetector()
       const callback = vi.fn()

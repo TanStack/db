@@ -1,6 +1,9 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { KeyScheduler } from '../src/executor/KeyScheduler'
+import {
+  KeyScheduler,
+  reconcilePendingTransactions,
+} from '../src/executor/KeyScheduler'
 import type { OfflineTransaction } from '../src/types'
 
 type Command =
@@ -17,6 +20,7 @@ type Command =
   | { type: `fail` }
   | { type: `retry`; delay: number; payload: number }
   | { type: `bulkUpdate`; payload: number }
+  | { type: `remove`; ids: Array<string> }
   | { type: `advance`; duration: number }
   | { type: `clear` }
 
@@ -160,6 +164,11 @@ function applyPlanningCommand(
     state.retryableId = undefined
   } else if (nextCommand.type === `advance`) {
     state.now += nextCommand.duration * 1000
+  } else if (nextCommand.type === `remove`) {
+    const ids = new Set(nextCommand.ids)
+    state.pending = state.pending.filter(
+      ({ id }) => id === state.activeId || !ids.has(id),
+    )
   } else if (nextCommand.type === `clear`) {
     state.pending = []
     state.activeId = undefined
@@ -182,6 +191,22 @@ function buildLegalHistory(tokens: Array<CommandToken>): Array<Command> {
       { type: `advance`, duration: token.duration },
       { type: `clear` },
     ]
+    const removable = state.pending.filter(({ id }) => id !== state.activeId)
+    if (removable.length > 0) {
+      const mode = Math.abs(token.payload) % 4
+      const ids =
+        mode === 0
+          ? []
+          : mode === 1
+            ? [removable[token.slot % removable.length]!.id]
+            : mode === 2
+              ? removable.map(({ id }) => id)
+              : [removable[0]!.id, `missing`]
+      choices.push({
+        type: `remove`,
+        ids,
+      })
+    }
 
     if (state.pending.length < 5) {
       choices.push({
@@ -419,6 +444,18 @@ function runHistory(
       const duration = nextCommand.duration * 1000
       vi.advanceTimersByTime(duration)
       model.now += duration
+    } else if (nextCommand.type === `remove`) {
+      const expectedRemoved = [
+        ...new Set(nextCommand.ids.filter((id) => id !== model.activeId)),
+      ]
+      expect(reconcilePendingTransactions(scheduler, nextCommand.ids)).toEqual(
+        expectedRemoved,
+      )
+      const ids = new Set(nextCommand.ids)
+      model.pending = model.pending.filter(
+        ({ transaction }) =>
+          transaction.id === model.activeId || !ids.has(transaction.id),
+      )
     } else {
       scheduler.clear()
       model.pending = []
@@ -458,6 +495,7 @@ describe(`KeyScheduler generated lifecycle`, () => {
       { type: `schedule`, slot: 1, createdAt: 0, delay: 0, payload: 2 },
       { type: `getNext` },
       { type: `start` },
+      { type: `remove`, ids: [`tx-0`, `tx-1`, `missing`] },
       { type: `fail` },
       { type: `retry`, delay: 2, payload: 3 },
       { type: `getNext` },
@@ -476,6 +514,7 @@ describe(`KeyScheduler generated lifecycle`, () => {
         `fail`,
         `retry`,
         `bulkUpdate`,
+        `remove`,
         `advance`,
         `complete`,
         `clear`,
@@ -593,5 +632,59 @@ describe(`KeyScheduler generated lifecycle`, () => {
         }),
       }),
     ).toThrow()
+  })
+
+  it(`rejects retaining selectively revoked work on its scheduler path`, () => {
+    const history: Array<Command> = [
+      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
+      { type: `schedule`, slot: 1, createdAt: 1, delay: 0, payload: 2 },
+      { type: `remove`, ids: [`tx-0`] },
+    ]
+
+    expect(() =>
+      runHistory(history, {
+        commandIndex: 2,
+        apply: (actual) => ({
+          ...actual,
+          pending: [
+            {
+              id: `tx-0`,
+              createdAt: BASE_TIME,
+              nextAttemptAt: BASE_TIME,
+              retryCount: 0,
+              payload: 1,
+            },
+            ...actual.pending,
+          ],
+          pendingCount: actual.pendingCount + 1,
+        }),
+      }),
+    ).toThrow()
+  })
+
+  it(`selectively removes only unissued work`, () => {
+    const scheduler = new KeyScheduler()
+    const active = createTransaction(``, BASE_TIME, BASE_TIME, 1)
+    const removed = createTransaction(`removed`, BASE_TIME + 1, BASE_TIME, 2)
+    const retained = createTransaction(`retained`, BASE_TIME + 2, BASE_TIME, 3)
+    scheduler.schedule(active)
+    scheduler.schedule(removed)
+    scheduler.schedule(retained)
+    scheduler.markStarted(active)
+
+    expect(
+      reconcilePendingTransactions(scheduler, [
+        active.id,
+        removed.id,
+        `missing`,
+      ]),
+    ).toEqual([removed.id, `missing`])
+
+    expect({
+      pending: scheduler.getAllPendingTransactions().map(({ id }) => id),
+      running: scheduler.getRunningCount(),
+    }).toEqual({ pending: [active.id, retained.id], running: 1 })
+    scheduler.markCompleted(active)
+    expect(scheduler.getNext()?.id).toBe(retained.id)
   })
 })
