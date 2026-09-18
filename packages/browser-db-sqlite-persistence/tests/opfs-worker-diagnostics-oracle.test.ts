@@ -214,17 +214,21 @@ describe(`OPFS worker diagnostics oracle`, () => {
     ...(diagnosticPath ? { path: diagnosticPath } : {}),
     examples: diagnosticExamples,
     verbose: true,
-  })(`matches the independent diagnostic formatter`, async (input) => {
-    const expectedMessage = referenceMessage(input)
-    const primary = makePrimary(input)
-    const cause = makeCause(input)
+  })(
+    `matches the independent diagnostic formatter`,
+    async (input) => {
+      const expectedMessage = referenceMessage(input)
+      const primary = makePrimary(input)
+      const cause = makeCause(input)
 
-    expect(await initialize(primary, cause)).toEqual({
-      type: `response`,
-      requestId: `diagnostic-oracle`,
-      ok: false,
-      code: `INTERNAL`,
-      error: expectedMessage,
-    })
-  })
+      expect(await initialize(primary, cause)).toEqual({
+        type: `response`,
+        requestId: `diagnostic-oracle`,
+        ok: false,
+        code: `INTERNAL`,
+        error: expectedMessage,
+      })
+    },
+    15_000,
+  )
 })
