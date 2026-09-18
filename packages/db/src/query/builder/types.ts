@@ -173,6 +173,8 @@ type ResultFromBranch<TBranch> =
 type UnionBranchResult<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
   ResultFromBranch<TBranches[number]>
 
+declare const BranchUnionRefs: unique symbol
+
 type UnionBranchSchema<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
   UnionBranchResult<TBranches> extends infer TResult
     ? {
@@ -183,13 +185,14 @@ type UnionBranchSchema<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
 export type ContextFromUnionBranches<
   TBranches extends readonly [QueryBuilder<any>, ...Array<QueryBuilder<any>>],
 > = {
-  baseSchema: UnionBranchSchema<TBranches> & ContextSchema
-  schema: UnionBranchSchema<TBranches> & ContextSchema
+  baseSchema: UnionBranchSchema<TBranches>
+  schema: UnionBranchSchema<TBranches>
   refsSchema: UnionBranchSchema<TBranches>
   fromSourceName: keyof UnionBranchSchema<TBranches> & string
   hasJoins: false
   result: PrettifyIfPlainObject<UnionBranchResult<TBranches>>
   hasResult: true
+  [BranchUnionRefs]: UnionBranchResult<TBranches>
 }
 
 /**
@@ -492,7 +495,7 @@ type ExtractRef<T> = T extends unknown
   ? IsTrueRef<T> extends true
     ? T extends RefLeaf<infer U>
       ? IsNullableRef<T> extends true
-        ? DeepNullable<U>
+        ? U | undefined
         : U
       : never
     : Prettify<ResultTypeFromSelect<WithoutRefBrand<T>>>
@@ -532,14 +535,6 @@ type RefShapeMatches<A, B> =
   (<G>() => G extends A ? 1 : 2) extends <G>() => G extends B ? 1 : 2
     ? true
     : false
-
-// Propagate nullable-join semantics into the user-data shape.
-type DeepNullable<T> =
-  T extends Record<string, any>
-    ? IsPlainObject<T> extends true
-      ? { [K in keyof T]: DeepNullable<T[K]> }
-      : T | undefined
-    : T | undefined
 
 // Helper type to extract the underlying type from various expression types
 type ExtractExpressionType<T> =
@@ -677,46 +672,82 @@ type RefForContextValue<T, Nullable extends boolean = false> = T extends unknown
     : RefLeaf<T, Nullable>
   : never
 type RefsSchemaForContext<TContext extends Context> =
-  IsExactlyUndefined<TContext[`refsSchema`]> extends true
-    ? TContext[`schema`]
-    : NonUndefined<TContext[`refsSchema`]> extends ContextSchema
-      ? NonUndefined<TContext[`refsSchema`]>
-      : TContext[`schema`]
+  `refsSchema` extends keyof TContext
+    ? IsExactlyUndefined<TContext[`refsSchema`]> extends true
+      ? TContext[`schema`]
+      : NonUndefined<TContext[`refsSchema`]>
+    : TContext[`schema`]
+
+type IsNullableContextKey<TContext extends Context, K extends PropertyKey> =
+  TContext[`joinTypes`] extends Record<string, any>
+    ? K extends keyof TContext[`joinTypes`]
+      ? Extract<TContext[`joinTypes`][K], `left` | `full`> extends never
+        ? false
+        : true
+      : K extends FromSourceNamesForOptionality<TContext>
+        ? TContext[`hasUnionFrom`] extends true
+          ? true
+          : HasRightOrFullJoin<TContext>
+        : false
+    : K extends FromSourceNamesForOptionality<TContext>
+      ? TContext[`hasUnionFrom`] extends true
+        ? true
+        : HasRightOrFullJoin<TContext>
+      : false
+
+type RefForContextSchemaValue<
+  T,
+  ForceNullable extends boolean,
+> = ForceNullable extends true
+  ? RefForContextValue<NonNullable<T>, true>
+  : IsNonExactOptional<T> extends true
+    ? IsNonExactNullable<T> extends true
+      ? RefForContextValue<NonNullable<T>, true>
+      : RefForContextValue<NonUndefined<T>, true>
+    : IsNonExactNullable<T> extends true
+      ? RefForContextValue<NonNull<T>, true>
+      : RefForContextValue<T>
+
+type RefsForBranchResult<T, ForceNullable extends boolean> = T extends unknown
+  ? {
+      [K in keyof T]: ForceNullable extends true
+        ? RefForContextValue<T[K], true>
+        : RefForContextSchemaValue<T[K], false>
+    }
+  : never
+
+type BranchUnionResultRefs<TContext extends Context> =
+  typeof BranchUnionRefs extends keyof TContext
+    ? RefsForBranchResult<
+        TContext[typeof BranchUnionRefs],
+        HasRightOrFullJoin<TContext>
+      >
+    : object
+
+type JoinedRefsForContext<TContext extends Context> =
+  TContext[`joinTypes`] extends Record<string, any>
+    ? {
+        [K in keyof TContext[`joinTypes`] &
+          keyof TContext[`schema`]]: RefForContextSchemaValue<
+          TContext[`schema`][K],
+          IsNullableContextKey<TContext, K>
+        >
+      }
+    : object
 
 export type RefsForContext<TContext extends Context> = {
-  [K in KeysOfUnion<RefsSchemaForContext<TContext>>]: IsNonExactOptional<
-    ValueOfUnion<RefsSchemaForContext<TContext>, K>
-  > extends true
-    ? IsNonExactNullable<
-        ValueOfUnion<RefsSchemaForContext<TContext>, K>
-      > extends true
-      ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-        // Extract the non-undefined and non-null part, mark as nullable ref
-        RefForContextValue<
-          NonNullable<ValueOfUnion<RefsSchemaForContext<TContext>, K>>,
-          true
-        >
-      : // T is optional (T | undefined) but not exactly undefined, and not nullable
-        // Extract the non-undefined part, mark as nullable ref
-        RefForContextValue<
-          NonUndefined<ValueOfUnion<RefsSchemaForContext<TContext>, K>>,
-          true
-        >
-    : IsNonExactNullable<
-          ValueOfUnion<RefsSchemaForContext<TContext>, K>
-        > extends true
-      ? // T is nullable (T | null) but not exactly null, and not optional
-        // Extract the non-null part, mark as nullable ref
-        RefForContextValue<
-          NonNull<ValueOfUnion<RefsSchemaForContext<TContext>, K>>,
-          true
-        >
-      : // T is exactly undefined, exactly null, or neither optional nor nullable
-        // Wrap in Ref as-is (includes exact undefined, exact null, and normal types)
-        RefForContextValue<ValueOfUnion<RefsSchemaForContext<TContext>, K>>
+  [K in Exclude<
+    KeysOfUnion<RefsSchemaForContext<TContext>>,
+    keyof JoinedRefsForContext<TContext> | keyof BranchUnionResultRefs<TContext>
+  >]: RefForContextSchemaValue<
+    ValueOfUnion<RefsSchemaForContext<TContext>, K>,
+    IsNullableContextKey<TContext, K>
+  >
 } & (TContext[`hasResult`] extends true
   ? { $selected: Ref<TContext[`result`]> }
-  : {})
+  : {}) &
+  BranchUnionResultRefs<TContext> &
+  JoinedRefsForContext<TContext>
 
 /**
  * Type Detection Helpers
@@ -887,32 +918,6 @@ type WithoutRefBrand<T> =
     : T
 
 /**
- * PreserveSingleResultFlag - Conditionally includes the singleResult flag
- *
- * This helper type ensures the singleResult flag is only added to the context when it's
- * explicitly true. It uses a non-distributive conditional (tuple wrapper) to prevent
- * unexpected behavior when TFlag is a union type.
- *
- * @template TFlag - The singleResult flag value to check
- * @returns { singleResult: true } if TFlag is true, otherwise {}
- */
-type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
-  ? { singleResult: true }
-  : {}
-
-type PreserveHasResultFlag<TFlag> = [TFlag] extends [true]
-  ? { hasResult: true }
-  : {}
-
-type PreserveUnionFromFlag<TFlag> = [TFlag] extends [true]
-  ? { hasUnionFrom: true }
-  : {}
-
-type PreserveFromSourceNames<TNames> = [TNames] extends [ReadonlyArray<string>]
-  ? { fromSourceNames: TNames }
-  : {}
-
-/**
  * MergeContextWithJoinType - Creates a new context after a join operation
  *
  * This is the core type that handles the complex logic of merging schemas
@@ -933,13 +938,13 @@ type PreserveFromSourceNames<TNames> = [TNames] extends [ReadonlyArray<string>]
  * - `hasJoins`: Set to true
  * - `joinTypes`: Updated to track this join type
  * - `result`: Preserved from previous operations
- * - `singleResult`: Preserved only if already true (via PreserveSingleResultFlag)
+ * - All other context state is preserved
  */
 export type MergeContextWithJoinType<
   TContext extends Context,
   TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
-> = {
+> = Omit<TContext, `schema` | `refsSchema` | `hasJoins` | `joinTypes`> & {
   baseSchema: TContext[`baseSchema`]
   // Apply optionality immediately to the schema
   schema: ApplyJoinOptionalityToMergedSchema<
@@ -962,11 +967,7 @@ export type MergeContextWithJoinType<
     : {}) & {
     [K in keyof TNewSchema & string]: TJoinType
   }
-  result: TContext[`result`]
-} & PreserveSingleResultFlag<TContext[`singleResult`]> &
-  PreserveHasResultFlag<TContext[`hasResult`]> &
-  PreserveUnionFromFlag<TContext[`hasUnionFrom`]> &
-  PreserveFromSourceNames<TContext[`fromSourceNames`]>
+}
 
 /**
  * ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
@@ -1267,20 +1268,19 @@ export type HasJoinType<
 export type MergeContextForJoinCallback<
   TContext extends Context,
   TNewSchema extends ContextSchema,
-> = {
+> = Omit<TContext, `schema` | `refsSchema` | `hasJoins` | `joinTypes`> & {
   baseSchema: TContext[`baseSchema`]
   // Merge schemas without applying join optionality - both are non-optional in join condition
   schema: TContext[`schema`] & TNewSchema
   refsSchema: RefsSchemaForContext<TContext> & TNewSchema
   fromSourceName: TContext[`fromSourceName`]
   hasJoins: true
-  joinTypes: TContext[`joinTypes`] extends Record<string, any>
+  joinTypes: (TContext[`joinTypes`] extends Record<string, any>
     ? TContext[`joinTypes`]
-    : {}
-  result: TContext[`result`]
-} & PreserveHasResultFlag<TContext[`hasResult`]> &
-  PreserveUnionFromFlag<TContext[`hasUnionFrom`]> &
-  PreserveFromSourceNames<TContext[`fromSourceNames`]>
+    : {}) & {
+    [K in keyof TNewSchema & string]: `inner`
+  }
+}
 
 /**
  * WithResult - Updates a context with a new result type after select()
@@ -1297,10 +1297,11 @@ export type MergeContextForJoinCallback<
  * result type display cleanly in IDEs.
  */
 export type WithResult<TContext extends Context, TResult> = Prettify<
-  Omit<TContext, `result` | `hasResult`> & {
-    result: PrettifyIfPlainObject<TResult>
-    hasResult: true
-  }
+  Omit<TContext, `result` | `hasResult`> &
+    Pick<TContext, `baseSchema` | `schema` | `fromSourceName`> & {
+      result: PrettifyIfPlainObject<TResult>
+      hasResult: true
+    }
 >
 
 /**

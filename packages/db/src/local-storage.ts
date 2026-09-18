@@ -737,6 +737,7 @@ function createLocalStorageSync<T extends object>(
     manualTrigger?: () => void
     collection: any
   } = {
+    rowUpdateMode: `full`,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady } = params
 

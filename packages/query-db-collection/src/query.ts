@@ -3,7 +3,9 @@ import {
   LoadSubsetOperationAbortedError,
   deepEquals,
   getLoadSubsetDemandKey,
+  warnOnce,
   withCollectionConfigFactory,
+  withCollectionSyncConfigFactory,
 } from '@tanstack/db'
 import {
   GetKeyRequiredError,
@@ -995,8 +997,13 @@ export function queryCollectionOptions(
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
-    const resultApplicationTokens = new Map<string, object>()
-    const resultApplicationControllers = new Map<string, Set<AbortController>>()
+    type ResultApplicationController = AbortController & {
+      rollback?: () => void
+    }
+    const resultApplicationControllers = new Map<
+      string,
+      ResultApplicationController
+    >()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -1005,20 +1012,41 @@ export function queryCollectionOptions(
     let persistedRetentionMaintenance = Promise.resolve()
 
     const invalidatePendingResultApplication = (hashedQueryKey: string) => {
+      const controller = resultApplicationControllers.get(hashedQueryKey)
+      controller?.rollback?.()
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
-      resultApplicationTokens.delete(hashedQueryKey)
-      resultApplicationControllers
-        .get(hashedQueryKey)
-        ?.forEach((controller) => controller.abort())
       resultApplicationControllers.delete(hashedQueryKey)
+      controller?.abort()
+    }
+
+    const waitForCurrentResultApplication = async (
+      hashedQueryKey: string,
+    ): Promise<void> => {
+      for (;;) {
+        const application = pendingResultApplications.get(hashedQueryKey)
+        if (!application) return
+        try {
+          await application
+        } catch (error) {
+          if (
+            pendingResultApplications.get(hashedQueryKey) === application ||
+            (failedResultApplications.has(hashedQueryKey) &&
+              failedResultApplications.get(hashedQueryKey) === error)
+          ) {
+            throw error
+          }
+        }
+      }
     }
 
     const getResultApplicationSettlement = (
       hashedQueryKey: string,
     ): true | Promise<void> => {
       const pending = pendingResultApplications.get(hashedQueryKey)
-      if (pending) return pending
+      if (pending) {
+        return waitForCurrentResultApplication(hashedQueryKey)
+      }
 
       if (failedResultApplications.has(hashedQueryKey)) {
         return Promise.reject(failedResultApplications.get(hashedQueryKey))
@@ -1589,6 +1617,7 @@ export function queryCollectionOptions(
     const applySuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
+      applicationToken: ResultApplicationController,
       persistedBaseline?: Map<
         string | number,
         {
@@ -1649,9 +1678,17 @@ export function queryCollectionOptions(
         previousOwnersByRow.set(key, owners ? new Set(owners) : undefined)
       })
       let transactionActive = false
+      let resultTransaction: { applicationStarted: boolean } | undefined
 
       const restoreOwnershipTracking = () => {
+        // Core flips this at its no-cancel point before publication can reenter.
+        if (resultTransaction?.applicationStarted) return
         if (!state.observers.has(hashedQueryKey)) return
+        if (
+          resultApplicationControllers.get(hashedQueryKey) !== applicationToken
+        ) {
+          return
+        }
 
         if (previousOwnedRows === undefined) {
           queryToRows.delete(hashedQueryKey)
@@ -1666,6 +1703,7 @@ export function queryCollectionOptions(
           }
         })
       }
+      applicationToken.rollback = restoreOwnershipTracking
 
       try {
         // From this point onward the result, including an empty result, is the
@@ -1722,6 +1760,7 @@ export function queryCollectionOptions(
           }
         })
 
+        resultTransaction = collection._state.pendingSyncedTransactions.at(-1)
         const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -1729,14 +1768,8 @@ export function queryCollectionOptions(
 
         // Readiness is publication: do not expose it until the establishing
         // transaction's rows and events are visible.
-        if (applied !== true) {
-          await applied
-        }
-        if (signal?.aborted) {
-          restoreOwnershipTracking()
-          return
-        }
-        markReady()
+        if (applied !== true) await applied
+        if (!signal?.aborted) markReady()
       } catch (error) {
         restoreOwnershipTracking()
 
@@ -1756,7 +1789,7 @@ export function queryCollectionOptions(
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
-      applicationToken: object,
+      applicationToken: ResultApplicationController,
       signal: AbortSignal,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
@@ -1764,11 +1797,17 @@ export function queryCollectionOptions(
         await loadPersistedBaselineForQuery(hashedQueryKey)
       if (
         collection.status === `cleaned-up` ||
-        resultApplicationTokens.get(hashedQueryKey) !== applicationToken
+        resultApplicationControllers.get(hashedQueryKey) !== applicationToken
       ) {
         return
       }
-      await applySuccessfulResult(queryKey, result, persistedBaseline, signal)
+      await applySuccessfulResult(
+        queryKey,
+        result,
+        applicationToken,
+        persistedBaseline,
+        signal,
+      )
     }
 
     const trackResultApplication = (
@@ -1806,26 +1845,24 @@ export function queryCollectionOptions(
 
     const enqueueResultApplication = (
       hashedQueryKey: string,
-      apply: (signal: AbortSignal) => Promise<void>,
+      apply: (
+        signal: AbortSignal,
+        applicationToken: ResultApplicationController,
+      ) => Promise<void>,
     ): void => {
-      const controller = new AbortController()
-      const controllers =
-        resultApplicationControllers.get(hashedQueryKey) ?? new Set()
-      controllers.add(controller)
-      resultApplicationControllers.set(hashedQueryKey, controllers)
-      const previousApplication = pendingResultApplications.get(hashedQueryKey)
-      const run = () => apply(controller.signal)
-      const application = previousApplication
-        ? previousApplication.then(run, run)
-        : run()
+      invalidatePendingResultApplication(hashedQueryKey)
+      const controller: ResultApplicationController = new AbortController()
+      resultApplicationControllers.set(hashedQueryKey, controller)
+      const application = apply(controller.signal, controller)
       const cleanupController = () => {
-        controllers.delete(controller)
-        if (controllers.size === 0) {
+        if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
         }
       }
       void application.then(cleanupController, cleanupController)
-      trackResultApplication(hashedQueryKey, application)
+      if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+        trackResultApplication(hashedQueryKey, application)
+      }
     }
 
     // eslint-disable-next-line no-shadow
@@ -1911,20 +1948,14 @@ export function queryCollectionOptions(
               }
               return
             }
+            if (result.isFetching) return
 
-            const applicationToken = {}
-            resultApplicationTokens.set(hashedQueryKey, applicationToken)
-            enqueueResultApplication(hashedQueryKey, (signal) =>
-              reconcileSuccessfulResult(
-                queryKey,
-                result,
-                applicationToken,
-                signal,
-              ),
+            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+              reconcileSuccessfulResult(queryKey, result, token, signal),
             )
           } else {
-            enqueueResultApplication(hashedQueryKey, (signal) =>
-              applySuccessfulResult(queryKey, result, undefined, signal),
+            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+              applySuccessfulResult(queryKey, result, token, undefined, signal),
             )
           }
         } else {
@@ -2152,7 +2183,6 @@ export function queryCollectionOptions(
       }
 
       const hasListeners = observer?.hasListeners() ?? false
-
       if (hasListeners) {
         // During invalidateQueries, TanStack Query keeps internal listeners alive.
         // Leave refcount at 0 but keep observer so it can resubscribe.
@@ -2721,57 +2751,82 @@ export function queryCollectionOptions(
     () => writeContext,
   )
 
+  // Helper to handle deprecated auto-refetch behavior with warnings
+  async function handleDeprecatedAutoRefetch(
+    handlerResult: unknown,
+  ): Promise<void> {
+    const canHaveProperties =
+      (typeof handlerResult === `object` && handlerResult !== null) ||
+      typeof handlerResult === `function`
+    const explicitRefetchFalse =
+      canHaveProperties &&
+      'refetch' in handlerResult &&
+      (handlerResult as Record<string, unknown>).refetch === false
+
+    if (explicitRefetchFalse) {
+      return
+    } else {
+      warnOnce(
+        'query-collection-auto-refetch',
+        '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
+          'This behavior will be removed in v1.0. To prepare: ' +
+          '(1) Add `await collection.utils.refetch()` and temporarily return `{ refetch: false }` to avoid a second refetch, or ' +
+          "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
+          'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
+      )
+      await refetch()
+    }
+  }
+
   // Create wrapper handlers for direct persistence operations that handle refetching
+  // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<any>) => {
+    ? async (params: InsertMutationFnParams<any>): Promise<void> => {
         const handlerResult = (await onInsert(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: UpdateMutationFnParams<any>) => {
+    ? async (params: UpdateMutationFnParams<any>): Promise<void> => {
         const handlerResult = (await onUpdate(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: DeleteMutationFnParams<any>) => {
+    ? async (params: DeleteMutationFnParams<any>): Promise<void> => {
         const handlerResult = (await onDelete(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   // Create utils instance with state and dependencies passed explicitly
   const utils: any = new QueryCollectionUtilsImpl(state, refetch, writeUtils)
 
+  const sync = withCollectionSyncConfigFactory(
+    { sync: enhancedInternalSync },
+    (source, utilities, startSyncIfIdle) => {
+      const boundUtilities = utilities as Record<
+        string,
+        (...args: Array<any>) => any
+      >
+      for (const name of Object.keys(writeUtils)) {
+        const write = boundUtilities[name]!
+        boundUtilities[name] = (...args) => {
+          startSyncIfIdle()
+          return write(...args)
+        }
+      }
+      return source
+    },
+  )
+
   const options = {
     ...baseCollectionConfig,
     getKey,
     syncMode,
-    sync: { sync: enhancedInternalSync },
+    sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
