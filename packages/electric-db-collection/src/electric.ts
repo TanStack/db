@@ -1857,6 +1857,12 @@ function createElectricSync<T extends Row<unknown>>(
         !isResettingSnapshot
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
+      // Presence belongs to the source transaction, which can span multiple
+      // ShapeStream callbacks. Rebuild it only when no transaction is open;
+      // otherwise later callbacks must see writes staged by earlier ones.
+      const pendingPresence = new Map<string | number, boolean>()
+      let usesBaseline = true
+
       // Track keys that have been synced to handle overlapping subset queries.
       // When multiple subset queries return the same row, the server sends `insert`
       // for each response. We convert subsequent inserts to updates to avoid
@@ -2024,6 +2030,8 @@ function createElectricSync<T extends Row<unknown>>(
           begin()
           transactionStarted = true
           truncate()
+          pendingPresence.clear()
+          usesBaseline = false
           syncedKeys.clear()
           clearTagTrackingState()
           isResettingSnapshot = true
@@ -2033,23 +2041,25 @@ function createElectricSync<T extends Row<unknown>>(
         // Applied rows can also arrive through persistence invalidations.
         // Overlay only unapplied writes, once per callback rather than once
         // per message. A queued truncate fences off the previous snapshot.
-        const pendingPresence = new Map<string | number, boolean>()
-        let usesBaseline = true
-        for (const pending of collection._state.pendingSyncedTransactions) {
-          if (pending.truncate) {
-            pendingPresence.clear()
-            usesBaseline = false
+        if (!transactionStarted) {
+          pendingPresence.clear()
+          usesBaseline = true
+          for (const pending of collection._state.pendingSyncedTransactions) {
+            if (pending.truncate) {
+              pendingPresence.clear()
+              usesBaseline = false
+            }
+            for (const operation of pending.operations) {
+              pendingPresence.set(operation.key, operation.type !== `delete`)
+            }
           }
-          for (const operation of pending.operations) {
-            pendingPresence.set(operation.key, operation.type !== `delete`)
-          }
-        }
-        for (const message of bufferedMessages) {
-          if (isChangeMessage(message)) {
-            pendingPresence.set(
-              collection.getKeyFromItem(message.value),
-              message.headers.operation !== `delete`,
-            )
+          for (const message of bufferedMessages) {
+            if (isChangeMessage(message)) {
+              pendingPresence.set(
+                collection.getKeyFromItem(message.value),
+                message.headers.operation !== `delete`,
+              )
+            }
           }
         }
 
@@ -2300,7 +2310,15 @@ function createElectricSync<T extends Row<unknown>>(
             void applied.then(
               () =>
                 wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
-              () => undefined,
+              (error: unknown) => {
+                if (!isActiveLifecycle() || abortController.signal.aborted) {
+                  return
+                }
+                streamErrorVersion++
+                unsubscribeStream()
+                abortController.abort()
+                if (collection.status !== `error`) markError(error)
+              },
             )
           }
 

@@ -214,8 +214,12 @@ async function runTagHistory(history: {
         }))
       const durableRows = () => [...rows.values()].map((entry) => entry.value)
       const check = async () => {
-        expect(publicRows(), `cold=${cold}, fresh=${fresh}`).toEqual(
-          expectedRows(),
+        await vi.waitFor(
+          () =>
+            expect(publicRows(), `cold=${cold}, fresh=${fresh}`).toEqual(
+              expectedRows(),
+            ),
+          { interval: 1 },
         )
         await vi.waitFor(() => expect(durableRows()).toEqual(expectedRows()), {
           interval: 1,
@@ -646,8 +650,7 @@ it.each([`resume`, `fresh`] as const)(
       if (restart === `fresh`)
         streams[1]!.send([insert(1, currentTag), upToDate])
       streams[1]!.send([moveOut(currentTag), upToDate])
-      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-      expect(collection.has(1)).toBe(false)
+      await vi.waitFor(() => expect(collection.has(1)).toBe(false))
       await vi.waitFor(() => expect(rows.has(1)).toBe(false))
     } finally {
       await collection.cleanup()

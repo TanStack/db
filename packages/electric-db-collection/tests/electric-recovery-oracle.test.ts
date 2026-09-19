@@ -212,9 +212,9 @@ describe(`persisted Electric recovery laws`, () => {
       f.record(`before`)
       subscribers[0]!([change(`update`, { id: 1, name: `wrong` }), upToDate])
       subscribers[0]!([change(`update`, { id: 1, name: `correct` }), upToDate])
-      f.record(`repaired`)
       const correct = [{ ...oldRow, name: `correct` }]
-      expect(f.publicRows()).toEqual(correct)
+      await vi.waitFor(() => expect(f.publicRows()).toEqual(correct))
+      f.record(`repaired`)
       const entries = f.exposures.slice(cut)
       expect(entries[0]!.rows).toEqual([oldRow])
       expect(
