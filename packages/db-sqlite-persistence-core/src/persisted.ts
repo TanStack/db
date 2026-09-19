@@ -596,15 +596,17 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   beginOptions?: { immediate?: boolean }
   signal?: AbortSignal
   applyToCollection: () => SyncAppliedReceipt
+  shouldFailStopOnAbort?: () => boolean
   resolveApplied?: () => void
   rejectApplied?: (error: unknown) => void
 }
 
 type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   BufferedSyncTransaction<T, TKey>,
-  `applyToCollection`
+  `applyToCollection` | `shouldFailStopOnAbort`
 > & {
   queuedBecauseHydrating: boolean
+  hasDependentSuccessor: boolean
   terminalFailure?: { error: unknown }
 }
 
@@ -1564,7 +1566,14 @@ class PersistedCollectionRuntime<
     this.throwIfTerminal()
     this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
     if (transaction.signal?.aborted) {
-      transaction.rejectApplied?.(new SyncTransactionAbortedError())
+      const error = new SyncTransactionAbortedError()
+      transaction.rejectApplied?.(error)
+      if (transaction.shouldFailStopOnAbort?.()) {
+        throw this.markTerminalFailure(error, transaction.lifecycleGeneration)
+      }
+      if (!transaction.rejectApplied) {
+        throw error
+      }
       return
     }
 
@@ -2495,8 +2504,49 @@ function createWrappedSyncConfig<
     ...sourceSyncConfig,
     sync: (params) => {
       const transactionStack: Array<OpenSyncTransaction<T, TKey>> = []
+      const pendingPublicationTransactions: Array<
+        OpenSyncTransaction<T, TKey>
+      > = []
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
+      const removePendingPublicationTransaction = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const index = pendingPublicationTransactions.indexOf(transaction)
+        if (index !== -1) pendingPublicationTransactions.splice(index, 1)
+      }
+      const getPendingRowMetadataWrite = (key: TKey) => {
+        for (
+          let index = pendingPublicationTransactions.length - 1;
+          index >= 0;
+          index--
+        ) {
+          const transaction = pendingPublicationTransactions[index]!
+          const write = transaction.rowMetadataWrites.get(key)
+          if (write) return { found: true, write }
+          if (transaction.truncate) {
+            return {
+              found: true,
+              write: { type: `delete` as const },
+            }
+          }
+        }
+        return { found: false as const }
+      }
+      const getPendingCollectionMetadataWrite = (key: string) => {
+        for (
+          let index = pendingPublicationTransactions.length - 1;
+          index >= 0;
+          index--
+        ) {
+          const write =
+            pendingPublicationTransactions[index]!.collectionMetadataWrites.get(
+              key,
+            )
+          if (write) return { found: true, write }
+        }
+        return { found: false as const }
+      }
       let fullStartPromise: Promise<void> | null = null
       const startupState = { cleanedUp: false }
       const acquisitions = new Map<LoadSubsetOptions, { forwarded: boolean }>()
@@ -2510,47 +2560,55 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
         signal?: AbortSignal,
       ): SyncAppliedReceipt => {
-        params.begin(transaction.beginOptions)
+        try {
+          params.begin(transaction.beginOptions)
 
-        if (transaction.truncate) {
-          params.truncate()
-        }
-
-        for (const operation of transaction.operations) {
-          if (operation.type === `delete`) {
-            params.write({
-              type: `delete`,
-              key: operation.key,
-            })
-          } else {
-            params.write({
-              type: `update`,
-              value: operation.value,
-              metadata: operation.metadata,
-            })
+          if (transaction.truncate) {
+            params.truncate()
           }
-        }
 
-        for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
-          if (metadataWrite.type === `delete`) {
-            params.metadata?.row.delete(key)
-          } else {
-            params.metadata?.row.set(key, metadataWrite.value)
+          for (const operation of transaction.operations) {
+            if (operation.type === `delete`) {
+              params.write({
+                type: `delete`,
+                key: operation.key,
+              })
+            } else {
+              params.write({
+                type: `update`,
+                value: operation.value,
+                metadata: operation.metadata,
+              })
+            }
           }
-        }
 
-        for (const [
-          key,
-          metadataWrite,
-        ] of transaction.collectionMetadataWrites) {
-          if (metadataWrite.type === `delete`) {
-            params.metadata?.collection.delete(key)
-          } else {
-            params.metadata?.collection.set(key, metadataWrite.value)
+          for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
+            if (metadataWrite.type === `delete`) {
+              params.metadata?.row.delete(key)
+            } else {
+              params.metadata?.row.set(key, metadataWrite.value)
+            }
           }
-        }
 
-        return params.commit(signal)
+          for (const [
+            key,
+            metadataWrite,
+          ] of transaction.collectionMetadataWrites) {
+            if (metadataWrite.type === `delete`) {
+              params.metadata?.collection.delete(key)
+            } else {
+              params.metadata?.collection.set(key, metadataWrite.value)
+            }
+          }
+
+          return params.commit(signal)
+        } finally {
+          // Queued source transactions must remain publicly atomic, but later
+          // source work still needs their accepted metadata decisions while
+          // durability is pending. Once publication runs, the collection's
+          // metadata API becomes authoritative again.
+          removePendingPublicationTransaction(transaction)
+        }
       }
       runtime.setSyncControls({
         begin: params.begin,
@@ -2578,17 +2636,24 @@ function createWrappedSyncConfig<
         begin: (options?: { immediate?: boolean }) => {
           if (startupState.cleanedUp) return
           const terminalFailure = getTerminalFailure()
+          const internal = runtime.isApplyingInternally()
+          if (!internal) {
+            for (const transaction of pendingPublicationTransactions) {
+              transaction.hasDependentSuccessor = true
+            }
+          }
           const transaction: OpenSyncTransaction<T, TKey> = {
             operations: [],
             rowMetadataWrites: new Map(),
             collectionMetadataWrites: new Map(),
             truncate: false,
-            internal: runtime.isApplyingInternally(),
+            internal,
             lifecycleGeneration: runtime.getLifecycleGeneration(),
             beginOptions: options,
+            hasDependentSuccessor: false,
             queuedBecauseHydrating:
               terminalFailure === undefined &&
-              !runtime.isApplyingInternally() &&
+              !internal &&
               runtime.isHydratingNow(),
             ...(terminalFailure === undefined ? {} : { terminalFailure }),
           }
@@ -2669,6 +2734,12 @@ function createWrappedSyncConfig<
                   if (openTransaction?.truncate) {
                     return undefined
                   }
+                  const pending = getPendingRowMetadataWrite(key)
+                  if (pending.found) {
+                    return pending.write.type === `delete`
+                      ? undefined
+                      : pending.write.value
+                  }
                   return params.metadata!.row.get(key)
                 },
                 scanPersisted: (options?: PersistedRowScanOptions) =>
@@ -2722,6 +2793,12 @@ function createWrappedSyncConfig<
                       ? undefined
                       : pendingWrite.value
                   }
+                  const pending = getPendingCollectionMetadataWrite(key)
+                  if (pending.found) {
+                    return pending.write.type === `delete`
+                      ? undefined
+                      : pending.write.value
+                  }
                   return params.metadata!.collection.get(key)
                 },
                 set: (key: string, value: unknown) => {
@@ -2766,6 +2843,18 @@ function createWrappedSyncConfig<
                       .metadata!.collection.list()
                       .map(({ key, value }) => [key, value]),
                   )
+                  for (const transaction of pendingPublicationTransactions) {
+                    for (const [
+                      key,
+                      metadataWrite,
+                    ] of transaction.collectionMetadataWrites) {
+                      if (metadataWrite.type === `delete`) {
+                        merged.delete(key)
+                      } else {
+                        merged.set(key, metadataWrite.value)
+                      }
+                    }
+                  }
                   const openTransaction = getOpenTransaction()
                   if (openTransaction) {
                     for (const [
@@ -2840,7 +2929,9 @@ function createWrappedSyncConfig<
             signal,
             applyToCollection: () =>
               applyTransactionToCollection(openTransaction, signal),
+            shouldFailStopOnAbort: () => openTransaction.hasDependentSuccessor,
           }
+          pendingPublicationTransactions.push(openTransaction)
           if (
             openTransaction.queuedBecauseHydrating &&
             runtime.isHydratingNow()
@@ -2857,11 +2948,18 @@ function createWrappedSyncConfig<
               resolveApplied,
               rejectApplied,
             })
+            void applied.then(
+              () => removePendingPublicationTransaction(openTransaction),
+              () => removePendingPublicationTransaction(openTransaction),
+            )
             return applied
           }
 
           const applied = runtime.applyHydrationBufferedTransaction(transaction)
-          void applied.catch(() => undefined)
+          void applied.then(
+            () => removePendingPublicationTransaction(openTransaction),
+            () => removePendingPublicationTransaction(openTransaction),
+          )
           return applied
         },
       }
@@ -2885,6 +2983,7 @@ function createWrappedSyncConfig<
         cleanup: () => {
           startupState.cleanedUp = true
           acquisitions.clear()
+          pendingPublicationTransactions.length = 0
           sourceResult.cleanup?.()
           runtime.cleanup()
         },

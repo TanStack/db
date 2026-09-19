@@ -1788,6 +1788,149 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`rejects a queued suffix derived from an aborted staged metadata layer`, async () => {
+    const adapter = createRecordingAdapter()
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await successfulApply(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `aborted-staged-metadata-suffix`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const aborted = new AbortController()
+    let firstReceipt: Promise<void> | undefined
+    let abortedReceipt: Promise<void> | undefined
+    let dependentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `aborted staged metadata collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `first`, title: `durability gate` },
+      })
+      firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void firstReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `first persistence entered before staged suffix`,
+      )
+
+      sourceParams.begin()
+      sourceParams.metadata!.row.set(`shared`, { owner: `aborted` })
+      abortedReceipt = Promise.resolve(
+        sourceParams.commit(aborted.signal),
+      ).then(() => undefined)
+      void abortedReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      const stagedOwner = sourceParams.metadata!.row.get(`shared`)
+      sourceParams.write({
+        type: `insert`,
+        value: {
+          id: `dependent`,
+          title:
+            (stagedOwner as { owner?: string } | undefined)?.owner ?? `missing`,
+        },
+      })
+      dependentReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void dependentReceipt.catch(() => undefined)
+
+      expect(stagedOwner).toEqual({ owner: `aborted` })
+      aborted.abort()
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(
+        firstReceipt,
+        `first durability gate settled`,
+      )
+      const abortedOutcome = await atPersistedOracleCheckpoint(
+        abortedReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `aborted staged receipt settled`,
+      )
+      const dependentOutcome = await atPersistedOracleCheckpoint(
+        dependentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `dependent staged receipt settled`,
+      )
+      const terminalError =
+        abortedOutcome.status === `rejected` ? abortedOutcome.reason : undefined
+
+      expect({
+        abortedStatus: abortedOutcome.status,
+        abortedName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        dependentStatus: dependentOutcome.status,
+        dependentExact:
+          dependentOutcome.status === `rejected` &&
+          dependentOutcome.reason === terminalError,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        visibleDependent: collection.get(`dependent`),
+        durableDependent: adapter.rows.get(`dependent`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+        applyCalls,
+      }).toEqual({
+        abortedStatus: `rejected`,
+        abortedName: `AbortError`,
+        dependentStatus: `rejected`,
+        dependentExact: true,
+        status: `error`,
+        exactPublicError: true,
+        visibleDependent: undefined,
+        durableDependent: undefined,
+        durableMetadata: undefined,
+        applyCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => firstReceipt?.catch(() => undefined),
+          () => abortedReceipt?.catch(() => undefined),
+          () => dependentReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`does not let an old external adapter success affect a restarted lifecycle`, async () => {
     const id = `external-lifecycle-success`
     const adapter = createRecordingAdapter()
