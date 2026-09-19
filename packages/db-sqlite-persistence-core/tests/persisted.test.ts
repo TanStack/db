@@ -1325,6 +1325,24 @@ describe(`persistedCollectionOptions`, () => {
 
       expect(collection.get(`aborted`)).toBeUndefined()
       expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
+
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `recovered`, title: `Later transaction` },
+      })
+      await remoteCommit?.()
+
+      expect(stripVirtualProps(collection.get(`recovered`))).toEqual({
+        id: `recovered`,
+        title: `Later transaction`,
+      })
+      expect(adapter.rows.get(`recovered`)).toEqual({
+        id: `recovered`,
+        title: `Later transaction`,
+      })
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
     } finally {
       await collection.cleanup()
     }
@@ -1403,6 +1421,133 @@ describe(`persistedCollectionOptions`, () => {
       releaseMutation()
       await transaction.isPersisted.promise.catch(() => undefined)
       await collection.cleanup()
+    }
+  })
+
+  it(`fail-stops a queued suffix when its staged predecessor aborts before publication`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-abort-before-publication-suffix`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            remoteBegin = params.begin
+            remoteWrite = params.write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = params.commit
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const localPersistence = createEventGate()
+    const localTransaction = createTransaction({
+      mutationFn: () => localPersistence.promise,
+    })
+    const aborted = new AbortController()
+    let abortedReceipt: Promise<void> | undefined
+    let dependentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      localTransaction.mutate(() => {
+        collection.insert({ id: `local`, title: `publication gate` })
+      })
+
+      remoteBegin?.()
+      sourceParams.metadata!.row.set(`shared`, { owner: `aborted` })
+      abortedReceipt = Promise.resolve(remoteCommit?.(aborted.signal)).then(
+        () => undefined,
+      )
+      void abortedReceipt.catch(() => undefined)
+
+      remoteBegin?.()
+      const stagedOwner = sourceParams.metadata!.row.get(`shared`)
+      remoteWrite?.({
+        type: `insert`,
+        value: {
+          id: `dependent`,
+          title:
+            (stagedOwner as { owner?: string } | undefined)?.owner ?? `missing`,
+        },
+      })
+      dependentReceipt = Promise.resolve(remoteCommit?.()).then(() => undefined)
+      void dependentReceipt.catch(() => undefined)
+
+      expect(stagedOwner).toEqual({ owner: `aborted` })
+      aborted.abort()
+      const abortedOutcome = await atPersistedOracleCheckpoint(
+        abortedReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `staged predecessor aborted before publication`,
+      )
+      localPersistence.resolve()
+      await localTransaction.isPersisted.promise
+      const dependentOutcome = await atPersistedOracleCheckpoint(
+        dependentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `post-abort staged suffix settled`,
+      )
+      const terminalError =
+        abortedOutcome.status === `rejected` ? abortedOutcome.reason : undefined
+
+      expect({
+        abortedStatus: abortedOutcome.status,
+        abortedName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        dependentStatus: dependentOutcome.status,
+        dependentExact:
+          dependentOutcome.status === `rejected` &&
+          dependentOutcome.reason === terminalError,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        visibleDependent: collection.get(`dependent`),
+        durableDependent: adapter.rows.get(`dependent`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+      }).toEqual({
+        abortedStatus: `rejected`,
+        abortedName: `AbortError`,
+        dependentStatus: `rejected`,
+        dependentExact: true,
+        status: `error`,
+        exactPublicError: true,
+        visibleDependent: undefined,
+        durableDependent: undefined,
+        durableMetadata: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      localPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => abortedReceipt?.catch(() => undefined),
+          () => dependentReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
     }
   })
 

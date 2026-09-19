@@ -1591,11 +1591,14 @@ class PersistedCollectionRuntime<
       }
       transaction.resolveApplied?.()
     } catch (error) {
-      const terminalError =
+      const aborted =
         transaction.signal?.aborted ||
         error instanceof SyncTransactionAbortedError
-          ? error
-          : this.markTerminalFailure(error)
+      const terminalError = aborted
+        ? transaction.shouldFailStopOnAbort?.()
+          ? this.markTerminalFailure(error, transaction.lifecycleGeneration)
+          : error
+        : this.markTerminalFailure(error)
       transaction.rejectApplied?.(terminalError)
       throw terminalError
     }
@@ -2966,6 +2969,7 @@ function createWrappedSyncConfig<
           const terminalFailure =
             openTransaction?.terminalFailure ?? getTerminalFailure()
           if (terminalFailure) {
+            if (openTransaction) settlePendingTransaction(openTransaction)
             return createHandledRejection(terminalFailure.error)
           }
           if (!openTransaction) {
@@ -2977,6 +2981,7 @@ function createWrappedSyncConfig<
           }
 
           if (signal?.aborted) {
+            settlePendingTransaction(openTransaction)
             return createHandledRejection(new SyncTransactionAbortedError())
           }
           const transaction = {
