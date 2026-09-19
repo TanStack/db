@@ -1,33 +1,29 @@
 import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persistence-core'
 import type { SQLiteDriver } from '@tanstack/db-sqlite-persistence-core'
-
-export type ExpoSQLiteBindParams =
-  | ReadonlyArray<unknown>
-  | Record<string, unknown>
-
-export type ExpoSQLiteRunResult = {
-  changes: number
-  lastInsertRowId: number
-}
+import type {
+  SQLiteBindParams,
+  SQLiteBindValue,
+  SQLiteRunResult,
+} from 'expo-sqlite'
 
 export type ExpoSQLiteQueryable = {
   execAsync: (sql: string) => Promise<void>
-  getAllAsync: <T>(
-    sql: string,
-    params?: ExpoSQLiteBindParams,
-  ) => Promise<ReadonlyArray<T>>
-  runAsync: (
-    sql: string,
-    params?: ExpoSQLiteBindParams,
-  ) => Promise<ExpoSQLiteRunResult>
+  getAllAsync: {
+    <T>(sql: string, params: SQLiteBindParams): Promise<ReadonlyArray<T>>
+    <T>(sql: string): Promise<ReadonlyArray<T>>
+  }
+  runAsync: {
+    (sql: string, params: SQLiteBindParams): Promise<SQLiteRunResult>
+    (sql: string): Promise<SQLiteRunResult>
+  }
 }
 
 export type ExpoSQLiteTransaction = ExpoSQLiteQueryable
 
 export type ExpoSQLiteDatabaseLike = ExpoSQLiteQueryable & {
-  withExclusiveTransactionAsync: <T>(
-    task: (transaction: ExpoSQLiteTransaction) => Promise<T>,
-  ) => Promise<T>
+  withExclusiveTransactionAsync: (
+    task: (transaction: ExpoSQLiteTransaction) => Promise<void>,
+  ) => Promise<void>
   closeAsync?: () => Promise<void>
 }
 
@@ -144,10 +140,12 @@ export class ExpoSQLiteDriver implements SQLiteDriver {
   ): Promise<T> {
     return this.enqueue(async () => {
       const database = await this.getDatabase()
-      return database.withExclusiveTransactionAsync(async (transaction) => {
+      let result: T | undefined
+      await database.withExclusiveTransactionAsync(async (transaction) => {
         const transactionDriver = this.createTransactionDriver(transaction)
-        return fn(transactionDriver)
+        result = await fn(transactionDriver)
       })
+      return result as T
     })
   }
 
@@ -225,10 +223,24 @@ export class ExpoSQLiteDriver implements SQLiteDriver {
   }
 }
 
-function normalizeParams(
-  params: ReadonlyArray<unknown>,
-): ExpoSQLiteBindParams | undefined {
-  return params.length > 0 ? [...params] : undefined
+function normalizeBindValue(value: unknown): SQLiteBindValue {
+  if (
+    value === null ||
+    typeof value === `string` ||
+    typeof value === `number` ||
+    typeof value === `boolean` ||
+    value instanceof Uint8Array
+  ) {
+    return value
+  }
+
+  throw new TypeError(
+    `Expo SQLite bind parameters must be strings, numbers, booleans, null, or Uint8Array values`,
+  )
+}
+
+function normalizeParams(params: ReadonlyArray<unknown>): SQLiteBindParams {
+  return params.map(normalizeBindValue)
 }
 
 export function createExpoSQLiteDriver(
