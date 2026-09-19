@@ -886,32 +886,32 @@ export class CollectionImpl<
 
   // Overload 1: Update multiple items with a callback
   update(
-    key: Array<TKey | unknown>,
+    key: Array<TKey>,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update(
-    keys: Array<TKey | unknown>,
+    keys: Array<TKey>,
     config: OperationConfig,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     config: OperationConfig,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
