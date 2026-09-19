@@ -1,6 +1,7 @@
 cleanupUnusedCatalogs: true
 linkWorkspacePackages: true
 preferWorkspacePackages: true
+minimumReleaseAge: 1440
 blockExoticSubdeps: false
 
 packages:
