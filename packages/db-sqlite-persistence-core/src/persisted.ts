@@ -2507,6 +2507,10 @@ function createWrappedSyncConfig<
       const pendingPublicationTransactions: Array<
         OpenSyncTransaction<T, TKey>
       > = []
+      const publicationMarkers = new Map<
+        OpenSyncTransaction<T, TKey>,
+        (typeof params.collection._state.pendingSyncedTransactions)[number]
+      >()
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       const removePendingPublicationTransaction = (
@@ -2514,6 +2518,52 @@ function createWrappedSyncConfig<
       ) => {
         const index = pendingPublicationTransactions.indexOf(transaction)
         if (index !== -1) pendingPublicationTransactions.splice(index, 1)
+      }
+      const reservePublicationMarker = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const pending = params.collection._state.pendingSyncedTransactions
+        const previousLength = pending.length
+        params.begin(transaction.beginOptions)
+        const marker = pending.at(-1)
+        if (!marker || pending.length !== previousLength + 1) {
+          throw new InvalidPersistedCollectionConfigError(
+            `wrapped sync begin did not reserve a publication transaction`,
+          )
+        }
+        publicationMarkers.set(transaction, marker)
+      }
+      const activatePublicationMarker = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const marker = publicationMarkers.get(transaction)
+        const pending = params.collection._state.pendingSyncedTransactions
+        const index = marker ? pending.indexOf(marker) : -1
+        if (!marker || index === -1) {
+          throw new InvalidPersistedCollectionConfigError(
+            `wrapped sync transaction lost its publication reservation`,
+          )
+        }
+        if (index !== pending.length - 1) {
+          pending.splice(index, 1)
+          pending.push(marker)
+        }
+      }
+      const removePublicationMarker = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const marker = publicationMarkers.get(transaction)
+        if (!marker) return
+        const pending = params.collection._state.pendingSyncedTransactions
+        const index = pending.indexOf(marker)
+        if (index !== -1) pending.splice(index, 1)
+        publicationMarkers.delete(transaction)
+      }
+      const settlePendingTransaction = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        removePendingPublicationTransaction(transaction)
+        removePublicationMarker(transaction)
       }
       const getPendingRowMetadataWrite = (key: TKey) => {
         for (
@@ -2560,9 +2610,8 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
         signal?: AbortSignal,
       ): SyncAppliedReceipt => {
+        activatePublicationMarker(transaction)
         try {
-          params.begin(transaction.beginOptions)
-
           if (transaction.truncate) {
             params.truncate()
           }
@@ -2601,13 +2650,24 @@ function createWrappedSyncConfig<
             }
           }
 
-          return params.commit(signal)
-        } finally {
+          const applied = params.commit(signal)
+          if (applied === true) {
+            removePendingPublicationTransaction(transaction)
+          } else {
+            void applied.then(
+              () => removePendingPublicationTransaction(transaction),
+              () => removePendingPublicationTransaction(transaction),
+            )
+          }
+          return applied
+        } catch (error) {
           // Queued source transactions must remain publicly atomic, but later
           // source work still needs their accepted metadata decisions while
-          // durability is pending. Once publication runs, the collection's
-          // metadata API becomes authoritative again.
+          // publication is pending. Once publication runs, the collection's
+          // metadata API becomes authoritative again. A prepublication failure
+          // removes the layer without exposing it.
           removePendingPublicationTransaction(transaction)
+          throw error
         }
       }
       runtime.setSyncControls({
@@ -2657,11 +2717,12 @@ function createWrappedSyncConfig<
               runtime.isHydratingNow(),
             ...(terminalFailure === undefined ? {} : { terminalFailure }),
           }
-          transactionStack.push(transaction)
-
           if (transaction.internal && !terminalFailure) {
             params.begin(options)
+          } else if (!transaction.internal && !terminalFailure) {
+            reservePublicationMarker(transaction)
           }
+          transactionStack.push(transaction)
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
           if (startupState.cleanedUp) return
@@ -2949,16 +3010,16 @@ function createWrappedSyncConfig<
               rejectApplied,
             })
             void applied.then(
-              () => removePendingPublicationTransaction(openTransaction),
-              () => removePendingPublicationTransaction(openTransaction),
+              () => settlePendingTransaction(openTransaction),
+              () => settlePendingTransaction(openTransaction),
             )
             return applied
           }
 
           const applied = runtime.applyHydrationBufferedTransaction(transaction)
           void applied.then(
-            () => removePendingPublicationTransaction(openTransaction),
-            () => removePendingPublicationTransaction(openTransaction),
+            () => settlePendingTransaction(openTransaction),
+            () => settlePendingTransaction(openTransaction),
           )
           return applied
         },
@@ -2984,6 +3045,9 @@ function createWrappedSyncConfig<
           startupState.cleanedUp = true
           acquisitions.clear()
           pendingPublicationTransactions.length = 0
+          for (const transaction of publicationMarkers.keys()) {
+            removePublicationMarker(transaction)
+          }
           sourceResult.cleanup?.()
           runtime.cleanup()
         },
