@@ -1,0 +1,81 @@
+{
+  "schema": "tanstack-trust-design-grammar-sources/v1",
+  "runId": 61,
+  "preservationContract": "v4",
+  "frozenAt": "2026-09-17",
+  "sources": [
+    {
+      "id": "S01",
+      "kind": "rfc",
+      "path": "../../field-trip-evidence-base-rfc-essay/drafts/tanstack-trust-rfc-v0.3.md",
+      "sha256": "cb5d2620be30fdd12baf7173ad383ae76507a665f45cedcdf8c3296f269d8724"
+    },
+    {
+      "id": "S02",
+      "kind": "prior-design-grammar",
+      "fieldLogRunId": 57,
+      "fieldLogEventId": 872,
+      "limit": "Migration and reconstruction input; its design choices are not automatically retained."
+    },
+    {
+      "id": "S03",
+      "kind": "protocols-research",
+      "path": "../protocols-institute-hardness-survey.md",
+      "sha256": "6fc48262b87dbba084cf7705a96fcd3a8059bca1285f8fbb8661e40d939c4ec0"
+    },
+    {
+      "id": "S04",
+      "kind": "blind-donor-perturbation",
+      "path": "../protocol-donor-perturbation.md",
+      "sha256": "663b3de0de9f43a2d328cbffa461a301c2966fc4559254ff568cc67b5b416bae"
+    },
+    {
+      "id": "S05",
+      "kind": "supplied-article",
+      "fieldLogSourceId": 210,
+      "url": "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
+      "limit": "Vendor-authored launch article; schema conformance is supported as a design property, while speed, cost, calibration, and semantic-reliability claims were not independently reproduced."
+    },
+    {
+      "id": "S06",
+      "kind": "user-requirement",
+      "fieldLogEventIds": [1038, 1041],
+      "description": "Trust is linting for agents and should preserve linter-style rule packages, per-project enablement, and easy project-local authoring."
+    },
+    {
+      "id": "S07",
+      "kind": "frozen-preservation-contract",
+      "fieldLogEventIds": [1043, 1044, 1045],
+      "path": "PRESERVATION.md"
+    },
+    {
+      "id": "S08",
+      "kind": "prototype",
+      "paths": {
+        "protocol": "../../../../evidence-base/protocol.ts",
+        "kernel": "../../../../evidence-base/kernel.ts",
+        "service": "../../../../evidence-base/service.mjs",
+        "cli": "../../../../evidence-base/cli.mjs",
+        "lsp": "../../../../evidence-base/lsp-server.mjs",
+        "mcp": "../../../../evidence-base/mcp-server.mjs",
+        "readme": "../../../../evidence-base/README.md"
+      },
+      "sha256": {
+        "protocol": "3efcdff5b3c7148534098e39a85278840b713ad73c2faa1d8da158f139a8df4c",
+        "kernel": "f82d463b8d373a9c0e6560b612e43c0bccba80b098cbfc1837712ebc2070fb74",
+        "service": "4008eecbb4c4fad79b6f5d15ef298b33dee791e3cb9b15b25fff2e2f79d9c51e",
+        "cli": "0843ed3af4779f727c04b413f0250c0a963a7797f09244b7134b606a36401f8b",
+        "lsp": "52b0c58e670479f4655748005486ee48eea5567c69d46616a7e0cb2d5fe373bd",
+        "mcp": "91763c4b091725b9ddc201d3cf381ae16ce60e6a35341eb1d0582ed0306ed5bb",
+        "readme": "115999cc3a1cc5d930704791946dd606924499d9bc7d05693b7c3fc65aba55e0"
+      },
+      "limit": "Bounded Endpoints implementation and migration evidence, not the frozen public API."
+    },
+    {
+      "id": "S09",
+      "kind": "oracle-guide",
+      "path": "../oracle-guidance-reaudit/GUIDE.md",
+      "sha256": "8460ba74a3eddbef29ba2a37a21b1716b63c1fae3f346b4bb5d1d6a191a69b0f"
+    }
+  ]
+}

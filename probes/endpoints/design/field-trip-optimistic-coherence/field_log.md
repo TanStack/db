@@ -2,15 +2,15 @@
 type: field-log
 format: field-log/v1
 event-stream: ./field_log.jsonl
-generated-through: 790
+generated-through: 1181
 title: "Endpoints: optimistic coherence and update delivery"
 opened-at: 2026-09-11T16:54:36.780Z
-updated-at: 2026-09-15T21:44:29.885Z
+updated-at: 2026-09-18T23:09:42.746Z
 ---
 
 # Endpoints: optimistic coherence and update delivery
 
-> Repair the reusable evidence base and its grammar after the Fracture Scan and Hostile Assay: preserve alternative argument routes in explanations, make repair resolution applicability explicit, and establish replay causality independently of delivery order. Extend generated oracle coverage and fault controls, update packaged claim/check authoring workflows, retain original frozen design/audit history, and prepare a portable complete record of this design/prototype work with granular commits and a verified push. Endpoints remains a fixture consumer, not a production integration. Rule semantics are trusted package code; exact policy, durable evidence storage, dependency-specific freshness and broad PostgreSQL generation remain unfinished. Preserve all current comments, decisions, results and known limits for work on another machine.
+> Develop TanStack Trust as a TypeScript system for verifying agent changes against established product and engineering targets and for letting agents work autonomously within explicit team judgment and authority. Trust composes evidence from code, databases, tests, generated oracles, production and external services; lets packages and projects contribute reusable targets while agents can propose new targets and evidence routes; and preserves admission, provenance, lifecycle, implementation limits and consequential uses across TypeScript, LSP, MCP, CLI, CI, deployment, runtime and Devtools. TanStack DB Endpoints remains the incubating implementation.
 
 ## Opening question
 
@@ -18,7 +18,7 @@ What information and lifetime contracts let Endpoints discover affected active c
 
 ## Current working question
 
-Which reusable evidence primitives and argument-checking rules belong in the base, and which semantic judgments belong in claim/check packages consumed by Endpoints?
+Which independently grounded sources of hardness from product requirements through code, deployment and production can TanStack Trust expose and compose to constrain or guide agents, and what coherent TypeScript, LSP, MCP, CLI and Devtools architecture preserves the meaning, authority and limits of each source?
 
 ## Open Questions
 
@@ -39,11 +39,11 @@ Which reusable evidence primitives and argument-checking rules belong in the bas
 
 ## Source shelf
 
-- **Complete chronological user requests through evidence repair** — Extracted and checked 273 chronological user messages. Excluded 8 injected environment/plugin/AGENTS records. Checked supplied latest request and compared text multiplicity with existing journal.
-- **structural-recombine-audit** — Existing artifact, its declared run/status, source pointers and bounded conclusions; full text attached to corresponding recovered run or note where applicable.
-- **structural-recombine** — Existing artifact, its declared run/status, source pointers and bounded conclusions; full text attached to corresponding recovered run or note where applicable.
+- **So what is hardness? Hardness is to protocols as information is to computing** — Entire supplied file: all 1,917 words, from the opening definition and Josh Stark block quotation through the final AI-safety paragraph; 38 displayed lines (37 newline terminators).
+- **Locally installed ESLint 9.39.4 runtime source** — Examined rule loading/context creation, reporting normalization, fix/suggestion construction and conflict selection, selector/traversal order, SourceCode services, config/schema validation, RuleTester assertions, and multipass verifyAndFix behavior.
+- **@eslint/mcp 0.3.12 official documentation and source** — https://eslint.org/docs/latest/use/mcp — Examined MCP tool count, input schema, result content, transport, process lifecycle, client setup, TypeScript-config limits, Node/ESLint compatibility, and the core CLI --mcp delegation path.
 
-[View all 123 sources](?file=field_log.md&page=artifacts&kind=source)
+[View all 215 sources](?file=field_log.md&page=artifacts&kind=source)
 
 ## Key Terms
 
@@ -65,17 +65,31 @@ _None recorded._
 - **Extract exploratory grammar for the evidence base** — Exploratory grammar and layered result saved; freeze hashes and all component ablations verified.
 - **Prototype the evidence base** — Bounded local prototype and fixture-based Endpoints consumer implemented and tested. Production integration and persistence remain unimplemented.
 - **Package claim/check authoring workflows** — Three draft authoring/evidence-maintenance/rule-repair workflows packaged beside the prototype; agent effectiveness not measured.
+- **Extract the Trust API design grammar** — Freeze the RFC, current prototype and relevant validated readouts; confirm preservation properties; extract primitives, invariants, authority overlaps, legal operations, exclusions and adjacent API forms.
+- **Attack the frozen API grammar** — Completed Fracture Scan 62 and blind Hostile Assay 63, then losslessly evaluated them with semantic, TypeScript/linter, and adversarial audits. The final evaluate-review ledger accounts for all 200 raw items, preserves every duplicate and surviving test idea, records focused runtime reproductions, and leaves the frozen v4 candidate unchanged pending an explicit repair pass.
+- **Generate coherent API configurations** — Use a Morphological Field to expose compatible choices and exclusions across package, applicability, admission, explanation and operation shapes; pause for the user's configuration choice.
+- **Sweep the chosen API for deviations** — Apply the Guide-word Sweep to omissions, duplication, stale context, reordering, partial results, forged admission and replay misuse, retaining unresolved reviewer judgments.
+- **Draft the readable API proposal** — Use Source-Bound Drafting to produce a use-case-led RFC with representative TypeScript contracts, Endpoints examples, CLI/LSP/MCP projections, status, open decisions and implementation sequence.
+- **Survey Protocols Institute hardness work** — Completed a validated broad Research Survey of the public Protocol Institute and Summer of Protocols corpus through 2026-09-17. The portable artifact preserves hardness, enactment, formal verification, lifecycle, trust and detailed stigmergic mechanisms and failures without choosing Trust architecture.
+- **Transfer distant protocol mechanisms** — Completed a blind Donor Perturbation using ant pheromone trails, urban search-and-rescue markings and germinal-center selection. The source-traced mapping preserves fit labels, eight explicit non-transfers and nearby negative controls for tandem running, live radio dispatch and T-independent activation.
+- **Re-extract the Trust design grammar** — Completed exact-equivalence Design Grammar run 61 with preservation contract v4, frozen Model/Evidence/Process layers, eight model reconstructions, full component ablation, three negative exclusions, three distinct adjacent API forms, and explicit Endpoints-only range.
+- **Repair the Trust grammar and test agent usability** — Froze v5 and a shared condensed packet, ran six isolated workflow simulations, preserved their code/state traces and invention ledgers, and classified the results against the frozen evaluation protocol. The agents recovered the semantic model but exposed shared protocol/schema gaps plus three semantic repairs proposed for v5.1.
 
 ## Synthesis
 
-The main additions are diagnostic construction and evaluation methods, not a new proof primitive. The [donor study](../evidence-guarantees/shadcn-donor-study.md) supplies the source trace.
+# Newcomer README explainability trial
 
-1. Treat finding validity and repair-guidance validity as separate checks. A finding may be right while its suggested edit targets a dependency file the app should not change. The user report is not independently reproduced, but supplies a concrete authoring control. The new authoring workflow already asks whether a suggested repair addresses the premise and points to an editable file.
-2. Use matched agent-repair evaluations: the same starting output, rules and correction budget, varying diagnostic access. This controls for extra correction work; separately measure whether the original intended behavior survives. Our oracle model already distinguishes laws, but this adds a concrete agent-workflow evaluation design that is not yet implemented.
-3. Keep shared diagnostic rendering separate from claim-owned context. shadcn shows common placeholders and fallbacks populated from current program details, with project-owned wording. This is an interface mechanism that fits the selected base/package separation; it does not itself justify a claim or settle permission policy.
-4. Preserve analysis failure as distinct from a demonstrated program violation. The reported theme-resolution failure illustrates how degraded context can produce misleading findings. This concretizes our existing unknown/error distinction rather than discovering it anew.
+The draft is available at [trust-concept-readme/README.md](trust-concept-readme/README.md). Its 1,508 words explain the product without requiring the Field Log: teams define valued targets; agents use typed loops to batch-test candidate changes against sourced analyses and checks; authoritative runs can compile artifacts for runtime integrations; the repeatedly enacted whole is a protocol.
 
-The broader idea that machine checks and actionable feedback guide agents confirms the prior direction. Reported cost savings remain narrow author measurements; they do not establish benefits for our system. No new eval, source search or implementation was performed for this synthesis.
+The user correction at event 1148 is incorporated. Trust does not prove or quantify overall hardness. For each target it reports the evidence, checks, gates, methods, runtime integrations, fallbacks, exceptions, incidents and gaps a team is bringing to bear. Individual claims may be formal or quantitative; whether the whole arrangement is good enough remains the team's judgment. Outages, slowdowns, near misses or changed requirements can motivate more hardening work without Trust computing a hardness delta.
+
+## Explainability result
+
+The conceptual center is now explainable in one paragraph and one Endpoints example. `target` supplies the product-facing organizer. `defineLoop` supplies the agent-facing unit of iteration. Sources, analyses, checks, outputs, artifacts and integrations use ordinary programming vocabulary. Reserving protocol for the live coordinating whole removes the need for a base `defineProtocol` constructor.
+
+The system is not complete or empirically proven easy to learn. Seven semantics remain open: target decomposition; legal hypothetical injection points; whether discovery, authoritative verification and maintenance use one loop kind; server/client artifact boundaries; the contents of a non-scoring target report; observable protocol liveness; and cross-owner admission, capability and policy composition. Endpoints is still the only executable domain.
+
+The prepared Guide-word worksheet is at [trust-concept-readme/guide-word-preparation.md](trust-concept-readme/guide-word-preparation.md). It covers all seven fixed guide words across ten conceptual nodes, but the instrument remains prepared rather than completed because competent credibility and safeguard reviewers were not present. A fresh-reader test has not run.
 
 ## Chronological log
 
@@ -6335,3 +6349,1186 @@ _2026-09-15T21:44:29.885Z_
 Four normal commits were created on `codex/component-endpoints-prototype`: `0189f0b1e` preserves research and reviewed Process Grammars; `fc42b8cac` preserves original design/audits and the v2 repair specification; `846b5aa07` adds the repaired prototype, generated oracle checks, fault controls, workflows and handoff; `a1c7b4fb0` adds the complete Field Log, historical user-request archive and portable source copies. `git push origin codex/component-endpoints-prototype` succeeded, advancing GitHub from `a47242b25` to `a1c7b4fb0`. No published history was rewritten.
 
 A copy of the tracked handoff was also saved to the normal local session-summary directory. The repository copy is the portable authority. This receipt is a follow-up documentation commit; its own final commit ID will be reported after push. Resume from [HANDOFF.md](../../../evidence-base/HANDOFF.md).
+
+### Kyle
+
+_2026-09-17T13:29:38.851Z_
+
+> **Kyle:** “ok, propose some instruments to arrive at a API design proposal I can read”
+
+### Kyle
+
+_2026-09-17T13:29:38.852Z_
+
+> **Kyle:** “let's put hostile assay & fracture scan after 1 but otherwise looks good, go”
+
+### Kyle
+
+_2026-09-17T13:29:38.852Z_
+
+> **Kyle:** “we already have the older field log right? We can just continue on that”
+
+### 21 sources examined
+
+_2026-09-17T13:34:57.205Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### Kyle
+
+_2026-09-17T13:54:15.696Z_
+
+_In response to the twelve-property Trust API preservation preview._
+
+> **Kyle:** “this looks right — have a fresh agent run a loss audit vs. this”
+
+### TanStack Trust API preservation: hidden-signal recovery assay
+
+_2026-09-17T14:11:31.780Z · loss-audit_
+
+Twenty-one isolated source traces recover 35 consequential signals absent from frozen AP1–AP12; four sources yield null traces. Status classes and false-rescue controls remain explicit; no restoration decision is made.
+
+### Kyle
+
+_2026-09-17T14:23:01.625Z_
+
+_In response to whether the 35 Loss Audit recoveries should be evaluated for inclusion in a revised preservation contract before API grammar extraction._
+
+> **Kyle:** “yes”
+
+### Evaluation of the API preservation Loss Audit
+
+_2026-09-17T14:23:01.626Z_
+
+# Evaluation of the API preservation Loss Audit
+
+## Decision rule
+
+A recovered item changes the preservation contract when omitting it could let the API proposal move authority, change a legal evidence-state transition, erase a required operation family, or imply a stronger guarantee than the sources support. A current representation or adapter behavior stays in the Model/Evidence/Process layers when another API could preserve the same semantics. An unstable compatibility shim is excluded when preserving it would constrain the new design without protecting an authority or semantic boundary.
+
+## Disposition
+
+- **Revise the preservation contract:** LA01–LA18 and LA29–LA35. These 25 recoveries carry semantic, authority, lifecycle, failure-fidelity, dependency, operation-family, authoring, or governance constraints. They should be folded into the contract rather than copied as 25 new top-level properties.
+- **Retain as implementation evidence or design-test inputs:** LA19 and LA21–LA28. These nine items describe the current type enumeration, identity encoding, import validation, diagnostic loss, rule-exception behavior, concrete service commands, CLI conventions, LSP mapping, and MCP tool surface. The new grammar must account for them and explain any migration, but it need not preserve their exact representation.
+- **Do not preserve as a target constraint:** LA20. The `passed` compatibility field is a prototype v1 shim, not a stable API promise. The proposal may remove it while recording the migration.
+
+LA23 and LA24 deserve special treatment. LA23 is evidence that the current implementation loses optional diagnostics; the revised contract preserves the stronger requirement that operational and reach history remain discoverable. LA24 is a current classification choice—turning rule exceptions into rejected routes—that should be attacked by the later Fracture Scan and Hostile Assay rather than frozen as correct behavior.
+
+## Proposed preservation contract v2
+
+1. **Authority and incubation.** Domain packages own claim meaning, applicability semantics, evidence adequacy, rules, and checks. Trust owns evidence mechanics and history. Consumer policy owns permission, severity, fallback, and deployment action. Workflows and adapters carry work but gain no authority. Trust remains an internal Endpoints layer with explicit semantic seams; admission may use the project's normal review process, but Trust does not prescribe a universal reviewer topology.
+
+2. **Claims, identity, and obligation lineage.** Claims remain visible before evidence and retain versioned law, subject, conditions, scope, and lineage. Narrower measurable claims do not retire larger obligations. Exact identity is a conservative current boundary, not semantic equivalence, scope subsumption, or cross-version case mapping; those relations remain explicit domain-owned or unresolved judgments. Speculative objections, observed counterexamples, and changed-version mappings cannot be collapsed.
+
+3. **Typed evidence methods and check packages.** Certificate, empirical/oracle, rubric/source-inspection, and formal/model evidence retain method-specific inputs, trust roots, observations, and limits; they are not a universal strength ladder. Every admitted check declares its law, domain, reference or relation, trusted components, production path and checkpoint, fixture/production responsibilities, observed fields, omissions, reach witnesses, fault controls, replay obligation, acceptance rationale, and migration notes. Same-agent interpretive assessment is allowed only when honestly labeled and cannot impersonate automatic-runner evidence.
+
+4. **Argument structure and reuse.** Within one route, all premises are jointly required; routes for a claim are alternatives; a failed route does not contradict the claim while another route remains viable; cycles without independent grounding cannot support anything. Public results preserve route-specific premise state, rejected versus unresolved arguments, structured challenge IDs, and any selected successful route. Shared claims may deduplicate work and observations may serve several claims, but logical roles, laws, rules, gaps, contradictions, and dependent uses remain distinct. Flat gaps are inventory only; Trust supplies neither general logical compression nor automatic proof search or total investigation priority.
+
+5. **Evidence, reach, operation, and action are separate.** Supported, contradicted, unresolved, absent evidence, and inconclusive observation remain distinct from production-path reach, transport/process/check operation status, and consumer action. The runner commits no correctness observation when reach or execution fails. Operational and cleanup history remains durably discoverable to agents without becoming correctness evidence, including primary failure, secondary cleanup diagnostics, and resource-release status.
+
+6. **Applicability, freshness, and dependency identity.** Every evidence use receives an inspectable applicable/inapplicable/unknown relation and reason. Ownership of the matcher—entirely domain-owned or a Trust structural layer with domain hooks—remains an explicit design choice. Dependency identities cover code, data, configuration, environment, method, and external inputs; names are scoped to package, endpoint, artifact, or another declared owner. Per-dependency revisions support selective invalidation, global invalidation remains representable, returning to old bytes cannot revive evidence, and captured context never proves discovery completeness.
+
+7. **Contradiction and repair.** A relevant counterexample defeats every affected use until an applicable repair is linked. Repair re-exercises the same law and case after the failure under an explicit happens-before relation; invocation, measurement, delivery, application, publication, and settlement events remain distinguishable when the law depends on them. Batch order, completion order, cached results, unrelated passes, or a changed claim cannot manufacture repair. Resolution remains append-only history whose current authority may expire.
+
+8. **Failure and concurrency fidelity.** A failure record can retain law and source, code/dependency/environment identity, seed or path, legal action or schedule trace, reached checkpoint, expected and actual observations, original and reduced traces, reproduction class, and separate cleanup diagnostics. Full returned batches are validated and committed atomically so callers cannot submit only green findings. For nondeterministic contracts, one observed history must have one coherent permitted explanation; fieldwise mixtures are invalid, and a finite accepted prefix does not prove liveness. Evidence credit remains scoped to contract × history × production path × observation.
+
+9. **Explanation and work projection.** Explanation is a stable structured operation exposing every viable or failed route, premises, evidence, rule/check/run provenance, dependencies, reach and operational state, challenges and their applicability, bounds, omissions, witnesses, counterexamples, and unresolved identity questions. Gap-derived work names the claim, route, premise, context, evidence form, affected uses, and remaining larger obligation. Task closure, notes, warnings, or policy decisions do not become support.
+
+10. **Admission, versioning, and revocation.** Agents may propose claims, rules, checks, arguments, observations, interpretations, challenges, and repairs but cannot admit their own semantic trust roots. Package, checker, rule, rubric, model, and encoding admission are versioned, inspectable, revocable, and externally authorized. Provenance or syntactic validity alone grants no authority; governance remains configurable rather than assuming mandatory independent review.
+
+11. **One lifecycle service with honest adapters and transactions.** One versioned service defines the semantics for package discovery and inspection, proposal/submission, authorized check execution, observation ingestion, contextual assessment, explanation, dependency impact, challenge/repair, gap work, dependent uses, and capability negotiation. Library, CLI, LSP, and MCP are projections of those operations; adapter rendering is neither evidence nor universal policy. Mutation boundaries prevent caller-owned values from rewriting stored history. Context updates, check reach, evidence commit, and durable storage have explicit transaction outcomes; current single-process atomic/checksummed durability is not authentication, multi-writer safety, or hostile-process isolation.
+
+12. **Completeness and honest limits.** Completeness means the API can represent support, defeat, applicability, earned repair, failure provenance, remaining obligations, and every unresolved boundary needed by an agent; it does not mean universal proof, confidence, certification, permission, liveness from finite tests, analyzer completeness, capture completeness, or independent corroboration from shared adapters. Implemented behavior, bounded evidence, proposed contracts, normative guidance, absent capabilities, unmeasured outcomes, unresolved choices, and deliberately unselected policy remain distinct. Endpoints is the incubation host and constructive evidence only.
+
+## Control and limitation
+
+The revision folds the 25 semantic recoveries into twelve properties so concrete API enumeration does not masquerade as an invariant. This evaluation can still over-promote Oracle Guide authoring advice into a system contract; properties 3 and 8 therefore bind packages only when the evidence method or concurrency law makes those fields relevant. The later Design Grammar reconstruction, Fracture Scan, and Hostile Assay must test whether those conditional clauses belong in the API, package manifest, workflow contract, or explanation type. No API configuration is selected here.
+
+### Kyle
+
+_2026-09-17T14:29:23.253Z_
+
+_In response to whether preservation contract v2 should be adopted and the TanStack Trust API Design Grammar restarted from it._
+
+> **Kyle:** “ok yeah looks great — the trick now is crafting the design grammar for a coherent, elegant, idiomatic TS APIs & agent-focused warning/error messaging”
+
+### design-grammar
+
+_2026-09-17T14:29:23.254Z · design-grammar_
+
+The frozen v1 preservation preview was superseded after the selected Loss Audit recovered consequential source signals and the user accepted preservation contract v2.
+
+### Kyle
+
+_2026-09-17T14:30:38.429Z_
+
+_Correction to the active TanStack Trust API Design Grammar extraction target._
+
+> **Kyle:** “we also need Bead-style apis to query todos etc. give me a high-level scope you think you're working on”
+
+### Kyle
+
+_2026-09-17T14:35:19.136Z_
+
+_Confirmation and concrete reconstruction cases for the active TanStack Trust API Design Grammar._
+
+> **Kyle:** “yes — this looks right. Key use cases that come to mind:
+
+- agent writes code, Trust reports required evidence via LSP. Agent queries via MCP for more info than gathers and then submits the evidence getting confirmation the new code is now clean
+- daily agent queries if any evidence is expired and regathers that evidence and submits then creates a PR to incorporate it
+- CI job calls CLI to see if Trust reports all green or not
+- devtools shows live state of all claims & evidence for human to browse”
+
+### Kyle
+
+_2026-09-17T14:43:13.000Z_
+
+_Additional reconstruction cases for the active TanStack Trust API Design Grammar._
+
+> **Kyle:** “oh another use case is downgrading a specific endpoint's checks temporarily to get it deployed and also checking what new evidence is required if the global check level is raised”
+
+### One evidence model, four agent-facing projections
+
+_2026-09-17T14:45:18.761Z · design-grammar_
+
+Ten semantic primitives and seven active projections reconstruct editor repair, scheduled renewal, CI evaluation, live Devtools, temporary endpoint downgrade and stricter-level preview. Diagnostics, work, policy and UI share one condition model while evidence remains unchanged. Three TypeScript facades remain unranked.
+
+### Blind attacks on the Trust API grammar
+
+_2026-09-17T14:52:57.504Z · hostile-assay_
+
+A fresh auditor found eleven material ways the grammar can fail, centered on missing transition semantics rather than facade style. The sharpest scene accepts evidence for source R41 after R42 lands and then incorrectly reports current code clean.
+
+### Five transition fractures in the Trust API grammar
+
+_2026-09-17T14:52:57.504Z · fracture-scan_
+
+The candidate remains coherent at the authority level but needs explicit transition rules for time, scoped completeness, recurring work, stale evidence submissions and durable operational failures. Two outside or premise-violating attacks were rejected.
+
+### Kyle
+
+_2026-09-17T15:32:07.442Z_
+
+_Review of the prepared TanStack Trust API Morphological Field._
+
+> **Kyle:** “one random self-critique — this is all "expert systems" and I wonder what the bitter lesson would say about these domain specific rules”
+
+### Kyle
+
+_2026-09-17T15:40:15.821Z_
+
+_Response to whether the Bitter Lesson critique extends from evidence production to human authorship of domain claims, during review of the Trust API Morphological Field._
+
+> **Kyle:** “yeah there's no way human experts will be able to author all claims by hand and even if they did, that'd be "expensive, brittle, increasingly inferior" as you say — so a mixture of common sense hardness of the domain but also let models push back and come up with their own proofs as needed. 
+
+This is also useful from Venkatesh Rao
+
+---
+
+One of my favorite epigrams is J. A. Wheeler’s about general relativity: 
+
+Spacetime tells mass how to move, mass tells spacetime how to curve. 
+
+I’ve been looking for a snowclone to relate AI and protocols in a similar way and I think I have a solid candidate: 
+
+Protocols tell AI where to harden, AI tells protocols when to leak. 
+
+Earlier I was thinking in terms of time and memory (something like AI tells protocols how to remember, protocols tell AI what time it is), but the time in question is eventfulness time, not clock time. Kairos, not chronos. But once you see that, the hardness and leakiness angle follows. That interplay is what creates the eventful synchronic memory process out of diachronic potentials interacting with atemporal structures.”
+
+### 1 source examined
+
+_2026-09-17T15:40:15.823Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### Kyle
+
+_2026-09-17T15:41:14.090Z_
+
+_Definition supplied while reviewing the TanStack Trust API Morphological Field after the Bitter Lesson and Venkatesh Rao hardening/leakiness critique._
+
+> **Kyle:** “so basically a "domain" package is a protocol for establishing and *finding* hardness in the protocols institute sense”
+
+### Kyle
+
+_2026-09-17T15:45:02.727Z_
+
+_After defining a domain package as a protocol for establishing and finding hardness, Kyle supplied Rao's essay and proposed a broader Protocols Institute donor search._
+
+> **Kyle:** “read this — we probably want to do a general donor search from protocols institute's work [https://contraptions.venkateshrao.com/p/in-search-of-hardness](https://contraptions.venkateshrao.com/p/in-search-of-hardness)”
+
+### 1 source examined
+
+_2026-09-17T15:45:02.728Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### Kyle
+
+_2026-09-17T15:50:13.235Z_
+
+_In response to the proposed Protocols Institute Research Survey followed by Donor Perturbation; Kyle also queued another Design Grammar pass afterward._
+
+> **Kyle:** “yes, then we'll need to do another pass on the design grammar”
+
+### Kyle
+
+_2026-09-17T15:57:51.988Z_
+
+_While the Research Survey was examining the Protocol Institute's September 2026 work on agent-created stigmergic coordination._
+
+> **Kyle:** “the stigmergy work is especially useful as that's the sort of system we're building”
+
+### 22 sources examined
+
+_2026-09-17T16:06:58.766Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### Hardness meets a stigmergic trace substrate
+
+_2026-09-17T16:06:58.766Z · research-survey_
+
+A broad public-corpus survey separates stable hard points from the live trace systems that discover, enact, contest and revise them. Stigmergy receives a full mechanism-and-failure treatment: shared media, trace cues, identity, queues, objection time, volatility, positive feedback and counterfeit traces.
+
+### Plan completed: Survey Protocols Institute hardness work
+
+_2026-09-17T16:06:58.766Z_
+
+Completed a validated broad Research Survey of the public Protocol Institute and Summer of Protocols corpus through 2026-09-17. The portable artifact preserves hardness, enactment, formal verification, lifecycle, trust and detailed stigmergic mechanisms and failures without choosing Trust architecture.
+
+### 41 sources examined
+
+_2026-09-17T16:28:09.076Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### Three donors separate traces, evidence, commands and admission
+
+_2026-09-17T16:28:09.076Z · donor-perturb_
+
+Blind research into ant trails, rescue markings and B-cell selection produced source-traced transfers with explicit failures. The strongest common result is categorical: asynchronous work cues, evidentiary records, transactional commands, semantic admission and consumer policy must remain separate.
+
+### Plan completed: Transfer distant protocol mechanisms
+
+_2026-09-17T16:28:09.076Z_
+
+Completed a blind Donor Perturbation using ant pheromone trails, urban search-and-rescue markings and germinal-center selection. The source-traced mapping preserves fit labels, eight explicit non-transfers and nearby negative controls for tandem running, live radio dispatch and T-independent activation.
+
+### Kyle
+
+_2026-09-17T16:30:34.708Z_
+
+> **Kyle:** “[https://typesafe.ai/blog/introducing-system-one-models-and-jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) is another interesting paradigm — it could be built directly into tanstack trust as part of its evaluation of evidence potentially”
+
+### 1 source examined
+
+_2026-09-17T16:31:17.141Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### Kyle
+
+_2026-09-17T16:33:18.586Z_
+
+> **Kyle:** “summarize the protocols & donor research. The new preservation contract is pretty dry w/o me knowing what you found”
+
+### Why the preservation contract contains these boundaries
+
+_2026-09-17T16:33:18.587Z_
+
+# Why the preservation contract contains these boundaries
+
+## Central result
+
+The research points to TanStack Trust as a living protocol for turning discovered constraints into dependable but contestable hard points. It is not just a catalog of expert-authored rules, a confidence score, or an overarching trust layer. A domain package supplies known constraints and methods for finding more; agents enact the protocol by proposing, inspecting, challenging and repairing; explicit authority decides which semantic roots become active; consumer policy decides what action the resulting state permits.
+
+## What the Protocol Institute survey contributed
+
+**Hardness is selective and temporal.** A hard point is something other actors can rely on long enough to coordinate. Hardness does not establish truth or goodness. Useful protocols harden some commitments while leaving surrounding regions soft enough for interpretation, exceptions, changed conditions and revision. Apparent stability without grounding, uptake, enforcement or continued fit is pseudo-hardness.
+
+**A protocol is enacted, not merely declared.** The sampled work distinguishes written rules from a protocol system: rules plus participants, roles, artifacts, knowledge, execution, enforcement, entry, exit and stewardship. This argues against treating an Endpoints domain package as a finished expert system. Its claims and checks matter only through how developers and agents discover, execute, contest, revise and rely on them.
+
+**Verification is an ecology.** The Estonia i-voting case distributes assurance across voter verification, reversibility, paper override, audits, experts, officials, courts and source review. No participant sees or proves everything. For Trust, provenance, admission, applicability, evidence production, policy and remedies can belong to different actors while remaining inspectable as one system.
+
+**Protocols have lifecycles.** They emerge through design and use, mutate after failures, become obsolete, and sometimes need explicit retirement or succession. The Durable AI Adoption work offers a related Discover → Encode → Prove → Harvest loop. The important transfer is continued evaluation and stewardship, not that exact four-step sequence.
+
+**Stigmergy supplies the coordination model.** Agents can coordinate asynchronously by changing a shared environment that later agents inspect. The reported AI-agent case evolved from ad hoc directory messages to mailbox conventions and then cryptographic signing after impersonation. It also produced duplicated work, overwritten repositories, ignored holds, overloaded queues and objection windows too short to matter. Biological examples add positive-feedback path finding, obsolete trails, adversarial false traces and ant mills. The same feedback that finds a path can amplify an error.
+
+This is why Trust needs a shared condition-and-work substrate, but also why that substrate must not count as evidence. Popularity, links, repeated assertions, agent agreement and task churn coordinate attention; they do not make a claim true.
+
+## What the three donor systems added
+
+### Ant pheromone trails
+
+Ant trails showed how `TrustCondition` and `WorkCase` can serve as environmental cues between agents that share neither a session nor memory. They also exposed the central failure: an active, locally coherent loop can make zero progress toward its endpoint. Trust therefore needs semantic progress—new evidence, changed applicability, an authorized repair or a resolved challenge—separate from queue activity.
+
+Different pheromones and behaviors also warned against one global expiry rule. Immutable history, evidence freshness, condition lifetime, work leases and policy expiry are different clocks. The nearby negative case, tandem running, is direct synchronous instruction rather than persistent tracing. It prevents us from using the trace model for commands, cancellation or delivery acknowledgment.
+
+### Urban search-and-rescue markings
+
+A building mark is attached to one exact subject and records who acted, when, what hazards or victims were found and how deeply the site was searched. Entering, exiting, completing one search level and authoritatively clearing a site are distinct states. Later crews append, replace or re-inspect when conditions or capability change.
+
+This transferred strongly to stable entity references, method-specific coverage, explicit omissions, append-and-supersede history and re-evaluation after relevant code or context changes. It also suggested the projection model: an LSP diagnostic can be the compact mark attached to source, while MCP, CLI and Devtools expose the richer record behind it.
+
+The negative case was live radio dispatch. Dispatch requires delivery, priority, acknowledgment, correction and cancellation. A durable mark cannot replace that transactional path. Commands may produce durable records, but commands and records are not the same thing.
+
+### Germinal-center B-cell selection
+
+B-cell maturation supplied the cleanest authority separation. Mutation generates a candidate; antigen interaction exposes behavior; helper recognition contributes an external selection signal; later differentiation and retention create durable output. The candidate mutation cannot contain its own verdict.
+
+For Trust, proposing a claim, route, check, proof or repair; running or inspecting it; judging applicability; admitting its semantic authority; and retaining its history must remain separate operations. An agent-generated proof or model judgment can be useful evidence without authorizing its own checker, rubric, model or trust root.
+
+The negative case was T-independent activation: similar durable outputs can arise without the helper-gated path. Output shape therefore cannot prove which authority route produced it. Likewise, temporarily deploying an endpoint under an authorized override does not admit missing evidence or rewrite the underlying condition.
+
+## The architecture these findings motivate
+
+The categories that must remain separate are now concrete:
+
+1. Domain semantics: claims, adequacy, applicability and presentation.
+2. Evidence: observations with method, provenance, coverage, omissions and context.
+3. Stigmergic coordination: derived conditions and work cases that cue later agents.
+4. Transactions: run, submit, challenge, repair, admit, revoke and override commands with explicit outcomes.
+5. Authority: versioned admission of semantic trust roots.
+6. Consumer policy: severity, deployment action, fallback and scoped expiring exceptions.
+
+One lifecycle service can project those meanings through TypeScript, LSP, MCP, CLI and Devtools, but none of those interfaces should redefine them.
+
+## Limits
+
+The Protocol Institute material is institutionally related, largely conceptual and English-language; organizing it may make an unfinished research program look more unified than it is. The donor tracks were independently researched in fresh contexts but used one model family and a recruitment brief already shaped by the Trust problem. No transferred mechanism has yet been implemented or tested. The Design Grammar run must still reconstruct and ablate the proposed categories rather than accepting these analogies as architecture by rhetorical force.
+
+### Kyle
+
+_2026-09-17T16:37:55.638Z_
+
+> **Kyle:** “ok yup this all makes sense. I think the design should also reflect linters as the class of program is quite similar — it's basically "linting for agents"”
+
+### Kyle
+
+_2026-09-17T16:40:17.853Z_
+
+> **Kyle:** “also linters provide the paradigm for extending rules — checks etc. are all just code packages that you can enable or disable per project and it's easy to write your own per project”
+
+### design-grammar
+
+_2026-09-17T16:40:17.855Z · design-grammar_
+
+The user added a consequential post-freeze preservation requirement: linter-style rule and check extensibility through installable and project-local code packages with per-project enablement. Extraction had not yet produced a frozen analytical model.
+
+### Trust becomes a linter-shaped protocol system
+
+_2026-09-17T16:47:01.709Z · design-grammar_
+
+The revised grammar preserves familiar rule packages, per-project configuration and local authoring while lowering each rule into separate claims, routes, methods, evidence, admission and policy. Typed model judges fit as evidence methods; conditions and work remain agent traces rather than proof.
+
+### Plan completed: Re-extract the Trust design grammar
+
+_2026-09-17T16:47:01.709Z_
+
+Completed exact-equivalence Design Grammar run 61 with preservation contract v4, frozen Model/Evidence/Process layers, eight model reconstructions, full component ablation, three negative exclusions, three distinct adjacent API forms, and explicit Endpoints-only range.
+
+### Kyle
+
+_2026-09-17T16:56:24.146Z_
+
+> **Kyle:** “ok run through auditors & then [$evaluate-review](/Users/kyle.mathews/programs/linux-config/skills/evaluate-review/SKILL.md) to do another round”
+
+### Kyle
+
+_2026-09-17T16:56:47.506Z_
+
+> **Kyle:** “oh I meant fracture scan & hostile assay — so add those too”
+
+### Three lifecycle seams open inside the frozen Trust grammar
+
+_2026-09-17T17:01:02.439Z · fracture-scan_
+
+Extending the frozen grammar under its own rules exposed three candidate fractures: what an off rule does to a still-recorded condition, how edited source enters a coherent snapshot before LSP reads it, and how one defineRule bundle gives its semantic parts independent identity. Conventional-linter simplicity and hostile plugin execution were rejected as outside attacks.
+
+### A blind attack finds twelve breakable links in v4
+
+_2026-09-17T17:08:16.864Z · hostile-assay_
+
+A fresh auditor, isolated from all sibling reviews, produced twelve defeaters and failure scenes. The attacks concentrate on ungrounded authority, impure executable hooks, condition and repair lifecycle gaps, detached favorable-batch submission, adapter drift, retry identity, incomplete source freezing and circular ablation controls.
+
+### Plan completed: Attack the frozen API grammar
+
+_2026-09-17T17:29:31.708Z_
+
+Completed Fracture Scan 62 and blind Hostile Assay 63, then losslessly evaluated them with semantic, TypeScript/linter, and adversarial audits. The final evaluate-review ledger accounts for all 200 raw items, preserves every duplicate and surviving test idea, records focused runtime reproductions, and leaves the frozen v4 candidate unchanged pending an explicit repair pass.
+
+### Kyle
+
+_2026-09-17T17:32:33.572Z_
+
+> **Kyle:** “let's also do a donor instrument vs. eslint — what key features does it have that we're missing (and should have)”
+
+### 4 sources examined
+
+_2026-09-17T17:44:25.561Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### ESLint contributes the missing ecosystem protocol
+
+_2026-09-17T17:44:25.561Z · donor-perturb_
+
+Current ESLint shows that the linter analogy requires more than rule packages: Trust still needs deterministic config explanation, concrete module metadata, author tests, source remapping, safe action and result contracts, exception hygiene, compatibility policy and a deliberately small agent façade. Severity-driven execution, inline suppression and autofix-as-proof are explicit non-transfers.
+
+### Kyle
+
+_2026-09-17T20:16:21.697Z_
+
+> **Kyle:** “yup, ok what do you suggest for evaluating the feedback & if we can incorporate eslint's transferable ideas”
+
+### Kyle
+
+_2026-09-17T20:16:21.698Z_
+
+> **Kyle:** “what are classic product design documents and tests? Since this is a design primarily for agents, we can ask them to test out the design”
+
+### Kyle
+
+_2026-09-17T20:16:21.698Z_
+
+> **Kyle:** “yeah, let's get to v5 of the design and then hand a condensed design to 6 fresh agents and ask them to simulate going through the 6 workflows writing out code they'd write and reflections about what's clear/friction-y and what APIs they had to make up, etc”
+
+### Trust API design grammar v5 frozen for agent usability
+
+_2026-09-17T20:26:00.426Z_
+
+The v5 design candidate repairs the evaluated v4 lifecycle, identity, authority, causal-repair, transaction, condition, work, policy and adapter gaps and incorporates the bounded ESLint transfers. It selects linter-style authoring over a typed query/command service over a shared operation protocol. The source and artifact hashes are frozen in `trust-api-grammar-v5/freeze.json`. Six isolated agents will receive only `agent-usability/TEST-PACKET.md` plus one workflow. This is a normative design and usability-test baseline, not an implementation or correctness pass.
+
+### Six fresh agents recover Trust's semantics but invent its executable contracts
+
+_2026-09-17T20:40:31.414Z_
+
+# Six fresh agents recover Trust's semantics but invent its executable contracts
+
+Six isolated agents each received the frozen condensed v5 packet and one workflow: editor repair, expired-evidence renewal, CI gating, Devtools inspection, a temporary endpoint downgrade, or stricter-level preview. All six recovered the intended path and kept claims, observations, conditions, work, policy, authority and snapshots distinct. None treated an edit, work item, note, PR, agent assertion, successful delivery, override or policy decision as evidence; none introduced a mutating query or hidden CI evidence run. This supports keeping the v5 ontology and its linter authoring → typed service → shared protocol architecture.
+
+Every workflow still required consequential API invention. The repeated defect is that v5 names operations and invariants but does not publish the input, result, receipt, error, pagination, capability and adapter schemas needed to execute them. The one-workflow defects are also consequential: LSP actions lack an invocation binding; ready renewal work lacks a plannable descriptor and its lease does not fence evidence runs; CI lacks an atomic machine-report contract; admission records have no query; proposed overrides have no read-only preview; and sealed candidate bundles have no canonical type, serialization, validation or comparison schema.
+
+Three semantic repairs should join the schema closure: the current work fence must authorize the associated run, proposed overrides need a non-deployable preview using the create validator and authority check, and admissions must be queryable. Candidate decisions must remain non-deployable, candidate validation must not create live conditions, conflicting overrides must fail closed, and the CLI report and exit must come from one pinned evaluation.
+
+The full classification, cross-workflow clusters, one-off safety findings and proposed v5.1 sequence are saved in `trust-api-grammar-v5/agent-usability/SYNTHESIS.md`. The raw reports remain under `agent-usability/results/`. The test supports a bounded conclusion: v5 communicates its semantic boundaries better than its executable contracts. It does not estimate general agent success or implementation correctness.
+
+### Plan completed: Repair the Trust grammar and test agent usability
+
+_2026-09-17T20:40:31.415Z_
+
+Froze v5 and a shared condensed packet, ran six isolated workflow simulations, preserved their code/state traces and invention ledgers, and classified the results against the frozen evaluation protocol. The agents recovered the semantic model but exposed shared protocol/schema gaps plus three semantic repairs proposed for v5.1.
+
+### Kyle
+
+_2026-09-17T20:54:39.330Z_
+
+> **Kyle:** “yeah it looks pretty hard to author atm. Let's make this example more concrete. Look at the actual code we wrote & oracles & show what code runs (at high level), what info it learns from code & db, and scenarios where results go in different ways through this architecture. Flesh out some real concrete details”
+
+### Kyle
+
+_2026-09-17T21:03:06.869Z_
+
+_In response to comparing the abstract v5 rule-authoring API with the actual Endpoints effect analysis, production verdict and oracle structure._
+
+> **Kyle:** “yeah we leaned too hard into the lint metaphor”
+
+### Kyle
+
+_2026-09-17T21:06:47.600Z_
+
+_Clarifying the relationship between the Endpoints compiler, TanStack Trust and externally supplied checks such as production latency budgets._
+
+> **Kyle:** “yeah endpoint is a compiler emitting structured info — it does a lot of static checks itself which it feeds into the Trust system directly but then also exposes structured info which can be built on top of e.g. a production p99 latency check which the user would import into the config and then say all queries need to be below 1 second p99 or something or when defining a query you annotate it somehow to do a per query policy. ”
+
+### Kyle
+
+_2026-09-17T21:16:44.491Z_
+
+_Adding a third-party evidence-method extension requirement to the compiler-centered TanStack Trust architecture._
+
+> **Kyle:** “yup — another key requirement is that Neon can release a package that extends it w/ additional ways to establish evidence e.g. a coding agent can use an API to run a query randomly (w/ predicates) in production say 30 times and get back stats & have policies about that. So e.g. a team can say any new query must have evidence provided from Neon's API that meets x policies before it can be deployed”
+
+### Kyle
+
+_2026-09-17T21:20:31.579Z_
+
+_Refining the domain-package architecture beneath Endpoints and third-party evidence providers._
+
+> **Kyle:** “yeah, we'd probably want a layered setup — just a general PG lib that extracts structured info from any sql lib along w/ trust annotations. Then endpoints builds on that to add its DB integration & optimizations it can calculate for selective refresh, etc.”
+
+### Kyle
+
+_2026-09-17T21:25:03.334Z_
+
+> **Kyle:** “ok run design grammar again w/ the new thinking”
+
+### Kyle
+
+_2026-09-17T21:33:22.382Z_
+
+_Confirmation of the twelve-item exact-equivalence preservation preview for Design Grammar run 65._
+
+> **Kyle:** “yes, looks good”
+
+### Trust v6 centers domain compilers and shared protocols
+
+_2026-09-17T21:40:45.895Z · design-grammar_
+
+The reconstructed grammar replaces the linter-centered model with a typed protocol graph: PostgreSQL adapters publish reusable facts, Endpoints adds relations and static evidence, independent providers add bounded runtime evidence, and requirements, qualification, work and policy remain separate. The real Endpoints branches and six agent workflows reconstruct; all ten primitives survive ablation. Range beyond Endpoints remains untested.
+
+### Kyle
+
+_2026-09-17T21:45:20.453Z_
+
+> **Kyle:** “back to our protocols research — the core protocol tells you what's "real" and "hard" within its domain e.g. pg can say a lot of things must be true because its backed by what pg itself will do or won't do. But packages that build on the pg protocol can add additional hardness e.g. queries must have x latency”
+
+### Kyle
+
+_2026-09-17T21:48:25.768Z_
+
+> **Kyle:** “a package can provide a model & fast-check setup to do oracle tests against some code to provide an oracle / statistical "hardness"”
+
+### Kyle
+
+_2026-09-17T21:51:07.822Z_
+
+> **Kyle:** “ok great, do we need another design grammar run? Present the brief neutrally not responding to previous runs”
+
+### Kyle
+
+_2026-09-17T21:54:09.334Z_
+
+> **Kyle:** “"In Search of Hardness" is really the perfect title for what we're doing — where are untapped sources of hardness in the SLDC that we can tap into to further constrain/guide agent behavior”
+
+### Kyle
+
+_2026-09-17T21:55:24.119Z_
+
+> **Kyle:** “yeah, linters are just for code but we're concerned with everything from production to product requirements, etc”
+
+### Kyle
+
+_2026-09-17T22:16:58.029Z_
+
+> **Kyle:** “yup, ok run the design grammar again”
+
+### Kyle
+
+_2026-09-18T12:56:01.942Z_
+
+_Confirmation of the twelve-item preservation preview for Design Grammar run 66._
+
+> **Kyle:** “looks good go”
+
+### Kyle
+
+_2026-09-18T13:11:52.033Z_
+
+_Supplied a complete passage developing Josh Stark's and Venkatesh Rao's account of hardness while Design Grammar run 66 was revising TanStack Trust._
+
+> **Kyle:** “reminder on hardness
+
+
+
+>
+”
+
+### 1 source examined
+
+_2026-09-18T13:11:52.034Z_
+
+Source activity is folded here for readability. [Browse the complete source record](?file=field_log.md&page=artifacts&kind=source).
+
+### TanStack Trust: grounding becomes hardness only at a reliable boundary
+
+_2026-09-18T13:29:56.050Z · design-grammar_
+
+The revised architecture separates grounding sources, protocols and placed hard points. Evidence or configured severity alone is not hardness; temporal placement, complementary softness, purpose-relative fit and an enacted consumer boundary determine what agents and people may actually rely on. Endpoints reconstructs as evidence, while general range and deployment enforcement remain untested.
+
+### Kyle
+
+_2026-09-18T13:32:38.942Z_
+
+_Correction to Design Grammar run 66's distinction among grounding sources, protocols and hard points._
+
+> **Kyle:** “yup pg provides actual hardness — so linting for it just tells you your queries will fail in production. But a protocol creates engineered hardness e.g. the atm example of you must remove your card before the money dispenses. So forcing a query in dev to pass a production gate creates hardness that didn't exist before”
+
+### Kyle
+
+_2026-09-18T13:36:37.580Z_
+
+_Further refinement of TanStack Trust's product aim after distinguishing native PostgreSQL hardness from protocol-engineered hardness._
+
+> **Kyle:** “yeah protocols create certainty or hardness about the future in something people find valuable. So it's a search for "what would I find valuable in the future?" And then see how you can create that guarantee now. There's lots of traditional ways of doing this (tests, perf work, feature flags, etc.) we can leverage but we're also keen with this project to leverage LLMs to find more sources of hardness that didn't exist before + think of what new cloud primitives can be exposed to agents to let them manufacture hardness in automated ways that didn't really make sense before”
+
+### Kyle
+
+_2026-09-18T13:40:15.225Z_
+
+_Selected a follow-up Design Grammar after refining Trust around valued future guarantees, native versus engineered hardness, and agent-operated cloud primitives._
+
+> **Kyle:** “ok another run? Yeah the lesson from all LLM stuff so far is they're really great at coming up with ideas but really bad at judging them so the best way to compose them for great results is a) LLMs come up with lots of ideas to iteratively test and b) a fast high quality verifier tests them — then LLMs can endlessly iterate until it finds something great”
+
+### Kyle
+
+_2026-09-18T13:42:21.154Z_
+
+_Clarification of the preservation preview for Design Grammar run 67._
+
+> **Kyle:** “yeah so this is a broader design for both how to find protocols but then also how to engineer them in concrete ts apis?”
+
+### Kyle
+
+_2026-09-18T13:44:48.673Z_
+
+_Confirmed and extended the preservation preview for Design Grammar run 67._
+
+> **Kyle:** “yeah good — yeah discovering and using hardness is very useful in a lot of systems as they'll have custom sources or needs for hardness that aren't broadly available / useful so it's not just me and other maintainers that'll need help with this — ideally this will trigger a broad industry effort to find new sources of hardness”
+
+### Trust joins a protocol workshop to an admitted TypeScript runtime
+
+_2026-09-18T14:05:16.067Z · design-grammar_
+
+The system now works backward from valued futures, lets LLMs generate protocol candidates, uses fast counterexamples plus independent admission verification to judge them, and lowers accepted designs into concrete TypeScript and shared agent operations. Local and industry discovery remain open without letting popularity or installation grant authority.
+
+### Kyle
+
+_2026-09-18T14:13:39.445Z_
+
+> **Kyle:** “defineProtocol({
+&#x20; target: productionReadyQuery,
+&#x20; harden: sequence(
+&#x20;   run(neon.productionSample, { executions: 30 }),
+&#x20;   verify(latency.p99BelowTarget),
+&#x20;   gate(deploy.release),
+&#x20; ),
+&#x20; maintain: reverify({ when: sqlOrEnvironmentChanges }),
+&#x20; soften: { fallback: disableQuery, exception: releaseException },
+})
+
+\---
+
+why is target a variable?
+
+soften has policy objects? Not really sure how this works. What does one of our endpoints protocols look like”
+
+### Kyle
+
+_2026-09-18T14:42:16.444Z_
+
+> **Kyle:** “ok the variable actually makes sense — it'd show up in UIs & docs as "this is the goal we're going for" — which makes perfect sense as the organizing feature. People set product/engineering goals like this & you'd then compose sources of hardness to build towards ensuring the overall goals.&#x20;
+
+endpoints would depend remember on the pg & general endpoints analysis of query/mutation graphs”
+
+### Kyle
+
+_2026-09-18T14:48:00.451Z_
+
+> **Kyle:** “yes we're essentially a specialized very flexible data processing/proving system w/ DAGs leading from various sources”
+
+### Kyle
+
+_2026-09-18T14:49:20.247Z_
+
+> **Kyle:** “also useful to note is e.g. the canSkipRefresh needs to compile a runtime packet of evidence that the server / client functions use to make decisions — so all this can lead to specific outputs”
+
+### Kyle
+
+_2026-09-18T15:08:54.438Z_
+
+> **Kyle:** “yup — there's a lot of prior art we can draw inspiration from on for APIs. And yeah, overview — the system's goal is to help teams find hardness. We do that by providing the base dataflow/trust system, by providing oss building blocks (verifiers, analysis, integrations w/ external sources of hardness) where things generalize, and allowing teams to write their own sources/protocols (need to tighten naming) as needed, and integrating into runtimes as well as needed to add hardness.”
+
+### Kyle
+
+_2026-09-18T15:13:51.595Z_
+
+> **Kyle:** “let's run a term scan against a bunch of words we've been throwing around — we've been pulling in tons of sources so it'd be good to see how they all vary between these things.
+
+
+
+"enactor" is weird.
+
+
+
+Hardness is broader than "constraint"
+
+
+
+> In practically any domain, I find, thinking in terms of protocols and explicitly searching for hardness to work with is an immensely generative thing to do. It helps get immediate problems unstuck, and it helps you see creative and expansive options.
+>
+> I think this is because engineering with hardness is a more artistic and fluid cousin of engineering with constraints. In traditional engineering, you’re taught to think in terms of the dimensionality of problems, and to use thoughtfully placed constraints to lower it to tractable levels. Similarly, in art, constraints (such as being forced to work on rectangular canvases with oil paints) are often seen as having a liberating effect on creativity. Hardness is that sort of thinking on a more elevated level, and protocols are the engineered artworks that result from doing it well.
+>
+> Perhaps sufficiently protocolized technologies are indistinguishable from art.
+
+but yeah this is starting to feel close”
+
+### Hardness, protocols, proof and runtime boundaries carry different loadings
+
+_2026-09-18T15:19:29.208Z · term-scan_
+
+The source corpus uses hardness and protocol more broadly than the current runtime grammar. Hardness is generative stability rather than merely constraint; a protocol may be a live coordinating system or a typed recipe; and evidence, outputs, gates and enactment must not inherit one another's meaning.
+
+### Kyle
+
+_2026-09-18T15:29:45.999Z_
+
+> **Kyle:** “"hard point" doesn't make sense — hardness is more like a field definition — hardness and softness measures across a field
+
+"protocol" is being used in a particularly flaccid way — we should lean on Protocols Institute's definition and be precise
+
+in general when we're using multiple words, we want to use one from programming even if it's not as precise as technical terms in another field
+
+ok propose how to clean this all up”
+
+### A smaller vocabulary for TanStack Trust
+
+_2026-09-18T15:32:29.168Z_
+
+# A smaller vocabulary for TanStack Trust
+
+## Cleanup rule
+
+Use protocol-theory language only for the product’s central ideas. Use ordinary programming language for the machinery. Do not create software entities merely because the conceptual account contains a noun.
+
+This gives three layers:
+
+1. **Product language:** target, hardness, softness and protocol.
+2. **Programming language:** source, analysis, check, graph/program, output, artifact and runtime integration.
+3. **Operational language:** evidence, status, finding, todo, policy, capability and admission.
+
+## Reserve the central terms
+
+### Hardness and softness are a field, not records
+
+Hardness describes how much stable, future-facing reliance is available across a domain. Softness describes the complementary capacity for interpretation, fallback, exception, challenge, revision and exit. They vary by subject, transition, context, authority and time. Neither is one scalar and neither should be represented as a list of `HardPoint` objects.
+
+Trust stores the facts from which a **hardness map** can be derived: targets, evidence, dependency state, runtime integrations, refusals, fallbacks, exceptions and history. The map may contain domain-specific measures, categorical status and explicit unknowns. It must not collapse them into a universal hardness score.
+
+Retire `HardPoint`, `trust.hardness.list()` and operations that appear to create or update hardness directly. Use concrete records such as target status, check result, runtime artifact, gate state and protocol status. A Devtools hardness view computes across them.
+
+### Protocol names the whole coordinating arrangement
+
+Use the Protocol Institute loading: a protocol is a repeated coordinating form that becomes real through participants, rules, artifacts, infrastructure, runtime behavior, maintenance, exceptions and exit. A check, graph fragment, evidence route or package is not by itself a protocol.
+
+The TypeScript API may produce a `ProtocolDefinition`, but the system should distinguish the declaration from an approved, installed and active protocol. `defineProtocol` is justified only when the value names the complete arrangement: target, dataflow program, runtime integrations and lifecycle. Smaller reusable compositions are programs or graphs.
+
+## Programming vocabulary
+
+| Meaning | Public programming term | Retire or narrow |
+|---|---|---|
+| Valued future organizing UI and work | `target` | `guarantee target` in ordinary API prose |
+| Typed input from code, PG, production or requirements | `source` | `grounding source` except in conceptual explanation |
+| Derivation of structured facts and unknowns | `analysis` | treating every analysis as proof |
+| Property evaluation with pass/fail/unknown | `check` | `verifier` as the universal public noun |
+| Reference used by a check | `oracle` | using oracle for the whole check or protocol |
+| Typed DAG computation | `program` | calling every recipe a protocol |
+| Materialized result from a program | `output` | implying every output is evidence |
+| Versioned output consumed later | `artifact` | vague certificate where no certified claim exists |
+| Runtime attachment | `integration` plus the concrete kind | `enactor` |
+| Boundary that blocks a transition | `gate` | using gate for every runtime integration |
+| Attributable observation or derivation | `evidence` | proof when the method is empirical/statistical |
+| Current derived result for a target | `status` | public `qualification` where status is sufficient |
+| Actionable semantic problem | `finding` | generic condition |
+| Leased unit of agent work | `todo` | treating task completion as evidence |
+
+Keep `proof` only when a method actually supplies a proof under declared assumptions. Keep `certificate` for an artifact that packages a certified claim, scope, dependencies and producer identity—not as the default name for any runtime packet. Keep `admission` because it names a real programming-system transition distinct from installation and execution.
+
+## Revised structure
+
+```ts
+export const safeSelectiveRefresh = defineTarget({
+  id: 'db-endpoints/safe-selective-refresh',
+  title: 'Avoid unnecessary authoritative refetches',
+  for: endpoints.queryMutationPairs,
+  requires: [
+    'A refetch is skipped only when the retained query is unaffected',
+  ],
+})
+
+export const refreshEvidence = defineProgram({
+  sources: {
+    endpointGraph: endpoints.queryMutationGraph,
+    queryEffects: pg.queryEffects,
+    mutationEffects: pg.mutationEffects,
+    collectionState: dbEndpoints.collectionState,
+  },
+
+  checks: {
+    canSkipRefetch: defineCheck({ run: checkCanSkipRefetch }),
+  },
+
+  outputs: {
+    runtimePacket: defineOutput({
+      from: ['canSkipRefetch'],
+      schema: refreshEvidencePacketSchema,
+      build: compileRefreshEvidencePacket,
+    }),
+  },
+})
+
+export const selectiveRefresh = defineProtocol({
+  target: safeSelectiveRefresh,
+  program: refreshEvidence,
+  integrations: {
+    server: dbEndpoints.server.refreshDecision,
+    client: dbEndpoints.client.reconcile,
+  },
+  lifecycle: {
+    rebuildWhen: [sqlChanges, schemaChanges, endpointGraphChanges],
+  },
+})
+```
+
+The builder returns a `ProtocolDefinition`. Trust reports it as an active protocol only when its declared integrations are present and the coordinating behavior is actually in use. Project policy separately owns requirements and exceptions. Fallbacks, challenges, revisions and exits remain distinct mechanisms rather than properties inside a `soften` bucket.
+
+## Hardness map
+
+Hardness is computed rather than created through CRUD:
+
+```ts
+const map = await trust.hardness.map({
+  target: safeSelectiveRefresh,
+})
+```
+
+The returned map traverses subjects, transitions and time. It shows native bases such as PostgreSQL behavior; engineered dependencies such as a deploy gate or refresh decision; the evidence and artifacts supporting each region; current unknown, expired or bypassed regions; and complementary fallback, exception, challenge, revision and exit routes. Measures remain typed and source-specific rather than collapsing into one score.
+
+## Package vocabulary
+
+A PG package may publish sources, analyses, checks and native-behavior descriptions. A Neon package may publish sources, actions and runtime integrations. DB Endpoints may publish targets, programs, outputs and complete protocol definitions. A project may define local versions of any programming component and activate protocols through configuration. `Provider` remains a package role, not a graph-node kind.
+
+## Result
+
+The product can still say “TanStack Trust helps teams find hardness.” Its implementation says: define targets, run programs over sources, record evidence, build artifacts, attach runtime integrations, and observe active protocols. The hardness map shows what future reliance those pieces actually create and where softness remains.
+
+### Kyle
+
+_2026-09-18T15:43:44.270Z_
+
+> **Kyle:** “maybe defineLoop actually — agentic programming is all about loops after all. So it's a loop that has inputs/outputs & the agent can use it to test things essentially. Program is too close to normal programs.
+
+do we need defineProtocol?
+
+Draw a mermaid diagram — that'll help us refine graph”
+
+### Trust loops inside an enacted protocol system
+
+_2026-09-18T15:43:44.271Z_
+
+# Trust loops inside an enacted protocol system
+
+`defineLoop` is the stronger name for Trust’s executable authoring unit. The internal computation for one iteration remains a DAG, but the user-facing contract is iterative: an agent supplies or changes inputs, receives checked outputs and counterexamples, and invokes another bounded iteration.
+
+A base `defineProtocol` API is probably unnecessary. In the Protocol Institute sense, the protocol is the larger live coordinating system produced when targets, loops, runtime integrations, policies, authorities and participants repeatedly operate together. Trust can observe and describe that protocol without pretending a TypeScript declaration alone creates it. Reusable code bundles can use programming terms such as module, package or preset.
+
+```mermaid
+flowchart TD
+  T["Target<br/>valued future"] --> A["Agent changes a candidate"]
+
+  subgraph P["Protocol system — exists when repeatedly enacted"]
+    A --> I
+
+    subgraph L["defineLoop(...) — one bounded iteration"]
+      I["Typed inputs<br/>code, configuration, observations"] --> S["Sources"]
+      S --> N["Analyses"]
+      N --> C["Checks and oracles"]
+      C --> R{"Result"}
+      R -->|"fail or unknown"| F["Findings and counterexamples"]
+      R -->|"supported"| O["Outputs and artifacts"]
+    end
+
+    F --> A
+    O --> X["Runtime integrations<br/>server, client, CI, deploy"]
+    X --> W["Runtime behavior / changed world"]
+    W --> Q["New observations or invalidation"]
+    Q --> I
+  end
+
+  AU["Policy, authority and capabilities"] --> C
+  AU --> X
+
+  HM["Hardness / softness map<br/>derived across the field"] -.-> T
+  HM -.-> C
+  HM -.-> O
+  HM -.-> X
+  HM -.-> W
+```
+
+The loop is not necessarily an autonomous infinite process. `defineLoop` defines one typed, budgeted and replayable iteration plus the feedback required for another actor or agent to continue it. The cycle outside that iteration is what makes it useful for agentic search and maintenance.
+
+For Endpoints, the inputs are PG effects, the general Endpoints query/mutation graph, DB Endpoints state and a candidate implementation. The checks include `canSkipRefetch` and model/oracle tests. A supported iteration emits a runtime evidence packet. Server and client integrations consume it; runtime changes invalidate its dependencies and make another iteration available.
+
+The diagram leaves `protocol` as an observed system-level category rather than an authored graph node. If Trust later needs a reusable complete arrangement, it can store a `ProtocolDescription` or report `ProtocolStatus`; that does not require `defineProtocol` in the base API.
+
+### Kyle
+
+_2026-09-18T15:48:38.120Z_
+
+> **Kyle:** “hmm ok for fast verification of ideas — what would speed that up is if an agent could just propose changes to the loop w/o e.g. having to modify code or pg etc. it could just call an API w/ one input anywhere in the graph changed and then see the result. Pass in a whole array to try multiple options in parallel. Then if it checks out, it then modifies the schema or query or code or whatever”
+
+### Kyle
+
+_2026-09-18T15:51:37.097Z_
+
+> **Kyle:** “yup, ok where else is there epistemic uncertainty that we could pay down?”
+
+### Kyle
+
+_2026-09-18T15:55:13.661Z_
+
+> **Kyle:** “yeah I'm mainly concerned about concepts atm now how we build the incremental system so guide-word sweep is good — then draft a README.md to try to explain this to a new programmer to see how easy that is — have we refined this down yet to a complete elegant explainable system”
+
+### Kyle
+
+_2026-09-18T16:01:10.659Z_
+
+> **Kyle:** “hardness/softness isn't something formally provable or quantifiable — it'd be more a list of "here's our goals and the evidence/gates/methods we're bring to bear to make goals real" — but it'd be up to teams to evaluate whether something is good enough or not e.g. an outage or production slow down might have them investing to harden things more”
+
+### A newcomer README exposes a coherent center and seven unresolved semantics
+
+_2026-09-18T16:04:03.772Z_
+
+# Newcomer README explainability trial
+
+The draft is available at [trust-concept-readme/README.md](trust-concept-readme/README.md). Its 1,508 words explain the product without requiring the Field Log: teams define valued targets; agents use typed loops to batch-test candidate changes against sourced analyses and checks; authoritative runs can compile artifacts for runtime integrations; the repeatedly enacted whole is a protocol.
+
+The user correction at event 1148 is incorporated. Trust does not prove or quantify overall hardness. For each target it reports the evidence, checks, gates, methods, runtime integrations, fallbacks, exceptions, incidents and gaps a team is bringing to bear. Individual claims may be formal or quantitative; whether the whole arrangement is good enough remains the team's judgment. Outages, slowdowns, near misses or changed requirements can motivate more hardening work without Trust computing a hardness delta.
+
+## Explainability result
+
+The conceptual center is now explainable in one paragraph and one Endpoints example. `target` supplies the product-facing organizer. `defineLoop` supplies the agent-facing unit of iteration. Sources, analyses, checks, outputs, artifacts and integrations use ordinary programming vocabulary. Reserving protocol for the live coordinating whole removes the need for a base `defineProtocol` constructor.
+
+The system is not complete or empirically proven easy to learn. Seven semantics remain open: target decomposition; legal hypothetical injection points; whether discovery, authoritative verification and maintenance use one loop kind; server/client artifact boundaries; the contents of a non-scoring target report; observable protocol liveness; and cross-owner admission, capability and policy composition. Endpoints is still the only executable domain.
+
+The prepared Guide-word worksheet is at [trust-concept-readme/guide-word-preparation.md](trust-concept-readme/guide-word-preparation.md). It covers all seven fixed guide words across ten conceptual nodes, but the instrument remains prepared rather than completed because competent credibility and safeguard reviewers were not present. A fresh-reader test has not run.
+
+### Kyle
+
+_2026-09-18T16:05:13.825Z_
+
+> **Kyle:** “> Trust helps teams connect these pieces. It supplies a typed dataflow and
+>
+> evidence system, reusable open-source integrations, and agent-operable loops for
+>
+> testing possible changes. Runtime integrations can then make the results affect
+>
+> real behavior.
+
+missing "gating deploys"”
+
+### Kyle
+
+_2026-09-18T16:08:03.893Z_
+
+> **Kyle:** “should have CI there to be more explicit that CI can reject. Also the linting analogy — ”
+
+### Kyle
+
+_2026-09-18T16:08:31.685Z_
+
+> **Kyle:** “connect to what familiar but be clear it's novel”
+
+### Kyle
+
+_2026-09-18T16:11:29.723Z_
+
+> **Kyle:** “think layered explanations”
+
+### Kyle
+
+_2026-09-18T16:11:29.724Z_
+
+> **Kyle:** “> A loop gives an agent a bounded way to test an idea.
+
+no this is wrong... which suggests "loop" isn't the right word — there's a DAG leading to some valuable conclusion — which is what verifies agent code & they can use it if they want as a fast feedback to try out new ideas”
+
+### Kyle
+
+_2026-09-18T16:14:34.858Z_
+
+> **Kyle:** “maybe just defineCheck — which happens to be a graph under the hood”
+
+### Kyle
+
+_2026-09-18T16:14:34.859Z_
+
+> **Kyle:** “> Hardness is not a collection of `HardPoint` records,
+
+don't explain against stuff the fresh reader has never heard of...”
+
+### Kyle
+
+_2026-09-18T16:17:25.046Z_
+
+> **Kyle:** “yes and targets can compose checks e.g. "keep checkout fast and secure" would compose a bunch of subchecks which compose other ones, etc”
+
+### Kyle
+
+_2026-09-18T16:28:57.238Z_
+
+_Clarifying how an Endpoints package should expose its recommended Trust configuration after targets were made roots over recursively composed checks._
+
+> **Kyle:** “yeah `endpointsRecommended` is an array of targets that people would generally agree are good and tractable if you're using endpoints”
+
+### Targets root recursively composed checks
+
+_2026-09-18T16:28:57.239Z_
+
+The newcomer README now gives the public model two recursive levels. A **target** names the future a team values and serves as a root in the DAG. A **check** establishes one conclusion either by evaluating typed inputs or by composing child checks with `allOf`, `anyOf`, or a domain-specific combinator. Composite checks may contain other composite checks, and shared children make the execution structure a DAG rather than a tree.
+
+An Endpoints package can therefore export `endpointsRecommended` as an array of target values such as authoritative mutation delivery, safe selective refresh, and recoverable optimism. The name means these are goals that are broadly valuable and tractable for projects using Endpoints. Projects can adopt the array, remove a target, add local targets, and configure the policies used by its checks.
+
+The Endpoints illustration now routes `canSkipRefetch` through a refresh-plan composite: supported evidence selects the skip path, while failed or unknown evidence selects authoritative refetch. This keeps the broad target attainable without treating every mutation as skippable. Exact status propagation and explanation semantics for composite combinators remain open.
+
+Revised artifacts: [`trust-concept-readme/README.md`](trust-concept-readme/README.md) and [`trust-concept-readme/guide-word-preparation.md`](trust-concept-readme/guide-word-preparation.md).
+
+### Kyle
+
+_2026-09-18T16:46:25.240Z_
+
+_Reviewing the newcomer TanStack Trust README after the target/check composition revision._
+
+> **Kyle:** “look at the subheaders — they're not great”
+
+### README headings now carry the explanation
+
+_2026-09-18T16:46:25.242Z_
+
+The README's generic transition and taxonomy headings were replaced with claims that preserve the layered explanation when read by themselves. The sequence now moves from familiar editor feedback, through lifecycle evidence, targets, recursively composed checks, agent testing, consequential outputs, the Endpoints example, extension, team judgment, protocol enactment, shared interfaces, and the remaining open semantics. No body claims or code examples changed in this pass.
+
+Revised artifact: [`trust-concept-readme/README.md`](trust-concept-readme/README.md).
+
+### Kyle
+
+_2026-09-18T16:50:30.504Z_
+
+_Selecting a Term Scan of the current TanStack Trust newcomer README._
+
+> **Kyle:** “run term scan on the README to see if we're using multiple terms when one would do or the same term in inconsistent ways”
+
+### Definition, evaluation, and authority share too many names
+
+_2026-09-18T16:54:52.198Z · term-scan_
+
+A Term Scan of the newcomer README found the largest ambiguity where `check`, `target`, `supported`, `authoritative`, and `evidence` cross definition, evaluation, policy, and runtime-authority boundaries. Graph names and claim/conclusion appear collapsible; the data and consequence paths need explicit hierarchy rather than fewer words.
+
+### Kyle
+
+_2026-09-18T16:58:59.772Z_
+
+_Authorizing terminology cleanup of the README based on Term Scan 70, with a request to pause on uncertain choices._
+
+> **Kyle:** “ok do cleanup — ask me if there's anything uncertain”
+
+### Kyle
+
+_2026-09-18T17:27:40.746Z_
+
+_Choosing the prototype's `supported | unresolved | contradicted` check-result statuses over the README's draft vocabulary._
+
+> **Kyle:** “prototype”
+
+### Kyle
+
+_2026-09-18T17:27:40.747Z_
+
+_Correcting the suggestion that `claim` and `conclusion` were merely competing labels._
+
+> **Kyle:** “they're quite different words... what are you asking for?”
+
+### Kyle
+
+_2026-09-18T17:27:40.747Z_
+
+_Confirming inline claim authoring in `defineCheck`, lowered internally to a distinct stable claim._
+
+> **Kyle:** “yes”
+
+### README terminology cleanup preserves the runtime distinctions
+
+_2026-09-18T17:27:40.747Z_
+
+The README cleanup applied Term Scan 70 with two user decisions. Check results now use the prototype's `supported | unresolved | contradicted` statuses; execution failure remains separate. `defineCheck` authors a claim inline, and Trust lowers that declaration to a stable claim identity. A claim is the proposition evidence bears on; running a check produces a check result.
+
+The revised prose reserves **check** and **target** for reusable definitions. A check run produces a **check result**; evaluating a target produces a **target report** for one subject and context. The execution structure is consistently the **check graph**.
+
+The data path now states its roles explicitly: a source provider reads facts, an input is a typed value, an analysis derives structured information, and evidence is an attributable record offered for a claim. The consequence path distinguishes check result, output, versioned artifact, and the Endpoints-specific runtime packet and refresh plan.
+
+**Admission** now names project acceptance of an exact result, subject, scope and use. **Database-authoritative** is reserved for the Endpoints baseline and refetch relation. `endpointsRecommended` is explicitly a target preset, while check policy configures thresholds and evidence requirements. **Sources of hardness** are mechanisms; **hardness** is the practical certainty the whole arrangement creates around a valued future target.
+
+The cleanup also removed accidental status aliases such as passing, failed, unknown, unsupported and clean from the Trust result model. The Endpoints domain may still select a database refresh when a skip-refetch claim is unresolved or contradicted.
+
+Revised artifact: [`trust-concept-readme/README.md`](trust-concept-readme/README.md).
+
+### Kyle
+
+_2026-09-18T23:09:42.744Z_
+
+_In response to the newcomer README's definition of softness._
+
+> **Kyle:** “> **Softness** describes its capacity to adapt through fallback,
+> exception, challenge, revision, repair, and exit.
+
+not sure where you got this from”
+
+### Kyle
+
+_2026-09-18T23:09:42.746Z_
+
+_In response to the newcomer README's opening value proposition._
+
+> **Kyle:** “we're missing two of the main values here — implementation is cheap so we need more help with verification and ensuring we can trust agent output & also a system that captures human judgement and allows agents to work more autonomously within it speeds things up a lot”
+
+### Kyle
+
+_2026-09-18T23:09:42.746Z_
+
+_In response to the README's future-oriented description of targets and hardness._
+
+> **Kyle:** “"future" is generally not the right feel as most of the time people using Trust would be using it to help agents modify a current system against goals/conditions they've already set”
+
+### Kyle
+
+_2026-09-18T23:09:42.746Z_
+
+_During discussion of overlapping public API concepts._
+
+> **Kyle:** “a target and claim are kinda the same — they're both useful words but as far as the api goes, defineClaim seems fine perhaps? Thoughts?”
+
+### Kyle
+
+_2026-09-18T23:09:42.746Z_
+
+_Correction: the overlap under discussion was between check and target, not claim and target._
+
+> **Kyle:** “oh I mean "check" and target”
+
+### Kyle
+
+_2026-09-18T23:09:42.746Z_
+
+_In response to describing a target as a claim selected as a root goal._
+
+> **Kyle:** “what's a "root goal"? Maybe target is better general verb”
+
+### Kyle
+
+_2026-09-18T23:09:42.746Z_
+
+_Authorization to apply the unified Target terminology to the newcomer README._
+
+> **Kyle:** “ok fix the README”
+
+### README now centers verification, bounded autonomy, and one Target API
+
+_2026-09-18T23:09:42.746Z_
+
+The newcomer README now leads with two product values: cheap implementation moves the bottleneck to verification, and captured team judgment lets agents work faster and more autonomously without asking people to trust unverified output. Its normal case is an agent modifying a current system against goals and conditions the team has already set.
+
+The unsupported definition of **softness** was removed. Fallback, exception, challenge, revision, repair, and exit remain concrete mechanisms the design may preserve, without claiming that the donor source defines their bundle as a formal Trust concept.
+
+The public authoring model now uses one primitive: `defineTarget`. A target names any product or engineering condition, from a small input-evaluating condition to a broad composition of other targets. `trust.check(target)` evaluates it and returns a target result with `supported | unresolved | contradicted`; execution failure remains separate. **Check** is now an operation rather than a second definition type, and the README no longer introduces a separate public claim or root-goal abstraction.
+
+The local artifact and its public gist were updated. This is a clarified API proposal, not evidence that the general Target API or its cross-domain range has been implemented or validated.

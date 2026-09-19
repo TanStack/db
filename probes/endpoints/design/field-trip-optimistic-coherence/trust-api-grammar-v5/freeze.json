@@ -1,0 +1,47 @@
+{
+  "schema": "tanstack-trust-design-freeze/v1",
+  "design": "trust-api-grammar-v5",
+  "status": "normative-design-candidate-for-agent-usability",
+  "frozenAt": "2026-09-17T20:24:40Z",
+  "repositoryBaseCommit": "4ad19815b44be533ac10f90b62aca4377f5138d2",
+  "fieldLogThroughEvent": 1073,
+  "artifacts": {
+    "BRIEF.md": "484a644355c8aca9b893c24f012c874e0d3dfed0895b2ba53e49a23fa29e4ee1",
+    "MODEL.md": "3ad0ab80233524cd844b52f1eb57b53f6ee844f7f103a2bb0a802bf8393f7127",
+    "PRESERVATION.md": "146c25aae634c699e239046727747e90962a428784a66128bdf7bbb9658eb72b",
+    "PROCESS.md": "9dd3ff1f8a61b4f1b4e90ff42e303a0525033439612e6699ba76dba00645c140",
+    "EVIDENCE.md": "a1effa48e4ac925a6fca0a7610b03181650ad7c79a97cafb197e6165ae297660",
+    "TRANSFER-LEDGER.md": "4a9ce853da1e5842d8998c8d76b972687380bc96ca2d1779f7ccafd4c34c62c6",
+    "agent-usability/TEST-PACKET.md": "195d763570fc747b8f06cfac2269b70d4018a6f07f2195278a7f6365b80fcc9b",
+    "agent-usability/EVALUATION-PROTOCOL.md": "ce9ace687674dd958ee3938944ad93d2615319b50cda8393dc165d2388d9e25a",
+    "agent-usability/workflows/01-editor-repair.md": "7a4bc35abd0021c319beef73a0333210e9c9afab2f905bdae82d6210884774c4",
+    "agent-usability/workflows/02-expired-renewal.md": "8453051460f2542cf089f679e76f66d6b561aa8a3d7455ae12dd558c77fc5777",
+    "agent-usability/workflows/03-ci-gate.md": "399c7a07cbe44cfdcf833d99fedeb084312ec734f247524c40c65c56630bbcf8",
+    "agent-usability/workflows/04-devtools-inspection.md": "d0120fc7f22441d73f4865b31e558ae6890af63472288920afdfdf9ca32b26f7",
+    "agent-usability/workflows/05-temporary-downgrade.md": "c29814156a075c2bbea05a6647ea877d4838eb40cdd15e75d8814a06f9d23bdf",
+    "agent-usability/workflows/06-stricter-level-preview.md": "65123ad6cea33e999747fd3fcaa1636dbbc6873aaaee7aff18d1ecd5ab08d764"
+  },
+  "sources": {
+    "trust-api-grammar-v4/BRIEF.md": "c5ddeaaa930cc55b5a39cca19a0956d8b046bef3770a1a53c055377be513e257",
+    "trust-api-grammar-v4/MODEL.md": "5d193addc0cdf3aea00f152d06efef27b5fa3079525aed0e794807138c093f08",
+    "trust-api-grammar-v4/PRESERVATION.md": "288c0e45fd4145ecfe8426ef645eef3a39b8d71944ec0595f142e98bb67eacff",
+    "trust-api-grammar-v4/PROCESS.md": "f38c79023cd283ae8a3e16c741144a03bdfaf08112b63fc62a64497c3ddf30d0",
+    "trust-api-grammar-v4/EVIDENCE.md": "82c68aa72096d6eff5eb3636ffcdce74f2f63c3d3af9e6a2340080182cfc5d6e",
+    "trust-api-grammar-v4/audits/FINAL-EVALUATION.md": "2dfd1c98f1347cb4144b88774ab5cf007d5e484a96ce7765970785621bb9db5e",
+    "trust-api-grammar-v4/audits/evaluation-ledger.md": "9d3ea0148be141d44c0933d96e552952794781c1ff18a41ae1e496831eec3cce",
+    "trust-api-grammar-v4/audits/evaluation-semantic-instruments.md": "7793aa1525b9224775206b481f9208e92de23754712194c35ae34dd8c686f900",
+    "trust-api-grammar-v4/audits/evaluation-ts-api.md": "ded97468026c2c77748a76ea904b371c9efeffed0dcf2d6b16357730575c457d",
+    "trust-api-grammar-v4/audits/evaluation-adversarial.md": "491a0639ab8939a13a5edbd3ceae1a7ab0e4db5e764aac83cb3986b887f2292f",
+    "field_log.jsonl-through-event-1073": "17067f141abdf6b1baaf7aba80b49cc51f46c097f749b64c1f84c5f2dd4ca245",
+    "tanstack-trust-rfc-v0.3.md": "cb5d2620be30fdd12baf7173ad383ae76507a665f45cedcdf8c3296f269d8724",
+    "protocols-institute-hardness-survey.md": "6fc48262b87dbba084cf7705a96fcd3a8059bca1285f8fbb8661e40d939c4ec0",
+    "protocol-donor-perturbation.md": "663b3de0de9f43a2d328cbffa461a301c2966fc4559254ff568cc67b5b416bae",
+    "oracle-guidance-reaudit/GUIDE.md": "8460ba74a3eddbef29ba2a37a21b1716b63c1fae3f346b4bb5d1d6a191a69b0f",
+    "field-lab/SKILL.md": "1b1992ff73a9a372a4b5b467a29d09642d89daff2b86d86d2c9c63dfb03b4088"
+  },
+  "controls": {
+    "v5ArtifactHashesExclude": ["freeze.json", "agent usability results"],
+    "agentPacketRule": "All six agents receive the frozen TEST-PACKET hash and exactly one frozen workflow hash.",
+    "claimLevel": "Design candidate and usability simulation only; no implementation or correctness pass."
+  }
+}

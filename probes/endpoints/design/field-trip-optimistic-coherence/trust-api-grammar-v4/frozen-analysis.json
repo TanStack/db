@@ -1,0 +1,41 @@
+{
+  "schema": "tanstack-trust-design-grammar-analysis/v1",
+  "id": "trust-api-grammar-v4.analysis-1",
+  "fieldLogRunId": 61,
+  "preservationContract": "v4",
+  "range": "untested-beyond-endpoints",
+  "model": {
+    "primitives": ["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10", "M11", "M12"],
+    "projections": ["X01", "X02", "X03", "X04", "X05", "X06"],
+    "overlaps": ["O01", "O02", "O03", "O04", "O05", "O06", "O07", "O08", "O09"],
+    "rules": ["R01", "R02", "R03", "R04", "R05", "R06", "R07", "R08", "R09", "R10", "R11", "R12", "R13", "R14", "R15", "R16", "R17", "R18"],
+    "authoredPatterns": ["TrustRule"]
+  },
+  "controls": {
+    "reconstruction": {
+      "status": "model-pass",
+      "cases": ["UC01", "UC02", "UC03", "UC04", "UC05", "UC06", "UC07", "UC08"]
+    },
+    "ablation": {
+      "status": "model-pass",
+      "survivors": ["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10", "M11", "M12", "X01", "X02", "X03", "X04", "X05", "X06", "TrustRule"]
+    },
+    "negativeCases": {
+      "status": "excluded-by-model",
+      "cases": ["N01", "N02", "N03"]
+    },
+    "range": {
+      "status": "untested",
+      "reason": "No independent Trust implementation or second domain package exists."
+    }
+  },
+  "forms": ["F01", "F02", "F03"],
+  "conflicts": ["C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10"],
+  "sourceIds": ["S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09"],
+  "projectionGate": {
+    "model": "MODEL.md",
+    "evidence": "EVIDENCE.md",
+    "process": "PROCESS.md",
+    "briefMayAddStructure": false
+  }
+}

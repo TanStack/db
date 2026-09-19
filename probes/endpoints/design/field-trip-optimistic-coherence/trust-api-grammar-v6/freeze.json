@@ -1,0 +1,46 @@
+{
+  "schema": "tanstack-trust-design-freeze/v1",
+  "design": "trust-api-grammar-v6",
+  "status": "frozen-design-grammar-candidate",
+  "runId": 65,
+  "frozenAt": "2026-09-17T21:38:48Z",
+  "repositoryBaseCommit": "4ad19815b44be533ac10f90b62aca4377f5138d2",
+  "fieldLogThroughEvent": 1088,
+  "preservationConfirmedAtEvent": 1089,
+  "artifacts": {
+    "BRIEF.md": "489f05e04fe856d90a5437f65965dd572aad4ba35dd0393b40d301b6f3e948e5",
+    "MODEL.md": "1ed8490f01fb76b4aa299f06e728425008fb895321e54362a534e968a846b317",
+    "EVIDENCE.md": "6a6b934650cce65bfd16cf1d7ba28501014bbc434d71bff1e1e543bc2f9744a2",
+    "PROCESS.md": "050422aebb3821aaecae416ca14bc577078ac6ac5f043775797dc7bb9e796469",
+    "PRESERVATION.md": "f9e6abff63314ec65684f82a233ca041d766b62ca0f23235a72a7ccdc8dc0442"
+  },
+  "sources": {
+    "field_log.jsonl-through-event-1088": "1f42bfbbffa3e8b92c06b6a40ebebac9c0ccada04c53a453bff482f93c1aa7f2",
+    "trust-api-grammar-v5/MODEL.md": "3ad0ab80233524cd844b52f1eb57b53f6ee844f7f103a2bb0a802bf8393f7127",
+    "trust-api-grammar-v5/PROCESS.md": "9dd3ff1f8a61b4f1b4e90ff42e303a0525033439612e6699ba76dba00645c140",
+    "trust-api-grammar-v5/EVIDENCE.md": "a1effa48e4ac925a6fca0a7610b03181650ad7c79a97cafb197e6165ae297660",
+    "trust-api-grammar-v5/agent-usability/SYNTHESIS.md": "b48233ae6a4ced7a0f0a494ce03969a26146d6c5fab73f9acd8d06fc06a71667",
+    "tanstack-trust-rfc-v0.3.md": "cb5d2620be30fdd12baf7173ad383ae76507a665f45cedcdf8c3296f269d8724",
+    "protocols-institute-hardness-survey.md": "6fc48262b87dbba084cf7705a96fcd3a8059bca1285f8fbb8661e40d939c4ec0",
+    "protocol-donor-perturbation.md": "663b3de0de9f43a2d328cbffa461a301c2966fc4559254ff568cc67b5b416bae",
+    "evidence-base/DESIGN.md": "9f253c43d4196414247bb0fa403ddd2a32c8e1f366dbbb34424d504ef9b99637",
+    "evidence-base/kernel.ts": "f82d463b8d373a9c0e6560b612e43c0bccba80b098cbfc1837712ebc2070fb74",
+    "evidence-base/protocol.ts": "3efcdff5b3c7148534098e39a85278840b713ad73c2faa1d8da158f139a8df4c",
+    "evidence-base/service.mjs": "4008eecbb4c4fad79b6f5d15ef298b33dee791e3cb9b15b25fff2e2f79d9c51e",
+    "evidence-base/endpoints-real.mjs": "b015673e64ed4d18911c4d70651ef5636790f0808028d9d19aaa6d595b0d54f4",
+    "evidence-base/rebuild.test.mjs": "5dc5867c4cfa3775e53bf2a79bca03a124cf6fd56375a987bf5cb9ef43874bd6",
+    "evidence-base/fault-controls.mjs": "1de15e0651cd0d2a2ea62ca9a4e83e0b1d1c6f88392df4b7ec59995806c7a2b3",
+    "integrated-todo/compile-schema.mjs": "92a02f2360ec98f99cb08d317138f98a202eb52b0cb09b409ed1dd9b7f58806e",
+    "integrated-todo/sql-effects.mjs": "5d586748c3afcd8177768a70126aaebe6eb86456a853eb2ac6d287f1a1a64d6e",
+    "integrated-todo/compiled-dependencies.mjs": "06b779be2403ecb135e9c6f40f387e66d38c76756ce8192462502b308c66e6fa",
+    "integrated-todo/effect-verdict.mjs": "56df1bf287805465e8fbfac0c33a0df797052df1d10e6762d8a0913b087321d9"
+  },
+  "controls": {
+    "prototypeTests": "21/21 passed",
+    "faultControls": "8/8 hostile mutations detected",
+    "typecheck": "passed",
+    "range": "untested; no independent second domain supplied",
+    "artifactHashesExclude": ["freeze.json"],
+    "claimLevel": "design grammar and representative API only; no v6 implementation or cross-domain validation"
+  }
+}

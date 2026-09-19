@@ -1,11 +1,22 @@
 {
   "name": "evidence-base-prototype",
   "private": true,
+  "description": "A local evidence engine with Endpoints checks and CLI, LSP, and MCP transports.",
   "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
-    "test": "node --experimental-strip-types --test kernel.test.mjs",
+    "test": "node --experimental-strip-types --test kernel.test.mjs rebuild.test.mjs",
+    "test:kernel": "node --experimental-strip-types --test kernel.test.mjs",
+    "test:rebuild": "node --experimental-strip-types --test rebuild.test.mjs",
     "test:faults": "node fault-controls.mjs",
+    "test:handoff": "node verify-handoff.mjs",
+    "check": "npm test && npm run test:faults && npm run test:handoff && npm run typecheck",
     "demo": "node --experimental-strip-types demo.mjs",
+    "cli": "node --experimental-strip-types cli.mjs",
+    "lsp": "node --experimental-strip-types lsp-server.mjs",
+    "mcp": "node --experimental-strip-types mcp-server.mjs",
     "typecheck": "tsc --project tsconfig.json"
   }
 }

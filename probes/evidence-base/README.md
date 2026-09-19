@@ -1,120 +1,159 @@
 # Evidence base prototype
 
-A local argument checker with domain-owned rules. The first example package
-contains three Endpoints claims: complete write bounds, complete read bounds,
-and disjointness of those bounds. It uses fixture observations, not the production
-compiler or a PostgreSQL instance. It does not decide whether to enable an
-optimization.
+A local evidence engine for structured software claims. The engine keeps
+versioned observations, evaluates domain-owned argument rules, preserves open
+counterexamples and exposes the same operation layer through a CLI, an LSP
+server and an MCP server.
 
-This implements the [v2 repair contract](../endpoints/design/evidence-guarantees/base-grammar/revisions/v2/README.md)
-following the original exploratory grammar and its two audits. Original frozen
-designs and audit witnesses remain available; they describe the pre-repair code.
-See the [handoff](HANDOFF.md) for decisions, open work and cross-machine setup.
+The first production-shaped package is the Endpoints
+`endpoints/safe-skip-refetch@1` claim. Its check calls the extracted
+`canSkipRefetch` function used by the Endpoints prototype. The bounded package
+and its Oracle Guide card are in [DESIGN.md](DESIGN.md).
 
-## Run
+This remains a prototype. A supported claim means that a registered procedure
+accepted current evidence within its declared boundary. It does not prove the
+procedure or SQL analyzer universally sound, and it does not enact refresh
+policy.
 
-Node 22.13 or later with TypeScript stripping; no runtime dependencies:
+## Run and verify
+
+Use Node 22.13 or later. Runtime code and tests have no package dependencies;
+strict typechecking additionally requires TypeScript.
+
+From this directory:
 
 ```sh
-node --experimental-strip-types probes/evidence-base/demo.mjs
-node --experimental-strip-types --test probes/evidence-base/kernel.test.mjs
+npm test
+npm run test:faults
+npm run test:handoff
+npm run typecheck
+```
+
+From the repository root, the equivalent direct commands are:
+
+```sh
+node --experimental-strip-types --test probes/evidence-base/kernel.test.mjs probes/evidence-base/rebuild.test.mjs
 node probes/evidence-base/fault-controls.mjs
+node probes/evidence-base/verify-handoff.mjs
 tsc --project probes/evidence-base/tsconfig.json
 ```
 
-The demo goes from missing premises to supported disjointness, then records a
-counterexample to the write bound. The downstream argument becomes unresolved
-with the counterexample in its explanation. It does not report a counterexample
-to disjointness itself: its supporting premise failed.
+The complete suite currently has 21 tests: 14 kernel/oracle tests and seven
+rebuild tests. Eight mutations of temporary production-code copies must fail at
+the intended oracle assertion.
 
-## Boundary
+## Shared operations
 
-`EvidenceBase` supplies registered-rule lookup, argument traversal, exact claim
-identity, per-use freshness, immutable observation snapshots, direct failure
-capture, explicit replay resolution and shared missing-premise reports.
+`service.mjs` is the single operation layer used by every transport:
 
-A package supplies versioned laws, parameterized claims, admission predicates,
-inference premises and side conditions. Its registered functions are trusted
-semantic code. Passing those functions proves that the declared procedure
-accepted the argument; it does not prove the procedure sound.
+- `init`: create a verified store.
+- `status`: summarize observations, dependencies and open challenges.
+- `assess`: evaluate one exact structured claim.
+- `runEndpoints`: execute and record the real Endpoints decision check.
+- `context`: register current dependency fingerprints.
+- `history`: return observations and challenge history.
+- `resolve`: link an open challenge to a causally later, applicable replay.
 
-`run()` records every returned observation and creates challenges for failures
-before returning to the caller. A thrown operational error creates no evidence.
-Application failure can still be the expected subject of a passing check.
+Requests within one service process are serialized. Writes use a temporary file
+and atomic rename. Separate processes are not coordinated by a file lock.
 
-`propose()` adds an argument, not support. `assess()` returns support, gaps and
-reasons. Its nested `routes` preserve alternatives and each route's required
-premises. Flat `gaps` are only a deduplicated inventory; top-level observation and
-rule lists describe one successful route, while all assessed routes remain
-available. Direct challenge IDs are structured data, including inside premise
-assessments. No severity, admission policy, aggregate confidence score, automatic
-proof search or application action is embedded in the base.
+## CLI
 
-## Prototype limits
+```sh
+node --experimental-strip-types probes/evidence-base/cli.mjs --store /tmp/endpoints-evidence.json init
+node --experimental-strip-types probes/evidence-base/cli.mjs --store /tmp/endpoints-evidence.json status
+node --experimental-strip-types probes/evidence-base/cli.mjs --store /tmp/endpoints-evidence.json run-endpoints @case.json
+node --experimental-strip-types probes/evidence-base/cli.mjs --store /tmp/endpoints-evidence.json assess @claim.json
+```
 
-- Context uses one explicit epoch. Call `advanceContext()` for a relevant change;
-  returning to old bytes cannot restore an earlier observation. This is deliberately
-  coarse and invalidates all observations. Dependency-specific invalidation,
-  expiry and automatic fingerprint capture are not implemented.
-- Exact JSON identity supports identical shared claims, not logical equivalence
-  or scope subsumption. Packages must version laws and state their conditions.
-- Same-claim counterexamples remain open across context changes until replay.
-  This may overblock. Automatic cross-version mapping, narrower-scope exclusions
-  and different-strategy resolution are not implemented.
-- Resolutions are append-only replay references, not permanent closed flags.
-  Every assessment checks whether a resolution's replay is current. When it
-  expires, a fresh original-case replay can append a new resolution without
-  discarding the old history.
-- Replay compares the full supplied case data and claim identity. Packages must
-  preserve the actual law/comparator and case semantics; a label alone proves
-  neither. A replay check must be invoked after the failure was recorded. Run
-  delivery order and within-batch order do not prove that relation. The runner
-  captures its invocation boundary; trusted callbacks must execute the check,
-  not return cached earlier measurements. Same-run repair is not supported.
-  Fresh passing evidence does not resolve a challenge implicitly.
-- State is in memory. Checked-in storage, import verification, incremental
-  evaluation and durable runner delivery remain work. Nothing here protects
-  against a hostile agent controlling the process, plugins or filesystem.
-- Proposed arguments may contain cycles; these cannot establish their own
-  support. Alternative grounded routes still work. Traversal is suitable for
-  small examples; it can repeat shared work on large graphs.
-- Source-inspection/rubric admission and speculative challenges are described
-  by the grammar/workflows but not implemented by this first kernel.
-- Endpoints currently consumes the base only through the runnable example.
-  Production refresh planning and the existing SQL analyzer are unchanged.
+JSON arguments may be inline, loaded with `@FILE`, or read from stdin with `-`.
+Run `cli.mjs --help` for the full command list. Parse, file, validation and
+service errors are reported on stderr with a nonzero exit status.
 
-## Checks and what they establish
+## LSP
 
-Thirteen tests pass. The argument oracle compares backward evaluation with a separate
-forward-chaining model over 60 generated clause sets and all 16 initial fact sets
-for each. The lifecycle oracle checks 80 histories of 35 operations against a
-small state model. A possible-worlds oracle enumerates actual read/write subsets
-for all 64 pairs of bounds over three table names. These are bounded mathematical
-fixtures, not broad PostgreSQL coverage.
+```sh
+node --experimental-strip-types probes/evidence-base/lsp-server.mjs --store /tmp/endpoints-evidence.json
+```
 
-The repair adds a public-explanation oracle over 60 clause sets and eight future
-fact sets each, a resolution-lifetime oracle over 40 histories of 45 generated
-operations after the failing prefix, and 30 reordered-delivery cases plus both
-same-batch orders. All three failed on the old kernel and pass on the repair.
-The older lifecycle model now retains historical failures and resolution epochs
-instead of forgetting failures permanently after a replay.
+The server uses standard `Content-Length` framed JSON-RPC on stdin/stdout. An
+opened JSON document must contain `{ "claim": { ... } }`; the server publishes
+an error for contradicted claims, a warning for unresolved claims and no
+diagnostic for supported claims. It also exposes `evidence.request` through
+`workspace/executeCommand`. Incoming messages are processed serially.
 
-Seven actual mutations of temporary kernel copies are detected by the unchanged
-oracles: accepting one conjunct, circular self-support, ignoring freshness, and
-dropping failure reports, erasing route explanations, retaining expired repair
-authority, and admitting replay by delivery order. Initially the freshness fault escaped because low bits
-of the test RNG produced repeating operation patterns. The generator was repaired
-and now also requires all 16 adjacent operation pairs. All four fault controls
-then failed at the expected assertions; the unchanged kernel passed. The audit
-later found the distinct resolution-lifetime and causal-replay gaps; the new
-controls cover those findings.
+## MCP
 
-The generator is a small deterministic local generator, not fast-check. It has
-replay seeds but no automatic shrinking. A broader kernel oracle should add
-shrinking and generated rule/claim schemas before making wider coverage claims.
+```sh
+node --experimental-strip-types probes/evidence-base/mcp-server.mjs --store /tmp/endpoints-evidence.json
+```
 
-## Authoring checks
+The MCP server uses newline-delimited JSON-RPC on stdin/stdout and advertises
+tools for status, assessment, Endpoints checks, history, dependency context and
+challenge resolution. Point an MCP client at the command above to make the
+engine available to agents. All tool calls dispatch through the same service as
+the CLI and LSP server.
 
-Start with the packaged [workflows](workflows/README.md). They guide claim/check
-design, evidence production and rule repair. They are draft authoring procedures,
-not a certification of checks produced by following them.
+## Evidence semantics
+
+- Check outcomes are `pass`, `fail` or `unresolved`. Unknown analysis is not a
+  counterexample.
+- A check that throws or does not reach its named production checkpoint records
+  no observation.
+- Dependencies include code, data, configuration, environment, method and
+  external inputs. Each changed fingerprint advances a monotonic revision, so
+  returning to old bytes cannot reactivate old evidence.
+- A failure opens a challenge. Only an exact same-law, same-case replay started
+  after that failure may resolve it, and the replay must remain applicable.
+- Arguments retain conjunctive premise structure and alternative routes. Cycles
+  cannot support themselves.
+- Claim identity is exact canonical JSON identity; logical equivalence and scope
+  subsumption are package responsibilities.
+- Import verifies the store envelope checksum and all internal references before
+  rebuilding state.
+
+The checksum detects accidental or out-of-band modification; it is not a
+signature and does not protect against a process or user that controls both the
+store and checksum.
+
+## Real Endpoints package
+
+The package reports safe-to-skip support only when the query and mutation share
+an artifact, authority has a confirmed baseline, no optimistic or repair work is
+pending, effect bounds are complete, and the query reads do not intersect the
+mutation writes. Overlap and missing authority produce a failing observation;
+incomplete effects or different artifacts remain unresolved.
+
+The independent oracle enumerates all small read/write subsets over three table
+names and computes intersection without using the production decision helper.
+This tests the verdict kernel. It does not establish SQL analyzer completeness,
+PostgreSQL value correctness, external-write handling or production policy.
+
+## Package map
+
+- `protocol.ts`: check, dependency and three-valued outcome contracts.
+- `kernel.ts`: evidence state, argument evaluation, applicability and replay.
+- `storage.mjs`: checksummed atomic JSON persistence.
+- `endpoints-real.mjs`: the real Endpoints claim, contract, runner and rule.
+- `service.mjs`: shared serialized operations.
+- `cli.mjs`, `lsp-server.mjs`, `mcp-server.mjs`: transport adapters.
+- `oracle-tools.mjs`: same-violation history reduction.
+- `kernel.test.mjs`, `rebuild.test.mjs`, `fault-controls.mjs`: bounded oracles,
+  integration checks and mutation controls.
+- `workflows/`: the packaged `design-check`, `maintain-evidence` and
+  `repair-rule` authoring workflows.
+
+## Remaining boundary
+
+The next useful steps are to broaden SQL-analyzer evidence, give query and
+mutation dependencies endpoint-specific identities, connect support to an
+explicit consumer fallback policy, add safe multi-process storage coordination,
+and package editor/agent configuration around the LSP and MCP servers. General
+proof search, policy levels, signatures, remote execution, automatic dependency
+discovery, cross-version case mapping and hostile-process isolation are not in
+this prototype.
+
+The [handoff](HANDOFF.md) records the implementation state, verification and
+source trail. The original grammar, audit witnesses and full Field Log remain
+under `probes/endpoints/design/evidence-guarantees/` and
+`probes/endpoints/design/field-trip-optimistic-coherence/`.

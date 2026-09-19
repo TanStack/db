@@ -1,9 +1,17 @@
+import type {
+  CapturedDependency,
+  CheckContract,
+  CheckExecution,
+  EvidenceDependency,
+  EvidenceOutcome,
+} from './protocol.ts'
+
 export type Json =
   | null
   | boolean
   | number
   | string
-  | Json[]
+  | Array<Json>
   | { [key: string]: Json }
 
 export interface Claim {
@@ -15,7 +23,9 @@ export interface Claim {
 export interface Finding {
   claim: Claim
   case: Json
-  passed: boolean
+  /** `passed` remains accepted for v1 callers; v2 callers should use outcome. */
+  passed?: boolean
+  outcome?: EvidenceOutcome
   value: Json
 }
 
@@ -24,6 +34,10 @@ export interface Observation extends Finding {
   run: number
   producer: string
   epoch: number
+  outcome: EvidenceOutcome
+  passed: boolean
+  dependencies: Array<CapturedDependency>
+  check?: CheckContract
   /** Last committed observation when the check callback was invoked. */
   startedAfterObservation: number
 }
@@ -31,44 +45,62 @@ export interface Observation extends Finding {
 export interface Rule {
   /** Version is part of the identifier. Registered rules are trusted code. */
   id: string
-  premises: (claim: Claim) => Claim[] | undefined
+  premises: (claim: Claim) => Array<Claim> | undefined
   inspect: (
     claim: Claim,
-    observations: readonly Observation[],
+    observations: ReadonlyArray<Observation>,
   ) => string | undefined
 }
 
 export interface Argument {
   claim: Claim
   rule: string
-  observations: number[]
+  observations: Array<number>
 }
 
 export interface Challenge {
   id: number
   observation: number
   /** Append-only replay history; current applicability is computed on use. */
-  resolutions: number[]
+  resolutions: Array<number>
 }
 
 export interface ArgumentAssessment {
   rule: string
-  observations: number[]
+  observations: Array<number>
   status: 'supported' | 'unresolved' | 'rejected'
-  reasons: string[]
+  reasons: Array<string>
   /** All premises are required; sibling routes in Assessment are alternatives. */
-  premises: Assessment[]
+  premises: Array<Assessment>
 }
 
 export interface Assessment {
   claim: Claim
   status: 'supported' | 'unresolved' | 'contradicted'
-  observations: number[]
-  rules: string[]
-  reasons: string[]
-  gaps: Claim[]
-  routes: ArgumentAssessment[]
-  challenges: number[]
+  observations: Array<number>
+  rules: Array<string>
+  reasons: Array<string>
+  gaps: Array<Claim>
+  routes: Array<ArgumentAssessment>
+  challenges: Array<number>
+}
+
+export interface EvidenceState {
+  format: 'evidence-base/v2'
+  epoch: number
+  dependencies: Array<CapturedDependency>
+  nextRun: number
+  nextObservation: number
+  arguments: Array<Argument>
+  observations: Array<Observation>
+  challenges: Array<Challenge>
+}
+
+export class CheckDidNotReachProductionPathError extends Error {
+  constructor(check: CheckContract) {
+    super(`Check did not reach production path: ${check.productionPath}`)
+    this.name = 'CheckDidNotReachProductionPathError'
+  }
 }
 
 /** Exact JSON identity, not domain-specific equivalence or subsumption. */
@@ -96,8 +128,66 @@ export function identity(value: Json | Claim): string {
     .join(',')}}`
 }
 
-function distinctClaims(claims: Claim[]): Claim[] {
+function distinctClaims(claims: Array<Claim>): Array<Claim> {
   return [...new Map(claims.map((claim) => [identity(claim), claim])).values()]
+}
+
+function dependencyKey(dependency: Pick<EvidenceDependency, 'kind' | 'name'>) {
+  return `${dependency.kind}\0${dependency.name}`
+}
+
+function normalizeOutcome(finding: Finding): EvidenceOutcome {
+  if (finding.outcome) {
+    if (
+      finding.passed !== undefined &&
+      finding.passed !== (finding.outcome === 'pass')
+    )
+      throw new Error('Finding outcome and passed flag disagree')
+    return finding.outcome
+  }
+  if (typeof finding.passed !== 'boolean')
+    throw new Error('Finding requires outcome or passed')
+  return finding.passed ? 'pass' : 'fail'
+}
+
+function validateDependency(dependency: EvidenceDependency): void {
+  if (
+    !['code', 'data', 'config', 'environment', 'method', 'external'].includes(
+      dependency.kind,
+    ) ||
+    !dependency.name ||
+    !dependency.fingerprint
+  )
+    throw new Error('Invalid evidence dependency')
+}
+
+function validateCheck(check: CheckContract): void {
+  if (
+    !check.id ||
+    !Number.isSafeInteger(check.version) ||
+    check.version < 1 ||
+    !check.law ||
+    !check.source ||
+    !check.domain ||
+    !check.productionPath ||
+    !check.checkpoint ||
+    !check.reachWitness ||
+    !check.replay ||
+    !Array.isArray(check.observes) ||
+    !Array.isArray(check.omissions) ||
+    !Array.isArray(check.faultControls) ||
+    ![
+      'model',
+      'differential',
+      'metamorphic',
+      'invariant',
+      'certificate',
+      'recorded',
+    ].includes(check.reference.kind) ||
+    !check.reference.description ||
+    !Array.isArray(check.reference.trusted)
+  )
+    throw new Error('Invalid check contract')
 }
 
 /**
@@ -106,19 +196,207 @@ function distinctClaims(claims: Claim[]): Claim[] {
  */
 export class EvidenceBase {
   #rules = new Map<string, Rule>()
-  #arguments = new Map<string, Argument[]>()
+  #arguments = new Map<string, Array<Argument>>()
   #observations = new Map<number, Observation>()
-  #challenges: Challenge[] = []
+  #challenges: Array<Challenge> = []
+  #dependencies = new Map<string, CapturedDependency>()
   #epoch = 0
   #nextRun = 1
   #nextObservation = 1
 
-  constructor(rules: readonly Rule[]) {
+  constructor(rules: ReadonlyArray<Rule>) {
     for (const rule of rules) {
       if (this.#rules.has(rule.id))
         throw new Error(`Duplicate rule: ${rule.id}`)
       this.#rules.set(rule.id, Object.freeze({ ...rule }))
     }
+  }
+
+  static #validateState(input: unknown): EvidenceState {
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+      throw new Error('Invalid evidence state')
+    const rawState = structuredClone(input) as { format?: unknown }
+    if (rawState.format !== 'evidence-base/v2')
+      throw new Error('Invalid evidence state')
+    const state = rawState as EvidenceState
+    if (
+      !Number.isSafeInteger(state.epoch) ||
+      state.epoch < 0 ||
+      !Number.isSafeInteger(state.nextRun) ||
+      !Number.isSafeInteger(state.nextObservation) ||
+      !Array.isArray(state.dependencies) ||
+      !Array.isArray(state.arguments) ||
+      !Array.isArray(state.observations) ||
+      !Array.isArray(state.challenges)
+    )
+      throw new Error('Invalid evidence state')
+
+    const dependencyKeys = new Set<string>()
+    for (const dependency of state.dependencies) {
+      validateDependency(dependency)
+      if (!Number.isSafeInteger(dependency.revision) || dependency.revision < 1)
+        throw new Error('Invalid dependency revision')
+      const key = dependencyKey(dependency)
+      if (dependencyKeys.has(key)) throw new Error('Duplicate dependency state')
+      dependencyKeys.add(key)
+    }
+
+    const observationIds = new Set<number>()
+    let maximumRun = 0
+    let maximumObservation = 0
+    for (const observation of state.observations) {
+      identity(observation.claim)
+      identity(observation.case)
+      identity(observation.value)
+      if (
+        !Number.isSafeInteger(observation.id) ||
+        observation.id < 1 ||
+        observationIds.has(observation.id) ||
+        !Number.isSafeInteger(observation.run) ||
+        observation.run < 1 ||
+        !Number.isSafeInteger(observation.epoch) ||
+        observation.epoch < 0 ||
+        !Number.isSafeInteger(observation.startedAfterObservation) ||
+        observation.startedAfterObservation < 0 ||
+        !['pass', 'fail', 'unresolved'].includes(observation.outcome) ||
+        observation.passed !== (observation.outcome === 'pass') ||
+        !observation.producer ||
+        !Array.isArray(observation.dependencies)
+      )
+        throw new Error('Invalid observation')
+      observationIds.add(observation.id)
+      maximumRun = Math.max(maximumRun, observation.run)
+      maximumObservation = Math.max(maximumObservation, observation.id)
+      for (const dependency of observation.dependencies) {
+        validateDependency(dependency)
+        if (
+          !Number.isSafeInteger(dependency.revision) ||
+          dependency.revision < 1
+        )
+          throw new Error('Invalid captured dependency')
+      }
+      if (observation.check) {
+        validateCheck(observation.check)
+        if (observation.check.law !== observation.claim.law)
+          throw new Error('Check law does not match observation')
+      }
+    }
+    if (
+      state.nextRun <= maximumRun ||
+      state.nextObservation <= maximumObservation
+    )
+      throw new Error('Evidence counters do not follow imported history')
+
+    for (const argument of state.arguments) {
+      identity(argument.claim)
+      if (!argument.rule || !Array.isArray(argument.observations))
+        throw new Error('Invalid argument')
+      if (argument.observations.some((id) => !observationIds.has(id)))
+        throw new Error('Argument references an unknown observation')
+    }
+
+    const challenges = new Set<number>()
+    for (const challenge of state.challenges) {
+      const failed = state.observations.find(
+        (observation) => observation.id === challenge.observation,
+      )
+      if (
+        !Number.isSafeInteger(challenge.id) ||
+        challenge.id < 1 ||
+        challenges.has(challenge.id) ||
+        failed?.outcome !== 'fail' ||
+        !Array.isArray(challenge.resolutions)
+      )
+        throw new Error('Invalid challenge')
+      challenges.add(challenge.id)
+      for (const resolution of challenge.resolutions) {
+        const replay = state.observations.find(
+          (observation) => observation.id === resolution,
+        )
+        if (
+          replay?.outcome !== 'pass' ||
+          replay.startedAfterObservation < failed.id ||
+          identity(replay.claim) !== identity(failed.claim) ||
+          identity(replay.case) !== identity(failed.case)
+        )
+          throw new Error('Invalid challenge resolution')
+      }
+    }
+    return state
+  }
+
+  static fromState(rules: ReadonlyArray<Rule>, input: unknown): EvidenceBase {
+    const state = EvidenceBase.#validateState(input)
+    const base = new EvidenceBase(rules)
+    base.#epoch = state.epoch
+    base.#nextRun = state.nextRun
+    base.#nextObservation = state.nextObservation
+    base.#dependencies = new Map(
+      state.dependencies.map((dependency) => [
+        dependencyKey(dependency),
+        structuredClone(dependency),
+      ]),
+    )
+    for (const argument of state.arguments) {
+      const key = identity(argument.claim)
+      const existing = base.#arguments.get(key) ?? []
+      existing.push(structuredClone(argument))
+      base.#arguments.set(key, existing)
+    }
+    base.#observations = new Map(
+      state.observations.map((observation) => [
+        observation.id,
+        structuredClone(observation),
+      ]),
+    )
+    base.#challenges = structuredClone(state.challenges)
+    return base
+  }
+
+  exportState(): EvidenceState {
+    return structuredClone({
+      format: 'evidence-base/v2',
+      epoch: this.#epoch,
+      dependencies: [...this.#dependencies.values()],
+      nextRun: this.#nextRun,
+      nextObservation: this.#nextObservation,
+      arguments: [...this.#arguments.values()].flat(),
+      observations: [...this.#observations.values()],
+      challenges: this.#challenges,
+    })
+  }
+
+  /**
+   * Register the currently observed dependency versions. A changed fingerprint
+   * advances a monotonic revision, so returning to old bytes cannot revive old
+   * evidence. Dependencies not named here retain their current versions.
+   */
+  updateDependencies(
+    dependencies: ReadonlyArray<EvidenceDependency>,
+  ): Array<CapturedDependency> {
+    const seen = new Set<string>()
+    return dependencies.map((dependency) => {
+      validateDependency(dependency)
+      const key = dependencyKey(dependency)
+      if (seen.has(key)) throw new Error(`Duplicate dependency: ${key}`)
+      seen.add(key)
+      const previous = this.#dependencies.get(key)
+      const current: CapturedDependency = {
+        ...structuredClone(dependency),
+        revision:
+          previous === undefined
+            ? 1
+            : previous.fingerprint === dependency.fingerprint
+              ? previous.revision
+              : previous.revision + 1,
+      }
+      this.#dependencies.set(key, current)
+      return structuredClone(current)
+    })
+  }
+
+  currentDependencies(): Array<CapturedDependency> {
+    return structuredClone([...this.#dependencies.values()])
   }
 
   /** Caller must signal relevant code/data/config/environment changes. */
@@ -127,6 +405,10 @@ export class EvidenceBase {
   }
 
   propose(argument: Argument): void {
+    if (!argument.rule || !Array.isArray(argument.observations))
+      throw new Error('Invalid argument')
+    if (argument.observations.some((id) => !this.#observations.has(id)))
+      throw new Error('Argument references an unknown observation')
     const key = identity(argument.claim)
     const existing = this.#arguments.get(key) ?? []
     existing.push(structuredClone(argument))
@@ -141,31 +423,92 @@ export class EvidenceBase {
    */
   async run(
     producer: string,
-    check: () => Promise<Finding[]>,
-  ): Promise<Observation[]> {
+    check: () => Promise<Array<Finding>>,
+  ): Promise<Array<Observation>> {
     const epoch = this.#epoch
     const run = this.#nextRun++
     const startedAfterObservation = this.#nextObservation - 1
     const findings = structuredClone(await check())
-    // Validate the whole returned batch before committing any observations.
-    for (const finding of findings) {
+    return this.#commitRun({
+      producer,
+      epoch,
+      run,
+      startedAfterObservation,
+      dependencies: [],
+      findings,
+    })
+  }
+
+  /**
+   * Run a source-described check. Failure and unresolved outcomes are evidence;
+   * inability to reach the named production path is an operational error and
+   * commits nothing.
+   */
+  async runCheck(
+    contract: CheckContract,
+    producer: string,
+    dependencies: ReadonlyArray<EvidenceDependency>,
+    check: () => Promise<CheckExecution<Finding>>,
+  ): Promise<Array<Observation>> {
+    validateCheck(contract)
+    const captured = this.updateDependencies(dependencies)
+    const epoch = this.#epoch
+    const run = this.#nextRun++
+    const startedAfterObservation = this.#nextObservation - 1
+    const execution = structuredClone(await check())
+    if (!execution.reached)
+      throw new CheckDidNotReachProductionPathError(contract)
+    if (!Array.isArray(execution.findings))
+      throw new Error('Invalid check execution')
+    for (const finding of execution.findings)
+      if (finding.claim.law !== contract.law)
+        throw new Error('Check returned a finding for another law')
+    return this.#commitRun({
+      producer,
+      epoch,
+      run,
+      startedAfterObservation,
+      dependencies: captured,
+      check: contract,
+      findings: execution.findings,
+    })
+  }
+
+  #commitRun(input: {
+    producer: string
+    epoch: number
+    run: number
+    startedAfterObservation: number
+    dependencies: Array<CapturedDependency>
+    check?: CheckContract
+    findings: Array<Finding>
+  }): Array<Observation> {
+    if (!input.producer || !Array.isArray(input.findings))
+      throw new Error('Invalid check result')
+    const normalized = input.findings.map((finding) => {
       identity(finding.claim)
       identity(finding.case)
       identity(finding.value)
-      if (typeof finding.passed !== 'boolean')
-        throw new Error('Invalid check outcome')
-    }
-    const observations = findings.map((finding) => ({
+      const outcome = normalizeOutcome(finding)
+      return {
+        ...structuredClone(finding),
+        outcome,
+        passed: outcome === 'pass',
+      }
+    })
+    const observations: Array<Observation> = normalized.map((finding) => ({
       ...finding,
       id: this.#nextObservation++,
-      run,
-      producer,
-      epoch,
-      startedAfterObservation,
+      run: input.run,
+      producer: input.producer,
+      epoch: input.epoch,
+      dependencies: structuredClone(input.dependencies),
+      ...(input.check ? { check: structuredClone(input.check) } : {}),
+      startedAfterObservation: input.startedAfterObservation,
     }))
     for (const observation of observations) {
       this.#observations.set(observation.id, observation)
-      if (!observation.passed) {
+      if (observation.outcome === 'fail') {
         this.#challenges.push({
           id: this.#challenges.length + 1,
           observation: observation.id,
@@ -191,8 +534,8 @@ export class EvidenceBase {
       !failed ||
       !replay ||
       this.#hasApplicableResolution(challenge) ||
-      !replay.passed ||
-      replay.epoch !== this.#epoch ||
+      replay.outcome !== 'pass' ||
+      !this.#isApplicable(replay) ||
       replay.startedAfterObservation < failed.id ||
       identity(replay.claim) !== identity(failed.claim) ||
       identity(replay.case) !== identity(failed.case)
@@ -204,7 +547,7 @@ export class EvidenceBase {
     challenge.resolutions.push(replayId)
   }
 
-  history(): { observations: Observation[]; challenges: Challenge[] } {
+  history(): { observations: Array<Observation>; challenges: Array<Challenge> } {
     return structuredClone({
       observations: [...this.#observations.values()],
       challenges: this.#challenges,
@@ -216,9 +559,21 @@ export class EvidenceBase {
   }
 
   #hasApplicableResolution(challenge: Challenge): boolean {
-    return challenge.resolutions.some(
-      (id) => this.#observations.get(id)?.epoch === this.#epoch,
-    )
+    return challenge.resolutions.some((id) => {
+      const observation = this.#observations.get(id)
+      return observation !== undefined && this.#isApplicable(observation)
+    })
+  }
+
+  #isApplicable(observation: Observation): boolean {
+    if (observation.epoch !== this.#epoch) return false
+    return observation.dependencies.every((captured) => {
+      const current = this.#dependencies.get(dependencyKey(captured))
+      return (
+        current?.revision === captured.revision &&
+        current.fingerprint === captured.fingerprint
+      )
+    })
   }
 
   #assess(claim: Claim, ancestors: Set<string>): Assessment {
@@ -306,22 +661,27 @@ export class EvidenceBase {
     const rule = this.#rules.get(argument.rule)
     if (!rule)
       return { ...route, reasons: [`Unregistered rule: ${argument.rule}`] }
-    const observations: Observation[] = []
+    const observations: Array<Observation> = []
     for (const id of argument.observations) {
       const observation = this.#observations.get(id)
-      if (
-        !observation ||
-        observation.epoch !== this.#epoch ||
-        !observation.passed
-      ) {
+      if (!observation || !this.#isApplicable(observation)) {
         return {
           ...route,
-          reasons: [`Missing, stale or failing observation: ${id}`],
+          reasons: [`Missing or stale observation: ${id}`],
         }
       }
+      if (observation.outcome !== 'pass')
+        return {
+          ...route,
+          reasons: [
+            observation.outcome === 'unresolved'
+              ? `Unresolved observation: ${id}`
+              : `Failing observation: ${id}`,
+          ],
+        }
       observations.push(observation)
     }
-    let premises: Claim[] | undefined
+    let premises: Array<Claim> | undefined
     let rejection: string | undefined
     try {
       premises = rule.premises(structuredClone(claim))

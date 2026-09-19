@@ -22,13 +22,13 @@ const faults = [
   },
   {
     name: 'old observations regain support after context changes',
-    pattern: 'observation.epoch !== this.#epoch ||',
-    replacement: '',
+    pattern: 'if (observation.epoch !== this.#epoch) return false',
+    replacement: 'if (false) return false',
     test: 'generated context and failure histories',
   },
   {
     name: 'failure reporting loses counterexamples',
-    pattern: 'if (!observation.passed) {',
+    pattern: "if (observation.outcome === 'fail') {",
     replacement: 'if (false) {',
     test: 'generated context and failure histories',
   },
@@ -41,15 +41,23 @@ const faults = [
   },
   {
     name: 'expired repair evidence permanently clears a challenge',
-    pattern: 'this.#observations.get(id)?.epoch === this.#epoch',
-    replacement: 'this.#observations.has(id)',
+    pattern:
+      'return observation !== undefined && this.#isApplicable(observation)',
+    replacement: 'return observation !== undefined',
     test: 'generated repairs retain',
   },
   {
     name: 'delivery order replaces causal replay eligibility',
-    pattern: 'replay.startedAfterObservation < failed.id',
-    replacement: 'replay.id <= failed.id',
+    pattern:
+      '!this.#isApplicable(replay) ||\n      replay.startedAfterObservation < failed.id',
+    replacement: '!this.#isApplicable(replay) ||\n      replay.id <= failed.id',
     test: 'generated delivery permutations',
+  },
+  {
+    name: 'returning to old dependency bytes reactivates old evidence',
+    pattern: 'previous.revision + 1',
+    replacement: 'previous.revision',
+    test: 'dependency revisions cannot reactivate',
   },
 ]
 
@@ -63,7 +71,7 @@ for (const fault of faults) {
   )
   const directory = await mkdtemp(join(tmpdir(), 'evidence-fault-'))
   try {
-    for (const name of ['kernel.test.mjs', 'endpoints.ts'])
+    for (const name of ['kernel.test.mjs', 'endpoints.ts', 'protocol.ts'])
       await copyFile(join(source, name), join(directory, name))
     await writeFile(join(directory, 'package.json'), '{"type":"module"}')
     await writeFile(

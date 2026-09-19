@@ -1,0 +1,44 @@
+{
+  "schema": "tanstack-trust-design-grammar-freeze/v1",
+  "runId": 67,
+  "title": "TanStack Trust: Finding and Engineering Hardness",
+  "repositoryBaseCommit": "4ad19815b44be533ac10f90b62aca4377f5138d2",
+  "sourceFreeze": {
+    "fieldLogThroughEvent": 1121,
+    "preservationConfirmedAtEvent": 1121,
+    "runStartedAtEvent": 1123,
+    "priorGrammar": {
+      "path": "../trust-api-grammar-v7/freeze.json",
+      "runId": 66
+    }
+  },
+  "analysisFrozenBeforeProjection": true,
+  "artifacts": {
+    "PRESERVATION.md": {
+      "sha256": "275736b2947c44c686ea5f661252d74b9ac96509dde62e4575294c9a357a1754"
+    },
+    "MODEL.md": {
+      "sha256": "3b2ab3449608adf94ac288c4c363ceab6f6ba68ffdbe9bccd45b48fa79a61775"
+    },
+    "EVIDENCE.md": {
+      "sha256": "4059dd5cec2c59d6356647647a8bab254d5704f7a1a5dd9e407933f5c3c1f0c6"
+    },
+    "PROCESS.md": {
+      "sha256": "d74be7b1cbc8f371664cdc8f2af4fcbfbb52832e51c912b58ed387e691b5993d"
+    },
+    "BRIEF.md": {
+      "sha256": "a1527cd391763c082b37f267f90a8715f7ce55a55b83e7d0a4aa97371e7b3eed",
+      "wordCount": 622
+    }
+  },
+  "controls": {
+    "sourceReconstruction": "passed for PE-R01 through PE-R13",
+    "componentAblation": "passed for PE-M01 through PE-M13 and PE-A01 through PE-A26",
+    "negativeExclusion": "passed for eight excluded systems",
+    "layerReconstruction": "passed for PE-P01 through PE-P12",
+    "executableTests": "21/21 passed",
+    "faultControls": "8/8 detected",
+    "typecheck": "passed",
+    "range": "untested; no independently sourced second domain"
+  }
+}

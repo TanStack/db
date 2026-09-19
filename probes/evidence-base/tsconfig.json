@@ -9,5 +9,5 @@
     "types": [],
     "skipLibCheck": true
   },
-  "include": ["kernel.ts", "endpoints.ts"]
+  "include": ["kernel.ts", "protocol.ts", "endpoints.ts"]
 }

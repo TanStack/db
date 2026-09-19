@@ -26,12 +26,42 @@ const leaf = {
       : 'Missing matching observation',
 }
 
+const dependencyContract = {
+  id: 'fixture/dependency-check@1',
+  version: 1,
+  law: 'fixture/value@1',
+  source: 'kernel.test.mjs',
+  domain: 'one generated fixture dependency',
+  reference: {
+    kind: 'model',
+    description: 'the fixture value is checked directly',
+    trusted: ['fixture model'],
+  },
+  productionPath: 'kernel.test.mjs#supportWithDependency',
+  checkpoint: 'after the fixture value is checked',
+  observes: ['fixture value'],
+  omissions: ['all non-fixture behavior'],
+  reachWitness: 'the callback returns reached=true',
+  faultControls: ['returning to old bytes must not restore evidence'],
+  replay: 'rerun the exact fixture after the dependency changes',
+}
+
 async function support(base, target) {
   const [observation] = await base.run('fixture/checker@1', async () => [
     finding(target),
   ])
   base.propose({ claim: target, rule: leaf.id, observations: [observation.id] })
   return observation
+}
+
+async function supportWithDependency(base, target, fingerprint) {
+  const [observation] = await base.runCheck(
+    dependencyContract,
+    'fixture/dependency-checker@1',
+    [{ kind: 'code', name: 'fixture/source', fingerprint }],
+    async () => ({ reached: true, findings: [finding(target)] }),
+  )
+  base.propose({ claim: target, rule: leaf.id, observations: [observation.id] })
 }
 
 function random(seed) {
@@ -208,6 +238,21 @@ test('context changes, including return to prior code, cannot reactivate old obs
   assert.equal(base.assess(target).status, 'unresolved')
   await support(base, target)
   assert.equal(base.assess(target).status, 'supported')
+})
+
+test('dependency revisions cannot reactivate evidence when bytes return', async () => {
+  const base = new EvidenceBase([leaf])
+  const target = claim('dependency helper')
+  await supportWithDependency(base, target, 'a')
+  assert.equal(base.assess(target).status, 'supported')
+  base.updateDependencies([
+    { kind: 'code', name: 'fixture/source', fingerprint: 'b' },
+  ])
+  assert.equal(base.assess(target).status, 'unresolved')
+  base.updateDependencies([
+    { kind: 'code', name: 'fixture/source', fingerprint: 'a' },
+  ])
+  assert.equal(base.assess(target).status, 'unresolved')
 })
 
 test('a run finishing after a context change remains attached to its starting epoch', async () => {

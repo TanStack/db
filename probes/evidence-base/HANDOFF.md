@@ -1,171 +1,165 @@
 # Evidence base handoff
 
 Date: 2026-09-15. Repository: `TanStack/db`. Branch:
-`codex/component-endpoints-prototype`.
+`codex/component-endpoints-prototype`. Local worktree:
+`/Users/kyle.mathews/programs/tanstack-db/.worktrees/codex-component-endpoints-prototype`.
 
-The reusable evidence base, its draft check-authoring workflows, and the Endpoints
-fixture package are runnable. Fracture Scan and a fresh Hostile Assay exposed
-three contract gaps. The grammar and prototype now repair them, with red/green
-oracle checks. Production Endpoints code was not changed by this repair.
+The base-system rebuild is runnable but not committed. It now has verified local
+storage, dependency-selective applicability, a real Endpoints decision check and
+one shared service exposed through CLI, LSP and MCP. The original 13 kernel tests
+remain, one dependency-revision oracle was added, and seven rebuild tests cover
+the new vertical slice.
 
-## Resume on another machine
+## Resume
 
-Fetch `origin`, switch to `codex/component-endpoints-prototype`, and pull with
-`--ff-only` in a clean checkout. Do not rebase or force-push this published branch.
-Start here, then read the [prototype boundary](README.md) and
-[current grammar v2](../endpoints/design/evidence-guarantees/base-grammar/revisions/v2/README.md).
-
-From the repository root, using Node 22.13 or later:
+Start with [README.md](README.md), [DESIGN.md](DESIGN.md), the packaged
+[design-check workflow](workflows/design-check.md) and the Oracle Guide captured
+in the Endpoints evidence-guarantees source trail. Then run, from this directory:
 
 ```sh
-node --experimental-strip-types probes/evidence-base/demo.mjs
-node --experimental-strip-types --test probes/evidence-base/kernel.test.mjs
-node probes/evidence-base/fault-controls.mjs
-node probes/evidence-base/verify-handoff.mjs
-tsc --project probes/evidence-base/tsconfig.json
+npm test
+npm run test:faults
+npm run test:handoff
+npm run typecheck
 ```
 
-The runtime, tests and verification use Node builtins only. `tsc` additionally
-requires TypeScript. No database, Kitchen AI checkout, workspace dependency
-installation, local browser server or credentials are needed to run the probe.
-This machine used Node 22.13.1 and a separately installed TypeScript compiler.
-`pnpm exec` tried to bootstrap the whole workspace and hit a network failure;
-that was not a probe test failure. No dependency or lockfile change resulted.
+Node 22.13 or later is required for TypeScript stripping. Runtime code and tests
+use Node builtins only; `tsc` requires TypeScript. No database, browser,
+credentials or Kitchen AI checkout is needed for this probe.
 
-## What the repair changes
+## What exists
 
-1. **Preserve alternatives in explanations.** An assessment now retains all
-   submitted routes and each route's required premises. `(A AND B) OR C` no longer
-   collapses to a flat to-do list that looks like `A AND B AND C`. Flat `gaps`
-   remain a deduplicated inventory; they are not a completion plan.
-2. **Recheck repair evidence on every use.** A challenge retains an append-only
-   list of replay references. An old resolution stops clearing it when its replay
-   becomes stale. A later applicable replay can clear it again without deleting
-   the failure or previous resolutions.
-3. **Require a causally later replay.** The runner records the observation boundary
-   when a check starts. A repair must come from a separate check invoked after
-   the failure was recorded. A previously started check cannot qualify merely by
-   finishing later. Same-run/batch repair is conservatively rejected. Trusted
-   callbacks must perform fresh measurements, not return cached old results.
+### Shared evidence engine
 
-The original v1 artifacts, captured prototype and failing audit witnesses remain
-unchanged. V2 is a repair specification, not a new full Design Grammar run. The
-two instruments have not been independently rerun against the repaired code.
+- Outcomes are `pass`, `fail` and `unresolved`; unknown analysis does not become
+  a counterexample.
+- Registered package rules own semantics. The base owns exact claim identity,
+  argument traversal, alternative routes, conjunctive premises, challenge
+  history, replay causality and current applicability.
+- Dependencies carry a kind, stable name, fingerprint and monotonic revision.
+  Changing a fingerprint invalidates only observations that captured it;
+  returning to old bytes does not revive them.
+- State export/import checks counters, references, challenges, resolutions,
+  check contracts and dependencies before reconstruction.
+- Storage wraps state in a package-bound, SHA-256-checked envelope and writes by
+  temporary file plus atomic rename.
+- Same-violation history shrinking retains the law, case and reached checkpoint.
 
-## Validation and its limits
+### Real Endpoints vertical
 
-All 13 tests pass, strict typechecking passes, and seven mutations of temporary
-kernel copies are detected at assertions. The three added oracles first failed
-on the old code, then passed with the repair:
+The production-shaped claim is `endpoints/safe-skip-refetch@1`. Its check invokes
+`probes/endpoints/integrated-todo/effect-verdict.mjs#canSkipRefetch`, which was
+extracted from `sql-effects.mjs` and re-exported there for existing callers.
 
-- Public route completion: 60 generated clause sets and eight future fact sets.
-- Repair lifetime: 40 histories with a failing prefix and 45 generated operations.
-- Replay causality: 30 reordered-delivery cases and both within-batch orders.
+The check records support only when the query and mutation share a build
+artifact, authority has a baseline, no optimistic or repair work remains, both
+effect bounds are complete, and the query read set is disjoint from the mutation
+write set. Overlap and absent authority fail. Incomplete effects and different
+artifacts remain unresolved.
 
-The older lifecycle oracle now retains historical failures and resolution epochs;
-its former scalar model incorrectly forgot resolved failures forever. It covers
-80 histories of 35 operations and requires all 16 adjacent operation pairs.
-Earlier low-bit RNG selection produced repetitive histories and missed a freshness
-fault; that generator defect was fixed before the audits. The argument and
-possible-worlds oracles remain in place. These use a deterministic local generator,
-not fast-check, and have no automatic shrinking.
+The package reports evidence; it does not enable an optimization or suppress a
+refresh. Consumer fallback policy remains separate.
 
-The audit witness scripts assert the old bad behavior against frozen snapshots.
-Their exit status is not a test of whether the repaired kernel still has the bug.
-Use `kernel.test.mjs` and `fault-controls.mjs` for the current implementation.
+### Agent and editor interfaces
 
-## Decisions to preserve
+- `cli.mjs` accepts inline JSON, `@FILE` and stdin, persists through the shared
+  service and reports top-level failures with nonzero status.
+- `lsp-server.mjs` publishes claim diagnostics and exposes arbitrary shared
+  operations through `evidence.request`. `Content-Length` framed messages are
+  processed serially.
+- `mcp-server.mjs` advertises six evidence tools over newline-delimited JSON-RPC.
+  Malformed input returns a protocol error without poisoning the request queue.
+- `service.mjs` serializes all operations in one process so every transport gets
+  the same persistence and assessment behavior.
 
-- The base supplies argument/evidence mechanics. Packages own versioned claims,
-  checkers, admission rules and inference rules. Endpoints will consume the base
-  plus its domain claims; the current package only uses fixtures for complete
-  read/write bounds and disjointness.
-- The base checks that registered procedures accepted an argument. Arbitrary
-  semantic rule code remains trusted. A bounded oracle pass is evidence within
-  its scope, not a universal proof or proof that the checker itself is sound.
-- Ship Field Lab-inspired workflows for designing claims/checkers as well as
-  maintaining evidence. Ground conditions and hostile examples belong in that
-  design process. The workflows are drafts, not empirically validated procedures.
-- Applicability depends on code, versions, configuration, data, environment and
-  method. Code is not the only test dependency. Reverting code does not renew old
-  evidence. Rubric-only reassessment may reuse evidence that remains applicable.
-- Oracle mismatches must be recorded automatically by the runner. An agent must
-  not get to choose whether to submit a known failure. Relevant contradictions
-  require fallback for the affected use; this does not contact deployed clients.
-- Preserve original failure cases and repair history. An inconclusive note does
-  not close an investigation. Same-agent production and rubric assessment are
-  allowed; independent audits may help but are not mandatory authority roles.
-- A check that cannot run is a CI error, not evidence about correctness. Do not
-  turn infrastructure errors into correctness claims or evidence-log events.
-- Missing evidence is not itself a contradiction. Diagnostic severity, check
-  levels, overrides and whether unsupported optimization is permitted remain
-  policy questions. Do not silently settle them in the base.
-- The compiler must not insert auth behavior or rewrite application auth. Normal
-  identity consistency is an app prerequisite; the framework must preserve its
-  boundaries. Retain known partial SQL effects without calling them complete.
-- Beads and shadcn/lint are donors, not dependencies. Shadcn sharpened the split
-  between diagnostic validity and repair validity, and between eliminating
-  violations and preserving intent. Its reported cost wins are not our results.
-- External writes require polling, an external event channel or a sync engine.
-  Broad PostgreSQL generation and subset loading remain separate future work.
+## Oracle Guide decisions to preserve
 
-## Deliberate prototype limits and next work
+- A check contract states its law, domain, reference, trusted boundary,
+  production path, checkpoint, observed data, omissions, reach witness, fault
+  controls and exact replay method.
+- Operational or reach failures record no observation. Application failure may
+  still be the expected subject of a passing check.
+- A bounded oracle pass is evidence for its declared domain, not universal proof
+  and not proof that the checker or analyzer is sound.
+- Known failures are captured by the runner. Agents cannot submit only green
+  findings.
+- Missing support, an unresolved observation and a counterexample are distinct.
+- Repair evidence must be an applicable same-law, same-case replay invoked after
+  the failure. Delivery order cannot manufacture replay causality.
+- Applicability includes code, data, configuration, environment, method and
+  external inputs, not code alone.
+- Rule assessment and refresh policy are separate layers. The evidence package
+  never silently decides an application action.
 
-State is in memory. One explicit global epoch invalidates all observations.
-Claims use exact JSON identity, not semantic equivalence or scope subsumption.
-Historical same-claim failures conservatively reopen across context changes.
-The caller must advance context; fingerprints are not captured automatically.
-The base does not decide application actions or optimization policy.
+## Verification
 
-The next implementation should make these choices explicit before broadening them:
+The current suite has 21 passing tests:
 
-1. Define checked-in storage, import validation and replayable history. Decide
-   which dependencies an evidence record must identify, and how their current
-   applicability is checked. Include data/environment/method inputs.
-2. Extend the oracle to serialization/reload and dependency-specific invalidation;
-   add shrinking. Use the current three repaired laws as required invariants.
-3. Connect one real Endpoints claim/checker, retaining partial SQL knowledge and
-   the boundary between missing support and an observed contradiction. Do not
-   infer production refresh policy from the fixture's `supported` result.
-4. Exercise the draft authoring workflow on that claim, including hostile cases,
-   comparison against an independent authority and repair validity. A fresh
-   post-repair audit remains useful; none is claimed here.
+- 14 kernel tests retain the generated forward-chaining, lifecycle,
+  possible-worlds, explanation, repair-lifetime and delivery-order oracles and
+  add a dependency-revision regression.
+- Seven rebuild tests cover three-valued checks and reach failure, selective
+  dependency invalidation, verified reload/tamper rejection, the real Endpoints
+  verdict, unresolved effects, violation-preserving shrinking and shared
+  CLI/LSP/MCP semantics.
+- Eight fault controls mutate temporary copies and require the intended unchanged
+  oracle to fail at an assertion: conjunct loss, circular support, epoch reuse,
+  failure loss, route erasure, expired resolution reuse, delivery-order replay
+  and dependency-revision reuse.
 
-Other open work: source-inspection/rubric admission, speculative challenges,
-durable runner delivery, dependency-selective expiry, cross-version case mapping,
-scope exclusions, alternate-strategy repair, graph performance, and policy levels.
-Nothing here protects against an actor controlling the process, plugins or files.
+`verify-handoff.mjs` separately verifies frozen v1/v2 grammar artifacts, audit
+snapshots, portable sources, recombination sources and the historical comment
+archive against the canonical Field Log.
 
-## Files and complete record
+## Limits and next work
 
-| Files                                                       | Role                                                                                               |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `kernel.ts`, `endpoints.ts`, `demo.mjs`                     | Generic in-memory base and runnable Endpoints fixture                                              |
-| `kernel.test.mjs`, `fault-controls.mjs`                     | Independent bounded models and seven fault controls                                                |
-| `package.json`, `tsconfig.json`                             | Private probe metadata and strict compile check                                                    |
-| `workflows/`                                                | Draft claim design, evidence maintenance and rule repair procedures                                |
-| `verify-handoff.mjs`                                        | Check frozen hashes, portable captures and user-comment completeness                               |
-| `../endpoints/design/evidence-guarantees/`                  | Research, reviewed guide-word sweep, process grammars, recombination, v1/v2 design and both audits |
-| `../endpoints/design/evidence-guarantees/portable-sources/` | RFC and instrument cards previously outside this checkout, with hashes                             |
-| `../endpoints/design/field-trip-optimistic-coherence/`      | Canonical Field Log, rendered log and chronological user-request archive                           |
+1. Broaden the independent evidence around the SQL effect analyzer. The current
+   exhaustive oracle covers the small set-intersection decision, not analyzer
+   completeness or wider PostgreSQL behavior. Some wider Endpoints probes need
+   standalone parser/schema dependencies that are not packaged here.
+2. Decide and test the consumer contract: unsupported or contradicted skip
+   claims should lead to an explicit fallback, but the evidence engine should
+   not own that policy.
+3. Scope query/mutation analysis dependency names by endpoint or artifact when
+   multiple endpoint packages must coexist. The current names are shared.
+4. Make check execution and dependency-context updates transactionally explicit.
+   `runCheck()` updates the in-memory dependency context before a reach failure;
+   the service does not persist that state when the request fails.
+5. Add multi-process coordination or a single daemon boundary. Atomic rename
+   prevents partial files, but two independent writers can still lose updates.
+6. Package real editor configuration and MCP registration, improve document
+   ranges/schema validation, and decide how the interface is distributed.
+7. Add signatures/authentication and hostile-plugin isolation before treating a
+   store controlled by another actor as trusted evidence.
 
-The [Field Log](../endpoints/design/field-trip-optimistic-coherence/field_log.md)
-contains the research, decisions, audit findings, repair outcomes and handoff.
-Entries 94–95 cover the original grammar/prototype, 96 the shadcn donor,
-99–101 the two audits and their overlap, 102 the donor synthesis, and 103 the
-complete comment recovery. Later entries record this repair and Git handoff.
+Other deferred work includes automatic dependency discovery, semantic claim
+equivalence, scope subsumption, cross-version case mapping, alternate-strategy
+repair, source-inspection admission, speculative challenges, graph performance,
+policy levels and remote execution.
 
-The [chronological archive](../endpoints/design/field-trip-optimistic-coherence/sources/user-comments-through-evidence-repair.json)
-preserves all 273 user requests available through the handoff instruction, with
-original timestamps and repeated replies. Injected environment/browser context
-was excluded. Missing occurrences were appended to the journal as historical
-recovery, not backdated or treated as new authorizations. This supersedes earlier
-notes that comment recovery was selective. It does not mean every historical
-implementation claim was independently reverified during this repair.
+## Files
 
-Read the log as Markdown or JSONL on any machine. To append, use the Field Lab
-event writer; do not hand-edit its canonical JSONL or generated Markdown.
-Historical absolute paths and localhost reader URLs are provenance, not startup
-requirements. The portable-source manifest maps external files to checked-in
-copies. Selected Kitchen AI passages are embedded in the Process Grammar source
-capture; the separate Kitchen AI app is not needed for this probe.
+| Files                                                                   | Role                                                    |
+| ----------------------------------------------------------------------- | ------------------------------------------------------- |
+| `protocol.ts`, `kernel.ts`                                              | Shared contracts and evidence mechanics                 |
+| `storage.mjs`, `oracle-tools.mjs`                                       | Verified persistence and history reduction              |
+| `endpoints-real.mjs`, `../endpoints/integrated-todo/effect-verdict.mjs` | Real claim/check package and production decision helper |
+| `service.mjs`                                                           | Serialized operation layer                              |
+| `cli.mjs`, `lsp-server.mjs`, `mcp-server.mjs`                           | Agent/editor transports                                 |
+| `kernel.test.mjs`, `rebuild.test.mjs`, `fault-controls.mjs`             | Oracles, integration tests and mutations                |
+| `DESIGN.md`, `workflows/`                                               | Bounded check package and authoring workflows           |
+| `verify-handoff.mjs`                                                    | Frozen-source and Field Log verification                |
+
+## Complete source trail
+
+The canonical Field Log is
+`probes/endpoints/design/field-trip-optimistic-coherence/field_log.md` with its
+JSONL source beside it. The grammar, audits, readouts and portable-source
+manifest are under `probes/endpoints/design/evidence-guarantees/`. Historical
+absolute paths and localhost URLs are provenance only.
+
+The chronological archive at
+`field-trip-optimistic-coherence/sources/user-comments-through-evidence-repair.json`
+preserves the prior user-request record and is checked by
+`verify-handoff.mjs`. Append to the canonical Field Log only through the Field
+Lab writer; do not hand-edit its JSONL or rendered Markdown.

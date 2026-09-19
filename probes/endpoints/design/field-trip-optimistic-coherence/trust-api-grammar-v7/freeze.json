@@ -1,0 +1,41 @@
+{
+  "schema": "tanstack-trust-design-grammar-freeze/v1",
+  "runId": 66,
+  "title": "TanStack Trust: In Search of Hardness",
+  "repositoryBaseCommit": "4ad19815b44be533ac10f90b62aca4377f5138d2",
+  "sourceFreeze": {
+    "fieldLogThroughEvent": 1110,
+    "preservationConfirmedAtEvent": 1106,
+    "hardnessReminder": {
+      "path": "/Users/kyle.mathews/.codex/attachments/946c901f-aad7-45c4-8c21-148eff60e837/pasted-text.txt",
+      "sha256": "96694b64015e06a0baca735e3e044c1d6313344d7c1f352bd251091e3ff3d8d3",
+      "coverage": "complete; 1,917 words"
+    }
+  },
+  "analysisFrozenBeforeProjection": true,
+  "artifacts": {
+    "PRESERVATION.md": {
+      "sha256": "6b34c9f6422dd8114789578c2a8fc49ff44152e97f9b8ace1e8f16d2425eae89"
+    },
+    "MODEL.md": {
+      "sha256": "891eb9fc4895a7074ccc2bcb782b4af7908ede799535da3368d26519e9edda3b"
+    },
+    "EVIDENCE.md": {
+      "sha256": "40d76fefc8599c2863bf29e8fc86fc537480bc0d8348f10784b56096c2a34839"
+    },
+    "PROCESS.md": {
+      "sha256": "b5eb3ced49760897be84ab3b4163f36e03ee33ebd4f3c402038cf7356e5947a6"
+    },
+    "BRIEF.md": {
+      "sha256": "5f93116f85d34f6ae27caa750d22b5c31c702e787a97c6f345c6b42a78c2ef08",
+      "wordCount": 690
+    }
+  },
+  "controls": {
+    "sourceReconstruction": "passed",
+    "componentAblation": "passed for HG-P01 through HG-P11 and HG-A01 through HG-A23",
+    "negativeExclusion": "passed",
+    "layerReconstruction": "passed for H1 through H12",
+    "range": "untested; no independently sourced second domain"
+  }
+}
