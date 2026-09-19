@@ -2516,6 +2516,14 @@ function createWrappedSyncConfig<
       >()
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
+      const markPendingMetadataDependency = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const openTransaction = getOpenTransaction()
+        if (openTransaction && !openTransaction.internal) {
+          transaction.hasDependentSuccessor = true
+        }
+      }
       const removePendingPublicationTransaction = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
@@ -2576,8 +2584,12 @@ function createWrappedSyncConfig<
         ) {
           const transaction = pendingPublicationTransactions[index]!
           const write = transaction.rowMetadataWrites.get(key)
-          if (write) return { found: true, write }
+          if (write) {
+            markPendingMetadataDependency(transaction)
+            return { found: true, write }
+          }
           if (transaction.truncate) {
+            markPendingMetadataDependency(transaction)
             return {
               found: true,
               write: { type: `delete` as const },
@@ -2592,11 +2604,12 @@ function createWrappedSyncConfig<
           index >= 0;
           index--
         ) {
-          const write =
-            pendingPublicationTransactions[index]!.collectionMetadataWrites.get(
-              key,
-            )
-          if (write) return { found: true, write }
+          const transaction = pendingPublicationTransactions[index]!
+          const write = transaction.collectionMetadataWrites.get(key)
+          if (write) {
+            markPendingMetadataDependency(transaction)
+            return { found: true, write }
+          }
         }
         return { found: false as const }
       }
@@ -2700,11 +2713,6 @@ function createWrappedSyncConfig<
           if (startupState.cleanedUp) return
           const terminalFailure = getTerminalFailure()
           const internal = runtime.isApplyingInternally()
-          if (!internal) {
-            for (const transaction of pendingPublicationTransactions) {
-              transaction.hasDependentSuccessor = true
-            }
-          }
           const transaction: OpenSyncTransaction<T, TKey> = {
             operations: [],
             rowMetadataWrites: new Map(),
@@ -2908,6 +2916,13 @@ function createWrappedSyncConfig<
                       .map(({ key, value }) => [key, value]),
                   )
                   for (const transaction of pendingPublicationTransactions) {
+                    if (
+                      Array.from(
+                        transaction.collectionMetadataWrites.keys(),
+                      ).some((key) => !prefix || key.startsWith(prefix))
+                    ) {
+                      markPendingMetadataDependency(transaction)
+                    }
                     for (const [
                       key,
                       metadataWrite,
