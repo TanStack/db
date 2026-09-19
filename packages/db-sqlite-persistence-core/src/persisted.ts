@@ -12,6 +12,7 @@ import {
   InvalidPersistedStorageKeyError,
   InvalidPersistenceAdapterError,
   InvalidSyncConfigError,
+  PersistenceDurabilityError,
 } from './errors'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -440,6 +441,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
   truncate: (() => void) | null
   metadata: SyncMetadataApi<TKey> | null
+  markError: ((error: unknown) => void) | null
 }
 
 /**
@@ -590,16 +592,22 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   >
   truncate: boolean
   internal: boolean
+  lifecycleGeneration: number
+  beginOptions?: { immediate?: boolean }
   signal?: AbortSignal
+  applyToCollection: () => SyncAppliedReceipt
+  shouldFailStopOnAbort?: () => boolean
   resolveApplied?: () => void
   rejectApplied?: (error: unknown) => void
 }
 
-type OpenSyncTransaction<
-  T extends object,
-  TKey extends string | number,
-> = BufferedSyncTransaction<T, TKey> & {
+type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
+  BufferedSyncTransaction<T, TKey>,
+  `applyToCollection` | `shouldFailStopOnAbort`
+> & {
   queuedBecauseHydrating: boolean
+  hasDependentSuccessor: boolean
+  terminalFailure?: { error: unknown }
 }
 
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
@@ -618,13 +626,40 @@ type SyncWriteNormalization<T extends object, TKey extends string | number> = {
 
 class ApplyMutex {
   private queue: Promise<void> = Promise.resolve()
+  private pending = 0
 
-  async run<T>(task: () => Promise<T>): Promise<T> {
+  run<T>(task: () => Promise<T>): Promise<T> {
+    const runImmediately = this.pending === 0
+    this.pending++
+
+    if (runImmediately) {
+      let releaseReservation!: () => void
+      this.queue = new Promise<void>((resolve) => {
+        releaseReservation = resolve
+      })
+      let taskPromise: Promise<T>
+      try {
+        taskPromise = Promise.resolve(task())
+      } catch (error) {
+        taskPromise = Promise.reject(error)
+      }
+      const markComplete = () => {
+        this.pending--
+        releaseReservation()
+      }
+      void taskPromise.then(markComplete, markComplete)
+      return taskPromise
+    }
+
     const taskPromise = this.queue.then(() => task())
     this.queue = taskPromise.then(
       () => undefined,
       () => undefined,
     )
+    const markComplete = () => {
+      this.pending--
+    }
+    void taskPromise.then(markComplete, markComplete)
     return taskPromise
   }
 }
@@ -790,7 +825,10 @@ class PersistedCollectionRuntime<
   private readonly queuedHydrationTransactions: Array<
     BufferedSyncTransaction<T, TKey>
   > = []
-  private readonly queuedTxCommitted: Array<TxCommitted> = []
+  private readonly queuedTxCommitted: Array<{
+    txCommitted: TxCommitted
+    lifecycleGeneration: number
+  }> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
@@ -801,6 +839,7 @@ class PersistedCollectionRuntime<
     commit: null,
     truncate: null,
     metadata: null,
+    markError: null,
   }
   private started = false
   private startupMetadataPromise: Promise<void> | null = null
@@ -811,6 +850,9 @@ class PersistedCollectionRuntime<
   private appliedReceiptSequence = 0
   private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private hydratingGeneration: number | null = null
+  private terminalFailure:
+    | { lifecycleGeneration: number; error: unknown }
+    | undefined
   private coordinatorUnsubscribe: (() => void) | null = null
   private indexAddedUnsubscribe: (() => void) | null = null
   private indexRemovedUnsubscribe: (() => void) | null = null
@@ -863,18 +905,66 @@ class PersistedCollectionRuntime<
     )
   }
 
-  clearSyncControls(): void {
+  private clearSyncControls(): void {
     this.syncControls = {
       begin: null,
       write: null,
       commit: null,
       truncate: null,
       metadata: null,
+      markError: null,
     }
   }
 
   isHydratingNow(): boolean {
     return this.hydratingGeneration === this.lifecycleGeneration
+  }
+
+  getCurrentTerminalFailure(): { error: unknown } | undefined {
+    const failure = this.terminalFailure
+    return failure?.lifecycleGeneration === this.lifecycleGeneration
+      ? failure
+      : undefined
+  }
+
+  getLifecycleGeneration(): number {
+    return this.lifecycleGeneration
+  }
+
+  private throwIfLifecycleReplaced(lifecycleGeneration: number): void {
+    if (lifecycleGeneration !== this.lifecycleGeneration) {
+      throw new SyncTransactionAbortedError()
+    }
+  }
+
+  private throwIfTerminal(): void {
+    const failure = this.getCurrentTerminalFailure()
+    if (failure) throw failure.error
+  }
+
+  private markTerminalFailure(
+    error: unknown,
+    lifecycleGeneration = this.lifecycleGeneration,
+  ): unknown {
+    if (lifecycleGeneration !== this.lifecycleGeneration) {
+      return error
+    }
+
+    const existing = this.getCurrentTerminalFailure()
+    if (existing) {
+      return existing.error
+    }
+
+    this.terminalFailure = { lifecycleGeneration, error }
+    this.pendingRemoteSubsetEnsures.clear()
+    this.queuedTxCommitted.length = 0
+    if (this.remoteEnsureRetryTimer !== null) {
+      clearTimeout(this.remoteEnsureRetryTimer)
+      this.remoteEnsureRetryTimer = null
+    }
+    this.rejectQueuedHydrationTransactions(error)
+    this.syncControls.markError?.(error)
+    return error
   }
 
   isApplyingInternally(): boolean {
@@ -900,16 +990,22 @@ class PersistedCollectionRuntime<
   }
 
   async ensureStarted(): Promise<void> {
+    this.throwIfTerminal()
     if (this.startPromise) {
       return this.startPromise
     }
 
     const lifecycleGeneration = this.lifecycleGeneration
-    this.startPromise = this.startInternal(lifecycleGeneration)
+    this.startPromise = this.startInternal(lifecycleGeneration).catch(
+      (error) => {
+        throw this.markTerminalFailure(error, lifecycleGeneration)
+      },
+    )
     return this.startPromise
   }
 
   ensureResumeBaselineHydrated(): Promise<void> {
+    this.throwIfTerminal()
     if (this.resumeBaselinePromise) {
       return this.resumeBaselinePromise
     }
@@ -921,7 +1017,9 @@ class PersistedCollectionRuntime<
       if (this.syncMode !== `on-demand`) return
 
       await this.hydrateBaseline(lifecycleGeneration)
-    })()
+    })().catch((error) => {
+      throw this.markTerminalFailure(error, lifecycleGeneration)
+    })
     return this.resumeBaselinePromise
   }
 
@@ -943,13 +1041,17 @@ class PersistedCollectionRuntime<
   }
 
   async ensureStartupMetadataLoaded(): Promise<void> {
+    this.throwIfTerminal()
     if (this.startupMetadataPromise) {
       return this.startupMetadataPromise
     }
 
     const lifecycleGeneration = this.lifecycleGeneration
-    this.startupMetadataPromise =
-      this.loadStartupMetadataInternal(lifecycleGeneration)
+    this.startupMetadataPromise = this.loadStartupMetadataInternal(
+      lifecycleGeneration,
+    ).catch((error) => {
+      throw this.markTerminalFailure(error, lifecycleGeneration)
+    })
     return this.startupMetadataPromise
   }
 
@@ -992,7 +1094,8 @@ class PersistedCollectionRuntime<
 
     const collectionMetadata = await this.loadCollectionMetadataSnapshot()
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    this.replaceCollectionMetadataSnapshot(collectionMetadata)
+    const applied = this.replaceCollectionMetadataSnapshot(collectionMetadata)
+    if (applied !== true) await applied
   }
 
   private async loadCollectionMetadataSnapshot(): Promise<
@@ -1007,13 +1110,13 @@ class PersistedCollectionRuntime<
 
   private replaceCollectionMetadataSnapshot(
     collectionMetadata: Array<{ key: string; value: unknown }>,
-  ): void {
+  ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
       !this.syncControls.commit ||
       !this.syncControls.metadata
     ) {
-      return
+      return true
     }
 
     const nextMetadata = new Map(
@@ -1023,7 +1126,7 @@ class PersistedCollectionRuntime<
       .list()
       .map(({ key }) => key)
 
-    this.withInternalApply(() => {
+    return this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
 
       currentKeys.forEach((key) => {
@@ -1036,7 +1139,7 @@ class PersistedCollectionRuntime<
         this.syncControls.metadata?.collection.set(key, value)
       })
 
-      this.syncControls.commit?.()
+      return this.syncControls.commit?.() ?? true
     })
   }
 
@@ -1044,18 +1147,23 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
     upstreamLoadSubset?: LoadSubsetFn,
   ): Promise<void> {
+    this.throwIfTerminal()
     const lifecycleGeneration = this.lifecycleGeneration
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
     const appliedCursor = this.appliedReceiptSequence
-    await this.applyMutex.run(() =>
-      this.hydrateSubsetUnsafe(options, {
-        requestRemoteEnsure: this.mode === `sync-present`,
-        lifecycleGeneration,
-      }),
-    )
-    if (lifecycleGeneration !== this.lifecycleGeneration) return
-    await this.waitForAppliedReceiptsAfter(appliedCursor)
+    try {
+      await this.applyMutex.run(() =>
+        this.hydrateSubsetUnsafe(options, {
+          requestRemoteEnsure: this.mode === `sync-present`,
+          lifecycleGeneration,
+        }),
+      )
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+      await this.waitForAppliedReceiptsAfter(appliedCursor)
+    } catch (error) {
+      throw this.markTerminalFailure(error, lifecycleGeneration)
+    }
 
     if (upstreamLoadSubset) {
       try {
@@ -1083,12 +1191,14 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
     upstreamUnloadSubset?: (options: LoadSubsetOptions) => void,
   ): void {
-    this.activeSubsets.delete(this.getSubsetKey(options))
-    this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+    const subsetKey = this.getSubsetKey(options)
+    this.activeSubsets.delete(subsetKey)
+    this.pendingRemoteSubsetEnsures.delete(subsetKey)
     upstreamUnloadSubset?.(options)
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
+    this.throwIfTerminal()
     const lifecycleGeneration = this.lifecycleGeneration
     // A one-shot refresh does not acquire an enduring subscription lease.
     await this.applyMutex.run(() =>
@@ -1102,14 +1212,21 @@ class PersistedCollectionRuntime<
   queueHydrationBufferedTransaction(
     transaction: BufferedSyncTransaction<T, TKey>,
   ): void {
+    const failure = this.getCurrentTerminalFailure()
+    if (failure) {
+      transaction.rejectApplied?.(failure.error)
+      return
+    }
     this.queuedHydrationTransactions.push(transaction)
   }
 
-  async persistAndBroadcastExternalSyncTransaction(
+  applyHydrationBufferedTransaction(
     transaction: BufferedSyncTransaction<T, TKey>,
   ): Promise<void> {
-    await this.applyMutex.run(() =>
-      this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction),
+    const failure = this.getCurrentTerminalFailure()
+    if (failure) return Promise.reject(failure.error)
+    return this.applyMutex.run(() =>
+      this.applyBufferedSyncTransactionUnsafe(transaction),
     )
   }
 
@@ -1176,14 +1293,21 @@ class PersistedCollectionRuntime<
 
   async persistAndConfirmCollectionMutations(
     mutations: Array<PendingMutation<T>>,
+    lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
+    this.throwIfTerminal()
+    this.throwIfLifecycleReplaced(lifecycleGeneration)
     if (mutations.length === 0) {
       return
     }
 
     await this.applyMutex.run(async () => {
-      const acceptedMutationIds =
-        await this.persistCollectionMutationsUnsafe(mutations)
+      this.throwIfLifecycleReplaced(lifecycleGeneration)
+      const acceptedMutationIds = await this.persistCollectionMutationsUnsafe(
+        mutations,
+        lifecycleGeneration,
+      )
+      this.throwIfLifecycleReplaced(lifecycleGeneration)
       const acceptedMutationIdSet = new Set(acceptedMutationIds)
       const acceptedMutations = mutations.filter((mutation) =>
         acceptedMutationIdSet.has(mutation.mutationId),
@@ -1195,13 +1319,18 @@ class PersistedCollectionRuntime<
         )
       }
 
-      this.confirmMutationsSyncUnsafe(acceptedMutations)
+      try {
+        await this.confirmMutationsSyncUnsafe(acceptedMutations)
+      } catch (error) {
+        throw this.markTerminalFailure(error, lifecycleGeneration)
+      }
     })
   }
 
   async acceptTransactionMutations(transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }): Promise<void> {
+    this.throwIfTerminal()
     const collectionMutations = this.filterMutationsForCollection(
       transaction.mutations,
     )
@@ -1247,6 +1376,7 @@ class PersistedCollectionRuntime<
     this.startupMetadataPromise = null
     this.startPromise = null
     this.resumeBaselinePromise = null
+    this.terminalFailure = undefined
   }
 
   private withInternalApply<TResult>(task: () => TResult): TResult {
@@ -1292,6 +1422,7 @@ class PersistedCollectionRuntime<
   async scanPersistedRows(
     options?: PersistedRowScanOptions,
   ): Promise<Array<PersistedScannedRow<T, TKey>>> {
+    this.throwIfTerminal()
     return this.applyMutex.run(() => this.scanPersistedRowsUnsafe(options))
   }
 
@@ -1302,38 +1433,51 @@ class PersistedCollectionRuntime<
       lifecycleGeneration: number
     },
   ): Promise<void> {
-    this.hydratingGeneration = config.lifecycleGeneration
     try {
-      const rows = await this.loadSubsetRowsUnsafe(options)
-      if (config.lifecycleGeneration !== this.lifecycleGeneration) return
+      this.throwIfTerminal()
+      this.hydratingGeneration = config.lifecycleGeneration
+      try {
+        const rows = await this.loadSubsetRowsUnsafe(options)
+        if (config.lifecycleGeneration !== this.lifecycleGeneration) return
 
-      this.applyRowsToCollection(rows)
-    } finally {
-      if (this.hydratingGeneration === config.lifecycleGeneration) {
-        this.hydratingGeneration = null
+        const applied = this.applyRowsToCollection(rows)
+        if (applied !== true) await applied
+      } finally {
+        if (this.hydratingGeneration === config.lifecycleGeneration) {
+          this.hydratingGeneration = null
+        }
       }
-    }
 
-    await this.flushQueuedHydrationTransactionsUnsafe()
-    await this.flushQueuedTxCommittedUnsafe()
+      await this.flushQueuedHydrationTransactionsUnsafe()
+      await this.flushQueuedTxCommittedUnsafe()
 
-    if (config.requestRemoteEnsure) {
-      this.queueRemoteSubsetEnsure(options)
+      if (config.requestRemoteEnsure) {
+        this.queueRemoteSubsetEnsure(options)
+      }
+    } catch (error) {
+      throw this.markTerminalFailure(error, config.lifecycleGeneration)
     }
+  }
+
+  private rejectQueuedHydrationTransactions(error: unknown): void {
+    for (const transaction of this.queuedHydrationTransactions) {
+      transaction.rejectApplied?.(error)
+    }
+    this.queuedHydrationTransactions.length = 0
   }
 
   private applyRowsToCollection(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
-  ): void {
+  ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
       !this.syncControls.write ||
       !this.syncControls.commit
     ) {
-      return
+      return true
     }
 
-    this.withInternalApply(() => {
+    return this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
 
       for (const row of rows) {
@@ -1347,21 +1491,21 @@ class PersistedCollectionRuntime<
         })
       }
 
-      this.syncControls.commit?.()
+      return this.syncControls.commit?.() ?? true
     })
   }
 
   private replaceCollectionSnapshot(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
     collectionMetadata: Array<{ key: string; value: unknown }>,
-  ): void {
+  ): SyncAppliedReceipt {
     if (
       !this.syncControls.begin ||
       !this.syncControls.write ||
       !this.syncControls.commit ||
       !this.syncControls.metadata
     ) {
-      return
+      return true
     }
 
     const nextMetadata = new Map(
@@ -1371,7 +1515,7 @@ class PersistedCollectionRuntime<
       .list()
       .map(({ key }) => key)
 
-    this.withInternalApply(() => {
+    return this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
       this.syncControls.truncate?.()
 
@@ -1393,7 +1537,7 @@ class PersistedCollectionRuntime<
         this.syncControls.metadata?.collection.set(key, value)
       })
 
-      this.syncControls.commit?.()
+      return this.syncControls.commit?.() ?? true
     })
   }
 
@@ -1419,73 +1563,44 @@ class PersistedCollectionRuntime<
   private async applyBufferedSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
   ): Promise<void> {
+    this.throwIfTerminal()
+    this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
     if (transaction.signal?.aborted) {
-      transaction.rejectApplied?.(new SyncTransactionAbortedError())
+      const error = new SyncTransactionAbortedError()
+      transaction.rejectApplied?.(error)
+      if (transaction.shouldFailStopOnAbort?.()) {
+        throw this.markTerminalFailure(error, transaction.lifecycleGeneration)
+      }
+      if (!transaction.rejectApplied) {
+        throw error
+      }
       return
-    }
-
-    const { begin, write, commit, truncate, metadata } = this.syncControls
-    if (!begin || !write || !commit) {
-      transaction.rejectApplied?.(new SyncTransactionAbortedError())
-      return
-    }
-
-    const applyToCollection = (): SyncAppliedReceipt => {
-      begin()
-
-      if (transaction.truncate) {
-        truncate?.()
-      }
-
-      for (const operation of transaction.operations) {
-        if (operation.type === `delete`) {
-          write({
-            type: `delete`,
-            key: operation.key,
-          })
-        } else {
-          write({
-            type: `update`,
-            value: operation.value,
-            metadata: operation.metadata,
-          })
-        }
-      }
-
-      for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
-        if (metadataWrite.type === `delete`) {
-          metadata?.row.delete(key)
-        } else {
-          metadata?.row.set(key, metadataWrite.value)
-        }
-      }
-
-      for (const [key, metadataWrite] of transaction.collectionMetadataWrites) {
-        if (metadataWrite.type === `delete`) {
-          metadata?.collection.delete(key)
-        } else {
-          metadata?.collection.set(key, metadataWrite.value)
-        }
-      }
-
-      return commit(transaction.signal)
     }
 
     try {
       const applied = transaction.internal
-        ? this.withInternalApply(applyToCollection)
-        : applyToCollection()
+        ? this.withInternalApply(transaction.applyToCollection)
+        : transaction.applyToCollection()
       if (applied !== true) {
         await applied
       }
+      this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
 
       if (!transaction.internal) {
         await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
       }
       transaction.resolveApplied?.()
     } catch (error) {
-      transaction.rejectApplied?.(error)
-      throw error
+      const aborted =
+        transaction.signal?.aborted ||
+        error instanceof SyncTransactionAbortedError
+      const terminalError = aborted
+        ? transaction.shouldFailStopOnAbort?.()
+          ? this.markTerminalFailure(error, transaction.lifecycleGeneration)
+          : error
+        : this.markTerminalFailure(error)
+      transaction.rejectApplied?.(terminalError)
+      throw terminalError
     }
   }
 
@@ -1496,6 +1611,8 @@ class PersistedCollectionRuntime<
       return
     }
 
+    this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
+
     const streamPosition = this.nextLocalStreamPosition()
 
     if (
@@ -1504,6 +1621,7 @@ class PersistedCollectionRuntime<
       transaction.rowMetadataWrites.size === 0 &&
       transaction.collectionMetadataWrites.size === 0
     ) {
+      if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
       this.publishTxCommittedEvent(
         this.createTxCommittedPayload({
           term: streamPosition.term,
@@ -1520,7 +1638,8 @@ class PersistedCollectionRuntime<
 
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
 
-    await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
+    await this.applyCommittedTx(tx)
+    if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
     this.publishTxCommittedEvent(
       this.createTxCommittedPayload({
         term: tx.term,
@@ -1541,6 +1660,22 @@ class PersistedCollectionRuntime<
         collectionMetadataMutations: tx.collectionMetadataMutations,
       }),
     )
+  }
+
+  private async applyCommittedTx(tx: PersistedTx): Promise<void> {
+    try {
+      this.throwIfTerminal()
+      await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
+    } catch (error) {
+      const durabilityError =
+        error instanceof PersistenceDurabilityError
+          ? error
+          : new PersistenceDurabilityError(
+              error,
+              `persistence.adapter.applyCommittedTx`,
+            )
+      throw this.markTerminalFailure(durabilityError)
+    }
   }
 
   private createPersistedTxFromOperations(
@@ -1622,9 +1757,9 @@ class PersistedCollectionRuntime<
     }
   }
 
-  private confirmMutationsSyncUnsafe(
+  private async confirmMutationsSyncUnsafe(
     mutations: Array<PendingMutation<T>>,
-  ): void {
+  ): Promise<void> {
     if (
       !this.syncControls.begin ||
       !this.syncControls.write ||
@@ -1633,7 +1768,7 @@ class PersistedCollectionRuntime<
       return
     }
 
-    this.withInternalApply(() => {
+    const applied = this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
 
       for (const mutation of mutations) {
@@ -1650,8 +1785,12 @@ class PersistedCollectionRuntime<
         }
       }
 
-      this.syncControls.commit?.()
+      return this.syncControls.commit?.() ?? true
     })
+
+    if (applied !== true) {
+      await applied
+    }
   }
 
   private filterMutationsForCollection(
@@ -1668,7 +1807,9 @@ class PersistedCollectionRuntime<
 
   private async persistCollectionMutationsUnsafe(
     mutations: Array<PendingMutation<T>>,
+    lifecycleGeneration: number,
   ): Promise<Array<string>> {
+    this.throwIfLifecycleReplaced(lifecycleGeneration)
     // When a coordinator with requestApplyLocalMutations is available, always
     // route through it — even on the leader tab. This ensures the coordinator's
     // seq/rowVersion counters stay in sync with actual writes. Without this,
@@ -1687,6 +1828,8 @@ class PersistedCollectionRuntime<
           this.collectionId,
           envelopeMutations,
         )
+
+      this.throwIfLifecycleReplaced(lifecycleGeneration)
 
       if (!response.ok) {
         throw new Error(
@@ -1723,7 +1866,9 @@ class PersistedCollectionRuntime<
     // SingleProcessCoordinator). Apply directly and broadcast.
     const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromMutations(mutations, streamPosition)
-    await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
+    await this.applyCommittedTx(tx)
+
+    this.throwIfLifecycleReplaced(lifecycleGeneration)
 
     this.publishTxCommittedEvent(
       this.createTxCommittedPayload({
@@ -1870,19 +2015,23 @@ class PersistedCollectionRuntime<
 
   private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
     if (
+      this.getCurrentTerminalFailure() ||
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset ||
-      this.activeSubsets.get(this.getSubsetKey(options)) !== options
+      !this.persistence.coordinator.requestEnsureRemoteSubset
     ) {
       return
     }
 
-    this.pendingRemoteSubsetEnsures.set(this.getSubsetKey(options), options)
+    const subsetKey = this.getSubsetKey(options)
+    if (this.activeSubsets.get(subsetKey) !== options) return
+
+    this.pendingRemoteSubsetEnsures.set(subsetKey, options)
     void this.flushPendingRemoteSubsetEnsures()
   }
 
   private scheduleRemoteEnsureRetry(): void {
     if (
+      this.getCurrentTerminalFailure() ||
       this.mode !== `sync-present` ||
       !this.persistence.coordinator.requestEnsureRemoteSubset
     ) {
@@ -1904,6 +2053,7 @@ class PersistedCollectionRuntime<
 
   private async flushPendingRemoteSubsetEnsures(): Promise<void> {
     if (
+      this.getCurrentTerminalFailure() ||
       this.mode !== `sync-present` ||
       !this.persistence.coordinator.requestEnsureRemoteSubset
     ) {
@@ -1947,8 +2097,12 @@ class PersistedCollectionRuntime<
     if (message.collectionId !== this.collectionId) {
       return
     }
+    if (this.getCurrentTerminalFailure()) {
+      return
+    }
 
     const { payload } = message
+    const lifecycleGeneration = this.lifecycleGeneration
     const isSelf = message.senderId === this.persistence.coordinator.getNodeId()
 
     // Allow tx:committed from self — the coordinator produces these on behalf
@@ -1956,14 +2110,17 @@ class PersistedCollectionRuntime<
     // processCommittedTxUnsafe prevents double-processing of our own writes.
     if (isTxCommittedPayload(payload)) {
       if (this.isHydratingNow()) {
-        this.queuedTxCommitted.push(payload)
+        this.queuedTxCommitted.push({
+          txCommitted: payload,
+          lifecycleGeneration,
+        })
         return
       }
 
       void this.applyMutex
-        .run(() => this.processCommittedTxUnsafe(payload))
+        .run(() => this.processCommittedTxUnsafe(payload, lifecycleGeneration))
         .catch((error) => {
-          console.warn(`Failed to process tx:committed message:`, error)
+          this.markTerminalFailure(error, lifecycleGeneration)
         })
       return
     }
@@ -1975,9 +2132,9 @@ class PersistedCollectionRuntime<
 
     if (isCollectionResetPayload(payload)) {
       void this.applyMutex
-        .run(() => this.truncateAndReloadUnsafe())
+        .run(() => this.truncateAndReloadUnsafe(lifecycleGeneration))
         .catch((error) => {
-          console.warn(`Failed to process collection reset message:`, error)
+          this.markTerminalFailure(error, lifecycleGeneration)
         })
     }
   }
@@ -1988,13 +2145,18 @@ class PersistedCollectionRuntime<
       if (!queued) {
         continue
       }
-      await this.processCommittedTxUnsafe(queued)
+      await this.processCommittedTxUnsafe(
+        queued.txCommitted,
+        queued.lifecycleGeneration,
+      )
     }
   }
 
   private async processCommittedTxUnsafe(
     txCommitted: TxCommitted,
+    lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
     if (txCommitted.term < this.latestTerm) {
       return
     }
@@ -2014,7 +2176,8 @@ class PersistedCollectionRuntime<
     const hasGap = hasGapInCurrentTerm || hasGapAcrossTerms
 
     if (hasGap) {
-      await this.recoverFromSeqGapUnsafe()
+      await this.recoverFromSeqGapUnsafe(lifecycleGeneration)
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
       if (
         txCommitted.term < this.latestTerm ||
         (txCommitted.term === this.latestTerm &&
@@ -2033,13 +2196,23 @@ class PersistedCollectionRuntime<
     await this.invalidateFromCommittedTxUnsafe(txCommitted)
   }
 
-  private async recoverFromSeqGapUnsafe(): Promise<void> {
+  private async recoverFromSeqGapUnsafe(
+    lifecycleGeneration: number,
+  ): Promise<void> {
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
     if (this.persistence.coordinator.pullSince && this.latestRowVersion >= 0) {
+      let pullResponse: PullSinceResponse | undefined
       try {
-        const pullResponse = await this.persistence.coordinator.pullSince(
+        pullResponse = await this.persistence.coordinator.pullSince(
           this.collectionId,
           this.latestRowVersion,
         )
+      } catch (error) {
+        console.warn(`Failed pullSince recovery attempt:`, error)
+      }
+
+      if (pullResponse) {
+        if (lifecycleGeneration !== this.lifecycleGeneration) return
 
         if (pullResponse.ok) {
           this.observeStreamPosition(
@@ -2053,6 +2226,7 @@ class PersistedCollectionRuntime<
           }
 
           for (const delta of pullResponse.deltas) {
+            if (lifecycleGeneration !== this.lifecycleGeneration) return
             await this.invalidateFromCommittedTxUnsafe({
               type: `tx:committed`,
               term: pullResponse.latestTerm,
@@ -2065,15 +2239,15 @@ class PersistedCollectionRuntime<
               rowMetadataMutations: delta.rowMetadataMutations,
               collectionMetadataMutations: delta.collectionMetadataMutations,
             })
+            if (lifecycleGeneration !== this.lifecycleGeneration) return
           }
           return
         }
-      } catch (error) {
-        console.warn(`Failed pullSince recovery attempt:`, error)
       }
     }
 
-    await this.truncateAndReloadUnsafe()
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
+    await this.truncateAndReloadUnsafe(lifecycleGeneration)
 
     if (this.mode === `sync-present`) {
       for (const options of this.activeSubsets.values()) {
@@ -2082,15 +2256,20 @@ class PersistedCollectionRuntime<
     }
   }
 
-  private async truncateAndReloadUnsafe(): Promise<void> {
+  private async truncateAndReloadUnsafe(
+    lifecycleGeneration = this.lifecycleGeneration,
+  ): Promise<void> {
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
     if (this.syncControls.begin && this.syncControls.commit) {
-      this.withInternalApply(() => {
+      const applied = this.withInternalApply(() => {
         this.syncControls.begin?.({ immediate: true })
         this.syncControls.truncate?.()
-        this.syncControls.commit?.()
+        return this.syncControls.commit?.() ?? true
       })
+      if (applied !== true) await applied
     }
 
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.reloadActiveSubsetsUnsafe()
   }
 
@@ -2130,7 +2309,7 @@ class PersistedCollectionRuntime<
       (opt) => (opt.where ? compileSingleRowExpression(opt.where) : null),
     )
 
-    this.withInternalApply(() => {
+    const applied = this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
 
       for (const {
@@ -2175,8 +2354,9 @@ class PersistedCollectionRuntime<
         }
       })
 
-      this.syncControls.commit?.()
+      return this.syncControls.commit?.() ?? true
     })
+    if (applied !== true) await applied
   }
 
   private async reloadActiveSubsetsUnsafe(): Promise<void> {
@@ -2202,7 +2382,7 @@ class PersistedCollectionRuntime<
         }
       }
 
-      this.replaceCollectionSnapshot(
+      const applied = this.replaceCollectionSnapshot(
         Array.from(mergedRows.entries()).map(([key, row]) => ({
           key,
           value: row.value,
@@ -2210,6 +2390,7 @@ class PersistedCollectionRuntime<
         })),
         collectionMetadata,
       )
+      if (applied !== true) await applied
     } finally {
       if (this.hydratingGeneration === lifecycleGeneration) {
         this.hydratingGeneration = null
@@ -2326,17 +2507,192 @@ function createWrappedSyncConfig<
     ...sourceSyncConfig,
     sync: (params) => {
       const transactionStack: Array<OpenSyncTransaction<T, TKey>> = []
+      const pendingPublicationTransactions: Array<
+        OpenSyncTransaction<T, TKey>
+      > = []
+      const publicationMarkers = new Map<
+        OpenSyncTransaction<T, TKey>,
+        (typeof params.collection._state.pendingSyncedTransactions)[number]
+      >()
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
+      const markPendingMetadataDependency = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const openTransaction = getOpenTransaction()
+        if (openTransaction && !openTransaction.internal) {
+          transaction.hasDependentSuccessor = true
+        }
+      }
+      const removePendingPublicationTransaction = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const index = pendingPublicationTransactions.indexOf(transaction)
+        if (index !== -1) pendingPublicationTransactions.splice(index, 1)
+      }
+      const reservePublicationMarker = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const pending = params.collection._state.pendingSyncedTransactions
+        const previousLength = pending.length
+        params.begin(transaction.beginOptions)
+        const marker = pending.at(-1)
+        if (!marker || pending.length !== previousLength + 1) {
+          throw new InvalidPersistedCollectionConfigError(
+            `wrapped sync begin did not reserve a publication transaction`,
+          )
+        }
+        publicationMarkers.set(transaction, marker)
+      }
+      const activatePublicationMarker = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const marker = publicationMarkers.get(transaction)
+        const pending = params.collection._state.pendingSyncedTransactions
+        const index = marker ? pending.indexOf(marker) : -1
+        if (!marker || index === -1) {
+          throw new InvalidPersistedCollectionConfigError(
+            `wrapped sync transaction lost its publication reservation`,
+          )
+        }
+        if (index !== pending.length - 1) {
+          pending.splice(index, 1)
+          pending.push(marker)
+        }
+      }
+      const removePublicationMarker = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        const marker = publicationMarkers.get(transaction)
+        if (!marker) return
+        const pending = params.collection._state.pendingSyncedTransactions
+        const index = pending.indexOf(marker)
+        if (index !== -1) pending.splice(index, 1)
+        publicationMarkers.delete(transaction)
+      }
+      const settlePendingTransaction = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        removePendingPublicationTransaction(transaction)
+        removePublicationMarker(transaction)
+      }
+      const getPendingRowMetadataWrite = (key: TKey) => {
+        for (
+          let index = pendingPublicationTransactions.length - 1;
+          index >= 0;
+          index--
+        ) {
+          const transaction = pendingPublicationTransactions[index]!
+          const write = transaction.rowMetadataWrites.get(key)
+          if (write) {
+            markPendingMetadataDependency(transaction)
+            return { found: true, write }
+          }
+          if (transaction.truncate) {
+            markPendingMetadataDependency(transaction)
+            return {
+              found: true,
+              write: { type: `delete` as const },
+            }
+          }
+        }
+        return { found: false as const }
+      }
+      const getPendingCollectionMetadataWrite = (key: string) => {
+        for (
+          let index = pendingPublicationTransactions.length - 1;
+          index >= 0;
+          index--
+        ) {
+          const transaction = pendingPublicationTransactions[index]!
+          const write = transaction.collectionMetadataWrites.get(key)
+          if (write) {
+            markPendingMetadataDependency(transaction)
+            return { found: true, write }
+          }
+        }
+        return { found: false as const }
+      }
       let fullStartPromise: Promise<void> | null = null
       const startupState = { cleanedUp: false }
       const acquisitions = new Map<LoadSubsetOptions, { forwarded: boolean }>()
+      const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
+      const createHandledRejection = (error: unknown): Promise<never> => {
+        const rejected = Promise.reject(error)
+        void rejected.catch(() => undefined)
+        return rejected
+      }
+      const applyTransactionToCollection = (
+        transaction: OpenSyncTransaction<T, TKey>,
+        signal?: AbortSignal,
+      ): SyncAppliedReceipt => {
+        activatePublicationMarker(transaction)
+        try {
+          if (transaction.truncate) {
+            params.truncate()
+          }
+
+          for (const operation of transaction.operations) {
+            if (operation.type === `delete`) {
+              params.write({
+                type: `delete`,
+                key: operation.key,
+              })
+            } else {
+              params.write({
+                type: `update`,
+                value: operation.value,
+                metadata: operation.metadata,
+              })
+            }
+          }
+
+          for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
+            if (metadataWrite.type === `delete`) {
+              params.metadata?.row.delete(key)
+            } else {
+              params.metadata?.row.set(key, metadataWrite.value)
+            }
+          }
+
+          for (const [
+            key,
+            metadataWrite,
+          ] of transaction.collectionMetadataWrites) {
+            if (metadataWrite.type === `delete`) {
+              params.metadata?.collection.delete(key)
+            } else {
+              params.metadata?.collection.set(key, metadataWrite.value)
+            }
+          }
+
+          const applied = params.commit(signal)
+          if (applied === true) {
+            removePendingPublicationTransaction(transaction)
+          } else {
+            void applied.then(
+              () => removePendingPublicationTransaction(transaction),
+              () => removePendingPublicationTransaction(transaction),
+            )
+          }
+          return applied
+        } catch (error) {
+          // Queued source transactions must remain publicly atomic, but later
+          // source work still needs their accepted metadata decisions while
+          // publication is pending. Once publication runs, the collection's
+          // metadata API becomes authoritative again. A prepublication failure
+          // removes the layer without exposing it.
+          removePendingPublicationTransaction(transaction)
+          throw error
+        }
+      }
       runtime.setSyncControls({
         begin: params.begin,
         write: params.write as SyncControlFns<T, TKey>[`write`],
         commit: params.commit,
         truncate: params.truncate,
         metadata: params.metadata ?? null,
+        markError: params.markError,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
@@ -2345,42 +2701,51 @@ function createWrappedSyncConfig<
       const wrappedParams = {
         ...params,
         markReady: () => {
-          if (startupState.cleanedUp) return
+          if (startupState.cleanedUp || getTerminalFailure()) return
           void (fullStartPromise ?? runtime.ensureStarted())
             .then(() => {
-              if (startupState.cleanedUp) return
+              if (startupState.cleanedUp || getTerminalFailure()) return
               params.markReady()
             })
-            .catch((error) => {
-              if (startupState.cleanedUp) return
-              console.warn(
-                `Failed persisted sync startup before markReady:`,
-                error,
-              )
-              params.markReady()
-            })
+            .catch(() => undefined)
         },
         begin: (options?: { immediate?: boolean }) => {
           if (startupState.cleanedUp) return
+          const terminalFailure = getTerminalFailure()
+          const internal = runtime.isApplyingInternally()
           const transaction: OpenSyncTransaction<T, TKey> = {
             operations: [],
             rowMetadataWrites: new Map(),
             collectionMetadataWrites: new Map(),
             truncate: false,
-            internal: runtime.isApplyingInternally(),
+            internal,
+            lifecycleGeneration: runtime.getLifecycleGeneration(),
+            beginOptions: options,
+            hasDependentSuccessor: false,
             queuedBecauseHydrating:
-              !runtime.isApplyingInternally() && runtime.isHydratingNow(),
+              terminalFailure === undefined &&
+              !internal &&
+              runtime.isHydratingNow(),
+            ...(terminalFailure === undefined ? {} : { terminalFailure }),
+          }
+          if (transaction.internal && !terminalFailure) {
+            params.begin(options)
+          } else if (!transaction.internal && !terminalFailure) {
+            reservePublicationMarker(transaction)
           }
           transactionStack.push(transaction)
-
-          if (!transaction.queuedBecauseHydrating) {
-            params.begin(options)
-          }
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
           if (startupState.cleanedUp) return
-          const normalization = runtime.normalizeSyncWriteMessage(message)
           const openTransaction = getOpenTransaction()
+          const terminalFailure =
+            openTransaction?.terminalFailure ?? getTerminalFailure()
+          if (terminalFailure) {
+            if (openTransaction)
+              openTransaction.terminalFailure = terminalFailure
+            return
+          }
+          const normalization = runtime.normalizeSyncWriteMessage(message)
 
           if (!openTransaction) {
             params.write(normalization.forwardMessage)
@@ -2417,7 +2782,7 @@ function createWrappedSyncConfig<
               value: normalization.operation.metadata,
             })
           }
-          if (!openTransaction.queuedBecauseHydrating) {
+          if (openTransaction.internal) {
             params.write(normalization.forwardMessage)
           }
         },
@@ -2441,6 +2806,12 @@ function createWrappedSyncConfig<
                   if (openTransaction?.truncate) {
                     return undefined
                   }
+                  const pending = getPendingRowMetadataWrite(key)
+                  if (pending.found) {
+                    return pending.write.type === `delete`
+                      ? undefined
+                      : pending.write.value
+                  }
                   return params.metadata!.row.get(key)
                 },
                 scanPersisted: (options?: PersistedRowScanOptions) =>
@@ -2450,6 +2821,8 @@ function createWrappedSyncConfig<
                 set: (key: TKey, value: unknown) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
+                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
+                    return
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.row.set must be called within an open sync transaction`,
@@ -2459,13 +2832,15 @@ function createWrappedSyncConfig<
                     type: `set`,
                     value,
                   })
-                  if (!openTransaction.queuedBecauseHydrating) {
+                  if (openTransaction.internal) {
                     params.metadata!.row.set(key, value)
                   }
                 },
                 delete: (key: TKey) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
+                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
+                    return
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.row.delete must be called within an open sync transaction`,
@@ -2474,7 +2849,7 @@ function createWrappedSyncConfig<
                   openTransaction.rowMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  if (!openTransaction.queuedBecauseHydrating) {
+                  if (openTransaction.internal) {
                     params.metadata!.row.delete(key)
                   }
                 },
@@ -2490,11 +2865,19 @@ function createWrappedSyncConfig<
                       ? undefined
                       : pendingWrite.value
                   }
+                  const pending = getPendingCollectionMetadataWrite(key)
+                  if (pending.found) {
+                    return pending.write.type === `delete`
+                      ? undefined
+                      : pending.write.value
+                  }
                   return params.metadata!.collection.get(key)
                 },
                 set: (key: string, value: unknown) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
+                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
+                    return
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.collection.set must be called within an open sync transaction`,
@@ -2504,13 +2887,15 @@ function createWrappedSyncConfig<
                     type: `set`,
                     value,
                   })
-                  if (!openTransaction.queuedBecauseHydrating) {
+                  if (openTransaction.internal) {
                     params.metadata!.collection.set(key, value)
                   }
                 },
                 delete: (key: string) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
+                  if (openTransaction?.terminalFailure ?? getTerminalFailure())
+                    return
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.collection.delete must be called within an open sync transaction`,
@@ -2519,7 +2904,7 @@ function createWrappedSyncConfig<
                   openTransaction.collectionMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  if (!openTransaction.queuedBecauseHydrating) {
+                  if (openTransaction.internal) {
                     params.metadata!.collection.delete(key)
                   }
                 },
@@ -2530,6 +2915,25 @@ function createWrappedSyncConfig<
                       .metadata!.collection.list()
                       .map(({ key, value }) => [key, value]),
                   )
+                  for (const transaction of pendingPublicationTransactions) {
+                    if (
+                      Array.from(
+                        transaction.collectionMetadataWrites.keys(),
+                      ).some((key) => !prefix || key.startsWith(prefix))
+                    ) {
+                      markPendingMetadataDependency(transaction)
+                    }
+                    for (const [
+                      key,
+                      metadataWrite,
+                    ] of transaction.collectionMetadataWrites) {
+                      if (metadataWrite.type === `delete`) {
+                        merged.delete(key)
+                      } else {
+                        merged.set(key, metadataWrite.value)
+                      }
+                    }
+                  }
                   const openTransaction = getOpenTransaction()
                   if (openTransaction) {
                     for (const [
@@ -2557,6 +2961,7 @@ function createWrappedSyncConfig<
         truncate: () => {
           if (startupState.cleanedUp) return
           const openTransaction = getOpenTransaction()
+          if (openTransaction?.terminalFailure ?? getTerminalFailure()) return
           if (!openTransaction) {
             params.truncate()
             return
@@ -2569,23 +2974,49 @@ function createWrappedSyncConfig<
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
           openTransaction.truncate = true
-          if (!openTransaction.queuedBecauseHydrating) {
+          if (openTransaction.internal) {
             params.truncate()
           }
         },
         commit: (signal?: AbortSignal) => {
           if (startupState.cleanedUp) return true
           const openTransaction = transactionStack.pop()
+          const terminalFailure =
+            openTransaction?.terminalFailure ?? getTerminalFailure()
+          if (terminalFailure) {
+            if (openTransaction) settlePendingTransaction(openTransaction)
+            return createHandledRejection(terminalFailure.error)
+          }
           if (!openTransaction) {
             return params.commit(signal)
           }
 
-          if (openTransaction.queuedBecauseHydrating) {
-            if (signal?.aborted) {
-              const aborted = Promise.reject(new SyncTransactionAbortedError())
-              void aborted.catch(() => undefined)
-              return aborted
-            }
+          if (openTransaction.internal) {
+            return params.commit(signal)
+          }
+
+          if (signal?.aborted) {
+            settlePendingTransaction(openTransaction)
+            return createHandledRejection(new SyncTransactionAbortedError())
+          }
+          const transaction = {
+            operations: openTransaction.operations,
+            rowMetadataWrites: openTransaction.rowMetadataWrites,
+            collectionMetadataWrites: openTransaction.collectionMetadataWrites,
+            truncate: openTransaction.truncate,
+            internal: false,
+            lifecycleGeneration: openTransaction.lifecycleGeneration,
+            beginOptions: openTransaction.beginOptions,
+            signal,
+            applyToCollection: () =>
+              applyTransactionToCollection(openTransaction, signal),
+            shouldFailStopOnAbort: () => openTransaction.hasDependentSuccessor,
+          }
+          pendingPublicationTransactions.push(openTransaction)
+          if (
+            openTransaction.queuedBecauseHydrating &&
+            runtime.isHydratingNow()
+          ) {
             let resolveApplied!: () => void
             let rejectApplied!: (error: unknown) => void
             const applied = new Promise<void>((resolve, reject) => {
@@ -2594,36 +3025,22 @@ function createWrappedSyncConfig<
             })
             void applied.catch(() => undefined)
             runtime.queueHydrationBufferedTransaction({
-              operations: openTransaction.operations,
-              rowMetadataWrites: openTransaction.rowMetadataWrites,
-              collectionMetadataWrites:
-                openTransaction.collectionMetadataWrites,
-              truncate: openTransaction.truncate,
-              internal: openTransaction.internal,
-              signal,
+              ...transaction,
               resolveApplied,
               rejectApplied,
             })
+            void applied.then(
+              () => settlePendingTransaction(openTransaction),
+              () => settlePendingTransaction(openTransaction),
+            )
             return applied
           }
 
-          const applied = params.commit(signal)
-          if (!openTransaction.internal) {
-            const persistAfterApplication = async () => {
-              if (applied !== true) await applied
-              await runtime.persistAndBroadcastExternalSyncTransaction({
-                operations: openTransaction.operations,
-                rowMetadataWrites: openTransaction.rowMetadataWrites,
-                collectionMetadataWrites:
-                  openTransaction.collectionMetadataWrites,
-                truncate: openTransaction.truncate,
-                internal: false,
-              })
-            }
-            const persisted = persistAfterApplication()
-            void persisted.catch(() => undefined)
-            return persisted
-          }
+          const applied = runtime.applyHydrationBufferedTransaction(transaction)
+          void applied.then(
+            () => settlePendingTransaction(openTransaction),
+            () => settlePendingTransaction(openTransaction),
+          )
           return applied
         },
       }
@@ -2647,9 +3064,12 @@ function createWrappedSyncConfig<
         cleanup: () => {
           startupState.cleanedUp = true
           acquisitions.clear()
+          pendingPublicationTransactions.length = 0
+          for (const transaction of publicationMarkers.keys()) {
+            removePublicationMarker(transaction)
+          }
           sourceResult.cleanup?.()
           runtime.cleanup()
-          runtime.clearSyncControls()
         },
         loadSubset: async (options: LoadSubsetOptions) => {
           const acquisition = { forwarded: false }
@@ -2708,6 +3128,7 @@ function createLoopbackSyncConfig<
         commit: params.commit,
         truncate: params.truncate,
         metadata: params.metadata ?? null,
+        markError: params.markError,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
@@ -2716,17 +3137,14 @@ function createLoopbackSyncConfig<
       void runtime
         .ensureStarted()
         .then(() => {
+          if (runtime.getCurrentTerminalFailure()) return
           params.markReady()
         })
-        .catch((error) => {
-          console.warn(`Failed persisted loopback startup:`, error)
-          params.markReady()
-        })
+        .catch(() => undefined)
 
       return {
         cleanup: () => {
           runtime.cleanup()
-          runtime.clearSyncControls()
         },
         loadSubset: (options: LoadSubsetOptions) => runtime.loadSubset(options),
         unloadSubset: (options: LoadSubsetOptions) =>
@@ -2841,6 +3259,7 @@ export function persistedCollectionOptions<
   const wrappedOnInsert = async (
     params: InsertMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,
   ) => {
+    const lifecycleGeneration = runtime.getLifecycleGeneration()
     const handlerResult = localOnlyOptions.onInsert
       ? await localOnlyOptions.onInsert(
           params as unknown as InsertMutationFnParams<T, TKey, TUtils>,
@@ -2849,6 +3268,7 @@ export function persistedCollectionOptions<
 
     await runtime.persistAndConfirmCollectionMutations(
       params.transaction.mutations as Array<PendingMutation<T>>,
+      lifecycleGeneration,
     )
 
     return handlerResult ?? {}
@@ -2857,6 +3277,7 @@ export function persistedCollectionOptions<
   const wrappedOnUpdate = async (
     params: UpdateMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,
   ) => {
+    const lifecycleGeneration = runtime.getLifecycleGeneration()
     const handlerResult = localOnlyOptions.onUpdate
       ? await localOnlyOptions.onUpdate(
           params as unknown as UpdateMutationFnParams<T, TKey, TUtils>,
@@ -2865,6 +3286,7 @@ export function persistedCollectionOptions<
 
     await runtime.persistAndConfirmCollectionMutations(
       params.transaction.mutations as Array<PendingMutation<T>>,
+      lifecycleGeneration,
     )
 
     return handlerResult ?? {}
@@ -2873,6 +3295,7 @@ export function persistedCollectionOptions<
   const wrappedOnDelete = async (
     params: DeleteMutationFnParams<T, TKey, TUtils & PersistedCollectionUtils>,
   ) => {
+    const lifecycleGeneration = runtime.getLifecycleGeneration()
     const handlerResult = localOnlyOptions.onDelete
       ? await localOnlyOptions.onDelete(
           params as unknown as DeleteMutationFnParams<T, TKey, TUtils>,
@@ -2881,6 +3304,7 @@ export function persistedCollectionOptions<
 
     await runtime.persistAndConfirmCollectionMutations(
       params.transaction.mutations as Array<PendingMutation<T>>,
+      lifecycleGeneration,
     )
 
     return handlerResult ?? {}

@@ -81,6 +81,12 @@ while still handling per-collection schema versions correctly.
 - `InvalidPersistedStorageKeyError`
 - `InvalidPersistedStorageKeyEncodingError`
 - `PersistenceUnavailableError`
+- `PersistenceDurabilityError`
+
+Adapter commit failures reject the applied receipt and become the collection's
+terminal sync error as `PersistenceDurabilityError`. The error preserves its
+original `cause` and any available string `code` and `path`. Hydration and
+source errors remain distinct and are not wrapped as durability errors.
 
 ## Typical usage (via runtime wrappers)
 
