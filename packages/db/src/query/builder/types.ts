@@ -710,7 +710,7 @@ type RefForContextSchemaValue<
       ? RefForOptionalNullableContextValue<NonUndefined<T>>
       : RefForContextValue<NonUndefined<T>, true>
     : IsNonExactNullable<T> extends true
-      ? RefForContextValue<NonNull<T>, true>
+      ? RefForContextValue<NonNull<T>, true> | Extract<T, null>
       : RefForContextValue<T>
 
 type RefForOptionalNullableContextValue<T> = T extends null

@@ -483,6 +483,7 @@ describe(`query API type algebra`, () => {
       id: string
       exactNull: null
       exactUndefined: undefined
+      nullableNumber: number | null
       nullableText: string | null
       nullableObject: { label: string } | null
     }
@@ -497,16 +498,41 @@ describe(`query API type algebra`, () => {
           id: value.id,
           exactNull: value.exactNull,
           exactUndefined: value.exactUndefined,
+          nullableNumber: value.nullableNumber,
           nullableText: value.nullableText,
           nullableObject: value.nullableObject,
         }))
       const union = new Query().unionAll(branch(a), branch(b))
+      const _plain = union.select(
+        ({ nullableNumber, nullableText, nullableObject }) => {
+          expectTypeOf(nullableNumber).toEqualTypeOf<RefLeaf<
+            number,
+            true
+          > | null>()
+          expectTypeOf(nullableText).toEqualTypeOf<RefLeaf<
+            string,
+            true
+          > | null>()
+          expectTypeOf(nullableObject).toEqualTypeOf<Ref<
+            { label: string },
+            true
+          > | null>()
+          return { nullableNumber, nullableText, nullableObject }
+        },
+      )
       const rightJoined = union
         .rightJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
         .select(
-          ({ exactNull, exactUndefined, nullableText, nullableObject }) => ({
+          ({
             exactNull,
             exactUndefined,
+            nullableNumber,
+            nullableText,
+            nullableObject,
+          }) => ({
+            exactNull,
+            exactUndefined,
+            nullableNumber,
             nullableText,
             nullableObject,
           }),
@@ -514,18 +540,38 @@ describe(`query API type algebra`, () => {
       const fullJoined = union
         .fullJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
         .select(
-          ({ exactNull, exactUndefined, nullableText, nullableObject }) => ({
+          ({
             exactNull,
             exactUndefined,
+            nullableNumber,
+            nullableText,
+            nullableObject,
+          }) => ({
+            exactNull,
+            exactUndefined,
+            nullableNumber,
             nullableText,
             nullableObject,
           }),
         )
 
+      type PlainResult = QueryResult<typeof _plain>
       type RightResult = QueryResult<typeof rightJoined>
       type FullResult = QueryResult<typeof fullJoined>
+      expectTypeOf<PlainResult[`nullableNumber`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
+      expectTypeOf<PlainResult[`nullableText`]>().toEqualTypeOf<
+        string | null | undefined
+      >()
+      expectTypeOf<PlainResult[`nullableObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
       expectTypeOf<RightResult[`exactNull`]>().toEqualTypeOf<null | undefined>()
       expectTypeOf<RightResult[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<RightResult[`nullableNumber`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
       expectTypeOf<RightResult[`nullableText`]>().toEqualTypeOf<
         string | null | undefined
       >()
@@ -534,6 +580,9 @@ describe(`query API type algebra`, () => {
       >()
       expectTypeOf<FullResult[`exactNull`]>().toEqualTypeOf<null | undefined>()
       expectTypeOf<FullResult[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<FullResult[`nullableNumber`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
       expectTypeOf<FullResult[`nullableText`]>().toEqualTypeOf<
         string | null | undefined
       >()
