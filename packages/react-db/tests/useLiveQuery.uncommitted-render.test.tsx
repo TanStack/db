@@ -349,7 +349,11 @@ describe(`live queries across uncommitted renders`, () => {
       const result = useLiveSuspenseQuery(config)
       liveCollections.set(label, result.collection)
       if (label === `Second` && secondRenderBlocked) throw secondRender
-      return <div>{label}: {result.data[0]?.name} {tick}</div>
+      return (
+        <div>
+          {label}: {result.data[0]?.name} {tick}
+        </div>
+      )
     }
 
     const firstView = render(

@@ -173,10 +173,7 @@ export function useLiveSuspenseQuery(
   // Use useLiveQuery to handle collection management and reactivity
   const result =
     deps === undefined
-      ? useLiveQueryForSuspense(
-          configOrQueryOrCollection,
-          undefined,
-        )
+      ? useLiveQueryForSuspense(configOrQueryOrCollection, undefined)
       : useLiveQueryForSuspense(configOrQueryOrCollection, deps)
 
   if (!result.isEnabled) {
