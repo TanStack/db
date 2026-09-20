@@ -810,6 +810,16 @@ class PersistedCollectionRuntime<
   private readonly hydratedDemands = new Set<
     ReturnType<typeof getLoadSubsetDemandKey>
   >()
+  /**
+   * Demands with a store read in flight. Registration is synchronous but the
+   * read is not (`ApplyMutex.run` always defers), so without this there is a
+   * window where a demand is covered, nothing is hydrating, and no row has
+   * been read.
+   */
+  private readonly loadsInFlight = new Map<
+    ReturnType<typeof getLoadSubsetDemandKey>,
+    number
+  >()
   private startupSettled = false
   /**
    * Bumped whenever the source truncates. A truncate that lands while a
@@ -954,6 +964,11 @@ class PersistedCollectionRuntime<
   private async hydrateBaseline(lifecycleGeneration: number): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
 
+    // `getLoadSubsetDemandKey({})` is `undefined`, the same key a genuinely
+    // unconstrained subset request has. That is safe only because this
+    // acquisition is never released and its entry stays in `activeSubsets` for
+    // the life of the collection, so every reload re-reads it and the rows
+    // really are present — a different argument from every other demand's.
     const baseline = {}
     this.registerSubsetAcquisition(baseline)
     const appliedCursor = this.appliedReceiptSequence
@@ -1076,49 +1091,97 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     const sourceTruncateGeneration = this.sourceTruncateGeneration
+    const demandKey = getLoadSubsetDemandKey(options)
     this.registerSubsetAcquisition(options)
+    this.enterLoad(demandKey)
 
     const appliedCursor = this.appliedReceiptSequence
-    await this.applyMutex.run(() =>
-      this.hydrateSubsetUnsafe(options, {
-        requestRemoteEnsure: this.mode === `sync-present`,
-        lifecycleGeneration,
-      }),
-    )
-    if (lifecycleGeneration !== this.lifecycleGeneration) return
-    await this.waitForAppliedReceiptsAfter(appliedCursor)
+    try {
+      await this.applyMutex.run(() =>
+        this.hydrateSubsetUnsafe(options, {
+          requestRemoteEnsure: this.mode === `sync-present`,
+          lifecycleGeneration,
+        }),
+      )
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+      await this.waitForAppliedReceiptsAfter(appliedCursor)
+    } finally {
+      this.leaveLoad(demandKey)
+    }
 
     // Only claim the rows are here if nothing invalidated them while we were
     // reading: a restart bumps the lifecycle, a source truncate bumps its own
     // generation, and either means this hydration no longer describes the
     // collection.
+    // ...and only if some acquisition still wants them. Every acquisition of
+    // this demand may have been released while the read was in flight, and
+    // recording a demand nothing holds would leave an entry that no release
+    // can ever remove — a `true` owed to rows the next reload will drop.
     if (
       lifecycleGeneration === this.lifecycleGeneration &&
-      sourceTruncateGeneration === this.sourceTruncateGeneration
+      sourceTruncateGeneration === this.sourceTruncateGeneration &&
+      (this.demandCoverage.get(demandKey) ?? 0) > 0
     ) {
-      this.hydratedDemands.add(getLoadSubsetDemandKey(options))
+      this.hydratedDemands.add(demandKey)
     }
 
     if (upstreamLoadSubset) {
       try {
         await upstreamLoadSubset(options)
       } catch (error) {
-        if (
-          options.signal?.aborted ||
-          (typeof error === `object` &&
-            error !== null &&
-            `name` in error &&
-            error.name === `AbortError`)
-        ) {
-          this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
-          throw error
-        }
-        console.warn(`Failed to trigger remote subset load:`, error)
-        this.queueRemoteSubsetEnsure(options)
-        // Hydration remains readable, but it does not satisfy remote demand.
+        this.noteUpstreamLoadFailure(options, error)
         throw error
       }
     }
+  }
+
+  /**
+   * The bookkeeping a failed upstream subset load owes, whichever path ran it.
+   *
+   * A cancelled demand must stop being ensured remotely; any other failure
+   * leaves the hydration readable but unsatisfied upstream, so it is queued
+   * for retry. The fast path forwards upstream without going through
+   * `loadSubset`, so it has to ask for this explicitly — otherwise an aborted
+   * acquisition is ensured for ever.
+   */
+  noteUpstreamLoadFailure(options: LoadSubsetOptions, error: unknown): void {
+    if (
+      options.signal?.aborted ||
+      (typeof error === `object` &&
+        error !== null &&
+        `name` in error &&
+        error.name === `AbortError`)
+    ) {
+      this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+      return
+    }
+
+    console.warn(`Failed to trigger remote subset load:`, error)
+    this.queueRemoteSubsetEnsure(options)
+  }
+
+  /** An upstream result with that bookkeeping attached, shape preserved. */
+  settleUpstreamLoad(
+    options: LoadSubsetOptions,
+    result: true | Promise<void>,
+  ): true | Promise<void> {
+    if (result === true) return true
+
+    return result.catch((error: unknown) => {
+      this.noteUpstreamLoadFailure(options, error)
+      throw error
+    })
+  }
+
+  private enterLoad(key: ReturnType<typeof getLoadSubsetDemandKey>): void {
+    this.loadsInFlight.set(key, (this.loadsInFlight.get(key) ?? 0) + 1)
+  }
+
+  private leaveLoad(key: ReturnType<typeof getLoadSubsetDemandKey>): void {
+    const remaining = (this.loadsInFlight.get(key) ?? 1) - 1
+
+    if (remaining > 0) this.loadsInFlight.set(key, remaining)
+    else this.loadsInFlight.delete(key)
   }
 
   unloadSubset(
@@ -1187,12 +1250,14 @@ class PersistedCollectionRuntime<
    * already know the answer to costs a promise, and that promise is what makes
    * a live query `loading` when it should be `ready`.
    *
-   * Three conditions, and each rules out a way the rows could be absent:
+   * Four conditions, and each rules out a way the rows could be absent:
    * startup must have finished; no hydration may be in flight (there is a
    * window inside `truncateAndReloadUnsafe` where the collection is
-   * deliberately empty); and some acquisition must still hold this demand,
-   * because every in-generation invalidation path preserves the rows of
-   * demands that are still active and only those.
+   * deliberately empty); this demand must have no read of its own still
+   * running, because registration is synchronous while the read is not; and
+   * some acquisition must still hold it, because every in-generation
+   * invalidation path preserves the rows of demands that are still active and
+   * only those.
    */
   tryAcquireHydratedSubset(options: LoadSubsetOptions): boolean {
     if (!this.startupSettled || this.isHydratingNow()) return false
@@ -1200,6 +1265,7 @@ class PersistedCollectionRuntime<
     const key = getLoadSubsetDemandKey(options)
 
     if (!this.hydratedDemands.has(key)) return false
+    if (this.loadsInFlight.has(key)) return false
     if ((this.demandCoverage.get(key) ?? 0) <= 0) return false
 
     // The same registration the slow path performs, so this acquisition owns
@@ -1375,12 +1441,12 @@ class PersistedCollectionRuntime<
   }
 
   private advanceLifecycle(): void {
-     
     this.lifecycleGeneration++
     this.started = false
     this.startupSettled = false
     this.demandCoverage.clear()
     this.hydratedDemands.clear()
+    this.loadsInFlight.clear()
     this.startupMetadataPromise = null
     this.startPromise = null
     this.resumeBaselinePromise = null
@@ -2844,8 +2910,16 @@ function createWrappedSyncConfig<
           // construction rather than `loading` for ever under Suspense.
           if (sourceResultSettled && runtime.tryAcquireHydratedSubset(options)) {
             try {
-              return forwardUpstream(sourceResult)(options)
+              // `settleUpstreamLoad` is what `runtime.loadSubset` would have
+              // applied: without it an aborted acquisition is never removed
+              // from the pending remote ensures and is retried for ever.
+              return runtime.settleUpstreamLoad(
+                options,
+                forwardUpstream(sourceResult)(options),
+              )
             } catch (error) {
+              runtime.noteUpstreamLoadFailure(options, error)
+
               // The async path below turns a synchronous upstream throw into a
               // rejection. Callers must not see a different failure shape
               // depending on whether the rows happened to be cached.
