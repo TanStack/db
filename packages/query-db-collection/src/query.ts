@@ -3,6 +3,7 @@ import {
   LoadSubsetOperationAbortedError,
   deepEquals,
   getLoadSubsetDemandKey,
+  warnOnce,
   withCollectionConfigFactory,
   withCollectionSyncConfigFactory,
 } from '@tanstack/db'
@@ -18,14 +19,10 @@ import type {
   BaseCollectionConfig,
   ChangeMessage,
   CollectionConfig,
-  DeleteMutationFnParams,
-  InsertMutationFnParams,
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
   SyncMetadataApi,
-  UpdateMutationFnParams,
-  UtilsRecord,
 } from '@tanstack/db'
 import type {
   FetchStatus,
@@ -110,7 +107,17 @@ export interface QueryCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
-> extends BaseCollectionConfig<T, TKey, TSchema> {
+> extends BaseCollectionConfig<
+  T,
+  TKey,
+  TSchema,
+  QueryCollectionUtils<
+    T,
+    TKey,
+    [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+    TError
+  >
+> {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
@@ -266,7 +273,9 @@ export interface QueryCollectionUtils<
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
   TError = unknown,
-> extends UtilsRecord {
+> {
+  // Keep this interface closed: extending UtilsRecord would make every
+  // nonexistent adapter utility appear as `any`.
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
   /** Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
@@ -2750,46 +2759,59 @@ export function queryCollectionOptions(
     () => writeContext,
   )
 
+  // Helper to handle deprecated auto-refetch behavior with warnings
+  async function handleDeprecatedAutoRefetch(
+    handlerResult: unknown,
+  ): Promise<void> {
+    const canHaveProperties =
+      (typeof handlerResult === `object` && handlerResult !== null) ||
+      typeof handlerResult === `function`
+    const explicitRefetchFalse =
+      canHaveProperties &&
+      'refetch' in handlerResult &&
+      (handlerResult as Record<string, unknown>).refetch === false
+
+    if (explicitRefetchFalse) {
+      return
+    } else {
+      warnOnce(
+        'query-collection-auto-refetch',
+        '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
+          'This behavior will be removed in v1.0. To prepare: ' +
+          '(1) Add `await collection.utils.refetch()` and temporarily return `{ refetch: false }` to avoid a second refetch, or ' +
+          "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
+          'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
+      )
+      await refetch()
+    }
+  }
+
   // Create wrapper handlers for direct persistence operations that handle refetching
+  // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<any>) => {
+    ? async (
+        params: Parameters<NonNullable<typeof onInsert>>[0],
+      ): Promise<void> => {
         const handlerResult = (await onInsert(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: UpdateMutationFnParams<any>) => {
+    ? async (
+        params: Parameters<NonNullable<typeof onUpdate>>[0],
+      ): Promise<void> => {
         const handlerResult = (await onUpdate(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: DeleteMutationFnParams<any>) => {
+    ? async (
+        params: Parameters<NonNullable<typeof onDelete>>[0],
+      ): Promise<void> => {
         const handlerResult = (await onDelete(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
