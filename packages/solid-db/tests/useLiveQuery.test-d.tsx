@@ -4,6 +4,7 @@ import { createCollection } from '../../db/src/collection/index'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createLiveQueryCollection, eq } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
+import type { CollectionStatus } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
@@ -84,5 +85,30 @@ describe(`useLiveQuery type assertions`, () => {
     expectTypeOf(rendered.result()).toMatchTypeOf<
       Array<OutputWithVirtual<Person>>
     >()
+  })
+
+  it(`types disabled callbacks from their empty reactive runtime`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-solid`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const rendered = renderHook(() =>
+      useLiveQuery((q) => (enabled ? q.from({ collection }) : null)),
+    )
+
+    const data: Array<OutputWithVirtual<Person>> = rendered.result()
+    expectTypeOf(data).toEqualTypeOf<Array<OutputWithVirtual<Person>>>()
+    expectTypeOf<null>().toExtend<typeof rendered.result.collection>()
+    expectTypeOf(rendered.result.status).toEqualTypeOf<
+      CollectionStatus | `disabled`
+    >()
+
+    // @ts-expect-error Disabled callbacks expose a null collection until enabled.
+    rendered.result.collection.preload()
   })
 })

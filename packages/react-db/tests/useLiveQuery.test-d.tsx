@@ -178,6 +178,32 @@ describe(`useLiveQuery type assertions`, () => {
     expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
   })
 
+  it(`types disabled callbacks with React's absent result representation`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-callback`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const { result } = renderHook(() =>
+      useLiveQuery((q) => (enabled ? q.from({ collection }) : null)),
+    )
+
+    const data: Array<OutputWithVirtual<Person>> | undefined =
+      result.current.data
+    expectTypeOf(data).toEqualTypeOf<
+      Array<OutputWithVirtual<Person>> | undefined
+    >()
+    expectTypeOf(result.current.status).toEqualTypeOf<UseLiveQueryStatus>()
+    expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
+
+    // @ts-expect-error React omits disabled query data until the callback enables it.
+    result.current.data.map((person) => person.id)
+  })
+
   it(`rejects a conditional config with a top-level scalar result`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

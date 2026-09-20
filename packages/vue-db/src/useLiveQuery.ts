@@ -53,6 +53,18 @@ export interface UseLiveQueryReturn<TContext extends Context> {
   isCleanedUp: ComputedRef<boolean>
 }
 
+type ConditionalUseLiveQueryReturn<TContext extends Context> = Omit<
+  UseLiveQueryReturn<TContext>,
+  `collection` | `status`
+> & {
+  collection: ComputedRef<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
+  status: ComputedRef<CollectionStatus | `disabled`>
+}
+
 export interface UseLiveQueryReturnWithCollection<
   T extends object,
   TKey extends string | number,
@@ -146,7 +158,7 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
   deps?: Array<MaybeRefOrGetter<unknown>>,
-): UseLiveQueryReturn<TContext>
+): ConditionalUseLiveQueryReturn<TContext>
 
 /**
  * Create a live query using configuration object
