@@ -112,9 +112,15 @@ describe(`aggregate value contracts`, () => {
   test(`rejects values outside each aggregate's documented domain`, () => {
     const loose = undefined as unknown as RefLeaf<any>
     const unknownValue = undefined as unknown as RefLeaf<unknown>
+    const nullLeaf = undefined as unknown as RefLeaf<null>
+    const nullProxy = undefined as unknown as RefProxy<null>
 
     expectTypeOf(sum(loose)).toEqualTypeOf<Aggregate<number>>()
     expectTypeOf(min(loose)).toEqualTypeOf<Aggregate<any>>()
+    // @ts-expect-error null-only wrappers have no numeric domain
+    sum(nullLeaf)
+    // @ts-expect-error null-only wrappers have no orderable domain
+    min(nullProxy)
 
     createLiveQueryCollection({
       query: (q) =>
@@ -176,7 +182,8 @@ describe(`aggregate value contracts`, () => {
     expectTypeOf(sum(coalesce(nullableBrandedRef, 0))).toEqualTypeOf<
       Aggregate<number>
     >()
-    expectTypeOf(minOrderableRef(mixedOrderableRef)).toEqualTypeOf<
+    expectTypeOf(minOrderableRef(mixedOrderableRef)).toMatchTypeOf<Aggregate>()
+    expectTypeOf(min(mixedOrderableRef)).toEqualTypeOf<
       Aggregate<number | string>
     >()
     expectTypeOf(maxOrderableValue(new Date())).toEqualTypeOf<Aggregate<Date>>()
