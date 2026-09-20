@@ -89,3 +89,39 @@ test(`branch unions publish unmatched whole-object projections as undefined`, as
   expect(query.toArray[0]!.other).toMatchObject({ id: `row-1` })
   expect(query.toArray[1]!.other).toBeUndefined()
 })
+
+test(`plain branch unions publish nullable-only values as null`, async () => {
+  type NullableRow = { id: string; value: number | null }
+  const rowsA = createCollection(
+    mockSyncCollectionOptions<NullableRow>({
+      id: `query-api-type-algebra-nullable-rows-a`,
+      getKey: (row) => row.id,
+      initialData: [{ id: `null-row`, value: null }],
+    }),
+  )
+  const rowsB = createCollection(
+    mockSyncCollectionOptions<NullableRow>({
+      id: `query-api-type-algebra-nullable-rows-b`,
+      getKey: (row) => row.id,
+      initialData: [{ id: `number-row`, value: 1 }],
+    }),
+  )
+  const query = createLiveQueryCollection((q) => {
+    const branchA = q.from({ rowsA }).select(({ rowsA: row }) => ({
+      id: row.id,
+      value: row.value,
+    }))
+    const branchB = q.from({ rowsB }).select(({ rowsB: row }) => ({
+      id: row.id,
+      value: row.value,
+    }))
+    return q.unionAll(branchA, branchB).select(({ id, value }) => ({
+      id,
+      value,
+    }))
+  })
+
+  await query.preload()
+
+  expect(query.toArray.find((row) => row.id === `null-row`)?.value).toBeNull()
+})
