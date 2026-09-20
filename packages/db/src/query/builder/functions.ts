@@ -93,8 +93,6 @@ type ExtractType<T> =
 
 type IsAny<T> = 0 extends 1 & T ? true : false
 
-// Validate the non-nullish value domain while preserving the original
-// expression type. `any` remains permissive, while `unknown` must be narrowed.
 type AggregateArgument<T, Domain> = T &
   (IsAny<ExtractType<T>> extends true
     ? unknown
@@ -104,10 +102,23 @@ type AggregateArgument<T, Domain> = T &
         ? unknown
         : never)
 
+type NumericAggregateWrapper =
+  | RefProxy<number | null | undefined>
+  | RefLeaf<number | null | undefined>
+  | BasicExpression<number | null | undefined>
+
+type OrderableAggregateValue = number | Date | bigint | string
+type OrderableAggregateWrapper =
+  | RefProxy<OrderableAggregateValue | null | undefined>
+  | RefLeaf<OrderableAggregateValue | null | undefined>
+  | BasicExpression<OrderableAggregateValue | null | undefined>
+
+// Constrained overloads compose through supported generics; these conditional
+// fallbacks validate concrete optional/nullish unions and reject unknown.
 type NumericAggregateArgument<T> = AggregateArgument<T, number>
 type OrderableAggregateArgument<T> = AggregateArgument<
   T,
-  number | Date | bigint | string
+  OrderableAggregateValue
 >
 
 // Helper type to determine string function return type based on input nullability
@@ -655,27 +666,47 @@ export function count(arg: ExpressionLike): Aggregate<number> {
   return new Aggregate(`count`, [toExpression(arg)])
 }
 
+export function avg<T extends number>(arg: T): Aggregate<number>
+export function avg<T extends NumericAggregateWrapper>(
+  arg: T,
+): Aggregate<number>
 export function avg<T extends ExpressionLike>(
   arg: NumericAggregateArgument<T>,
-): Aggregate<number> {
+): Aggregate<number>
+export function avg(arg: ExpressionLike): Aggregate<number> {
   return new Aggregate(`avg`, [toExpression(arg)])
 }
 
+export function sum<T extends number>(arg: T): Aggregate<number>
+export function sum<T extends NumericAggregateWrapper>(
+  arg: T,
+): Aggregate<number>
 export function sum<T extends ExpressionLike>(
   arg: NumericAggregateArgument<T>,
-): Aggregate<number> {
+): Aggregate<number>
+export function sum(arg: ExpressionLike): Aggregate<number> {
   return new Aggregate(`sum`, [toExpression(arg)])
 }
 
+export function min<T extends OrderableAggregateValue>(arg: T): Aggregate<T>
+export function min<T extends OrderableAggregateWrapper>(
+  arg: T,
+): Aggregate<ExtractType<T>>
 export function min<T extends ExpressionLike>(
   arg: OrderableAggregateArgument<T>,
-): Aggregate<ExtractType<T>> {
+): Aggregate<ExtractType<T>>
+export function min(arg: ExpressionLike): Aggregate {
   return new Aggregate(`min`, [toExpression(arg)])
 }
 
+export function max<T extends OrderableAggregateValue>(arg: T): Aggregate<T>
+export function max<T extends OrderableAggregateWrapper>(
+  arg: T,
+): Aggregate<ExtractType<T>>
 export function max<T extends ExpressionLike>(
   arg: OrderableAggregateArgument<T>,
-): Aggregate<ExtractType<T>> {
+): Aggregate<ExtractType<T>>
+export function max(arg: ExpressionLike): Aggregate {
   return new Aggregate(`max`, [toExpression(arg)])
 }
 
