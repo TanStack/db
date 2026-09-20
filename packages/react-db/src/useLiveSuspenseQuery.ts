@@ -1,7 +1,7 @@
 'use client'
 
-import { useRef } from 'react'
-import { useLiveQuery } from './useLiveQuery'
+import { useId, useRef } from 'react'
+import { useLiveQueryForSuspense } from './useLiveQuery'
 import { getLiveQueryResultInfo } from './live-query-internals'
 import type { UseLiveQueryConfig } from './useLiveQuery'
 import type {
@@ -166,6 +166,7 @@ export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   deps?: Array<unknown>,
 ) {
+  const suspenseConsumerId = useId()
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
@@ -173,8 +174,16 @@ export function useLiveSuspenseQuery(
   // Use useLiveQuery to handle collection management and reactivity
   const result =
     deps === undefined
-      ? useLiveQuery(configOrQueryOrCollection)
-      : useLiveQuery(configOrQueryOrCollection, deps)
+      ? useLiveQueryForSuspense(
+          configOrQueryOrCollection,
+          undefined,
+          suspenseConsumerId,
+        )
+      : useLiveQueryForSuspense(
+          configOrQueryOrCollection,
+          deps,
+          suspenseConsumerId,
+        )
   const queryInfo = getLiveQueryResultInfo(result)
 
   // Reset promise and ready state when query identity changes
@@ -185,7 +194,7 @@ export function useLiveSuspenseQuery(
   }
 
   // SUSPENSE LOGIC: Throw promise or error based on collection status
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
     throw new Error(
@@ -229,7 +238,6 @@ export function useLiveSuspenseQuery(
         `Cannot stream this live query during SSR because ${reason}. Provide an explicit serializable queryKey.`,
       )
     }
-
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
       promiseRef.current = queryInfo.observer.preload()

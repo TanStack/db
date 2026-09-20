@@ -52,6 +52,7 @@ export class OrderedSourceLoader {
   private lastBoundary: unknown
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
+  private synchronousCompletionDepth = 0
 
   constructor(
     private readonly info: OrderByOptimizationInfo,
@@ -153,7 +154,9 @@ export class OrderedSourceLoader {
     // A recorded failure always carries recovery debt, so it cannot reach this
     // finite path; only the first request needs the whole prefix here.
     let count = Math.max(
-      this.info.dataNeeded(),
+      this.synchronousCompletionDepth > 0
+        ? this.directSourceRowsNeeded()
+        : this.info.dataNeeded(),
       this.hasSettledSourceRequest ? 0 : this.info.offset + this.info.limit,
     )
     if (
@@ -187,7 +190,11 @@ export class OrderedSourceLoader {
   private loadPrefix(count: number, windowOperationGeneration?: number): void {
     if (!this.active || this.pending) return
     if (this.lastPrefixCount === count) {
-      if ((this.info.dataNeeded?.() ?? 0) > 0) {
+      const needsRows =
+        this.synchronousCompletionDepth > 0
+          ? this.directSourceRowsNeeded() > 0
+          : (this.info.dataNeeded?.() ?? 0) > 0
+      if (needsRows) {
         this.loadFullSource(windowOperationGeneration)
       }
       return
@@ -290,6 +297,16 @@ export class OrderedSourceLoader {
       ).length
   }
 
+  /** Read direct-source demand without waiting for D2's next graph turn. */
+  private directSourceRowsNeeded(): number {
+    const needed = this.info.offset + this.info.limit
+    const available = this.subscription.readOrderedSnapshot({
+      orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
+      limit: needed,
+    }).length
+    return Math.max(0, needed - available)
+  }
+
   private loadPage(count: number, windowOperationGeneration?: number): void {
     if (!this.active || this.pending) return
     // Rows observed before the first provider request do not prove ordered
@@ -341,7 +358,7 @@ export class OrderedSourceLoader {
     kind: OrderedRequestKind,
     windowOperationGeneration?: number,
     options?: LoadSubsetOptions,
-  ): Promise<void> {
+  ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
     const retryRepair =
       isFullSource &&
@@ -349,8 +366,9 @@ export class OrderedSourceLoader {
       this.needsFullSourceRecovery &&
       windowOperationGeneration === undefined
     const generation = this.generation
-    const complete = (): void => {
-      if (this.pending === tracked) this.pending = undefined
+    const complete = (settledRequest?: Promise<void>): void => {
+      if (settledRequest && this.pending === settledRequest)
+        this.pending = undefined
       if (!this.active) return
       // Retirement failure does not undo a successful acquisition. Finish its
       // boundary and continuation, then report the first cleanup error.
@@ -393,7 +411,7 @@ export class OrderedSourceLoader {
                   this.subscription.readOrderedSnapshot(options).at(-1)
                     ?.value ?? this.settledSourceBoundary
               } catch (error) {
-                fail(error)
+                fail(error, settledRequest)
               }
             }
           }
@@ -414,11 +432,10 @@ export class OrderedSourceLoader {
         },
       ])
     }
-    const settlesAsync = result instanceof Promise
-    const request = settlesAsync ? result : Promise.resolve()
-    const fail = (error: unknown) => {
+    const fail = (error: unknown, settledRequest?: Promise<void>) => {
       this.settledFiniteAcquisitions.delete(releaseAcquisition)
-      if (this.pending === tracked) this.pending = undefined
+      if (settledRequest && this.pending === settledRequest)
+        this.pending = undefined
       if (!this.active) return
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
@@ -433,7 +450,40 @@ export class OrderedSourceLoader {
       if (retryRepair) this.scheduleRepairRetry()
       throw error
     }
-    const tracked = request.then(complete, fail)
+    if (result === true) {
+      let completionError: unknown
+      this.synchronousCompletionDepth++
+      try {
+        complete()
+      } catch (error) {
+        completionError = error
+      } finally {
+        this.synchronousCompletionDepth--
+      }
+      if (completionError !== undefined) {
+        // Acquisition succeeded even if its completion bookkeeping reports an
+        // error (for example, retiring an older lease). Preserve that state
+        // and surface the error through the same operation channel as an
+        // asynchronous completion callback would.
+        const rejected = Promise.reject(completionError)
+        this.pending = rejected
+        void rejected.catch(() => {})
+        void rejected.then(
+          () => {},
+          () => {
+            if (this.pending === rejected) this.pending = undefined
+          },
+        )
+        this.onResult(rejected, false)
+        return rejected
+      }
+      this.onResult(true, false)
+      return
+    }
+    const tracked: Promise<void> = result.then(
+      () => complete(tracked),
+      (error) => fail(error, tracked),
+    )
     this.pending = tracked
     void tracked.catch(() => {})
     // Register each request separately. The operation tracker observes the
@@ -441,7 +491,7 @@ export class OrderedSourceLoader {
     // pending without retaining every ancestor promise until the final page.
     this.onResult(
       tracked,
-      settlesAsync && isFullSource && this.needsFullSourceRecovery,
+      isFullSource && this.needsFullSourceRecovery,
     )
     return tracked
   }

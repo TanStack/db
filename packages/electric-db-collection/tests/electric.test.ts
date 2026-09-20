@@ -3128,237 +3128,69 @@ describe(`Electric Integration`, () => {
       },
     )
 
-    it.each([true, false])(
-      `settles reasonless cancellation after refresh with DOMException available %s`,
-      async (hasDOMException) => {
-        const originalDOMException = globalThis.DOMException
-        const controller = new NativeAbortController()
-        const refresh = createDeferred<void>()
-        mockStream.isUpToDate = true
-        mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
-        const testCollection = createOnDemandCollection(
-          `reasonless-refresh-abort`,
-        )
-        try {
-          const load = testCollection._sync.loadSubset({
-            limit: 10,
-            signal: controller.signal,
-          })
-          const outcome = Promise.resolve(load).then(
-            () => undefined,
-            (error: unknown) => error,
-          )
-          await Promise.resolve()
-          // Model a platform signal without reason; no event is required for
-          // the post-refresh cancellation check to observe its terminal state.
-          Object.defineProperty(controller.signal, `aborted`, { value: true })
-          Object.defineProperty(controller.signal, `reason`, {
-            value: undefined,
-          })
-          if (!hasDOMException) vi.stubGlobal(`DOMException`, undefined)
-          refresh.resolve()
-          await expect(outcome).resolves.toMatchObject({ name: `AbortError` })
-          expect(mockRequestSnapshot).not.toHaveBeenCalled()
-        } finally {
-          vi.stubGlobal(`DOMException`, originalDOMException)
-          refresh.resolve()
-          await testCollection.cleanup()
+    it(`lets requestSnapshot transition an up-to-date stream to a subset request`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `on-demand-snapshot-up-to-date-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      mockStream.isUpToDate = true
+
+      await testCollection._sync.loadSubset({ limit: 10 })
+
+      expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+      await testCollection.cleanup()
+    })
+
+    it(`issues one snapshot and no ordinary refresh for each distinct demand`, async () => {
+      const testCollection = createOnDemandCollection(
+        `on-demand-distinct-snapshot-count-test`,
+      )
+
+      try {
+        for (let limit = 1; limit <= 10; limit++) {
+          await testCollection._sync.loadSubset({ limit })
         }
-      },
-    )
 
-    it(`cancels a pending refresh wait when the collection is cleaned up`, async () => {
-      vi.useFakeTimers()
-      const schedule = vi.spyOn(globalThis, `setTimeout`)
-      const cancel = vi.spyOn(globalThis, `clearTimeout`)
-      const refresh = createDeferred<void>()
-      mockStream.isUpToDate = true
-      mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
-      const testCollection = createOnDemandCollection(
-        `on-demand-refresh-cleanup-test`,
-      )
-      try {
-        const load = Promise.resolve(
-          testCollection._sync.loadSubset({ limit: 10 }),
-        )
-        const loadError = load.then(
-          () => undefined,
-          (error: unknown) => error,
-        )
-        const refreshTimerIndex = schedule.mock.calls.findIndex(
-          ([, delay]) => delay === 250,
-        )
-        expect(refreshTimerIndex).toBeGreaterThanOrEqual(0)
-        const refreshTimer = schedule.mock.results[refreshTimerIndex]!.value
-
-        await Promise.resolve()
-        await testCollection.cleanup()
-        await expect(loadError).resolves.toMatchObject({ name: `AbortError` })
-        expect(mockRequestSnapshot).not.toHaveBeenCalled()
-        // The shared collection GC timer may still exist; this wait must not.
-        expect(cancel).toHaveBeenCalledWith(refreshTimer)
-
-        refresh.resolve()
-        await refresh.promise
-        await load.catch(() => undefined)
-        expect(mockRequestSnapshot).not.toHaveBeenCalled()
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(10)
+        expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
       } finally {
-        refresh.resolve()
         await testCollection.cleanup()
-        schedule.mockRestore()
-        cancel.mockRestore()
-        vi.useRealTimers()
       }
     })
 
-    it(`should refresh the stream before requesting on-demand snapshots when already up-to-date`, async () => {
-      vi.clearAllMocks()
-
-      const config = {
-        id: `on-demand-refresh-before-snapshot-test`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: {
-            table: `test_table`,
-          },
-        },
-        syncMode: `on-demand` as const,
-        getKey: (item: Row) => item.id as number,
-        startSync: true,
-      }
-
-      const testCollection = createCollection(electricCollectionOptions(config))
-
-      mockStream.isUpToDate = true
-
-      await testCollection._sync.loadSubset({ limit: 10 })
-
-      expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(1)
-      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-      const refreshCall =
-        mockForceDisconnectAndRefresh.mock.invocationCallOrder[0]!
-      const snapshotCall = mockRequestSnapshot.mock.invocationCallOrder[0]!
-      expect(refreshCall).toBeLessThan(snapshotCall)
-    })
-
-    it(`should fall through to requestSnapshot when forceDisconnectAndRefresh fails`, async () => {
-      vi.clearAllMocks()
-
-      const config = {
-        id: `on-demand-refresh-fallthrough-test`,
-        shapeOptions: {
-          url: `http://test-url`,
-          params: {
-            table: `test_table`,
-          },
-        },
-        syncMode: `on-demand` as const,
-        getKey: (item: Row) => item.id as number,
-        startSync: true,
-      }
-
-      const testCollection = createCollection(electricCollectionOptions(config))
-
-      mockStream.isUpToDate = true
-      mockForceDisconnectAndRefresh.mockImplementationOnce(() => {
-        return Promise.reject(new Error(`PauseLock held`))
-      })
-
-      await testCollection._sync.loadSubset({ limit: 10 })
-
-      expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(1)
-      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-    })
-
-    it(`should request the snapshot after the refresh timeout and ignore late fulfillment`, async () => {
-      vi.useFakeTimers()
-      const refresh = createDeferred<void>()
-      mockStream.isUpToDate = true
-      mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh.promise)
+    it(`retries a warm snapshot after its previous request rejects`, async () => {
+      const failure = new Error(`snapshot failed`)
+      mockRequestSnapshot
+        .mockRejectedValueOnce(failure)
+        .mockResolvedValueOnce(undefined)
       const testCollection = createOnDemandCollection(
-        `on-demand-refresh-timeout-fulfillment-test`,
+        `on-demand-snapshot-retry-test`,
       )
+
       try {
-        let loadSettled = false
-        const load = Promise.resolve(
-          testCollection._sync.loadSubset({ limit: 10 }),
-        ).then(() => {
-          loadSettled = true
-        })
-
-        await vi.advanceTimersByTimeAsync(249)
-        expect(mockRequestSnapshot).not.toHaveBeenCalled()
-        expect(loadSettled).toBe(false)
-
-        await vi.advanceTimersByTimeAsync(1)
-        await load
-        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(loadSettled).toBe(true)
-
-        refresh.resolve()
-        await refresh.promise
-        await Promise.resolve()
-        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-      } finally {
-        refresh.resolve()
-        await testCollection.cleanup()
-        vi.useRealTimers()
-      }
-    })
-
-    it(`should handle late refresh rejection after requesting the snapshot`, async () => {
-      vi.useFakeTimers()
-      let rejectRefresh: (error: Error) => void = () => {}
-      let resolveRefresh: () => void = () => {}
-      const refresh = new Promise<void>((resolve, reject) => {
-        resolveRefresh = resolve
-        rejectRefresh = reject
-      })
-      mockStream.isUpToDate = true
-      mockForceDisconnectAndRefresh.mockReturnValueOnce(refresh)
-      const testCollection = createOnDemandCollection(
-        `on-demand-refresh-timeout-rejection-test`,
-      )
-      try {
-        const load = testCollection._sync.loadSubset({ limit: 10 })
-        await vi.advanceTimersByTimeAsync(250)
-        await load
-
-        rejectRefresh(new Error(`late refresh failure`))
-        await expect(refresh).rejects.toThrow(`late refresh failure`)
-        await Promise.resolve()
-        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-      } finally {
-        resolveRefresh()
-        await testCollection.cleanup()
-        vi.useRealTimers()
-      }
-    })
-
-    it(`should clear the refresh timeout when refresh settles early`, async () => {
-      vi.useFakeTimers()
-      const schedule = vi.spyOn(globalThis, `setTimeout`)
-      const cancel = vi.spyOn(globalThis, `clearTimeout`)
-      mockStream.isUpToDate = true
-      mockForceDisconnectAndRefresh.mockResolvedValueOnce(undefined)
-      const testCollection = createOnDemandCollection(
-        `on-demand-refresh-clears-timeout-test`,
-      )
-      try {
+        await expect(
+          Promise.resolve(testCollection._sync.loadSubset({ limit: 10 })),
+        ).rejects.toBe(failure)
         await testCollection._sync.loadSubset({ limit: 10 })
-        const refreshTimerIndex = schedule.mock.calls.findIndex(
-          ([, delay]) => delay === 250,
-        )
-        expect(refreshTimerIndex).toBeGreaterThanOrEqual(0)
-        const refreshTimer = schedule.mock.results[refreshTimerIndex]!.value
 
-        expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-        expect(cancel).toHaveBeenCalledWith(refreshTimer)
+        expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
+        expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
       } finally {
         await testCollection.cleanup()
-        schedule.mockRestore()
-        cancel.mockRestore()
-        vi.useRealTimers()
       }
     })
 

@@ -1930,7 +1930,6 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     query
       .from({ row: source })
       .orderBy(({ row }) => row.rank, `asc`)
-      .orderBy(({ row }) => row.id, `asc`)
       .limit(1),
   )
 

@@ -192,8 +192,14 @@ describe(`OrderedSourceLoader`, () => {
           expect(() => loader.start()).toThrow(failure)
         } else {
           loader.start()
-          if (outcome === `success`) await pendingPromise(loader)
-          else await expect(pendingPromise(loader)).rejects.toBe(failure)
+          if (outcome === `success`) {
+            const pending = pendingPromise(loader)
+            if (route === `page` || route === `prefix`)
+              expect(pending).toBeInstanceOf(Promise)
+            else expect(pending).toBeUndefined()
+          } else {
+            await expect(pendingPromise(loader)).rejects.toBe(failure)
+          }
         }
         // Drain the synchronous boundary's own settlement as well as its parent.
         await Promise.resolve()
@@ -209,7 +215,9 @@ describe(`OrderedSourceLoader`, () => {
         if (outcome === `success`) {
           // Ordered loads establish a cursor and refine ties; neither a tie
           // load nor a full-source load may restart that refinement step.
-          expect(boundaryReads).toBe(route === `full-source` ? 0 : 1)
+          expect(boundaryReads).toBe(
+            route === `full-source` ? 0 : route === `boundary` ? 2 : 1,
+          )
           expect(requests).toHaveLength(route === `full-source` ? 1 : 2)
           if (route === `page` || route === `prefix`) {
             expect(requests[1]!.options.where).toBeDefined()
@@ -231,6 +239,50 @@ describe(`OrderedSourceLoader`, () => {
         loader.dispose()
         waiting.resolve()
         await Promise.resolve()
+      }
+    },
+  )
+
+  it.each([`page`, `prefix`, `full-source`] as const)(
+    `settles a fully synchronous $route acquisition before start returns`,
+    (route) => {
+      const requests: Array<string> = []
+      const request = (
+        method: string,
+        options: RequestOptions,
+      ): void => {
+        requests.push(method)
+        options.onLoadSubsetResult?.(true, options, () => {})
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`limited`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`snapshot`, options),
+      }
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({
+          dataNeeded: () => 0,
+          ...(route === `prefix` ? { index: undefined } : {}),
+          requiresFullSource: route === `full-source`,
+        }),
+        subscription as unknown as CollectionSubscription,
+        `row`,
+      )
+      try {
+        loader.start()
+        expect(pendingPromise(loader)).toBeUndefined()
+        expect(requests).toEqual(
+          route === `full-source`
+            ? [`snapshot`]
+            : route === `prefix`
+              ? [`snapshot`, `snapshot`]
+              : [`limited`, `snapshot`],
+        )
+      } finally {
+        loader.dispose()
       }
     },
   )

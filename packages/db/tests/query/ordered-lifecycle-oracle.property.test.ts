@@ -688,6 +688,180 @@ describe(`ordered lifecycle product`, () => {
   )
 })
 
+describe(`warm ordered readiness oracle`, () => {
+  it.each([
+    { limit: 0, expectedRequests: [] },
+    {
+      limit: 50,
+      expectedRequests: [
+        { ordered: true, filtered: false, limit: 50 },
+        { ordered: false, filtered: false, limit: undefined },
+      ],
+    },
+  ])(
+    `makes a retained $limit-row window synchronously ready after an async cold prime`,
+    async ({ limit, expectedRequests }) => {
+      type DatedRow = { id: number; createdAt: Date | null }
+      const remote: Array<DatedRow> = [
+        { id: 1, createdAt: new Date(`2026-01-03T00:00:00.000Z`) },
+        { id: 2, createdAt: null },
+        { id: 3, createdAt: new Date(`2026-01-01T00:00:00.000Z`) },
+        { id: 4, createdAt: new Date(`2026-01-02T00:00:00.000Z`) },
+      ]
+      const installed = new Set<number>()
+      const warmRequests: Array<{
+        ordered: boolean
+        filtered: boolean
+        limit: number | undefined
+      }> = []
+      let cold = true
+      const source = createCollection<DatedRow, number>({
+        id: `warm-ordered-readiness-${limit}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                if (!cold) {
+                  warmRequests.push({
+                    ordered: options.orderBy !== undefined,
+                    filtered: options.where !== undefined,
+                    limit: options.limit,
+                  })
+                }
+                const missing = remote.filter(({ id }) => !installed.has(id))
+                if (missing.length > 0) {
+                  begin()
+                  for (const row of missing) {
+                    installed.add(row.id)
+                    write({ type: `insert`, value: row })
+                  }
+                  commit()
+                }
+                return cold ? Promise.resolve() : true
+              },
+            }
+          },
+        },
+      })
+      const query = (queryLimit: number) =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.createdAt, {
+                direction: `asc`,
+                nulls: `last`,
+              })
+              .limit(queryLimit),
+          startSync: true,
+        })
+      const coldQuery = query(50)
+      try {
+        await coldQuery.preload()
+        cold = false
+
+        const warmQuery = query(limit)
+        try {
+          expect(warmQuery.status).toBe(`ready`)
+          expect(warmQuery.isLoadingSubset).toBe(false)
+          expect(warmQuery.toArray.map(({ id }) => id)).toEqual(
+            limit === 0 ? [] : [3, 4, 1, 2],
+          )
+          expect(warmRequests).toEqual(expectedRequests)
+        } finally {
+          await warmQuery.cleanup()
+        }
+      } finally {
+        await coldQuery.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
+  it(`makes a retained nonzero-offset prefix and boundary synchronously ready`, async () => {
+    type WarmRow = { id: number; rank: number; tie: number }
+    const remote: Array<WarmRow> = [
+      { id: 1, rank: 1, tie: 1 },
+      { id: 2, rank: 2, tie: 1 },
+      { id: 3, rank: 3, tie: 1 },
+      { id: 4, rank: 4, tie: 1 },
+    ]
+    const installed = new Set<number>()
+    const warmRequests: Array<{
+      ordered: boolean
+      filtered: boolean
+      limit: number | undefined
+    }> = []
+    let cold = true
+    const source = createCollection<WarmRow, number>({
+      id: `warm-offset-prefix-readiness`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              if (!cold) {
+                warmRequests.push({
+                  ordered: options.orderBy !== undefined,
+                  filtered: options.where !== undefined,
+                  limit: options.limit,
+                })
+              }
+              const missing = remote.filter(({ id }) => !installed.has(id))
+              if (missing.length > 0) {
+                begin()
+                for (const row of missing) {
+                  installed.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+                commit()
+              }
+              return cold ? Promise.resolve() : true
+            },
+          }
+        },
+      },
+    })
+    const query = () =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ row: source })
+            .orderBy(({ row }) => row.rank, `asc`)
+            .orderBy(({ row }) => row.tie, `asc`)
+            .offset(1)
+            .limit(2),
+        startSync: true,
+      })
+    const owner = query()
+    try {
+      await owner.preload()
+      cold = false
+      const sibling = query()
+      try {
+        expect(sibling.status).toBe(`ready`)
+        expect(sibling.toArray.map(({ id }) => id)).toEqual([2, 3])
+        expect(warmRequests).toEqual([
+          { ordered: true, filtered: false, limit: 3 },
+          { ordered: false, filtered: true, limit: undefined },
+        ])
+      } finally {
+        await sibling.cleanup()
+      }
+    } finally {
+      await owner.cleanup()
+      await source.cleanup()
+    }
+  })
+})
+
 describe(`nullable multi-term lifecycle product`, () => {
   const cells: Array<Scenario> = ([`first`, `last`] as const)
     .flatMap((primaryNulls) =>

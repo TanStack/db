@@ -3,6 +3,7 @@
 import { useRef, useSyncExternalStore } from 'react'
 import {
   BaseQueryBuilder,
+  IR,
   UnhashableQueryIRError,
   createLiveQueryCollection,
   createLiveQueryObserver,
@@ -38,6 +39,81 @@ const warnedDepsCallsites = new Set<string>()
 const warnedDerivedIdentityCallsites = new Set<string>()
 const warnedUnhashableIdentityCallsites = new Set<string>()
 const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
+
+type SuspenseCollection = Collection<object, string | number, {}>
+type SuspenseCollectionEntry = {
+  collection: SuspenseCollection
+  pendingConsumers: Set<string>
+  removeStatusListeners: () => void
+}
+
+const unscopedSuspenseCollections = new Map<
+  string,
+  SuspenseCollectionEntry
+>()
+const suspenseCollectionsByClient = new WeakMap<
+  DbClient,
+  Map<string, SuspenseCollectionEntry>
+>()
+const suspenseSourceIds = new WeakMap<object, number>()
+let nextSuspenseSourceId = 0
+
+function getSuspenseSourceId(source: object): number {
+  let id = suspenseSourceIds.get(source)
+  if (id === undefined) {
+    id = ++nextSuspenseSourceId
+    suspenseSourceIds.set(source, id)
+  }
+  return id
+}
+
+function getUnscopedSuspenseKey(
+  preparedValue: unknown,
+  queryHash: string,
+): string {
+  const query =
+    preparedValue instanceof BaseQueryBuilder
+      ? preparedValue
+      : preparedValue &&
+          typeof preparedValue === `object` &&
+          `query` in preparedValue &&
+          preparedValue.query instanceof BaseQueryBuilder
+        ? preparedValue.query
+        : undefined
+  if (!query) return queryHash
+  const sourceIds = IR.collectCollectionSources(query._getQuery()).map(
+    ({ collection }) => getSuspenseSourceId(collection),
+  )
+  return `${sourceIds.join(`,`)}:${queryHash}`
+}
+
+function getSuspenseCollections(
+  client: DbClient | undefined,
+): Map<string, SuspenseCollectionEntry> {
+  if (!client) return unscopedSuspenseCollections
+  let collections = suspenseCollectionsByClient.get(client)
+  if (!collections) {
+    collections = new Map()
+    suspenseCollectionsByClient.set(client, collections)
+  }
+  return collections
+}
+
+function releaseSuspenseCollection(
+  collections: Map<string, SuspenseCollectionEntry>,
+  queryHash: string,
+  collection: SuspenseCollection,
+  consumerId?: string,
+): void {
+  const entry = collections.get(queryHash)
+  if (entry?.collection !== collection) return
+  if (consumerId) {
+    entry.pendingConsumers.delete(consumerId)
+    if (entry.pendingConsumers.size > 0) return
+  }
+  collections.delete(queryHash)
+  entry.removeStatusListeners()
+}
 
 export type DerivedIdentityProfiler = {
   renderCount: number
@@ -120,7 +196,14 @@ function getCurrentTime(): number {
 
 function getWarningCallsite(stackIndex: number): string {
   const stack = new Error().stack ?? `unknown`
-  return stack.split(`\n`)[stackIndex]?.trim() ?? stack
+  const lines = stack.split(`\n`)
+  const userFrame = lines.slice(1).find(
+    (line) =>
+      !line.includes(`useLiveQuery.ts`) &&
+      !line.includes(`useLiveSuspenseQuery.ts`) &&
+      !line.includes(`useLiveInfiniteQuery.ts`),
+  )
+  return userFrame?.trim() ?? lines[stackIndex]?.trim() ?? stack
 }
 
 function warnDerivedIdentityHotPath(
@@ -644,6 +727,23 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps?: Array<unknown>,
 ) {
+  return useLiveQueryImpl(configOrQueryOrCollection, deps)
+}
+
+/** @internal Shared implementation for the Suspense wrapper. */
+export function useLiveQueryForSuspense(
+  configOrQueryOrCollection: any,
+  deps: Array<unknown> | undefined,
+  consumerId: string,
+) {
+  return useLiveQueryImpl(configOrQueryOrCollection, deps, consumerId)
+}
+
+function useLiveQueryImpl(
+  configOrQueryOrCollection: any,
+  deps: Array<unknown> | undefined,
+  suspenseConsumerId?: string,
+) {
   const contextDbClient = useOptionalDbClient()
   // Check if it's already a collection
   const inputIsCollection = isCollection(configOrQueryOrCollection)
@@ -747,6 +847,35 @@ export function useLiveQuery(
     warnDeprecatedDepsArray()
   }
 
+  if (
+    suspenseConsumerId &&
+    !inputIsCollection &&
+    queryHash &&
+    !dbClient &&
+    preparedQueryValue === unpreparedQueryValue
+  ) {
+    preparedQueryValue = prepareQueryValue(
+      configOrQueryOrCollection,
+      dbClient,
+      deferredCollectionsRef.current,
+    )
+  }
+
+  const suspenseKey =
+    queryHash && !dbClient
+      ? getUnscopedSuspenseKey(preparedQueryValue, queryHash)
+      : queryHash
+
+  const suspenseCollections =
+    suspenseConsumerId && !inputIsCollection && suspenseKey
+      ? getSuspenseCollections(dbClient)
+      : undefined
+  const suspenseEntry = suspenseKey
+    ? suspenseCollections?.get(suspenseKey)
+    : undefined
+  if (suspenseConsumerId) suspenseEntry?.pendingConsumers.add(suspenseConsumerId)
+  const suspenseCollection = suspenseEntry?.collection
+
   const identityChanged =
     depsRef.current === null ||
     (deps !== undefined
@@ -792,16 +921,54 @@ export function useLiveQuery(
       collectionRef.current = configOrQueryOrCollection
       configRef.current = configOrQueryOrCollection
     } else {
-      if (preparedQueryValue === unpreparedQueryValue) {
-        preparedQueryValue = prepareQueryValue(
-          configOrQueryOrCollection,
-          dbClient,
-          deferredCollectionsRef.current,
-        )
+      if (suspenseCollection) {
+        collectionRef.current = suspenseCollection
+      } else {
+        if (preparedQueryValue === unpreparedQueryValue) {
+          preparedQueryValue = prepareQueryValue(
+            configOrQueryOrCollection,
+            dbClient,
+            deferredCollectionsRef.current,
+          )
+        }
+        collectionRef.current = createCollectionFromPreparedQuery(
+          preparedQueryValue,
+        ) as SuspenseCollection
+        if (suspenseCollections && suspenseKey && suspenseConsumerId) {
+          const collection = collectionRef.current
+          const removeCleanupListener = collection.on(
+            `status:cleaned-up`,
+            () =>
+              releaseSuspenseCollection(
+                suspenseCollections,
+                suspenseKey,
+                collection,
+              ),
+          )
+          const removeErrorListener = collection.on(`status:error`, () => {
+            // Keep the failed collection through React's immediate retry so
+            // the hook can throw its actual load error to an ErrorBoundary.
+            // Retire it afterward so a later boundary reset starts fresh.
+            setTimeout(
+              () =>
+                releaseSuspenseCollection(
+                  suspenseCollections,
+                  suspenseKey,
+                  collection,
+                ),
+              0,
+            )
+          })
+          suspenseCollections.set(suspenseKey, {
+            collection,
+            pendingConsumers: new Set([suspenseConsumerId]),
+            removeStatusListeners: () => {
+              removeCleanupListener()
+              removeErrorListener()
+            },
+          })
+        }
       }
-      collectionRef.current = createCollectionFromPreparedQuery(
-        preparedQueryValue,
-      ) as Collection<object, string | number, {}>
       configRef.current = configOrQueryOrCollection
       depsRef.current = [...identityDeps]
     }
@@ -838,9 +1005,25 @@ export function useLiveQuery(
     ((onStoreChange: () => void) => () => void) | null
   >(null)
   if (!subscribeRef.current || needsNewCollection) {
+    const collection = collectionRef.current
     subscribeRef.current = (onStoreChange: () => void) => {
       const unsubscribe = observer.subscribe(() => onStoreChange())
       resumeDeferredCollections()
+      if (
+        suspenseCollections &&
+        suspenseKey &&
+        collection &&
+        suspenseConsumerId
+      ) {
+        queueMicrotask(() =>
+          releaseSuspenseCollection(
+            suspenseCollections,
+            suspenseKey,
+            collection,
+            suspenseConsumerId,
+          ),
+        )
+      }
       return unsubscribe
     }
   }

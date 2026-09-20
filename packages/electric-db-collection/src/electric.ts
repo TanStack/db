@@ -80,8 +80,6 @@ export { isChangeMessage, isControlMessage } from '@electric-sql/client'
 
 const debug = DebugModule.debug(`ts/db:electric`)
 
-const FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS = 250
-
 /**
  * Symbol for internal test hooks (hidden from public API)
  */
@@ -757,56 +755,6 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     }
 
     const { cursor, where, orderBy, limit } = opts
-
-    // When the stream is already up-to-date, it may be in a long-poll wait.
-    // Forcing a disconnect-and-refresh ensures requestSnapshot gets a response
-    // from a fresh server round-trip rather than waiting for the current poll to end.
-    // Some native fetch implementations (notably React Native/Expo) may not abort
-    // long-poll requests promptly. Bound the wait so on-demand live queries don't
-    // remain loading until the long-poll naturally times out.
-    // If the refresh fails or times out, we fall through to requestSnapshot which
-    // still works.
-    if (stream.isUpToDate) {
-      let timeoutId: ReturnType<typeof setTimeout> | undefined
-      const abortSignals = [signal, opts.signal].filter(
-        (candidate): candidate is AbortSignal => candidate !== undefined,
-      )
-      let rejectAbort: (reason: unknown) => void = () => {}
-      const aborted = new Promise<never>((_resolve, reject) => {
-        rejectAbort = reject
-      })
-      const abort = (event: Event) =>
-        rejectAbort(abortReason(event.currentTarget as AbortSignal))
-      for (const abortSignal of abortSignals) {
-        abortSignal.addEventListener(`abort`, abort, { once: true })
-      }
-      try {
-        await Promise.race([
-          stream.forceDisconnectAndRefresh(),
-          new Promise<void>((resolve) => {
-            timeoutId = setTimeout(
-              resolve,
-              FORCE_DISCONNECT_AND_REFRESH_TIMEOUT_MS,
-            )
-          }),
-          aborted,
-        ])
-      } catch (error) {
-        if (signal.aborted || opts.signal?.aborted) throw error
-        if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
-          return
-        }
-        debug(
-          `${logPrefix}forceDisconnectAndRefresh failed, proceeding to requestSnapshot: %o`,
-          error,
-        )
-      } finally {
-        clearTimeout(timeoutId)
-        for (const abortSignal of abortSignals) {
-          abortSignal.removeEventListener(`abort`, abort)
-        }
-      }
-    }
 
     throwIfAborted()
 

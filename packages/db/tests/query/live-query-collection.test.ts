@@ -1712,6 +1712,38 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.size).toBeGreaterThan(0)
     })
 
+    it(`makes a warm ordered window ready before construction returns when every acquisition is synchronous`, () => {
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-fully-sync-subset`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            write({ type: `insert`, value: { id: 2, value: 20 } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(1),
+        startSync: true,
+      })
+
+      expect(liveQuery.isLoadingSubset).toBe(false)
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.toArray.map(({ id }) => id)).toEqual([1])
+    })
+
     it(`live query result collection has isLoadingSubset property`, async () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
@@ -2811,6 +2843,8 @@ describe(`createLiveQueryCollection`, () => {
       type Row = { id: number; rank: number }
       const gate = createDeferred<void>()
       let loadCount = 0
+      let afterPreload = false
+      const loaded = new Set<number>()
       const source = createCollection<Row>({
         id: `ordered-cleanup-window-source`,
         getKey: (row) => row.id,
@@ -2819,14 +2853,24 @@ describe(`createLiveQueryCollection`, () => {
         defaultIndexType: BTreeIndex,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
-            begin()
-            write({ type: `insert`, value: { id: 1, rank: 1 } })
-            commit()
             markReady()
             return {
-              loadSubset: () => {
+              loadSubset: (options) => {
                 loadCount++
-                return loadCount === 3 ? gate.promise : true
+                const start = options.cursor ? (options.offset ?? 0) : 0
+                const end = start + (options.limit ?? 0)
+                const rows = [1, 2, 3].filter(
+                  (id) => id > start && id <= end && !loaded.has(id),
+                )
+                if (rows.length > 0) {
+                  begin()
+                  for (const id of rows) {
+                    loaded.add(id)
+                    write({ type: `insert`, value: { id, rank: id } })
+                  }
+                  commit(options.signal)
+                }
+                return afterPreload ? gate.promise : true
               },
             }
           },
@@ -2855,7 +2899,8 @@ describe(`createLiveQueryCollection`, () => {
       return withHistoryCleanup(
         async () => {
           await live.preload()
-          const move = live.utils.setWindow({ offset: 0, limit: 2 })
+          afterPreload = true
+          const move = live.utils.setWindow({ offset: 2, limit: 1 })
           observedMove = Promise.resolve(move).then(
             () => {},
             () => {},
@@ -2895,7 +2940,9 @@ describe(`createLiveQueryCollection`, () => {
       type Row = { id: number; rank: number }
       const oldGate = createDeferred<void>()
       const newGate = createDeferred<void>()
-      let limitFourCalls = 0
+      const loaded = new Set<number>()
+      let windowAttempts = 0
+      let initialPreloadComplete = false
       const source = createCollection<Row>({
         id: `ordered-window-restart-generation-source`,
         getKey: (row) => row.id,
@@ -2904,26 +2951,47 @@ describe(`createLiveQueryCollection`, () => {
         defaultIndexType: BTreeIndex,
         sync: {
           sync: (operations) => {
-            operations.begin()
-            for (let id = 1; id <= 6; id++) {
-              operations.write({ type: `insert`, value: { id, rank: id } })
-            }
-            operations.commit()
             operations.markReady()
             return {
               loadSubset: (options) => {
-                if (options.where || options.limit !== 4) return true
-                limitFourCalls++
-                if (limitFourCalls === 1) {
-                  options.signal?.addEventListener(
-                    `abort`,
-                    () =>
-                      oldGate.reject(new DOMException(`aborted`, `AbortError`)),
-                    { once: true },
+                const start = options.cursor ? (options.offset ?? 0) : 0
+                const end = start + (options.limit ?? 0)
+                const deliver = () => {
+                  const rows = [1, 2, 3, 4].filter(
+                    (id) => id > start && id <= end && !loaded.has(id),
                   )
-                  return oldGate.promise
+                  if (rows.length === 0) return
+                  operations.begin()
+                  for (const id of rows) {
+                    loaded.add(id)
+                    operations.write({
+                      type: `insert`,
+                      value: { id, rank: id },
+                    })
+                  }
+                  operations.commit(options.signal)
                 }
-                return newGate.promise
+                if (
+                  initialPreloadComplete &&
+                  options.cursor &&
+                  options.offset === 1
+                ) {
+                  windowAttempts++
+                  if (windowAttempts === 1) {
+                    options.signal?.addEventListener(
+                      `abort`,
+                      () =>
+                        oldGate.reject(
+                          new DOMException(`aborted`, `AbortError`),
+                        ),
+                      { once: true },
+                    )
+                    return oldGate.promise
+                  }
+                  return newGate.promise.then(deliver)
+                }
+                deliver()
+                return true
               },
             }
           },
@@ -2938,6 +3006,7 @@ describe(`createLiveQueryCollection`, () => {
 
       try {
         await live.preload()
+        initialPreloadComplete = true
         const abandoned = live.utils.setWindow({ offset: 2, limit: 2 })
         expect(abandoned).toBeInstanceOf(Promise)
         const abandonedRejection = expect(abandoned).rejects.toMatchObject({
@@ -2945,7 +3014,9 @@ describe(`createLiveQueryCollection`, () => {
         })
 
         const cleanup = live.cleanup()
+        initialPreloadComplete = false
         const preload = live.preload()
+        initialPreloadComplete = true
         const replacement = live.utils.setWindow({ offset: 2, limit: 2 })
         expect(replacement).toBeInstanceOf(Promise)
         await Promise.all([cleanup, preload, abandonedRejection])
@@ -3027,7 +3098,8 @@ describe(`createLiveQueryCollection`, () => {
     it(`settles a superseding window only after that window is visible`, async () => {
       type Row = { id: number; rank: number }
       const gate = createDeferred<void>()
-      let loadCount = 0
+      const loaded = new Set<number>()
+      let initialPreloadComplete = false
       const source = createCollection<Row>({
         id: `ordered-superseding-window-source`,
         getKey: (row) => row.id,
@@ -3036,15 +3108,32 @@ describe(`createLiveQueryCollection`, () => {
         defaultIndexType: BTreeIndex,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
-            begin()
-            write({ type: `insert`, value: { id: 1, rank: 1 } })
-            write({ type: `insert`, value: { id: 2, rank: 2 } })
-            commit()
             markReady()
             return {
-              loadSubset: () => {
-                loadCount++
-                return loadCount <= 2 ? true : gate.promise
+              loadSubset: (options) => {
+                const start = options.cursor ? (options.offset ?? 0) : 0
+                const end = start + (options.limit ?? 0)
+                const deliver = () => {
+                  const rows = [1, 2, 3].filter(
+                    (id) => id > start && id <= end && !loaded.has(id),
+                  )
+                  if (rows.length === 0) return
+                  begin()
+                  for (const id of rows) {
+                    loaded.add(id)
+                    write({ type: `insert`, value: { id, rank: id } })
+                  }
+                  commit(options.signal)
+                }
+                if (
+                  initialPreloadComplete &&
+                  options.cursor &&
+                  options.offset === 1
+                ) {
+                  return gate.promise.then(deliver)
+                }
+                deliver()
+                return true
               },
             }
           },
@@ -3059,6 +3148,7 @@ describe(`createLiveQueryCollection`, () => {
 
       try {
         await live.preload()
+        initialPreloadComplete = true
         const first = live.utils.setWindow({ offset: 0, limit: 3 })
         expect(first).toBeInstanceOf(Promise)
         const second = live.utils.setWindow({ offset: 1, limit: 1 })
@@ -3085,6 +3175,7 @@ describe(`createLiveQueryCollection`, () => {
       type Row = { id: number; rank: number }
       const failure = new Error(`restarted ordered page failed`)
       let failPage = false
+      const loaded = new Set<number>()
       const source = createCollection<Row>({
         id: `ordered-window-restart-source`,
         getKey: (row) => row.id,
@@ -3093,14 +3184,25 @@ describe(`createLiveQueryCollection`, () => {
         defaultIndexType: BTreeIndex,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
-            begin()
-            write({ type: `insert`, value: { id: 1, rank: 1 } })
-            write({ type: `insert`, value: { id: 2, rank: 2 } })
-            commit()
             markReady()
             return {
               loadSubset: (options) => {
-                if (failPage && !options.where) throw failure
+                if (failPage && options.cursor) {
+                  throw failure
+                }
+                const start = options.cursor ? (options.offset ?? 0) : 0
+                const end = start + (options.limit ?? 0)
+                const rows = [1, 2, 3].filter(
+                  (id) => id > start && id <= end && !loaded.has(id),
+                )
+                if (rows.length > 0) {
+                  begin()
+                  for (const id of rows) {
+                    loaded.add(id)
+                    write({ type: `insert`, value: { id, rank: id } })
+                  }
+                  commit(options.signal)
+                }
                 return true
               },
             }
@@ -3126,7 +3228,7 @@ describe(`createLiveQueryCollection`, () => {
         failPage = true
         await expect(
           Promise.resolve().then<true | void>(() =>
-            live.utils.setWindow({ offset: 0, limit: 3 }),
+            live.utils.setWindow({ offset: 50, limit: 1 }),
           ),
         ).rejects.toBe(failure)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual([1])
@@ -3964,80 +4066,67 @@ describe(`createLiveQueryCollection`, () => {
       // 3. The Promise waits for loading to complete
       // 4. The Promise resolves once loading is done
 
-      vi.useFakeTimers()
+      const gate = createDeferred<void>()
+      let initialPreloadComplete = false
+      let moveStarted = false
+      let loadSubsetCallCount = 0
 
-      try {
-        let loadSubsetCallCount = 0
+      const sourceCollection = createCollection<{
+        id: number
+        value: number
+      }>({
+        id: `source-async-subset-loading`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`, // Enable auto-indexing for orderBy optimization
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Provide minimal initial data
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 1 } })
+            write({ type: `insert`, value: { id: 2, value: 2 } })
+            write({ type: `insert`, value: { id: 3, value: 3 } })
+            commit()
+            markReady()
 
-        const sourceCollection = createCollection<{
-          id: number
-          value: number
-        }>({
-          id: `source-async-subset-loading`,
-          getKey: (item) => item.id,
-          syncMode: `on-demand`,
-          startSync: true,
-          autoIndex: `eager`, // Enable auto-indexing for orderBy optimization
-          defaultIndexType: BTreeIndex,
-          sync: {
-            sync: ({ markReady, begin, write, commit }) => {
-              // Provide minimal initial data
-              begin()
-              write({ type: `insert`, value: { id: 1, value: 1 } })
-              write({ type: `insert`, value: { id: 2, value: 2 } })
-              write({ type: `insert`, value: { id: 3, value: 3 } })
-              commit()
-              markReady()
-
-              return {
-                loadSubset: () => {
+            return {
+                loadSubset: (options) => {
                   loadSubsetCallCount++
-
-                  // First call is for the initial window request
-                  if (loadSubsetCallCount === 1) {
-                    return true
-                  }
-
-                  // The second call closes the initial ordered boundary.
-                  if (loadSubsetCallCount === 2) return true
-
-                  // The later call triggered by setWindow returns a promise.
-                  const loadPromise = new Promise<void>((resolve) => {
-                    // Simulate async data loading with a delay
-                    setTimeout(() => {
-                      begin()
-                      // Load additional items that would be needed for the new window
-                      write({ type: `insert`, value: { id: 4, value: 4 } })
-                      write({ type: `insert`, value: { id: 5, value: 5 } })
-                      write({ type: `insert`, value: { id: 6, value: 6 } })
-                      commit()
-                      resolve()
-                    }, 50)
-                  })
-
-                  return loadPromise
-                },
-              }
-            },
+                if (!initialPreloadComplete || moveStarted) return true
+                moveStarted = true
+                return gate.promise.then(() => {
+                  begin()
+                  write({ type: `insert`, value: { id: 4, value: 4 } })
+                  write({ type: `insert`, value: { id: 5, value: 5 } })
+                  write({ type: `insert`, value: { id: 6, value: 6 } })
+                  commit(options.signal)
+                })
+              },
+            }
           },
-        })
+        },
+      })
 
-        const liveQuery = createLiveQueryCollection({
-          query: (q) =>
-            q
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
               .from({ item: sourceCollection })
               .orderBy(({ item }) => item.value, `asc`)
-              .limit(2)
-              .offset(0),
-          startSync: true,
-        })
+              .limit(1)
+            .offset(0),
+        startSync: true,
+      })
 
+      try {
         await liveQuery.preload()
+        initialPreloadComplete = true
 
-        // Initial state: should have 2 items (values 1, 2)
-        expect(liveQuery.size).toBe(2)
+        // Initial state: one visible row, with later rows already resident.
+        expect(liveQuery.size).toBe(1)
         expect(liveQuery.isLoadingSubset).toBe(false)
-        expect(loadSubsetCallCount).toBe(2)
+        const initialLoadCount = loadSubsetCallCount
 
         // Move window to offset 3, which requires loading more data
         // This should trigger loadSubset and return a Promise
@@ -4047,11 +4136,8 @@ describe(`createLiveQueryCollection`, () => {
         expect(result).toBeInstanceOf(Promise)
         expect(result).not.toBe(true)
 
-        // Advance just a bit to let the scheduler execute and trigger loadSubset
-        await vi.advanceTimersByTimeAsync(1)
-
         // Verify that loading was triggered and is in progress
-        expect(loadSubsetCallCount).toBeGreaterThan(1)
+        expect(loadSubsetCallCount).toBeGreaterThan(initialLoadCount)
         expect(liveQuery.isLoadingSubset).toBe(true)
 
         // Track when the promise resolves
@@ -4063,20 +4149,11 @@ describe(`createLiveQueryCollection`, () => {
         }
 
         // Promise should NOT be resolved yet because loading is still in progress
-        await vi.advanceTimersByTimeAsync(10)
+        await flushPromises()
         expect(promiseResolved).toBe(false)
         expect(liveQuery.isLoadingSubset).toBe(true)
 
-        // Complete the page request. The operation must remain pending while
-        // the loader closes the ordering boundary so equal sort values cannot
-        // be omitted from later window moves.
-        await vi.advanceTimersByTimeAsync(40)
-        expect(loadSubsetCallCount).toBe(4)
-        expect(promiseResolved).toBe(false)
-        expect(liveQuery.isLoadingSubset).toBe(true)
-
-        // Complete the boundary request as well.
-        await vi.advanceTimersByTimeAsync(50)
+        gate.resolve()
 
         // Wait for the promise to resolve
         if (result !== true) {
@@ -4092,7 +4169,8 @@ describe(`createLiveQueryCollection`, () => {
         const items = liveQuery.toArray
         expect(items.map((i) => i.value)).toEqual([4, 5])
       } finally {
-        vi.useRealTimers()
+        gate.resolve()
+        await Promise.all([liveQuery.cleanup(), sourceCollection.cleanup()])
       }
     })
 

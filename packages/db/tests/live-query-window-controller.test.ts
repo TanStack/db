@@ -30,6 +30,28 @@ function makeSource(initialData: Array<Row> = ROWS) {
   )
 }
 
+function makePendingSource(initialData: Array<Row>) {
+  let resolveLoad!: () => void
+  const pendingLoad = new Promise<void>((resolve) => {
+    resolveLoad = resolve
+  })
+  const source = createCollection<Row>({
+    id: `window-ctrl-${seq++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of initialData) write({ type: `insert`, value: row })
+        commit()
+        markReady()
+        return { loadSubset: () => pendingLoad }
+      },
+    },
+  })
+  return { source, resolveLoad }
+}
+
 /** Ordered live query with page 1's peek-ahead window baked in, as the React adapter builds it. */
 function makeOrderedLiveQuery(source: Collection<Row>, pageSize: number) {
   return createLiveQueryCollection({
@@ -57,7 +79,9 @@ describe(`createLiveQueryWindowController`, () => {
   )(
     `handles $action during initial loading with $rowCount rows`,
     async ({ rowCount, action }) => {
-      const source = makeSource(ROWS.slice(0, rowCount))
+      const { source, resolveLoad } = makePendingSource(
+        ROWS.slice(0, rowCount),
+      )
       const lq = makeOrderedLiveQuery(source, 2)
       const controller = createLiveQueryWindowController(lq, {
         pageSize: 2,
@@ -67,8 +91,10 @@ describe(`createLiveQueryWindowController`, () => {
         expect(controller.getSnapshot().isLoading).toBe(true)
         const fetch = controller.fetchNextPage()
         expect(controller.fetchNextPage()).toBe(fetch)
-        if (action === `reset`) await controller.reset()
+        const reset = action === `reset` ? controller.reset() : undefined
         if (action === `dispose`) controller.dispose()
+        resolveLoad()
+        await reset
         await fetch
         const visibleCount = action === `fetch` ? 4 : 2
         expect(ids(controller.getSnapshot())).toEqual(

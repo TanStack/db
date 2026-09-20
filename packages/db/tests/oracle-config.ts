@@ -107,6 +107,7 @@ const staticOracleProperties = [
   `pagination.pending-history`,
   `pagination.pending-mutation`,
   `pagination.window-transition`,
+  `persistence.retained-demand`,
   `predicate-subtraction.duplicate-terms`,
   `predicate-subtraction.finite-world`,
   `predicate-subtraction.unbounded`,

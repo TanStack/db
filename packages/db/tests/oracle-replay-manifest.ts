@@ -141,6 +141,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `pagination`,
     `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
   ],
+  [
+    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `persistence`,
+    `retained-demand`,
+  ],
 ]
 
 const owners = new Map<string, string>()
