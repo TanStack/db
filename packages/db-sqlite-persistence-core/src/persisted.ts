@@ -990,24 +990,41 @@ class PersistedCollectionRuntime<
     void this.startupMetadataPromise.catch(() => undefined)
 
     this.startPromise = (async () => {
-      const appliedCursor = await this.applyMutex.run(() =>
-        this.runInHydrationScope(async (adapter) => {
-          if (lifecycleGeneration !== this.lifecycleGeneration) {
-            resolveStartupMetadata()
-            return undefined
-          }
+      const loadStartupMetadata = async (
+        adapter: HydrationPersistenceAdapter,
+      ) => {
+        if (lifecycleGeneration !== this.lifecycleGeneration) {
+          resolveStartupMetadata()
+          return false
+        }
 
-          try {
-            await this.loadStartupMetadataInternal(lifecycleGeneration, adapter)
-            resolveStartupMetadata()
-          } catch (error) {
-            rejectStartupMetadata(error)
-            throw error
-          }
+        try {
+          await this.loadStartupMetadataInternal(lifecycleGeneration, adapter)
+          resolveStartupMetadata()
+          return lifecycleGeneration === this.lifecycleGeneration
+        } catch (error) {
+          rejectStartupMetadata(error)
+          throw error
+        }
+      }
 
-          return this.startInternal(lifecycleGeneration, adapter)
-        }),
-      )
+      let appliedCursor: number | undefined
+      if (this.persistence.adapter.runInHydrationScope) {
+        appliedCursor = await this.applyMutex.run(() =>
+          this.runInHydrationScope(async (adapter) => {
+            if (!(await loadStartupMetadata(adapter))) return undefined
+            return this.startInternal(lifecycleGeneration, adapter)
+          }),
+        )
+      } else {
+        // Preserve the existing unscheduled-adapter lifecycle contract: a
+        // replacement upstream may start while stale hydration is settling.
+        if (await loadStartupMetadata(this.persistence.adapter)) {
+          appliedCursor = await this.applyMutex.run(() =>
+            this.startInternal(lifecycleGeneration, this.persistence.adapter),
+          )
+        }
+      }
       if (
         appliedCursor !== undefined &&
         lifecycleGeneration === this.lifecycleGeneration
