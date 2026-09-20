@@ -98,6 +98,92 @@ function fakeSubscription(
 }
 
 describe(`Ordered source request ownership`, () => {
+  it(`keeps nested refinement pending when successful cleanup reports an error`, async () => {
+    const requests: Array<Observed> = []
+    const releases: Array<number> = []
+    const participants: Array<Promise<unknown>> = []
+    const participantErrors = new Map<Promise<unknown>, unknown>()
+    const cleanupError = new Error(`older prefix cleanup failed`)
+    let boundary = 1
+    const request = (method: Observed[`method`], options: RequestOptions) => {
+      const index = requests.length
+      const acquisition: LoadSubsetOptions = {
+        orderBy: options.orderBy,
+        limit: options.limit,
+        where: options.where,
+      }
+      const deferred = createDeferred()
+      requests.push({ method, options, acquisition, deferred })
+      options.onLoadSubsetResult?.(
+        index === 2 ? true : deferred.promise,
+        acquisition,
+        () => {
+          releases.push(index)
+          if (index === 0) throw cleanupError
+        },
+      )
+    }
+    const subscription = {
+      readOrderedSnapshot: () => [
+        {
+          type: `insert`,
+          key: boundary,
+          value: { id: boundary, rank: boundary },
+        },
+      ],
+      setOrderByIndex: () => {},
+      requestLimitedSnapshot: (options: RequestOptions) =>
+        request(`limited`, options),
+      requestSnapshot: (options: RequestOptions) =>
+        request(`snapshot`, options),
+    } as unknown as CollectionSubscription
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo(),
+      subscription,
+      `row`,
+      (result) => {
+        if (result instanceof Promise) {
+          participants.push(result)
+          void result.catch((error) => participantErrors.set(result, error))
+        }
+      },
+    )
+
+    try {
+      loader.start()
+      requests[0]!.deferred.resolve()
+      await participants[0]
+      requests[1]!.deferred.resolve()
+      await participants[1]
+
+      boundary = 2
+      loader.invalidateCursor()
+      const result = loader.loadMore(1)!
+      expect(requests).toHaveLength(4)
+      expect(participants).toHaveLength(4)
+      await flushPromises()
+      const recent = participants.slice(2)
+      const cleanup = recent.find(
+        (participant) => participantErrors.get(participant) === cleanupError,
+      )!
+      const nested = recent.find((participant) => participant !== cleanup)!
+      const pending = (
+        loader as unknown as { pending: Promise<unknown> | undefined }
+      ).pending
+      expect(result).toBe(pending)
+      expect(pending).toBe(nested)
+      await expect(cleanup).rejects.toBe(cleanupError)
+
+      expect(loader.loadMore()).toBe(nested)
+      expect(requests).toHaveLength(4)
+      expect(releases).toEqual([0])
+    } finally {
+      loader.dispose()
+      for (const observed of requests) observed.deferred.resolve()
+      await Promise.allSettled(participants)
+    }
+  })
+
   it.each([`success`, `failure`] as const)(
     `keeps a failed public window private when its older tie request ends in %s`,
     async (olderOutcome) => {

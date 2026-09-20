@@ -768,6 +768,7 @@ function useLiveQueryImpl(
     null,
   )
   const queryHashRef = useRef<string | undefined>(undefined)
+  const suspenseKeyRef = useRef<string | undefined>(undefined)
   const identityErrorRef = useRef<UnhashableQueryIRError | undefined>(undefined)
 
   const queryKey = !inputIsCollection
@@ -839,11 +840,22 @@ function useLiveQueryImpl(
     warnDeprecatedDepsArray()
   }
 
+  const canReuseSuspenseKey =
+    forSuspense &&
+    !inputIsCollection &&
+    queryHash !== undefined &&
+    !dbClient &&
+    collectionRef.current !== null &&
+    clientRef.current === dbClient &&
+    queryHashRef.current === queryHash &&
+    suspenseKeyRef.current !== undefined
+
   if (
     forSuspense &&
     !inputIsCollection &&
     queryHash &&
     !dbClient &&
+    !canReuseSuspenseKey &&
     preparedQueryValue === unpreparedQueryValue
   ) {
     preparedQueryValue = prepareQueryValue(
@@ -855,7 +867,9 @@ function useLiveQueryImpl(
 
   const suspenseKey =
     queryHash && !dbClient
-      ? getUnscopedSuspenseKey(preparedQueryValue, queryHash)
+      ? canReuseSuspenseKey
+        ? suspenseKeyRef.current
+        : getUnscopedSuspenseKey(preparedQueryValue, queryHash)
       : queryHash
 
   const suspenseCollections =
@@ -961,6 +975,7 @@ function useLiveQueryImpl(
     }
     clientRef.current = dbClient
     queryHashRef.current = queryHash
+    suspenseKeyRef.current = suspenseKey
     identityErrorRef.current = identityError
   }
 

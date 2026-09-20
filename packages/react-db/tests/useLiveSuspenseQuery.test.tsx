@@ -467,6 +467,42 @@ describe(`useLiveSuspenseQuery`, () => {
     }).toThrow(/does not support disabled queries/)
   })
 
+  it(`does not rebuild an explicitly keyed query after it commits`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `stable-keyed-suspense-query`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+    let queryExecutions = 0
+
+    const { result, rerender } = renderHook(
+      ({ render }: { render: number }) => {
+        void render
+        return useLiveSuspenseQuery({
+          queryKey: [collection.id, `stable`],
+          query: (q) => {
+            queryExecutions += 1
+            return q.from({ people: collection })
+          },
+        })
+      },
+      {
+        initialProps: { render: 0 },
+        wrapper: SuspenseWrapper,
+      },
+    )
+
+    await waitFor(() => expect(result.current.data).toHaveLength(3))
+    const executionsAfterCommit = queryExecutions
+
+    rerender({ render: 1 })
+
+    expect(result.current.data).toHaveLength(3)
+    expect(queryExecutions).toBe(executionsAfterCommit)
+  })
+
   it(`should work with config object`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

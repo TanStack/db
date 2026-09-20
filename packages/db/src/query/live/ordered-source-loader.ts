@@ -466,7 +466,10 @@ export class OrderedSourceLoader {
         // and surface the error through the same operation channel as an
         // asynchronous completion callback would.
         const rejected = Promise.reject(completionError)
-        this.pending = rejected
+        // Completion may have synchronously started the next request before a
+        // cleanup callback's error was rethrown. Keep that newer request as the
+        // active refinement participant.
+        if (this.pending === undefined) this.pending = rejected
         void rejected.catch(() => {})
         void rejected.then(
           () => {},
