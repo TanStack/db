@@ -140,14 +140,13 @@ describe(`local adapter schema transform conformance`, () => {
     }
     expectTypeOf(assertBoundary).toBeFunction()
 
-    const assertOutput = (row: RowOutput) => {
+    type LocalStorageOutput = ItemOf<typeof collection.toArray>
+    const assertOutput = (row: LocalStorageOutput) => {
       row.createdAt.getTime()
       row.score.toFixed()
+      expectTypeOf(row.label).toEqualTypeOf<string>()
       // @ts-expect-error output dates do not expose string methods
       row.createdAt.toUpperCase()
-      // @ts-expect-error defaulted output fields are required
-      const missingDefault: undefined = row.label
-      return missingDefault
     }
     expectTypeOf(assertOutput).toBeFunction()
   })
