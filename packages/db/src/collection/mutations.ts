@@ -47,11 +47,14 @@ export class CollectionMutationsManager<
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private collection!: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
-  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private config!: CollectionConfig<TOutput, TKey, TSchema, TUtils>
   private transactionScope?: TransactionScope
   private id: string
 
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, TUtils>,
+    id: string,
+  ) {
     this.id = id
     this.config = config
   }
@@ -268,9 +271,14 @@ export class CollectionMutationsManager<
             transaction:
               params.transaction as unknown as TransactionWithMutations<
                 TOutput,
-                `insert`
+                `insert`,
+                Collection<TOutput, TKey, TUtils>
               >,
-            collection: this.collection as unknown as Collection<TOutput, TKey>,
+            collection: this.collection as unknown as Collection<
+              TOutput,
+              TKey,
+              TUtils
+            >,
           })
         },
       })
@@ -294,7 +302,7 @@ export class CollectionMutationsManager<
    * Updates one or more items in the collection using a callback function
    */
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
@@ -464,9 +472,14 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `update`
+              `update`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })
@@ -569,9 +582,14 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `delete`
+              `delete`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })
