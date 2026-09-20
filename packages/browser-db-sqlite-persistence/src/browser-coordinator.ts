@@ -1,6 +1,7 @@
 import { safeRandomUUID } from '@tanstack/db-sqlite-persistence-core'
 import type {
   ApplyLocalMutationsResponse,
+  HydrationPersistenceAdapter,
   PersistedCollectionCoordinator,
   PersistedIndexSpec,
   PersistedMutationEnvelope,
@@ -221,9 +222,15 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     collectionId: string,
     signature: string,
     spec: PersistedIndexSpec,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
-      await this.requireAdapter().ensureIndex(collectionId, signature, spec)
+      // A scoped adapter is a leader-local capability and never crosses RPC.
+      await (scopedAdapter ?? this.requireAdapter()).ensureIndex(
+        collectionId,
+        signature,
+        spec,
+      )
       return
     }
 
@@ -270,13 +277,19 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   async pullSince(
     collectionId: string,
     fromRowVersion: number,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<PullSinceResponse> {
     if (this.isLeader(collectionId)) {
-      return this.handlePullSince(collectionId, {
-        type: `rpc:pullSince:req`,
-        rpcId: safeRandomUUID(),
-        fromRowVersion,
-      })
+      // A scoped adapter is a leader-local capability and never crosses RPC.
+      return this.handlePullSince(
+        collectionId,
+        {
+          type: `rpc:pullSince:req`,
+          rpcId: safeRandomUUID(),
+          fromRowVersion,
+        },
+        scopedAdapter,
+      )
     }
 
     return this.sendRPC<PullSinceResponse>(collectionId, {
@@ -733,10 +746,11 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       rpcId: string
       fromRowVersion: number
     },
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<PullSinceResponse> {
     const state = this.collections.get(collectionId)
 
-    const adapter = this.requireAdapter()
+    const adapter = scopedAdapter ?? this.requireAdapter()
     if (!adapter.pullSince) {
       return {
         type: `rpc:pullSince:res`,

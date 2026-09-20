@@ -258,6 +258,17 @@ async function flushAsyncWork(delayMs: number = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
 
+function createDeferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
+}
+
 describe(`persistedCollectionOptions`, () => {
   it(`provides a sync-absent loopback configuration with persisted utils`, async () => {
     const adapter = createRecordingAdapter()
@@ -987,6 +998,199 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`propagates an operation-owned receipt rejection that settles before the hydration waiter snapshots`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrateLoadEntered = createDeferred()
+    const allowHydrateLoad = createDeferred()
+    let gateHydrationLoad = true
+    adapter.loadSubset = async () => {
+      if (gateHydrationLoad) {
+        gateHydrationLoad = false
+        hydrateLoadEntered.resolve()
+        await allowHydrateLoad.promise
+      }
+      return []
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-settled-receipt-boundary`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<unknown> | undefined
+    let receipt: Promise<void> | undefined
+    const abortController = new AbortController()
+
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      await hydrateLoadEntered.promise
+
+      let keyReads = 0
+      const establishingRow = {
+        get id() {
+          keyReads++
+          if (keyReads === 2) abortController.abort()
+          return `establishing`
+        },
+        title: `Abort during buffered replay`,
+      }
+      remoteBegin?.()
+      remoteWrite?.({ type: `insert`, value: establishingRow })
+      const applied = remoteCommit?.(abortController.signal)
+      if (!(applied instanceof Promise)) {
+        throw new Error(`expected a buffered establishing receipt`)
+      }
+      receipt = applied
+      void receipt.catch(() => undefined)
+
+      allowHydrateLoad.resolve()
+      const [loadResult, receiptResult] = await Promise.allSettled([
+        load,
+        receipt,
+      ])
+
+      expect(keyReads).toBeGreaterThanOrEqual(2)
+      expect(abortController.signal.aborted).toBe(true)
+      expect(receiptResult.status).toBe(`rejected`)
+      expect(loadResult.status).toBe(`rejected`)
+      if (
+        loadResult.status === `rejected` &&
+        receiptResult.status === `rejected`
+      ) {
+        expect(loadResult.reason).toBe(receiptResult.reason)
+      }
+    } finally {
+      abortController.abort()
+      allowHydrateLoad.resolve()
+      await receipt?.catch(() => undefined)
+      await load?.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not adopt an unrelated source receipt created after hydration work returns`, async () => {
+    const adapter = createRecordingAdapter()
+    const mutationEntered = createDeferred()
+    const releaseMutation = createDeferred()
+    const unrelatedStarted = createDeferred<{
+      abortController: AbortController
+      receipt: Promise<void>
+    }>()
+    const trace: Array<string> = []
+    let probeActive = false
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+
+    adapter.runInHydrationScope = async (task) => {
+      if (!probeActive) return task(adapter)
+      probeActive = false
+
+      const result = await task(adapter)
+      trace.push(`hydrate-task-returned`)
+
+      const abortController = new AbortController()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `unrelated`, title: `Outside hydrate boundary` },
+      })
+      const receipt = remoteCommit?.(abortController.signal)
+      if (!(receipt instanceof Promise)) {
+        throw new Error(`expected a pending unrelated receipt`)
+      }
+      trace.push(`unrelated-receipt-created`)
+      unrelatedStarted.resolve({ abortController, receipt })
+      return result
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-unrelated-receipt-boundary`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+        onInsert: async () => {
+          mutationEntered.resolve()
+          await releaseMutation.promise
+        },
+      }),
+    )
+    let mutation: ReturnType<typeof collection.insert> | undefined
+    let load: Promise<unknown> | undefined
+    let unrelated:
+      | { abortController: AbortController; receipt: Promise<void> }
+      | undefined
+
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      mutation = collection.insert({ id: `local`, title: `Persisting gate` })
+      await mutationEntered.promise
+
+      probeActive = true
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      unrelated = await unrelatedStarted.promise
+      expect(trace).toEqual([
+        `hydrate-task-returned`,
+        `unrelated-receipt-created`,
+      ])
+
+      // Give the public load continuation the opportunity to snapshot receipts.
+      await flushAsyncWork()
+      unrelated.abortController.abort()
+      await unrelated.receipt.catch(() => undefined)
+
+      await expect(load).resolves.toBeUndefined()
+    } finally {
+      unrelated?.abortController.abort()
+      releaseMutation.resolve()
+      await mutation?.isPersisted.promise.catch(() => undefined)
+      await load?.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
     const adapter = createRecordingAdapter()
     const ownership = { queryCollection: { owners: [`gc:q1`] } }
@@ -1266,6 +1470,122 @@ describe(`persistedCollectionOptions`, () => {
       id: `during-hydrate`,
       title: `During hydrate`,
     })
+  })
+
+  it(`replays a buffered source receipt without blocking its persisting predecessor`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrateLoadEntered = createDeferred()
+    const allowHydrateLoad = createDeferred()
+    let gateHydrationLoad = true
+    const replayState = { persisted: false }
+
+    adapter.loadSubset = async () => {
+      if (gateHydrationLoad) {
+        gateHydrationLoad = false
+        hydrateLoadEntered.resolve()
+        await allowHydrateLoad.promise
+      }
+      return []
+    }
+    const applyCommittedTx = adapter.applyCommittedTx
+    adapter.applyCommittedTx = async (...args) => {
+      replayState.persisted = true
+      await applyCommittedTx(...args)
+    }
+    adapter.runInHydrationScope = (task) => task(adapter)
+
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `update`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const sourceReady = createDeferred()
+    const bufferedCommitReturned = createDeferred<{
+      receipt: Promise<void>
+    }>()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-buffered-causal-replay`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `update`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            sourceReady.resolve()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+        onInsert: async () => {
+          if (!remoteBegin || !remoteWrite || !remoteCommit) {
+            throw new Error(`source sync is not ready`)
+          }
+          remoteBegin()
+          remoteWrite({
+            type: `update`,
+            value: { id: `source-row`, title: `Buffered during hydrate` },
+          })
+          const applied = remoteCommit()
+          if (applied === true) {
+            throw new Error(`source commit was not buffered during hydration`)
+          }
+          bufferedCommitReturned.resolve({ receipt: applied })
+          await applied
+        },
+      }),
+    )
+
+    const preload = Promise.resolve(collection.preload())
+    void preload.catch(() => undefined)
+    let mutationPersisted: Promise<unknown> | undefined
+    let bufferedReceipt: Promise<void> | undefined
+
+    try {
+      await hydrateLoadEntered.promise
+      await sourceReady.promise
+
+      const mutation = collection.insert({ id: `local`, title: `Pending` })
+      mutationPersisted = mutation.isPersisted.promise
+      void mutationPersisted.catch(() => undefined)
+      const bufferedCommit = await bufferedCommitReturned.promise
+      bufferedReceipt = bufferedCommit.receipt
+      void bufferedReceipt.catch(() => undefined)
+
+      allowHydrateLoad.resolve()
+
+      let causalCycleObserved = false
+      for (
+        let attempt = 0;
+        attempt < 100 && !replayState.persisted;
+        attempt++
+      ) {
+        causalCycleObserved = collection._state.pendingSyncedTransactions.some(
+          (transaction) =>
+            transaction.committed && transaction.applied.isPending(),
+        )
+        if (causalCycleObserved) break
+        await Promise.resolve()
+      }
+
+      expect(causalCycleObserved).toBe(false)
+      expect(replayState.persisted).toBe(true)
+      await expect(bufferedReceipt).resolves.toBeUndefined()
+      await expect(mutationPersisted).resolves.toBeDefined()
+      await expect(preload).resolves.toBeUndefined()
+      expect(stripVirtualProps(collection.get(`source-row`))).toEqual({
+        id: `source-row`,
+        title: `Buffered during hydrate`,
+      })
+    } finally {
+      allowHydrateLoad.resolve()
+      await collection.cleanup()
+    }
   })
 
   it(`discards a hydration-buffered transaction aborted before replay`, async () => {
@@ -1746,6 +2066,91 @@ describe(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
 
     expect(collection.get(`2`)).toBeUndefined()
+  })
+
+  it(`does not let stale startup install index work on a rebound lifecycle`, async () => {
+    const adapter = createRecordingAdapter()
+    const g0MetadataEntered = createDeferred()
+    const allowG0Metadata = createDeferred()
+    const g1MetadataEntered = createDeferred()
+    const allowG1Metadata = createDeferred()
+    let metadataCalls = 0
+    adapter.loadCollectionMetadata = async () => {
+      metadataCalls++
+      if (metadataCalls === 1) {
+        g0MetadataEntered.resolve()
+        await allowG0Metadata.promise
+      } else if (metadataCalls === 2) {
+        g1MetadataEntered.resolve()
+        await allowG1Metadata.promise
+      }
+      return []
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-startup-index-generation`,
+        getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const stalePreload = Promise.resolve(collection.preload())
+    void stalePreload.catch(() => undefined)
+    let freshReady: Promise<unknown> | undefined
+
+    try {
+      await g0MetadataEntered.promise
+      await collection.cleanup()
+
+      const reboundIndex = collection.createIndex((row) => row.title, {
+        name: `rebound-bootstrap`,
+      })
+      const reboundSignature = collection
+        .getIndexMetadata()
+        .find((metadata) => metadata.indexId === reboundIndex.id)?.signature
+      expect(reboundSignature).toBeDefined()
+      freshReady = collection.stateWhenReady()
+
+      allowG0Metadata.resolve()
+      await g1MetadataEntered.promise
+
+      const staleBootstrapCalls = adapter.ensureIndexCalls.filter(
+        (call) => call.signature === reboundSignature,
+      )
+      const listenerIndex = collection.createIndex((row) => row.id, {
+        name: `rebound-listener`,
+      })
+      const listenerSignature = collection
+        .getIndexMetadata()
+        .find((metadata) => metadata.indexId === listenerIndex.id)?.signature
+      expect(listenerSignature).toBeDefined()
+      const staleListenerCalls = adapter.ensureIndexCalls.filter(
+        (call) => call.signature === listenerSignature,
+      )
+
+      expect({
+        staleBootstrapCalls: staleBootstrapCalls.length,
+        staleListenerCalls: staleListenerCalls.length,
+      }).toEqual({
+        staleBootstrapCalls: 0,
+        staleListenerCalls: 0,
+      })
+
+      allowG1Metadata.resolve()
+      await freshReady
+    } finally {
+      allowG0Metadata.resolve()
+      allowG1Metadata.resolve()
+      await stalePreload.catch(() => undefined)
+      await freshReady?.catch(() => undefined)
+      await collection.cleanup()
+    }
   })
 
   it(`does not let a stale invalidation reload overwrite a restarted lifecycle`, async () => {

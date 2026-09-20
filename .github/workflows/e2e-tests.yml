@@ -74,6 +74,11 @@ jobs:
           cd examples/react/start-ssr-e2e
           pnpm exec playwright install --with-deps chromium
 
+      - name: Run Browser SQLite OPFS fairness E2E tests
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:opfs-fairness
+
       - name: Run React Start SSR E2E tests
         run: |
           cd examples/react/start-ssr-e2e
