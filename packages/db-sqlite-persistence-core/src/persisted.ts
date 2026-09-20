@@ -2155,13 +2155,14 @@ class PersistedCollectionRuntime<
       if (!queued) {
         continue
       }
-      await this.processCommittedTxUnsafe(queued, adapter)
+      await this.processCommittedTxUnsafe(queued, adapter, true)
     }
   }
 
   private async processCommittedTxUnsafe(
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
+    gapRecoveryAlreadyScoped = false,
   ): Promise<void> {
     if (txCommitted.term < this.latestTerm) {
       return
@@ -2182,7 +2183,13 @@ class PersistedCollectionRuntime<
     const hasGap = hasGapInCurrentTerm || hasGapAcrossTerms
 
     if (hasGap) {
-      await this.recoverFromSeqGapUnsafe(adapter)
+      if (gapRecoveryAlreadyScoped) {
+        await this.recoverFromSeqGapUnsafe(adapter)
+      } else {
+        await this.runInHydrationScope((scopedAdapter) =>
+          this.recoverFromSeqGapUnsafe(scopedAdapter),
+        )
+      }
       if (
         txCommitted.term < this.latestTerm ||
         (txCommitted.term === this.latestTerm &&
