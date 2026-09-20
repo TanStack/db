@@ -53,10 +53,16 @@ export interface UseLiveQueryReturn<TContext extends Context> {
   isCleanedUp: ComputedRef<boolean>
 }
 
-type ConditionalUseLiveQueryReturn<TContext extends Context> = Omit<
+type InferConditionalResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? InferResultType<TContext> | []
+    : InferResultType<TContext>
+
+export type ConditionalUseLiveQueryReturn<TContext extends Context> = Omit<
   UseLiveQueryReturn<TContext>,
-  `collection` | `status`
+  `data` | `collection` | `status`
 > & {
+  data: ComputedRef<InferConditionalResultType<TContext>>
   collection: ComputedRef<Collection<
     GetResult<TContext>,
     string | number,

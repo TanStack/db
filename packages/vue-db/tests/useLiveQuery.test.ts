@@ -1933,5 +1933,40 @@ describe(`Query Collections`, () => {
       expect(result.data.value).toHaveLength(1)
       expect(result.isReady.value).toBe(true)
     })
+
+    it(`keeps conditional findOne data empty while disabled`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-find-one-vue`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) =>
+          enabled.value
+            ? q
+                .from({ collection })
+                .where(({ collection: person }) => eq(person.id, `3`))
+                .findOne()
+            : null,
+        [() => enabled.value],
+      )
+
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.data.value).toEqual([])
+
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.data.value).toMatchObject({ id: `3` })
+      })
+
+      enabled.value = false
+      await waitFor(() => {
+        expect(result.status.value).toBe(`disabled`)
+      })
+      expect(result.data.value).toEqual([])
+    })
   })
 })

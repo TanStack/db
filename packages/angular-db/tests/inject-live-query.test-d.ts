@@ -162,4 +162,23 @@ describe(`injectLiveQuery type assertions`, () => {
     // @ts-expect-error Disabled callbacks expose a null collection until enabled.
     result.collection().preload()
   })
+
+  it(`types conditional findOne data with its empty disabled representation`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-find-one-angular`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const result = injectLiveQuery((q) =>
+      enabled ? q.from({ collection }).findOne() : null,
+    )
+
+    expectTypeOf(result.data()).toEqualTypeOf<
+      Prettify<OutputWithVirtual<Person>> | undefined | []
+    >()
+  })
 })

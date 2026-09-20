@@ -116,4 +116,25 @@ describe(`useLiveQuery type assertions`, () => {
     // @ts-expect-error Disabled callbacks expose a null collection until enabled.
     rendered.result.collection.preload()
   })
+
+  it(`types conditional findOne data with its empty disabled representation`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-find-one-solid`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const rendered = renderHook(() =>
+      useLiveQuery((q) =>
+        enabled ? q.from({ collection }).findOne() : undefined,
+      ),
+    )
+
+    expectTypeOf(rendered.result()).toEqualTypeOf<
+      Prettify<OutputWithVirtual<Person>> | undefined | []
+    >()
+  })
 })

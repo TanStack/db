@@ -2,6 +2,7 @@ import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '../../db/src/collection/index'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
+import type { ConditionalUseLiveQueryReturn } from '../src/index.js'
 import type { Prettify } from '../../db/src/query/index'
 import type { Collection, CollectionStatus } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
@@ -52,5 +53,29 @@ describe(`useLiveQuery type assertions`, () => {
 
     const data: OutputWithVirtual<Person> | undefined = result.data
     expectTypeOf(data).toEqualTypeOf<OutputWithVirtual<Person> | undefined>()
+  })
+
+  it(`types conditional findOne data with its empty disabled representation`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-find-one-svelte`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const result = useLiveQuery((q) =>
+      enabled ? q.from({ collection }).findOne() : null,
+    )
+    const annotated: ConditionalUseLiveQueryReturn<
+      Prettify<OutputWithVirtual<Person>>,
+      Prettify<OutputWithVirtual<Person>> | undefined | []
+    > = result
+
+    expectTypeOf(annotated).toEqualTypeOf<typeof result>()
+    expectTypeOf(result.data).toEqualTypeOf<
+      Prettify<OutputWithVirtual<Person>> | undefined | []
+    >()
   })
 })
