@@ -5,9 +5,10 @@ import {
   createLiveQueryCollection,
   eq,
   liveQueryCollectionOptions,
+  type Prettify,
 } from '../../db/src/query/index'
 import { injectLiveQuery } from '../src/index'
-import type { CollectionStatus } from '@tanstack/db'
+import type { Collection, CollectionStatus } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
@@ -151,7 +152,11 @@ describe(`injectLiveQuery type assertions`, () => {
 
     const data: Array<OutputWithVirtual<Person>> = result.data()
     expectTypeOf(data).toEqualTypeOf<Array<OutputWithVirtual<Person>>>()
-    expectTypeOf<null>().toExtend<ReturnType<typeof result.collection>>()
+    expectTypeOf(result.collection()).toEqualTypeOf<Collection<
+      Prettify<OutputWithVirtual<Person>>,
+      string | number,
+      {}
+    > | null>()
     expectTypeOf(result.status()).toEqualTypeOf<CollectionStatus | `disabled`>()
 
     // @ts-expect-error Disabled callbacks expose a null collection until enabled.

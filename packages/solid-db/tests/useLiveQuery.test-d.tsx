@@ -2,9 +2,13 @@ import { describe, expectTypeOf, it } from 'vitest'
 import { renderHook } from '@solidjs/testing-library'
 import { createCollection } from '../../db/src/collection/index'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import { createLiveQueryCollection, eq } from '../../db/src/query/index'
+import {
+  createLiveQueryCollection,
+  eq,
+  type Prettify,
+} from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
-import type { CollectionStatus } from '@tanstack/db'
+import type { Collection, CollectionStatus } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
@@ -103,7 +107,11 @@ describe(`useLiveQuery type assertions`, () => {
 
     const data: Array<OutputWithVirtual<Person>> = rendered.result()
     expectTypeOf(data).toEqualTypeOf<Array<OutputWithVirtual<Person>>>()
-    expectTypeOf<null>().toExtend<typeof rendered.result.collection>()
+    expectTypeOf(rendered.result.collection).toEqualTypeOf<Collection<
+      Prettify<OutputWithVirtual<Person>>,
+      string | number,
+      {}
+    > | null>()
     expectTypeOf(rendered.result.status).toEqualTypeOf<
       CollectionStatus | `disabled`
     >()

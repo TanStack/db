@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '../../db/src/collection/index'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { Prettify } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import type { Collection, CollectionStatus } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
@@ -27,9 +28,8 @@ describe(`useLiveQuery type assertions`, () => {
 
     const data: Array<OutputWithVirtual<Person>> = result.data
     expectTypeOf(data).toEqualTypeOf<Array<OutputWithVirtual<Person>>>()
-    expectTypeOf<null>().toExtend<typeof result.collection>()
-    expectTypeOf(result.collection).toMatchTypeOf<Collection<
-      OutputWithVirtual<Person>,
+    expectTypeOf(result.collection).toEqualTypeOf<Collection<
+      Prettify<OutputWithVirtual<Person>>,
       string | number,
       {}
     > | null>()

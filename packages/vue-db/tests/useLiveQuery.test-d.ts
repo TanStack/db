@@ -5,6 +5,7 @@ import {
   createLiveQueryCollection,
   eq,
   liveQueryCollectionOptions,
+  type Prettify,
 } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
 import type { Collection, CollectionStatus } from '@tanstack/db'
@@ -163,9 +164,8 @@ describe(`useLiveQuery type assertions`, () => {
 
     const data: Array<OutputWithVirtual<Person>> = result.data.value
     expectTypeOf(data).toEqualTypeOf<Array<OutputWithVirtual<Person>>>()
-    expectTypeOf<null>().toExtend<typeof result.collection.value>()
-    expectTypeOf(result.collection.value).toMatchTypeOf<Collection<
-      OutputWithVirtual<Person>,
+    expectTypeOf(result.collection.value).toEqualTypeOf<Collection<
+      Prettify<OutputWithVirtual<Person>>,
       string | number,
       {}
     > | null>()
