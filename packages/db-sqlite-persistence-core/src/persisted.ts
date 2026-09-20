@@ -1,6 +1,7 @@
 import {
   SyncTransactionAbortedError,
   compileSingleRowExpression,
+  getLoadSubsetDemandKey,
   safeRandomUUID,
   toBooleanPredicate,
   withCollectionConfigFactory,
@@ -792,6 +793,31 @@ class PersistedCollectionRuntime<
   > = []
   private readonly queuedTxCommitted: Array<TxCommitted> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
+  /**
+   * How many live acquisitions currently cover each demand, and which demands
+   * are already hydrated into the collection.
+   *
+   * `activeSubsets` is keyed per *options object* so that releasing one
+   * acquisition cannot end another's lease. Answering "are these rows already
+   * here?" is a different question, asked per *demand*, so it needs its own
+   * index. Coverage is what keeps the two in step: a demand stays hydrated
+   * for exactly as long as some acquisition still holds it.
+   */
+  private readonly demandCoverage = new Map<
+    ReturnType<typeof getLoadSubsetDemandKey>,
+    number
+  >()
+  private readonly hydratedDemands = new Set<
+    ReturnType<typeof getLoadSubsetDemandKey>
+  >()
+  private startupSettled = false
+  /**
+   * Bumped whenever the source truncates. A truncate that lands while a
+   * hydration is in flight is buffered and applied later, so clearing
+   * `hydratedDemands` outright would be undone by the in-flight hydration
+   * marking its demand hydrated again. Comparing generations cannot be.
+   */
+  private sourceTruncateGeneration = 0
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
     null
@@ -929,7 +955,7 @@ class PersistedCollectionRuntime<
     if (lifecycleGeneration !== this.lifecycleGeneration) return
 
     const baseline = {}
-    this.activeSubsets.set(this.getSubsetKey(baseline), baseline)
+    this.registerSubsetAcquisition(baseline)
     const appliedCursor = this.appliedReceiptSequence
     await this.applyMutex.run(async () => {
       if (lifecycleGeneration !== this.lifecycleGeneration) return
@@ -970,6 +996,10 @@ class PersistedCollectionRuntime<
 
     if (this.syncMode !== `on-demand`) {
       await this.hydrateBaseline(lifecycleGeneration)
+    }
+
+    if (lifecycleGeneration === this.lifecycleGeneration) {
+      this.startupSettled = true
     }
   }
 
@@ -1045,7 +1075,8 @@ class PersistedCollectionRuntime<
     upstreamLoadSubset?: LoadSubsetFn,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
-    this.activeSubsets.set(this.getSubsetKey(options), options)
+    const sourceTruncateGeneration = this.sourceTruncateGeneration
+    this.registerSubsetAcquisition(options)
 
     const appliedCursor = this.appliedReceiptSequence
     await this.applyMutex.run(() =>
@@ -1056,6 +1087,17 @@ class PersistedCollectionRuntime<
     )
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.waitForAppliedReceiptsAfter(appliedCursor)
+
+    // Only claim the rows are here if nothing invalidated them while we were
+    // reading: a restart bumps the lifecycle, a source truncate bumps its own
+    // generation, and either means this hydration no longer describes the
+    // collection.
+    if (
+      lifecycleGeneration === this.lifecycleGeneration &&
+      sourceTruncateGeneration === this.sourceTruncateGeneration
+    ) {
+      this.hydratedDemands.add(getLoadSubsetDemandKey(options))
+    }
 
     if (upstreamLoadSubset) {
       try {
@@ -1083,9 +1125,98 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
     upstreamUnloadSubset?: (options: LoadSubsetOptions) => void,
   ): void {
-    this.activeSubsets.delete(this.getSubsetKey(options))
-    this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+    const subsetKey = this.getSubsetKey(options)
+    if (this.activeSubsets.has(subsetKey)) this.releaseDemand(options)
+    this.activeSubsets.delete(subsetKey)
+    this.pendingRemoteSubsetEnsures.delete(subsetKey)
     upstreamUnloadSubset?.(options)
+  }
+
+  /**
+   * Record one acquisition of a subset.
+   *
+   * **Idempotent per options object, because `activeSubsets` is.** Its key is
+   * a per-object `request:N`, so acquiring the *same* object twice replaces
+   * one entry rather than adding a second — and a second `retainDemand` would
+   * then leave coverage claiming a holder that no `unloadSubset` can ever
+   * release. Coverage has to count entries, not calls, or a demand can stay
+   * marked hydrated after the last subset covering it is gone.
+   */
+  private registerSubsetAcquisition(options: LoadSubsetOptions): void {
+    const subsetKey = this.getSubsetKey(options)
+
+    if (this.activeSubsets.has(subsetKey)) return
+
+    this.activeSubsets.set(subsetKey, options)
+    this.retainDemand(options)
+  }
+
+  /**
+   * Take this demand for one more acquisition.
+   */
+  private retainDemand(options: LoadSubsetOptions): void {
+    const key = getLoadSubsetDemandKey(options)
+    this.demandCoverage.set(key, (this.demandCoverage.get(key) ?? 0) + 1)
+  }
+
+  /**
+   * Give one acquisition's hold back, and forget the demand once nothing
+   * holds it: its rows are no longer guaranteed to be in the collection.
+   */
+  private releaseDemand(options: LoadSubsetOptions): void {
+    const key = getLoadSubsetDemandKey(options)
+    const remaining = (this.demandCoverage.get(key) ?? 1) - 1
+
+    if (remaining > 0) {
+      this.demandCoverage.set(key, remaining)
+      return
+    }
+
+    this.demandCoverage.delete(key)
+    this.hydratedDemands.delete(key)
+  }
+
+  /**
+   * Acquire a subset whose rows are already in the collection, without
+   * touching the store — reporting whether that was possible.
+   *
+   * `LoadSubsetFn` is declared `(options) => true | Promise<void>` precisely so
+   * an implementation can say "already here, nothing to await", and
+   * `CollectionSyncManager.loadSubset` only treats a subset as outstanding
+   * work when it gets a promise. Re-reading the store to answer a question we
+   * already know the answer to costs a promise, and that promise is what makes
+   * a live query `loading` when it should be `ready`.
+   *
+   * Three conditions, and each rules out a way the rows could be absent:
+   * startup must have finished; no hydration may be in flight (there is a
+   * window inside `truncateAndReloadUnsafe` where the collection is
+   * deliberately empty); and some acquisition must still hold this demand,
+   * because every in-generation invalidation path preserves the rows of
+   * demands that are still active and only those.
+   */
+  tryAcquireHydratedSubset(options: LoadSubsetOptions): boolean {
+    if (!this.startupSettled || this.isHydratingNow()) return false
+
+    const key = getLoadSubsetDemandKey(options)
+
+    if (!this.hydratedDemands.has(key)) return false
+    if ((this.demandCoverage.get(key) ?? 0) <= 0) return false
+
+    // The same registration the slow path performs, so this acquisition owns
+    // a lease and the invalidation paths keep treating its rows as wanted.
+    this.registerSubsetAcquisition(options)
+    this.queueRemoteSubsetEnsure(options)
+
+    return true
+  }
+
+  /**
+   * Record that the source truncated, so no hydration that started before it
+   * may report its demand as still present.
+   */
+  noteSourceTruncate(): void {
+    this.sourceTruncateGeneration++
+    this.hydratedDemands.clear()
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
@@ -1232,6 +1363,8 @@ class PersistedCollectionRuntime<
 
     this.pendingRemoteSubsetEnsures.clear()
     this.activeSubsets.clear()
+    this.demandCoverage.clear()
+    this.hydratedDemands.clear()
     for (const transaction of this.queuedHydrationTransactions) {
       transaction.rejectApplied?.(new SyncTransactionAbortedError())
     }
@@ -1242,8 +1375,12 @@ class PersistedCollectionRuntime<
   }
 
   private advanceLifecycle(): void {
+     
     this.lifecycleGeneration++
     this.started = false
+    this.startupSettled = false
+    this.demandCoverage.clear()
+    this.hydratedDemands.clear()
     this.startupMetadataPromise = null
     this.startPromise = null
     this.resumeBaselinePromise = null
@@ -2181,6 +2318,7 @@ class PersistedCollectionRuntime<
 
   private async reloadActiveSubsetsUnsafe(): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
+    const sourceTruncateGeneration = this.sourceTruncateGeneration
     const activeSubsetOptions =
       this.activeSubsets.size > 0
         ? Array.from(this.activeSubsets.values())
@@ -2210,6 +2348,23 @@ class PersistedCollectionRuntime<
         })),
         collectionMetadata,
       )
+
+      // Everything active was just re-read, so those demands are hydrated
+      // again even though they did not go through `loadSubset`. When nothing
+      // was active this reloaded the bare baseline instead, which no
+      // acquisition holds and must not be recorded as a demand.
+      //
+      // A source truncate that lands *while* this reload is in flight empties
+      // the collection after these rows were read, so re-marking them here
+      // would undo the invalidation the truncate just performed.
+      if (
+        this.activeSubsets.size > 0 &&
+        sourceTruncateGeneration === this.sourceTruncateGeneration
+      ) {
+        for (const options of activeSubsetOptions) {
+          this.hydratedDemands.add(getLoadSubsetDemandKey(options))
+        }
+      }
     } finally {
       if (this.hydratingGeneration === lifecycleGeneration) {
         this.hydratingGeneration = null
@@ -2556,6 +2711,7 @@ function createWrappedSyncConfig<
           : undefined,
         truncate: () => {
           if (startupState.cleanedUp) return
+          runtime.noteSourceTruncate()
           const openTransaction = getOpenTransaction()
           if (!openTransaction) {
             params.truncate()
@@ -2629,17 +2785,20 @@ function createWrappedSyncConfig<
       }
 
       let sourceResult: SyncConfigRes = {}
+      let sourceResultSettled = false
       fullStartPromise = runtime.ensureStarted()
       const sourceResultPromise = (async () => {
         await runtime.ensureStartupMetadataLoaded()
 
         if (startupState.cleanedUp) {
+          sourceResultSettled = true
           return sourceResult
         }
 
         sourceResult = normalizeSyncFnResult(
           sourceSyncConfig.sync(wrappedParams),
         )
+        sourceResultSettled = true
         return sourceResult
       })()
 
@@ -2651,37 +2810,63 @@ function createWrappedSyncConfig<
           runtime.cleanup()
           runtime.clearSyncControls()
         },
-        loadSubset: async (options: LoadSubsetOptions) => {
+        loadSubset: (options: LoadSubsetOptions): true | Promise<void> => {
           const acquisition = { forwarded: false }
           acquisitions.set(options, acquisition)
-          await fullStartPromise
-          const resolvedSourceResult = await sourceResultPromise
-          if (
-            startupState.cleanedUp ||
-            acquisitions.get(options) !== acquisition
-          ) {
-            return
+
+          // Hydration is another async boundary. A release before this point
+          // owns no upstream lease and must not start one later.
+          const forwardUpstream =
+            (resolved: SyncConfigRes) =>
+            (loadOptions: LoadSubsetOptions): true | Promise<void> => {
+              if (
+                startupState.cleanedUp ||
+                acquisitions.get(options) !== acquisition
+              ) {
+                return true
+              }
+              if (!resolved.loadSubset) return true
+              acquisition.forwarded = true
+              try {
+                // Returning a promise transfers its lease even if it rejects.
+                // Only a synchronous throw leaves no upstream lease to
+                // release.
+                return resolved.loadSubset(loadOptions)
+              } catch (error) {
+                acquisition.forwarded = false
+                throw error
+              }
+            }
+
+          // Nothing to await: the source is up and these rows are already in
+          // the collection, so the only work left is the upstream forward.
+          // Staying synchronous here is what lets the live query be `ready` at
+          // construction rather than `loading` for ever under Suspense.
+          if (sourceResultSettled && runtime.tryAcquireHydratedSubset(options)) {
+            try {
+              return forwardUpstream(sourceResult)(options)
+            } catch (error) {
+              // The async path below turns a synchronous upstream throw into a
+              // rejection. Callers must not see a different failure shape
+              // depending on whether the rows happened to be cached.
+              return Promise.reject(error)
+            }
           }
-          return runtime.loadSubset(options, (loadOptions) => {
-            // Hydration is another async boundary. A release before this
-            // point owns no upstream lease and must not start one later.
+
+          return (async () => {
+            await fullStartPromise
+            const resolvedSourceResult = await sourceResultPromise
             if (
               startupState.cleanedUp ||
               acquisitions.get(options) !== acquisition
             ) {
-              return true
+              return
             }
-            if (!resolvedSourceResult.loadSubset) return true
-            acquisition.forwarded = true
-            try {
-              // Returning a promise transfers its lease even if it rejects.
-              // Only a synchronous throw leaves no upstream lease to release.
-              return resolvedSourceResult.loadSubset(loadOptions)
-            } catch (error) {
-              acquisition.forwarded = false
-              throw error
-            }
-          })
+            return runtime.loadSubset(
+              options,
+              forwardUpstream(resolvedSourceResult),
+            )
+          })()
         },
         unloadSubset: (options: LoadSubsetOptions) => {
           const acquisition = acquisitions.get(options)
@@ -2728,7 +2913,10 @@ function createLoopbackSyncConfig<
           runtime.cleanup()
           runtime.clearSyncControls()
         },
-        loadSubset: (options: LoadSubsetOptions) => runtime.loadSubset(options),
+        loadSubset: (options: LoadSubsetOptions): true | Promise<void> =>
+          runtime.tryAcquireHydratedSubset(options)
+            ? true
+            : runtime.loadSubset(options),
         unloadSubset: (options: LoadSubsetOptions) =>
           runtime.unloadSubset(options),
       }

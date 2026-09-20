@@ -2161,7 +2161,10 @@ describe(`persistedCollectionOptions`, () => {
     )
     collection.startSyncImmediate()
     const first: LoadSubsetOptions = { limit: 1 }
-    const second: LoadSubsetOptions = { limit: 1 }
+    // A *different* demand, so the second load reaches the store and can be
+    // blocked mid-hydration. Two acquisitions of the same demand are answered
+    // from the rows already in the collection and never get there.
+    const second: LoadSubsetOptions = { limit: 2 }
     try {
       await collection._sync.loadSubset(first)
       expect(leases).toBe(1)
@@ -2177,6 +2180,217 @@ describe(`persistedCollectionOptions`, () => {
       expect(leases).toBe(0)
     } finally {
       finishHydration()
+      await collection.cleanup()
+    }
+  })
+
+
+  it(`answers a repeat acquisition of a loaded subset synchronously`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `first` },
+    ])
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `repeat-acquisition-is-synchronous`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      const storeReads = adapter.loadSubsetCalls.length
+
+      // The same demand, a second acquisition. `LoadSubsetFn` is declared
+      // `true | Promise<void>` so this can be answered without a promise, and
+      // a live query built on it is `ready` at construction rather than
+      // `loading`.
+      expect(collection._sync.loadSubset({ limit: 1 })).toBe(true)
+      expect(adapter.loadSubsetCalls.length).toBe(storeReads)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`keeps the upstream lease of a sibling acquisition when one is released`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `first` },
+    ])
+    let leases = 0
+    const released: Array<LoadSubsetOptions> = []
+    let publish!: (row: Todo) => void
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sibling-acquisition-lease`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            publish = (row) => {
+              begin()
+              write({ type: `insert`, value: row })
+              commit()
+            }
+            return {
+              loadSubset: () => {
+                leases++
+                return true
+              },
+              unloadSubset: (options) => {
+                leases--
+                released.push(options)
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    const first: LoadSubsetOptions = { limit: 1 }
+    const second: LoadSubsetOptions = { limit: 1 }
+
+    try {
+      await collection._sync.loadSubset(first)
+      // The fast path must still take a lease of its own, or releasing the
+      // first acquisition would end one the second still depends on.
+      expect(collection._sync.loadSubset(second)).toBe(true)
+      expect(leases).toBe(2)
+
+      collection._sync.unloadSubset(first)
+      expect(released).toEqual([first])
+      expect(leases).toBe(1)
+
+      // Still loaded for the surviving acquisition.
+      expect(collection._sync.loadSubset(second)).toBe(true)
+
+      // And the surviving acquisition is still a live demand: a later source
+      // write must reach the collection rather than be discarded as matching
+      // no active subset.
+      publish({ id: `2`, title: `second` })
+      await flushAsyncWork()
+      expect(collection.get(`2`)).toMatchObject({ id: `2`, title: `second` })
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`re-reads a subset once its last acquisition is released`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `first` },
+    ])
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `released-subset-is-reread`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    const only: LoadSubsetOptions = { limit: 1 }
+
+    try {
+      await collection._sync.loadSubset(only)
+      const storeReads = adapter.loadSubsetCalls.length
+
+      collection._sync.unloadSubset(only)
+
+      // Nothing holds the demand any more, so its rows are no longer
+      // guaranteed to be in the collection and the next request must read.
+      const reacquired = collection._sync.loadSubset({ limit: 1 })
+      expect(reacquired).not.toBe(true)
+      await reacquired
+      expect(adapter.loadSubsetCalls.length).toBeGreaterThan(storeReads)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`re-reads a subset after the source truncates`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `first` },
+    ])
+    let truncateSource!: () => void
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `truncated-subset-is-reread`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ begin, commit, markReady, truncate }) => {
+            markReady()
+            truncateSource = () => {
+              begin()
+              truncate()
+              commit()
+            }
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      const storeReads = adapter.loadSubsetCalls.length
+
+      truncateSource()
+      await flushAsyncWork()
+
+      // The rows are gone, so a repeat request must not be answered from the
+      // belief that they are still there.
+      const afterTruncate = collection._sync.loadSubset({ limit: 1 })
+      expect(afterTruncate).not.toBe(true)
+      await afterTruncate
+      expect(adapter.loadSubsetCalls.length).toBeGreaterThan(storeReads)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`answers a repeat acquisition synchronously for a local-only collection`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `first` },
+    ])
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-only-repeat-acquisition`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      const storeReads = adapter.loadSubsetCalls.length
+
+      // The loopback sync config has no source to forward to, so it is
+      // unconditionally synchronous once the rows are in hand.
+      expect(collection._sync.loadSubset({ limit: 1 })).toBe(true)
+      expect(adapter.loadSubsetCalls.length).toBe(storeReads)
+    } finally {
       await collection.cleanup()
     }
   })
