@@ -400,7 +400,7 @@ describe(`live queries across uncommitted renders`, () => {
     firstView.unmount()
     secondView.unmount()
     thirdView.unmount()
-    await advanceTime(2)
+    await advanceTime(5100)
 
     const fourthView = render(
       <Suspense fallback={<div>Fourth loading</div>}>
@@ -411,6 +411,60 @@ describe(`live queries across uncommitted renders`, () => {
 
     expect(fourthView.getByText(`Fourth: A 0`)).toBeDefined()
     expect(liveCollections.get(`Fourth`)).not.toBe(secondCollection)
+  })
+
+  it(`retains a ready collection while its next suspense consumer is pending commit`, async () => {
+    let releaseSecondRender!: () => void
+    let secondRenderBlocked = true
+    const secondRender = new Promise<void>((resolve) => {
+      releaseSecondRender = resolve
+    })
+    const source = makeSource(`pending-ready-suspense-consumer`)
+    const config = {
+      query: (q: InitialQueryBuilder) =>
+        q.from({ person: source }).where(({ person }) => eq(person.id, `1`)),
+    }
+    const collectionsByLabel = new Map<string, object>()
+    const People = ({ label }: { label: string }) => {
+      const result = useLiveSuspenseQuery(config)
+      collectionsByLabel.set(label, result.collection)
+      if (label === `Second` && secondRenderBlocked) throw secondRender
+      return (
+        <div>
+          {label}: {result.data[0]?.name}
+        </div>
+      )
+    }
+
+    const firstView = render(
+      <Suspense fallback={<div>First loading</div>}>
+        <People label="First" />
+      </Suspense>,
+    )
+    await advanceTime(1)
+    expect(firstView.getByText(`First: A`)).toBeDefined()
+    const firstCollection = collectionsByLabel.get(`First`)
+
+    const secondView = render(
+      <Suspense fallback={<div>Second loading</div>}>
+        <People label="Second" />
+      </Suspense>,
+    )
+    expect(secondView.getByText(`Second loading`)).toBeDefined()
+    expect(collectionsByLabel.get(`Second`)).toBe(firstCollection)
+
+    firstView.unmount()
+    await advanceTime(2)
+
+    await act(async () => {
+      secondRenderBlocked = false
+      releaseSecondRender()
+      await Promise.resolve()
+    })
+    await advanceTime(1)
+
+    expect(secondView.getByText(`Second: A`)).toBeDefined()
+    expect(collectionsByLabel.get(`Second`)).toBe(firstCollection)
   })
 
   it(`does not share precommit queries across distinct source objects with the same id`, async () => {
@@ -604,7 +658,7 @@ describe(`live queries across uncommitted renders`, () => {
       resolveLoad()
       await Promise.resolve()
     })
-    await advanceTime(100)
+    await advanceTime(5100)
     expect(source.subscriberCount).toBe(0)
   })
 })
