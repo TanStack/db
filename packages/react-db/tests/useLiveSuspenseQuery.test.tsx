@@ -608,7 +608,11 @@ describe(`useLiveSuspenseQuery`, () => {
     )
 
     const { result, unmount } = renderHook(
-      () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
+      () =>
+        useLiveSuspenseQuery({
+          query: (q) => q.from({ persons: collection }),
+          gcTime: 1,
+        }),
       {
         wrapper: SuspenseWrapper,
       },
@@ -623,7 +627,7 @@ describe(`useLiveSuspenseQuery`, () => {
 
     unmount()
 
-    // Collection should eventually be cleaned up (gcTime is 1ms)
+    // An explicit short gcTime still opts out of the Suspense grace period.
     await waitFor(
       () => {
         expect(liveQueryCollection.status).toBe(`cleaned-up`)

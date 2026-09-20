@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useRef } from 'react'
+import { useRef } from 'react'
 import { useLiveQueryForSuspense } from './useLiveQuery'
 import { getLiveQueryResultInfo } from './live-query-internals'
 import type { UseLiveQueryConfig } from './useLiveQuery'
@@ -166,7 +166,6 @@ export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   deps?: Array<unknown>,
 ) {
-  const suspenseConsumerId = useId()
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
@@ -174,16 +173,8 @@ export function useLiveSuspenseQuery(
   // Use useLiveQuery to handle collection management and reactivity
   const result =
     deps === undefined
-      ? useLiveQueryForSuspense(
-          configOrQueryOrCollection,
-          undefined,
-          suspenseConsumerId,
-        )
-      : useLiveQueryForSuspense(
-          configOrQueryOrCollection,
-          deps,
-          suspenseConsumerId,
-        )
+      ? useLiveQueryForSuspense(configOrQueryOrCollection, undefined)
+      : useLiveQueryForSuspense(configOrQueryOrCollection, deps)
 
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
