@@ -19,6 +19,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import type {
+  CollectionReset,
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
   PersistedSyncWrappedOptions,
@@ -184,7 +185,7 @@ function createNoopAdapter(): PersistenceAdapter {
 }
 
 type CoordinatorHarness = PersistedCollectionCoordinator & {
-  emit: (payload: TxCommitted, senderId?: string) => void
+  emit: (payload: TxCommitted | CollectionReset, senderId?: string) => void
   pullSinceCalls: number
   setPullSinceResponse: (response: PullSinceResponse) => void
 }
@@ -456,6 +457,69 @@ describe(`persistedCollectionOptions`, () => {
       queryHash: `q1`,
       mode: `until-revalidated`,
     })
+  })
+
+  it(`keeps a collection-reset reload inside one hydration scope`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
+    adapter.collectionMetadata.set(`snapshot`, `initial`)
+    const coordinator = createCoordinatorHarness()
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    let inHydrationScope = false
+    let interleaveArmed = false
+    let interleaveRan = false
+
+    const runInterleavedWrite = () => {
+      interleaveRan = true
+      adapter.collectionMetadata.set(`snapshot`, `v2`)
+      adapter.rows.set(`1`, { id: `1`, title: `v2 row` })
+    }
+
+    adapter.loadSubset = async (...args) => {
+      if (interleaveArmed && !inHydrationScope && !interleaveRan) {
+        runInterleavedWrite()
+      }
+      return loadSubset(...args)
+    }
+    adapter.runInHydrationScope = async (task) => {
+      inHydrationScope = true
+      try {
+        return await task(adapter)
+      } finally {
+        inHydrationScope = false
+        if (interleaveArmed && !interleaveRan) runInterleavedWrite()
+      }
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    adapter.collectionMetadata.set(`snapshot`, `v1`)
+    adapter.rows.set(`1`, { id: `1`, title: `v1 row` })
+    interleaveArmed = true
+
+    coordinator.emit({
+      type: `collection:reset`,
+      schemaVersion: 1,
+      resetEpoch: 1,
+    })
+
+    await vi.waitFor(() => expect(interleaveRan).toBe(true))
+    expect(collection._state.syncedCollectionMetadata.get(`snapshot`)).toBe(
+      `v1`,
+    )
+    expect(collection.get(`1`)?.title).toBe(`v1 row`)
+    await collection.cleanup()
   })
 
   it(`persists metadata-only wrapped sync transactions`, async () => {

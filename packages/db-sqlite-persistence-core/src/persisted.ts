@@ -2136,7 +2136,11 @@ class PersistedCollectionRuntime<
 
     if (isCollectionResetPayload(payload)) {
       void this.applyMutex
-        .run(() => this.truncateAndReloadUnsafe(this.persistence.adapter))
+        .run(() =>
+          this.runInHydrationScope((adapter) =>
+            this.truncateAndReloadUnsafe(adapter),
+          ),
+        )
         .catch((error) => {
           console.warn(`Failed to process collection reset message:`, error)
         })
