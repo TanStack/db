@@ -35,6 +35,9 @@ const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned
 const DERIVED_IDENTITY_SINGLE_RENDER_WARN_MS = 16
 const DERIVED_IDENTITY_RENDER_COUNT_WARN_THRESHOLD = 10
 const DERIVED_IDENTITY_TOTAL_WARN_MS = 50
+// Match the normal live-query GC window while React decides whether a
+// suspended render will commit. The timeout bounds abandoned render leases.
+const SUSPENSE_PENDING_RENDER_GC_MS = 5000
 const warnedDepsCallsites = new Set<string>()
 const warnedDerivedIdentityCallsites = new Set<string>()
 const warnedUnhashableIdentityCallsites = new Set<string>()
@@ -43,6 +46,8 @@ const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 type SuspenseCollection = Collection<object, string | number, {}>
 type SuspenseCollectionEntry = {
   collection: SuspenseCollection
+  pendingConsumers: Map<string, ReturnType<typeof setTimeout>>
+  pendingSubscription?: { unsubscribe: () => void }
   removeStatusListeners: () => void
 }
 
@@ -103,7 +108,42 @@ function releaseSuspenseCollection(
   const entry = collections.get(queryHash)
   if (entry?.collection !== collection) return
   collections.delete(queryHash)
+  for (const timeout of entry.pendingConsumers.values()) clearTimeout(timeout)
+  entry.pendingConsumers.clear()
+  entry.pendingSubscription?.unsubscribe()
+  entry.pendingSubscription = undefined
   entry.removeStatusListeners()
+}
+
+function releaseSuspensePendingConsumer(
+  entry: SuspenseCollectionEntry,
+  consumerId: string,
+): void {
+  const timeout = entry.pendingConsumers.get(consumerId)
+  if (timeout === undefined) return
+  clearTimeout(timeout)
+  entry.pendingConsumers.delete(consumerId)
+  if (entry.pendingConsumers.size === 0) {
+    entry.pendingSubscription?.unsubscribe()
+    entry.pendingSubscription = undefined
+  }
+}
+
+function retainSuspensePendingConsumer(
+  entry: SuspenseCollectionEntry,
+  consumerId: string,
+): void {
+  releaseSuspensePendingConsumer(entry, consumerId)
+  entry.pendingSubscription ??= entry.collection.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+  entry.pendingConsumers.set(
+    consumerId,
+    setTimeout(
+      () => releaseSuspensePendingConsumer(entry, consumerId),
+      SUSPENSE_PENDING_RENDER_GC_MS,
+    ),
+  )
 }
 
 export type DerivedIdentityProfiler = {
@@ -727,14 +767,15 @@ export function useLiveQuery(
 export function useLiveQueryForSuspense(
   configOrQueryOrCollection: any,
   deps: Array<unknown> | undefined,
+  consumerId: string,
 ) {
-  return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
+  return useLiveQueryImpl(configOrQueryOrCollection, deps, consumerId)
 }
 
 function useLiveQueryImpl(
   configOrQueryOrCollection: any,
   deps: Array<unknown> | undefined,
-  forSuspense = false,
+  suspenseConsumerId?: string,
 ) {
   const contextDbClient = useOptionalDbClient()
   // Check if it's already a collection
@@ -851,7 +892,7 @@ function useLiveQueryImpl(
     suspenseKeyRef.current !== undefined
 
   if (
-    forSuspense &&
+    suspenseConsumerId &&
     !inputIsCollection &&
     queryHash &&
     !dbClient &&
@@ -873,7 +914,7 @@ function useLiveQueryImpl(
       : queryHash
 
   const suspenseCollections =
-    forSuspense && !inputIsCollection && suspenseKey
+    suspenseConsumerId && !inputIsCollection && suspenseKey
       ? getSuspenseCollections(dbClient)
       : undefined
   const suspenseEntry = suspenseKey
@@ -893,6 +934,10 @@ function useLiveQueryImpl(
     !collectionRef.current ||
     (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
     (!inputIsCollection && (clientRef.current !== dbClient || identityChanged))
+
+  if (suspenseConsumerId && needsNewCollection && suspenseEntry) {
+    retainSuspensePendingConsumer(suspenseEntry, suspenseConsumerId)
+  }
   const resumeDeferredCollections = () => {
     for (const collection of deferredCollectionsRef.current) {
       collection._resumeSyncStart()
@@ -961,13 +1006,18 @@ function useLiveQueryImpl(
               0,
             )
           })
-          suspenseCollections.set(suspenseKey, {
+          const entry: SuspenseCollectionEntry = {
             collection,
+            pendingConsumers: new Map(),
             removeStatusListeners: () => {
               removeCleanupListener()
               removeErrorListener()
             },
-          })
+          }
+          suspenseCollections.set(suspenseKey, entry)
+          if (suspenseConsumerId) {
+            retainSuspensePendingConsumer(entry, suspenseConsumerId)
+          }
         }
       }
       configRef.current = configOrQueryOrCollection
@@ -1007,9 +1057,18 @@ function useLiveQueryImpl(
     ((onStoreChange: () => void) => () => void) | null
   >(null)
   if (!subscribeRef.current || needsNewCollection) {
+    const suspenseEntryForRender =
+      suspenseEntry ??
+      (suspenseKey ? suspenseCollections?.get(suspenseKey) : undefined)
     subscribeRef.current = (onStoreChange: () => void) => {
       const unsubscribe = observer.subscribe(() => onStoreChange())
       resumeDeferredCollections()
+      if (suspenseConsumerId && suspenseEntryForRender) {
+        releaseSuspensePendingConsumer(
+          suspenseEntryForRender,
+          suspenseConsumerId,
+        )
+      }
       return unsubscribe
     }
   }

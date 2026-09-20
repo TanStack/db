@@ -2705,9 +2705,9 @@ describe(`persistedCollectionOptions`, () => {
         (options) => options === second,
       ).length
       await vi.advanceTimersByTimeAsync(500)
-      expect(
-        ensured.filter((options) => options === second),
-      ).toHaveLength(callsBeforeRetry)
+      expect(ensured.filter((options) => options === second)).toHaveLength(
+        callsBeforeRetry,
+      )
     } finally {
       await collection.cleanup()
       warning.mockRestore()
