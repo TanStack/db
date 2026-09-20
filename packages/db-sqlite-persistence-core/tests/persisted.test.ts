@@ -27,7 +27,11 @@ import type {
   PullSinceResponse,
   TxCommitted,
 } from '../src'
-import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+import type {
+  LoadSubsetOptions,
+  SyncAppliedReceipt,
+  SyncConfig,
+} from '@tanstack/db'
 
 type Todo = {
   id: string
@@ -256,6 +260,20 @@ const stripVirtualProps = <T extends Record<string, any> | undefined>(
 
 async function flushAsyncWork(delayMs: number = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs))
+}
+
+function deferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 describe(`persistedCollectionOptions`, () => {
@@ -1413,10 +1431,15 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
-  it(`marks ready even when persisted startup fails before markReady`, async () => {
+  it(`falls back to upstream readiness when persisted startup fails`, async () => {
     const adapter = createRecordingAdapter()
-    adapter.loadSubset = async () => {
-      throw new Error(`startup failure`)
+    const startupError = new Error(`startup failure`)
+    const localAttempted = deferred()
+    const upstreamStarted = deferred()
+    let markUpstreamReady: (() => void) | undefined
+    adapter.loadSubset = () => {
+      localAttempted.resolve()
+      return Promise.reject(startupError)
     }
 
     const collection = createCollection(
@@ -1425,7 +1448,8 @@ describe(`persistedCollectionOptions`, () => {
         getKey: (item) => item.id,
         sync: {
           sync: ({ markReady }) => {
-            markReady()
+            markUpstreamReady = markReady
+            upstreamStarted.resolve()
             return {}
           },
         },
@@ -1435,9 +1459,992 @@ describe(`persistedCollectionOptions`, () => {
       }),
     )
 
+    const preload = collection.preload()
+    await Promise.all([localAttempted.promise, upstreamStarted.promise])
+    await flushAsyncWork()
+    expect(collection.status).toBe(`loading`)
+
+    expect(markUpstreamReady).toBeTypeOf(`function`)
+    markUpstreamReady!()
+    await preload
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it.each([
+    {
+      name: `non-empty`,
+      rows: [{ id: `1`, title: `Offline Todo` }],
+    },
+    { name: `empty`, rows: [] },
+  ])(
+    `marks an eager $name local snapshot ready without upstream readiness`,
+    async ({ rows }) => {
+      const adapter = createRecordingAdapter(rows)
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `local-first-${rows.length}`,
+          getKey: (item) => item.id,
+          sync: { sync: () => ({}) },
+          persistence: { adapter },
+        }),
+      )
+
+      await collection.preload()
+
+      expect(collection.status).toBe(`ready`)
+      expect(collection.toArray.map(stripVirtualProps)).toEqual(rows)
+      expect(adapter.loadSubsetCalls).toHaveLength(1)
+      await collection.cleanup()
+    },
+  )
+
+  it(`keeps on-demand readiness gated on the upstream`, async () => {
+    const upstreamStarted = deferred()
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `on-demand-readiness`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markUpstreamReady = markReady
+            upstreamStarted.resolve()
+          },
+        },
+        persistence: { adapter: createRecordingAdapter() },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await upstreamStarted.promise
+    expect(collection.status).toBe(`loading`)
+
+    markUpstreamReady?.()
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+    await collection.cleanup()
+  })
+
+  it(`preserves upstream ready-error-ready transitions for on-demand sync`, async () => {
+    const upstreamError = new Error(`rebuild failed`)
+    const upstreamStarted = deferred()
+    let failUpstream: ((error: unknown) => void) | undefined
+    let recoverUpstream: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `on-demand-upstream-recovery`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markError, markReady }) => {
+            failUpstream = markError
+            recoverUpstream = markReady
+            markReady()
+            upstreamStarted.resolve()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter: createRecordingAdapter() },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await upstreamStarted.promise
+    expect(collection.status).toBe(`ready`)
+
+    failUpstream?.(upstreamError)
+    expect(collection.status).toBe(`error`)
+    expect(collection._lifecycle.getSyncError()).toBe(upstreamError)
+
+    recoverUpstream?.()
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`loads an on-demand subset upstream when persisted startup fails`, async () => {
+    const localError = new Error(`persisted metadata unavailable`)
+    const adapter = createRecordingAdapter()
+    adapter.getStreamPosition = () => Promise.reject(localError)
+    const upstreamStarted = deferred()
+    let upstreamLoads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `on-demand-upstream-fallback`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            upstreamStarted.resolve()
+            return {
+              loadSubset: async () => {
+                upstreamLoads++
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: `network`, title: `Loaded from network` },
+                })
+                await commit()
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await upstreamStarted.promise
+    expect(collection.status).toBe(`ready`)
+    await collection._sync.loadSubset({})
+
+    expect(upstreamLoads).toBe(1)
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Loaded from network`,
+    })
+    expect(collection.status).toBe(`ready`)
+    await collection.cleanup()
+  })
+
+  it(`loads an on-demand subset upstream when local hydration fails`, async () => {
+    const localError = new Error(`persisted rows unavailable`)
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => Promise.reject(localError)
+    const upstreamStarted = deferred()
+    let upstreamLoads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `on-demand-hydration-fallback`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            upstreamStarted.resolve()
+            return {
+              loadSubset: async () => {
+                upstreamLoads++
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: `network`, title: `Loaded from network` },
+                })
+                await commit()
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await upstreamStarted.promise
+    expect(collection.status).toBe(`ready`)
+    await collection._sync.loadSubset({})
+
+    expect(upstreamLoads).toBe(1)
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Loaded from network`,
+    })
+    await collection.cleanup()
+  })
+
+  it(`reports an error only after local hydration and upstream both fail`, async () => {
+    const localError = new Error(`local startup failed`)
+    const upstreamError = new Error(`upstream startup failed`)
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => Promise.reject(localError)
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `both-startup-paths-fail`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markError }) => {
+            markError(upstreamError)
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    const outcome = await collection.preload().catch((error) => error)
+    expect(outcome).toBeInstanceOf(AggregateError)
+    expect((outcome as AggregateError).errors).toEqual([
+      localError,
+      upstreamError,
+    ])
+    expect(collection.status).toBe(`error`)
+    expect(collection._lifecycle.getSyncError()).toBe(outcome)
+    await collection.cleanup()
+  })
+
+  it(`recovers when upstream becomes ready after both startup paths fail`, async () => {
+    const localError = new Error(`local startup failed`)
+    const upstreamError = new Error(`upstream startup failed`)
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => Promise.reject(localError)
+    let recoverUpstream: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `startup-recovery-after-both-fail`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markError, markReady }) => {
+            recoverUpstream = markReady
+            markError(upstreamError)
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    await expect(collection.preload()).rejects.toBeInstanceOf(AggregateError)
+    expect(collection.status).toBe(`error`)
+
+    expect(recoverUpstream).toBeTypeOf(`function`)
+    recoverUpstream!()
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`uses a successful local snapshot when upstream fails`, async () => {
+    const upstreamError = new Error(`upstream startup failed`)
+    const rows = [{ id: `1`, title: `Offline Todo` }]
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-success-upstream-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markError }) => {
+            markError(upstreamError)
+            return {}
+          },
+        },
+        persistence: { adapter: createRecordingAdapter(rows) },
+      }),
+    )
+
+    await collection.preload()
+    expect(collection.status).toBe(`ready`)
+    expect(collection.toArray.map(stripVirtualProps)).toEqual(rows)
+    await collection.cleanup()
+  })
+
+  it(`keeps waiting for upstream after local hydration fails`, async () => {
+    const localAttempted = deferred()
+    const localError = new Error(`local startup failed`)
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      localAttempted.resolve()
+      return Promise.reject(localError)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-failure-upstream-pending`,
+        getKey: (item) => item.id,
+        sync: { sync: () => ({}) },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await localAttempted.promise
+    await flushAsyncWork()
+
+    expect(collection.status).toBe(`loading`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`uses an authoritative upstream snapshot before local hydration finishes`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const upstreamDone = deferred()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `upstream-snapshot-wins`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady }) => {
+            void (async () => {
+              await hydrationStarted.promise
+              begin()
+              truncate()
+              write({
+                type: `insert`,
+                value: { id: `network`, title: `Network winner` },
+              })
+              await commit()
+              markReady()
+            })().then(upstreamDone.resolve, upstreamDone.reject)
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    const preload = collection.preload()
+    await upstreamDone.promise
+    await preload
+
+    expect(collection.status).toBe(`ready`)
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Network winner`,
+    })
+
+    hydration.resolve([
+      { key: `stale`, value: { id: `stale`, title: `Late local row` } },
+      { key: `network`, value: { id: `network`, title: `Stale local row` } },
+    ])
+    await hydration.promise
+    await flushAsyncWork()
+
+    expect(collection.get(`stale`)).toBeUndefined()
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Network winner`,
+    })
+    await collection.cleanup()
+  })
+
+  it(`persists a network winner after coordinator activity races hydration`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const startNetwork = deferred()
+    const upstreamDone = deferred()
+    const adapter = createRecordingAdapter()
+    const loadPersistedRows = adapter.loadSubset.bind(adapter)
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let persistedSeq = 0
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    adapter.getStreamPosition = () =>
+      Promise.resolve({
+        latestTerm: 1,
+        latestSeq: persistedSeq,
+        latestRowVersion: persistedSeq,
+      })
+    adapter.applyCommittedTx = (collectionId, transaction) => {
+      if (transaction.term === 1 && transaction.seq <= persistedSeq) {
+        return Promise.resolve()
+      }
+      persistedSeq = transaction.seq
+      return applyCommittedTx(collectionId, transaction)
+    }
+    const coordinator = createCoordinatorHarness()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady }) => {
+            void (async () => {
+              await startNetwork.promise
+              begin()
+              truncate()
+              write({
+                type: `insert`,
+                value: { id: `network`, title: `Network winner` },
+              })
+              await commit()
+              markReady()
+            })().then(upstreamDone.resolve, upstreamDone.reject)
+            return {}
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    const preload = collection.preload()
+    await hydrationStarted.promise
+    startNetwork.resolve()
+    await upstreamDone.promise
+    await preload
+
+    // The authoritative snapshot is live, but its persistence is still parked
+    // behind hydration. A peer can commit the next stream position in this
+    // window before the snapshot's queued persistence acquires the mutex.
+    adapter.rows.set(`peer`, { id: `peer`, title: `Peer transaction` })
+    persistedSeq = 1
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `peer-during-hydration`,
+      latestRowVersion: 1,
+      requiresFullReload: false,
+      changedRows: [
+        { key: `peer`, value: { id: `peer`, title: `Peer transaction` } },
+      ],
+      deletedKeys: [],
+    })
+    expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+
+    hydration.resolve([
+      { key: `stale`, value: { id: `stale`, title: `Late local row` } },
+    ])
+    await hydration.promise
+    await flushAsyncWork()
+
+    expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    expect(adapter.applyCommittedTxCalls[0]?.tx.seq).toBe(2)
+    expect(adapter.rows.get(`peer`)).toBeUndefined()
+    expect(adapter.rows.get(`network`)).toEqual({
+      id: `network`,
+      title: `Network winner`,
+    })
+    await collection.cleanup()
+
+    adapter.loadSubset = loadPersistedRows
+    const reopened = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: { sync: () => ({}) },
+        persistence: { adapter },
+      }),
+    )
+    await reopened.preload()
+
+    expect(stripVirtualProps(reopened.get(`network`))).toEqual({
+      id: `network`,
+      title: `Network winner`,
+    })
+    expect(reopened.get(`peer`)).toBeUndefined()
+    await reopened.cleanup()
+  })
+
+  it(`reports a network winner persistence failure after becoming ready`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const upstreamDone = deferred()
+    const persistenceAttempted = deferred()
+    const persistenceError = new Error(`network winner persistence failed`)
+    let recoverUpstream: (() => void) | undefined
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    adapter.applyCommittedTx = () => {
+      persistenceAttempted.resolve()
+      return Promise.reject(persistenceError)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `network-winner-persistence-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady }) => {
+            recoverUpstream = markReady
+            void (async () => {
+              await hydrationStarted.promise
+              begin()
+              truncate()
+              write({
+                type: `insert`,
+                value: { id: `network`, title: `Network winner` },
+              })
+              await commit()
+              markReady()
+            })().then(upstreamDone.resolve, upstreamDone.reject)
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    const preload = collection.preload()
+    await upstreamDone.promise
+    await preload
+    expect(collection.status).toBe(`ready`)
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Network winner`,
+    })
+
+    hydration.resolve([])
+    await persistenceAttempted.promise
+    await flushAsyncWork()
+
+    expect(collection.status).toBe(`error`)
+    expect(collection._lifecycle.getSyncError()).toBe(persistenceError)
+
+    expect(recoverUpstream).toBeTypeOf(`function`)
+    recoverUpstream!()
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`recovers when explicit upstream readiness follows network winner persistence failure`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const upstreamCommitted = deferred()
+    const persistenceAttempted = deferred()
+    const persistenceError = new Error(`network winner persistence failed`)
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    adapter.applyCommittedTx = () => {
+      persistenceAttempted.resolve()
+      return Promise.reject(persistenceError)
+    }
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `delayed-upstream-ready-after-persistence-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady }) => {
+            markUpstreamReady = markReady
+            void (async () => {
+              await hydrationStarted.promise
+              begin()
+              truncate()
+              write({
+                type: `insert`,
+                value: { id: `network`, title: `Network winner` },
+              })
+              await commit()
+            })().then(upstreamCommitted.resolve, upstreamCommitted.reject)
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await upstreamCommitted.promise
+    expect(collection.status).toBe(`ready`)
+    hydration.resolve([])
+    await persistenceAttempted.promise
+    await flushAsyncWork()
+
+    expect(collection.status).toBe(`error`)
+    expect(collection._lifecycle.getSyncError()).toBe(persistenceError)
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Network winner`,
+    })
+
+    expect(markUpstreamReady).toBeTypeOf(`function`)
+    markUpstreamReady!()
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`aggregates upstream failure after network winner persistence fails`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const upstreamCommitted = deferred()
+    const persistenceAttempted = deferred()
+    const persistenceError = new Error(`network winner persistence failed`)
+    const upstreamError = new Error(`upstream startup failed`)
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    adapter.applyCommittedTx = () => {
+      persistenceAttempted.resolve()
+      return Promise.reject(persistenceError)
+    }
+    let failUpstream: ((error: unknown) => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `delayed-upstream-failure-after-persistence-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markError }) => {
+            failUpstream = markError
+            void (async () => {
+              await hydrationStarted.promise
+              begin()
+              truncate()
+              write({
+                type: `insert`,
+                value: { id: `network`, title: `Network winner` },
+              })
+              await commit()
+            })().then(upstreamCommitted.resolve, upstreamCommitted.reject)
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await upstreamCommitted.promise
+    expect(collection.status).toBe(`ready`)
+    hydration.resolve([])
+    await persistenceAttempted.promise
+    await flushAsyncWork()
+    expect(collection.status).toBe(`error`)
+    expect(collection._lifecycle.getSyncError()).toBe(persistenceError)
+
+    expect(failUpstream).toBeTypeOf(`function`)
+    failUpstream!(upstreamError)
+    expect(collection.status).toBe(`error`)
+    const failure = collection._lifecycle.getSyncError()
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).errors).toEqual([
+      persistenceError,
+      upstreamError,
+    ])
+    await collection.cleanup()
+  })
+
+  it(`does not persist a network winner after cleanup starts a new lifecycle`, async () => {
+    const firstHydrationStarted = deferred()
+    const firstHydration = deferred<Array<{ key: string; value: Todo }>>()
+    const firstUpstreamDone = deferred()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      firstHydrationStarted.resolve()
+      return firstHydration.promise
+    }
+    let syncRun = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cleanup-fences-network-winner-persistence`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady }) => {
+            syncRun++
+            if (syncRun === 1) {
+              void (async () => {
+                await firstHydrationStarted.promise
+                begin()
+                truncate()
+                write({
+                  type: `insert`,
+                  value: { id: `network`, title: `Network winner` },
+                })
+                await commit()
+                markReady()
+              })().then(firstUpstreamDone.resolve, firstUpstreamDone.reject)
+            } else {
+              markReady()
+            }
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    const firstPreload = collection.preload()
+    await firstUpstreamDone.promise
+    await firstPreload
+    expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+
+    await collection.cleanup()
+    adapter.loadSubset = () =>
+      Promise.resolve([
+        { key: `fresh`, value: { id: `fresh`, title: `Fresh restart` } },
+      ])
+    collection.startSyncImmediate()
+    firstHydration.resolve([
+      { key: `stale`, value: { id: `stale`, title: `Late local row` } },
+    ])
+    await firstHydration.promise
     await collection.stateWhenReady()
     await flushAsyncWork()
+
+    expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    expect(stripVirtualProps(collection.get(`fresh`))).toEqual({
+      id: `fresh`,
+      title: `Fresh restart`,
+    })
+    expect(collection.get(`stale`)).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`does not persist a transaction after its commit listener cleans up`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cleanup-during-sync-commit`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    await collection.preload()
+    let cleanupPromise: Promise<void> | undefined
+    collection.subscribeChanges(
+      () => {
+        cleanupPromise ??= collection.cleanup()
+      },
+      { includeInitialState: false },
+    )
+
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `retired`, title: `Retired lifecycle` },
+    })
+    const applied = remoteCommit?.()
+    if (applied !== true) await applied
+    await cleanupPromise
+    await flushAsyncWork()
+
+    expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    collection.startSyncImmediate()
+    await collection.stateWhenReady()
+    expect(collection.get(`retired`)).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`does not persist buffered replay after its commit listener cleans up`, async () => {
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const upstreamDone = deferred()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let syncRun = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cleanup-during-buffered-replay`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncRun++
+            if (syncRun === 1) {
+              void (async () => {
+                await hydrationStarted.promise
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: `retired`, title: `Retired lifecycle` },
+                })
+                await commit()
+                markReady()
+              })().then(upstreamDone.resolve, upstreamDone.reject)
+            } else {
+              markReady()
+            }
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let cleanupPromise: Promise<void> | undefined
+    collection.subscribeChanges(
+      () => {
+        cleanupPromise ??= collection.cleanup()
+      },
+      { includeInitialState: false },
+    )
+
+    collection.startSyncImmediate()
+    await hydrationStarted.promise
+    hydration.resolve([])
+    await upstreamDone.promise
+    await cleanupPromise
+    await flushAsyncWork()
+
+    expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    adapter.loadSubset = () => Promise.resolve([])
+    collection.startSyncImmediate()
+    await collection.stateWhenReady()
+    expect(collection.get(`retired`)).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`rejects buffered upstream rows when eager local hydration fails`, async () => {
+    const localError = new Error(`persisted rows unavailable`)
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const upstreamDone = deferred()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `buffered-upstream-after-hydration-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            void (async () => {
+              await hydrationStarted.promise
+              begin()
+              write({
+                type: `insert`,
+                value: { id: `network`, title: `Loaded from network` },
+              })
+              await commit()
+              markReady()
+            })().then(upstreamDone.resolve, upstreamDone.reject)
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await hydrationStarted.promise
+    hydration.reject(localError)
+    const upstreamOutcome = await upstreamDone.promise.catch((error) => error)
+    await flushAsyncWork()
+
+    expect(upstreamOutcome).toBe(localError)
+    expect(collection.status).toBe(`loading`)
+    expect(collection.get(`network`)).toBeUndefined()
+    expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    await collection.cleanup()
+  })
+
+  it(`signals readiness once when eager hydration and upstream readiness race`, async () => {
+    const hydrationStarted = deferred()
+    const upstreamStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `readiness-race`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markUpstreamReady = markReady
+            upstreamStarted.resolve()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let readyEvents = 0
+    collection.on(`status:ready`, () => readyEvents++)
+
+    collection.startSyncImmediate()
+    await Promise.all([hydrationStarted.promise, upstreamStarted.promise])
+    expect(markUpstreamReady).toBeTypeOf(`function`)
+    markUpstreamReady!()
     expect(collection.status).toBe(`ready`)
+    expect(readyEvents).toBe(1)
+
+    hydration.resolve([])
+    await collection.stateWhenReady()
+    await flushAsyncWork()
+
+    expect(readyEvents).toBe(1)
+    await collection.cleanup()
+  })
+
+  it(`cleanup fences old readiness before a fresh restart snapshot`, async () => {
+    const hydrationStarted = deferred()
+    const upstreamStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `cleanup-during-hydration`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markUpstreamReady = markReady
+            upstreamStarted.resolve()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let readyEvents = 0
+    collection.on(`status:ready`, () => readyEvents++)
+
+    collection.startSyncImmediate()
+    await Promise.all([hydrationStarted.promise, upstreamStarted.promise])
+    await collection.cleanup()
+    expect(markUpstreamReady).toBeTypeOf(`function`)
+    markUpstreamReady!()
+    hydration.resolve([
+      { key: `late`, value: { id: `late`, title: `Must not apply` } },
+    ])
+    await hydration.promise
+    await flushAsyncWork()
+
+    expect(readyEvents).toBe(0)
+    expect(collection.get(`late`)).toBeUndefined()
+
+    adapter.loadSubset = () =>
+      Promise.resolve([
+        { key: `fresh`, value: { id: `fresh`, title: `Fresh restart` } },
+      ])
+    collection.on(`status:ready`, () => readyEvents++)
+    collection.startSyncImmediate()
+    await collection.stateWhenReady()
+
+    expect(readyEvents).toBe(1)
+    expect(stripVirtualProps(collection.get(`fresh`))).toEqual({
+      id: `fresh`,
+      title: `Fresh restart`,
+    })
+    expect(collection.get(`late`)).toBeUndefined()
+    await collection.cleanup()
   })
 
   it(`reads staged metadata writes during hydration-queued transactions`, async () => {
@@ -2179,6 +3186,53 @@ describe(`persistedCollectionOptions`, () => {
       finishHydration()
       await collection.cleanup()
     }
+  })
+
+  it(`does not acquire an upstream lease after released hydration fails`, async () => {
+    const localError = new Error(`persisted rows unavailable`)
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let loads = 0
+    let unloads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `released-failed-hydration`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                return true
+              },
+              unloadSubset: () => {
+                unloads++
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+
+    collection.startSyncImmediate()
+    const pending = collection._sync.loadSubset(options)
+    await hydrationStarted.promise
+    collection._sync.unloadSubset(options)
+    hydration.reject(localError)
+    await pending
+
+    expect(loads).toBe(0)
+    expect(unloads).toBe(0)
+    await collection.cleanup()
   })
 
   it.each([`abort`, `release`, `offline`] as const)(

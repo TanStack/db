@@ -1072,6 +1072,12 @@ importers:
       '@journeyapps/wa-sqlite':
         specifier: ^1.4.1
         version: 1.5.0
+      '@playwright/test':
+        specifier: ^1.60.0
+        version: 1.60.0
+      '@tanstack/electric-db-collection':
+        specifier: workspace:*
+        version: link:../electric-db-collection
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13

@@ -1984,10 +1984,13 @@ function createElectricSync<T extends Row<unknown>>(
         signal: abortController.signal,
       })
 
-      const resumeKeysPromise =
-        requiresCompleteResume || freshSnapshotPending
-          ? whenHydrated?.()
-          : undefined
+      // A resumed incremental stream needs the persisted baseline before its
+      // partial updates can be interpreted. A fresh authoritative snapshot
+      // does not: its truncate transaction can supersede hydration and make
+      // the network snapshot visible immediately.
+      const resumeKeysPromise = requiresCompleteResume
+        ? whenHydrated?.()
+        : undefined
       let areResumeKeysReady = !resumeKeysPromise
       const pendingResumeBatches: Array<Array<Message<T>>> = []
       let unsubscribeStream: () => void = () => {}

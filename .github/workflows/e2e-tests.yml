@@ -74,6 +74,11 @@ jobs:
           cd examples/react/start-ssr-e2e
           pnpm exec playwright install --with-deps chromium
 
+      - name: Run browser SQLite readiness E2E tests
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:e2e:readiness
+
       - name: Run React Start SSR E2E tests
         run: |
           cd examples/react/start-ssr-e2e
