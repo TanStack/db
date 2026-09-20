@@ -545,16 +545,28 @@ describe(`Query collection type resolution tests`, () => {
         outputRows: Array<RowOutput>
       }
 
-      const selectSchemaInputRows = (
-        response: HostileResponse,
-      ): Array<RowOutput> => {
-        // @ts-expect-error schema input rows are not materialized output rows
-        return response.inputRows
+      const schemaOutputSelectConfig = {
+        queryClient,
+        queryKey: [`wrapped-schema-output-control`],
+        queryFn: async (): Promise<HostileResponse> => ({
+          inputRows: [{ id: `1`, createdAt: `1970-01-01T00:00:00.000Z` }],
+          outputRows: [{ id: `1`, createdAt: new Date(0) }],
+        }),
+        select: (response: HostileResponse): Array<RowOutput> =>
+          response.outputRows,
+        schema: rowSchema,
+        getKey: (item: RowOutput) => item.id,
+      }
+      queryCollectionOptions(schemaOutputSelectConfig)
+
+      const schemaInputSelectConfig = {
+        ...schemaOutputSelectConfig,
+        select: (response: HostileResponse): Array<RowInput> =>
+          response.inputRows,
       }
 
-      expectTypeOf(selectSchemaInputRows).parameters.toEqualTypeOf<
-        [HostileResponse]
-      >()
+      // @ts-expect-error select must return materialized schema output rows
+      queryCollectionOptions(schemaInputSelectConfig)
     })
   })
 
