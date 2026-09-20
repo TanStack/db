@@ -422,7 +422,7 @@ describe(`query API type algebra`, () => {
           expectTypeOf(row.exactNull).toEqualTypeOf<RefLeaf<null>>()
           expectTypeOf(row.exactUndefined).toEqualTypeOf<RefLeaf<undefined>>()
           expectTypeOf(row.nullishObject).toEqualTypeOf<
-            Ref<{ label: string }> | null | undefined
+            Ref<{ label: string }, false, false> | null | undefined
           >()
           return row.nullish
         })

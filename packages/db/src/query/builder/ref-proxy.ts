@@ -31,26 +31,31 @@ type SingleRowField<V, TKey extends string | number> = [
 ] extends [never]
   ? RefLeaf<V>
   : IsPlainObject<NonNullable<V>> extends true
-    ? SingleRowRefProxy<NonNullable<V>, TKey> | Extract<V, null | undefined>
+    ?
+        | SingleRowRefProxy<NonNullable<V>, TKey, false>
+        | Extract<V, null | undefined>
     : RefLeaf<V>
 
 /**
  * Type for creating a RefProxy for a single row/type without namespacing
  * Used in collection indexes and where clauses
  *
- * Includes virtual properties ($synced, $origin, $key, $collectionId) for
- * querying on sync status and row metadata.
+ * The row root includes virtual properties ($synced, $origin, $key,
+ * $collectionId) for querying on row metadata. Recursively traversed user
+ * objects do not, because those values are not independently published rows.
  */
 export type SingleRowRefProxy<
   T,
   TKey extends string | number = string | number,
+  IncludeVirtualProps extends boolean = true,
 > =
   T extends Record<string, any>
     ? {
         [K in keyof T]: SingleRowField<T[K], TKey>
       } & RefProxy<T> &
-        VirtualPropsRefProxy<TKey>
-    : RefProxy<T> & VirtualPropsRefProxy<TKey>
+        (IncludeVirtualProps extends true ? VirtualPropsRefProxy<TKey> : {})
+    : RefProxy<T> &
+        (IncludeVirtualProps extends true ? VirtualPropsRefProxy<TKey> : {})
 
 /**
  * Creates a proxy object that records property access paths for a single row

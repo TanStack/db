@@ -274,6 +274,11 @@ type SelectValue =
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
+// Selection inference accepts both row-root refs (with virtual row fields) and
+// nested object refs (without them).
+type AnyRef<T = any, Nullable extends boolean = false> =
+  | Ref<T, Nullable>
+  | Ref<T, Nullable, false>
 export type ScalarSelectValue =
   | BasicExpression
   | Aggregate
@@ -333,7 +338,7 @@ export type ResultTypeFromSelectValue<TSelectValue> =
                   ? ResultTypeFromCaseWhen<T>
                   : TSelectValue extends QueryBuilder<infer TChildContext>
                     ? Collection<GetResult<TChildContext>>
-                    : TSelectValue extends Ref<infer _T>
+                    : TSelectValue extends AnyRef<infer _T>
                       ? ExtractRef<TSelectValue>
                       : TSelectValue extends RefLeaf<infer T>
                         ? IsNullableRef<TSelectValue> extends true
@@ -348,7 +353,7 @@ export type ResultTypeFromSelectValue<TSelectValue> =
                               ? T | null | undefined
                               : T | null
                             : TSelectValue extends
-                                  | Ref<infer _T>
+                                  | AnyRef<infer _T>
                                   | null
                                   | undefined
                               ?
@@ -436,7 +441,7 @@ export type ResultTypeFromSelect<TSelectObject> =
                       TSelectObject[K] extends QueryBuilder<infer TChildContext>
                       ? Collection<GetResult<TChildContext>>
                       : // Ref (full object ref or spread with RefBrand) - recursively process properties
-                        TSelectObject[K] extends Ref<infer _T>
+                        TSelectObject[K] extends AnyRef<infer _T>
                         ? ExtractRef<TSelectObject[K]>
                         : // RefLeaf (simple property ref like user.name)
                           TSelectObject[K] extends RefLeaf<infer T>
@@ -457,7 +462,7 @@ export type ResultTypeFromSelect<TSelectObject> =
                                 : T | null
                               : // Nullable and/or optional object-type schema field
                                 TSelectObject[K] extends
-                                    | Ref<infer _T>
+                                    | AnyRef<infer _T>
                                     | null
                                     | undefined
                                 ?
@@ -524,7 +529,9 @@ type IsTrueRef<T> =
   T extends RefLeaf<infer U>
     ? RefShapeMatches<T, Ref<U, IsNullableRef<T>>> extends true
       ? true
-      : false
+      : RefShapeMatches<T, Ref<U, IsNullableRef<T>, false>> extends true
+        ? true
+        : false
     : false
 
 // Strict structural equivalence between two ref shapes. Unlike plain
@@ -820,7 +827,7 @@ type NonUndefined<T> = T extends undefined ? never : T
 type NonNull<T> = T extends null ? never : T
 
 /**
- * Virtual properties available on all Ref types in query builders.
+ * Virtual properties available on row-root Ref types in query builders.
  * These allow querying on sync status, origin, key, and collection ID.
  *
  * @example
@@ -855,8 +862,9 @@ type VirtualPropsRef<TKey extends string | number = string | number> = {
  * through all nested property accesses, ensuring the result type includes
  * `| undefined` for all fields accessed through this ref.
  *
- * Includes virtual properties ($synced, $origin, $key, $collectionId) for
- * querying on sync status and row metadata.
+ * Row-root refs include virtual properties ($synced, $origin, $key,
+ * $collectionId) for querying on row metadata. Recursively traversed user
+ * objects do not, because those values are not independently published rows.
  *
  * Example usage:
  * ```typescript
@@ -873,32 +881,38 @@ type VirtualPropsRef<TKey extends string | number = string | number> = {
  * select(({ user }) => ({ ...user })) // Returns User type, not Ref types
  * ```
  */
-export type Ref<T = any, Nullable extends boolean = false> = T extends unknown
-  ? RefBranch<T, Nullable>
-  : never
+export type Ref<
+  T = any,
+  Nullable extends boolean = false,
+  IncludeVirtualProps extends boolean = true,
+> = T extends unknown ? RefBranch<T, Nullable, IncludeVirtualProps> : never
 
-type RefBranch<T, Nullable extends boolean> = {
+type RefBranch<
+  T,
+  Nullable extends boolean,
+  IncludeVirtualProps extends boolean,
+> = {
   [K in keyof T]: IsNonExactOptional<T[K]> extends true
     ? IsNonExactNullable<T[K]> extends true
       ? // Both optional and nullable
         IsPlainObject<NonNullable<T[K]>> extends true
-        ? Ref<NonNullable<T[K]>, Nullable> | null | undefined
+        ? Ref<NonNullable<T[K]>, Nullable, false> | null | undefined
         : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined
       : // Optional only
         IsPlainObject<NonUndefined<T[K]>> extends true
-        ? Ref<NonUndefined<T[K]>, Nullable> | undefined
+        ? Ref<NonUndefined<T[K]>, Nullable, false> | undefined
         : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined
     : IsNonExactNullable<T[K]> extends true
       ? // Nullable only
         IsPlainObject<NonNull<T[K]>> extends true
-        ? Ref<NonNull<T[K]>, Nullable> | null
+        ? Ref<NonNull<T[K]>, Nullable, false> | null
         : RefLeaf<NonNull<T[K]>, Nullable> | null
       : // Required
         IsPlainObject<T[K]> extends true
-        ? Ref<T[K], Nullable>
+        ? Ref<T[K], Nullable, false>
         : RefLeaf<T[K], Nullable>
 } & RefLeaf<T, Nullable> &
-  VirtualPropsRef
+  (IncludeVirtualProps extends true ? VirtualPropsRef : {})
 
 /**
  * Ref - The user-facing ref type with clean IDE display
@@ -1034,9 +1048,15 @@ export type InferResultType<TContext extends Context> =
     ? GetResult<TContext> | undefined
     : Array<GetResult<TContext>>
 
-type WithVirtualPropsIfObject<TResult> = TResult extends object
-  ? WithVirtualProps<TResult, string | number>
-  : TResult
+type WithVirtualPropsIfAttachable<TResult> = TResult extends unknown
+  ? TResult extends object
+    ? IsPlainObject<TResult> extends true
+      ? WithVirtualProps<TResult, string | number>
+      : TResult extends ReadonlyArray<any>
+        ? WithVirtualProps<TResult, string | number>
+        : TResult
+    : TResult
+  : never
 
 type PrettifyIfPlainObject<T> = IsPlainObject<T> extends true ? Prettify<T> : T
 type FromSourceNamesForOptionality<TContext extends Context> =
@@ -1079,7 +1099,7 @@ type UnionFromResult<
       ? JoinedOnlyUnionFromResult<TBaseSchema, TSchema>
       : never)
 type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
-  ? WithVirtualPropsIfObject<TContext[`result`]>
+  ? WithVirtualPropsIfAttachable<TContext[`result`]>
   : TContext[`hasUnionFrom`] extends true
     ? UnionFromResult<
         TContext[`baseSchema`],
