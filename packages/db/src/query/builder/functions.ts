@@ -91,13 +91,24 @@ type ExtractType<T> =
         ? U
         : T
 
-// Helper type to determine aggregate return type based on input nullability
-type AggregateReturnType<T> =
-  ExtractType<T> extends infer U
-    ? U extends number | undefined | null | Date | bigint | string
-      ? Aggregate<U>
-      : Aggregate<number | undefined | null | Date | bigint | string>
-    : Aggregate<number | undefined | null | Date | bigint | string>
+type IsAny<T> = 0 extends 1 & T ? true : false
+
+// Validate the non-nullish value domain while preserving the original
+// expression type. `any` remains permissive, while `unknown` must be narrowed.
+type AggregateArgument<T, Domain> = T &
+  (IsAny<ExtractType<T>> extends true
+    ? unknown
+    : [Exclude<ExtractType<T>, null | undefined>] extends [never]
+      ? never
+      : [Exclude<ExtractType<T>, null | undefined>] extends [Domain]
+        ? unknown
+        : never)
+
+type NumericAggregateArgument<T> = AggregateArgument<T, number>
+type OrderableAggregateArgument<T> = AggregateArgument<
+  T,
+  number | Date | bigint | string
+>
 
 // Helper type to determine string function return type based on input nullability
 type StringFunctionReturnType<T> =
@@ -644,20 +655,28 @@ export function count(arg: ExpressionLike): Aggregate<number> {
   return new Aggregate(`count`, [toExpression(arg)])
 }
 
-export function avg<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
-  return new Aggregate(`avg`, [toExpression(arg)]) as AggregateReturnType<T>
+export function avg<T extends ExpressionLike>(
+  arg: NumericAggregateArgument<T>,
+): Aggregate<number> {
+  return new Aggregate(`avg`, [toExpression(arg)])
 }
 
-export function sum<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
-  return new Aggregate(`sum`, [toExpression(arg)]) as AggregateReturnType<T>
+export function sum<T extends ExpressionLike>(
+  arg: NumericAggregateArgument<T>,
+): Aggregate<number> {
+  return new Aggregate(`sum`, [toExpression(arg)])
 }
 
-export function min<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
-  return new Aggregate(`min`, [toExpression(arg)]) as AggregateReturnType<T>
+export function min<T extends ExpressionLike>(
+  arg: OrderableAggregateArgument<T>,
+): Aggregate<ExtractType<T>> {
+  return new Aggregate(`min`, [toExpression(arg)])
 }
 
-export function max<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
-  return new Aggregate(`max`, [toExpression(arg)]) as AggregateReturnType<T>
+export function max<T extends ExpressionLike>(
+  arg: OrderableAggregateArgument<T>,
+): Aggregate<ExtractType<T>> {
+  return new Aggregate(`max`, [toExpression(arg)])
 }
 
 /**
