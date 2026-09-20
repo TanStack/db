@@ -488,6 +488,71 @@ describe(`Query collection type resolution tests`, () => {
       // Should infer ResponseType as select parameter type
       expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
     })
+
+    /**
+     * Law: Query `select` materializes schema output rows, while collection
+     * mutations continue to accept schema input. A transforming schema keeps
+     * those domains observably distinct. Reversing the select result to input
+     * must fail the hostile control below.
+     */
+    it(`preserves schema output rows selected from a wrapped response`, () => {
+      const rowSchema = z.object({
+        id: z.string(),
+        createdAt: z.string().transform((value) => new Date(value)),
+      })
+
+      type RowInput = z.input<typeof rowSchema>
+      type RowOutput = z.output<typeof rowSchema>
+      type WrappedResponse = {
+        rows: Array<RowOutput>
+        total: number
+      }
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`wrapped-transformed-schema`],
+        queryFn: async (): Promise<WrappedResponse> => ({
+          rows: [{ id: `1`, createdAt: new Date(0) }],
+          total: 1,
+        }),
+        select: (response) => response.rows,
+        schema: rowSchema,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[RowOutput]>()
+
+      const collection = createCollection(options)
+      collection.insert({ id: `2`, createdAt: `2026-09-20T00:00:00.000Z` })
+
+      const selected = collection.get(`1`)
+      if (selected) {
+        expectTypeOf(selected.createdAt).toEqualTypeOf<Date>()
+      }
+
+      // @ts-expect-error schema mutation inputs have not been materialized yet
+      collection.insert({ id: `3`, createdAt: new Date(0) })
+
+      type HostileResponse = {
+        inputRows: Array<RowInput>
+        outputRows: Array<RowOutput>
+      }
+
+      const schemaInputSelectConfig = {
+        queryClient,
+        queryKey: [`wrapped-schema-input`],
+        queryFn: async (): Promise<HostileResponse> => ({
+          inputRows: [{ id: `1`, createdAt: `1970-01-01T00:00:00.000Z` }],
+          outputRows: [{ id: `1`, createdAt: new Date(0) }],
+        }),
+        select: (response: HostileResponse) => response.inputRows,
+        schema: rowSchema,
+        getKey: (item: RowOutput) => item.id,
+      }
+
+      // @ts-expect-error select must return materialized schema output rows
+      queryCollectionOptions(schemaInputSelectConfig)
+    })
   })
 
   describe(`loadSubsetOptions type inference`, () => {
