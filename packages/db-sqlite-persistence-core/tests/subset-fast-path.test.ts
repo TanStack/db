@@ -50,7 +50,7 @@ function createLimitAdapter(initial: Array<Todo>) {
 }
 
 type CoordinatorHarness = PersistedCollectionCoordinator & {
-  emit: (payload: TxCommitted, senderId?: string) => void
+  emit: (payload: TxCommitted | Record<string, unknown>, senderId?: string) => void
 }
 
 function createCoordinatorHarness(collectionId: string): CoordinatorHarness {
@@ -371,6 +371,116 @@ describe(`subset fast path`, () => {
       await collection.cleanup()
       warning.mockRestore()
       vi.useRealTimers()
+    }
+  })
+
+  it(`does not answer from a demand whose reload failed after a reset`, async () => {
+    const adapter = createLimitAdapter([
+      { id: `1`, title: `one` },
+      { id: `2`, title: `two` },
+    ])
+    const coordinator = createCoordinatorHarness(`reset-reload-failed`)
+    const read = adapter.loadSubset.bind(adapter)
+    let failNextRead = false
+    adapter.loadSubset = (...args) => {
+      if (failNextRead) {
+        failNextRead = false
+        return Promise.reject(new Error(`store read failed`))
+      }
+      return read(...args)
+    }
+
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `reset-reload-failed`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      await collection._sync.loadSubset({ limit: 2 })
+      expect(collection.size).toBe(2)
+
+      // A reset from another node empties the collection and reloads it. The
+      // reload fails, so the rows are gone and nothing put them back.
+      failNextRead = true
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+      await flush()
+
+      expect(collection.size).toBe(0)
+
+      // Answering `true` here would hand a live query rows that are not there.
+      const reacquired = collection._sync.loadSubset({ limit: 2 })
+      expect(reacquired).not.toBe(true)
+      await reacquired
+      expect(collection.size).toBe(2)
+    } finally {
+      warning.mockRestore()
+      await collection.cleanup()
+    }
+  })
+
+  it(`keeps upstream loads and releases balanced for one options object`, async () => {
+    const adapter = createLimitAdapter([
+      { id: `1`, title: `one` },
+      { id: `2`, title: `two` },
+    ])
+    let loads = 0
+    let releases = 0
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `balanced-leases`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                loads++
+                return true
+              },
+              unloadSubset: () => {
+                releases++
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      // The *same* object twice. `unloadSubset` releases the exact acquisition
+      // created for it, so a second upstream lease taken here could never be
+      // given back.
+      const only: LoadSubsetOptions = { limit: 2 }
+
+      await collection._sync.loadSubset(only)
+      expect(collection._sync.loadSubset(only)).toBe(true)
+      expect(loads).toBe(1)
+
+      collection._sync.unloadSubset(only)
+      expect(releases).toBe(1)
+      expect(loads).toBe(releases)
+    } finally {
+      await collection.cleanup()
     }
   })
 

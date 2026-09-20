@@ -818,7 +818,7 @@ class PersistedCollectionRuntime<
    */
   private readonly loadsInFlight = new Map<
     ReturnType<typeof getLoadSubsetDemandKey>,
-    number
+    { generation: number; count: number }
   >()
   private startupSettled = false
   /**
@@ -1106,7 +1106,7 @@ class PersistedCollectionRuntime<
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       await this.waitForAppliedReceiptsAfter(appliedCursor)
     } finally {
-      this.leaveLoad(demandKey)
+      this.leaveLoad(demandKey, lifecycleGeneration)
     }
 
     // Only claim the rows are here if nothing invalidated them while we were
@@ -1174,13 +1174,36 @@ class PersistedCollectionRuntime<
   }
 
   private enterLoad(key: ReturnType<typeof getLoadSubsetDemandKey>): void {
-    this.loadsInFlight.set(key, (this.loadsInFlight.get(key) ?? 0) + 1)
+    const entry = this.loadsInFlight.get(key)
+
+    if (entry && entry.generation === this.lifecycleGeneration) {
+      entry.count++
+      return
+    }
+
+    this.loadsInFlight.set(key, {
+      generation: this.lifecycleGeneration,
+      count: 1,
+    })
   }
 
-  private leaveLoad(key: ReturnType<typeof getLoadSubsetDemandKey>): void {
-    const remaining = (this.loadsInFlight.get(key) ?? 1) - 1
+  /**
+   * `generation` is the one the load started in.
+   *
+   * `advanceLifecycle` clears this map, but a load from before it still runs
+   * its `finally`. Without the check that late call would decrement — or
+   * delete — a count belonging to the *current* generation, and the fast path
+   * would then answer while that load was still settling.
+   */
+  private leaveLoad(
+    key: ReturnType<typeof getLoadSubsetDemandKey>,
+    generation: number,
+  ): void {
+    const entry = this.loadsInFlight.get(key)
 
-    if (remaining > 0) this.loadsInFlight.set(key, remaining)
+    if (!entry || entry.generation !== generation) return
+
+    if (entry.count > 1) entry.count--
     else this.loadsInFlight.delete(key)
   }
 
@@ -1265,7 +1288,9 @@ class PersistedCollectionRuntime<
     const key = getLoadSubsetDemandKey(options)
 
     if (!this.hydratedDemands.has(key)) return false
-    if (this.loadsInFlight.has(key)) return false
+    if (this.loadsInFlight.get(key)?.generation === this.lifecycleGeneration) {
+      return false
+    }
     if ((this.demandCoverage.get(key) ?? 0) <= 0) return false
 
     // The same registration the slow path performs, so this acquisition owns
@@ -2286,6 +2311,12 @@ class PersistedCollectionRuntime<
   }
 
   private async truncateAndReloadUnsafe(): Promise<void> {
+    // The collection is about to be emptied, and the reload that refills it
+    // can fail. Nothing below may be believed until it is read again — and
+    // this path does not go through the source's `truncate`, so
+    // `noteSourceTruncate` never runs for it.
+    this.hydratedDemands.clear()
+
     if (this.syncControls.begin && this.syncControls.commit) {
       this.withInternalApply(() => {
         this.syncControls.begin?.({ immediate: true })
@@ -2877,7 +2908,11 @@ function createWrappedSyncConfig<
           runtime.clearSyncControls()
         },
         loadSubset: (options: LoadSubsetOptions): true | Promise<void> => {
-          const acquisition = { forwarded: false }
+          // **One record per options object.** `unloadSubset` releases the
+          // exact acquisition created for `options`, so replacing the record
+          // on a repeat acquisition would strand the first upstream lease: one
+          // release would end only the latest.
+          const acquisition = acquisitions.get(options) ?? { forwarded: false }
           acquisitions.set(options, acquisition)
 
           // Hydration is another async boundary. A release before this point
@@ -2892,6 +2927,12 @@ function createWrappedSyncConfig<
                 return true
               }
               if (!resolved.loadSubset) return true
+
+              // Already holding an upstream lease for this exact object: a
+              // second forward would take a lease the single release cannot
+              // give back.
+              if (acquisition.forwarded) return true
+
               acquisition.forwarded = true
               try {
                 // Returning a promise transfers its lease even if it rejects.
