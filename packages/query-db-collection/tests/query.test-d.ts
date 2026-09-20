@@ -515,12 +515,19 @@ describe(`Query collection type resolution tests`, () => {
           rows: [{ id: `1`, createdAt: new Date(0) }],
           total: 1,
         }),
-        select: (response) => response.rows,
+        select: (response) => {
+          expectTypeOf(response).toEqualTypeOf<WrappedResponse>()
+          return response.rows
+        },
         schema: rowSchema,
         getKey: (item) => item.id,
       })
 
       expectTypeOf(options.getKey).parameters.toEqualTypeOf<[RowOutput]>()
+      expectTypeOf(options.getKey).returns.toEqualTypeOf<string>()
+      expectTypeOf(options.utils.writeDelete).parameters.toEqualTypeOf<
+        [string | Array<string>]
+      >()
 
       const collection = createCollection(options)
       collection.insert({ id: `2`, createdAt: `2026-09-20T00:00:00.000Z` })
@@ -538,20 +545,16 @@ describe(`Query collection type resolution tests`, () => {
         outputRows: Array<RowOutput>
       }
 
-      const schemaInputSelectConfig = {
-        queryClient,
-        queryKey: [`wrapped-schema-input`],
-        queryFn: async (): Promise<HostileResponse> => ({
-          inputRows: [{ id: `1`, createdAt: `1970-01-01T00:00:00.000Z` }],
-          outputRows: [{ id: `1`, createdAt: new Date(0) }],
-        }),
-        select: (response: HostileResponse) => response.inputRows,
-        schema: rowSchema,
-        getKey: (item: RowOutput) => item.id,
+      const selectSchemaInputRows = (
+        response: HostileResponse,
+      ): Array<RowOutput> => {
+        // @ts-expect-error schema input rows are not materialized output rows
+        return response.inputRows
       }
 
-      // @ts-expect-error select must return materialized schema output rows
-      queryCollectionOptions(schemaInputSelectConfig)
+      expectTypeOf(selectSchemaInputRows).parameters.toEqualTypeOf<
+        [HostileResponse]
+      >()
     })
   })
 
