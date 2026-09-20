@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useRef } from 'react'
+import { useRef } from 'react'
 import { useLiveQueryForSuspense } from './useLiveQuery'
 import { getLiveQueryResultInfo } from './live-query-internals'
 import type { UseLiveQueryConfig } from './useLiveQuery'
@@ -166,7 +166,6 @@ export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   deps?: Array<unknown>,
 ) {
-  const suspenseConsumerId = useId()
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
@@ -177,23 +176,8 @@ export function useLiveSuspenseQuery(
       ? useLiveQueryForSuspense(
           configOrQueryOrCollection,
           undefined,
-          suspenseConsumerId,
         )
-      : useLiveQueryForSuspense(
-          configOrQueryOrCollection,
-          deps,
-          suspenseConsumerId,
-        )
-  const queryInfo = getLiveQueryResultInfo(result)
-
-  // Reset promise and ready state when query identity changes
-  if (collectionRef.current !== result.collection) {
-    promiseRef.current = null
-    collectionRef.current = result.collection
-    hasBeenReadyRef.current = false
-  }
-
-  // SUSPENSE LOGIC: Throw promise or error based on collection status
+      : useLiveQueryForSuspense(configOrQueryOrCollection, deps)
 
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
@@ -205,6 +189,17 @@ export function useLiveSuspenseQuery(
         `2) Use useLiveQuery instead, which supports disabled queries with the 'isEnabled' flag.`,
     )
   }
+
+  const queryInfo = getLiveQueryResultInfo(result)
+
+  // Reset promise and ready state when query identity changes
+  if (collectionRef.current !== result.collection) {
+    promiseRef.current = null
+    collectionRef.current = result.collection
+    hasBeenReadyRef.current = false
+  }
+
+  // SUSPENSE LOGIC: Throw promise or error based on collection status
 
   const collectionStatus = result.collection.status
 
@@ -242,9 +237,7 @@ export function useLiveSuspenseQuery(
     if (!promiseRef.current) {
       promiseRef.current = queryInfo.observer.preload()
     }
-    // THROW PROMISE - React Suspense catches this (React 18+ required)
-    // Note: We don't check React version here. In React <18, this will be caught
-    // by an Error Boundary, which provides a reasonable failure mode.
+    // React Suspense catches this promise and retries after preload settles.
     throw promiseRef.current
   }
 

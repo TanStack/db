@@ -333,6 +333,82 @@ describe(`live queries across uncommitted renders`, () => {
     expect(loadCount).toBe(1)
   })
 
+  it(`shares an active suspense collection and retires it after cleanup`, async () => {
+    let releaseSecondRender!: () => void
+    let secondRenderBlocked = true
+    const secondRender = new Promise<void>((resolve) => {
+      releaseSecondRender = resolve
+    })
+    const source = makeSource(`committed-rerender-precommit-ownership`)
+    const config = {
+      query: (q: InitialQueryBuilder) =>
+        q.from({ person: source }).where(({ person }) => eq(person.id, `1`)),
+    }
+    const liveCollections = new Map<string, object>()
+    const People = ({ label, tick = 0 }: { label: string; tick?: number }) => {
+      const result = useLiveSuspenseQuery(config)
+      liveCollections.set(label, result.collection)
+      if (label === `Second` && secondRenderBlocked) throw secondRender
+      return <div>{label}: {result.data[0]?.name} {tick}</div>
+    }
+
+    const firstView = render(
+      <Suspense fallback={<div>First loading</div>}>
+        <People label="First" />
+      </Suspense>,
+    )
+    await advanceTime(1)
+    expect(firstView.getByText(`First: A 0`)).toBeDefined()
+    const firstCollection = liveCollections.get(`First`)
+
+    const secondView = render(
+      <Suspense fallback={<div>Second loading</div>}>
+        <People label="Second" />
+      </Suspense>,
+    )
+    expect(secondView.getByText(`Second loading`)).toBeDefined()
+
+    firstView.rerender(
+      <Suspense fallback={<div>First loading</div>}>
+        <People label="First" tick={1} />
+      </Suspense>,
+    )
+    expect(liveCollections.get(`First`)).toBe(firstCollection)
+    await act(async () => {
+      secondRenderBlocked = false
+      releaseSecondRender()
+      await Promise.resolve()
+    })
+    await advanceTime(1)
+    expect(secondView.getByText(`Second: A 0`)).toBeDefined()
+
+    const secondCollection = liveCollections.get(`Second`)
+    const thirdView = render(
+      <Suspense fallback={<div>Third loading</div>}>
+        <People label="Third" />
+      </Suspense>,
+    )
+    await advanceTime(1)
+
+    expect(thirdView.getByText(`Third: A 0`)).toBeDefined()
+    expect(liveCollections.get(`Third`)).toBe(secondCollection)
+
+    firstView.unmount()
+    secondView.unmount()
+    thirdView.unmount()
+    await advanceTime(2)
+
+    const fourthView = render(
+      <Suspense fallback={<div>Fourth loading</div>}>
+        <People label="Fourth" />
+      </Suspense>,
+    )
+    await advanceTime(1)
+
+    expect(fourthView.getByText(`Fourth: A 0`)).toBeDefined()
+    expect(liveCollections.get(`Fourth`)).not.toBe(secondCollection)
+  })
+
   it(`does not share precommit queries across distinct source objects with the same id`, async () => {
     const createSource = (name: string) => {
       let resolveLoad!: () => void

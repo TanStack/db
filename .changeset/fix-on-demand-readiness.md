@@ -5,4 +5,4 @@
 '@tanstack/electric-db-collection': patch
 ---
 
-Restore synchronous readiness for warm on-demand queries, retain retry-stable Suspense resources before commit, and preserve persisted demand readiness across lifecycle transitions. Avoid redundant Electric refreshes when requesting subset snapshots.
+Restore synchronous readiness for warm on-demand queries, retain retry-stable Suspense resources, and preserve persisted demand readiness across lifecycle transitions. Avoid redundant Electric refreshes when requesting subset snapshots, and declare React 18 as the minimum supported React version.

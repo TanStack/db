@@ -43,7 +43,6 @@ const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 type SuspenseCollection = Collection<object, string | number, {}>
 type SuspenseCollectionEntry = {
   collection: SuspenseCollection
-  pendingConsumers: Set<string>
   removeStatusListeners: () => void
 }
 
@@ -100,14 +99,9 @@ function releaseSuspenseCollection(
   collections: Map<string, SuspenseCollectionEntry>,
   queryHash: string,
   collection: SuspenseCollection,
-  consumerId?: string,
 ): void {
   const entry = collections.get(queryHash)
   if (entry?.collection !== collection) return
-  if (consumerId) {
-    entry.pendingConsumers.delete(consumerId)
-    if (entry.pendingConsumers.size > 0) return
-  }
   collections.delete(queryHash)
   entry.removeStatusListeners()
 }
@@ -733,15 +727,14 @@ export function useLiveQuery(
 export function useLiveQueryForSuspense(
   configOrQueryOrCollection: any,
   deps: Array<unknown> | undefined,
-  consumerId: string,
 ) {
-  return useLiveQueryImpl(configOrQueryOrCollection, deps, consumerId)
+  return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
 }
 
 function useLiveQueryImpl(
   configOrQueryOrCollection: any,
   deps: Array<unknown> | undefined,
-  suspenseConsumerId?: string,
+  forSuspense = false,
 ) {
   const contextDbClient = useOptionalDbClient()
   // Check if it's already a collection
@@ -847,7 +840,7 @@ function useLiveQueryImpl(
   }
 
   if (
-    suspenseConsumerId &&
+    forSuspense &&
     !inputIsCollection &&
     queryHash &&
     !dbClient &&
@@ -866,14 +859,12 @@ function useLiveQueryImpl(
       : queryHash
 
   const suspenseCollections =
-    suspenseConsumerId && !inputIsCollection && suspenseKey
+    forSuspense && !inputIsCollection && suspenseKey
       ? getSuspenseCollections(dbClient)
       : undefined
   const suspenseEntry = suspenseKey
     ? suspenseCollections?.get(suspenseKey)
     : undefined
-  if (suspenseConsumerId)
-    suspenseEntry?.pendingConsumers.add(suspenseConsumerId)
   const suspenseCollection = suspenseEntry?.collection
 
   const identityChanged =
@@ -888,7 +879,6 @@ function useLiveQueryImpl(
     !collectionRef.current ||
     (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
     (!inputIsCollection && (clientRef.current !== dbClient || identityChanged))
-
   const resumeDeferredCollections = () => {
     for (const collection of deferredCollectionsRef.current) {
       collection._resumeSyncStart()
@@ -933,8 +923,8 @@ function useLiveQueryImpl(
         }
         collectionRef.current = createCollectionFromPreparedQuery(
           preparedQueryValue,
-        ) as SuspenseCollection
-        if (suspenseCollections && suspenseKey && suspenseConsumerId) {
+        ) as SuspenseCollection | null
+        if (suspenseCollections && suspenseKey && collectionRef.current) {
           const collection = collectionRef.current
           const removeCleanupListener = collection.on(`status:cleaned-up`, () =>
             releaseSuspenseCollection(
@@ -959,7 +949,6 @@ function useLiveQueryImpl(
           })
           suspenseCollections.set(suspenseKey, {
             collection,
-            pendingConsumers: new Set([suspenseConsumerId]),
             removeStatusListeners: () => {
               removeCleanupListener()
               removeErrorListener()
@@ -1003,25 +992,9 @@ function useLiveQueryImpl(
     ((onStoreChange: () => void) => () => void) | null
   >(null)
   if (!subscribeRef.current || needsNewCollection) {
-    const collection = collectionRef.current
     subscribeRef.current = (onStoreChange: () => void) => {
       const unsubscribe = observer.subscribe(() => onStoreChange())
       resumeDeferredCollections()
-      if (
-        suspenseCollections &&
-        suspenseKey &&
-        collection &&
-        suspenseConsumerId
-      ) {
-        queueMicrotask(() =>
-          releaseSuspenseCollection(
-            suspenseCollections,
-            suspenseKey,
-            collection,
-            suspenseConsumerId,
-          ),
-        )
-      }
       return unsubscribe
     }
   }
