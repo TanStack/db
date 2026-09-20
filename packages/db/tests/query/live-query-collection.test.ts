@@ -4092,8 +4092,8 @@ describe(`createLiveQueryCollection`, () => {
             markReady()
 
             return {
-                loadSubset: (options) => {
-                  loadSubsetCallCount++
+              loadSubset: (options) => {
+                loadSubsetCallCount++
                 if (!initialPreloadComplete || moveStarted) return true
                 moveStarted = true
                 return gate.promise.then(() => {
@@ -4112,9 +4112,9 @@ describe(`createLiveQueryCollection`, () => {
       const liveQuery = createLiveQueryCollection({
         query: (q) =>
           q
-              .from({ item: sourceCollection })
-              .orderBy(({ item }) => item.value, `asc`)
-              .limit(1)
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(1)
             .offset(0),
         startSync: true,
       })

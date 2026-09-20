@@ -47,10 +47,7 @@ type SuspenseCollectionEntry = {
   removeStatusListeners: () => void
 }
 
-const unscopedSuspenseCollections = new Map<
-  string,
-  SuspenseCollectionEntry
->()
+const unscopedSuspenseCollections = new Map<string, SuspenseCollectionEntry>()
 const suspenseCollectionsByClient = new WeakMap<
   DbClient,
   Map<string, SuspenseCollectionEntry>
@@ -197,12 +194,14 @@ function getCurrentTime(): number {
 function getWarningCallsite(stackIndex: number): string {
   const stack = new Error().stack ?? `unknown`
   const lines = stack.split(`\n`)
-  const userFrame = lines.slice(1).find(
-    (line) =>
-      !line.includes(`useLiveQuery.ts`) &&
-      !line.includes(`useLiveSuspenseQuery.ts`) &&
-      !line.includes(`useLiveInfiniteQuery.ts`),
-  )
+  const userFrame = lines
+    .slice(1)
+    .find(
+      (line) =>
+        !line.includes(`useLiveQuery.ts`) &&
+        !line.includes(`useLiveSuspenseQuery.ts`) &&
+        !line.includes(`useLiveInfiniteQuery.ts`),
+    )
   return userFrame?.trim() ?? lines[stackIndex]?.trim() ?? stack
 }
 
@@ -873,7 +872,8 @@ function useLiveQueryImpl(
   const suspenseEntry = suspenseKey
     ? suspenseCollections?.get(suspenseKey)
     : undefined
-  if (suspenseConsumerId) suspenseEntry?.pendingConsumers.add(suspenseConsumerId)
+  if (suspenseConsumerId)
+    suspenseEntry?.pendingConsumers.add(suspenseConsumerId)
   const suspenseCollection = suspenseEntry?.collection
 
   const identityChanged =
@@ -936,14 +936,12 @@ function useLiveQueryImpl(
         ) as SuspenseCollection
         if (suspenseCollections && suspenseKey && suspenseConsumerId) {
           const collection = collectionRef.current
-          const removeCleanupListener = collection.on(
-            `status:cleaned-up`,
-            () =>
-              releaseSuspenseCollection(
-                suspenseCollections,
-                suspenseKey,
-                collection,
-              ),
+          const removeCleanupListener = collection.on(`status:cleaned-up`, () =>
+            releaseSuspenseCollection(
+              suspenseCollections,
+              suspenseKey,
+              collection,
+            ),
           )
           const removeErrorListener = collection.on(`status:error`, () => {
             // Keep the failed collection through React's immediate retry so

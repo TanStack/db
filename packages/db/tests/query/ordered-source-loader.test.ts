@@ -247,10 +247,7 @@ describe(`OrderedSourceLoader`, () => {
     `settles a fully synchronous $route acquisition before start returns`,
     (route) => {
       const requests: Array<string> = []
-      const request = (
-        method: string,
-        options: RequestOptions,
-      ): void => {
+      const request = (method: string, options: RequestOptions): void => {
         requests.push(method)
         options.onLoadSubsetResult?.(true, options, () => {})
       }

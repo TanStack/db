@@ -79,9 +79,7 @@ describe(`createLiveQueryWindowController`, () => {
   )(
     `handles $action during initial loading with $rowCount rows`,
     async ({ rowCount, action }) => {
-      const { source, resolveLoad } = makePendingSource(
-        ROWS.slice(0, rowCount),
-      )
+      const { source, resolveLoad } = makePendingSource(ROWS.slice(0, rowCount))
       const lq = makeOrderedLiveQuery(source, 2)
       const controller = createLiveQueryWindowController(lq, {
         pageSize: 2,

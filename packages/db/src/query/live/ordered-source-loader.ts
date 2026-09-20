@@ -489,10 +489,7 @@ export class OrderedSourceLoader {
     // Register each request separately. The operation tracker observes the
     // next request before this promise settles, so the logical chain remains
     // pending without retaining every ancestor promise until the final page.
-    this.onResult(
-      tracked,
-      isFullSource && this.needsFullSourceRecovery,
-    )
+    this.onResult(tracked, isFullSource && this.needsFullSourceRecovery)
     return tracked
   }
 

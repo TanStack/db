@@ -226,9 +226,7 @@ describe(`live queries across uncommitted renders`, () => {
     const People = () => {
       const { data } = useLiveSuspenseQuery({
         query: (q) =>
-          q
-            .from({ person: source })
-            .where(({ person }) => eq(person.id, `1`)),
+          q.from({ person: source }).where(({ person }) => eq(person.id, `1`)),
       })
       return <div>{data.map((person) => person.name).join(`, `)}</div>
     }
@@ -291,9 +289,7 @@ describe(`live queries across uncommitted renders`, () => {
     collections.push(source)
     const config = {
       query: (q: InitialQueryBuilder) =>
-        q
-          .from({ person: source })
-          .where(({ person }) => eq(person.id, `1`)),
+        q.from({ person: source }).where(({ person }) => eq(person.id, `1`)),
     }
     const First = () => {
       const { data } = useLiveSuspenseQuery(config)
