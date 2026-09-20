@@ -2539,6 +2539,182 @@ describe(`persistedCollectionOptions`, () => {
     },
   )
 
+  it(`does not mark a demand hydrated after its last acquisition leaves mid-read`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `one` },
+      { id: `2`, title: `two` },
+      { id: `3`, title: `three` },
+    ])
+    const readSubset = adapter.loadSubset
+    let releaseRead!: () => void
+    let enterRead!: () => void
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    const readEntered = new Promise<void>((resolve) => {
+      enterRead = resolve
+    })
+    let blockNextRead = true
+    adapter.loadSubset = async (...args) => {
+      if (blockNextRead) {
+        blockNextRead = false
+        enterRead()
+        await readGate
+      }
+      return readSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `released-mid-read`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      const first: LoadSubsetOptions = { limit: 3 }
+      const pending = collection._sync.loadSubset(first)
+      await readEntered
+      collection._sync.unloadSubset(first)
+      releaseRead()
+      await pending
+
+      const reacquired = collection._sync.loadSubset({ limit: 3 })
+      expect(reacquired).not.toBe(true)
+      await reacquired
+      expect(collection.get(`3`)).toBeDefined()
+    } finally {
+      releaseRead()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not answer a registered but unread demand synchronously`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `one` }])
+    const readSubset = adapter.loadSubset
+    let releaseRead!: () => void
+    let enterRead!: () => void
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    const readEntered = new Promise<void>((resolve) => {
+      enterRead = resolve
+    })
+    let blockNextRead = true
+    adapter.loadSubset = async (...args) => {
+      if (blockNextRead) {
+        blockNextRead = false
+        enterRead()
+        await readGate
+      }
+      return readSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `registered-before-read`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      const first = collection._sync.loadSubset({ limit: 1 })
+      await readEntered
+      const second = collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+      releaseRead()
+      await Promise.all([first, second])
+      expect(collection.get(`1`)).toBeDefined()
+    } finally {
+      releaseRead()
+      await collection.cleanup()
+    }
+  })
+
+  it(`stops ensuring an aborted fast-path acquisition`, async () => {
+    vi.useFakeTimers()
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const abortError = Object.assign(new Error(`abort`), { name: `AbortError` })
+    const ensured: Array<LoadSubsetOptions> = []
+    const first: LoadSubsetOptions = { limit: 1 }
+    const second: LoadSubsetOptions = { limit: 1 }
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `fast-path-abort`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => true,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestEnsureRemoteSubset: (_id, options) => {
+        ensured.push(options)
+        return Promise.reject(new Error(`offline`))
+      },
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `fast-path-abort`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) =>
+                options === second ? Promise.reject(abortError) : true,
+              unloadSubset: () => {},
+            }
+          },
+        },
+        persistence: {
+          adapter: createRecordingAdapter([{ id: `1`, title: `one` }]),
+          coordinator,
+        },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await collection._sync.loadSubset(first)
+      const result = await Promise.resolve(
+        collection._sync.loadSubset(second),
+      ).then(
+        () => `ready`,
+        (error: unknown) => error,
+      )
+      expect(result).toBe(abortError)
+
+      const callsBeforeRetry = ensured.filter(
+        (options) => options === second,
+      ).length
+      await vi.advanceTimersByTimeAsync(500)
+      expect(
+        ensured.filter((options) => options === second),
+      ).toHaveLength(callsBeforeRetry)
+    } finally {
+      await collection.cleanup()
+      warning.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it(`does not release or acquire an upstream lease cancelled during hydration`, async () => {
     const adapter = createRecordingAdapter()
     const hydrate = adapter.loadSubset

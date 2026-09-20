@@ -932,6 +932,8 @@ class PersistedCollectionRuntime<
   private async hydrateBaseline(lifecycleGeneration: number): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
 
+    // The baseline shares the unconstrained demand key. Its lease is never
+    // released, and every reload rereads it, so that coverage stays valid.
     const baseline = {}
     this.activeSubsets.set(this.getSubsetKey(baseline), baseline)
     const appliedCursor = this.appliedReceiptSequence
