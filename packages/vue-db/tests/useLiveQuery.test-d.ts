@@ -5,9 +5,9 @@ import {
   createLiveQueryCollection,
   eq,
   liveQueryCollectionOptions,
-  type Prettify,
 } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
+import type { Prettify } from '../../db/src/query/index'
 import type { Collection, CollectionStatus } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'

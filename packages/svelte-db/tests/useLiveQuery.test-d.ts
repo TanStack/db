@@ -1,8 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '../../db/src/collection/index'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import type { Prettify } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
+import type { Prettify } from '../../db/src/query/index'
 import type { Collection, CollectionStatus } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 
