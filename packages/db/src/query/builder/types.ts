@@ -277,7 +277,7 @@ type SelectShape = { [key: string]: SelectValue | SelectShape }
 // Selection inference accepts both row-root refs (with virtual row fields) and
 // nested object refs (without them).
 type AnyRef<T = any, Nullable extends boolean = false> =
-  | Ref<T, Nullable>
+  | Ref<T, Nullable, true>
   | Ref<T, Nullable, false>
 export type ScalarSelectValue =
   | BasicExpression
@@ -527,7 +527,7 @@ type ExtractRef<T> = T extends unknown
 // shape rather than a one-directional key-subset check.
 type IsTrueRef<T> =
   T extends RefLeaf<infer U>
-    ? RefShapeMatches<T, Ref<U, IsNullableRef<T>>> extends true
+    ? RefShapeMatches<T, Ref<U, IsNullableRef<T>, true>> extends true
       ? true
       : RefShapeMatches<T, Ref<U, IsNullableRef<T>, false>> extends true
         ? true
@@ -680,7 +680,7 @@ type ValueOfUnion<T, K extends PropertyKey> = T extends unknown
   : never
 type RefForContextValue<T, Nullable extends boolean = false> = T extends unknown
   ? IsPlainObject<T> extends true
-    ? Ref<T, Nullable>
+    ? Ref<T, Nullable, true>
     : RefLeaf<T, Nullable>
   : never
 type RefsSchemaForContext<TContext extends Context> =
@@ -760,7 +760,7 @@ export type RefsForContext<TContext extends Context> = {
     IsNullableContextKey<TContext, K>
   >
 } & (TContext[`hasResult`] extends true
-  ? { $selected: Ref<TContext[`result`]> }
+  ? { $selected: Ref<TContext[`result`], false, true> }
   : {}) &
   BranchUnionResultRefs<TContext> &
   JoinedRefsForContext<TContext>
@@ -862,9 +862,11 @@ type VirtualPropsRef<TKey extends string | number = string | number> = {
  * through all nested property accesses, ensuring the result type includes
  * `| undefined` for all fields accessed through this ref.
  *
- * Row-root refs include virtual properties ($synced, $origin, $key,
- * $collectionId) for querying on row metadata. Recursively traversed user
- * objects do not, because those values are not independently published rows.
+ * Inferred row-root refs include virtual properties ($synced, $origin, $key,
+ * $collectionId) for querying on row metadata. The default exported `Ref<T>`
+ * shape is suitable for reusable helpers that can accept either a row root or
+ * a recursively traversed user object, so it does not require those fields.
+ * Use `Ref<T, false, true>` when a helper specifically requires a row root.
  *
  * Example usage:
  * ```typescript
@@ -872,7 +874,8 @@ type VirtualPropsRef<TKey extends string | number = string | number> = {
  * const users: Ref<{ id: number; profile?: { bio: string } }> = { ... }
  * users.id // Ref<number> - clean display
  * users.profile?.bio // Ref<string> - nested optional access works
- * users.$synced // RefLeaf<boolean> - virtual property access
+ * const rootUsers: Ref<{ id: number }, false, true> = { ... }
+ * rootUsers.$synced // RefLeaf<boolean> - row-root virtual property access
  *
  * // Nullable ref (left/right/full join side):
  * select(({ dept }) => ({ name: dept.name })) // result: string | undefined
@@ -884,7 +887,7 @@ type VirtualPropsRef<TKey extends string | number = string | number> = {
 export type Ref<
   T = any,
   Nullable extends boolean = false,
-  IncludeVirtualProps extends boolean = true,
+  IncludeVirtualProps extends boolean = false,
 > = T extends unknown ? RefBranch<T, Nullable, IncludeVirtualProps> : never
 
 type RefBranch<
@@ -1052,9 +1055,7 @@ type WithVirtualPropsIfAttachable<TResult> = TResult extends unknown
   ? TResult extends object
     ? IsPlainObject<TResult> extends true
       ? WithVirtualProps<TResult, string | number>
-      : TResult extends ReadonlyArray<any>
-        ? WithVirtualProps<TResult, string | number>
-        : TResult
+      : TResult
     : TResult
   : never
 
@@ -1136,6 +1137,13 @@ type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
  * complex intersection types into readable object types.
  */
 export type GetRawResult<TContext extends Context> = ResultValue<TContext>
+
+// Inline materialization bypasses a child Collection, so selected child values
+// do not pass through Collection enrichment and must keep their runtime shape.
+export type GetInlineResult<TContext extends Context> =
+  TContext[`hasResult`] extends true
+    ? TContext[`result`]
+    : GetRawResult<TContext>
 
 export type GetResult<TContext extends Context> = Prettify<
   ResultValue<TContext>

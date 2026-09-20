@@ -20,6 +20,7 @@ type Row = {
   id: string
   profile: { label: string }
   createdAt: Date
+  tags: Array<string>
 }
 
 describe(`virtual row field runtime boundary`, () => {
@@ -29,7 +30,14 @@ describe(`virtual row field runtime boundary`, () => {
       mockSyncCollectionOptions<Row>({
         id: `virtual-row-fields-runtime-oracle-source`,
         getKey: (row) => row.id,
-        initialData: [{ id: `row-1`, profile: { label: `nested` }, createdAt }],
+        initialData: [
+          {
+            id: `row-1`,
+            profile: { label: `nested` },
+            createdAt,
+            tags: [`one`, `two`],
+          },
+        ],
       }),
     )
     const live = createLiveQueryCollection((q) =>
@@ -48,6 +56,36 @@ describe(`virtual row field runtime boundary`, () => {
             .from({ child: rows })
             .where(({ child }) => eq(child.id, row.id))
             .select(({ child }) => child.createdAt)
+            .findOne(),
+        ),
+        wholeRows: toArray(
+          q.from({ child: rows }).where(({ child }) => eq(child.id, row.id)),
+        ),
+        objects: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => ({ label: child.profile.label })),
+        ),
+        nestedObjects: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => ({
+              nested: { label: child.profile.label },
+            })),
+        ),
+        arrays: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => child.tags),
+        ),
+        firstObject: materialize(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => ({ label: child.profile.label }))
             .findOne(),
         ),
       })),
@@ -71,6 +109,14 @@ describe(`virtual row field runtime boundary`, () => {
       expect(hasVirtualProps(result.dates[0])).toBe(false)
       expect(result.firstDate).toBeInstanceOf(Date)
       expect(hasVirtualProps(result.firstDate)).toBe(false)
+
+      expect(hasVirtualProps(result.wholeRows[0])).toBe(true)
+      expect(result.wholeRows[0]!.$key).toBe(`row-1`)
+      expect(hasVirtualProps(result.objects[0])).toBe(false)
+      expect(hasVirtualProps(result.nestedObjects[0])).toBe(false)
+      expect(hasVirtualProps(result.nestedObjects[0]!.nested)).toBe(false)
+      expect(hasVirtualProps(result.arrays[0])).toBe(false)
+      expect(hasVirtualProps(result.firstObject)).toBe(false)
     } finally {
       await live.cleanup()
       await rows.cleanup()

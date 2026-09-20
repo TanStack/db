@@ -20,6 +20,8 @@ import {
 } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
+import type { SingleRowRefProxy } from '../../src/query/builder/ref-proxy.js'
+import type { Ref } from '../../src/query/index.js'
 import type {
   WithVirtualProps,
   WithoutVirtualProps,
@@ -37,6 +39,7 @@ type Row = {
   optionalProfile?: Profile
   nullableProfile: Profile | null
   createdAt: Date
+  tags: Array<string>
 }
 
 const rows = createCollection(
@@ -53,10 +56,18 @@ describe(`virtual row field type boundary`, () => {
   })
 
   test(`query refs expose virtual fields only at row roots`, () => {
+    const profileLabelIs = (profile: Ref<Profile>) =>
+      eq(profile.label, `nested`)
+    const rowKey = (row: Ref<Row, false, true>) => row.$key
+
     const collection = createLiveQueryCollection((q) =>
       q.from({ row: rows }).select(({ row }) => {
         expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
         expectTypeOf(row.$synced).toEqualTypeOf<RefLeaf<boolean>>()
+        profileLabelIs(row.profile)
+        if (row.optionalProfile) profileLabelIs(row.optionalProfile)
+        if (row.nullableProfile) profileLabelIs(row.nullableProfile)
+        rowKey(row)
 
         // @ts-expect-error Nested user objects are not collection rows.
         row.profile.$key
@@ -77,9 +88,18 @@ describe(`virtual row field type boundary`, () => {
   })
 
   test(`single-row refs expose virtual fields only at row roots`, () => {
+    const profileLabelIs = (profile: SingleRowRefProxy<Profile>) =>
+      eq(profile.label, `nested`)
+    const rowKey = (row: SingleRowRefProxy<Row, string | number, true>) =>
+      row.$key
+
     rows.createIndex((row) => {
       expectTypeOf(row.$collectionId).toEqualTypeOf<RefLeaf<string>>()
       expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
+      profileLabelIs(row.profile)
+      if (row.optionalProfile) profileLabelIs(row.optionalProfile)
+      if (row.nullableProfile) profileLabelIs(row.nullableProfile)
+      rowKey(row)
 
       // @ts-expect-error Nested user objects are not collection rows.
       row.profile.$key
@@ -120,5 +140,65 @@ describe(`virtual row field type boundary`, () => {
     result.dates[0]!.$key
     // @ts-expect-error Materialized Date values are not rows either.
     result.firstDate?.$synced
+  })
+
+  test(`projected child metadata follows row-shaped results`, () => {
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ row: rows }).select(({ row }) => ({
+        id: row.id,
+        wholeRows: toArray(
+          q.from({ child: rows }).where(({ child }) => eq(child.id, row.id)),
+        ),
+        objects: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => ({ label: child.profile.label })),
+        ),
+        nestedObjects: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => ({
+              nested: { label: child.profile.label },
+            })),
+        ),
+        arrays: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => child.tags),
+        ),
+        firstObject: materialize(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => ({ label: child.profile.label }))
+            .findOne(),
+        ),
+      })),
+    )
+
+    const result = collection.toArray[0]!
+    expectTypeOf(result.wholeRows[0]!.$key).toEqualTypeOf<string | number>()
+    expectTypeOf(result.objects[0]!).toEqualTypeOf<{ label: string }>()
+    expectTypeOf(result.nestedObjects[0]!).toEqualTypeOf<{
+      nested: { label: string }
+    }>()
+    expectTypeOf(result.firstObject).toEqualTypeOf<
+      { label: string } | undefined
+    >()
+    expectTypeOf(result.arrays[0]!).toEqualTypeOf<Array<string>>()
+
+    // @ts-expect-error Projected child objects are values, not rows.
+    result.objects[0]!.$key
+    // @ts-expect-error Projected child objects remain values when nested.
+    result.nestedObjects[0]!.$key
+    // @ts-expect-error Nested projection objects are values, not rows.
+    result.nestedObjects[0]!.nested.$key
+    // @ts-expect-error Selected array values are opaque values, not rows.
+    result.arrays[0]!.$key
+    // @ts-expect-error Projected findOne results are values, not rows.
+    result.firstObject?.$key
   })
 })

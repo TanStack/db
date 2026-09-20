@@ -754,7 +754,7 @@ export class CollectionImpl<
    * ```
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
-    indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
+    indexCallback: (row: SingleRowRefProxy<TOutput, TKey, true>) => any,
     config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     return this._indexes.createIndex(indexCallback, config)

@@ -274,7 +274,10 @@ export class CollectionChangesManager<
     const { where, ...opts } = options
     let whereExpression = opts.whereExpression
     if (where) {
-      const proxy = createSingleRowRefProxy<WithVirtualProps<TOutput, TKey>>()
+      const proxy = createSingleRowRefProxy<
+        WithVirtualProps<TOutput, TKey>,
+        TKey
+      >()
       const result = where(proxy)
       whereExpression = toExpression(result)
     }
