@@ -34,7 +34,7 @@ const sqliteTransformSchema = z.object({
     .number()
     .nullable()
     .default(0)
-    .transform((value) => value)
+    .transform((value) => value ?? 0)
     .brand<`Score`>(),
   label: z
     .string()
@@ -68,12 +68,12 @@ const applicationDeserializer = z.object({
     .number()
     .nullable()
     .transform(
-      (value) => value! as z.output<typeof applicationSchema>[`score`],
+      (value) => (value ?? 0) as z.output<typeof applicationSchema>[`score`],
     ),
   label: z
     .string()
     .nullable()
-    .transform((value) => value!),
+    .transform((value) => value ?? `untitled`),
   note: z.string().nullable(),
   enabled: z
     .number()
@@ -135,7 +135,7 @@ describe(`PowerSync schema transform conformance`, () => {
         expectTypeOf(right).toEqualTypeOf<SqliteOutput>()
         expectTypeOf(left.id).toEqualTypeOf<SqliteOutput[`id`]>()
         expectTypeOf(left.created_at).toEqualTypeOf<Date>()
-        expectTypeOf(left.score).toEqualTypeOf<SqliteOutput[`score`]>()
+        expectTypeOf(left.score).toEqualTypeOf<ApplicationOutput[`score`]>()
         expectTypeOf(left.label).toEqualTypeOf<string>()
         expectTypeOf(left.note).toEqualTypeOf<string | null>()
         expectTypeOf(left.enabled).toEqualTypeOf<boolean>()
