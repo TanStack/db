@@ -302,7 +302,7 @@ export class CollectionMutationsManager<
    * Updates one or more items in the collection using a callback function
    */
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
