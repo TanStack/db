@@ -2187,6 +2187,12 @@ describe(`Query Collections`, () => {
       })
     })
 
+    /**
+     * Driver: public `useLiveQuery` with Svelte state. Each `flushSync` is the
+     * observation cut after disabled, enabled, and disabled-again updates. This
+     * test observes conditional `findOne` data and status; shared conformance
+     * owns array-query Collection/state behavior.
+     */
     it(`keeps conditional findOne data empty while disabled`, () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({

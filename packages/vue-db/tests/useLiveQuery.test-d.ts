@@ -164,6 +164,9 @@ describe(`useLiveQuery type assertions`, () => {
     )
     const enabled = null as unknown as boolean
 
+    // Compile-time observation cut: the public refs returned by the real
+    // `useLiveQuery` hook; the preload error proves the live-query Collection
+    // is absent while disabled.
     const result = useLiveQuery((q) =>
       enabled ? q.from({ collection }) : null,
     )
@@ -198,6 +201,8 @@ describe(`useLiveQuery type assertions`, () => {
         ? TContext
         : never
 
+    // The exact public result combines enabled `findOne` cardinality with the
+    // empty-reactive disabled value. A paired framework test owns transitions.
     const result = useLiveQuery((q) => (enabled ? build(q) : null))
     const annotated: ConditionalUseLiveQueryReturn<QueryContext> = result
 

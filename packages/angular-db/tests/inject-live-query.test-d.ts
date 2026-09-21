@@ -146,6 +146,9 @@ describe(`injectLiveQuery type assertions`, () => {
     )
     const enabled = null as unknown as boolean
 
+    // Compile-time observation cut: the public signal accessors returned by
+    // `injectLiveQuery`; the preload error proves the live-query Collection is
+    // absent while disabled.
     const result = injectLiveQuery((q) =>
       enabled ? q.from({ collection }) : undefined,
     )
@@ -173,6 +176,8 @@ describe(`injectLiveQuery type assertions`, () => {
     )
     const enabled = null as unknown as boolean
 
+    // The exact public result combines enabled `findOne` cardinality with the
+    // empty-reactive disabled value. A paired framework test owns transitions.
     const result = injectLiveQuery((q) =>
       enabled ? q.from({ collection }).findOne() : null,
     )

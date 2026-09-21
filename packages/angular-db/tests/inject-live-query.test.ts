@@ -1209,6 +1209,12 @@ describe(`injectLiveQuery`, () => {
       })
     })
 
+    /**
+     * Driver: public `injectLiveQuery` with an Angular signal. Each
+     * `waitForAngularUpdate` is an observation cut after disabled, enabled, and
+     * disabled-again updates. This test observes status and public result data;
+     * array-query Collection/state behavior remains in shared conformance.
+     */
     it(`keeps conditional findOne data empty while disabled`, async () => {
       await TestBed.runInInjectionContext(async () => {
         const collection = createCollection(

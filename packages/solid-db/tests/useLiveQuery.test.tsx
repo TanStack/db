@@ -2078,6 +2078,12 @@ describe(`Query Collections`, () => {
       })
     })
 
+    /**
+     * Driver: public `useLiveQuery` with a Solid signal. Initial reads and each
+     * `waitFor` completion are observation cuts for disabled, enabled, and
+     * disabled-again public results. Collection/state behavior remains in
+     * shared conformance; this test isolates conditional `findOne` data.
+     */
     it(`keeps conditional findOne data empty while disabled`, async () => {
       return createRoot(async (dispose) => {
         const collection = createCollection(

@@ -178,6 +178,12 @@ describe(`useLiveQuery type assertions`, () => {
     expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
   })
 
+  /**
+   * React's public disabled result is absent rather than empty-reactive. The
+   * observation cut is `result.current` from the real `useLiveQuery` hook; the
+   * negative `map` call rejects an array-only disabled type. Runtime lifecycle
+   * and scheduler behavior remain in React conformance tests.
+   */
   it(`types disabled callbacks with React's absent result representation`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

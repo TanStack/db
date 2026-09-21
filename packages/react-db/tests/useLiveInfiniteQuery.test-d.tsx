@@ -28,6 +28,13 @@ describe(`useLiveInfiniteQuery type assertions`, () => {
     >().toEqualTypeOf<() => Promise<void>>()
   })
 
+  /**
+   * Law and source: the public pre-created live-query Collection overload must
+   * preserve its row, key, and utility types through `useLiveInfiniteQuery`.
+   * The compile-time observation cut is the returned public result. Missing-row
+   * and wrong-key accesses are hostile controls. Pagination timing and runtime
+   * page contents remain in the infinite-query conformance suite.
+   */
   it(`preserves pre-created collection row, key, and utility types`, () => {
     type Post = { id: `post-${number}`; title: string }
     type PostKey = Post[`id`]

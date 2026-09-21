@@ -110,7 +110,17 @@ export interface ControllableHandle<P> extends LiveQueryHandle {
   setParam: (param: P) => Promise<void>
 }
 
-/** What each adapter package implements and hands to `runSuite`. */
+/**
+ * Shared live-query binding law: an enabled array query exposes row data from
+ * its live-query Collection; `findOne` exposes one row or `undefined`. A
+ * disabled callback has no live-query Collection, reports `disabled` status,
+ * and exposes the adapter's declared `absent` or `empty-reactive` public result.
+ *
+ * Each adapter implements this driver through its real public hook. `flush`
+ * defines the observation cut after framework updates and core sync settle.
+ * The runtime suite observes public result data, state, and status. Framework
+ * type inference and framework scheduler internals are outside this contract.
+ */
 export interface LiveQueryDriver {
   name: string
   /** Public disabled data/state policy, not inferred from observed output. */

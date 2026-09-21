@@ -1934,6 +1934,12 @@ describe(`Query Collections`, () => {
       expect(result.isReady.value).toBe(true)
     })
 
+    /**
+     * Driver: public `useLiveQuery` with a Vue ref. The initial read and each
+     * `waitFor` completion are observation cuts for disabled, enabled, and
+     * disabled-again public results. Collection/state behavior remains in
+     * shared conformance; this test isolates conditional `findOne` data.
+     */
     it(`keeps conditional findOne data empty while disabled`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
