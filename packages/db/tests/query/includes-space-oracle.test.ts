@@ -4,6 +4,27 @@ import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { createNestedCollectionFixture } from './includes-space-oracle-fixture.js'
 
+/**
+ * # Does nested Collection materialization retain only reachable facades?
+ *
+ * Collection-valued includes need one facade for each reachable relationship
+ * bucket. They must not create a facade per leaf, retain a retired bucket at
+ * startup, or leak partially built sources when setup fails.
+ *
+ * The fixture has two branches per root, five twigs per branch, and ten leaves
+ * per twig. Facades exist for the root-to-branch, branch-to-twig, and
+ * twig-to-leaf buckets. The expected count is therefore `roots + branches +
+ * twigs`. Leaf count changes row volume but not facade count.
+ *
+ * This oracle also checks setup ownership. All four source preloads must settle
+ * before cleanup starts. Any synchronous or asynchronous setup failure cleans
+ * every source, restores test instrumentation, preserves the first failure,
+ * and reports cleanup failures separately.
+ *
+ * Facade-map inspection is a test diagnostic, not a runtime API. The count is a
+ * bounded space invariant for this fixed topology, not a general heap measure.
+ */
+
 // Inspect retained adapter state only in tests; diagnostics need no runtime API.
 type AdapterState = {
   getEntry: (...args: Array<unknown>) => object
@@ -106,31 +127,34 @@ describe(`nested Collection materialization space oracle`, () => {
     }
   }
 
-  it(`constructs exactly one facade per reachable bucket`, async () => {
-    await withSpaceFixture(20, async (fixture, entries) => {
-      await fixture.live.preload()
+  it.each([0, 1, 20])(
+    `constructs exactly one facade per reachable bucket for %i roots`,
+    async (rootCount) => {
+      await withSpaceFixture(rootCount, async (fixture, entries) => {
+        await fixture.live.preload()
 
-      const adapters = new Set(entries.mock.contexts as Array<AdapterState>)
-      const created = new Set(
-        entries.mock.results
-          .filter((result) => result.type === `return`)
-          .map((result) => result.value),
-      )
-      expect(created.size).toBe(fixture.expectedFacadeCount)
-      expect(
-        [...adapters].reduce(
-          (n, adapter) => n + countEntries(adapter.entries),
-          0,
-        ),
-      ).toBe(fixture.expectedFacadeCount)
-      expect(
-        [...adapters].reduce(
-          (n, adapter) => n + countEntries(adapter.retiredEntries),
-          0,
-        ),
-      ).toBe(0)
-    })
-  })
+        const adapters = new Set(entries.mock.contexts as Array<AdapterState>)
+        const created = new Set(
+          entries.mock.results
+            .filter((result) => result.type === `return`)
+            .map((result) => result.value),
+        )
+        expect(created.size).toBe(fixture.expectedFacadeCount)
+        expect(
+          [...adapters].reduce(
+            (n, adapter) => n + countEntries(adapter.entries),
+            0,
+          ),
+        ).toBe(fixture.expectedFacadeCount)
+        expect(
+          [...adapters].reduce(
+            (n, adapter) => n + countEntries(adapter.retiredEntries),
+            0,
+          ),
+        ).toBe(0)
+      })
+    },
+  )
 
   for (const phase of [
     `preload`,

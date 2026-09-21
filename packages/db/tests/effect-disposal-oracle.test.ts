@@ -3,8 +3,18 @@ import { createCollection, createEffect } from '../src/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { flushPromises } from './utils.js'
 
-// One disposal attempt has one outcome, even when abort/release callbacks
-// reenter it. Counting physical releases alone misses divergent caller results.
+/**
+ * # What does concurrent effect disposal mean?
+ *
+ * Every call to `dispose()` joins one disposal attempt. Abort and release
+ * callbacks may call `dispose()` again while that attempt is running. All
+ * callers must then observe the same fulfillment or the same normalized error,
+ * and the source acquisition lease must release exactly once.
+ *
+ * This finite matrix crosses the two reentry sites, a pending or synchronous
+ * batch handler, and success, Error, or `undefined` failure. Counting releases
+ * alone would miss callers that disagree about the outcome.
+ */
 const scenarios = ([`abort`, `release`] as const).flatMap((reentry) =>
   [false, true].flatMap((pendingHandler) =>
     ([`success`, `error`, `undefined`] as const).map((outcome) => ({
@@ -89,7 +99,7 @@ describe(`Effect disposal outcome oracle`, () => {
           }
           expect(result).toEqual(observed[0])
         }
-        // A settled failed attempt does not make the source lease retryable.
+        // A settled failed attempt does not make the acquisition lease retryable.
         await effect.dispose()
         expect(releases).toBe(1)
       } finally {

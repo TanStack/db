@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 
+/**
+ * Mixed-carrier graphs extend the graph law across every recursive container.
+ *
+ * The abstract graph stores only labels, targets, and edge-carrier names.
+ * Separate construction turns each edge into an object field, array slot, Map
+ * key/value, Set member, or symbol-keyed field. Reachability and acyclicity are
+ * still judged on the abstract graph. Thus a carrier bug cannot be copied into
+ * the oracle's cycle decision, and equal unfolded DAGs remain the value model.
+ */
+
 type Carrier = `object` | `array` | `map-key` | `map-value` | `set` | `symbol`
 type Edge = Readonly<{ target: number; carrier: Carrier }>
 type Node = Readonly<{ label: number; edges: ReadonlyArray<Edge> }>

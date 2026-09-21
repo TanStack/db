@@ -3,15 +3,17 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
 
 /**
- * Property-based tests for pg-serializer
+ * # Does PostgreSQL text serialization preserve the supported value domain?
  *
- * Key properties:
- * 1. Strings pass through unchanged
- * 2. Finite numbers preserve their whole numeric value without trailing text
- * 3. Booleans serialize to 'true'/'false'
- * 4. null and undefined both serialize to empty string
- * 5. Dates produce valid ISO strings
- * 6. Arrays preserve every element, its type, and its position after decoding
+ * Scalars have direct laws: strings pass through, finite numbers round-trip
+ * through strict numeric parsing, booleans use PostgreSQL tokens, nullish values
+ * become empty text, and Dates produce valid ISO strings. Flat arrays preserve
+ * every element, type, position, quote, slash, comma, brace, and null marker.
+ *
+ * The decoder below is an independent parser for this finite output dialect,
+ * not PostgreSQL or a copy of the serializer. Generated values compare decoded
+ * output with the input. Corrupt-output controls and shrink/replay checks prove
+ * the parser and properties reject omissions and malformed tokens.
  */
 
 type FiniteArrayValue = string | number | boolean | null

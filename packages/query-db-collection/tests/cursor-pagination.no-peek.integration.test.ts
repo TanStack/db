@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
 import { expectedWindow } from './cursor-pagination/model.js'
-import { createNoPeekSession } from './cursor-pagination/no-peek.js'
+import { createNoPeekDemandModel } from './cursor-pagination/no-peek.js'
 import { createFactTransport } from './cursor-pagination/no-peek-transport.js'
 import type { Row } from './cursor-pagination/model.js'
 import type { PrefixPublication } from './cursor-pagination/no-peek.js'
@@ -128,23 +128,21 @@ describe(`no-peek bridge at real graph publication`, () => {
     async (count) => {
       const candidate = createGraphFixture(count, 3)
       const baseline = createGraphFixture(count, 3)
-      const session = createNoPeekSession(candidate.acquire)
+      const model = createNoPeekDemandModel(candidate.acquire)
       const controller = createLiveQueryWindowController(baseline.live, {
         pageSize: 3,
       })
       const unsubscribe = controller.subscribe(() => {})
       try {
-        session.request(`a`, 3)
-        await session.refresh()
+        model.retainDemand(`a`, 3)
+        await model.refresh()
         await controller.preload()
-        expect(session.get(`a`)).toEqual(
-          expectedWindow(candidate.rows, scope, 3),
-        )
+        expect(model.get(`a`)).toEqual(expectedWindow(candidate.rows, scope, 3))
         expect(controller.getSnapshot().hasNextPage).toBe(
-          session.get(`a`)?.hasNextPage,
+          model.get(`a`)?.hasNextPage,
         )
         expect(controller.getSnapshot().data.map(({ id }) => id)).toEqual(
-          session.get(`a`)?.rows.map(({ id }) => id),
+          model.get(`a`)?.rows.map(({ id }) => id),
         )
         expect(candidate.transport.requests[0]).toBe(3)
         expect(baseline.transport.requests[0]).toBe(4)
@@ -161,11 +159,11 @@ describe(`no-peek bridge at real graph publication`, () => {
 
   it(`holds continuation behind actual source and graph publication`, async () => {
     const fixture = createGraphFixture(9, 3, true)
-    const session = createNoPeekSession(fixture.acquire)
-    session.request(`a`, 3)
+    const model = createNoPeekDemandModel(fixture.acquire)
+    model.retainDemand(`a`, 3)
     let notifications = 0
-    session.subscribe(() => notifications++)
-    const pending = session.refresh()
+    model.subscribe(() => notifications++)
+    const pending = model.refresh()
     const observed = pending.then(
       () => undefined,
       (error: unknown) => error,
@@ -174,11 +172,11 @@ describe(`no-peek bridge at real graph publication`, () => {
       await fixture.received.promise
       expect(fixture.fact()?.fact?.hasMore).toBe(true)
       expect(fixture.live.toArray).toEqual([])
-      expect(session.get(`a`)).toBeUndefined()
+      expect(model.get(`a`)).toBeUndefined()
       expect(notifications).toBe(0)
       fixture.release.resolve()
       expect(await observed).toBeUndefined()
-      expect(session.get(`a`)).toEqual(expectedWindow(fixture.rows, scope, 3))
+      expect(model.get(`a`)).toEqual(expectedWindow(fixture.rows, scope, 3))
       expect(notifications).toBe(1)
     } finally {
       fixture.release.resolve()
@@ -189,15 +187,15 @@ describe(`no-peek bridge at real graph publication`, () => {
 
   it(`falls back for a local filter even though the order is unchanged`, async () => {
     const fixture = createGraphFixture(9, 3, false, true)
-    const session = createNoPeekSession(fixture.acquire, false)
-    session.request(`a`, 3)
+    const model = createNoPeekDemandModel(fixture.acquire, false)
+    model.retainDemand(`a`, 3)
     try {
       const rawPrefix = await createFactTransport(fixture.rows, 3, scope).read(
         3,
       )
       expect(rawPrefix.fact?.hasMore).toBe(true)
-      await session.refresh()
-      expect(session.get(`a`)).toEqual(
+      await model.refresh()
+      expect(model.get(`a`)).toEqual(
         expectedWindow(
           fixture.rows.filter((row) => row.id < 3),
           scope,
@@ -205,7 +203,7 @@ describe(`no-peek bridge at real graph publication`, () => {
         ),
       )
       expect(fixture.windows).toEqual([4])
-      expect(session.get(`a`)?.hasNextPage).toBe(false)
+      expect(model.get(`a`)?.hasNextPage).toBe(false)
       // An opaque local filter requires the existing full-source loading path.
       expect(fixture.transport.requests[0]).toBe(10)
     } finally {
