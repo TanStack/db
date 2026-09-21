@@ -14,6 +14,23 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
+/**
+ * # What remains visible while a persisted Electric replica repairs itself?
+ *
+ * Hydrated rows and resume metadata provide the last complete public snapshot.
+ * A must-refetch starts a private replacement. Until that replacement is fully
+ * applied, readers may see an earlier permitted snapshot but never a torn mix.
+ * Failure keeps the old public rows and records repair debt; later success may
+ * replace them atomically.
+ *
+ * A plain persisted row Map and metadata Map form the reference snapshots. The
+ * driver controls hydration, SDK callbacks, applied receipts, cleanup, restart,
+ * and eager or progressive mode through the real persistence coordinator and
+ * Electric adapter. It records every exposed observation cut, not only final
+ * rows. The external-publisher fixture routes complete committed transactions
+ * through its bound adapter; that wiring does not add native-host evidence.
+ */
+
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }

@@ -19,6 +19,21 @@ import type {
 } from '../src'
 import type { SyncConfig, UtilsRecord } from '@tanstack/db'
 
+/**
+ * # Which persistence contracts are visible to TypeScript callers?
+ *
+ * The exported types require complete committed-transaction routing, preserve
+ * named reconciliation and durability errors, and admit exactly the declared
+ * remote-subset wire domain. Positive assignments are the reference type
+ * shapes. `@ts-expect-error` cases are the fault controls for omitted
+ * acquisition identity, live signals/subscriptions, unsupported values, and
+ * incomplete coordinators.
+ *
+ * The TypeScript compile is the production checkpoint. These checks establish
+ * assignability and inference only. Runtime validation, structured cloning,
+ * routing, settlement, and publication belong to the executable owners.
+ */
+
 type Todo = {
   id: string
   title: string

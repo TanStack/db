@@ -14,6 +14,35 @@ import type {
 } from '@tanstack/db-sqlite-persistence-core'
 import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordinator'
 
+/**
+ * # Which Browser coordinator outcomes are safe to acknowledge?
+ *
+ * RFC #1659 requires every adapter operation to use the elected owner for its
+ * collection. Complete committed transactions must cross that boundary
+ * without losing metadata. A mutating RPC may replay only through the same
+ * known leader and term. Remote subset request data must be clone-safe, and
+ * each accepted physical acquisition creates one exact acquisition lease.
+ *
+ * The adapter call logs, transport controls, owner callbacks, and internal-map
+ * snapshots are focused reference ledgers. Histories vary local and follower
+ * routes, response loss, leadership change, owner replacement, duplicate
+ * delivery, release, failure, and disposal. The production driver is the real
+ * `BrowserCollectionCoordinator`; only BroadcastChannel and Web Locks are
+ * replaced with deterministic seams.
+ *
+ * Checkpoints sit at adapter entry, RPC response delivery, acquisition
+ * acceptance, acquisition release, lifecycle failure, and disposal. Fault
+ * controls drop or duplicate messages, reject owner work, change leaders, and
+ * advance the released-tombstone clock. Exact call counts and error identities
+ * prevent a final-state-only false green.
+ *
+ * The composed public-Collection and generated route models live in
+ * `per-collection-coordinator-oracle.test.ts`. These seams do not prove real
+ * browser scheduling, Web Locks, BroadcastChannel, OPFS ownership, or worker
+ * behavior. They also do not yet prove bounded retry after follower transport
+ * or remote-owner admission failure; that review finding remains open.
+ */
+
 // ---------------------------------------------------------------------------
 // BroadcastChannel mock
 // ---------------------------------------------------------------------------

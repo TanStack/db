@@ -40,6 +40,34 @@ import type {
   ElectronPersistenceResponseEnvelope,
 } from '../src/protocol'
 
+/**
+ * # Does Electron preserve one collection's transaction and acquisition laws?
+ *
+ * RFC #1659 requires renderer work to reach the exact collection adapter in
+ * the elected main-process owner. Complete committed transactions retain row
+ * and collection metadata. Mutating RPC replay is limited to the same known
+ * leader and term. Remote subset request data stays inside the clone-safe wire
+ * domain, and each accepted physical acquisition has one acquisition lease.
+ *
+ * Expected transactions, adapter call logs, SQLite rows, metadata, owner
+ * callbacks, and coordinator snapshots form the reference observations.
+ * Histories vary response loss, leadership change, owner replacement,
+ * duplicate delivery, acquisition release, durability failure, cleanup, and
+ * reopen. The driver crosses the real Electron coordinator and IPC persistence
+ * adapter; the durable witness reopens a real SQLite database.
+ *
+ * Checkpoints sit at adapter entry, RPC settlement, acquisition acceptance and
+ * release, lifecycle error, disposal, and durable reopen. Hostile wire values,
+ * held work, changed leaders, rejected owner operations, and released-tombstone
+ * clock advances challenge the assertions.
+ *
+ * The default invoke and Web Locks seams are deterministic process-local
+ * controls. They prove an actual Electron process only when explicit runtime-
+ * bridge mode runs. This suite also does not yet prove bounded retry after
+ * follower transport or remote-owner admission failure; that review finding
+ * remains open.
+ */
+
 type InvokeHarness = {
   invoke: ElectronPersistenceInvoke
   close: () => void

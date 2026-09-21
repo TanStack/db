@@ -31,6 +31,34 @@ import type {
 } from '../src'
 import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
 
+/**
+ * # Does persisted wrapping preserve one Collection history?
+ *
+ * Persistence adds a durable replica beneath an optional upstream sync source.
+ * Startup hydrates rows and metadata, buffers concurrent remote work, then
+ * publishes one coherent public snapshot. Complete committed transactions
+ * route through the configured collection owner. Publication may precede
+ * durability settlement, but a later failure must stay observable.
+ *
+ * The recording adapter is a plain durable-state model: Maps for rows and
+ * metadata plus ordered transaction, index, load, and reload calls. Histories
+ * vary hydration, source commits, applied receipts, remote subset demand,
+ * acquisition release, retry, failure, cleanup, and restart. The driver uses
+ * the real persisted wrapper, Collection, coordinator, transactions, and
+ * indexes.
+ *
+ * Refinement checkpoints compare public rows, durable state, metadata, request
+ * data, sequence evidence, exact errors, and late-work fencing. Fixed hostile
+ * values challenge wire admission. Controlled failures challenge publication
+ * and durability classification. Focused Browser and Electron suites own the
+ * multiprocess transport and host-specific replay partitions.
+ *
+ * Driver SQL behavior, native host ownership, and the shared conformance
+ * portfolio have separate owners. This file does not yet prove that
+ * non-single-process remote demand is gated by successful remote-subset owner
+ * registration; that completed-review finding remains open.
+ */
+
 type Todo = {
   id: string
   title: string

@@ -57,9 +57,9 @@ Routing law and source:
   collectionId-bearing PersistedCollectionCoordinator API; issues #1589 and
   #1753. Configuration and adapter effects for collection A cannot be handled
   by collection B's adapter, before or after leadership transfer.
-- Domain: two distinct collections, distinct schema versions/policies, two
-  tabs, reordered request delivery, local writes, and leader -> follower
-  takeover. The reference is a Map keyed by (tab, collection), not the
+- History grammar: two distinct collections, distinct schema versions/policies,
+  two tabs, reordered request delivery, local writes, and leadership transfer.
+  The reference is a Map keyed by (tab, collection), not the
   coordinator's mutable adapter slot.
 - Production/checkpoint: real coordinator RPC plus Web Locks seam; compare the
   adapter identity that applies each collection's transaction after both the
@@ -74,16 +74,30 @@ Wire/ack law and source:
   wire; live signal/subscription ownership stays local. A successful follower
   response is permitted only after the leader's exact upstream subset load has
   completed.
-- Domain: a callback-bearing Subscription witness plus clone-safe expression,
-  limit, and offset requests. Requests and responses may be held separately.
+- History grammar: a callback-bearing Subscription witness plus clone-safe
+  expression, limit, and offset request data. Requests and responses may be
+  held separately.
 - Production/checkpoint: BrowserCollectionCoordinator.sendRPC and the public
   persisted on-demand leader collection. Record postMessage clone failures,
   upstream load entry/completion, and follower settlement at response delivery.
 
+Acquisition law and source:
+- RFC invariant 4 and the remote-subset owner contract. Demand can survive
+  leadership transfer, but every accepted physical acquisition creates an
+  acquisition lease with one exact release obligation.
+- History grammar: sibling logical owners, reused and distinct request-data
+  objects, prefix and duplicate release, owner replacement, and leadership
+  transfer. `RemoteLeaseOwnerLedger` is a model-only call ledger whose active
+  entries represent physical acquisitions and their acquisition leases.
+- Production/checkpoint: real coordinator ensure/release calls. Compare owner
+  load/unload counts, exact request-data identity, active acquisitions, and
+  cleanup after each release and takeover cut.
+
 Write-ownership law and source:
 - RFC invariants 3 and 9 and issue #1753. A sync-ingested persistent write has
   the same supported-owner requirement as a local write.
-- Domain: public source begin/write/commit after a modeled leadership change.
+- History grammar: public source begin/write/commit after a modeled leadership
+  change.
 - Production/checkpoint: persistedCollectionOptions' wrapped source commit;
   record collection-visible rows, adapter calls, and the owner active at the
   exact applyCommittedTx call.
@@ -91,18 +105,19 @@ Write-ownership law and source:
 Reach, challenge, replay, cleanup, and limits:
 - Green calibration tests prove structuredClone rejects a function payload,
   the leader upstream fixture can really enter/complete, and the ownership
-  checker rejects an unowned apply. Every RED test records a reached production
-  checkpoint before comparing the independent ledger.
-- FastCheck prints seed/path. Replay with TANSTACK_DB_COORDINATOR_ORACLE_{SEED,
-  PATH,RUNS}; the thrown report retains the first failing (original) and final
-  shrunk candidate traces.
-- Coordinators/collections/databases are disposed by failure-preserving cleanup. A final
-  lifecycle test proves no channel, held lock, queued lock, or delayed delivery
-  remains and that a fresh db name elects normally.
+  checker rejects an unowned apply. Every production-path test records a
+  reached checkpoint before comparing the independent ledger.
+- The default is one fixed fast-check campaign. Replay with
+  TANSTACK_DB_COORDINATOR_ORACLE_{SEED,PATH,RUNS}; the thrown report retains the
+  first failing trace and final shrunk candidate.
+- Coordinators, Collections, and databases use failure-preserving cleanup. A
+  final lifecycle test proves no channel, held lock, queued lock, or delayed
+  delivery remains and that a fresh database name elects normally.
 - The BroadcastChannel and Web Locks seams below perform real structuredClone
   and real coordinator code but are deterministic Node controls. They do not
   earn real-browser, multi-context, OPFS exclusive-handle, worker, Electric,
-  PowerSync, or service credit. Those cells remain required for GREEN closeout.
+  PowerSync, or service credit. Bounded retry after follower transport or
+  remote-owner admission failure also remains an open review finding.
 */
 
 type MessageHandler = (event: { data: unknown }) => void
@@ -626,7 +641,7 @@ function registerCollectionAdapter(
       (options: TransportedLoadSubsetOptions) =>
         adapter.ensureRemoteSubset(collectionId, options),
       {
-        // These route/wire laws do not exercise lease release semantics; the
+        // These route/wire laws do not exercise acquisition-release semantics; the
         // dedicated remote-ownership oracle below owns exact unload behavior.
         unloadSubset: () => {},
         onError: () => {},
@@ -716,6 +731,8 @@ type SubsetWireTrace = {
   expected: SemanticValue
 }
 
+// Clone-safe projection may remove live ownership callbacks. It must preserve
+// every supported request-data value that determines subset semantics.
 function subsetWireViolations(trace: SubsetWireTrace): Array<string> {
   const violations: Array<string> = []
   if (trace.outcome?.ok !== true) violations.push(`subset-transport-failed`)
@@ -728,6 +745,8 @@ function subsetWireViolations(trace: SubsetWireTrace): Array<string> {
   return violations
 }
 
+// A follower acknowledgement is valid only after the registered leader owner
+// has accepted and completed the exact remote subset acquisition attempt.
 function subsetAckViolations(trace: SubsetAckTrace): Array<string> {
   const violations: Array<string> = []
   if (trace.ownerInvocation !== `coordinator`) {
@@ -829,7 +848,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
       if (outcome?.ok === false) {
         expect(outcome.errorName).toBe(observedCloneFault?.errorName)
       }
-      // RED D3: after clone-safe projection, the registered leader owner must
+      // D3 refinement: after clone-safe projection, the registered leader owner must
       // receive the exact supported semantics and the follower call succeeds.
       expect(
         subsetWireViolations({
@@ -1297,7 +1316,7 @@ describe(`per-collection coordinator wire and acknowledgement oracle`, () => {
         ),
         acknowledgedAfterResponseDelivery: acknowledged,
       }
-      // RED D13: one comparator owns both the production verdict and hostile
+      // D13 refinement: one comparator owns both the production verdict and hostile
       // entry-only/false-success calibrations above.
       expect(subsetAckViolations(trace)).toEqual([])
     }, [
@@ -1509,6 +1528,9 @@ const remoteLeaseHistoryArbitrary = fc.record({
   reverseFinalRelease: fc.boolean(),
 })
 
+// Every accepted physical acquisition remains active until its exact
+// acquisition lease is released. Leadership transfer releases retired-owner
+// acquisitions and establishes replacements only for surviving demand.
 function remoteLeaseHistoryViolations(
   history: RemoteLeaseHistory,
   actual: RemoteLeaseHistoryTrace,
@@ -2293,7 +2315,7 @@ describe(`per-collection adapter and SQLite-state oracle`, () => {
       )
       const after = await readRawCollectionSnapshot(createdDatabase, `alpha`)
 
-      // RED D2 fixed cross-collection contamination witness. The shared
+      // D2 fixed cross-collection contamination witness. The shared
       // comparator reports schema, reset, and row losses independently.
       expect(rawSnapshotViolations(after, expected)).toEqual([])
     }, [
@@ -2564,6 +2586,8 @@ function routeViolations(
   return violations
 }
 
+// Collection identity and elected ownership jointly select the adapter. The
+// model deliberately uses Maps instead of the coordinator's routing storage.
 class PerCollectionRouteOracle {
   private readonly routes = new Map<string, string>()
   private readonly owners = new Map<CollectionName, TabName>()
@@ -3215,7 +3239,7 @@ describe(`generated collection-route histories`, () => {
       propertyFailure = error
     }
 
-    // Cleanup diagnostics are evaluated outside FastCheck, so cleanup cannot
+    // Cleanup diagnostics are evaluated outside fast-check, so cleanup cannot
     // become the predicate that selects or shrinks a semantic route failure.
     expect.soft(cleanupDiagnostics).toEqual([])
     // Setup/reach/fixture failures are also reported outside the property;
@@ -3230,6 +3254,8 @@ type OwnershipObservation = {
   ownerAtCall?: string
 }
 
+// A source commit may apply only while the elected persistence owner holds the
+// writer boundary. Collection visibility alone does not establish ownership.
 function findUnownedWrites(
   observations: ReadonlyArray<OwnershipObservation>,
   electedOwner: string,
