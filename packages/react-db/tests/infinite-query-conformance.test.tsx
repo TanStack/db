@@ -1,4 +1,11 @@
-/** React driver for the shared infinite-query conformance suite. */
+/**
+ * React driver for the shared infinite-query conformance suite.
+ *
+ * `renderHook`, `act`, and the hook result are the only React-specific layer.
+ * Sources and query operators come from this package's module realm. The shared
+ * suite owns the page model and histories; this driver defines when React has
+ * committed enough work for those public observations to be read.
+ */
 import { act, renderHook } from '@testing-library/react'
 import {
   BTreeIndex,

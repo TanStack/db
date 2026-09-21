@@ -2225,7 +2225,7 @@ describe(`Collection isLoadingSubset property`, () => {
     expect(collection.isLoadingSubset).toBe(false)
   })
 
-  it(`cleanup isolates subset loading state from a later sync session`, async () => {
+  it(`cleanup isolates subset loading state from a later sync run`, async () => {
     const resolveLoads: Array<() => void> = []
     const collection = createCollection<{ id: string; value: string }>({
       id: `cleanup-isolates-subset-loading`,

@@ -30,7 +30,6 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * rows. The external-publisher fixture routes complete committed transactions
  * through its bound adapter; that wiring does not add native-host evidence.
  */
-
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }
