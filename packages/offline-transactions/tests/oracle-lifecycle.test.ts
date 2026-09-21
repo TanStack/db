@@ -1,6 +1,12 @@
 import { expect, it, vi } from 'vitest'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 
+/**
+ * Calibration for offline-oracle ownership. These cases hold or fail cleanup
+ * stages to prove deadlines do not claim cancellation, later releases still
+ * run, and secondary cleanup errors cannot hide the scenario's primary error.
+ */
+
 it(`retains a cleanup error as secondary and still releases later resources`, async () => {
   const secondary = new Error(`cleanup failed`)
   const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})

@@ -143,7 +143,7 @@ export class CollectionStateManager<
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
   private isDrainingSyncTransactions = false
-  private syncSessionGeneration = 0
+  private syncRunGeneration = 0
   public isLocalOnly = false
 
   /**
@@ -930,7 +930,7 @@ export class CollectionStateManager<
     processed: boolean
     failure?: { error: unknown }
   } {
-    const syncSessionGeneration = this.syncSessionGeneration
+    const syncRunGeneration = this.syncRunGeneration
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
@@ -1511,11 +1511,11 @@ export class CollectionStateManager<
         failure = { error }
       }
 
-      if (this.syncSessionGeneration === syncSessionGeneration) {
+      if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()
         this.preSyncVirtualState.clear()
         Promise.resolve().then(() => {
-          if (this.syncSessionGeneration === syncSessionGeneration) {
+          if (this.syncRunGeneration === syncRunGeneration) {
             this.recentlySyncedKeys.clear()
           }
         })
@@ -1660,7 +1660,7 @@ export class CollectionStateManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
-    this.syncSessionGeneration++
+    this.syncRunGeneration++
     for (const transaction of this.pendingSyncedTransactions) {
       transaction.applied.reject(new SyncTransactionAbortedError())
     }

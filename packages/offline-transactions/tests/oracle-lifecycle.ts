@@ -1,4 +1,12 @@
-// Bound an observation, not the underlying work: no cancellation is implied.
+/**
+ * Bound offline-oracle observation and exhaust test-owned cleanup.
+ *
+ * A checkpoint timeout says that an expected event was not observed; it does
+ * not cancel the underlying operation. Cleanup therefore tries every action.
+ * If the scenario already has a primary failure, cleanup failures are reported
+ * without replacing it. Otherwise they form one AggregateError after all
+ * resources have had a release attempt.
+ */
 export async function atOracleCheckpoint<T>(
   promise: Promise<T>,
   label: string,

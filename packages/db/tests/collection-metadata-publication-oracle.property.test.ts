@@ -9,6 +9,20 @@ import { oraclePropertyOptions } from './oracle-config.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
+/**
+ * One transaction publishes one coherent row/metadata world.
+ *
+ * The model keeps rows and metadata as independent maps, applies an ordered
+ * transaction to private copies, and either commits both or aborts both.
+ * Multiple writes to one key collapse to one published change. Structured
+ * metadata is cloned once per model/driver world so aliases inside a world are
+ * preserved without letting production mutate the reference expectation.
+ *
+ * The driver observes direct collection state, live-query rows, metadata,
+ * exact change batches, and cancellation. Agreement at all of those cuts rules
+ * out torn publication that a final row comparison could hide.
+ */
+
 type PublicationRow = {
   id: number
   position: number

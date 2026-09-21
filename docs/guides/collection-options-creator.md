@@ -65,9 +65,13 @@ interface MyCollectionConfig<TItem extends object>
 
 ### 2. Sync Implementation
 
-The sync function is the heart of your collection. It must:
+Each call to the sync function starts a **sync run**. The run owns the callbacks
+and resources installed by that call until its returned cleanup ends them. A
+sync run may make several backend requests or open a longer-lived provider
+session, so it is not itself a request or provider session.
 
-The sync function must return a cleanup function for proper garbage collection:
+The sync function is the heart of your collection. It must return a cleanup
+function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {

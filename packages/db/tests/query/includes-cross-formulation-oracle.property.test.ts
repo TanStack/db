@@ -23,6 +23,36 @@ import type { LoadSubsetOptions } from '../../src/types.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
 
+/**
+ * # Why ask the same relationship question five ways?
+ *
+ * A nested include can be wrong even when its result looks plausible. A model
+ * copied from the include pipeline can repeat the same mistake. This oracle
+ * therefore compares five independent formulations after every source change:
+ *
+ * 1. A plain Map-and-array recomputation supplies the expected rows.
+ * 2. A correlated nested include exercises materialization routes.
+ * 3. A flat left join reconstructs the same parent-child relation.
+ * 4. Fresh child queries run once for each current parent.
+ * 5. Ternary logic partitioning makes true, false, and unknown partitions. It
+ *    then unions the three results.
+ *
+ * Every formulation must produce the same parent rows and child membership.
+ * Formulations with a promised order must also preserve that exact order. Raw
+ * capture checks run before normalization so an unexpected field, symbol,
+ * placeholder, duplicate, or wrong sequence cannot disappear during cleanup.
+ *
+ * Generated histories vary parent and child writes, route sharing, route
+ * movement, null predicate values, ordering, offsets, and limits. Separate
+ * controls cover opaque reference identity, query equality,
+ * lazy demand, grouping, and user aliases that resemble compiler metadata.
+ *
+ * The architecture contract is in
+ * `packages/db/src/query/live/ARCHITECTURE.md`. This file supplies executable
+ * evidence for cross-formulation equivalence. It does not redefine the wider
+ * demand, publication, or facade lifecycle contracts.
+ */
+
 type ParentRow = {
   id: number
   group: number
@@ -60,6 +90,8 @@ type FlatRow = {
   child: ChildRow | undefined
 }
 
+// Opaque reference routes form a second value domain. Equal object shapes do
+// not make two reference-sensitive correlation keys equal.
 type ReferenceKey = { code: number }
 
 type ReferenceParent = {
@@ -151,7 +183,8 @@ type ReferenceContextChild = {
 }
 
 // Public VirtualRowProps and docs/guides/live-queries.md name only these keys.
-// Their values/presence are a separate metadata law, not part of this projection.
+// Their values and presence are a separate metadata law. They are not part of
+// this projection.
 const virtualKeys = new Set<string>([
   `$synced`,
   `$origin`,
@@ -309,6 +342,7 @@ function captureOrderedNested(
 }
 
 // Canonicalize only model rows and formulations with no common result order.
+// Ordered production observations use `captureOrderedNested` directly.
 function normalizeNested(
   rows: ReadonlyArray<NormalizedParent>,
 ): Array<NormalizedParent> {
@@ -361,7 +395,9 @@ function normalizeFlat(
   return normalizeNested([...parents.values()])
 }
 
-function recompute(
+// This is the independent relationship model. It uses only current source
+// Maps, strict group equality, and the declared total orders.
+function recomputeNestedModel(
   parents: Map<number, ParentRow>,
   children: Map<number, ChildRow>,
 ): Array<NormalizedParent> {
@@ -375,6 +411,8 @@ function recompute(
   )
 }
 
+// The next three builders are production formulations. They share source rows
+// and public result types, but they use different compiler and runtime paths.
 function createNestedQuery(
   parents: Collection<ParentRow>,
   children: Collection<ChildRow>,
@@ -466,6 +504,8 @@ function createFlatQuery(
 
 type ChildPartition = `all` | `predicate` | `complement` | `unknown`
 
+// Ternary logic partitioning is complete only with the unknown partition.
+// A null score makes `score < pivot` unknown rather than true or false.
 async function queryChildren(
   children: Collection<ChildRow>,
   parentGroup: number,
@@ -535,8 +575,8 @@ async function queryPerParent(
       return { ...parent, children: childRows }
     }),
   )
-  // TLP concatenates three independently ordered partitions. Its union is
-  // unordered; the standalone query's promised child sequence is not.
+  // TLP concatenates three independently ordered partitions. Their union has
+  // no shared order. The standalone query still promises child order.
   return useTlp ? normalizeNested(rows) : captureOrderedNested(rows, context)
 }
 
@@ -547,6 +587,8 @@ function applyAction(
   parents: Map<number, ParentRow>,
   children: Map<number, ChildRow>,
 ): void {
+  // The Map state advances the reference model. The controlled sources deliver
+  // the same external action to each live production formulation.
   switch (action.type) {
     case `putParent`: {
       const type = parents.has(action.row.id) ? `update` : `insert`
@@ -600,14 +642,14 @@ async function expectFormulationsEquivalent(
       checkpoint,
       action: scenario.actions[checkpoint - 1],
     })
-    const expected = recompute(parents, children)
+    const expected = recomputeNestedModel(parents, children)
     const nestedResult = captureOrderedNested(
       nested.toArray,
       `${context} nested`,
     )
     const flatResult = normalizeFlat(flat.toArray, `${context} flat`)
     // Fresh child queries do not determine parent order. The model chooses
-    // their invocation order; their returned child order stays untouched.
+    // their invocation order. It does not change their returned child order.
     const parentRows = [...parents.values()].sort(compareParents)
     const standaloneResult = await queryPerParent(
       parentRows,
@@ -748,6 +790,8 @@ const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
   }),
 )
 
+// The grammar keeps the state space small enough to shrink. It still permits
+// shared routes, absent ids, overwrites, route movement, ties, and null scores.
 const scenarioArbitrary: fc.Arbitrary<CrossFormulationScenario> = fc.record({
   parents: fc.tuple(parentRowArbitrary(0), parentRowArbitrary(1)),
   children: fc.tuple(
@@ -909,7 +953,7 @@ describe(`includes cross-formulation oracle`, () => {
       await grouped.preload()
       expect(requests.length).toBeGreaterThan(0)
       expect(loaded.size).toBeGreaterThan(0)
-      // Full-source or broader requests are legal; counts alone decide routing.
+      // Full-source or broader requests are legal. Counts alone decide routing.
       assertGroupedRouteCounts(grouped.toArray, [2, 1])
     }, [
       () => grouped.cleanup(),
@@ -1098,7 +1142,8 @@ describe(`includes cross-formulation oracle`, () => {
       if (level === `root`) wrong.reverse()
       else wrong[0]!.children.reverse()
 
-      // Old checker false green; the new observation retains the violation.
+      // The old checker was false green. The new observation retains the
+      // violation.
       expect(normalizeNested(wrong)).toEqual(expected)
       expect(captureOrderedNested(expected)).toEqual(expected)
       expect(() =>

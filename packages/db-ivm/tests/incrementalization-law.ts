@@ -5,6 +5,32 @@ import { output } from '../src/operators/output.js'
 import type { IStreamBuilder } from '../src/types.js'
 import type { Arbitrary } from 'fast-check'
 
+/**
+ * # How does the checker judge an incremental operator?
+ *
+ * A relation is a set of values with signed integer weights. A positive weight
+ * adds copies. A negative weight removes copies. For a query `Q`, a change from
+ * state `x` to state `y` must emit the weighted difference `Q(y) - Q(x)`.
+ *
+ * The caller supplies two independent parts:
+ *
+ * 1. `build` constructs the production D2 graph.
+ * 2. `evaluate` computes the complete expected relation from plain data.
+ *
+ * The checker applies each logical batch in two ways. The atomic run delivers
+ * the batch in one graph step. The split run delivers the same change as legal
+ * one-row steps. After each logical batch, both runs must satisfy three laws:
+ *
+ * 1. The emitted delta equals the difference between full recomputations.
+ * 2. The retained output equals the new full recomputation.
+ * 3. Atomic and split delivery end with the same retained output.
+ *
+ * Split delivery does not invent invalid intermediate input states. It orders
+ * unit changes so weights stay nonnegative. A caller can also declare a unique
+ * row key so a replacement retracts the occupied row before it inserts a new
+ * row with the same key.
+ */
+
 export type Weighted<T> = Array<[T, number]>
 
 type StateEntry<T> = { value: T; weight: number }

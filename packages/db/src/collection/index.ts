@@ -1144,7 +1144,7 @@ export class CollectionImpl<
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    * Cleanup callbacks must not restart this collection or call its preload().
-   * Wait until cleanup completes before starting a new sync session.
+   * Wait until cleanup completes before starting a new sync run.
    */
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()

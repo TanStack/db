@@ -2,6 +2,17 @@ import { expect, it } from 'vitest'
 import { runOptimisticHistory } from './optimistic-history-oracle.js'
 import type { HistoryRow, OptimisticStep } from './optimistic-history-oracle.js'
 
+/**
+ * # Does each optimistic history publish complete source cuts?
+ *
+ * These short distinguishing histories focus on publication boundaries that a
+ * final-row assertion can miss: deletes of prior rows, truncate replacement,
+ * origin retention, rollback followed by queued source drain, and exact event
+ * semantics. The shared history model supplies expected rows and batches.
+ * Corruption cases prove the driver rejects wrong keys, partial or reversed
+ * cuts, stale previous values, and updates mislabeled as inserts.
+ */
+
 const initial: Array<HistoryRow> = [
   { id: 1, a: 0, b: 0, c: 0 },
   { id: 2, a: 0, b: 0, c: 0 },
