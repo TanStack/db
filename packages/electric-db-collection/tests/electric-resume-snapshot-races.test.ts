@@ -429,7 +429,10 @@ async function runRace(
       if (laterKeySetEvidence !== `unchanged`) {
         expect(collection._lifecycle.getSyncError()).toEqual(
           expect.objectContaining({
-            message: `Electric persisted resume baseline could not be certified during hydration`,
+            message:
+              syncMode === `on-demand`
+                ? `Electric persisted resume baseline could not be certified`
+                : `Electric persisted resume baseline could not be certified during hydration`,
           }),
         )
       }
@@ -452,7 +455,8 @@ async function runRace(
       // fails and never applies or publishes the queued stream batches.
       const expectedErroredRows =
         transition === `external-row-loss` &&
-        laterKeySetEvidence !== `unchanged`
+        laterKeySetEvidence !== `unchanged` &&
+        syncMode !== `on-demand`
           ? [{ id: 2, name: `two` }]
           : []
       expect(
@@ -815,29 +819,25 @@ describe(`Electric resume snapshot races`, () => {
     await runRace(`committed-write`)
   })
 
-  it(`rejects row loss when later resume evidence becomes unknown`, async () => {
-    await runRace(
-      `external-row-loss`,
-      `eager`,
-      false,
-      false,
-      `none`,
-      `none`,
-      `unknown`,
-    )
-  })
-
-  it(`rejects row loss when later resume evidence becomes missing`, async () => {
-    await runRace(
-      `external-row-loss`,
-      `eager`,
-      false,
-      false,
-      `none`,
-      `none`,
-      `missing`,
-    )
-  })
+  it.each([
+    [`eager`, `unknown`],
+    [`eager`, `missing`],
+    [`on-demand`, `unknown`],
+    [`on-demand`, `missing`],
+  ] as const)(
+    `rejects row loss when %s resume evidence becomes %s`,
+    async (syncMode, laterKeySetEvidence) => {
+      await runRace(
+        `external-row-loss`,
+        syncMode,
+        false,
+        false,
+        `none`,
+        `none`,
+        laterKeySetEvidence,
+      )
+    },
+  )
 
   it(`freshly replaces an unknown on-demand resume baseline`, async () => {
     await runRace(`none`, `on-demand`, true)
