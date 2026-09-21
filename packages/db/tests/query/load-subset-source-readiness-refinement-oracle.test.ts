@@ -11,6 +11,19 @@ import {
 import { flushPromises } from '../utils.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
+/**
+ * # Can an obsolete source attempt satisfy a fresh correlated demand?
+ *
+ * Changing the parent correlation key retires the old child demand and starts
+ * a new generation. The old request may resolve or reject before or after the
+ * fresh one, but it may not mark the fresh query ready, publish stale children,
+ * or release the fresh acquisition lease.
+ *
+ * This four-cell refinement crosses old resolve/reject with old-first/fresh-
+ * first settlement. It drives real parent and on-demand child Collections and
+ * checks request predicates, abort state at unload, readiness, and visible rows.
+ */
+
 type Row = { id: string; group: string }
 
 it.each([

@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { createCollection, createLiveQueryCollection } from '../src'
 import type { SyncConfig } from '../src/types'
 
+/**
+ * Cleanup is a closed admission interval, not merely a final status value.
+ *
+ * The history enters cleanup, re-enters start/preload from abort or release
+ * callbacks, and may request nested cleanup. The model admits no replacement
+ * owner until the first cleanup promise settles: every reentrant start must
+ * fail, the original load and release occur once, and subscriber count reaches
+ * zero. A later ordinary preload is a new generation and must work.
+ *
+ * Counts, errors, status, rows, and ownership are all observed. Checking only
+ * `cleaned-up` would miss leaked or duplicated physical resources.
+ */
+
 type Row = { id: number; rank: number }
 const cleanupError = {
   name: `CollectionStateError`,

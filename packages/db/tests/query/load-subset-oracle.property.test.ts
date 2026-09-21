@@ -20,6 +20,25 @@ import type {
   SyncAppliedReceipt,
 } from '../../src/types.js'
 
+/**
+ * # When are two loadSubset demands the same, applied, or canceled?
+ *
+ * Exact demand identity includes predicate values, order terms and comparison
+ * options, offset, limit, and cursor boundary. Equal demands share one physical
+ * acquisition; distinct demands do not. Rejection reaches every waiter, then
+ * leaves the demand retryable.
+ *
+ * A separate application law says acquisition settlement is not enough. Loaded
+ * rows must cross the Collection publication boundary before readiness settles.
+ * Abort before that boundary rejects and suppresses the rows. Abort after
+ * publication is too late and the applied rows remain visible.
+ *
+ * The identity model uses canonical plain records and an independent SQL
+ * expression evaluator. The application driver uses real transactions, sync
+ * receipts, optimistic work, and live queries. Keeping these nodes separate
+ * prevents a correct key function from hiding a broken settlement boundary.
+ */
+
 type PersistedLoadRow = {
   id: string
   projectId: string
