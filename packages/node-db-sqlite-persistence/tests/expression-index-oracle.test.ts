@@ -1,13 +1,16 @@
 /**
- * Law and source: RFC #1659 invariant 8 requires persisted index DDL and the
- * indexed runtime predicate to have the same SQLite expression shape. SQLite
- * requires syntactically matching expressions before an expression index can
- * satisfy a predicate.
+ * # When does SQLite use a persisted expression index?
  *
- * Domain: constructively generated object-rooted SQLite JSON paths have a
- * one-to-six-character identifier root and up to three identifier/array-index
- * tail segments. Identifiers start with a/m/p/t/x and continue with
- * a/b/e/i/n/r/s/0/1; array indices are 0..3. Independent equality values are
+ * Contract and source: RFC #1659 invariant 8 requires persisted index DDL and
+ * the indexed runtime predicate to have the same SQLite expression shape.
+ * SQLite requires syntactically matching expressions before an expression
+ * index can satisfy a predicate.
+ *
+ * History grammar and domain: constructively generated object-rooted SQLite
+ * JSON paths have a one-to-six-character identifier root and up to three
+ * identifier/array-index tail segments. Identifiers start with a/m/p/t/x and
+ * continue with a/b/e/i/n/r/s/0/1; array indices are 0..3. Independent
+ * equality values are
  * integer targets -10_000..10_000 with adjacent distractors,
  * `target-'${suffix}` strings with `before-${suffix}`/`after-${suffix}`
  * distractors for suffixes 0..10_000, or booleans with duplicated opposite
@@ -18,8 +21,9 @@
  * coercions can change the indexed expression. Each generated history inserts
  * rows, creates the serialized ref index, scans, and loads the subset.
  *
- * Reference: a full adapter scan followed by a small path walker and strict
- * scalar equality. It does not call the SQL compiler or reuse its path logic.
+ * Independent model: a full adapter scan followed by a small path walker and
+ * strict scalar equality. It does not call the SQL compiler or reuse its path
+ * logic.
  *
  * Production path and checkpoint: the public SQLite-core adapter factory with
  * the real BetterSqlite3SQLiteDriver. The exact SQL and bindings passed to the
