@@ -4,11 +4,38 @@ import { CleanupQueue } from '../src/collection/cleanup-queue'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import { resetCleanupQueue } from './utils'
 
+/**
+ * # Which cleanup callback must run?
+ *
+ * A cleanup appointment binds one key to one callback and one deadline.
+ * Scheduling the same key replaces its appointment. Cancellation removes its
+ * appointment. Advancing the clock runs each due callback exactly once.
+ *
+ * A callback error must not stop another due callback. The contract does not
+ * set callback order when one clock advance makes several callbacks due. The
+ * queue must use at most one root timer.
+ *
+ * `stepModel` stores only appointments and public deliveries. It does not copy
+ * the production timer, microtask, or wake-up logic.
+ */
+
 type Action =
   | { kind: `schedule`; key: number; delay: number; throws: boolean }
   | { kind: `cancel`; key: number }
   | { kind: `advance`; elapsed: number }
 type Delivery = { id: number; at: number }
+type Appointment = {
+  id: number
+  key: number
+  at: number
+  throws: boolean
+}
+type Model = {
+  now: number
+  appointments: Array<Appointment>
+  deliveries: Array<Delivery>
+  errors: Array<string>
+}
 type Fault =
   | `none`
   | `ignore-cancel`
@@ -16,10 +43,54 @@ type Fault =
   | `duplicate`
   | `late`
 
-// The model is a list of current appointments, not a model of the root timer,
-// its microtask or its early wakeups. Equal-deadline callback order is free.
-// Callbacks may throw, but do not schedule/cancel other callbacks: reentrant
-// delivery needs a separate contract, not assumptions from today's Map loop.
+// Each key has at most one appointment. A schedule replaces the old
+// appointment. An advance moves the clock and delivers all due appointments.
+function stepModel(model: Model, id: number, action: Action): Model {
+  if (action.kind === `schedule`) {
+    return {
+      ...model,
+      appointments: [
+        ...model.appointments.filter((entry) => entry.key !== action.key),
+        {
+          id,
+          key: action.key,
+          at: model.now + action.delay,
+          throws: action.throws,
+        },
+      ],
+    }
+  }
+
+  if (action.kind === `cancel`) {
+    return {
+      ...model,
+      appointments: model.appointments.filter(
+        (entry) => entry.key !== action.key,
+      ),
+    }
+  }
+
+  const now = model.now + action.elapsed
+  const due = model.appointments.filter((entry) => entry.at <= now)
+  return {
+    now,
+    appointments: model.appointments.filter((entry) => entry.at > now),
+    deliveries: [
+      ...model.deliveries,
+      ...due.map((entry) => ({ id: entry.id, at: entry.at })),
+    ],
+    errors: [
+      ...model.errors,
+      ...due
+        .filter((entry) => entry.throws)
+        .map((entry) => `callback:${entry.id}`),
+    ],
+  }
+}
+
+// Callbacks in this model do not schedule or cancel other callbacks. Reentrant
+// callbacks need a separate contract. They must not inherit current Map-loop
+// behavior by accident.
 async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   vi.useFakeTimers()
   vi.setSystemTime(0)
@@ -30,19 +101,16 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   const keys = [0, `0`, {}, {}]
   const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
   const actual: Array<Delivery> = []
-  const expected: Array<Delivery> = []
-  const expectedErrors: Array<string> = []
-  let appointments: Array<{
-    id: number
-    key: number
-    at: number
-    throws: boolean
-  }> = []
-  let now = 0
+  let model: Model = {
+    now: 0,
+    appointments: [],
+    deliveries: [],
+    errors: [],
+  }
   const canonical = (rows: Array<Delivery>) =>
     [...rows].sort((a, b) => a.id - b.id)
   const check = () => {
-    expect(canonical(actual)).toEqual(canonical(expected))
+    expect(canonical(actual)).toEqual(canonical(model.deliveries))
     expect(
       errors.mock.calls
         .map(([label, error]) => {
@@ -51,22 +119,15 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
           return (error as Error).message
         })
         .sort(),
-    ).toEqual([...expectedErrors].sort())
+    ).toEqual([...model.errors].sort())
   }
   const advance = async (elapsed: number) => {
     await Promise.resolve() // Admit the whole synchronous registration batch.
     expect(vi.getTimerCount()).toBeLessThanOrEqual(1)
-    now += elapsed
-    for (const entry of appointments.filter(
-      (appointment) => appointment.at <= now,
-    )) {
-      expected.push({ id: entry.id, at: entry.at })
-      if (entry.throws) expectedErrors.push(`callback:${entry.id}`)
-    }
-    appointments = appointments.filter((entry) => entry.at > now)
+    model = stepModel(model, -1, { kind: `advance`, elapsed })
     vi.advanceTimersByTime(elapsed)
     check()
-    expect(vi.getTimerCount()).toBe(appointments.length ? 1 : 0)
+    expect(vi.getTimerCount()).toBe(model.appointments.length ? 1 : 0)
   }
   try {
     check()
@@ -74,16 +135,10 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
       if (action.kind === `advance`) {
         await advance(action.elapsed)
       } else if (action.kind === `cancel`) {
-        appointments = appointments.filter((entry) => entry.key !== action.key)
+        model = stepModel(model, id, action)
         if (fault !== `ignore-cancel`) queue.cancel(keys[action.key])
       } else {
-        appointments = appointments.filter((entry) => entry.key !== action.key)
-        appointments.push({
-          id,
-          key: action.key,
-          at: now + action.delay,
-          throws: action.throws,
-        })
+        model = stepModel(model, id, action)
         queue.schedule(
           fault === `lose-replacement` ? { key: action.key } : keys[action.key],
           action.delay + (fault === `late` ? 1 : 0),
@@ -123,6 +178,8 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   }),
 )
 
+// Run one stable campaign and one random campaign. The shared oracle config
+// accepts a seed and shrink path for replay of the random lane.
 it.each([20260913, undefined])(
   `obeys appointment histories (seed %s)`,
   async (seed) => {
@@ -155,6 +212,7 @@ it.each([20260913, undefined])(
   },
 )
 
+// These controls prove that the oracle rejects four plausible wrong queues.
 it.each([`ignore-cancel`, `lose-replacement`, `duplicate`, `late`] as const)(
   `rejects the %s faulty queue`,
   async (fault) => {

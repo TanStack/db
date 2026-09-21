@@ -7,14 +7,18 @@ const nativeSession = await captureHashSession()
 const { hash } = nativeSession
 
 /**
- * Property-based tests for hash function
+ * The hash is a deterministic fingerprint of its declared value domain.
  *
- * Key properties:
- * 1. Determinism: hash(x) always returns the same value
- * 2. Structural equality: equal structures should have the same hash
- * 3. Property order independence: objects with same properties in different order have same hash
- * 4. Number normalization: -0 and 0 have same hash, NaN has consistent hash
- * 5. Type markers: different types should generally produce different hashes
+ * Independent constructors build equivalent values with different allocation,
+ * property order, container order, and normalized numeric representations.
+ * They must agree. Deliberately different type/value pairs must disagree only
+ * where the contract promises separation; a sampled 32-bit collision alone is
+ * not a defect. `HashSession` records environment and calls so a failure can be
+ * replayed without turning random frequency into a semantic claim.
+ *
+ * Graph reachability, mixed carriers, failed traversal, and retry atomicity are
+ * separate owners. Keeping them separate makes this file's flat-value model
+ * small enough to inspect.
  */
 
 // Arbitraries for generating test values

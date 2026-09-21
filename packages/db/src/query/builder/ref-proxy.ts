@@ -1,6 +1,6 @@
 import { PropRef, Value } from '../ir.js'
 import type { BasicExpression } from '../ir.js'
-import type { RefLeaf } from './types.js'
+import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
 
 export interface RefProxy<T = any> {
@@ -22,6 +22,18 @@ export type VirtualPropsRefProxy<
   readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
 }
 
+// Strip nullish members before deciding whether a schema field is traversable,
+// then restore them outside the proxy so the schema still requires a guard.
+// The tuple guard keeps exact null/undefined fields as leaves: `never` would
+// otherwise satisfy the plain-object check.
+type SingleRowField<V, TKey extends string | number> = [
+  NonNullable<V>,
+] extends [never]
+  ? RefLeaf<V>
+  : IsPlainObject<NonNullable<V>> extends true
+    ? SingleRowRefProxy<NonNullable<V>, TKey> | Extract<V, null | undefined>
+    : RefLeaf<V>
+
 /**
  * Type for creating a RefProxy for a single row/type without namespacing
  * Used in collection indexes and where clauses
@@ -35,9 +47,7 @@ export type SingleRowRefProxy<
 > =
   T extends Record<string, any>
     ? {
-        [K in keyof T]: T[K] extends Record<string, any>
-          ? SingleRowRefProxy<T[K], TKey> & RefProxy<T[K]>
-          : RefLeaf<T[K]>
+        [K in keyof T]: SingleRowField<T[K], TKey>
       } & RefProxy<T> &
         VirtualPropsRefProxy<TKey>
     : RefProxy<T> & VirtualPropsRefProxy<TKey>

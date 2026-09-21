@@ -18,6 +18,24 @@ import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
+/**
+ * # Does ordered acquisition do only the work its result requires?
+ *
+ * Row truth and work truth are different laws. An ordered query must match an
+ * independent filter/sort/window recomputation. It must also avoid duplicate
+ * finite requests, repeated source scans, partial initial publications, and
+ * cross-source suppression when joined loads overlap or replay.
+ *
+ * The value model is a plain sorted array. The work model records normalized
+ * page and boundary requests, examined source rows, publications, and errors.
+ * Live Collections and Effects receive the same scenario and must agree with
+ * each other and the model. Exhaustive small domains cover ties, eligibility,
+ * direction, and middle-row count; generated runs vary the same grammar.
+ *
+ * Counts are contract bounds, not timing benchmarks. They pin established
+ * request and scan behavior only where the test names that promise.
+ */
+
 type Row = {
   id: number
   rank: number

@@ -73,7 +73,7 @@ export class CollectionStateManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  public config!: CollectionConfig<TOutput, TKey, TSchema>
+  public config!: CollectionConfig<TOutput, TKey, TSchema, any>
   public collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
   public lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
@@ -143,13 +143,13 @@ export class CollectionStateManager<
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
   private isDrainingSyncTransactions = false
-  private syncSessionGeneration = 0
+  private syncRunGeneration = 0
   public isLocalOnly = false
 
   /**
    * Creates a new CollectionState manager
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema, any>) {
     this.config = config
     this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
       a.compareCreatedAt(b),
@@ -930,7 +930,7 @@ export class CollectionStateManager<
     processed: boolean
     failure?: { error: unknown }
   } {
-    const syncSessionGeneration = this.syncSessionGeneration
+    const syncRunGeneration = this.syncRunGeneration
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
@@ -1016,11 +1016,17 @@ export class CollectionStateManager<
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
+      const firstSyncOperations = new Map<
+        TKey,
+        OptimisticChangeMessage<TOutput>
+      >()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
-          if (operation.type !== `delete`)
-            syncedInsertedOrUpdatedKeys.add(operation.key as TKey)
+          const key = operation.key as TKey
+          changedKeys.add(key)
+          if (!firstSyncOperations.has(key))
+            firstSyncOperations.set(key, operation)
+          if (operation.type !== `delete`) syncedInsertedOrUpdatedKeys.add(key)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -1147,6 +1153,11 @@ export class CollectionStateManager<
               ? 'local'
               : 'remote'
           if (origin === `local`) localKeys.add(key)
+
+          // A sync source may reuse a live-reading row object, making an
+          // enriched snapshot cached for an earlier publication stale.
+          if (operation.type !== `delete`)
+            this.virtualPropsCache.delete(operation.value)
 
           // Update synced data
           switch (operation.type) {
@@ -1381,7 +1392,21 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
-        const previousVisibleValue = currentVisibleState.get(key)
+        const firstSyncOperation = firstSyncOperations.get(key)
+        // A live-reading source can change a reused row before this commit
+        // captures it. Later writes must not substitute an intermediate value.
+        const syncPreviousValue =
+          firstSyncOperation?.type === `update` &&
+          currentVisibleState.get(key) === firstSyncOperation.value
+            ? firstSyncOperation.previousValue
+            : undefined
+        const previousVisibleValue =
+          !hasTruncateSync &&
+          !previousOptimisticUpserts.has(key) &&
+          !previousOptimisticDeletes.has(key) &&
+          syncPreviousValue !== undefined
+            ? syncPreviousValue
+            : currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
         const previousVirtualProps =
           this.preSyncVirtualState.get(key) ??
@@ -1486,11 +1511,11 @@ export class CollectionStateManager<
         failure = { error }
       }
 
-      if (this.syncSessionGeneration === syncSessionGeneration) {
+      if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()
         this.preSyncVirtualState.clear()
         Promise.resolve().then(() => {
-          if (this.syncSessionGeneration === syncSessionGeneration) {
+          if (this.syncRunGeneration === syncRunGeneration) {
             this.recentlySyncedKeys.clear()
           }
         })
@@ -1635,7 +1660,7 @@ export class CollectionStateManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
-    this.syncSessionGeneration++
+    this.syncRunGeneration++
     for (const transaction of this.pendingSyncedTransactions) {
       transaction.applied.reject(new SyncTransactionAbortedError())
     }

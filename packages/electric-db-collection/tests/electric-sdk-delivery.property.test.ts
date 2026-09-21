@@ -7,6 +7,20 @@ import { oraclePropertyOptions } from '../../db/tests/oracle-config'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 import type { Message } from '@electric-sql/client'
 
+/**
+ * # Does the installed Electric SDK deliver the adapter's assumed protocol?
+ *
+ * The main adapter oracle controls callbacks below the SDK. This driver moves
+ * the boundary outward: a finite HTTP provider sends real Electric responses,
+ * and the installed ShapeStream owns framing, pause, snapshot, abort, and
+ * silent-move behavior. The adapter must reconstruct the same overlapping
+ * source relation and DNF visibility as the independent model.
+ *
+ * Response gates expose ordering without replacing the SDK. Dropping response
+ * rows or silent reactivation deliberately breaks the driver and proves its
+ * boundary assertions are live.
+ */
+
 type Item = { id: number; name: string }
 
 function deferred<T>() {
@@ -19,8 +33,7 @@ function deferred<T>() {
 
 type Request = { url: URL; respond: (response: Response) => void }
 
-// The real SDK owns message framing and pauses. The finite HTTP provider only
-// holds responses, and observes each fetch's own cancellation signal.
+// The finite provider only holds responses and observes each fetch's signal.
 function controlledHttp() {
   const queued: Array<Request> = []
   const waiting: Array<{
