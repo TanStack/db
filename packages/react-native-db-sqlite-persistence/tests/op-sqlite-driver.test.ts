@@ -111,9 +111,18 @@ async function withColumnarDriver<T>(
  * Domain: deterministic object-row wrappers and v14 columnar rows, including
  * empty, asymmetric/reordered multirow, legal reserved-looking SQL aliases,
  * and malformed or conflicting envelopes.
+ * Reference/history grammar: `aliasQueryCase` builds two ordered object rows
+ * directly from unique legal aliases and distinct scalar values. Histories
+ * choose wrapper shape or columnar aliases, execute real writes or one SELECT,
+ * and then either return the exact rows or reject an invalid envelope; the
+ * reference never calls the production decoder.
  * Path/checkpoint: OpSQLiteDriver over a real better-sqlite3 shim, observed
  * when each query Promise settles. Exact row values, keys, order, and count are
  * compared.
+ * Refinement evidence: query execution counts prove the SELECT reached the
+ * adapter. Empty, reordered, duplicated, missing-key, and swapped-value mutants
+ * challenge the checker; the alias property records a seed and shrink path and
+ * verifies replay of the same exact-row violation.
  * Limit: this shim establishes adapter normalization, not native device/host
  * execution; native op-sqlite v14 still needs a separate runtime receipt.
  */

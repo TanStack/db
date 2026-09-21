@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { expectAdmissionHistory } from './driver-admission-laws'
 import type { SQLiteDriver } from '../../src'
 
+/**
+ * # What must every SQLite persistence driver mean?
+ *
+ * Drivers bind parameters, return exact query rows, roll back failed
+ * transactions, serialize outside work behind an active transaction, admit it
+ * after rollback, and use savepoints for nesting. The callback must receive the
+ * transaction-scoped driver so implementations cannot silently run nested work
+ * on the outer connection.
+ *
+ * Each platform supplies only a harness. This shared suite executes the same
+ * SQL histories and compares both values and rowid admission order. A passing
+ * shim proves the TypeScript driver boundary; it does not replace native-device
+ * evidence for the host runtime.
+ */
+
 export type SQLiteDriverContractHarness = {
   driver: SQLiteDriver
   cleanup: () => void | Promise<void>
