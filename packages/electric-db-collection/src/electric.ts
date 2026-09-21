@@ -9,6 +9,7 @@ import {
   DeduplicatedLoadSubset,
   LoadSubsetOperationAbortedError,
   and,
+  warnOnce,
   withCollectionConfigFactory,
   withCollectionSyncConfigCleanup,
   withCollectionSyncConfigFactory,
@@ -54,7 +55,6 @@ import type {
   SyncMetadataApi,
   SyncMode,
   UpdateMutationFnParams,
-  UtilsRecord,
 } from '@tanstack/db'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -304,11 +304,11 @@ export type MatchFunction<T extends Row<unknown>> = (
 /**
  * Matching strategies for Electric synchronization
  * Handlers can return:
- * - Txid strategy: { txid: number | number[], timeout?: number } (recommended)
+ * - Txid strategy: { txid: number | number[], timeout?: number } (deprecated compatibility behavior)
  * - Void (no return value) - mutation completes without waiting
  *
  * The optional timeout property specifies how long to wait for the txid(s) in milliseconds.
- * If not specified, defaults to 5000ms.
+ * If not specified, defaults to 15000ms.
  */
 export type MatchingStrategy = {
   txid: Txid | Array<Txid>
@@ -357,13 +357,7 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-  BaseCollectionConfig<
-    T,
-    string | number,
-    TSchema,
-    ElectricCollectionUtils<T>,
-    any
-  >,
+  BaseCollectionConfig<T, string | number, TSchema, ElectricCollectionUtils<T>>,
   `onInsert` | `onUpdate` | `onDelete` | `syncMode`
 > {
   /**
@@ -380,43 +374,82 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an insert operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
+   *
    * @example
-   * // Basic Electric insert handler with txid (recommended)
-   * onInsert: async ({ transaction }) => {
+   * // Recommended: Wait for txid to sync
+   * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid }
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
    * // Insert handler with custom timeout
-   * onInsert: async ({ transaction }) => {
+   * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid, timeout: 10000 } // Wait up to 10 seconds
+   *   // Wait up to 10 seconds for txid
+   *   await collection.utils.awaitTxId(result.txid, 10000)
    * }
    *
    * @example
-   * // Insert handler with multiple items - return array of txids
-   * onInsert: async ({ transaction }) => {
+   * // Insert handler with timeout error handling
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *
+   *   try {
+   *     await collection.utils.awaitTxId(result.txid, 5000)
+   *   } catch (error) {
+   *     // Decide sync timeout policy:
+   *     // - Throw to rollback optimistic state
+   *     // - Catch to keep optimistic state (eventual consistency)
+   *     // - Schedule background retry
+   *     console.warn('Sync timeout, keeping optimistic state:', error)
+   *     // Don't throw - allow optimistic state to persist
+   *   }
+   * }
+   *
+   * @example
+   * // Insert handler with multiple items
+   * onInsert: async ({ transaction, collection }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   const results = await Promise.all(
    *     items.map(item => api.todos.create({ data: item }))
    *   )
-   *   return { txid: results.map(r => r.txid) }
+   *   // Wait for all txids to sync
+   *   await Promise.all(
+   *     results.map(r => collection.utils.awaitTxId(r.txid))
+   *   )
    * }
    *
    * @example
-   * // Use awaitMatch utility for custom matching
+   * // Alternative: Use awaitMatch utility for custom matching logic
    * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   await api.todos.create({ data: newItem })
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'insert' &&
@@ -434,24 +467,39 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an update operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
+   *
    * @example
-   * // Basic Electric update handler with txid (recommended)
-   * onUpdate: async ({ transaction }) => {
+   * // Recommended: Wait for txid to sync
+   * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   const result = await api.todos.update({
    *     where: { id: original.id },
    *     data: changes
    *   })
-   *   return { txid: result.txid }
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
-   * // Use awaitMatch utility for custom matching
+   * // Alternative: Use awaitMatch utility for custom matching logic
    * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   await api.todos.update({ where: { id: original.id }, data: changes })
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'update' &&
@@ -469,23 +517,38 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before a delete operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
+   *
    * @example
-   * // Basic Electric delete handler with txid (recommended)
-   * onDelete: async ({ transaction }) => {
+   * // Recommended: Wait for txid to sync
+   * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
    *     id: mutation.original.id
    *   })
-   *   return { txid: result.txid }
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
-   * // Use awaitMatch utility for custom matching
+   * // Alternative: Use awaitMatch utility for custom matching logic
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   await api.todos.delete({ id: mutation.original.id })
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'delete' &&
@@ -820,7 +883,9 @@ export type AwaitMatchFn<T extends Row<unknown>> = (
  */
 export interface ElectricCollectionUtils<
   T extends Row<unknown> = Row<unknown>,
-> extends UtilsRecord {
+> {
+  // Keep this interface closed: extending UtilsRecord would make every
+  // nonexistent adapter utility appear as `any`.
   awaitTxId: AwaitTxIdFn
   awaitMatch: AwaitMatchFn<T>
 }
@@ -935,7 +1000,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
 
   private async awaitTxId(
     txId: Txid,
-    timeout: number = 5000,
+    timeout: number = 15000,
   ): Promise<boolean> {
     debug(
       `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitTxId called with txid %d`,
@@ -963,7 +1028,7 @@ class ElectricLifecycle<T extends Row<unknown>> {
 
   private async awaitMatch(
     matchFn: MatchFunction<T>,
-    timeout: number = 3000,
+    timeout: number = 15000,
   ): Promise<boolean> {
     debug(
       `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitMatch called with custom function`,
@@ -1142,17 +1207,32 @@ export function electricCollectionOptions<T extends Row<unknown>>(
    * Process matching strategy and wait for synchronization
    */
   const processMatchingStrategy = async (
-    result: MatchingStrategy,
+    result: unknown,
     waitForTxId: AwaitTxIdFn,
   ): Promise<void> => {
+    const canHaveProperties =
+      (typeof result === `object` && result !== null) ||
+      typeof result === `function`
+
     // Only wait if result contains txid
-    if (result && `txid` in result) {
-      const timeout = result.timeout
+    if (canHaveProperties && `txid` in result) {
+      const strategy = result as Exclude<MatchingStrategy, void>
+      // Warn about deprecated return value pattern
+      warnOnce(
+        'electric-collection-txid-return',
+        '[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. ' +
+          'Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. ' +
+          'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization',
+      )
+
+      const timeout = strategy.timeout
       // Handle both single txid and array of txids
-      if (Array.isArray(result.txid)) {
-        await Promise.all(result.txid.map((txid) => waitForTxId(txid, timeout)))
+      if (Array.isArray(strategy.txid)) {
+        await Promise.all(
+          strategy.txid.map((txid) => waitForTxId(txid, timeout)),
+        )
       } else {
-        await waitForTxId(result.txid, timeout)
+        await waitForTxId(strategy.txid, timeout)
       }
     }
     // If result is void/undefined, don't wait - mutation completes immediately
@@ -1167,6 +1247,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   }
 
   // Create wrapper handlers for direct persistence operations that handle different matching strategies
+  // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = config.onInsert
     ? async (
         params: InsertMutationFnParams<
@@ -1174,13 +1255,12 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onInsert!(params)
         await processMatchingStrategy(
           handlerResult,
           getMutationAwaitTxId(params),
         )
-        return handlerResult
       }
     : undefined
 
@@ -1191,13 +1271,12 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onUpdate!(params)
         await processMatchingStrategy(
           handlerResult,
           getMutationAwaitTxId(params),
         )
-        return handlerResult
       }
     : undefined
 
@@ -1208,13 +1287,12 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onDelete!(params)
         await processMatchingStrategy(
           handlerResult,
           getMutationAwaitTxId(params),
         )
-        return handlerResult
       }
     : undefined
 

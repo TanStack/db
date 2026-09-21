@@ -16,12 +16,11 @@ const APP_SCHEMA = new Schema({
 
 describe(`PowerSync collection type tests`, () => {
   it(`should type collection.utils as PowerSyncCollectionUtils after createCollection`, () => {
-    const collection = createCollection(
-      powerSyncCollectionOptions({
-        database: {} as PowerSyncDatabase,
-        table: APP_SCHEMA.props.documents,
-      }),
-    )
+    const options = powerSyncCollectionOptions({
+      database: {} as PowerSyncDatabase,
+      table: APP_SCHEMA.props.documents,
+    })
+    const collection = createCollection(options)
 
     // Verify that collection.utils is typed as PowerSyncCollectionUtils, not UtilsRecord
     const utils: PowerSyncCollectionUtils<
@@ -29,6 +28,17 @@ describe(`PowerSync collection type tests`, () => {
     > = collection.utils
     expectTypeOf(utils.getMeta).toBeFunction()
     expectTypeOf(collection.utils.getMeta).toBeFunction()
+
+    type InsertParams = Parameters<NonNullable<typeof options.onInsert>>[0]
+    type InsertMutation = InsertParams[`transaction`][`mutations`][0]
+
+    expectTypeOf<InsertMutation[`key`]>().toEqualTypeOf<string>()
+    expectTypeOf<
+      InsertMutation[`collection`][`utils`][`getMeta`]
+    >().toBeFunction()
+
+    // @ts-expect-error PowerSync Collection does not expose Electric acknowledgement helpers
+    collection.utils.awaitTxId(1)
   })
 
   it(`types a no-schema comparator against the inferred SQLite row`, () => {

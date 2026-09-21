@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
@@ -146,6 +146,9 @@ const originalWorker = (globalThis as typeof globalThis & { Worker?: unknown })
 const originalNavigator = globalThis.navigator
 
 function installWorkerTestEnvironment(behavior: FakeWorkerBehavior = {}): void {
+  const page = new EventTarget()
+  vi.stubGlobal(`addEventListener`, page.addEventListener.bind(page))
+  vi.stubGlobal(`removeEventListener`, page.removeEventListener.bind(page))
   FakeWorker.instances = []
   FakeWorker.behavior = behavior
   Object.defineProperty(globalThis, `Worker`, {
@@ -179,6 +182,7 @@ function restoreWorkerTestEnvironment(): void {
 
 afterEach(() => {
   restoreWorkerTestEnvironment()
+  vi.unstubAllGlobals()
 })
 
 describe(`openBrowserWASQLiteOPFSDatabase`, () => {

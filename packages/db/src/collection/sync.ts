@@ -56,7 +56,7 @@ export class CollectionSyncManager<
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private _events!: CollectionEventsManager
-  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private config!: CollectionConfig<TOutput, TKey, TSchema, any>
   private id: string
   private syncMode: `eager` | `on-demand`
 
@@ -79,7 +79,10 @@ export class CollectionSyncManager<
   /**
    * Creates a new CollectionSyncManager instance
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, any>,
+    id: string,
+  ) {
     this.config = config
     this.id = id
     this.syncMode = config.syncMode ?? `eager`

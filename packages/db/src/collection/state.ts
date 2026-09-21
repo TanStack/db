@@ -73,7 +73,7 @@ export class CollectionStateManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  public config!: CollectionConfig<TOutput, TKey, TSchema>
+  public config!: CollectionConfig<TOutput, TKey, TSchema, any>
   public collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
   public lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
@@ -149,7 +149,7 @@ export class CollectionStateManager<
   /**
    * Creates a new CollectionState manager
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema, any>) {
     this.config = config
     this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
       a.compareCreatedAt(b),
