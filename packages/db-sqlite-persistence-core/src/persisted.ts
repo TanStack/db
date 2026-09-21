@@ -947,9 +947,7 @@ class PersistedCollectionRuntime<
     return this.lifecycleGeneration
   }
 
-  markExternalSyncApplied(
-    transaction: BufferedSyncTransaction<T, TKey>,
-  ): void {
+  markExternalSyncApplied(transaction: BufferedSyncTransaction<T, TKey>): void {
     if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
 
     for (const fence of this.hydrationFences) {
@@ -3009,8 +3007,7 @@ function createWrappedSyncConfig<
               runtime.markExternalSyncApplied(openTransaction)
             } else {
               void applied.then(
-                () =>
-                  runtime.markExternalSyncApplied(openTransaction),
+                () => runtime.markExternalSyncApplied(openTransaction),
                 () => undefined,
               )
             }
