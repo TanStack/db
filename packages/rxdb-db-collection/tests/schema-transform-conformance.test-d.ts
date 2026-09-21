@@ -43,8 +43,16 @@ const synchronizedOutput = {
 } satisfies RowOutput
 
 /**
- * RxDB is the synchronization provider, so its collection document type must
- * already be schema output. TanStack mutation entry points remain schema input.
+ * Adapter mapping for the shared schema input/output law:
+ * `rxdbCollectionOptions` requires the RxDB document type to equal schema
+ * output because RxDB supplies sync rows. `getKey`, `compare`, Collection rows,
+ * and sync change messages observe that output. Public insert and update entry
+ * points accept schema input.
+ *
+ * The assertions observe those production type paths after option and
+ * Collection inference. Hostile controls reject an input row at the sync
+ * boundary and an input-shaped `RxCollection`. This partial oracle does not
+ * execute RxDB subscriptions, provider I/O, or schema parsing.
  */
 describe(`RxDB schema transform conformance`, () => {
   it(`requires output-shaped RxDB documents`, () => {
@@ -98,9 +106,9 @@ describe(`RxDB schema transform conformance`, () => {
       unknown
     >
 
-    // @ts-expect-error provider documents must match schema output
     rxdbCollectionOptions({
       rxCollection: inputCollection,
+      // @ts-expect-error provider documents must match schema output
       schema: rowSchema,
     })
   })

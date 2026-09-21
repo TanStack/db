@@ -42,8 +42,16 @@ const synchronizedOutput = {
 } satisfies RowOutput
 
 /**
- * Electric shape rows enter the collection as schema output. Mutation entry
- * points accept schema input, while handlers observe validated output.
+ * Adapter mapping for the shared schema input/output law:
+ * `electricCollectionOptions` carries Electric shape rows into sync change
+ * messages as schema output. `getKey`, `compare`, Collection rows, and handler
+ * mutations observe that output. Public insert and update entry points accept
+ * schema input.
+ *
+ * The assertions observe those production type paths after overload
+ * resolution. Hostile controls reject an untransformed shape row at the sync
+ * boundary and an invalid value at the mutation boundary. This partial oracle
+ * does not execute Shape parsing, network I/O, or mutation-handler timing.
  */
 describe(`Electric schema transform conformance`, () => {
   it(`keeps the shape and mutation sides distinct`, () => {

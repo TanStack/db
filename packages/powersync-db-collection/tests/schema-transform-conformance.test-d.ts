@@ -114,9 +114,19 @@ const synchronizedOutput = {
 } satisfies ApplicationOutput
 
 /**
- * PowerSync has two independent boundaries: collection mutations use the
- * collection schema input, while SQLite synchronization must pass through a
- * deserialization schema whose output is exactly the collection output.
+ * Adapter mapping for the shared schema input/output law:
+ * PowerSync has two supported production type paths. A transforming Collection
+ * schema maps SQLite-shaped input to Collection output. With an application
+ * schema, `deserializationSchema` maps SQLite rows to that schema's exact
+ * output. In both paths, public mutations accept the Collection schema input;
+ * compare, serializer, Collection rows, and sync change messages use output.
+ *
+ * The assertions observe both paths after TypeScript resolves the public
+ * options and Collection types. Hostile controls reject SQLite values at an
+ * application mutation boundary, application values at a SQLite mutation
+ * boundary, input rows at the sync boundary, and a deserializer with the wrong
+ * output. This partial oracle does not execute database reads, parsing,
+ * serialization, or deserialization-error handling.
  */
 describe(`PowerSync schema transform conformance`, () => {
   it(`transforms SQLite-shaped mutation and sync rows to exact output`, () => {

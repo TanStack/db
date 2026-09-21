@@ -42,12 +42,31 @@ const synchronizedOutput = {
 type ItemOf<T> = T extends Array<infer U> ? U : T
 
 /**
- * Contract card:
- * - Schema output is the stored/read/synchronized row and the input to getKey.
- * - Schema input is accepted by insert and exposed as the update draft.
- * - The matrix crosses transformed Date/number fields, a branded key, a
- *   defaulted field, and a nullish field.
- * - The input-only synchronized-row controls are deliberate hostile mutants.
+ * Which side of a Standard Schema transform belongs at each Collection
+ * boundary?
+ *
+ * Shared law:
+ * - Mutation entry points accept schema input. An update draft is schema input.
+ * - A Collection stores and exposes schema output. `getKey`, `compare`, and
+ *   sync change messages therefore use schema output.
+ *
+ * Type relation and domain:
+ * `RowInput` and `RowOutput` come from one schema, but deliberately differ in
+ * transformed Date and number fields, a branded key, a defaulted field, and a
+ * nullish field. The compile-time oracle requires every production type path
+ * to choose the correct side of that relation.
+ *
+ * Production paths and observation cut:
+ * The driver passes the schema through `localOnlyCollectionOptions` and
+ * `localStorageCollectionOptions`, then creates the public Collection.
+ * `expectTypeOf` observes callbacks, mutation parameters, Collection rows, and
+ * sync change messages after TypeScript resolves each public adapter type.
+ *
+ * Fault controls and omissions:
+ * `@ts-expect-error` controls send an input-only row through the sync boundary
+ * or an invalid value through the mutation boundary. This partial oracle does
+ * not execute schema parsing, local storage, change publication, or provider
+ * I/O. Package-specific files map the same law to their production paths.
  */
 describe(`local adapter schema transform conformance`, () => {
   it(`keeps local-only synchronized rows on the output side`, () => {
