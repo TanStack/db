@@ -64,9 +64,9 @@ evidence together.
 
 Two small examples show the form:
 
-- [`load-subset-transaction-refinement-oracle.test.ts`](../../packages/db/tests/query/load-subset-transaction-refinement-oracle.test.ts)
+- [`load-subset-transaction-refinement-oracle.test.ts`](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-transaction-refinement-oracle.test.ts)
   explains when an abort can still cancel an on-demand load.
-- [`fifo-retry.property.test.ts`](../../packages/offline-transactions/tests/fifo-retry.property.test.ts)
+- [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
   explains why a ready transaction waits behind a delayed FIFO head.
 
 ### Use five visible layers
@@ -364,7 +364,7 @@ The fixed and random lanes should use the same property, generators,
 observations, and run budget. Only their seed source should differ. This keeps a
 random failure eligible for promotion into a pinned example or fixed campaign.
 
-[`fifo-retry.property.test.ts`](../../packages/offline-transactions/tests/fifo-retry.property.test.ts)
+[`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
 shows this shape. Its fixed lane preserves one scheduler campaign. Its second
 lane uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
 `OFFLINE_ORACLE_PATH` for replay.
@@ -620,7 +620,7 @@ For a new oracle or a claimed repair, ask:
 2. Which legal history distinguishes the proposed model from a weaker one?
 3. Does the fixture make production do the work being tested?
 4. Which concrete wrong answer can the comparison reject—and which can it miss?
-5. What proves the path and assertion ran? What did the fault control actually show?
+5. What proves the path and assertion ran? What did the mutant or fault injection actually show?
 6. Can capture, cleanup or shrinking turn this into a different failure?
 7. Which larger promises remain outside this test, and where are they tracked?
 

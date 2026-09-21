@@ -449,7 +449,7 @@ export class CollectionConfigBuilder<
     return this.activeWindowOperation?.generation
   }
 
-  scheduleGraphRunForSyncRunGeneration(syncRunGeneration: number): void {
+  scheduleGraphRunIfSyncRunCurrent(syncRunGeneration: number): void {
     if (
       syncRunGeneration !== this.syncRunGeneration ||
       !this.currentSyncConfig ||

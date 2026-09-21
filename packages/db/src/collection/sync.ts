@@ -73,7 +73,9 @@ export class CollectionSyncManager<
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
-  private syncEpoch = 0
+  // Fences callbacks retained across reentrant sync entry and cleanup. This
+  // changes at both boundaries; syncRunGeneration changes only at cleanup.
+  private syncCallbackEpoch = 0
   private syncRunGeneration = 0
 
   /**
@@ -123,8 +125,8 @@ export class CollectionSyncManager<
       return
     }
 
-    const syncEpoch = ++this.syncEpoch
-    const isCurrentSync = () => syncEpoch === this.syncEpoch
+    const syncCallbackEpoch = ++this.syncCallbackEpoch
+    const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
     this.lifecycle.setStatus(`loading`)
     if (!isCurrentSync()) return
     let syncEntryActive = true
@@ -887,7 +889,7 @@ export class CollectionSyncManager<
   public cleanup(): void {
     // Invalidate callbacks retained by asynchronous work from this sync run
     // before invoking adapter cleanup or allowing a new sync run to start.
-    const cleanupEpoch = ++this.syncEpoch
+    const cleanupCallbackEpoch = ++this.syncCallbackEpoch
     this.syncRunGeneration++
     this.rejectPreload?.(new CollectionPreloadAbortedError())
     const cleanup = this.syncCleanupFn
@@ -899,7 +901,9 @@ export class CollectionSyncManager<
     } catch (error) {
       // Keep failed cleanup retryable, but never overwrite a replacement
       // sync run installed by reentrant adapter code.
-      if (this.syncEpoch === cleanupEpoch) this.syncCleanupFn = cleanup
+      if (this.syncCallbackEpoch === cleanupCallbackEpoch) {
+        this.syncCleanupFn = cleanup
+      }
       // Re-throw in a microtask to surface the error after cleanup completes
       queueMicrotask(() => {
         if (error instanceof Error) {

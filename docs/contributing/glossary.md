@@ -29,7 +29,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | subscription | A consumer of Collection changes with its own subset demands and lifecycle. | Collection, query, or transport. |
 | sync adapter | The code supplied through Collection sync configuration that starts a sync run and translates between TanStack DB and a provider. | Provider or source Collection. |
 | provider | The external database, service, or SDK from which a sync adapter acquires data. | Sync adapter or source Collection. |
-| sync run | One invocation of a Collection's sync function, plus the callbacks and resources installed by that invocation, until cleanup invalidates them. A run may own zero or more provider requests and may outlive any one request. The internal `syncRunGeneration` counter fences this lifetime. | Provider session, replay, generation, or request. |
+| sync run | One invocation of a Collection's sync function, plus the callbacks and resources installed by that invocation, until cleanup invalidates them. A run may own zero or more provider requests and may outlive any one request. Component-owned `syncRunGeneration` counters fence this lifetime in Collection state, sync ownership, and live-query graph work. | Provider session, replay, generation, or request. |
 | provider session | A provider-defined remote stream, connection, or SDK lifetime. Always qualify it with the provider. | Sync run. |
 | cleanup | The transition that ends the current sync run and releases its resources. The Collection object remains available for cleanup or restart. | Collection destruction, restart, or replay. |
 | restart | Starting a new sync run after the prior sync run has ended. | Same-run recovery or replay. |
@@ -38,7 +38,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | public snapshot | The last coherent set of rows exposed to reads, events, and downstream queries. | Private replacement or source snapshot. |
 | private replacement | Source or graph state withheld while an authoritative replay or repair is incomplete. | Public snapshot. |
 | publication | The boundary that makes one coherent result observable to reads, events, and downstream queries. | Provider return, request settlement, or sync commit by itself. |
-| coherent commit | One publication in which state, events, and consumers see the same complete result. | Any individual `commit()` call. |
+| atomic publication | One publication boundary at which state, events, and consumers observe the same result without an intermediate public state. | Any individual `commit()` call or source snapshot. |
 | readiness | Evidence that a named consumer may proceed. Always qualify Collection readiness, subscription readiness, or initial-query readiness; they settle at different boundaries. | Provider completion or publication in general. |
 
 `source` names a role in a data flow; it does not own a lifecycle. Do not coin a
@@ -70,7 +70,7 @@ earlier node alone.
 | demand | The logical need for source data. Demand may outlive or replace physical work. | Request, transport, or row ownership. |
 | logical subset owner | One subscription claim that keeps a subset demand active. | Physical acquisition. |
 | request data | The immutable `LoadSubsetOptions` and attached signal passed to an adapter. | Demand or established coverage. |
-| acquisition attempt | One invocation that asks a sync adapter to start physical work. A synchronous throw ends the attempt before it establishes an acquisition lease. | Physical acquisition or transport. |
+| acquisition attempt | One invocation that asks a sync adapter to start physical work. A synchronous throw ends the attempt before acceptance. If cleanup invalidates the captured sync run after the adapter returns but before activation, core cancels the tentative acquisition without retaining its lease; cleanup owns the adapter resources. | Physical acquisition or transport. |
 | physical acquisition | Request-scoped work accepted by a sync adapter for a demand. | Acquisition attempt, logical demand, or transport. |
 | lease | An ownership token that requires a matching release. TanStack DB leases do not expire on a timer. Always qualify which resource the lease owns. | Demand, request, or data coverage. |
 | acquisition lease | The release obligation created when an adapter accepts a physical acquisition. | The acquisition attempt itself. |
@@ -90,7 +90,7 @@ earlier node alone.
 | boundary | The last value that an ordered acquisition has safely established for continuation. | Any last local row. |
 | tie group | Rows equal under the order terms used by a continuation boundary. | Page. |
 | source exhaustion | Authoritative evidence that no more matching source rows exist. | A short response unless the provider says it is authoritative. |
-| generation | A monotonic token used to reject obsolete asynchronous work. Qualify the clock it fences, such as sync-run, replay, ordered-load, window-operation, cursor-sequence, publication, post-write-refetch, graph, or demand generation. | Session, replay, or request. |
+| generation | A monotonic token used to reject obsolete asynchronous work. Qualify the clock it fences, such as sync-run, replay, ordered-load, window-operation, cursor-sequence, post-write-refetch, or demand generation. | Session, replay, or request. |
 | repair | Work that tries to restore an authoritative source result after finite coverage becomes invalid or an acquisition fails. Repair may use a replay, but the terms are not synonyms. | Retry, replay, or restart. |
 | recovery | Regaining a named capability after failure. Always qualify what recovered and whether it stayed in the same sync run. | Restart or repair in general. |
 
@@ -111,7 +111,7 @@ cross-file terms keep their exact meanings:
 | weighted delta | A positive or negative change to a relation row. |
 
 See
-[`packages/db/src/query/live/ARCHITECTURE.md`](../../packages/db/src/query/live/ARCHITECTURE.md)
+[`packages/db/src/query/live/ARCHITECTURE.md`](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/ARCHITECTURE.md)
 for bucket relations, bucket values, arrangements, reductions, and the normative
 materialization laws.
 
@@ -133,7 +133,8 @@ materialization laws.
 | refinement check | A check that observed production behavior is allowed by the model. A sampled check is not a proof for every behavior. |
 | partial oracle | An oracle that judges only named parts of the contract. |
 | reach witness | Evidence that the production driver reached the claimed boundary. |
-| fault control or mutant | A deliberate wrong answer or implementation used to test oracle sensitivity. |
+| mutant | A deliberate wrong answer or implementation used to test oracle sensitivity. |
+| fault injection | A deliberate runtime failure, delay, cancellation, or malformed response used to test a system boundary. |
 | shrinking | Reducing a failing generated history while preserving the failure. |
 | bounded exhaustiveness | Executing every case inside stated finite bounds. |
 | held-out challenge | A challenge not used to shape the tested design. After it guides a change, retain it but stop calling it held out. |
@@ -145,7 +146,9 @@ Use nouns for state and verbs for transitions:
 - A demand **becomes active** or **retires**.
 - Core **starts an acquisition attempt**. If the adapter accepts it, the attempt
   **establishes a physical acquisition** and its **acquisition lease**. A
-  synchronous throw **fails the attempt** before either is established.
+  synchronous throw **fails the attempt** before either is established. Cleanup
+  may instead invalidate a returned attempt before activation; core then
+  **cancels the tentative acquisition** without retaining its lease.
 - A logical owner **retires**. Core **releases an acquisition lease**. The
   adapter **unloads** its acquisition.
 - An abort signal **requests cancellation**; transport **stops** only when the
@@ -157,8 +160,9 @@ Use nouns for state and verbs for transitions:
 - Truncate replay **replaces** source state inside the current sync run and
   any current dependent graph.
 
-Use `complete` only when fulfillment versus rejection does not matter. Use
-`success` only for fulfillment. Qualify overloaded words such as `state`,
+Use `settled` for a promise that fulfilled or rejected. Use `complete` for named
+coverage, content, history, or a non-promise operation only when no stronger
+boundary term applies. Use `success` only for fulfillment. Qualify overloaded words such as `state`,
 `request`, `snapshot`, `session`, `owner`, `release`, `recovery`, and
 `generation` at first use.
 

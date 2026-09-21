@@ -379,7 +379,7 @@ export class CollectionSubscriber<
           return
         }
         this.orderedLoader?.settleFullSourceReplay()
-        this.collectionConfigBuilder.scheduleGraphRunForSyncRunGeneration(
+        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
           syncRunGeneration,
         )
       },
