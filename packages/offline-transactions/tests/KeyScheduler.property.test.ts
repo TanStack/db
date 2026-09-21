@@ -1,6 +1,7 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KeyScheduler } from '../src/executor/KeyScheduler'
+import { readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
 type Command =
@@ -50,36 +51,36 @@ type Snapshot = {
 }
 
 const BASE_TIME = Date.parse(`2026-01-01T00:00:00.000Z`)
-const SEED = Number(process.env.TANSTACK_DB_OFFLINE_ORACLE_SEED ?? 1815)
-const RUNS = Number(process.env.TANSTACK_DB_OFFLINE_ORACLE_RUNS ?? 150)
-const PATH = process.env.TANSTACK_DB_OFFLINE_ORACLE_PATH
+const {
+  runs: RUNS,
+  seed: SEED,
+  path: PATH,
+} = readOfflineOracleConfig({
+  prefix: `TANSTACK_DB_OFFLINE_ORACLE`,
+  defaultRuns: 150,
+  defaultSeed: 1815,
+})
 
-/*
-Test card:
-- Law and source: KeyScheduler is globally serial in creation order. Equal
-  creation times retain scheduling order, as owned by KeyScheduler.test.ts's
-  "processes transactions with identical createdAt in scheduling order" test.
-- Domain and legal histories: the event table below, including retry deadline
-  orderings, payload replacement, clear during either state, and reuse.
-- Reference: a declarative ledger, clock, stable creation sequence, and at most
-  one active transaction.
-- Production path and checkpoint: KeyScheduler's executor-facing methods;
-  compare after every legal event returns.
-- Observed result: returned identity/payload, ordered pending records, pending
-  and running counts, and current eligibility.
-- Known omissions: persistence, Promise settlement, timers outside the modeled
-  clock, and leadership are owned by the retained integration oracles.
-- Reach/fault/replay: fixed transition/deadline witnesses, four path-specific
-  fault controls, and TANSTACK_DB_OFFLINE_ORACLE_{SEED,PATH,RUNS}.
-
-Legal event table:
-- schedule/getNext may occur while idle or active
-- start requires the FIFO head to be ready and no active transaction
-- complete/fail require one active transaction
-- retry update immediately follows fail, as TransactionExecutor invokes it
-- bulk update, clock advance, and clear are legal while otherwise reachable
-- clear retires active and pending work, after which the scheduler is reusable
-*/
+/**
+ * # Which offline transaction may run next?
+ *
+ * The scheduler is globally serial in creation order. Equal creation times keep
+ * scheduling order. A delayed FIFO head blocks younger work. At most one entry
+ * is active. Failure makes that entry retryable; retry updates its deadline and
+ * payload without changing its place. Clear retires active and pending work and
+ * leaves the scheduler reusable.
+ *
+ * A declarative ledger, fake clock, and stable sequence form the model. Legal
+ * commands are schedule, inspect, start, complete, fail, retry, bulk update,
+ * advance time, and clear. The driver calls only executor-facing scheduler
+ * methods, then compares returned identity and payload, ordered pending records,
+ * counts, active state, and eligibility after every command.
+ *
+ * Fixed histories cover every transition and deadline relation. Generated
+ * histories add shrinking and replay; four injected faults calibrate the path.
+ * Persistence, promise settlement, leadership, and real timers have separate
+ * owners.
+ */
 
 type CommandToken = {
   selector: number

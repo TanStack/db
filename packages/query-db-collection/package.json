@@ -21,7 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
-    "test:oracles": "vitest run tests/includes-work-counter-oracle.test.ts tests/load-subset-lifecycle-oracle.test.ts tests/ownership-lifecycle.oracle.test.ts tests/cursor-pagination.oracle.test.ts tests/cursor-pagination.cache-oracle.test.ts tests/cursor-pagination.publication-oracle.test.ts tests/cursor-pagination.boundary-oracle.test.ts tests/cursor-pagination.integration.test.ts",
+    "test:oracles": "vitest run --coverage.enabled=false tests/includes-work-counter-oracle.test.ts tests/load-subset-lifecycle-oracle.test.ts tests/ownership-lifecycle.oracle.test.ts tests/cursor-pagination.oracle.test.ts tests/cursor-pagination.cache-oracle.test.ts tests/cursor-pagination.publication-oracle.test.ts tests/cursor-pagination.boundary-oracle.test.ts tests/cursor-pagination.integration.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",

@@ -26,9 +26,9 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * A plain persisted row Map and metadata Map form the reference snapshots. The
  * driver controls hydration, SDK callbacks, applied receipts, cleanup, restart,
  * and eager or progressive mode through the real persistence coordinator and
- * Electric adapter. It records every exposed observation cut, not only final
- * rows. The external-publisher fixture routes complete committed transactions
- * through its bound adapter; that wiring does not add native-host evidence.
+ * Electric adapter. It records every exposed cut, not only the final rows. The
+ * external-publisher fixture routes complete committed transactions through
+ * its bound adapter; that wiring does not add native-host evidence.
  */
 
 type Item = Row & { id: number; name: string; stable: string }
@@ -188,7 +188,6 @@ function fixture(
   }
   return {
     collection,
-    adapter,
     rows,
     metadata,
     commits,
@@ -257,7 +256,6 @@ describe(`persisted Electric recovery laws`, () => {
 
   function externalPublisher() {
     let receive: ((message: ProtocolEnvelope<unknown>) => void) | undefined
-    let ownerAdapter: PersistenceAdapter | undefined
     let id = ``
     let term = 100
     const coordinator: PersistedCollectionCoordinator = {
@@ -274,29 +272,9 @@ describe(`persisted Electric recovery laws`, () => {
       ensureLeadership: () => Promise.resolve(),
       requestEnsurePersistedIndex: () => Promise.resolve(),
       requestEnsureRemoteSubset: () => Promise.resolve(),
-      // This fixture owns external publication/recovery, not subset leases.
-      requestReleaseRemoteSubset: () => Promise.resolve(),
-      registerRemoteSubsetOwner: () => () => {},
-      requestApplyCommittedTx: async (collectionId, tx) => {
-        if (!ownerAdapter) {
-          throw new Error(`external publisher has no persistence owner`)
-        }
-        await ownerAdapter.applyCommittedTx(collectionId, tx)
-        return {
-          type: `rpc:applyCommittedTx:res`,
-          rpcId: tx.txId,
-          ok: true,
-          term: tx.term,
-          seq: tx.seq,
-          latestRowVersion: tx.rowVersion,
-        }
-      },
     }
     return {
       coordinator,
-      bindAdapter: (adapter: PersistenceAdapter) => {
-        ownerAdapter = adapter
-      },
       publish: (
         row: Item,
         deleted: boolean,
@@ -339,7 +317,6 @@ describe(`persisted Electric recovery laws`, () => {
     async ({ syncMode, fullReload }) => {
       const peer = externalPublisher()
       const f = fixture(syncMode, peer.coordinator)
-      peer.bindAdapter(f.adapter)
       try {
         f.start()
         await vi.waitFor(() => expect(subscribers).toHaveLength(1))
@@ -409,7 +386,6 @@ describe(`persisted Electric recovery laws`, () => {
       subscribers.length = 0
       const peer = externalPublisher()
       const f = fixture(`on-demand`, peer.coordinator)
-      peer.bindAdapter(f.adapter)
       const expected = new Map([[oldRow.id, structuredClone(oldRow)]])
       const expectedRows = () =>
         structuredClone([...expected.values()].sort((a, b) => a.id - b.id))
