@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   InvalidPersistedCollectionConfigError,
+  RetryableRemoteSubsetAcquisitionError,
   persistedCollectionOptions,
 } from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
@@ -63,9 +64,8 @@ import type {
  *
  * The default invoke and Web Locks seams are deterministic process-local
  * controls. They prove an actual Electron process only when explicit runtime-
- * bridge mode runs. This suite also does not yet prove bounded retry after
- * follower transport or remote-owner admission failure; that review finding
- * remains open.
+ * bridge mode runs. Bounded replay retry is covered for retryable transport
+ * and admission failures, including cancellation on release and disposal.
  */
 
 type InvokeHarness = {
@@ -2770,6 +2770,135 @@ describe(`electron sqlite persistence bridge`, () => {
       coordinator.dispose()
     }
   })
+
+  it(`retries retained Electron demand after a retryable replay failure`, async () => {
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `electron-subset-retryable-replay`,
+    })
+    registerCleanup(() => coordinator.dispose())
+    coordinator.isLeader = () => true
+
+    type Acquisition = {
+      collectionId: string
+      acquisitionId: string
+      options: TransportedLoadSubsetOptions
+      acquiredLeaderId: string | null
+      inFlight: Promise<void> | null
+      forceReplay: boolean
+      retryTimer: ReturnType<typeof setTimeout> | null
+      retryAttempts: number
+    }
+    const acquisition: Acquisition = {
+      collectionId: `todos`,
+      acquisitionId: `retryable-electron-replay`,
+      options: { limit: 1 },
+      acquiredLeaderId: `retired-electron-leader`,
+      inFlight: null,
+      forceReplay: false,
+      retryTimer: null,
+      retryAttempts: 0,
+    }
+    const internals = coordinator as unknown as {
+      nodeId: string
+      collections: Map<string, { isLeader: boolean; leaderId: string | null }>
+      outboundRemoteSubsetAcquisitions: Map<string, Acquisition>
+      acquireRemoteSubset: (acquisition: Acquisition) => Promise<void>
+      replayRemoteSubsetAcquisitions: (collectionId: string) => Promise<void>
+    }
+    internals.collections.set(`todos`, {
+      isLeader: true,
+      leaderId: internals.nodeId,
+    })
+    internals.outboundRemoteSubsetAcquisitions.set(
+      JSON.stringify([acquisition.collectionId, acquisition.acquisitionId]),
+      acquisition,
+    )
+    let attempts = 0
+    internals.acquireRemoteSubset = vi.fn((current) => {
+      attempts++
+      if (attempts === 1) {
+        return Promise.reject(
+          new RetryableRemoteSubsetAcquisitionError(`offline`),
+        )
+      }
+      current.acquiredLeaderId = internals.nodeId
+      return Promise.resolve()
+    })
+
+    await internals.replayRemoteSubsetAcquisitions(`todos`)
+    expect(attempts).toBe(1)
+    await vi.waitFor(() => expect(attempts).toBe(2))
+  })
+
+  it.each([`release`, `dispose`] as const)(
+    `cancels a scheduled Electron replay retry on %s`,
+    async (stop) => {
+      const coordinator = new ElectronCollectionCoordinator({
+        dbName: `electron-subset-cancel-retry-${stop}`,
+      })
+      registerCleanup(() => coordinator.dispose())
+      coordinator.isLeader = () => true
+
+      type Acquisition = {
+        collectionId: string
+        acquisitionId: string
+        options: TransportedLoadSubsetOptions
+        acquiredLeaderId: string | null
+        inFlight: Promise<void> | null
+        forceReplay: boolean
+        retryTimer: ReturnType<typeof setTimeout> | null
+        retryAttempts: number
+      }
+      const requestedOptions: LoadSubsetOptions = { limit: 1 }
+      const acquisition: Acquisition = {
+        collectionId: `todos`,
+        acquisitionId: `cancelled-electron-replay`,
+        options: { limit: 1 },
+        acquiredLeaderId: `retired-electron-leader`,
+        inFlight: null,
+        forceReplay: false,
+        retryTimer: null,
+        retryAttempts: 0,
+      }
+      const internals = coordinator as unknown as {
+        remoteSubsetIds: Map<string, WeakMap<LoadSubsetOptions, string>>
+        collections: Map<string, { isLeader: boolean; leaderId: string | null }>
+        outboundRemoteSubsetAcquisitions: Map<string, Acquisition>
+        acquireRemoteSubset: (acquisition: Acquisition) => Promise<void>
+        replayRemoteSubsetAcquisitions: (collectionId: string) => Promise<void>
+      }
+      internals.collections.set(`todos`, {
+        isLeader: true,
+        leaderId: null,
+      })
+      internals.remoteSubsetIds.set(
+        `todos`,
+        new WeakMap([[requestedOptions, acquisition.acquisitionId]]),
+      )
+      internals.outboundRemoteSubsetAcquisitions.set(
+        JSON.stringify([acquisition.collectionId, acquisition.acquisitionId]),
+        acquisition,
+      )
+      let attempts = 0
+      internals.acquireRemoteSubset = vi.fn(() => {
+        attempts++
+        return Promise.reject(
+          new RetryableRemoteSubsetAcquisitionError(`offline`),
+        )
+      })
+
+      await internals.replayRemoteSubsetAcquisitions(`todos`)
+      expect(acquisition.retryTimer).not.toBeNull()
+      if (stop === `release`) {
+        await coordinator.requestReleaseRemoteSubset(`todos`, requestedOptions)
+      } else {
+        coordinator.dispose()
+      }
+      expect(acquisition.retryTimer).toBeNull()
+      await new Promise<void>((resolve) => setTimeout(resolve, 250))
+      expect(attempts).toBe(1)
+    },
+  )
 
   it(`starts independent Electron lease replays without sibling head-of-line blocking`, async () => {
     const coordinator = new ElectronCollectionCoordinator({

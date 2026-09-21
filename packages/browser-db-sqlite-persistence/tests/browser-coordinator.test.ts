@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IR } from '@tanstack/db'
+import { RetryableRemoteSubsetAcquisitionError } from '@tanstack/db-sqlite-persistence-core'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import type { LoadSubsetOptions, Subscription } from '@tanstack/db'
 import type {
@@ -39,8 +40,8 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * The composed public-Collection and generated route models live in
  * `per-collection-coordinator-oracle.test.ts`. These seams do not prove real
  * browser scheduling, Web Locks, BroadcastChannel, OPFS ownership, or worker
- * behavior. They also do not yet prove bounded retry after follower transport
- * or remote-owner admission failure; that review finding remains open.
+ * behavior. Bounded replay retry is covered for retryable transport and
+ * admission failures, including cancellation on release and disposal.
  */
 
 // ---------------------------------------------------------------------------
@@ -3749,6 +3750,126 @@ describe(`BrowserCollectionCoordinator`, () => {
         coordinator.dispose()
       }
     })
+
+    it(`retries retained Browser demand after a retryable replay failure`, async () => {
+      const coordinator = createCoordinator()
+      coordinator.subscribe(`todos`, () => {})
+      await flush(50)
+
+      type Acquisition = {
+        collectionId: string
+        acquisitionId: string
+        options: TransportedLoadSubsetOptions
+        acquiredLeaderId: string | null
+        inFlight: Promise<void> | null
+        forceReplay: boolean
+        retryTimer: ReturnType<typeof setTimeout> | null
+        retryAttempts: number
+      }
+      const acquisition: Acquisition = {
+        collectionId: `todos`,
+        acquisitionId: `retryable-browser-replay`,
+        options: { limit: 1 },
+        acquiredLeaderId: `retired-browser-leader`,
+        inFlight: null,
+        forceReplay: false,
+        retryTimer: null,
+        retryAttempts: 0,
+      }
+      const internals = coordinator as unknown as {
+        nodeId: string
+        outboundRemoteSubsetAcquisitions: Map<string, Acquisition>
+        acquireRemoteSubset: (acquisition: Acquisition) => Promise<void>
+        replayRemoteSubsetAcquisitions: (collectionId: string) => Promise<void>
+      }
+      internals.outboundRemoteSubsetAcquisitions.set(
+        JSON.stringify([acquisition.collectionId, acquisition.acquisitionId]),
+        acquisition,
+      )
+      let attempts = 0
+      internals.acquireRemoteSubset = vi.fn((current) => {
+        attempts++
+        if (attempts === 1) {
+          return Promise.reject(
+            new RetryableRemoteSubsetAcquisitionError(`offline`),
+          )
+        }
+        current.acquiredLeaderId = internals.nodeId
+        return Promise.resolve()
+      })
+
+      await internals.replayRemoteSubsetAcquisitions(`todos`)
+      expect(attempts).toBe(1)
+      await vi.waitFor(() => expect(attempts).toBe(2))
+    })
+
+    it.each([`release`, `dispose`] as const)(
+      `cancels a scheduled Browser replay retry on %s`,
+      async (stop) => {
+        const coordinator = createCoordinator()
+        coordinator.subscribe(`todos`, () => {})
+        await flush(50)
+
+        type Acquisition = {
+          collectionId: string
+          acquisitionId: string
+          options: TransportedLoadSubsetOptions
+          acquiredLeaderId: string | null
+          inFlight: Promise<void> | null
+          forceReplay: boolean
+          retryTimer: ReturnType<typeof setTimeout> | null
+          retryAttempts: number
+        }
+        const requestedOptions: LoadSubsetOptions = { limit: 1 }
+        const acquisition: Acquisition = {
+          collectionId: `todos`,
+          acquisitionId: `cancelled-browser-replay`,
+          options: { limit: 1 },
+          acquiredLeaderId: `retired-browser-leader`,
+          inFlight: null,
+          forceReplay: false,
+          retryTimer: null,
+          retryAttempts: 0,
+        }
+        const internals = coordinator as unknown as {
+          remoteSubsetIds: Map<string, WeakMap<LoadSubsetOptions, string>>
+          outboundRemoteSubsetAcquisitions: Map<string, Acquisition>
+          acquireRemoteSubset: (acquisition: Acquisition) => Promise<void>
+          replayRemoteSubsetAcquisitions: (
+            collectionId: string,
+          ) => Promise<void>
+        }
+        internals.remoteSubsetIds.set(
+          `todos`,
+          new WeakMap([[requestedOptions, acquisition.acquisitionId]]),
+        )
+        internals.outboundRemoteSubsetAcquisitions.set(
+          JSON.stringify([acquisition.collectionId, acquisition.acquisitionId]),
+          acquisition,
+        )
+        let attempts = 0
+        internals.acquireRemoteSubset = vi.fn(() => {
+          attempts++
+          return Promise.reject(
+            new RetryableRemoteSubsetAcquisitionError(`offline`),
+          )
+        })
+
+        await internals.replayRemoteSubsetAcquisitions(`todos`)
+        expect(acquisition.retryTimer).not.toBeNull()
+        if (stop === `release`) {
+          await coordinator.requestReleaseRemoteSubset(
+            `todos`,
+            requestedOptions,
+          )
+        } else {
+          coordinator.dispose()
+        }
+        expect(acquisition.retryTimer).toBeNull()
+        await new Promise<void>((resolve) => setTimeout(resolve, 250))
+        expect(attempts).toBe(1)
+      },
+    )
 
     it(`starts independent Browser lease replays without sibling head-of-line blocking`, async () => {
       const coordinator = createCoordinator()

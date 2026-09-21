@@ -144,6 +144,16 @@ export class DuplicateRemoteSubsetOwnerError extends PersistedCollectionCoreErro
   }
 }
 
+export class RetryableRemoteSubsetAcquisitionError extends PersistedCollectionCoreError {
+  override readonly cause: unknown
+
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = `RetryableRemoteSubsetAcquisitionError`
+    this.cause = cause
+  }
+}
+
 export class InvalidPersistedStorageKeyError extends InvalidPersistedCollectionConfigError {
   constructor(key: string | number) {
     super(

@@ -2,6 +2,7 @@ import {
   DuplicateRemoteSubsetOwnerError,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
+  RetryableRemoteSubsetAcquisitionError,
   safeRandomUUID,
   toPersistedCollectionDurabilityError,
   toTransportedLoadSubsetOptions,
@@ -36,6 +37,7 @@ const HEARTBEAT_INTERVAL_MS = 3_000
 const RPC_TIMEOUT_MS = 10_000
 const RPC_RETRY_ATTEMPTS = 2
 const RPC_RETRY_DELAY_MS = 200
+const REMOTE_SUBSET_REPLAY_RETRY_ATTEMPTS = 2
 const RPC_DEDUPE_RETENTION_MS = 60_000
 const WRITER_LOCK_BUSY_RETRY_MS = 50
 const WRITER_LOCK_MAX_RETRIES = 20
@@ -164,6 +166,8 @@ type OutboundRemoteSubsetAcquisition = {
   acquiredLeaderId: string | null
   inFlight: Promise<void> | null
   forceReplay: boolean
+  retryTimer: ReturnType<typeof setTimeout> | null
+  retryAttempts: number
 }
 
 type AppliedEnvelope =
@@ -353,6 +357,8 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         acquiredLeaderId: null,
         inFlight: null,
         forceReplay: false,
+        retryTimer: null,
+        retryAttempts: 0,
       }
       this.outboundRemoteSubsetAcquisitions.set(
         remoteSubsetAcquisitionKey(collectionId, acquisitionId),
@@ -371,7 +377,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     const acquisitionId = collectionIds?.get(options)
     if (!acquisitionId) return
     const key = remoteSubsetAcquisitionKey(collectionId, acquisitionId)
-    if (!this.outboundRemoteSubsetAcquisitions.delete(key)) return
+    const acquisition = this.outboundRemoteSubsetAcquisitions.get(key)
+    if (!acquisition) return
+    this.outboundRemoteSubsetAcquisitions.delete(key)
+    this.cancelRemoteSubsetReplayRetry(acquisition)
     collectionIds!.delete(options)
 
     const request: Extract<
@@ -415,18 +424,35 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         options: acquisition.options,
       }
       route.localOwner = this.isLeader(acquisition.collectionId)
-      const response = route.localOwner
-        ? await this.handleEnsureRemoteSubset(
-            acquisition.collectionId,
-            request,
-            this.nodeId,
-          )
-        : await this.sendRPC<EnsureRemoteSubsetResponse>(
-            acquisition.collectionId,
-            request,
-          )
+      let response: EnsureRemoteSubsetResponse
+      try {
+        response = route.localOwner
+          ? await this.handleEnsureRemoteSubset(
+              acquisition.collectionId,
+              request,
+              this.nodeId,
+            )
+          : await this.sendRPC<EnsureRemoteSubsetResponse>(
+              acquisition.collectionId,
+              request,
+            )
+      } catch (error) {
+        if (
+          route.localOwner ||
+          error instanceof RetryableRemoteSubsetAcquisitionError
+        ) {
+          throw error
+        }
+        throw new RetryableRemoteSubsetAcquisitionError(
+          `Remote subset transport failed`,
+          error,
+        )
+      }
 
       if (!response.ok) {
+        if (response.retryable) {
+          throw new RetryableRemoteSubsetAcquisitionError(response.error)
+        }
         throw new Error(`ensureRemoteSubset failed: ${response.error}`)
       }
       acquisition.acquiredLeaderId = response.leaderId
@@ -436,6 +462,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     try {
       await work
       acquired = true
+      this.cancelRemoteSubsetReplayRetry(acquisition)
     } finally {
       if (acquisition.inFlight === work) acquisition.inFlight = null
       const current = this.collections.get(acquisition.collectionId)
@@ -454,8 +481,8 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
             acquisition.acquiredLeaderId !== currentLeaderId))
       ) {
         acquisition.forceReplay = false
-        void this.acquireRemoteSubset(acquisition).catch(() => {
-          // Demand stays retained; only new demand or ownership change retries.
+        void this.acquireRemoteSubset(acquisition).catch((error) => {
+          this.scheduleRemoteSubsetReplayRetry(acquisition, error)
         })
       }
     }
@@ -559,6 +586,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     this.disposed = true
 
     for (const acquisition of this.outboundRemoteSubsetAcquisitions.values()) {
+      this.cancelRemoteSubsetReplayRetry(acquisition)
       this.postRemoteSubsetRelease(acquisition)
     }
     this.outboundRemoteSubsetAcquisitions.clear()
@@ -731,6 +759,49 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     } satisfies ProtocolEnvelope<unknown>)
   }
 
+  private cancelRemoteSubsetReplayRetry(
+    acquisition: OutboundRemoteSubsetAcquisition,
+  ): void {
+    if (acquisition.retryTimer !== null) {
+      clearTimeout(acquisition.retryTimer)
+      acquisition.retryTimer = null
+    }
+    acquisition.retryAttempts = 0
+  }
+
+  private scheduleRemoteSubsetReplayRetry(
+    acquisition: OutboundRemoteSubsetAcquisition,
+    error: unknown,
+  ): void {
+    const key = remoteSubsetAcquisitionKey(
+      acquisition.collectionId,
+      acquisition.acquisitionId,
+    )
+    if (
+      !(error instanceof RetryableRemoteSubsetAcquisitionError) ||
+      this.isDisposed() ||
+      this.outboundRemoteSubsetAcquisitions.get(key) !== acquisition ||
+      acquisition.retryTimer !== null ||
+      acquisition.retryAttempts >= REMOTE_SUBSET_REPLAY_RETRY_ATTEMPTS
+    ) {
+      return
+    }
+
+    acquisition.retryAttempts++
+    acquisition.retryTimer = setTimeout(() => {
+      acquisition.retryTimer = null
+      if (
+        this.isDisposed() ||
+        this.outboundRemoteSubsetAcquisitions.get(key) !== acquisition
+      ) {
+        return
+      }
+      void this.acquireRemoteSubset(acquisition).catch((retryError) => {
+        this.scheduleRemoteSubsetReplayRetry(acquisition, retryError)
+      })
+    }, RPC_RETRY_DELAY_MS)
+  }
+
   private async replayRemoteSubsetAcquisitions(
     collectionId: string,
   ): Promise<void> {
@@ -753,8 +824,8 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       }
       acquisition.forceReplay = false
       replays.push(
-        this.acquireRemoteSubset(acquisition).catch(() => {
-          // Demand stays retained; only new demand or ownership change retries.
+        this.acquireRemoteSubset(acquisition).catch((error) => {
+          this.scheduleRemoteSubsetReplayRetry(acquisition, error)
         }),
       )
     }
@@ -1101,7 +1172,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
     const owner = this.remoteSubsetOwners.get(collectionId)
     if (!owner) {
-      throw new Error(
+      throw new RetryableRemoteSubsetAcquisitionError(
         `BrowserCollectionCoordinator: no remote subset owner registered for collection "${collectionId}"`,
       )
     }
@@ -1923,6 +1994,9 @@ function createRPCErrorResponse(
         rpcId: request.rpcId,
         ok: false,
         error,
+        ...(cause instanceof RetryableRemoteSubsetAcquisitionError
+          ? { retryable: true as const }
+          : {}),
       }
     case `rpc:releaseRemoteSubset:req`:
       return {

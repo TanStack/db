@@ -121,6 +121,7 @@ export type EnsureRemoteSubsetResponse =
       rpcId: string
       ok: false
       error: string
+      retryable?: true
     }
 
 export type ReleaseRemoteSubsetRequest = {
@@ -1346,6 +1347,7 @@ class PersistedCollectionRuntime<
     const lifecycleGeneration = this.lifecycleGeneration
     const routeRemoteDemandThroughCoordinator =
       this.mode === `sync-present` &&
+      this.remoteSubsetOwnerUnsubscribe !== null &&
       !(this.persistence.coordinator instanceof SingleProcessCoordinator)
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
@@ -2230,6 +2232,7 @@ class PersistedCollectionRuntime<
   private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
     if (
       this.mode !== `sync-present` ||
+      this.remoteSubsetOwnerUnsubscribe === null ||
       this.persistence.coordinator instanceof SingleProcessCoordinator ||
       this.activeSubsets.get(this.getSubsetKey(options)) !== options
     ) {

@@ -3256,7 +3256,7 @@ describe(`persistedCollectionOptions`, () => {
         sync: {
           sync: ({ markReady }) => {
             markReady()
-            return {}
+            return { loadSubset: vi.fn() }
           },
         },
         persistence: {
@@ -3279,6 +3279,63 @@ describe(`persistedCollectionOptions`, () => {
 
     expect(firstResult).toBe(offline)
     expect(ensureCalls).toBeGreaterThanOrEqual(2)
+  })
+
+  it(`does not route remote demand without a subset owner`, async () => {
+    const ensure = vi.fn(async () => {
+      throw new Error(`no remote subset owner registered`)
+    })
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `ownerless-node`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => true,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      requestEnsureRemoteSubset: ensure,
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `ownerless-on-demand-source`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter: createRecordingAdapter(),
+          coordinator,
+        },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+
+      await expect(
+        Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+      ).resolves.toBeUndefined()
+      await flushAsyncWork(120)
+
+      expect(ensure).not.toHaveBeenCalled()
+    } finally {
+      await collection.cleanup()
+    }
   })
 
   it(`fails sync-absent persistence when follower ack omits mutation ids`, async () => {
