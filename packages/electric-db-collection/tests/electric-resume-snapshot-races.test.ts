@@ -662,12 +662,33 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
 }
 
 /**
- * Deterministic companion schedules for the persisted recovery owner in
- * electric-recovery-oracle.test.ts. Its scenario matrix proves settled restart
- * semantics; these cases hold the adapter's second atomic snapshot so row loss,
- * reset, and concurrent commit can be injected between startup metadata and
- * resume certification. The separate fixture keeps the held boundary explicit
- * and does not claim native SQLite or live Electric service coverage.
+ * # Which persisted baseline may Electric resume from during startup races?
+ *
+ * The persisted resume law requires the rows, resume metadata, stream position,
+ * and key-set evidence used for certification to belong to one atomic baseline
+ * generation. An unverifiable, externally changed, or reset baseline must start
+ * a fresh source snapshot; a compatible baseline may retain its resume cursor.
+ * This refines the settled recovery law in electric-recovery-oracle.test.ts and
+ * the atomic `loadResumeSnapshot` persistence contract.
+ *
+ * The reference is the small baseline tuple captured by each case: generation,
+ * complete key set, resume state, and expected source delivery. Legal histories
+ * vary eager versus on-demand sync, compatible versus unknown legacy evidence,
+ * startup reset cause, and row loss, schema reset, or committed write between
+ * the initial metadata read and certification. No production classifier or SQL
+ * helper computes the expected public and durable rows.
+ *
+ * The production driver uses `SQLiteCorePersistenceAdapter`, the persisted
+ * Collection wrapper, and `electricCollectionOptions`. It holds the adapter's
+ * later atomic snapshot, injects the selected transition, then compares the
+ * ShapeStream offset/handle plus complete public and durable rows at the
+ * post-restart up-to-date checkpoint. Entering the held snapshot is the reach
+ * witness; compatible and legacy-unknown controls challenge both resume and
+ * fresh-snapshot branches.
+ *
+ * These deterministic schedules do not model arbitrary external SQL edits,
+ * native SQLite hosts, or a live Electric service. Those require their separate
+ * persistence-driver and real-provider owners.
  */
 describe(`Electric resume snapshot races`, () => {
   beforeEach(() => {

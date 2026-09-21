@@ -20,6 +20,32 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
+/**
+ * # What remains visible while a persisted Electric replica repairs itself?
+ *
+ * Hydrated rows and resume metadata provide the last complete public snapshot.
+ * A must-refetch starts a private replacement. Until that replacement is fully
+ * applied, readers may see an earlier permitted snapshot but never a torn mix.
+ * Failure keeps the old public rows and records repair debt; later success may
+ * replace them atomically.
+ *
+ * A plain persisted row Map and metadata Map form the reference snapshots. The
+ * driver controls hydration, SDK callbacks, applied receipts, cleanup, restart,
+ * and eager or progressive mode through the real persistence coordinator and
+ * Electric adapter. It records every exposed cut, not only the final rows.
+ *
+ * Legal histories vary sync mode, hydration and restart timing, reset cause,
+ * peer publication, stream delta, deletion, and full reload. At each recorded
+ * publication cut, the complete public rows must refine one permitted snapshot;
+ * durable rows and resume metadata are compared again after the applied or
+ * post-restart up-to-date checkpoint. Stale/missing canonical-row controls and
+ * the repaired-intermediate trace challenge the checker; generated failures
+ * retain fast-check's seed and shrink path.
+ *
+ * The fixture does not establish live HTTP delivery, native SQLite host
+ * behavior, or callback multiplicity beyond the observations named below.
+ */
+
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }

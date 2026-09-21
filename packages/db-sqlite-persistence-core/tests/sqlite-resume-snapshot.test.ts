@@ -196,12 +196,33 @@ async function observeCachedSchemaState(
 }
 
 /**
- * Narrow companion to sqlite-core-adapter.test.ts for atomic snapshot and DDL
- * interleavings. That owner deliberately drives sqlite3 through a serialized
- * copy-on-commit CLI harness, which cannot expose two adapters to the same
- * in-flight connection state. This file uses node:sqlite only for that missing
- * deterministic seam; expected key membership and reset lineage remain
- * independent assertions, not a second production-shaped model.
+ * # Which generation does a SQLite resume snapshot certify?
+ *
+ * `loadResumeSnapshot` must return rows, collection metadata, applied position,
+ * reset epoch, and key-set evidence from one atomic persisted generation. Raw
+ * key loss makes that evidence incompatible until a full replacement establishes
+ * a new baseline; concurrent schema migration may advance but never downgrade or
+ * repeat the observed generation. These laws refine the shared persistence and
+ * schema-mismatch contracts exercised by sqlite-core-adapter.test.ts.
+ *
+ * `CachedSchemaState` is the independent projection: complete rows and metadata,
+ * transaction position, schema/reset lineage, and expected keys. The history
+ * grammar crosses external row loss, full replacement, two legacy-schema
+ * adapters, stale reads, newer-schema observation, and a cached writer racing a
+ * reset. Expected membership and lineage come from the declared transition, not
+ * from the adapter's SQL or internal branch structure.
+ *
+ * The production driver runs two real `SQLiteCorePersistenceAdapter` instances
+ * over one node:sqlite database and holds the exact transaction or snapshot
+ * boundary needed for each interleaving. At the settled snapshot checkpoint it
+ * compares the entire projected schema state; the held boundary and reset epoch
+ * are reach witnesses, while compatible reopen and recertifying truncate cases
+ * prevent an oracle that merely rejects every resume.
+ *
+ * This narrow fixture supplies the same-connection concurrency seam that the
+ * serialized copy-on-commit CLI harness cannot. It does not claim native host
+ * execution or judge whether a consumer such as Electric may use the certified
+ * cursor; those remain separate driver-contract and Electric recovery owners.
  */
 describe(`SQLite resume snapshots`, () => {
   it(`keeps raw key loss sticky until a full replacement recertifies the baseline`, async () => {
