@@ -54,7 +54,7 @@ export function createCursorPager<T>({
   staleTime,
   gcTime,
 }: CursorPagerOptions<T>): CursorPager<T> {
-  let generation = 0
+  let cursorSequenceGeneration = 0
   let tail = Promise.resolve()
   const sequences = new WeakMap<AbortSignal, Set<string | undefined>>()
   type Pages = InfiniteData<CursorPage<T>, string | undefined>
@@ -137,10 +137,10 @@ export function createCursorPager<T>({
 
   return {
     read({ offset = 0, limit }, signal) {
-      const requestedGeneration = generation
+      const requestedCursorSequenceGeneration = cursorSequenceGeneration
       const checkCurrent = () => {
         if (signal?.aborted) throw signal.reason ?? abortError()
-        if (requestedGeneration !== generation) {
+        if (requestedCursorSequenceGeneration !== cursorSequenceGeneration) {
           throw new DOMException(`Cursor sequence was reset`, `AbortError`)
         }
       }
@@ -234,7 +234,7 @@ export function createCursorPager<T>({
       return abortable(result, signal)
     },
     reset() {
-      generation++
+      cursorSequenceGeneration++
       queryClient.removeQueries({ queryKey, exact: true })
     },
   }

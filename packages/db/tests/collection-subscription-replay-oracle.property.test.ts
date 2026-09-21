@@ -19,6 +19,27 @@ import type {
 } from '../src/types.js'
 import type { Scheduler } from 'fast-check'
 
+/**
+ * # Does replay replace a source atomically under hostile timing?
+ *
+ * Replay rebuilds a subscription while old acquisitions, source writes,
+ * optimistic state, callbacks, and cleanup may still be in flight. The public
+ * snapshot must change only when the newest complete replay earns authority.
+ * Older, failed, aborted, or released work may settle and release resources,
+ * but it must not leak rows or overwrite a newer snapshot.
+ *
+ * Small scenario records describe source rows, logical demands, replay
+ * attempts, settlement order, release points, and later source actions. Plain
+ * Map-based reducers compute the expected snapshot and event batches. The
+ * production driver uses real Collection subscriptions, indexes, transactions,
+ * and callback reentry. It compares every intermediate publication, not only
+ * the final rows.
+ *
+ * This file owns replay-specific data and timing. General owner/attempt status
+ * is modeled in the lifecycle grammar, and optimistic transaction semantics
+ * are modeled by the optimistic-history oracle.
+ */
+
 type ReplayRow = {
   id: `one` | `two`
   value: number
@@ -368,7 +389,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
   let truncate!: () => void
   let loadCount = 0
   let unloadCount = 0
-  const leases = new Map<
+  const acquisitionCounts = new Map<
     LoadSubsetOptions,
     { acquisitions: number; releases: number }
   >()
@@ -446,12 +467,12 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           return {
             loadSubset: (options) => {
               loadCount++
-              const lease = leases.get(options) ?? {
+              const counts = acquisitionCounts.get(options) ?? {
                 acquisitions: 0,
                 releases: 0,
               }
-              lease.acquisitions++
-              leases.set(options, lease)
+              counts.acquisitions++
+              acquisitionCounts.set(options, counts)
               const demandId =
                 options.where === undefined
                   ? undefined
@@ -499,12 +520,12 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
             },
             unloadSubset: (options) => {
               unloadCount++
-              const lease = leases.get(options) ?? {
+              const counts = acquisitionCounts.get(options) ?? {
                 acquisitions: 0,
                 releases: 0,
               }
-              lease.releases++
-              leases.set(options, lease)
+              counts.releases++
+              acquisitionCounts.set(options, counts)
             },
           }
         },
@@ -573,7 +594,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     assertSource()
     let expectedPublicationCount = publicationCount
     let lastReportedError: Error | undefined
-    let modelSession:
+    let modelReplayState:
       | {
           baseline: Map<string | number, ReplayRow>
           pending: Set<number>
@@ -613,11 +634,11 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
 
     const settleReplay = async (replayIndex: number) => {
       const pending = pendingReplays[replayIndex]!
-      const session = modelSession
+      const replayState = modelReplayState
       const load = pending.load
       const isCurrent =
-        session !== undefined &&
-        pending.attemptIndex === session.currentAttemptIndex &&
+        replayState !== undefined &&
+        pending.attemptIndex === replayState.currentAttemptIndex &&
         activeDemandIds.has(load.demandId)
       pending.settled = true
       if (load.outcome === `resolve`) {
@@ -631,31 +652,34 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         }
         pending.deferred.reject(pending.error)
       }
-      session?.pending.delete(replayIndex)
+      replayState?.pending.delete(replayIndex)
       await flushPromises()
       assertSource()
 
-      if (!session) {
+      if (!replayState) {
         expect(subscription.status).toBe(`ready`)
         assertPublished(expectedPublished)
         expect(subscription.lastError).toBe(lastReportedError)
         return
       }
 
-      const hasPendingReplay = session.pending.size > 0
+      const hasPendingReplay = replayState.pending.size > 0
       expect(subscription.status).toBe(
         hasPendingReplay ? `loadingSubset` : `ready`,
       )
 
-      if (session.pending.size === 0) {
-        const currentAttempt = scenario.attempts[session.currentAttemptIndex]!
+      if (replayState.pending.size === 0) {
+        const currentAttempt =
+          scenario.attempts[replayState.currentAttemptIndex]!
         const currentAttemptSucceeds = currentAttempt.loads.every(
           ({ demandId, outcome }) =>
             !activeDemandIds.has(demandId) || outcome === `resolve`,
         )
         const previousPublication = new Map(expectedPublished)
         expectedPublished.clear()
-        const nextRows = currentAttemptSucceeds ? sourceRows : session.baseline
+        const nextRows = currentAttemptSucceeds
+          ? sourceRows
+          : replayState.baseline
         for (const [id, row] of nextRows) {
           expectedPublished.set(id, { ...row })
         }
@@ -665,7 +689,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
             previousPublication,
             expectedPublished,
           )
-          expect(publicationCount - session.publicationCount).toBe(
+          expect(publicationCount - replayState.publicationCount).toBe(
             Number(expectedBatch.length > 0),
           )
           if (expectedBatch.length > 0) {
@@ -673,13 +697,13 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
               sortedChanges(expectedBatch),
             )
           }
-          modelSession = undefined
+          modelReplayState = undefined
         } else {
-          expect(publicationCount).toBe(session.publicationCount)
+          expect(publicationCount).toBe(replayState.publicationCount)
         }
         expectedPublicationCount = publicationCount
       } else {
-        expect(publicationCount).toBe(session.publicationCount)
+        expect(publicationCount).toBe(replayState.publicationCount)
       }
 
       assertPublished(expectedPublished)
@@ -688,13 +712,13 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     }
 
     for (const [attemptIndex, attempt] of scenario.attempts.entries()) {
-      modelSession ??= {
+      modelReplayState ??= {
         baseline: new Map(expectedPublished),
         pending: new Set(),
         currentAttemptIndex: attemptIndex,
         publicationCount: expectedPublicationCount,
       }
-      modelSession.currentAttemptIndex = attemptIndex
+      modelReplayState.currentAttemptIndex = attemptIndex
 
       for (const load of attempt.loads) {
         queuedLoads.push({ attemptIndex, load })
@@ -710,7 +734,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         replayIndex < pendingReplays.length;
         replayIndex++
       ) {
-        modelSession.pending.add(replayIndex)
+        modelReplayState.pending.add(replayIndex)
         const pending = pendingReplays[replayIndex]!
         if (pending.load.writeBeforeSettlement) {
           writeReplayRows(pending, true)
@@ -723,26 +747,26 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         const releasedDemand = scenario.releaseOnLastAttempt
         subscription.releaseSnapshot(demandWheres.get(releasedDemand)!)
         activeDemandIds.delete(releasedDemand)
-        for (const replayIndex of modelSession.pending) {
+        for (const replayIndex of modelReplayState.pending) {
           if (pendingReplays[replayIndex]?.load.demandId === releasedDemand) {
-            modelSession.pending.delete(replayIndex)
+            modelReplayState.pending.delete(replayIndex)
           }
         }
         // A released request does not retract rows already applied by the
         // source, nor change the retained baseline of an unfinished replay.
-        if (modelSession.pending.size === 0 && activeDemandIds.size === 0) {
+        if (modelReplayState.pending.size === 0 && activeDemandIds.size === 0) {
           expectedPublicationCount = publicationCount
-          modelSession = undefined
+          modelReplayState = undefined
         }
       }
       assertSource()
       assertPublished(expectedPublished)
       expect(publicationCount).toBe(
-        modelSession?.publicationCount ?? expectedPublicationCount,
+        modelReplayState?.publicationCount ?? expectedPublicationCount,
       )
       expect(subscription.lastError).toBe(lastReportedError)
       expect(subscription.status).toBe(
-        modelSession && modelSession.pending.size > 0
+        modelReplayState && modelReplayState.pending.size > 0
           ? `loadingSubset`
           : `ready`,
       )
@@ -759,7 +783,7 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
       }
     }
 
-    expect(modelSession?.pending.size ?? 0).toBe(0)
+    expect(modelReplayState?.pending.size ?? 0).toBe(0)
 
     for (const action of scenario.afterSettlement) {
       const countBeforeAction = publicationCount
@@ -772,17 +796,17 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
           where: demandWheres.get(action.demandId),
         })
         const row = sourceRows.get(action.demandId)
-        if (!modelSession && row) {
+        if (!modelReplayState && row) {
           expectedPublished.set(action.demandId, { ...row })
         }
       }
       const applied = applySourceAction(action)
       if (applied && action.type === `delete`) {
-        if (!modelSession) expectedPublished.delete(action.id)
+        if (!modelReplayState) expectedPublished.delete(action.id)
       } else if (applied && action.type === `put`) {
         recordExpectedSourceWrite([action.row], { type: `ordinary` }, true)
         assertSourceWrites()
-        if (!modelSession) {
+        if (!modelReplayState) {
           expectedPublished.set(action.row.id, { ...action.row })
         }
       }
@@ -793,7 +817,8 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
         expectedPublished,
       )
       const expectsPublication =
-        !modelSession && (action.type === `request` || expectedBatch.length > 0)
+        !modelReplayState &&
+        (action.type === `request` || expectedBatch.length > 0)
       expect(publicationCount).toBe(
         countBeforeAction + Number(expectsPublication),
       )
@@ -807,8 +832,8 @@ async function runReplayScenario(scenario: ReplayScenario): Promise<void> {
     subscription.unsubscribe()
     unsubscribed = true
     expect(unloadCount).toBe(loadCount)
-    for (const lease of leases.values()) {
-      expect(lease).toEqual({ acquisitions: 1, releases: 1 })
+    for (const counts of acquisitionCounts.values()) {
+      expect(counts).toEqual({ acquisitions: 1, releases: 1 })
     }
     assertSourceWrites()
   } finally {
@@ -834,7 +859,7 @@ async function runSequentialReplayScenario(
   let nextError: Error | undefined
   let initialLoad = true
   const sourceRows = new Map<string | number, ReplayRow>()
-  const leases = new Map<
+  const acquisitionCounts = new Map<
     LoadSubsetOptions,
     { acquisitions: number; releases: number }
   >()
@@ -873,7 +898,10 @@ async function runSequentialReplayScenario(
             if (initialLoad) {
               initialLoad = false
               applyRows(scenario.initialRows)
-              leases.set(options, { acquisitions: 1, releases: 0 })
+              acquisitionCounts.set(options, {
+                acquisitions: 1,
+                releases: 0,
+              })
               return true
             }
 
@@ -889,18 +917,21 @@ async function runSequentialReplayScenario(
               throw error
             }
 
-            leases.set(options, { acquisitions: 1, releases: 0 })
+            acquisitionCounts.set(options, {
+              acquisitions: 1,
+              releases: 0,
+            })
             if (load.outcome === `return`) return true
             const deferred = createDeferred<void>()
             pending.push({ load, deferred, error })
             return deferred.promise
           },
           unloadSubset: (options) => {
-            const lease = leases.get(options)
-            if (!lease) {
+            const counts = acquisitionCounts.get(options)
+            if (!counts) {
               throw new Error(`Released an acquisition that never returned`)
             }
-            lease.releases++
+            counts.releases++
           },
         }
       },
@@ -982,8 +1013,8 @@ async function runSequentialReplayScenario(
 
     subscription.unsubscribe()
     unsubscribed = true
-    for (const lease of leases.values()) {
-      expect(lease).toEqual({ acquisitions: 1, releases: 1 })
+    for (const counts of acquisitionCounts.values()) {
+      expect(counts).toEqual({ acquisitions: 1, releases: 1 })
     }
   } finally {
     for (const load of pending) load.deferred.resolve()
@@ -996,16 +1027,16 @@ async function runSequentialReplayScenario(
 async function runCleanupRestartScenario(
   scenario: CleanupRestartScenario,
 ): Promise<void> {
-  const sessions: Array<{
+  const syncRuns: Array<{
     begin: () => void
     write: (message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>) => void
     commit: () => void
   }> = []
   const loads: Array<{
-    session: number
+    syncRunGeneration: number
     deferred: ReturnType<typeof createDeferred<void>>
   }> = []
-  let session = 0
+  let nextSyncRunGeneration = 0
   const collection = createCollection<ReplayRow>({
     id: `cleanup-restart-oracle`,
     getKey: (row) => row.id,
@@ -1013,13 +1044,13 @@ async function runCleanupRestartScenario(
     startSync: true,
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
-        const currentSession = session++
-        sessions.push({ begin, write, commit })
+        const syncRunGeneration = nextSyncRunGeneration++
+        syncRuns.push({ begin, write, commit })
         markReady()
         return {
           loadSubset: () => {
             const deferred = createDeferred<void>()
-            loads.push({ session: currentSession, deferred })
+            loads.push({ syncRunGeneration, deferred })
             return deferred.promise
           },
         }
@@ -1030,7 +1061,11 @@ async function runCleanupRestartScenario(
   const settle = async (loadIndex: number, outcome: `resolve` | `reject`) => {
     const load = loads[loadIndex]!
     if (outcome === `resolve`) load.deferred.resolve()
-    else load.deferred.reject(new Error(`session ${load.session} failed`))
+    else {
+      load.deferred.reject(
+        new Error(`sync run ${load.syncRunGeneration} failed`),
+      )
+    }
     await flushPromises()
   }
 
@@ -1047,19 +1082,21 @@ async function runCleanupRestartScenario(
     const newResult = collection._sync.loadSubset({})
     expect(newResult).toBeInstanceOf(Promise)
     if (newResult instanceof Promise) void newResult.catch(() => {})
-    expect(loads.map(({ session: loadSession }) => loadSession)).toEqual([0, 1])
+    expect(loads.map(({ syncRunGeneration }) => syncRunGeneration)).toEqual([
+      0, 1,
+    ])
     expect(collection.isLoadingSubset).toBe(true)
 
-    const oldSession = sessions[0]!
-    oldSession.begin()
-    oldSession.write({ type: `insert`, value: { id: `one`, value: 1 } })
-    oldSession.commit()
+    const oldSyncRun = syncRuns[0]!
+    oldSyncRun.begin()
+    oldSyncRun.write({ type: `insert`, value: { id: `one`, value: 1 } })
+    oldSyncRun.commit()
     expect(collection.toArray).toEqual([])
 
-    const currentSession = sessions[1]!
-    currentSession.begin()
-    currentSession.write({ type: `insert`, value: { id: `two`, value: 2 } })
-    currentSession.commit()
+    const currentSyncRun = syncRuns[1]!
+    currentSyncRun.begin()
+    currentSyncRun.write({ type: `insert`, value: { id: `two`, value: 2 } })
+    currentSyncRun.commit()
     expect(collection.toArray.map(({ id, value }) => ({ id, value }))).toEqual([
       { id: `two`, value: 2 },
     ])
@@ -1108,15 +1145,18 @@ async function expectScheduledReplaySettlementIsGenerationSafe(
         actions.markReady()
         return {
           loadSubset: ({ signal }) => {
-            const generation = loads.length + 1
+            const replayAttemptGeneration = loads.length + 1
             const outcome = scheduler
-              .schedule(Promise.resolve(), `generation-${generation}`)
+              .schedule(
+                Promise.resolve(),
+                `replay-attempt-${replayAttemptGeneration}`,
+              )
               .then(() => {
                 if (signal?.aborted) return
                 begin()
                 write({
                   type: `insert`,
-                  value: { id: `one`, value: generation },
+                  value: { id: `one`, value: replayAttemptGeneration },
                 })
                 commit()
               })
@@ -2420,20 +2460,20 @@ describe(`CollectionSubscription replay oracle`, () => {
         // Narrow retention witness for old and new representations. Follow
         // stored replay frames, not a captured map that the source discarded.
         type Frame = { failures?: Map<unknown, Error> }
-        const session = (
+        const replayState = (
           subscription as unknown as {
-            truncateReplaySession: Frame & {
+            truncateReplayState: Frame & {
               currentAttempt: Frame
               attempts?: Set<Frame>
               pending?: Set<{ attempt: Frame }>
             }
           }
-        ).truncateReplaySession
+        ).truncateReplayState
         const frames = new Set([
-          session,
-          session.currentAttempt,
-          ...(session.attempts ?? []),
-          ...[...(session.pending ?? [])].map(({ attempt }) => attempt),
+          replayState,
+          replayState.currentAttempt,
+          ...(replayState.attempts ?? []),
+          ...[...(replayState.pending ?? [])].map(({ attempt }) => attempt),
         ])
         return [...frames].flatMap((frame) => [
           ...(frame.failures?.values() ?? []),
@@ -3260,9 +3300,11 @@ describe(`CollectionSubscription replay oracle`, () => {
       const loads: Array<LoadSubsetOptions> = []
       const unloads: Array<LoadSubsetOptions> = []
       let reentered = false
-      const releaseFailure = new Error(`old replay lease release failed`)
+      const releaseFailure = new Error(
+        `old replay acquisition lease release failed`,
+      )
       const collection = createCollection<ReplayRow>({
-        id: `reentrant-replay-lease-replacement`,
+        id: `reentrant-replay-acquisition-lease-replacement`,
         getKey: ({ id }) => id,
         syncMode: `on-demand`,
         sync: {
@@ -3954,7 +3996,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     }
   })
 
-  it(`waits for a new async demand acquired while unloading a replay lease`, async () => {
+  it(`waits for a new async demand acquired while unloading a replay acquisition lease`, async () => {
     let begin!: () => void
     let write!: (
       message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
@@ -4496,7 +4538,7 @@ describe(`CollectionSubscription replay oracle`, () => {
     numRuns: generatedRuns,
     seed: 1757,
   })(
-    `isolates cleanup and restart sessions for a fixed seed`,
+    `isolates cleanup and restart sync runs for a fixed seed`,
     runCleanupRestartScenario,
   )
 
@@ -4508,7 +4550,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       `subscription-replay.restart`,
     ),
   )(
-    `isolates cleanup and restart sessions for a random or replayed seed`,
+    `isolates cleanup and restart sync runs for a random or replayed seed`,
     runCleanupRestartScenario,
   )
 

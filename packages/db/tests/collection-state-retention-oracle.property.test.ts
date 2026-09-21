@@ -11,6 +11,21 @@ import type { CollectionChangesManager } from '../src/collection/changes.js'
 import type { Collection } from '../src/collection/index.js'
 import type { SyncConfig, TransactionState } from '../src/types.js'
 
+/**
+ * Retained collection state is the last accepted source snapshot plus local
+ * whole-row intent; restart changes ownership, not that value contract.
+ *
+ * A plain Map models source insert/update/delete and truncate-replace batches.
+ * A separate lifecycle driver stops and restarts sync, including reentrant
+ * commits before and after the old callback returns. The optimistic companion
+ * model owns accepted local snapshots, rollback, and settlement. Neither model
+ * borrows CollectionState's merge bookkeeping.
+ *
+ * The oracle compares retained source data, public rows, indexes, events, and
+ * sync-run ownership after every cut. This makes stale-sync-run writes and rows
+ * that vanish or reappear only after unrelated work observable.
+ */
+
 type RetainedRow = {
   id: number
   value: number
@@ -267,7 +282,7 @@ async function runRetentionHistory(
         expect(restarted).toBe(true)
         expect(restartedSync).toBeDefined()
         if (restartedSync === undefined) {
-          throw new Error(`restarted sync session was not captured`)
+          throw new Error(`restarted sync run was not captured`)
         }
         if (action.commitPhase === `insideListener`) {
           expect(restartedReceipt).toBeDefined()
@@ -293,7 +308,7 @@ async function runRetentionHistory(
           },
           {
             // This subscriber observed the trigger, but did not request the
-            // earlier initial state. Restart retracts its known old-session row.
+            // earlier initial state. Restart retracts its known old-sync-run row.
             changes: [
               {
                 type: `delete`,
@@ -353,7 +368,7 @@ it.each(
     ),
   ),
 )(
-  `retains an old-session %s and a restarted row committed %s`,
+  `retains an old-sync-run %s and a restarted row committed %s`,
   async (triggerType, commitPhase) => {
     await runRetentionHistory([
       ...(triggerType === `update`
@@ -379,7 +394,7 @@ it(`releases retained keys after long unique-key churn`, async () => {
   await runRetentionHistory(actions)
 })
 
-it(`starts a new sync session without retained publication state`, async () => {
+it(`starts a new sync run without retained publication state`, async () => {
   let sync!: SyncActions
   const collection = createCollection<RetainedRow, number>({
     getKey: (row) => row.id,
@@ -442,7 +457,7 @@ it(`starts a new sync session without retained publication state`, async () => {
   }
 })
 
-it(`keeps a restarted session's publication state after the old listener returns`, async () => {
+it(`keeps a restarted sync run's publication state after the old listener returns`, async () => {
   let sync!: SyncActions
   const collection = createCollection<RetainedRow, number>({
     getKey: (row) => row.id,
@@ -540,7 +555,7 @@ it(`does not let an old publication microtask clear restarted sync state`, async
 
 it(`publishes a virtual-state update when a restarted optimistic row is confirmed`, async () => {
   let sync!: SyncActions
-  let syncSession = 0
+  let syncRunCount = 0
   let releaseMutation!: () => void
   const mutationHold = new Promise<void>((resolve) => {
     releaseMutation = resolve
@@ -552,8 +567,8 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       rowUpdateMode: `full`,
       sync: (actions) => {
         sync = actions
-        syncSession++
-        if (syncSession === 1) actions.markReady()
+        syncRunCount++
+        if (syncRunCount === 1) actions.markReady()
       },
     },
   })
@@ -1377,9 +1392,9 @@ it(`does not publish an authoritative update hidden by an optimistic overlay`, a
   }
 })
 
-it(`does not carry previous-value state across a failed sync session`, async () => {
+it(`does not carry previous-value state across a failed sync run`, async () => {
   let sync!: Parameters<SyncConfig<LivePreviousRow, number>[`sync`]>[0]
-  let session = 0
+  let syncRunCount = 0
   let liveValue: LivePreviousRow[`value`] = 0
   const failure = new Error(`live value read failed`)
   const liveRow = {
@@ -1395,9 +1410,9 @@ it(`does not carry previous-value state across a failed sync session`, async () 
       rowUpdateMode: `full`,
       sync: (actions) => {
         sync = actions
-        session++
+        syncRunCount++
         actions.begin()
-        if (session === 1) {
+        if (syncRunCount === 1) {
           actions.write({ type: `insert`, value: liveRow })
           actions.write({ type: `insert`, value: { id: 2, value: 0 } })
         } else {
@@ -1458,7 +1473,7 @@ it(`does not carry previous-value state across a failed sync session`, async () 
 
     await collection.cleanup()
     collection.startSyncImmediate()
-    expect(session, `replacement sync session started`).toBe(2)
+    expect(syncRunCount, `replacement sync run started`).toBe(2)
     const observation = observeValuePublications(collection)
     subscription = observation.subscription
     sync.begin()

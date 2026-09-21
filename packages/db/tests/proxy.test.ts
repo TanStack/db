@@ -9,6 +9,26 @@ import {
   withChangeTracking,
 } from '../src/proxy'
 
+/**
+ * # Does a draft behave like the native value it represents?
+ *
+ * A mutation draft promises ordinary JavaScript object, array, Map, Set, Date,
+ * RegExp, class, and Temporal behavior while recording the smallest correct
+ * change set. Reads must not create changes. Writes and deletes must preserve
+ * descriptors, keys, iteration, cycles, aliases, and revert-to-original rules.
+ * The input object must remain unchanged.
+ *
+ * Most examples pin individual language operations. The array callback oracle
+ * is differential: it runs the same callback history on a plain native row and
+ * on a draft, then compares callback results, visit order, reconstructed rows,
+ * change records, peers, and the untouched baseline. Generated two-step
+ * histories explore interactions that single method tests cannot reach.
+ *
+ * Detachment and Map/Set iterator identity have deeper contract owners in the
+ * companion files. Keeping those graphs separate prevents this broad language
+ * conformance suite from growing another copy of their models.
+ */
+
 const callbackMethods = [
   `forEach`,
   `some`,
