@@ -9,6 +9,20 @@ import { expectedRows } from './cursor-pagination/model.js'
 import type { CursorPager } from '../src/index.js'
 import type { Row } from './cursor-pagination/model.js'
 
+/**
+ * # When may cached cursor pages answer a later read?
+ *
+ * Cached pages belong to one query key and one immutable backend sequence.
+ * Fresh reads may reuse them. Invalidation, expiry, forced refresh, garbage
+ * collection, or protocol failure starts a new sequence before its rows become
+ * authoritative. Cancellation stops the reader without poisoning later work.
+ *
+ * A fake clock and real QueryClient drive those boundaries. The reference keeps
+ * only the permitted source snapshot and freshness deadline; it does not model
+ * Query pages, retryers, observers, or garbage collection. Every returned
+ * window still compares with the full-relation value model.
+ */
+
 const scope = { group: undefined, descending: false }
 const makeRows = (count: number, version = 0): Array<Row> =>
   Array.from({ length: count }, (_, id) => ({
@@ -28,9 +42,6 @@ async function checkWindow(
   ).toEqual(expectedRows(source, scope, { offset: 0, limit: width }))
 }
 
-/** Row truth is still a full relation. A fake clock and real QueryClient drive
- * freshness; the model keeps only the permitted source snapshot and a deadline,
- * not Query's page cache, retryer, observer or garbage-collection state. */
 describe(`cursor cache lifecycle`, () => {
   it.each([
     [`global`, `maxPages`],

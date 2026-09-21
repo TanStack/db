@@ -17,19 +17,22 @@ import type { Collection } from '../src/collection/index.js'
 import type { SyncConfig } from '../src/types.js'
 
 /**
- * Oracle review card
- * Owner: core Collection insert/update/delete admission while startSync:false is idle.
- * Sources: #918's regular-mutation path, #929's batch-key guard, and CodeRabbit's
- * #1840 pre-start/post-start duplicate review.
- * Model: finite rejection, synchronous hydration, duplicate-visibility, accepted,
- * and startup-failure cells; rejected cells compare ready and throwing adapters.
- * Path: public mutations through their production validation and sync entry points.
- * Observations: exact error class/identity, starts, handler calls, status, rows,
- * mutation type/key, and persistence.
- * Mutants: eager/omitted/repeated/late startup, removed or over-broad duplicate
- * checks, batch-key loss, wrong handler dispatch, and application before failure.
- * Limits: no Query write utilities, deferred startup, ambient transactions,
- * cleanup, asynchronous providers, reconciliation, publication, or settlement.
+ * # What may an idle Collection mutation start?
+ *
+ * A Collection with `startSync: false` delays its source until a valid public
+ * mutation needs it. Invalid mutations must fail before startup and before a
+ * handler runs. A valid insert starts the source once, waits for synchronous
+ * hydration, then checks the hydrated rows for duplicates before it applies
+ * optimistic state.
+ *
+ * This is a finite admission model rather than a second Collection. Each case
+ * belongs to one of five cells: reject before startup, hydrate then reject a
+ * duplicate, hydrate then accept, reuse an existing start, or surface startup
+ * failure unchanged. The production driver observes starts, handler calls,
+ * status, rows, mutation type and key, and persistence through the public API.
+ *
+ * Deferred providers, ambient transactions, reconciliation, publication, and
+ * settlement belong to the subscription and optimistic-history oracles.
  */
 type Row = { id: string; value: string }
 type IdleCollection = Collection<Row, string>

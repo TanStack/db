@@ -7,9 +7,31 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import { oracleRuns } from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+
+/**
+ * # Which distinctions determine the shape of an included result?
+ *
+ * Incremental query state can look correct while losing a semantic distinction
+ * that a later change exposes. This suite isolates three such distinctions:
+ *
+ * 1. Join multiplicity keeps a parent visible until its last contributor leaves.
+ * 2. A correlation through the joined alias differs from one through the source.
+ * 3. A null or unmatched singleton is absent, but a later valid key reactivates it.
+ *
+ * These laws form separate model nodes. Each node uses plain Maps and full
+ * recomputation. The shared trace runner applies an action to production and to
+ * the matching node, then compares the complete public result. Combining the
+ * nodes into one reference query engine would add machinery without making any
+ * law stronger.
+ *
+ * Stable campaigns preserve the histories that exposed these distinctions.
+ * Fresh random campaigns vary their value domains. Pinned examples cover route
+ * movement and repeated retirement because those laws need ordered histories,
+ * not more random scalar values.
+ */
 
 function rowsById<T extends { id: number }>(rows: Array<T>): Map<number, T> {
   return new Map(rows.map((row) => [row.id, row]))
@@ -126,6 +148,7 @@ const multiplicityProjection: TraceProjection<
   unknown,
   Array<ParentRow>
 > = {
+  // A join projects one parent row for any positive contributor count.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
   recompute: ({ children, parents }) =>
     [...parents.values()]
@@ -262,6 +285,7 @@ const correlationProjection: TraceProjection<
   unknown,
   CorrelationResult
 > = {
+  // Correlation chooses a route. Join identity only decides which rows meet.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
   recompute: ({ orders, parts, productions, target }) =>
     [...parts.values()]
@@ -363,6 +387,7 @@ const nullableProjection: TraceProjection<
   unknown,
   NullableResult
 > = {
+  // SQL equality never matches null. A later non-null key starts a fresh route.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
   recompute: ({ authors, posts }) =>
     [...posts.values()]
@@ -374,20 +399,32 @@ const nullableProjection: TraceProjection<
   assertEqual: assertRowsEqual,
 }
 
-describe(`includes query-shape recompute oracle`, () => {
-  fcTest.prop([fc.integer({ min: 2, max: 5 })], {
-    numRuns: oracleRuns(12),
-    seed: 1703,
-  })(
-    `deleting one joined contributor preserves remaining multiplicity (#1703)`,
-    async (childCount) => {
-      await runTrace({
-        steps: [1],
-        driver: createMultiplicityDriver(childCount),
-        projection: multiplicityProjection,
-      })
+function campaigns(fixedSeed: number, property: string) {
+  return [
+    {
+      name: `fixed`,
+      options: { numRuns: oracleRuns(12), seed: fixedSeed },
     },
-  )
+    {
+      name: `random or replayed`,
+      options: oraclePropertyOptions(12, property),
+    },
+  ]
+}
+
+describe(`includes query-shape recompute oracle`, () => {
+  for (const campaign of campaigns(1703, `includes-query-shape.multiplicity`)) {
+    fcTest.prop([fc.integer({ min: 2, max: 5 })], campaign.options)(
+      `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,
+      async (childCount) => {
+        await runTrace({
+          steps: [1],
+          driver: createMultiplicityDriver(childCount),
+          projection: multiplicityProjection,
+        })
+      },
+    )
+  }
 
   fcTest(
     `matches recomputation when the final joined contributor is deleted`,
@@ -399,24 +436,30 @@ describe(`includes query-shape recompute oracle`, () => {
       }),
   )
 
-  fcTest.prop(
-    [
-      fc.record({
-        correlationId: fc.integer({ min: 1, max: 100 }),
-        productionId: fc.integer({ min: 101, max: 200 }),
-      }),
-    ],
-    { numRuns: oracleRuns(12), seed: 1704 },
-  )(
-    `materialization follows correlation through a joined alias (#1704)`,
-    async ({ correlationId, productionId }) => {
-      await runTrace({
-        steps: [],
-        driver: createCorrelationDriver(`joined`, correlationId, productionId),
-        projection: correlationProjection,
-      })
-    },
-  )
+  for (const campaign of campaigns(1704, `includes-query-shape.correlation`)) {
+    fcTest.prop(
+      [
+        fc.record({
+          correlationId: fc.integer({ min: 1, max: 100 }),
+          productionId: fc.integer({ min: 101, max: 200 }),
+        }),
+      ],
+      campaign.options,
+    )(
+      `materialization follows correlation through a joined alias (${campaign.name})`,
+      async ({ correlationId, productionId }) => {
+        await runTrace({
+          steps: [],
+          driver: createCorrelationDriver(
+            `joined`,
+            correlationId,
+            productionId,
+          ),
+          projection: correlationProjection,
+        })
+      },
+    )
+  }
 
   fcTest(
     `matches recomputation when materialization correlates through its source alias`,
@@ -432,7 +475,7 @@ describe(`includes query-shape recompute oracle`, () => {
     `keeps %s correlation distinct from join identity through route moves`,
     (target) =>
       runTrace({
-        // Part 1 is the joined correlation; part 7 is the source correlation.
+        // Part 1 is the joined correlation. Part 7 is the source correlation.
         // Moving order.partId changes only the joined query, then restores it.
         steps: [
           { id: 7, partId: 7 },
@@ -460,19 +503,18 @@ describe(`includes query-shape recompute oracle`, () => {
     },
   )
 
-  fcTest.prop([fc.integer({ min: 1, max: 100 })], {
-    numRuns: oracleRuns(12),
-    seed: 1706,
-  })(
-    `findOne maps a null correlation key to undefined (#1706)`,
-    async (postId) => {
-      await runTrace({
-        steps: [],
-        driver: createNullableDriver([], [{ id: postId, authorId: null }]),
-        projection: nullableProjection,
-      })
-    },
-  )
+  for (const campaign of campaigns(1706, `includes-query-shape.nullable`)) {
+    fcTest.prop([fc.integer({ min: 1, max: 100 })], campaign.options)(
+      `findOne maps a null correlation key to undefined (${campaign.name})`,
+      async (postId) => {
+        await runTrace({
+          steps: [],
+          driver: createNullableDriver([], [{ id: postId, authorId: null }]),
+          projection: nullableProjection,
+        })
+      },
+    )
+  }
 
   fcTest(
     `matches recomputation for an unmatched non-null correlation key`,

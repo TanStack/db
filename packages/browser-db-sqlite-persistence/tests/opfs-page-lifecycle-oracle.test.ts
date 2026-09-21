@@ -7,6 +7,25 @@ import type {
   BrowserOPFSWorkerResponse,
 } from '../src/opfs-worker-protocol'
 
+/**
+ * # Who owns an OPFS worker when the browser page leaves?
+ *
+ * A database request, pagehide, worker response, terminal worker event, close,
+ * and bfcache admission can race. Every accepted request must settle once.
+ * Non-persisted pagehide closes and terminates the worker after pending work;
+ * persisted pagehide keeps the database eligible for restoration. Listener and
+ * worker resources release exactly once even when init or close fails.
+ *
+ * Controlled page and worker objects implement only the browser event and
+ * message grammar. Generated products vary pending request kind, delivery
+ * stage, persisted flag, execute count, release direction, and terminal event.
+ * The driver observes exact requests, settlements, errors, listener counts,
+ * held responses, close, and termination against this state machine.
+ *
+ * This proves page/worker ownership in jsdom. It does not prove native OPFS
+ * locking, real bfcache admission, or browser process teardown.
+ */
+
 type Database = Awaited<ReturnType<typeof openBrowserWASQLiteOPFSDatabase>>
 type RequestKind = BrowserOPFSWorkerRequest[`type`]
 type DeliveryStage =

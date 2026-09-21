@@ -812,7 +812,7 @@ export function queryCollectionOptions(
     >(),
   }
 
-  // Query-cache ownership is scoped to this sync generation and keyed by the
+  // Query-cache ownership is scoped to this sync run and keyed by the
   // actual Query object. Weak membership survives subset unload without
   // retaining entries after Query Core garbage-collects them.
   let ownedCacheQueries = new WeakSet<AnyQuery>()
@@ -874,10 +874,10 @@ export function queryCollectionOptions(
         nextQueryCollectionFetchStart,
       ),
     )
-    const generation =
+    const postWriteRefetchGeneration =
       (postWriteRefetchGenerations.get(hashedQueryKey) ?? 0) + 1
-    postWriteRefetchGenerations.set(hashedQueryKey, generation)
-    return generation
+    postWriteRefetchGenerations.set(hashedQueryKey, postWriteRefetchGeneration)
+    return postWriteRefetchGeneration
   }
 
   const isObserverEnabled = (
@@ -2523,7 +2523,7 @@ export function queryCollectionOptions(
       const refetchTrackedQuery = async (
         query: AnyQuery,
         logicalHashes: Set<string>,
-        generations: Map<string, number>,
+        postWriteRefetchGenerationByHash: Map<string, number>,
       ): Promise<void> => {
         try {
           await query.fetch(undefined, { cancelRefetch: false })
@@ -2535,7 +2535,7 @@ export function queryCollectionOptions(
         const stillNeedsAuthority = [...logicalHashes].some(
           (hashedQueryKey) =>
             postWriteRefetchGenerations.get(hashedQueryKey) ===
-              generations.get(hashedQueryKey) &&
+              postWriteRefetchGenerationByHash.get(hashedQueryKey) &&
             !hasPostWriteAuthority(hashedQueryKey, query),
         )
         if (
@@ -2563,7 +2563,10 @@ export function queryCollectionOptions(
           continue
         }
 
-        const generation = requirePostWriteAuthority(hashedQueryKey, query)
+        const postWriteRefetchGeneration = requirePostWriteAuthority(
+          hashedQueryKey,
+          query,
+        )
         revalidatingQueries.add(query)
         const ownedAtSchedule = ownedCacheQueries.has(query)
         query.invalidate()
@@ -2579,8 +2582,14 @@ export function queryCollectionOptions(
             query.invalidate()
             if (!query.isDisabled()) {
               const logicalHashes = new Set([hashedQueryKey])
-              const generations = new Map([[hashedQueryKey, generation]])
-              void refetchTrackedQuery(query, logicalHashes, generations)
+              const postWriteRefetchGenerationByHash = new Map([
+                [hashedQueryKey, postWriteRefetchGeneration],
+              ])
+              void refetchTrackedQuery(
+                query,
+                logicalHashes,
+                postWriteRefetchGenerationByHash,
+              )
             }
           } else {
             queryClient.getQueryCache().remove(query)
@@ -2605,7 +2614,8 @@ export function queryCollectionOptions(
           const result = await observer.refetch().catch(() => undefined)
           if (
             result?.isError ||
-            postWriteRefetchGenerations.get(hashedQueryKey) !== generation
+            postWriteRefetchGenerations.get(hashedQueryKey) !==
+              postWriteRefetchGeneration
           ) {
             return
           }
@@ -2647,16 +2657,20 @@ export function queryCollectionOptions(
           if (ownObservers > 0) continue
 
           const logicalHashes = getLogicalHashes(query)
-          const generations = new Map<string, number>()
+          const postWriteRefetchGenerationByHash = new Map<string, number>()
           for (const hashedQueryKey of logicalHashes) {
-            generations.set(
+            postWriteRefetchGenerationByHash.set(
               hashedQueryKey,
               requirePostWriteAuthority(hashedQueryKey, query),
             )
           }
           query.invalidate()
           if (!query.isDisabled()) {
-            void refetchTrackedQuery(query, logicalHashes, generations)
+            void refetchTrackedQuery(
+              query,
+              logicalHashes,
+              postWriteRefetchGenerationByHash,
+            )
           }
           continue
         }

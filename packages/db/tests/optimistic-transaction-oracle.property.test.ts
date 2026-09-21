@@ -14,6 +14,22 @@ import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
+/**
+ * # Are transaction payloads and publications whole and ordered?
+ *
+ * A transaction may author insert, update, and delete operations in any order.
+ * Same-key operations collapse to one net request, but the request must retain
+ * every authored field and the correct original and modified snapshots.
+ * Mixed-key transactions publish one complete cut; observers must not see a
+ * prefix of the transaction.
+ *
+ * Small finite matrices cover operation order, optimistic visibility, and
+ * resolve, reject, or rollback. Generated payloads vary values and strings.
+ * The independent history model judges rows and outcomes, while this driver
+ * also inspects the real mutation payload and callback batches. Deliberate
+ * corruptions calibrate each observation.
+ */
+
 type Row = { id: number; value: number; note: string }
 type Operation = `insert` | `update` | `delete`
 type Scenario = {

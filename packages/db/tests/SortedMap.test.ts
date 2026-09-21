@@ -3,6 +3,23 @@ import fc from 'fast-check'
 import { SortedMap } from '../src/SortedMap'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 
+/**
+ * SortedMap is an ordered view over ordinary map semantics.
+ *
+ * The contract has two independent parts. Keys still have Map ownership:
+ * setting a key replaces its value, deleting reports whether the key existed,
+ * and clearing removes everything. Iteration then presents the surviving
+ * entries in either key order or the caller's value order. Equal values use
+ * key order as a stable tie-breaker, so no entry disappears inside a tie.
+ *
+ * The reference model is deliberately dull: a native Map owns the values and
+ * a fresh full sort derives every observation. The production structure may
+ * update its ordered index incrementally, but it must refine that recomputation
+ * after every generated command. The driver observes size, point lookup, every
+ * iterator, and forEach; checking only the final values would miss stale keys,
+ * lost ties, and inconsistent views of the same state.
+ */
+
 type Order = `key` | `ascending` | `descending`
 
 function expectMap(

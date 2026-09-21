@@ -13,6 +13,20 @@ import type {
   OptimisticStep,
 } from './optimistic-history-oracle.js'
 
+/**
+ * # Do callers observe the exact optimistic request outcome?
+ *
+ * Row correctness is not enough. A request may remain pending, fulfill with a
+ * specific value, reject with the original reason, or roll back while an
+ * independent peer survives. This driver crosses those outcomes with existing
+ * or absent rows, optimistic visibility, queued source work, and peer
+ * settlement, then delegates row and event truth to the history model.
+ *
+ * The second group calibrates the outcome observer itself. It proves premature
+ * success, copied values, replaced errors, and missing errors are detectable,
+ * and that a shrunk failure can be replayed by seed and path.
+ */
+
 type Scenario = {
   existing: boolean
   optimistic: boolean
