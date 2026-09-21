@@ -490,10 +490,19 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     /**
-     * Law: Query `select` materializes schema output rows, while collection
-     * mutations continue to accept schema input. A transforming schema keeps
-     * those domains observably distinct. Reversing the select result to input
-     * must fail the hostile control below.
+     * Law and source: The public schema-plus-select overload maps the `queryFn`
+     * result through `select` into materialized schema output rows. Collection
+     * mutations still accept schema input. Here, the schema relation is
+     * `createdAt: string` input -> `createdAt: Date` output.
+     *
+     * Production path and checkpoint: Infer options through
+     * `queryCollectionOptions`, create the Collection, then inspect the public
+     * types at compile time.
+     *
+     * Observations: `select` input, output-row keys, delete keys, collection
+     * reads, and mutation inputs. The paired configs are the hostile control:
+     * they differ only in whether `select` returns schema output or input.
+     * Runtime schema parsing and result publication are outside this oracle.
      */
     it(`preserves schema output rows selected from a wrapped response`, () => {
       const rowSchema = z.object({
@@ -545,6 +554,8 @@ describe(`Query collection type resolution tests`, () => {
         outputRows: Array<RowOutput>
       }
 
+      // Keep every option shared so unrelated config errors cannot satisfy the
+      // negative assertion at the public overload.
       const schemaOutputSelectConfig = {
         queryClient,
         queryKey: [`wrapped-schema-output-control`],
