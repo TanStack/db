@@ -72,14 +72,13 @@ if (REPLAY_PATH !== undefined && replaySeed === undefined) {
   )
 }
 
-const generatedCampaigns = [
-  { name: `fixed`, seed: FIXED_SEED, path: undefined },
-  {
-    name: replaySeed === undefined ? `random` : `replay`,
-    seed: replaySeed,
-    path: REPLAY_PATH,
-  },
-] as const
+const generatedCampaigns =
+  replaySeed === undefined
+    ? [
+        { name: `fixed`, seed: FIXED_SEED, path: undefined },
+        { name: `random`, seed: undefined, path: undefined },
+      ]
+    : [{ name: `replay`, seed: replaySeed, path: REPLAY_PATH }]
 
 function campaignParameters(campaign: (typeof generatedCampaigns)[number]) {
   return {
@@ -103,8 +102,8 @@ const uniqueRowSplitDomain = {
  * exposes selected members, not their sequence indices. Publication timing and
  * SQL meaning are separate contracts.
  *
- * The fixed generated lane preserves one stable campaign. The second lane uses
- * a new seed unless replay variables select a prior seed and shrink path.
+ * Normal runs pair a stable campaign with a new random seed. Replay variables
+ * instead select only the recorded seed and shrink path.
  */
 
 const weightedWorld = weightedStateArbitrary(

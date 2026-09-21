@@ -72,7 +72,7 @@ earlier node alone.
 | request data | The immutable `LoadSubsetOptions` and attached signal passed to an adapter. | Demand or established coverage. |
 | acquisition attempt | One invocation that asks a sync adapter to start physical work. A synchronous throw ends the attempt before it establishes an acquisition lease. | Physical acquisition or transport. |
 | physical acquisition | Request-scoped work accepted by a sync adapter for a demand. | Acquisition attempt, logical demand, or transport. |
-| lease | An ownership token that requires a matching release. Always qualify which resource it owns. | Demand, request, or data coverage. |
+| lease | An ownership token that requires a matching release. TanStack DB leases do not expire on a timer. Always qualify which resource the lease owns. | Demand, request, or data coverage. |
 | acquisition lease | The release obligation created when an adapter accepts a physical acquisition. | The acquisition attempt itself. |
 | window lease | One window-controller caller's contribution to the requested window. | Acquisition lease. |
 | observer lease | One Query DB owner's claim that retains a query observer or its rows. | Subscription or acquisition lease. |
@@ -128,6 +128,7 @@ materialization laws.
 | observation | One recorded public fact. |
 | trace | An ordered sequence of observations. |
 | checkpoint or observation cut | The exact point where the contract requires comparison. |
+| oracle replay | Re-running a recorded oracle failure from its seed, shrink path, actions, or other replay inputs. | Runtime truncate replay, retry, or a new random campaign. |
 | projection or abstraction | The parts of concrete state retained for one judgment. |
 | refinement check | A check that observed production behavior is allowed by the model. A sampled check is not a proof for every behavior. |
 | partial oracle | An oracle that judges only named parts of the contract. |

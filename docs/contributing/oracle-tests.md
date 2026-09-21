@@ -356,6 +356,10 @@ suite environment variables or another checked replay interface when practical.
 The replay input must select both the seed and the path. A seed alone reruns the
 campaign but might not stop at the same reduced counterexample.
 
+When replay inputs are present, run only the requested replay lane. Do not spend
+time on the fixed campaign before reaching the failure the developer asked to
+reproduce.
+
 The fixed and random lanes should use the same property, generators,
 observations, and run budget. Only their seed source should differ. This keeps a
 random failure eligible for promotion into a pinned example or fixed campaign.
