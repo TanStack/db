@@ -106,9 +106,9 @@ describe(`RxDB schema transform conformance`, () => {
       unknown
     >
 
+    // @ts-expect-error provider documents must match schema output
     rxdbCollectionOptions({
       rxCollection: inputCollection,
-      // @ts-expect-error provider documents must match schema output
       schema: rowSchema,
     })
   })
