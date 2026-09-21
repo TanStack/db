@@ -45,13 +45,17 @@ import type {
  * path fails.
  *
  * The deterministic history grammar below controls local hydration, upstream
- * readiness and sync transactions, durable application, cleanup, and restart.
- * It covers empty and non-empty local snapshots, either source winning, dual
- * failure and recovery, post-ready durability failure, and stale work. The
- * expected relation is independent of the implementation queues: the first
- * usable startup result establishes Collection readiness, an authoritative
- * upstream winner cannot be overwritten by late hydration, and cleanup fences
- * the prior sync run.
+ * readiness and sync transactions, durable application, mutex occupancy,
+ * cleanup, and restart. It covers empty and non-empty local snapshots, either
+ * source winning, dual failure and recovery, post-ready durability failure,
+ * dropped receipts, transactions crossing the hydration boundary, and stale
+ * work. The expected relation is independent of the implementation queues: the
+ * first usable startup result establishes Collection readiness, an
+ * authoritative upstream winner cannot be overwritten by late hydration, and
+ * cleanup fences the prior sync run. Once local hydration makes an eager
+ * Collection usable, a later upstream failure does not hide those rows. A
+ * later upstream ready signal may recover a transient durability error; the
+ * next failed durable write reports error again.
  *
  * The production driver is `persistedCollectionOptions` through real Collection
  * status, reads, applied receipts, and persistence/coordinator boundaries.
@@ -1116,6 +1120,64 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`handles a dropped sync receipt when persistence fails`, async () => {
+    const adapter = createRecordingAdapter()
+    const persistenceError = new Error(`durable write failed`)
+    const persistenceAttempted = deferred()
+    adapter.applyCommittedTx = () => {
+      persistenceAttempted.resolve()
+      return Promise.reject(persistenceError)
+    }
+    const unhandled: Array<unknown> = []
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason)
+    }
+    process.on(`unhandledRejection`, onUnhandled)
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `dropped-sync-receipt`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.preload()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `network`, title: `Network row` },
+      })
+      remoteCommit?.()
+      await persistenceAttempted.promise
+      await flushAsyncWork()
+      await flushAsyncWork(10)
+
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(persistenceError)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off(`unhandledRejection`, onUnhandled)
+      await collection.cleanup()
+    }
+  })
+
   it(`preserves row metadata set before a metadata-less insert in the same sync transaction`, async () => {
     const adapter = createRecordingAdapter()
     const ownership = { queryCollection: { owners: [`gc:q1`] } }
@@ -1395,6 +1457,86 @@ describe(`persistedCollectionOptions`, () => {
       id: `during-hydrate`,
       title: `During hydrate`,
     })
+  })
+
+  it(`replays a transaction begun during hydration when it commits after hydration`, async () => {
+    const adapter = createRecordingAdapter()
+    let resolveLoadSubset: (() => void) | undefined
+    adapter.loadSubset = async () => {
+      await new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+      return []
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `commit-after-hydration`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      const ready = collection.stateWhenReady()
+      for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
+        await flushAsyncWork()
+      }
+
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `late-commit`, title: `Committed after hydration` },
+      })
+      resolveLoadSubset?.()
+      await ready
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      const applied = remoteCommit?.()
+      let settled = applied === true
+      if (applied !== true) {
+        void applied?.then(
+          () => {
+            settled = true
+          },
+          () => {
+            settled = true
+          },
+        )
+      }
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      expect(settled).toBe(true)
+      expect(stripVirtualProps(collection.get(`late-commit`))).toEqual({
+        id: `late-commit`,
+        title: `Committed after hydration`,
+      })
+      expect(adapter.rows.get(`late-commit`)).toEqual({
+        id: `late-commit`,
+        title: `Committed after hydration`,
+      })
+    } finally {
+      resolveLoadSubset?.()
+      await collection.cleanup()
+    }
   })
 
   it(`discards a hydration-buffered transaction aborted before replay`, async () => {
@@ -1967,6 +2109,146 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
+  it.each([
+    { blocker: `full reload`, change: `truncate` },
+    { blocker: `full reload`, change: `narrow` },
+    { blocker: `gap recovery`, change: `truncate` },
+    { blocker: `gap recovery`, change: `narrow` },
+  ] as const)(
+    `reconciles queued startup hydration behind $blocker with a $change upstream change`,
+    async ({ blocker, change }) => {
+      const adapter = createRecordingAdapter([
+        { id: `cached`, title: `Cached snapshot` },
+        { id: `retained`, title: `Unaffected cached row` },
+      ])
+      const coordinator = createCoordinatorHarness()
+      const blockerStarted = deferred()
+      const releaseBlocker = deferred()
+      const originalLoadSubset = adapter.loadSubset.bind(adapter)
+      let loadCalls = 0
+      adapter.loadSubset = async (...args) => {
+        loadCalls++
+        const rows = originalLoadSubset(...args)
+        if (blocker === `full reload` && loadCalls === 1) {
+          blockerStarted.resolve()
+          await releaseBlocker.promise
+        }
+        return rows
+      }
+      if (blocker === `gap recovery`) {
+        coordinator.pullSince = async () => {
+          blockerStarted.resolve()
+          await releaseBlocker.promise
+          return {
+            type: `rpc:pullSince:res`,
+            rpcId: `held-gap-recovery`,
+            ok: true,
+            latestTerm: 1,
+            latestSeq: 2,
+            latestRowVersion: 2,
+            requiresFullReload: false,
+            changedKeys: [],
+            deletedKeys: [],
+            deltas: [],
+          }
+        }
+      }
+      let remoteBegin: (() => void) | undefined
+      let remoteTruncate: (() => void) | undefined
+      let remoteWrite:
+        | ((
+            message:
+              | { type: `insert`; value: Todo }
+              | { type: `delete`; key: string },
+          ) => void)
+        | undefined
+      let remoteCommit: (() => SyncAppliedReceipt) | undefined
+      let remoteMarkReady: (() => void) | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `sync-present`,
+          getKey: (item) => item.id,
+          sync: {
+            sync: ({ begin, truncate, write, commit, markReady }) => {
+              remoteBegin = begin
+              remoteTruncate = truncate
+              remoteWrite = write as typeof remoteWrite
+              remoteCommit = commit
+              remoteMarkReady = markReady
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+
+      try {
+        collection.startSyncImmediate()
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: blocker === `full reload` ? 1 : 2,
+          txId: `peer-${blocker}`,
+          latestRowVersion: blocker === `full reload` ? 1 : 2,
+          requiresFullReload: blocker === `full reload`,
+          changedRows: [],
+          deletedKeys: [],
+        })
+        await blockerStarted.promise
+
+        // Let startup hydration queue behind the held reload before the
+        // authoritative transaction queues its durable write.
+        await flushAsyncWork()
+        await flushAsyncWork()
+        expect(loadCalls).toBe(blocker === `full reload` ? 1 : 0)
+
+        remoteBegin?.()
+        if (change === `truncate`) {
+          remoteTruncate?.()
+        } else {
+          remoteWrite?.({ type: `delete`, key: `cached` })
+        }
+        remoteWrite?.({
+          type: `insert`,
+          value: { id: `network`, title: `Network winner` },
+        })
+        const applied = remoteCommit?.()
+        if (applied !== true) void applied?.catch(() => undefined)
+        remoteMarkReady?.()
+        await flushAsyncWork()
+
+        expect(collection.status).toBe(`ready`)
+        expect(collection.get(`cached`)).toBeUndefined()
+        expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+
+        releaseBlocker.resolve()
+        await flushAsyncWork()
+        await flushAsyncWork()
+        await flushAsyncWork()
+
+        expect(loadCalls).toBe(blocker === `full reload` ? 2 : 1)
+        expect(
+          adapter.applyCommittedTxCalls.map((call) => call.tx.truncate),
+        ).toEqual([change === `truncate`])
+        expect(Array.from(adapter.rows.keys())).toEqual(
+          change === `truncate` ? [`network`] : [`retained`, `network`],
+        )
+        expect(collection.get(`cached`)).toBeUndefined()
+        expect(collection.get(`retained`)).toEqual(
+          change === `truncate`
+            ? undefined
+            : expect.objectContaining({
+                id: `retained`,
+                title: `Unaffected cached row`,
+              }),
+        )
+      } finally {
+        releaseBlocker.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`persists a network winner after coordinator activity races hydration`, async () => {
     const hydrationStarted = deferred()
     const hydration = deferred<Array<{ key: string; value: Todo }>>()
@@ -2145,6 +2427,7 @@ describe(`persistedCollectionOptions`, () => {
   it(`reports persistence failure when a network snapshot follows local readiness`, async () => {
     const persistenceError = new Error(`post-local-ready persistence failed`)
     const persistenceAttempted = deferred()
+    let persistenceAttempts = 0
     const adapter = createRecordingAdapter([
       { id: `local`, title: `Local snapshot` },
     ])
@@ -2179,6 +2462,7 @@ describe(`persistedCollectionOptions`, () => {
     await collection.preload()
     expect(collection.status).toBe(`ready`)
     adapter.applyCommittedTx = () => {
+      persistenceAttempts++
       persistenceAttempted.resolve()
       return Promise.reject(persistenceError)
     }
@@ -2201,6 +2485,20 @@ describe(`persistedCollectionOptions`, () => {
     await collection.stateWhenReady()
     expect(collection.status).toBe(`ready`)
     expect(collection._lifecycle.getSyncError()).toBeUndefined()
+
+    remoteBegin!()
+    remoteTruncate!()
+    remoteWrite!({
+      type: `insert`,
+      value: { id: `network-2`, title: `Next network snapshot` },
+    })
+    const nextApplied = remoteCommit!()
+    if (nextApplied !== true) {
+      await expect(nextApplied).rejects.toBe(persistenceError)
+    }
+    expect(persistenceAttempts).toBe(2)
+    expect(collection.status).toBe(`error`)
+    expect(collection._lifecycle.getSyncError()).toBe(persistenceError)
     await collection.cleanup()
   })
 
