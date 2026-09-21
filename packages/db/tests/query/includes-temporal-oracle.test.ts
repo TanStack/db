@@ -24,6 +24,32 @@ import type { BasicExpression } from '../../src/query/ir.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { Scheduler } from 'fast-check'
 
+/**
+ * # Which child demand controls readiness and publication?
+ *
+ * Parent routes can appear, disappear, and return. Their correlated child
+ * demand changes with them. A settled Promise does not identify current work.
+ * The model follows logical demand incarnations and applies these laws:
+ *
+ * 1. Every reachable child demand must settle before initial readiness.
+ * 2. Demand that is no longer reachable cannot block readiness.
+ * 3. An obsolete demand cannot publish rows or settle a later incarnation.
+ * 4. A successful load settles only after its source writes are public.
+ * 5. Failure belongs to the demand that failed. Retired failure cannot poison
+ *    a later demand or keep unrelated graph work private.
+ *
+ * No one state machine mirrors the production controller. The file uses small
+ * models for readiness, cancellation, scheduled completion, and progressive
+ * delivery. Each model records only the public facts needed for its law.
+ * fast-check schedules current and obsolete completions in new orders, while
+ * fixed scheduler orders pin both directions.
+ *
+ * The production drivers use real Collections, compiled includes, applied
+ * receipts, release callbacks, replay barriers, and source writes. They observe
+ * readiness, preload settlement, visible rows, request keys, and errors at each
+ * named boundary. The live-query architecture remains the contract source.
+ */
+
 type Post = {
   id: number
   authorId: string
@@ -60,6 +86,8 @@ type PreloadState = {
   preloadSettled: boolean
 }
 
+// A preload can reject before cleanup observes it. This record retains both
+// settlement and the original error without changing the production Promise.
 function startPreload(
   live: ReturnType<typeof createLiveQueryCollection>,
   state: PreloadState,
@@ -783,6 +811,7 @@ it.each(
   },
 )
 
+// Model A: initial readiness depends only on currently reachable demand.
 type ReadinessObservation = {
   ready: boolean
   preloadSettled: boolean
@@ -881,6 +910,8 @@ async function expectReadinessMatches(
   })
 }
 
+// Model B: retiring the only route removes its child load from readiness, even
+// when the physical acquisition cannot settle yet.
 type DemandCancellationObservation = {
   ready: boolean
   rowCount: number
@@ -1120,6 +1151,8 @@ async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<voi
 async function expectScheduledDemandCompletionsStayGenerationSafe(
   scheduler: Scheduler,
 ): Promise<void> {
+  // The scheduler changes only completion order. Request generations decide
+  // whether a completion can publish.
   const { collection: posts, remove, add } = createRemovablePost()
   const requests: Array<{
     outcome: Promise<void>
@@ -1180,7 +1213,8 @@ async function expectScheduledDemandCompletionsStayGenerationSafe(
     await scheduler.waitAll(async (task) => {
       await task()
       await flushPromises()
-      // Copy this completion's public value; later completions must not erase it.
+      // Copy this completion's public value. Later completions must not replace
+      // it.
       observations.push({
         completed: scheduler
           .report()
@@ -1816,6 +1850,8 @@ type FastPathEvent = {
   keys: Array<number>
 }
 
+// Model C: progressive rows can publish before demand settles. The load still
+// starts inside the initial fast-path window and readiness waits for settlement.
 type ProgressiveObservation = {
   events: Array<FastPathEvent>
   ready: boolean
@@ -2181,8 +2217,8 @@ describe(`includes temporal oracle`, () => {
             },
           },
         })
-        // Keep wrappers concrete at compilation; a union of wrapper types is
-        // not a supported query-builder result type.
+        // Keep wrappers concrete at compilation. The query builder does not
+        // accept a union of wrapper types as its result.
         const live =
           form === `array`
             ? createLiveQueryCollection((q) =>

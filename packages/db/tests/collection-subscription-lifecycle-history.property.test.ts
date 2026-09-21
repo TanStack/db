@@ -34,6 +34,24 @@ import type {
   LifecycleUnloadEvent,
 } from './collection-subscription-lifecycle-grammar.js'
 
+/**
+ * # Does the runtime follow the subscription lifecycle grammar?
+ *
+ * The shared grammar models logical owners, acquisition attempts, sync runs,
+ * and the publication barrier. This driver gives the same command history to a
+ * real on-demand Collection and compares the exact lifecycle trace: loads,
+ * unloads, returned results, readiness, and reported errors.
+ *
+ * Returned promises need their own observation rule. They belong to the
+ * transport attempt that created them, while a caller waiting for publication
+ * belongs to a cancellable logical owner. A retired attempt may still settle;
+ * it must not revive its old owner or replace a newer result.
+ *
+ * Row contents are checked by the publication oracle. Keeping them out of this
+ * driver makes ownership faults visible instead of masking them behind final
+ * state equality.
+ */
+
 type RuntimeAttempt = {
   id: number
   ownerId: number
@@ -185,7 +203,11 @@ async function runHistory(
   const attemptByOptions = new Map<LoadSubsetOptions, number>()
   const observedLoads: Array<LifecycleLoadEvent> = []
   const observedUnloads: Array<
-    LifecycleUnloadEvent | { attemptId: `unacquired`; handlerSession: number }
+    | LifecycleUnloadEvent
+    | {
+        attemptId: `unacquired`
+        handlerSyncRunGeneration: number
+      }
   > = []
   const observedErrors: Array<{
     attemptId: number | `unacquired`
@@ -203,14 +225,18 @@ async function runHistory(
   const observedStatuses: Array<string> = []
   const observedTrace: Array<
     | LifecycleTraceEvent
-    | { type: `unload`; attemptId: `unacquired`; handlerSession: number }
+    | {
+        type: `unload`
+        attemptId: `unacquired`
+        handlerSyncRunGeneration: number
+      }
     | { type: `error`; attemptId: `unacquired` }
     | { type: `result`; attemptId: `unacquired`; resultKind: string }
   > = []
   let nextObservedAttemptId = 0
   let nextObservedOwnerId = 0
-  let observedReplay = 0
-  let observedSession = -1
+  let observedReplayGeneration = 0
+  let observedSyncRunGeneration = -1
   let observedActive = true
   let observedUnsubscribed = false
   let syncOps:
@@ -223,7 +249,7 @@ async function runHistory(
     syncMode: `on-demand`,
     sync: {
       sync: (operations) => {
-        const handlerSession = ++observedSession
+        const handlerSyncRunGeneration = ++observedSyncRunGeneration
         syncOps = operations
         operations.markReady()
         return {
@@ -240,8 +266,8 @@ async function runHistory(
             const observed: LifecycleLoadEvent = {
               id: nextObservedAttemptId++,
               demand,
-              session: handlerSession,
-              replay: observedReplay,
+              syncRunGeneration: handlerSyncRunGeneration,
+              replayGeneration: observedReplayGeneration,
             }
             const deferred =
               acquisitionMode === `async-pending`
@@ -279,7 +305,7 @@ async function runHistory(
           unloadSubset: (options) => {
             const unload = {
               attemptId: attemptByOptions.get(options) ?? `unacquired`,
-              handlerSession,
+              handlerSyncRunGeneration,
             } as const
             observedUnloads.push(unload)
             observedTrace.push({ type: `unload`, ...unload })
@@ -518,7 +544,7 @@ async function runHistory(
         }
       } else if (command.type === `truncate`) {
         if (observedActive) {
-          observedReplay++
+          observedReplayGeneration++
           for (const owner of runtimeOwners) {
             if (owner.attemptId !== undefined) {
               runtimeAttempts.get(owner.attemptId)!.current = false
@@ -548,7 +574,7 @@ async function runHistory(
         const queuesReplay =
           !observedActive && !observedUnsubscribed && model.owners.length > 0
         if (!observedActive) {
-          observedReplay = 0
+          observedReplayGeneration = 0
           observedActive = true
         }
         collection.startSyncImmediate()
@@ -569,7 +595,7 @@ async function runHistory(
       check(runtimeAttempts.size).toBe(1)
       const attempt = runtimeAttempts.get(0)
       if (!attempt?.deferred)
-        throw new Error(`Missing retired physical attempt`)
+        throw new Error(`Missing retired acquisition attempt`)
       check(attempt.settled).toBe(false)
       check(attempt.options.signal?.aborted).toBe(true)
       check(returnedResults).toHaveLength(1)
@@ -846,8 +872,8 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
           ),
         ),
       ),
-      `attempt-session:initial`,
-      `attempt-session:restarted`,
+      `attempt-sync-run:initial`,
+      `attempt-sync-run:restarted`,
       `attempt-replay:initial`,
       `attempt-replay:replayed`,
       `attempt-location:initial:initial`,

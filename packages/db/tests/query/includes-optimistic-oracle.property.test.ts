@@ -12,6 +12,33 @@ import { createControlledCollection as createOracleControlledCollection } from '
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 
+/**
+ * # How should optimistic relationship writes affect a nested result?
+ *
+ * An optimistic write changes the public relationship tree before sync settles.
+ * The visible tree follows these laws:
+ *
+ * 1. A reparent moves the row to its optimistic parent route immediately.
+ * 2. A relationship-key change detaches descendants that no longer correlate.
+ * 3. Rollback removes only that overlay and reveals the latest synced base.
+ * 4. Confirmation keeps the overlay until settlement, then reveals the
+ *    authoritative row without an intermediate stale route.
+ * 5. Pending changes at different levels compose, regardless of settlement
+ *    order. The controlled sync cannot settle two changes at one level alone,
+ *    so the grammar rejects that unsupported harness state.
+ *
+ * The semantic model is small: three Maps hold synced child levels and pending
+ * rows overlay them by ID. Full recomputation filters each level by its current
+ * parent key and sorts it. Transaction promises, sync gates, and cleanup
+ * receipts belong to the production driver. They do not determine expected
+ * rows.
+ *
+ * Each property supplies a deliberate action history and randomizes disjoint
+ * route values. This keeps shrinking useful while preserving the relationship
+ * distinctions under test. Focused controls also inspect the immediate
+ * optimistic checkpoint, queued sibling delivery, and failure cleanup.
+ */
+
 type RootRow = {
   id: number
   group: number
@@ -132,7 +159,7 @@ function trackRuntimeMutation(
     entry.settled = true
     if (entry.syncReleased) context.runtimePending.delete(entry)
   }
-  // Both outcomes are handled before a checkpoint or sibling source write.
+  // Attach both outcome handlers before a checkpoint or sibling source write.
   entry.receipt = transaction.isPersisted.promise.then(settled, settled)
   return entry
 }
@@ -289,6 +316,8 @@ function applyPatch(row: ChildRow, patch: ChildPatch): ChildRow {
 }
 
 function visibleLevels(context: OptimisticContext) {
+  // Model rule: pending rows replace their synced row at the same level. The
+  // recursive projection below decides their route from the overlaid values.
   const levels = context.levels.map(
     (level) => new Map([...level].map(([id, row]) => [id, { ...row }])),
   )
@@ -364,6 +393,8 @@ function createDriver(
   roots: ReadonlyArray<RootRow>,
   levelRows: LevelRows,
 ): TraceDriver<OptimisticRelationshipStep, OptimisticContext> {
+  // The driver owns transaction settlement. Model Maps change only when the
+  // corresponding logical sync or optimistic action takes effect.
   return {
     setup: () => {
       const sources = createSources(roots, levelRows)
@@ -398,8 +429,8 @@ function createDriver(
         }
         // This compound action checks the settled state. The immediate state is
         // checked separately so its known mismatch cannot abort the rollback.
-        // Its normal same-source sibling commit is queued during persistence;
-        // invoking writeBatch does not establish sibling delivery at this cut.
+        // Persistence queues its normal same-source sibling commit. Invoking
+        // writeBatch does not establish sibling delivery at this cut.
         await rollback(source, transaction, context, runtime)
         return
       }
@@ -480,8 +511,8 @@ function createDriver(
             ),
           )
       }
-      // Failed rollback/release can leave a receipt pending. Dispose resources
-      // even then; receipt rejection handlers are already attached.
+      // Failed rollback or release can leave a receipt pending. Receipt
+      // rejection handlers already exist, so dispose resources even then.
       if (errors.length === 0)
         await Promise.all(entries.map(({ receipt }) => receipt))
       pending.clear()

@@ -1,9 +1,21 @@
 /**
  * Shared live-query conformance suite.
  *
- * Sourced bottom-up from the union of the five adapters' existing test suites
- * (the "spine" + framework-agnostic "gap-closers"), plus a small tail of
- * behaviors that all adapters should support.
+ * Think of each scenario as a short state-machine trace:
+ *
+ *     create sources -> mount -> publish or reconfigure -> flush -> observe
+ *
+ * Sources and handles form an ownership graph. `ScenarioSources` and
+ * `ScenarioLifetime` release that graph even when an assertion fails, while
+ * each framework driver chooses the native scheduling operation that defines
+ * `flush`. The suite compares public observations, not framework internals.
+ * This keeps the reference smaller than any adapter and makes disagreements
+ * between adapters visible without copying their implementations.
+ *
+ * The scenario set came from the union of the five adapters' existing suites
+ * plus framework-neutral gap closers. It covers value, order, cardinality,
+ * lifecycle, reactivity, failure, and disposal as separate laws so a passing
+ * final row assertion cannot hide a wrong intermediate state.
  *
  * Each scenario has a unique stable key. All current scenarios must pass;
  * future known bugs need exact failure signatures, not whole-test waivers.

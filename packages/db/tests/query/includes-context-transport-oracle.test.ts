@@ -23,6 +23,35 @@ import type { Collection } from '../../src/collection/index.js'
 import type { Context, QueryBuilder } from '../../src/query/builder/index.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
 
+/**
+ * # How can a parent value cross a nested query without becoming user data?
+ *
+ * A correlated include needs values from its lexical parent. The compiler
+ * carries that route context through filters, projections, joins, aggregates,
+ * unions, query references, and windows. The context belongs to the control
+ * plane. User callbacks and query results must never see its private metadata.
+ *
+ * This oracle states five laws:
+ *
+ * 1. Every supported query boundary preserves the parent correlation.
+ * 2. Different parents keep different routes, even when they share child rows.
+ * 3. Collection, `toArray`, and `materialize` produce the same public values.
+ * 4. Parent and child updates recompute only from the current public sources.
+ * 5. Private route metadata never leaks through rows, callbacks, symbols,
+ *    opaque objects, cycles, or adversarial property names.
+ *
+ * One reference compiler would repeat the production compiler and risk the
+ * same bugs. This file instead declares a grammar of transport boundaries.
+ * Each grammar family has a small JavaScript model for its own result. The
+ * production side compiles the matching live query and crosses the full
+ * boundary. The suite expands the grammar across three materialization forms
+ * and three checkpoints for 819 explicit observations.
+ *
+ * This suite owns route-context transport and public-data hygiene. The temporal
+ * oracle owns demand lifetime. The publication oracle owns coherent callbacks.
+ * The Collection oracle owns facade identity and retirement.
+ */
+
 type Cleanable = { cleanup: () => Promise<void> }
 type MaterializationForm = (typeof materializationForms)[number]
 
@@ -35,6 +64,9 @@ type MaterializedForms<T> = {
 const materializationForms = [`collection`, `array`, `materialized`] as const
 const checkpoints = [`initial`, `parent-update`, `child-update`] as const
 
+// These axes name semantic boundaries, not implementation functions. Adding a
+// compiler feature means adding its boundary here or stating why it cannot
+// carry correlated context.
 const routeContextGrammar = {
   parentProjection: {
     shapes: [`field`, `whole-row`] as const,
@@ -171,6 +203,8 @@ type GrammarCell =
   | NamespaceCollisionCell
   | PublicSurfaceCell
 
+// Expand every declared product once. The calibration test below rejects both
+// missing cells and duplicate cells.
 const grammarCells: Array<GrammarCell> = [
   ...routeContextGrammar.parentProjection.shapes.map(
     (shape): ParentProjectionCell => ({
@@ -271,6 +305,8 @@ function includeInEveryForm<TContext extends Context>(
   }
 }
 
+// Read each public form through the same projection. This keeps normalization
+// outside the production query while preserving exact row counts and values.
 function readEveryForm<T, U>(
   forms: MaterializedForms<T>,
   project: (rows: Iterable<T>) => U,
@@ -1774,6 +1810,8 @@ class PublicSurfaceBox {
   }
 }
 
+// Public-surface cells deliberately retain callback values and opaque wrappers.
+// A cleaner that only fixes the final array will still fail these observations.
 function expectNoPrivateSymbolsDeep(
   value: unknown,
   allowedSymbols: ReadonlySet<symbol>,

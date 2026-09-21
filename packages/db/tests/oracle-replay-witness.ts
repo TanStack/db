@@ -10,7 +10,13 @@ export type OracleReplayWitness = {
   failed: boolean
 }
 
-/** Only the guarded runner supplies this channel. Constructing options is not reach. */
+/**
+ * Attach a witness only when the guarded runner's property, seed, and path all
+ * match. Constructing fast-check options is not evidence that a property ran.
+ * The reporter records fast-check's completed run details, then preserves its
+ * native failure formatting and cause policy instead of turning instrumentation
+ * into a second assertion engine.
+ */
 export function oracleReplayReporter(
   property: string,
   seed: number,
