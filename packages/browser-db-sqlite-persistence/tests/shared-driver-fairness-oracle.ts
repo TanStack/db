@@ -1,3 +1,40 @@
+/**
+ * # When does a cold hydrate get a turn on a shared SQLite driver?
+ *
+ * Contract and source: RFC #1659 accepts K=1 complete-logical-cold-hydrate
+ * scheduling. The persist already executing when the storm begins is
+ * non-preemptible. After that, at most one additional persist may complete
+ * between consecutive hydrate completions, with FIFO identity preserved
+ * inside the hydrate and persist lanes.
+ *
+ * History grammar and domain: a legal storm has unique work IDs, starts with
+ * that already-running persist when any persist exists, and then permutes
+ * complete hydrate and persist requests. Hydrates contain nonempty unique
+ * seeded rows; persists contain one or more mutations. The generated campaign
+ * varies 2..7 hydrates, 2..7 persists, 1..3 mutations per persist, and sampled
+ * tail permutations. Neutral histories contain only hydrates.
+ *
+ * Independent model and production boundary: `createFairnessReference`
+ * computes permitted completed persist IDs from the ordered history and K; it
+ * does not import or simulate the production scheduler. The driver exercises
+ * public `Collection.preload()` through persisted collection options, the core
+ * adapter, and one real `BrowserWASQLiteDriver`. Each preload completion is a
+ * checkpoint after the complete logical hydrate, not after an individual SQL
+ * statement.
+ *
+ * Observed public facts: admitted and completed logical IDs, completed and
+ * pending persists at every hydrate checkpoint, independently seeded public
+ * collection rows, raw SQL dequeue reach, and cleanup diagnostics. The oracle
+ * does not establish elapsed-time latency, unbounded eventuality, multi-process
+ * coordination, or a browser matrix; the Chromium OPFS fixture separately
+ * refines the provider boundary.
+ *
+ * Challenge and replay: the executable persist-first FIFO driver must violate
+ * the same K=1 checker while using the public/core/driver path. Re-run a
+ * generated failure with TANSTACK_DB_DRIVER_FAIRNESS_SEED and
+ * TANSTACK_DB_DRIVER_FAIRNESS_PATH. Cleanup preserves the primary failure and
+ * reports secondary resource-release diagnostics separately.
+ */
 import { createCollection } from '../../db/src/index'
 import { persistedCollectionOptions } from '../src/index'
 import { BrowserWASQLiteDriver } from '../src/wa-sqlite-driver'

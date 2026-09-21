@@ -1,3 +1,12 @@
+/**
+ * Node campaign for the shared-driver K=1 contract documented in
+ * `shared-driver-fairness-oracle.ts`. Fixed histories prove neutral reach and a
+ * persist storm; generated legal histories vary both lane sizes, mutation
+ * width, and tail order. Public rows and logical completion checkpoints are
+ * checked independently of production scheduling, and an executable
+ * persist-first FIFO mutant proves the checker rejects the original fault.
+ * Failures replay through TANSTACK_DB_DRIVER_FAIRNESS_SEED/PATH.
+ */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

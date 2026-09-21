@@ -1,3 +1,12 @@
+/**
+ * Real-provider refinement of the shared-driver fairness oracle. The page runs
+ * the same legal neutral and fixed-storm histories through public `preload()`,
+ * the browser/core adapter boundary, and Chromium's OPFSCoopSyncVFS worker. It
+ * freezes logical completions, public rows, raw dequeue reach, and the K=1
+ * violation result before cleanup, then reports provider cleanup separately.
+ * This fixture adds real OPFS/worker evidence; it does not claim multi-tab,
+ * multi-process, non-Chromium, latency, or unbounded-eventuality coverage.
+ */
 import { openBrowserWASQLiteOPFSDatabase } from '../src/index'
 import {
   findSharedDriverFairnessViolation,

@@ -1,3 +1,11 @@
+/**
+ * Browser checkpoint assertions for the OPFS refinement. Expected public rows
+ * are rebuilt from the scenario IDs rather than from production output. The
+ * neutral case proves cold-query reach; the storm case requires no K=1
+ * violation. Failure-before-checkpoint, semantic mismatch, driver cleanup, and
+ * OPFS cleanup remain distinct outcomes so setup or teardown cannot satisfy the
+ * scheduling law.
+ */
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import type { OPFSOracleResult } from './shared-driver-fairness.opfs'

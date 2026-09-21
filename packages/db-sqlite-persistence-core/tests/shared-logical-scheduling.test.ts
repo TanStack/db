@@ -1,3 +1,32 @@
+/**
+ * # Which adapters share one logical scheduling boundary?
+ *
+ * Contract and source: the RFC #1659 driver protocol keys scheduling by the
+ * exact shared driver identity. Two fresh core adapters over that identity
+ * must not interleave a complete hydration scope with regular adapter work.
+ * Transparent wrappers must forward the identity unchanged, including when
+ * the identity itself is a function object.
+ *
+ * Independent relation and legal domain: a two-adapter history starts one
+ * hydration metadata query, holds it at the driver boundary, then requests one
+ * regular metadata query. Before release, exactly the first query may be
+ * admitted; after release, both operations must finish. The three legal driver
+ * forms are direct, transparently wrapped, and direct with a function-valued
+ * key. This relation records admissions without copying the production
+ * scheduler or invoking the opaque key.
+ *
+ * Production boundary and checkpoint: both operations use
+ * `createSQLiteCorePersistenceAdapter`; the hydration operation enters through
+ * `runInHydrationScope`. The first checkpoint is after the regular request has
+ * had microtasks to reach the gated driver, while the first query remains
+ * held. Losing wrapper identity or treating a function key as a getter admits
+ * the second query and fails the exact admission assertion.
+ *
+ * This focused contract test does not establish K=1 lane fairness, SQL result
+ * correctness, eventual progress under arbitrary I/O, or cross-process
+ * coordination. Those belong to the shared-driver oracle and provider
+ * refinements.
+ */
 import { describe, expect, it } from 'vitest'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,

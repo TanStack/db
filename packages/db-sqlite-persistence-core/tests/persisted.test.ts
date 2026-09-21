@@ -459,6 +459,10 @@ describe(`persistedCollectionOptions`, () => {
     })
   })
 
+  // Focused collection-reset refinement: metadata and rows must come from one
+  // hydration scope. The adapter makes an interleaved v2 write possible only
+  // outside that scope, so the public v1 metadata and row are the independent
+  // coherence checkpoint. This fixed history does not model arbitrary resets.
   it(`keeps a collection-reset reload inside one hydration scope`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
     adapter.collectionMetadata.set(`snapshot`, `initial`)
@@ -1062,6 +1066,11 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  // Focused receipt-ownership refinements. A source receipt created by the
+  // hydration operation belongs to its waiter even if it rejects before the
+  // waiter snapshots; a receipt created after hydration work returns does not.
+  // The public load result and exact rejection identity distinguish those two
+  // boundaries without treating every pending source receipt as related.
   it(`propagates an operation-owned receipt rejection that settles before the hydration waiter snapshots`, async () => {
     const adapter = createRecordingAdapter()
     const hydrateLoadEntered = createDeferred()
@@ -1536,6 +1545,10 @@ describe(`persistedCollectionOptions`, () => {
     })
   })
 
+  // Focused R7 causal-replay witness: after hydration releases its buffer, the
+  // source receipt must replay without awaiting the persisting operation whose
+  // callback is itself awaiting that receipt. Persistence reach, both public
+  // settlements, and the final source row expose the otherwise hidden cycle.
   it(`replays a buffered source receipt without blocking its persisting predecessor`, async () => {
     const adapter = createRecordingAdapter()
     const hydrateLoadEntered = createDeferred()
@@ -2083,6 +2096,10 @@ describe(`persistedCollectionOptions`, () => {
     })
   })
 
+  // Focused invalidation-reload refinements. Whether recovery follows a
+  // sequence gap or a contiguous committed notification, metadata and rows
+  // must be read inside one hydration scope. The adapter schedules v2 only
+  // outside the scope; coherent public v1 state is the checkpoint.
   it(`keeps sequence-gap recovery inside one hydration scope`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
     adapter.collectionMetadata.set(`snapshot`, `initial`)
@@ -2275,6 +2292,10 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection.get(`2`)).toBeUndefined()
   })
 
+  // Focused lifecycle-fencing witness: generation-zero startup is held across
+  // cleanup and rebound, then released while generation one is still loading.
+  // Zero ensure-index calls for the rebound signatures prove stale bootstrap
+  // and listener work did not cross the public lifecycle boundary.
   it(`does not let stale startup install index work on a rebound lifecycle`, async () => {
     const adapter = createRecordingAdapter()
     const g0MetadataEntered = createDeferred()
