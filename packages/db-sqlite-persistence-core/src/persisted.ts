@@ -2162,7 +2162,7 @@ class PersistedCollectionRuntime<
   private async processCommittedTxUnsafe(
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
-    gapRecoveryAlreadyScoped = false,
+    hydrationScopeAlreadyActive = false,
   ): Promise<void> {
     if (txCommitted.term < this.latestTerm) {
       return
@@ -2183,7 +2183,7 @@ class PersistedCollectionRuntime<
     const hasGap = hasGapInCurrentTerm || hasGapAcrossTerms
 
     if (hasGap) {
-      if (gapRecoveryAlreadyScoped) {
+      if (hydrationScopeAlreadyActive) {
         await this.recoverFromSeqGapUnsafe(adapter)
       } else {
         await this.runInHydrationScope((scopedAdapter) =>
@@ -2205,7 +2205,11 @@ class PersistedCollectionRuntime<
       txCommitted.latestRowVersion,
     )
 
-    await this.invalidateFromCommittedTxUnsafe(txCommitted, adapter)
+    await this.invalidateFromCommittedTxUnsafe(
+      txCommitted,
+      adapter,
+      hydrationScopeAlreadyActive,
+    )
   }
 
   private async recoverFromSeqGapUnsafe(
@@ -2245,6 +2249,7 @@ class PersistedCollectionRuntime<
                 collectionMetadataMutations: delta.collectionMetadataMutations,
               },
               adapter,
+              true,
             )
           }
           return
@@ -2280,16 +2285,24 @@ class PersistedCollectionRuntime<
   private async invalidateFromCommittedTxUnsafe(
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
+    hydrationScopeAlreadyActive = false,
   ): Promise<void> {
+    const reloadActiveSubsets = () =>
+      hydrationScopeAlreadyActive
+        ? this.reloadActiveSubsetsUnsafe(adapter)
+        : this.runInHydrationScope((scopedAdapter) =>
+            this.reloadActiveSubsetsUnsafe(scopedAdapter),
+          )
+
     if (txCommitted.requiresFullReload) {
-      await this.reloadActiveSubsetsUnsafe(adapter)
+      await reloadActiveSubsets()
       return
     }
 
     const changedKeyCount =
       txCommitted.changedRows.length + txCommitted.deletedKeys.length
     if (changedKeyCount > TARGETED_INVALIDATION_KEY_LIMIT) {
-      await this.reloadActiveSubsetsUnsafe(adapter)
+      await reloadActiveSubsets()
       return
     }
 
@@ -2304,7 +2317,7 @@ class PersistedCollectionRuntime<
 
     // Has paginated subsets — fall back to full reload.
     // Targeted invalidation for paginated subsets is deferred to a future iteration.
-    await this.reloadActiveSubsetsUnsafe(adapter)
+    await reloadActiveSubsets()
   }
 
   private async applyTargetedInvalidationUnsafe(
