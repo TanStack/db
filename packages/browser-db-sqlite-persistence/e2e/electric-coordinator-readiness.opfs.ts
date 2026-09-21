@@ -8,6 +8,30 @@ import {
 } from '../src/index'
 import type { ElectricCollectionUtils } from '@tanstack/electric-db-collection'
 
+/**
+ * # Which browser path supplies persisted readiness evidence?
+ *
+ * This fixture drives a real Chromium `OPFSCoopSyncVFS`,
+ * `BrowserCollectionCoordinator`, persisted Collection, and Electric
+ * ShapeStream. A controlled fetch transport holds or supplies upstream data so
+ * the four declared histories are deterministic: eager empty and non-empty
+ * SQLite snapshots, on-demand pending upstream, and an authoritative network
+ * snapshot that wins while hydration is held.
+ *
+ * The companion spec supplies the independent expected observations. This
+ * driver records exact public rows, Collection status, ready-event count,
+ * hydration calls, upstream requests, and whether publication preceded the
+ * hydration-release checkpoint. `failed-before-checkpoint` distinguishes setup
+ * failure from completed evidence, and cleanup diagnostics remain separate from
+ * the primary observation.
+ *
+ * Replay by the companion Playwright test title and mode. The held-hydration
+ * network case kills the pre-fix stale-local/indefinite-loading behavior; the
+ * eager cases kill upstream-only readiness. Scope is one Chromium page/context
+ * with synthetic HTTP responses: it is neither a live Electric service nor
+ * multi-tab or PowerSync evidence.
+ */
+
 type Row = { id: string; title: string }
 type Mode = `non-empty` | `empty` | `network-wins` | `on-demand`
 

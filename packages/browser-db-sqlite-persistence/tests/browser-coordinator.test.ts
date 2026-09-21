@@ -8,6 +8,33 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordinator'
 
+/**
+ * # Which transaction owns the next durable coordinator position?
+ *
+ * Contract: the leader-owned writer lock serializes position allocation,
+ * durable application, coordinator-state advancement, and publication. A
+ * direct authoritative source transaction and a competing follower RPC must
+ * therefore receive distinct term/sequence positions without losing rows,
+ * metadata, truncate intent, or failure identity.
+ *
+ * The history grammar covers direct source application, competing follower
+ * mutation RPC, leader routing, full transaction fidelity, and adapter failure.
+ * Expected results come from the public ordering law: positions are distinct,
+ * durable rows and metadata equal the submitted transactions, and a failed
+ * application neither retries nor consumes the next position.
+ *
+ * The driver calls the real `BrowserCollectionCoordinator` methods with
+ * controlled BroadcastChannel and Web Locks implementations. Checkpoints observe
+ * RPC settlement, term/sequence values, durable adapter input, and publication.
+ * These simulated browser primitives do not prove native lock or multi-tab
+ * behavior; the single-context Chromium/OPFS evidence lives in the readiness
+ * E2E suite and is not a two-context browser proof.
+ *
+ * Replay by exact Vitest title. The source-position and held-lock schedules are
+ * hostile pre-fix witnesses: reusing sequence 1 dropped the network winner, and
+ * releasing the competing mutation early violated source-before-follower order.
+ */
+
 // ---------------------------------------------------------------------------
 // BroadcastChannel mock
 // ---------------------------------------------------------------------------

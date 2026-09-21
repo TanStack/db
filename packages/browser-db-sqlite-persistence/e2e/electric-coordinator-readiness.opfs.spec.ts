@@ -2,6 +2,24 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import type { ReadinessOracleResult } from './electric-coordinator-readiness.opfs'
 
+/**
+ * # Does the Chromium driver refine dual-source readiness?
+ *
+ * The contract is the same independent dual-source law as the core suite: an
+ * eager Collection becomes ready from a compatible local snapshot or an
+ * authoritative upstream source snapshot, while on-demand remains upstream
+ * gated. The four literal expected cells are independent of the browser driver
+ * and are bounded exhaustiveness over this declared matrix.
+ *
+ * Each test reads the fixture only after its observation checkpoint, then
+ * compares exact public rows, Collection status, ready-event and work counters,
+ * provider identity, race ordering, and cleanup results. Replay by Playwright
+ * title (the eager title includes its mode). A pre-fix network winner remains
+ * loading or exposes the stale OPFS row; a pre-fix eager local case remains
+ * blocked on Electric. The fixture limits still apply: one Chromium context,
+ * controlled HTTP responses, no live Electric service, and no PowerSync path.
+ */
+
 type Mode = `non-empty` | `empty` | `network-wins` | `on-demand`
 
 async function readResult(

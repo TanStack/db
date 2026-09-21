@@ -34,6 +34,37 @@ import type {
   SyncConfig,
 } from '@tanstack/db'
 
+/**
+ * # Which startup source makes a persisted Collection ready?
+ *
+ * Contract and source: the sync-mode contract recorded in
+ * `.changeset/fix-persisted-dual-source-readiness.md`. An eager Collection
+ * becomes ready after either compatible SQLite hydration or an authoritative
+ * upstream source snapshot succeeds. On-demand Collections remain
+ * upstream-gated, and startup enters error only after every available startup
+ * path fails.
+ *
+ * The deterministic history grammar below controls local hydration, upstream
+ * readiness and sync transactions, durable application, cleanup, and restart.
+ * It covers empty and non-empty local snapshots, either source winning, dual
+ * failure and recovery, post-ready durability failure, and stale work. The
+ * expected relation is independent of the implementation queues: the first
+ * usable startup result establishes Collection readiness, an authoritative
+ * upstream winner cannot be overwritten by late hydration, and cleanup fences
+ * the prior sync run.
+ *
+ * The production driver is `persistedCollectionOptions` through real Collection
+ * status, reads, applied receipts, and persistence/coordinator boundaries.
+ * Checkpoints compare exact public rows, Collection status and errors, durable
+ * calls, and settlement before controlled gates are released.
+ *
+ * These are pinned schedules, not a generated lifecycle model. Replay one with
+ * its exact Vitest title. The schedules retain pre-fix kills for stale overwrite,
+ * false readiness errors, misclassified receipt rejection, remote-ensure retry,
+ * and hidden durability failure. PowerSync does not currently use this
+ * authoritative-truncate path.
+ */
+
 type Todo = {
   id: string
   title: string

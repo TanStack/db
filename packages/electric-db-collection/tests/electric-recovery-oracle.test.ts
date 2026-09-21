@@ -14,6 +14,39 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
+/**
+ * # Does persisted Electric recovery publish only complete source snapshots?
+ *
+ * Contract and source: persisted dual-source readiness, authoritative truncate
+ * replacement, and Electric resume/reset semantics. SQLite hydration and the
+ * upstream source are independent startup authorities; a valid resume may merge
+ * deltas, while an invalid resume must replace omitted cached rows only when the
+ * new source snapshot is complete.
+ *
+ * The fixture's `rows` and `metadata` Maps model durable state independently of
+ * the Collection. The generated property's `expected` Map models complete public
+ * and durable rows. `expectWholeRecoveryTrace` allows only monotonic movement
+ * through the explicitly listed public snapshots; it does not copy production's
+ * replay state machine.
+ *
+ * Histories cross eager, progressive, and on-demand sync modes; external
+ * coordinator publication and ShapeStream deltas; full reload and delta paths;
+ * insert, update, and delete; valid and invalid resume; empty and non-empty
+ * replacement; and hydration before or after the final source commit.
+ *
+ * The production driver is `persistedCollectionOptions` composed with
+ * `electricCollectionOptions` and mocked installed ShapeStream callbacks.
+ * Observation cuts include coordinator metadata publication, `up-to-date`,
+ * restart, resume metadata, and exact public and durable rows.
+ *
+ * Replay matrices by exact Vitest title; replay the generated property with the
+ * fast-check seed and path printed on failure. The trace fault control rejects a
+ * missing intermediate publication, while exact row checks reject stale cached
+ * rows with fresh metadata and incomplete replacement. This is a fixed matrix
+ * plus a bounded generated property over a mocked ShapeStream, not a live
+ * Electric service or PowerSync authority.
+ */
+
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }
