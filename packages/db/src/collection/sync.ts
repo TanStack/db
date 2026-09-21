@@ -74,7 +74,7 @@ export class CollectionSyncManager<
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
   private syncEpoch = 0
-  private loadSubsetSession = 0
+  private syncRunGeneration = 0
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -395,7 +395,7 @@ export class CollectionSyncManager<
     this.syncStartRequested = false
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
-    const loadSubsetSession = this.loadSubsetSession
+    const syncRunGeneration = this.syncRunGeneration
 
     try {
       if (shouldStart) {
@@ -412,7 +412,7 @@ export class CollectionSyncManager<
       const loadSubset = this.syncLoadSubsetFn
       try {
         if (
-          loadSubsetSession !== this.loadSubsetSession ||
+          syncRunGeneration !== this.syncRunGeneration ||
           options.signal?.aborted
         ) {
           throw new LoadSubsetOperationAbortedError()
@@ -782,7 +782,7 @@ export class CollectionSyncManager<
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
   public trackLoadPromise(promise: Promise<unknown>): void {
-    const loadSubsetSession = this.loadSubsetSession
+    const syncRunGeneration = this.syncRunGeneration
     const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
     this.trackLoadSubsetOperationPromise(promise)
@@ -798,7 +798,7 @@ export class CollectionSyncManager<
     }
 
     const finish = () => {
-      if (loadSubsetSession !== this.loadSubsetSession) return
+      if (syncRunGeneration !== this.syncRunGeneration) return
 
       const loadingEnding =
         this.pendingLoadSubsetPromises.size === 1 &&
@@ -819,8 +819,8 @@ export class CollectionSyncManager<
   }
 
   /** @internal Generation fence for subscription-owned async work. */
-  public getLoadSubsetSession(): number {
-    return this.loadSubsetSession
+  public getSyncRunGeneration(): number {
+    return this.syncRunGeneration
   }
 
   /**
@@ -885,10 +885,10 @@ export class CollectionSyncManager<
   }
 
   public cleanup(): void {
-    // Invalidate callbacks retained by asynchronous work from this session
-    // before invoking adapter cleanup or allowing a new session to start.
+    // Invalidate callbacks retained by asynchronous work from this sync run
+    // before invoking adapter cleanup or allowing a new sync run to start.
     const cleanupEpoch = ++this.syncEpoch
-    this.loadSubsetSession++
+    this.syncRunGeneration++
     this.rejectPreload?.(new CollectionPreloadAbortedError())
     const cleanup = this.syncCleanupFn
     this.syncCleanupFn = null
@@ -898,7 +898,7 @@ export class CollectionSyncManager<
       cleanup?.()
     } catch (error) {
       // Keep failed cleanup retryable, but never overwrite a replacement
-      // session installed by reentrant adapter code.
+      // sync run installed by reentrant adapter code.
       if (this.syncEpoch === cleanupEpoch) this.syncCleanupFn = cleanup
       // Re-throw in a microtask to surface the error after cleanup completes
       queueMicrotask(() => {

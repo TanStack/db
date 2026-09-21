@@ -12,6 +12,37 @@ import {
 import { flushPromises } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
+/**
+ * # What may cross a functional projection boundary?
+ *
+ * Expression projections stay inside the query graph. Functional projections
+ * run user JavaScript. Inline arrays and materialized values can enter that
+ * callback as snapshots. A Collection-valued include is a live handle, so the
+ * callback cannot turn reads from it into query dependencies. The builder
+ * rejects that ambiguous input instead of returning a stale derived scalar.
+ *
+ * This oracle states five laws:
+ *
+ * 1. Query references, recursive references, and unions preserve each supported
+ *    include form and its public row shape.
+ * 2. Functional callbacks receive complete values from the current graph step.
+ * 3. Published Collection facades stay live, but reads from them do not become
+ *    hidden scalar dependencies.
+ * 4. A failed projection publishes no partial facade state or events.
+ * 5. Cleanup fences the old graph from a later preload and its publications.
+ *
+ * The model is a set of small truth Maps and direct JavaScript projections.
+ * Declared products cross boundary, form, output, initial state, consumer,
+ * operator, and rename choices. Negative cells prove that unsupported
+ * Collection inputs fail before user code runs. Callback-time captures prevent
+ * a later live reference from making an incomplete callback look correct.
+ *
+ * This suite owns functional projection compatibility. The route-context suite
+ * owns hidden metadata transport. The Collection suite owns facade lifecycle.
+ */
+
+// These products are finite contract partitions. Calibration tests below
+// reject missing or duplicate cells before the behavior tests run.
 const boundaries = [`query-ref`, `recursive-query-ref`, `union`] as const
 const forms = [`collection`, `array`, `materialized`] as const
 const outputs = [`expression`, `record`, `opaque-root`] as const
@@ -91,8 +122,8 @@ function readChildren(value: unknown, form: (typeof forms)[number]): ChildView {
   }
 }
 
-// Keep only the selected public fields in row comparisons. Callback-time shape
-// and facade readiness have their own assertions rather than being normalized away.
+// Keep only the selected public fields in row comparisons. Other assertions
+// check callback-time shape and facade readiness.
 function selectedRows(rows: ReadonlyArray<Child>) {
   return rows.map(({ id, parentGroup, value }) => ({ id, parentGroup, value }))
 }
@@ -186,7 +217,7 @@ describe(`functional projection output compatibility`, () => {
       }
       const query = buildQuery()
       const failure = new Error(`pending child failed`)
-      // Attach both outcomes immediately; no pending-length assertion may
+      // Attach both outcomes immediately. A pending-length assertion must not
       // leave a rejected preload promise unobserved.
       const preload = () => {
         const result: { settled: boolean; error?: unknown } = { settled: false }

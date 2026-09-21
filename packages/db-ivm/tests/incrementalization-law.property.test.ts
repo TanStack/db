@@ -27,13 +27,68 @@ import {
 } from './incrementalization-law.js'
 import type { Weighted } from './incrementalization-law.js'
 
+/**
+ * # Does incremental execution equal full recomputation?
+ *
+ * D2 operators keep state and emit only changes. A wrong delta can leave the
+ * final rows looking right after a later batch, so final-state examples are not
+ * enough. This suite compares every emitted delta and retained result with a
+ * direct recomputation from the complete logical input.
+ *
+ * The plain evaluators below define the expected relations for reductions,
+ * joins, groups, and ordered windows. They use arrays and Maps, not D2
+ * operators. The shared checker then delivers each generated logical change as
+ * one atomic batch and as legal one-row steps.
+ *
+ * The generated domain uses small JSON tuples with integer weights. Named
+ * cases force empty batches, duplicate weights, replacements, cancellation,
+ * presence changes, boundary ties, and a zero-width window. Fault controls
+ * prove that the checker rejects missing, sign-flipped, and wrong-member output.
+ */
+
 type Keyed = [number, number]
 type JoinOutput = [number, [number, number]]
 type OuterJoinOutput = [number, [number | null, number | null]]
 type GroupedOutput = [string, { bucket: number; total: number }]
 
-const SEED = Number(process.env.TANSTACK_DB_IVM_ORACLE_SEED ?? 1741)
+const FIXED_SEED = 1741
+const replaySeedText = process.env.TANSTACK_DB_IVM_ORACLE_SEED
+const replaySeed =
+  replaySeedText === undefined ? undefined : Number(replaySeedText)
 const RUNS = Number(process.env.TANSTACK_DB_IVM_ORACLE_RUNS ?? 100)
+const REPLAY_PATH = process.env.TANSTACK_DB_IVM_ORACLE_PATH
+if (
+  replaySeedText !== undefined &&
+  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
+) {
+  throw new Error(`TANSTACK_DB_IVM_ORACLE_SEED must be an integer`)
+}
+if (!Number.isSafeInteger(RUNS) || RUNS <= 0) {
+  throw new Error(`TANSTACK_DB_IVM_ORACLE_RUNS must be a positive integer`)
+}
+if (REPLAY_PATH !== undefined && replaySeed === undefined) {
+  throw new Error(
+    `TANSTACK_DB_IVM_ORACLE_PATH requires TANSTACK_DB_IVM_ORACLE_SEED`,
+  )
+}
+
+const generatedCampaigns = [
+  { name: `fixed`, seed: FIXED_SEED, path: undefined },
+  {
+    name: replaySeed === undefined ? `random` : `replay`,
+    seed: replaySeed,
+    path: REPLAY_PATH,
+  },
+] as const
+
+function campaignParameters(campaign: (typeof generatedCampaigns)[number]) {
+  return {
+    numRuns: RUNS,
+    ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+    ...(campaign.path === undefined ? {} : { path: campaign.path }),
+  }
+}
+
 const CANCELLATION_ROW: Keyed = [99, 99]
 const keyedPolicy = jsonLawValuePolicy<Keyed>()
 const joinPolicy = jsonLawValuePolicy<JoinOutput>()
@@ -43,18 +98,14 @@ const uniqueRowSplitDomain = {
   uniqueKey: ([key]: Keyed) => String(key),
 }
 
-/*
-Law/source: DBSP incrementalization, as scoped by issue #1741.
-Domain: finite JSON tuples with integer weights; batches preserve nonnegative
-logical input states and split lanes preserve that law after every delivery.
-Reference/path/checkpoint: full recomputation is independent of each D2
-operator implementation and is compared with exact emitted deltas and retained
-output after every logical batch.
-Observed: weighted relation membership and multiplicity. Plain orderBy exposes
-selected membership, not sequence indices. Publication and SQL meaning are out
-of scope. Fixed cells witness named structural paths; fault controls challenge
-missing/sign-flipped/wrong-member output. FastCheck reports replay seed/path.
-*/
+/**
+ * The model observes relation membership and multiplicity. Plain `orderBy`
+ * exposes selected members, not their sequence indices. Publication timing and
+ * SQL meaning are separate contracts.
+ *
+ * The fixed generated lane preserves one stable campaign. The second lane uses
+ * a new seed unless replay variables select a prior seed and shrink path.
+ */
 
 const weightedWorld = weightedStateArbitrary(
   fc.tuple(fc.integer({ min: 0, max: 3 }), fc.integer({ min: -3, max: 3 })),
@@ -223,219 +274,229 @@ function firstTwoPerParity(input: Weighted<Keyed>): Weighted<Keyed> {
 }
 
 describe(`DBSP incrementalization laws`, () => {
-  it(`checks consolidate, reduce, and grouped top-K against full recomputation`, async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
-        async (worlds) => {
-          // Yield between complete histories so stress runs can report progress.
-          // Graph delivery and every observation within a history stay synchronous.
-          await setImmediate()
-          const batches = transitions(worlds)
-          assertUnaryIncrementalization({
-            name: `consolidate`,
-            initial: worlds[0]!,
-            batches,
-            inputPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            build: (input) => input.pipe(consolidate()),
-            evaluate: keyedIdentity,
-          })
-          assertUnaryIncrementalization({
-            name: `reduce`,
-            initial: worlds[0]!,
-            batches,
-            inputPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            build: (input) =>
-              input.pipe(
-                reduce((values) => {
-                  if (values.length === 0) return []
-                  return [
-                    [
-                      values.reduce(
-                        (sum, [value, weight]) => sum + value * weight,
-                        0,
-                      ),
-                      1,
-                    ],
-                  ]
-                }),
-              ),
-            evaluate: summed,
-          })
-          assertUnaryIncrementalization({
-            name: `groupBy reduction`,
-            initial: worlds[0]!,
-            batches,
-            inputPolicy: keyedPolicy,
-            outputPolicy: groupedPolicy,
-            build: (input) =>
-              input.pipe(
-                groupBy(([key]) => ({ bucket: key % 2 }), {
-                  total: groupByOperators.sum(([, value]) => value),
-                }),
-              ),
-            evaluate: groupedSums,
-          })
-          assertUnaryIncrementalization({
-            name: `top-K`,
-            initial: worlds[0]!,
-            batches,
-            inputPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            build: (input) =>
-              input.pipe(topK((left, right) => left - right, { limit: 2 })),
-            evaluate: topTwo,
-          })
-        },
-      ),
-      { seed: SEED, numRuns: RUNS },
-    )
-  })
+  it.each(generatedCampaigns)(
+    `checks consolidate, reduce, and grouped top-K against full recomputation ($name campaign)`,
+    async (campaign) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(weightedWorld, { minLength: 2, maxLength: 7 }),
+          async (worlds) => {
+            // Yield between complete histories so stress runs can report progress.
+            // Graph delivery and every observation within a history stay synchronous.
+            await setImmediate()
+            const batches = transitions(worlds)
+            assertUnaryIncrementalization({
+              name: `consolidate`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              build: (input) => input.pipe(consolidate()),
+              evaluate: keyedIdentity,
+            })
+            assertUnaryIncrementalization({
+              name: `reduce`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              build: (input) =>
+                input.pipe(
+                  reduce((values) => {
+                    if (values.length === 0) return []
+                    return [
+                      [
+                        values.reduce(
+                          (sum, [value, weight]) => sum + value * weight,
+                          0,
+                        ),
+                        1,
+                      ],
+                    ]
+                  }),
+                ),
+              evaluate: summed,
+            })
+            assertUnaryIncrementalization({
+              name: `groupBy reduction`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: groupedPolicy,
+              build: (input) =>
+                input.pipe(
+                  groupBy(([key]) => ({ bucket: key % 2 }), {
+                    total: groupByOperators.sum(([, value]) => value),
+                  }),
+                ),
+              evaluate: groupedSums,
+            })
+            assertUnaryIncrementalization({
+              name: `top-K`,
+              initial: worlds[0]!,
+              batches,
+              inputPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              build: (input) =>
+                input.pipe(topK((left, right) => left - right, { limit: 2 })),
+              evaluate: topTwo,
+            })
+          },
+        ),
+        campaignParameters(campaign),
+      )
+    },
+  )
 
-  it(`checks simultaneous binary join deltas and split delivery`, async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(fc.tuple(weightedWorld, weightedWorld), {
-          minLength: 2,
-          maxLength: 7,
-        }),
-        async (generated) => {
-          await setImmediate()
-          const worlds = generated.map(([left, right]) => ({ left, right }))
-          const batches = worlds.slice(1).map((next, index) => ({
-            left: weightedDifference(
-              worlds[index]!.left,
-              next.left,
-              keyedPolicy,
-              CANCELLATION_ROW,
-            ),
-            right: weightedDifference(
-              worlds[index]!.right,
-              next.right,
-              keyedPolicy,
-              CANCELLATION_ROW,
-            ),
-          }))
-          assertBinaryIncrementalization({
-            name: `inner join`,
-            initialLeft: worlds[0]!.left,
-            initialRight: worlds[0]!.right,
-            batches,
-            leftPolicy: keyedPolicy,
-            rightPolicy: keyedPolicy,
-            outputPolicy: joinPolicy,
-            build: (left, right) => left.pipe(innerJoin(right)),
-            evaluate: joined,
-          })
-          assertBinaryIncrementalization({
-            name: `full outer join`,
-            initialLeft: worlds[0]!.left,
-            initialRight: worlds[0]!.right,
-            batches,
-            leftPolicy: keyedPolicy,
-            rightPolicy: keyedPolicy,
-            outputPolicy: outerJoinPolicy,
-            build: (left, right) => left.pipe(fullJoin(right)),
-            evaluate: fullJoined,
-          })
-          assertBinaryIncrementalization({
-            name: `left outer join`,
-            initialLeft: worlds[0]!.left,
-            initialRight: worlds[0]!.right,
-            batches,
-            leftPolicy: keyedPolicy,
-            rightPolicy: keyedPolicy,
-            outputPolicy: outerJoinPolicy,
-            build: (left, right) => left.pipe(leftJoin(right)),
-            evaluate: leftJoined,
-          })
-          assertBinaryIncrementalization({
-            name: `right outer join`,
-            initialLeft: worlds[0]!.left,
-            initialRight: worlds[0]!.right,
-            batches,
-            leftPolicy: keyedPolicy,
-            rightPolicy: keyedPolicy,
-            outputPolicy: outerJoinPolicy,
-            build: (left, right) => left.pipe(rightJoin(right)),
-            evaluate: rightJoined,
-          })
-          assertBinaryIncrementalization({
-            name: `join then grouped reduction`,
-            initialLeft: worlds[0]!.left,
-            initialRight: worlds[0]!.right,
-            batches,
-            leftPolicy: keyedPolicy,
-            rightPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            build: (left, right) =>
-              left.pipe(
-                innerJoin(right),
-                map(([key, [leftValue, rightValue]]) => [
-                  key,
-                  leftValue * rightValue,
-                ]),
-                reduce((values) => {
-                  if (values.length === 0) return []
-                  return [
-                    [
-                      values.reduce(
-                        (sum, [value, weight]) => sum + value * weight,
-                        0,
-                      ),
-                      1,
-                    ],
-                  ]
-                }),
+  it.each(generatedCampaigns)(
+    `checks simultaneous binary join deltas and split delivery ($name campaign)`,
+    async (campaign) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(fc.tuple(weightedWorld, weightedWorld), {
+            minLength: 2,
+            maxLength: 7,
+          }),
+          async (generated) => {
+            await setImmediate()
+            const worlds = generated.map(([left, right]) => ({ left, right }))
+            const batches = worlds.slice(1).map((next, index) => ({
+              left: weightedDifference(
+                worlds[index]!.left,
+                next.left,
+                keyedPolicy,
+                CANCELLATION_ROW,
               ),
-            evaluate: joinedSums,
-          })
-        },
-      ),
-      { seed: SEED, numRuns: RUNS },
-    )
-  })
+              right: weightedDifference(
+                worlds[index]!.right,
+                next.right,
+                keyedPolicy,
+                CANCELLATION_ROW,
+              ),
+            }))
+            assertBinaryIncrementalization({
+              name: `inner join`,
+              initialLeft: worlds[0]!.left,
+              initialRight: worlds[0]!.right,
+              batches,
+              leftPolicy: keyedPolicy,
+              rightPolicy: keyedPolicy,
+              outputPolicy: joinPolicy,
+              build: (left, right) => left.pipe(innerJoin(right)),
+              evaluate: joined,
+            })
+            assertBinaryIncrementalization({
+              name: `full outer join`,
+              initialLeft: worlds[0]!.left,
+              initialRight: worlds[0]!.right,
+              batches,
+              leftPolicy: keyedPolicy,
+              rightPolicy: keyedPolicy,
+              outputPolicy: outerJoinPolicy,
+              build: (left, right) => left.pipe(fullJoin(right)),
+              evaluate: fullJoined,
+            })
+            assertBinaryIncrementalization({
+              name: `left outer join`,
+              initialLeft: worlds[0]!.left,
+              initialRight: worlds[0]!.right,
+              batches,
+              leftPolicy: keyedPolicy,
+              rightPolicy: keyedPolicy,
+              outputPolicy: outerJoinPolicy,
+              build: (left, right) => left.pipe(leftJoin(right)),
+              evaluate: leftJoined,
+            })
+            assertBinaryIncrementalization({
+              name: `right outer join`,
+              initialLeft: worlds[0]!.left,
+              initialRight: worlds[0]!.right,
+              batches,
+              leftPolicy: keyedPolicy,
+              rightPolicy: keyedPolicy,
+              outputPolicy: outerJoinPolicy,
+              build: (left, right) => left.pipe(rightJoin(right)),
+              evaluate: rightJoined,
+            })
+            assertBinaryIncrementalization({
+              name: `join then grouped reduction`,
+              initialLeft: worlds[0]!.left,
+              initialRight: worlds[0]!.right,
+              batches,
+              leftPolicy: keyedPolicy,
+              rightPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              build: (left, right) =>
+                left.pipe(
+                  innerJoin(right),
+                  map(([key, [leftValue, rightValue]]) => [
+                    key,
+                    leftValue * rightValue,
+                  ]),
+                  reduce((values) => {
+                    if (values.length === 0) return []
+                    return [
+                      [
+                        values.reduce(
+                          (sum, [value, weight]) => sum + value * weight,
+                          0,
+                        ),
+                        1,
+                      ],
+                    ]
+                  }),
+                ),
+              evaluate: joinedSums,
+            })
+          },
+        ),
+        campaignParameters(campaign),
+      )
+    },
+  )
 
-  it(`checks global ordering and window membership`, async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(orderedWorld, { minLength: 2, maxLength: 7 }),
-        async (worlds) => {
-          await setImmediate()
-          assertUnaryIncrementalization({
-            name: `orderBy`,
-            initial: worlds[0]!,
-            batches: transitions(worlds),
-            inputPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            splitDomain: uniqueRowSplitDomain,
-            build: (input) => input.pipe(orderBy((rank) => rank, { limit: 3 })),
-            evaluate: firstThree,
-          })
-          assertUnaryIncrementalization({
-            name: `grouped orderBy`,
-            initial: worlds[0]!,
-            batches: transitions(worlds),
-            inputPolicy: keyedPolicy,
-            outputPolicy: keyedPolicy,
-            splitDomain: uniqueRowSplitDomain,
-            build: (input) =>
-              input.pipe(
-                groupedOrderByWithFractionalIndex((rank) => rank, {
-                  groupKeyFn: (key) => key % 2,
-                  limit: 2,
-                }),
-                map(([key, [rank]]) => [key, rank] as Keyed),
-              ),
-            evaluate: firstTwoPerParity,
-          })
-        },
-      ),
-      { seed: SEED, numRuns: RUNS },
-    )
-  })
+  it.each(generatedCampaigns)(
+    `checks global ordering and window membership ($name campaign)`,
+    async (campaign) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(orderedWorld, { minLength: 2, maxLength: 7 }),
+          async (worlds) => {
+            await setImmediate()
+            assertUnaryIncrementalization({
+              name: `orderBy`,
+              initial: worlds[0]!,
+              batches: transitions(worlds),
+              inputPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              splitDomain: uniqueRowSplitDomain,
+              build: (input) =>
+                input.pipe(orderBy((rank) => rank, { limit: 3 })),
+              evaluate: firstThree,
+            })
+            assertUnaryIncrementalization({
+              name: `grouped orderBy`,
+              initial: worlds[0]!,
+              batches: transitions(worlds),
+              inputPolicy: keyedPolicy,
+              outputPolicy: keyedPolicy,
+              splitDomain: uniqueRowSplitDomain,
+              build: (input) =>
+                input.pipe(
+                  groupedOrderByWithFractionalIndex((rank) => rank, {
+                    groupKeyFn: (key) => key % 2,
+                    limit: 2,
+                  }),
+                  map(([key, [rank]]) => [key, rank] as Keyed),
+                ),
+              evaluate: firstTwoPerParity,
+            })
+          },
+        ),
+        campaignParameters(campaign),
+      )
+    },
+  )
 
   it(`replays empty, duplicate, replacement, cancellation, and presence-flip cells`, () => {
     const unaryReach = assertUnaryIncrementalization({

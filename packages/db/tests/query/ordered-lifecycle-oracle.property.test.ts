@@ -13,6 +13,26 @@ import {
 } from '../oracle-config.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
+/**
+ * # Which ordered request histories are distinct?
+ *
+ * Ordered acquisition has six independent control dimensions: acquisition
+ * path, delivery time, window change, acquisition outcome, sync run, and
+ * initial-versus-replay barrier. Their 192-cell product is small enough to enumerate. A
+ * second product adds nullable multi-term ordering, including direction and
+ * null placement for both terms.
+ *
+ * For each cell, a plain finite source supplies the reference order and window.
+ * The driver records physical acquisitions, application, readiness, errors,
+ * cleanup, and final rows from a real live query. Reach assertions prove every
+ * declared cell performs work and reaches terminal cleanup. Deliberate
+ * secondary-order and null-placement faults calibrate the comparator checks.
+ *
+ * `AcquisitionPath` is a model projection over production request kinds. A
+ * `page` is an indexed ordered request. A `prefix` is an unindexed ordered
+ * request. `boundary` and `full-source` retain the production names.
+ */
+
 type Row = {
   id: number
   rank: number | null
@@ -20,13 +40,13 @@ type Row = {
   version: number
 }
 type OrderTerm = { direction: `asc` | `desc`; nulls: `first` | `last` }
-type Route = `page` | `prefix` | `boundary` | `full-source`
+type AcquisitionPath = `page` | `prefix` | `boundary` | `full-source`
 type Scenario = {
-  route: Route
+  acquisitionPath: AcquisitionPath
   delivery: `before-settlement` | `after-success`
   window: `keep` | `widen`
   outcome: `resolve` | `reject` | `abort-error`
-  session: `retain` | `restart`
+  syncRun: `retain` | `restart`
   barrier: `initial` | `replay`
   rankOffset?: number
   rankStep?: number
@@ -47,7 +67,7 @@ function compareNullable(
   return (left < right ? -1 : 1) * (term.direction === `asc` ? 1 : -1)
 }
 
-const routes: ReadonlyArray<Route> = [
+const acquisitionPaths: ReadonlyArray<AcquisitionPath> = [
   `page`,
   `prefix`,
   `boundary`,
@@ -81,7 +101,7 @@ async function observeHistory(
       ? finiteValue([null, -2, 2][Math.floor((id - 1) / 3)]!)
       : (scenario.rankOffset ?? 0) +
         (scenario.rankStep ?? 1) *
-          (scenario.route === `boundary` && id === 2 ? 1 : id),
+          (scenario.acquisitionPath === `boundary` && id === 2 ? 1 : id),
   }))
   const primary =
     scenario.nullable?.primary ??
@@ -107,7 +127,7 @@ async function observeHistory(
       : new Error(`target rejected`)
   const requests: Array<{
     options: LoadSubsetOptions
-    session: number
+    syncRunGeneration: number
     ids: Array<number>
     indexed: boolean
     applied: boolean
@@ -116,7 +136,7 @@ async function observeHistory(
   const sourceCleanups: Array<number> = []
   const publications: Array<Array<Row>> = []
   const deliveredRows = new Map<string | number, Row>()
-  let generation = 0
+  let syncRunGeneration = 0
   let activeSync!: Sync
   let activeInstalled!: Set<number>
   let targetOutcome: string | undefined
@@ -130,12 +150,12 @@ async function observeHistory(
     id: `ordered-history-source-${JSON.stringify(scenario)}`,
     getKey: ({ id }) => id,
     syncMode: `on-demand`,
-    autoIndex: scenario.route === `prefix` ? `off` : `eager`,
+    autoIndex: scenario.acquisitionPath === `prefix` ? `off` : `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
       sync: (sync: Sync) => {
         activeSync = sync
-        const session = ++generation
+        const requestSyncRunGeneration = ++syncRunGeneration
         const installed = new Set<number>()
         activeInstalled = installed
         sync.markReady()
@@ -175,22 +195,26 @@ async function observeHistory(
             )
             const request = {
               options,
-              session,
+              syncRunGeneration: requestSyncRunGeneration,
               ids: rows.map(({ id }) => id),
               indexed: source.indexes.size > 0,
               applied: false,
             }
             requests.push(request)
             const matchesRoute =
-              scenario.route === `boundary`
+              scenario.acquisitionPath === `boundary`
                 ? options.orderBy === undefined && options.where !== undefined
-                : scenario.route === `full-source`
+                : scenario.acquisitionPath === `full-source`
                   ? options.limit === undefined && options.where === undefined
                   : options.orderBy !== undefined && options.limit !== undefined
             const gated = allowTarget && !target && matchesRoute
             if (gated) target = request
             const apply = async () => {
-              if (options.signal?.aborted || session !== generation) return
+              if (
+                options.signal?.aborted ||
+                requestSyncRunGeneration !== syncRunGeneration
+              )
+                return
               request.applied = true
               const fresh = rows.filter(({ id }) => !installed.has(id))
               if (fresh.length === 0) return
@@ -224,7 +248,7 @@ async function observeHistory(
             released.push(options)
           },
           cleanup: () => {
-            sourceCleanups.push(session)
+            sourceCleanups.push(requestSyncRunGeneration)
           },
         }
       },
@@ -233,7 +257,7 @@ async function observeHistory(
   const live = createLiveQueryCollection((q) => {
     const from = q.from({ row: source })
     const ordered = (
-      scenario.route === `full-source` && !scenario.nullable
+      scenario.acquisitionPath === `full-source` && !scenario.nullable
         ? from.distinct()
         : from
     ).orderBy(
@@ -350,7 +374,7 @@ async function observeHistory(
         })),
       }),
     ).toBeDefined()
-    expect(target!.session).toBe(1)
+    expect(target!.syncRunGeneration).toBe(1)
     expect(target!.ids.length).toBeGreaterThan(0)
     await flushPromises()
     if (scenario.barrier === `initial`)
@@ -375,7 +399,7 @@ async function observeHistory(
       })
       expect(publications).toEqual([])
     }
-    if (scenario.session === `restart`) {
+    if (scenario.syncRun === `restart`) {
       allowTarget = false
       await live.cleanup()
       await source.cleanup()
@@ -401,7 +425,7 @@ async function observeHistory(
         )
       }
       await live.preload()
-      expect(generation).toBe(2)
+      expect(syncRunGeneration).toBe(2)
       check(`restarted-window`, read(), referenceWindow(1))
       check(`restarted-window-options`, live.utils.getWindow(), {
         offset: 0,
@@ -417,12 +441,12 @@ async function observeHistory(
     for (let turn = 0; turn < 8; turn++) await flushPromises()
     expect(targetOutcome).toBe(scenario.outcome)
     // Deferred application happens only after a live attempt succeeds. Failure
-    // and old-session success must not apply its rows through this provider.
+    // and old-sync-run success must not apply its rows through this provider.
     expect(target!.applied).toBe(
       scenario.delivery === `before-settlement` ||
-        (scenario.outcome === `resolve` && scenario.session === `retain`),
+        (scenario.outcome === `resolve` && scenario.syncRun === `retain`),
     )
-    if (scenario.session === `restart`) {
+    if (scenario.syncRun === `restart`) {
       check(`obsolete-status`, live.status, priorStatus)
       check(`obsolete-error`, live.utils.lastSubsetError === priorError, true)
       check(`obsolete-rows`, read(), prior)
@@ -560,9 +584,9 @@ async function observeHistory(
   expect(new Set(released).size).toBe(released.length)
   for (const { options } of requests)
     expect(released.filter((release) => release === options)).toHaveLength(1)
-  expect(sourceCleanups).toEqual(scenario.session === `restart` ? [1, 2] : [1])
+  expect(sourceCleanups).toEqual(scenario.syncRun === `restart` ? [1, 2] : [1])
   expect(requests.every(({ options }) => options.signal?.aborted)).toBe(true)
-  const route =
+  const acquisitionPath =
     target!.options.orderBy !== undefined
       ? target!.indexed
         ? `page`
@@ -571,12 +595,12 @@ async function observeHistory(
         ? `boundary`
         : `full-source`
   return {
-    route,
+    acquisitionPath,
     authority:
       target!.options.limit === undefined && target!.options.where === undefined
         ? `full`
         : `finite`,
-    generation,
+    syncRunGeneration,
     repaired,
     orderedRequests: requests.filter(
       ({ options }) => options.orderBy !== undefined,
@@ -592,11 +616,11 @@ async function observeHistory(
         options.limit === undefined && options.where === undefined,
     ).length,
     coordinates: [
-      route,
+      acquisitionPath,
       appliedBeforeSettlement ? `before-settlement` : `after-success`,
       move ? `widen` : `keep`,
       targetOutcome,
-      generation === 2 ? `restart` : `retain`,
+      syncRunGeneration === 2 ? `restart` : `retain`,
       replayStarted ? `replay` : `initial`,
     ],
     mismatches,
@@ -608,28 +632,28 @@ async function assertHistory(
   fault?: `secondary-order` | `null-placement`,
 ) {
   const result = await observeHistory(scenario, fault)
-  expect(result.route).toBe(scenario.route)
+  expect(result.acquisitionPath).toBe(scenario.acquisitionPath)
   expect(result.authority).toBe(
-    scenario.route === `full-source` ? `full` : `finite`,
+    scenario.acquisitionPath === `full-source` ? `full` : `finite`,
   )
-  expect(result.generation).toBe(scenario.session === `restart` ? 2 : 1)
+  expect(result.syncRunGeneration).toBe(scenario.syncRun === `restart` ? 2 : 1)
   expect(result.mismatches).toEqual([])
   return result
 }
 
 describe(`ordered lifecycle product`, () => {
   const observed = new Set<string>()
-  const cells: Array<Scenario> = routes.flatMap((route) =>
+  const cells: Array<Scenario> = acquisitionPaths.flatMap((acquisitionPath) =>
     ([`before-settlement`, `after-success`] as const).flatMap((delivery) =>
       ([`keep`, `widen`] as const).flatMap((window) =>
         ([`resolve`, `reject`, `abort-error`] as const).flatMap((outcome) =>
-          ([`retain`, `restart`] as const).flatMap((session) =>
+          ([`retain`, `restart`] as const).flatMap((syncRun) =>
             ([`initial`, `replay`] as const).map((barrier) => ({
-              route,
+              acquisitionPath,
               delivery,
               window,
               outcome,
-              session,
+              syncRun,
               barrier,
             })),
           ),
@@ -642,7 +666,7 @@ describe(`ordered lifecycle product`, () => {
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(192)
   })
   it.each(cells)(
-    `$route / $delivery / $window / $outcome / $session / $barrier`,
+    `$acquisitionPath / $delivery / $window / $outcome / $syncRun / $barrier`,
     async (scenario) => {
       const result = await assertHistory(scenario)
       observed.add(JSON.stringify(result.coordinates))
@@ -652,7 +676,7 @@ describe(`ordered lifecycle product`, () => {
     expect(observed.size).toBe(192)
   })
   const arbitrary = fc.record({
-    route: fc.constantFrom(...routes),
+    acquisitionPath: fc.constantFrom(...acquisitionPaths),
     delivery: fc.constantFrom(
       `before-settlement` as const,
       `after-success` as const,
@@ -663,7 +687,7 @@ describe(`ordered lifecycle product`, () => {
       `reject` as const,
       `abort-error` as const,
     ),
-    session: fc.constantFrom(`retain` as const, `restart` as const),
+    syncRun: fc.constantFrom(`retain` as const, `restart` as const),
     barrier: fc.constantFrom(`initial` as const, `replay` as const),
     rankOffset: fc.integer({ min: -1000, max: 1000 }),
     rankStep: fc.integer({ min: 1, max: 10 }),
@@ -692,7 +716,7 @@ describe(`nullable multi-term lifecycle product`, () => {
   const cells: Array<Scenario> = ([`first`, `last`] as const)
     .flatMap((primaryNulls) =>
       ([`first`, `last`] as const).flatMap((secondaryNulls) =>
-        ([`prefix`, `boundary`] as const).flatMap((route) =>
+        ([`prefix`, `boundary`] as const).flatMap((acquisitionPath) =>
           ([`resolve`, `repair`, `restart`] as const).map(
             (mode) =>
               ({
@@ -700,14 +724,14 @@ describe(`nullable multi-term lifecycle product`, () => {
                   primary: { direction: `asc`, nulls: primaryNulls },
                   secondary: { direction: `desc`, nulls: secondaryNulls },
                 },
-                route:
-                  route === `boundary` && primaryNulls === `first`
+                acquisitionPath:
+                  acquisitionPath === `boundary` && primaryNulls === `first`
                     ? `full-source`
-                    : route,
+                    : acquisitionPath,
                 delivery: `before-settlement`,
                 window: `widen`,
                 outcome: mode === `repair` ? `reject` : `resolve`,
-                session: mode === `restart` ? `restart` : `retain`,
+                syncRun: mode === `restart` ? `restart` : `retain`,
                 barrier: mode === `repair` ? `replay` : `initial`,
                 repair: mode === `repair`,
               }) as const,
@@ -721,7 +745,7 @@ describe(`nullable multi-term lifecycle product`, () => {
       (scenario) =>
         !(
           scenario.nullable.primary.nulls === `first` &&
-          scenario.route === `prefix` &&
+          scenario.acquisitionPath === `prefix` &&
           scenario.repair
         ),
     )
@@ -774,7 +798,7 @@ describe(`nullable multi-term lifecycle product`, () => {
     )
   it(`generates the nullable value and lifecycle dimensions`, () => {
     const sample = fc.sample(arbitrary, { seed: 93472, numRuns: 100 })
-    expect(new Set(sample.map((scenario) => scenario.route))).toEqual(
+    expect(new Set(sample.map((scenario) => scenario.acquisitionPath))).toEqual(
       new Set([`prefix`, `boundary`, `full-source`]),
     )
     expect(
@@ -787,7 +811,7 @@ describe(`nullable multi-term lifecycle product`, () => {
       new Set(sample.map((scenario) => scenario.nullable!.primary.direction)),
     ).toEqual(new Set([`asc`, `desc`]))
     expect(sample.some((scenario) => scenario.repair)).toBe(true)
-    expect(sample.some((scenario) => scenario.session === `restart`)).toBe(true)
+    expect(sample.some((scenario) => scenario.syncRun === `restart`)).toBe(true)
   })
   const { multiplier, ...replay } = readOracleRunConfig()
   fcTest.prop(

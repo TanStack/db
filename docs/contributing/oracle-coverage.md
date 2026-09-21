@@ -4,6 +4,10 @@ Use [Writing reliable oracle tests](oracle-tests.md) when adding or reviewing a
 law. This map identifies existing owners, their judgment, and their limits. It
 is not a claim that every state or every test has been audited.
 
+The [project glossary](glossary.md) owns terms shared by these executable
+models and their production subsystems. A coverage owner may define narrower
+local terms, but it must not silently rename a production concept.
+
 ## Scope of the oracle repair project
 
 [Issue #1808](https://github.com/TanStack/db/issues/1808) commissioned a bounded
@@ -12,6 +16,58 @@ paths: 132 selected/support entries and 197 discovery-tier files. The latter
 received routing recommendations, not 197 full semantic reviews. Focused
 examples, type tests, and host-wiring tests remain useful; converting them all
 to generated tests is not a completion criterion.
+
+## Literate model audit
+
+The literate-model pass audits every primary executable owner in
+[Find an owner](#find-an-owner) and every repository file explicitly named
+`oracle` or `property`. Derive that strict inventory from the repository rather
+than copying a count into this document:
+
+```sh
+git ls-files -co --exclude-standard packages \
+  | rg '/[^/]*(oracle|property)[^/]*$' \
+  | sort -u
+```
+
+The command includes tracked and untracked package files so an in-progress
+audit cannot hide a new owner. A surface is complete only when each primary
+owner does one of these things:
+
+- states its contract, model, history grammar, production path, and observations
+  in the executable file, or
+- records why that structure would add no useful information to a focused test.
+
+The pass must not change product behavior. If clearer prose exposes a missing
+model rule or assertion, strengthen the oracle and run it against unchanged
+production first. Track any production failure as separate follow-up work.
+
+The same pass audits vocabulary. Shared concepts use the production names in
+the project glossary. The audit corrected model prose that collapsed a physical
+acquisition into a request or called an acquisition lease merely a lease.
+Model-only terms such as an appointment ledger or fault tape remain local and
+say what production facts they abstract. This is a semantic review, not a rule
+that test identifiers must copy production's private data structures.
+
+| Surface | Status | Completed or next owner |
+| --- | --- | --- |
+| Ordered relations and BTree | Complete | The signed top-K relation, BTree/Map refinement model, and DBSP incrementalization laws are literate. |
+| Includes and publication | Complete | The central recomputation model plus cross-formulation, temporal demand, layered publication, Collection facade lifecycle and space bounds, route-context transport, functional projection, query-shape, optimistic, and source-work owners are literate. They keep the architecture document as their contract source. |
+| Collection lifecycle | Complete | The shared logical-owner/acquisition-attempt/sync-run grammar plus mutation admission, lifecycle trace, publication, replay, disposal, and transaction-refinement boundaries are literate. |
+| Optimistic state | Complete | The independent base/intent/source-queue graph plus outcome, transaction-payload, and publication drivers are literate. |
+| Drafts and native values | Complete | Native differential behavior, draft change tracking, detachment and its class-instance exception, hostile keys, aliases, cycles, and Map/Set live iteration are literate. |
+| Query DB and observer | Complete | Query-scope row ownership, subset identity and cancellation, failure and recovery, and the per-listener eligibility ledger are literate. |
+| Ordered acquisition | Complete | Exact demand identity, applied settlement, independent pagination recomputation, request work, lifecycle products, replay authority, source-generation readiness, and transaction-refinement abort boundaries are literate. |
+| Join equality and cold acquisition | Complete | Independent cold relational recomputation, acquisition evidence, established equality domains, replacements, and scan/index routes are literate. |
+| Opaque backend pagination | Complete | The full-relation value model plus opaque token, cache generation, publication, browser acquisition, and live-window integration owners are literate. |
+| Electric and TrailBase | Complete | Electric replica and recovery models, installed-SDK HTTP delivery, PostgreSQL serialization, and TrailBase's controlled RecordApi/native-stream lifecycle are literate with their real-provider limits intact. |
+| PowerSync | Complete | Patch conservation, effective-update receipts, metadata and falsey changes, declared-view keys, transformed schema output, logging, cleanup, and native SQLite reach are literate. |
+| SQLite persistence and native hosts | Complete | Persisted hydration/replay and ownership, shared driver transaction laws, OPFS page and diagnostic state machines, and the 113-law native conformance manifest are literate. Native execution remains distinct from registration and shim evidence. |
+| Offline execution | Complete | FIFO retry, scheduler eligibility, leadership replay, transaction settlement, and typed wire serialization are literate. |
+| Frameworks | Complete | Shared live-query and infinite-query models are literate. Each framework keeps its own realm, ownership, and scheduling driver. |
+| Structural values and ordered primitives | Complete | Structural hashing, deep equality, comparison, cursor denotation, index refinement, and query-identity output equivalence are literate. |
+| Boundary refinements | Complete | Cleanup/restart admission, metadata publication, retained state, acquisition cells, D2 source reconciliation, top-K support windows, and nested Query work bounds are literate. |
+| Small structures and test mechanics | Complete | SortedMap, cleanup appointments, and guarded replay are literate. |
 
 ### Recent fix-wave authority inventory
 
@@ -57,7 +113,9 @@ comment and the current API/architecture contract before extending its model.
 | SQLite persistence and native hosts | [persisted histories](../../packages/db-sqlite-persistence-core/tests/persisted.test.ts), [driver contracts](../../packages/db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract.ts), [browser OPFS lifecycle](../../packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts), [worker diagnostics](../../packages/browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts), [113-law manifest](../../packages/db-collection-e2e/src/fixtures/persisted-conformance-manifest.ts) | Cache/remote rejection/peer/reopen histories, exact driver results, controlled page/worker ownership, and diagnostic-cause retention. Fake workers and synthetic page events do not prove native handle release or real bfcache admission. The manifest excludes progressive and move suites; registration and shim runs are not device execution. |
 | Offline execution | [scheduler](../../packages/offline-transactions/tests/KeyScheduler.property.test.ts), [leadership](../../packages/offline-transactions/tests/leadership-replay.property.test.ts), [settlement](../../packages/offline-transactions/tests/transaction-settlement.property.test.ts), [serialization](../../packages/offline-transactions/tests/transaction-serializer.property.test.ts) | Declarative FIFO eligibility, per-transaction outcomes, durable state and typed wire trees. Issued work may finish after ownership loss, but new work must not start. Exactly-once network execution is not promised. |
 | Frameworks | [React conformance](../../packages/react-db/tests/conformance.test.tsx), [React pagination](../../packages/react-db/tests/infinite-query-conformance.test.tsx), [shared suites](../../packages/db-collection-e2e/src/suites) | Exact exposed rows/pages and each framework's own lifecycle cuts. A React witness does not prove Vue/Solid/Angular/Svelte scheduling. Preserve their receiving registrations. |
-| Small structures and test mechanics | [SortedMap](../../packages/db/tests/SortedMap.test.ts), [cleanup queue](../../packages/db/tests/cleanup-queue.property.test.ts), [guarded replay](../../packages/db/tests/oracle-replay.test.ts) | Map/full-sort and appointment-list models; executed target/seed/path checks. Callback-reentrant scheduling is outside the initial cleanup-queue domain. |
+| Structural values and ordered primitives | [hash values](../../packages/db-ivm/tests/hash.property.test.ts), [hash graphs](../../packages/db-ivm/tests/hash-graph.property.test.ts), [mixed hash graphs](../../packages/db-ivm/tests/hash-mixed-graph.property.test.ts), [hash retry](../../packages/db-ivm/tests/hash-failure-retry.property.test.ts), [comparison](../../packages/db/tests/comparison.property.test.ts), [deep equality](../../packages/db/tests/utils.property.test.ts), [cursor](../../packages/db/tests/cursor.property.test.ts), [indexes](../../packages/db/tests/index-update.property.test.ts), [query identity](../../packages/db/tests/query/identity-output-shape-oracle.test.ts) | Independent flat values, graph topology, algebraic laws, Map/group/sort recomputation, expression denotation, and compiled output bags. Hash collision freedom is not promised. Unsupported composite cursors reject. |
+| Boundary refinements | [cleanup/restart](../../packages/db/tests/collection-cleanup-restart-oracle.test.ts), [metadata publication](../../packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [state retention](../../packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](../../packages/db/tests/collection-subscription-lifecycle-oracle.test.ts), [D2 source reconciliation](../../packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](../../packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](../../packages/query-db-collection/tests/includes-work-counter-oracle.test.ts) | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them. |
+| Small structures and test mechanics | [SortedMap](../../packages/db/tests/SortedMap.test.ts), [cleanup queue](../../packages/db/tests/cleanup-queue.property.test.ts), [guarded replay](../../packages/db/tests/oracle-replay.test.ts) | Map/full-sort and appointment-list models with executed target/seed/path checks. Callback-reentrant scheduling is outside the initial cleanup-queue domain. |
 
 ## Acceptance map
 

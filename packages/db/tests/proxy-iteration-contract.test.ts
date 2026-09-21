@@ -6,8 +6,21 @@ import {
   withChangeTracking,
 } from '../src/proxy.js'
 
-// Drafts preserve native live membership, even if a snapshot iterator would
-// make mutation tracking simpler. Nested field edits have separate laws.
+/**
+ * # Do draft Map and Set iterators preserve native live semantics?
+ *
+ * Iterators and `forEach` see membership changes made before an entry is
+ * consumed. They visit each entry once, use the draft collection as the
+ * callback receiver, and report no change for reads alone. New caller-owned
+ * members remain shared during the callback, then detach at publication.
+ * Existing members reuse one draft identity across values, entries, iterator,
+ * and `forEach` paths.
+ *
+ * Each operation also runs against a native Map or Set where possible. The
+ * oracle compares membership, key order, callback arguments, nested writes,
+ * aliases, cycles, rollback after throw, and the final detached result. Whole-
+ * object detachment rules live in the companion contract, not this model.
+ */
 describe.each([`Map`, `Set`] as const)(`%s draft iteration`, (kind) => {
   it(`calls a read-only forEach callback once per entry without reporting changes`, () => {
     const values =
