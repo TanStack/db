@@ -318,6 +318,72 @@ describe(`QueryCollection`, () => {
     queryClient.clear()
   })
 
+  it(`accepts the explicit null persistence sentinel from core`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `explicit-null-persistence-test`,
+      queryClient,
+      queryKey: [`explicit-null-persistence-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const originalSync = options.sync
+    let observedPersistence: unknown
+    const collection = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          observedPersistence = params.metadata?.persistence
+          return originalSync.sync(params)
+        },
+      },
+    })
+
+    collection.startSyncImmediate()
+    await collection.stateWhenReady()
+
+    expect(observedPersistence).toBeNull()
+    expect(queryFn).toHaveBeenCalledOnce()
+    await collection.cleanup()
+  })
+
+  it(`rejects a sync wrapper that drops the entire persistence field before querying`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `missing-persistence-field-test`,
+      queryClient,
+      queryKey: [`missing-persistence-field-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const originalSync = options.sync
+    const malformedCollection = createCollection({
+      ...options,
+      startSync: false,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          const { persistence: _dropped, ...metadataWithoutPersistence } =
+            params.metadata!
+          return originalSync.sync({
+            ...params,
+            metadata: metadataWithoutPersistence as unknown as SyncMetadataApi<
+              string | number
+            >,
+          })
+        },
+      },
+    })
+
+    expect(() => malformedCollection.startSyncImmediate()).toThrow(
+      /expected null or a complete capability object.*forward metadata\.persistence unchanged/i,
+    )
+    expect(malformedCollection.status).toBe(`error`)
+    expect(queryFn).not.toHaveBeenCalled()
+    await malformedCollection.cleanup()
+  })
+
   it(`should pass through additional top-level Query observer options`, async () => {
     const queryKey = [`query-options-pass-through`]
     const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])

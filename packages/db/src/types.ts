@@ -479,9 +479,10 @@ export interface SyncMetadataApi<
   /**
    * Versioned persistence bridge used by sync adapters that can hydrate and
    * inspect a durable collection baseline. Custom sync wrappers must forward
-   * this object unchanged.
+   * this value unchanged. `null` explicitly means that the collection has no
+   * persistence capability; a missing property is invalid.
    */
-  persistence?: SyncPersistenceCapabilityV1<TKey>
+  persistence: SyncPersistenceCapabilityV1<TKey> | null
 }
 
 export type SyncPersistenceKeySetEvidence = {

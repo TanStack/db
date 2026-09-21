@@ -98,6 +98,7 @@ function createMetadata(seed: ReadonlyMap<string, unknown>): {
   return {
     state,
     api: {
+      persistence: null,
       row: {
         get: () => undefined,
         set: () => {},

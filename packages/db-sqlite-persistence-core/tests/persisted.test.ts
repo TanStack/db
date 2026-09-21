@@ -1880,7 +1880,7 @@ describe(`persistedCollectionOptions`, () => {
     })
     adapter.loadCollectionMetadata = async (...args) => {
       metadataCalls++
-      if (metadataCalls === 2) await staleMetadataGate
+      if (metadataCalls === 1) await staleMetadataGate
       return originalLoadCollectionMetadata(...args)
     }
     adapter.loadSubset = async (...args) => {
@@ -1918,6 +1918,7 @@ describe(`persistedCollectionOptions`, () => {
       await flushAsyncWork()
     }
     expect(metadataCalls).toBe(1)
+    expect(subsetCalls).toBe(0)
 
     await collection.cleanup()
     adapter.rows.set(`1`, { id: `1`, title: `Restarted` })
@@ -1932,7 +1933,7 @@ describe(`persistedCollectionOptions`, () => {
     }
 
     expect(metadataCalls).toBe(1)
-    expect(subsetCalls).toBe(1)
+    expect(subsetCalls).toBe(0)
     expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
       title: `Restarted`,
@@ -2559,8 +2560,12 @@ describe(`persistedCollectionOptions`, () => {
         getKey: (item) => item.id,
         sync: {
           sync: ({ markReady, metadata }) => {
-            persistenceCapability = metadata?.persistence
-            hydrateBaseline = metadata?.persistence?.hydrateBaseline
+            const capability = metadata?.persistence
+            if (!capability) {
+              throw new Error(`Expected persisted sync capability`)
+            }
+            persistenceCapability = capability
+            hydrateBaseline = capability.hydrateBaseline
             markReady()
             return { loadSubset: () => true }
           },

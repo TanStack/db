@@ -91,6 +91,12 @@ capability object unchanged rather than copying individual methods. Adapter
 methods are invoked with their receiver and may rely on instance state through
 `this`.
 
+`SyncMetadataApi.persistence` is always present. Core sync sources receive
+`null`, which explicitly means that no persistence bridge is active. The
+persisted wrapper replaces that sentinel with the complete versioned
+capability. A wrapper that omits the property is invalid and fails before a
+consumer can resume or query against uncertified durable state.
+
 ### SQLite core adapter APIs
 
 - `SQLiteCoreAdapterOptions`

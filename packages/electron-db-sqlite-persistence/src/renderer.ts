@@ -200,6 +200,20 @@ function createResolvedRendererAdapter(
         value: Record<string, unknown>
       }>
     },
+    loadResumeSnapshot: async (
+      collectionId: string,
+      ctx?: {
+        requiredIndexSignatures?: ReadonlyArray<string>
+        includeRows?: boolean
+      },
+    ) => {
+      return executeRequest(
+        `loadResumeSnapshot`,
+        collectionId,
+        { ctx },
+        resolution,
+      )
+    },
     applyCommittedTx: async (
       collectionId: string,
       tx: PersistedTx<Record<string, unknown>, string | number>,

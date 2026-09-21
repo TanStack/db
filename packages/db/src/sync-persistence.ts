@@ -23,15 +23,18 @@ function requireFunction(
 
 /**
  * Validates the cross-package structural persistence protocol before a sync
- * adapter uses it. Undefined means that the collection has no persistence
- * capability; any advertised capability must be complete.
+ * adapter uses it. Null explicitly means that the collection has no
+ * persistence capability; undefined means a wrapper dropped the required
+ * field. Any advertised capability must be complete.
  */
 export function validateSyncPersistenceCapability<
   TKey extends string | number = string | number,
->(value: unknown): SyncPersistenceCapabilityV1<TKey> | undefined {
-  if (value === undefined) return undefined
+>(value: unknown): SyncPersistenceCapabilityV1<TKey> | null {
+  if (value === null) return null
   if (!isRecord(value)) {
-    throw new InvalidSyncPersistenceCapabilityError(`expected an object`)
+    throw new InvalidSyncPersistenceCapabilityError(
+      `expected null or a complete capability object`,
+    )
   }
   if (value.protocol !== SYNC_PERSISTENCE_PROTOCOL) {
     throw new InvalidSyncPersistenceCapabilityError(

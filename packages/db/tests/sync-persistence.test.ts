@@ -9,6 +9,16 @@ const baseCapability = {
 } as const
 
 describe(`sync persistence capability`, () => {
+  it(`accepts null as an explicit no-persistence capability`, () => {
+    expect(validateSyncPersistenceCapability(null)).toBeNull()
+  })
+
+  it(`rejects a missing persistence field with forwarding guidance`, () => {
+    expect(() => validateSyncPersistenceCapability(undefined)).toThrow(
+      /expected null or a complete capability object.*forward metadata\.persistence unchanged/i,
+    )
+  })
+
   it(`preserves a complete capability by identity`, () => {
     const capability = {
       ...baseCapability,
