@@ -197,6 +197,12 @@ it(`throws when transaction callback omits transaction driver argument`, async (
   ).rejects.toThrow(`transaction driver argument`)
 })
 
+/**
+ * Runtime checkpoint for the paired type assertion: `transaction<T>` resolves
+ * to the callback's value after Expo's void-returning exclusive transaction
+ * boundary settles. This test does not claim an intermediate publication or
+ * independently recheck commit and rollback behavior.
+ */
 it(`returns callback values when Expo's transaction boundary returns void`, async () => {
   const transaction: ExpoSQLiteTransaction = {
     execAsync: () => Promise.resolve(),

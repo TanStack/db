@@ -7,8 +7,16 @@ import {
 import type { SQLiteDatabase } from 'expo-sqlite'
 import type { ExpoSQLiteDatabaseLike } from '../src'
 
-// Law: the adapter's structural boundary accepts the installed Expo vendor
-// database itself while retaining the exclusive-transaction requirement.
+/**
+ * The public driver boundary accepts Expo's installed `SQLiteDatabase` while
+ * retaining its exclusive-transaction requirement. It also preserves the
+ * generic `SQLiteDriver.transaction<T>` result even though Expo's native
+ * `withExclusiveTransactionAsync` boundary returns `Promise<void>`.
+ *
+ * These compile-time checkpoints cover structural database compatibility and
+ * the returned `Promise<T>`. The paired runtime test observes the callback value
+ * only after the native exclusive transaction boundary settles.
+ */
 describe(`Expo SQLite driver types`, () => {
   it(`accepts the vendor database returned by expo-sqlite`, () => {
     const database = null as unknown as SQLiteDatabase
@@ -19,6 +27,18 @@ describe(`Expo SQLite driver types`, () => {
 
     const compatible: ExpoSQLiteDatabaseLike = database
     void compatible
+  })
+
+  it(`preserves the transaction callback result type`, () => {
+    const database = null as unknown as SQLiteDatabase
+    const driver = new ExpoSQLiteDriver({ database })
+
+    const result = driver.transaction(async (transactionDriver) => {
+      void transactionDriver
+      return { status: `committed` as const }
+    })
+    const expected: Promise<{ readonly status: `committed` }> = result
+    void expected
   })
 
   it(`rejects databases without an exclusive transaction boundary`, () => {
