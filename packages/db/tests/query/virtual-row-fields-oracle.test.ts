@@ -48,6 +48,13 @@ type VirtualFieldSubject =
   | `nested-value`
   | `opaque-value`
 
+const virtualFieldNames = [
+  `$key`,
+  `$synced`,
+  `$origin`,
+  `$collectionId`,
+] as const
+
 // Only row roots and unprojected whole-row children carry virtual row fields.
 function expectsVirtualFields(subject: VirtualFieldSubject): boolean {
   return subject === `row-root` || subject === `whole-row-child`
@@ -184,9 +191,18 @@ describe(`virtual row field runtime boundary`, () => {
       ]
 
       for (const observation of observations) {
+        const expectsFields = expectsVirtualFields(observation.subject)
         expect(hasVirtualProps(observation.value), observation.name).toBe(
-          expectsVirtualFields(observation.subject),
+          expectsFields,
         )
+        if (!expectsFields) {
+          for (const field of virtualFieldNames) {
+            expect(
+              field in Object(observation.value),
+              `${observation.name} must not expose ${field}`,
+            ).toBe(false)
+          }
+        }
       }
 
       expect(result.$key).toBe(`row-1`)
