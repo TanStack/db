@@ -463,7 +463,11 @@ describe(`persisted Electric recovery laws`, () => {
           upToDate,
         ])
         f.record(`after invalid resume`)
-        await vi.waitFor(() => expect(f.collection.status).toBe(`error`))
+        await vi.waitFor(() =>
+          expect(f.collection.status).toBe(
+            syncMode === `eager` ? `ready` : `error`,
+          ),
+        )
         await vi.waitFor(() =>
           expect(f.metadata.get(`electric:resume`)).toMatchObject({
             kind: `reset`,

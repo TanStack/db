@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../../db/src'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
+import type {
+  PersistedTx,
+  PersistenceAdapter,
+} from '../../db-sqlite-persistence-core/src'
 import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordinator'
-import type { PersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
 
 // ---------------------------------------------------------------------------
 // BroadcastChannel mock
@@ -228,6 +233,20 @@ async function flush(ms: number = 10): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function deferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (reason?: unknown) => void
+} {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -409,6 +428,221 @@ describe(`BrowserCollectionCoordinator`, () => {
       coord.dispose()
     })
 
+    it(`does not reuse a directly published source transaction position`, async () => {
+      const adapter = createStubAdapter()
+      const durableRows = new Map<string | number, unknown>()
+      const occupiedPositions = new Set<string>()
+      adapter.applyCommittedTx = (collectionId, tx) => {
+        const position = `${collectionId}:${tx.term}:${tx.seq}`
+        if (occupiedPositions.has(position)) return Promise.resolve()
+        occupiedPositions.add(position)
+        adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+        if (tx.truncate) durableRows.clear()
+        for (const mutation of tx.mutations) {
+          if (mutation.type === `delete`) {
+            durableRows.delete(mutation.key)
+          } else {
+            durableRows.set(mutation.key, mutation.value)
+          }
+        }
+        return Promise.resolve()
+      }
+      const coord = createCoordinator(adapter)
+      coord.subscribe(`todos`, () => {})
+      await flush(50)
+      expect(coord.isLeader(`todos`)).toBe(true)
+
+      await adapter.applyCommittedTx(`todos`, {
+        txId: `authoritative-source-snapshot`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        truncate: true,
+        mutations: [
+          {
+            type: `insert`,
+            key: `network`,
+            value: { id: `network`, title: `Network snapshot` },
+          },
+        ],
+      })
+      coord.publish(`todos`, {
+        v: 1,
+        dbName: `test-db`,
+        collectionId: `todos`,
+        senderId: coord.getNodeId(),
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `authoritative-source-snapshot`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+      })
+
+      const response = await coord.requestApplyLocalMutations(`todos`, [
+        {
+          mutationId: `local-after-network`,
+          type: `insert`,
+          key: `local`,
+          value: { id: `local`, title: `Local mutation` },
+        },
+      ])
+
+      expect({
+        ok: response.ok,
+        seq: response.ok ? response.seq : undefined,
+        durableKeys: Array.from(durableRows.keys()).sort(),
+      }).toEqual({
+        ok: true,
+        seq: 2,
+        durableKeys: [`local`, `network`],
+      })
+      coord.dispose()
+    })
+
+    it(`serializes a network winner with a competing coordinator mutation`, async () => {
+      type Todo = { id: string; title: string }
+
+      const adapter = createStubAdapter()
+      const hydrationStarted = deferred()
+      const hydration =
+        deferred<
+          Array<{ key: string | number; value: Record<string, unknown> }>
+        >()
+      const startNetwork = deferred()
+      const upstreamDone = deferred()
+      const snapshotApplyEntered = deferred<PersistedTx>()
+      const releaseSnapshotApply = deferred()
+      const durableRows = new Map<string | number, Record<string, unknown>>()
+      const occupiedPositions = new Set<string>()
+
+      adapter.loadSubset = () => {
+        hydrationStarted.resolve()
+        return hydration.promise
+      }
+      adapter.applyCommittedTx = async (collectionId, tx) => {
+        if (tx.truncate) {
+          snapshotApplyEntered.resolve(tx)
+          await releaseSnapshotApply.promise
+        }
+
+        const position = `${collectionId}:${tx.term}:${tx.seq}`
+        if (occupiedPositions.has(position)) return
+        occupiedPositions.add(position)
+        adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+        if (tx.truncate) durableRows.clear()
+        for (const mutation of tx.mutations) {
+          if (mutation.type === `delete`) {
+            durableRows.delete(mutation.key)
+          } else {
+            durableRows.set(mutation.key, mutation.value)
+          }
+        }
+      }
+
+      const leader = createCoordinator(adapter)
+      const follower = createCoordinator(adapter)
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `todos`,
+          getKey: (todo) => todo.id,
+          sync: {
+            sync: ({ begin, truncate, write, commit, markReady, metadata }) => {
+              void (async () => {
+                await startNetwork.promise
+                begin()
+                metadata?.collection.set(`cursor`, `network-cursor`)
+                truncate()
+                write({
+                  type: `insert`,
+                  value: { id: `network`, title: `Network snapshot` },
+                  metadata: { owner: `network` },
+                })
+                const applied = commit()
+                if (applied !== true) void applied.catch(() => undefined)
+                markReady()
+              })().then(upstreamDone.resolve, upstreamDone.reject)
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator: leader },
+        }),
+      )
+
+      try {
+        const preload = collection.preload()
+        await hydrationStarted.promise
+        await flush(50)
+        expect(leader.isLeader(`todos`)).toBe(true)
+        follower.subscribe(`todos`, () => {})
+        await flush(50)
+        expect(follower.isLeader(`todos`)).toBe(false)
+
+        startNetwork.resolve()
+        await upstreamDone.promise
+        hydration.resolve([])
+        await preload
+        const sourceTx = await snapshotApplyEntered.promise
+        expect(sourceTx).toMatchObject({
+          truncate: true,
+          mutations: [
+            {
+              key: `network`,
+              value: { id: `network`, title: `Network snapshot` },
+            },
+          ],
+          rowMetadataMutations: [
+            { type: `set`, key: `network`, value: { owner: `network` } },
+          ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `network-cursor` },
+          ],
+        })
+
+        let responseSettled = false
+        const responsePromise = follower
+          .requestApplyLocalMutations(`todos`, [
+            {
+              mutationId: `peer-while-source-apply-is-held`,
+              type: `insert`,
+              key: `peer`,
+              value: { id: `peer`, title: `Peer mutation` },
+            },
+          ])
+          .then((response) => {
+            responseSettled = true
+            return response
+          })
+        await flush()
+        const responseSettledBeforeSourceApply = responseSettled
+        releaseSnapshotApply.resolve()
+        const response = await responsePromise
+        await flush()
+        await collection.cleanup()
+
+        expect({
+          responseSettledBeforeSourceApply,
+          responseSeq: response.ok ? response.seq : undefined,
+          sourceSeq: sourceTx.seq,
+          durableKeys: Array.from(durableRows.keys()).sort(),
+        }).toEqual({
+          responseSettledBeforeSourceApply: false,
+          responseSeq: sourceTx.seq + 1,
+          sourceSeq: sourceTx.seq,
+          durableKeys: [`network`, `peer`],
+        })
+      } finally {
+        releaseSnapshotApply.resolve()
+        hydration.resolve([])
+        await collection.cleanup()
+        leader.dispose()
+        follower.dispose()
+      }
+    })
+
     it(`follower routes mutations to leader via RPC`, async () => {
       const adapter = createStubAdapter()
       const leader = createCoordinator(adapter)
@@ -438,6 +672,103 @@ describe(`BrowserCollectionCoordinator`, () => {
 
       leader.dispose()
       follower.dispose()
+    })
+
+    it(`routes full persisted transactions through the leader without losing data`, async () => {
+      const adapter = createStubAdapter()
+      let appliedTx: PersistedTx | undefined
+      adapter.applyCommittedTx = (collectionId, tx) => {
+        adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+        appliedTx = tx
+        return Promise.resolve()
+      }
+      const leader = createCoordinator(adapter)
+      leader.subscribe(`todos`, () => {})
+      await flush(50)
+      const follower = createCoordinator(adapter)
+      follower.subscribe(`todos`, () => {})
+      await flush(50)
+
+      const response = await follower.requestApplyPersistedTransaction(
+        `todos`,
+        {
+          txId: `source-with-metadata`,
+          truncate: true,
+          mutations: [
+            {
+              type: `insert`,
+              key: `network`,
+              value: { id: `network`, title: `Network snapshot` },
+              metadata: { owner: `source` },
+              metadataChanged: true,
+            },
+          ],
+          rowMetadataMutations: [
+            { type: `set`, key: `network`, value: { owner: `source` } },
+          ],
+          collectionMetadataMutations: [
+            { type: `set`, key: `cursor`, value: `cursor-1` },
+          ],
+        },
+      )
+
+      expect(response.ok).toBe(true)
+      expect(appliedTx).toMatchObject({
+        txId: `source-with-metadata`,
+        truncate: true,
+        mutations: [
+          {
+            type: `insert`,
+            key: `network`,
+            value: { id: `network`, title: `Network snapshot` },
+            metadata: { owner: `source` },
+            metadataChanged: true,
+          },
+        ],
+        rowMetadataMutations: [
+          { type: `set`, key: `network`, value: { owner: `source` } },
+        ],
+        collectionMetadataMutations: [
+          { type: `set`, key: `cursor`, value: `cursor-1` },
+        ],
+      })
+      expect(appliedTx?.term).toBeGreaterThan(0)
+      expect(appliedTx?.seq).toBeGreaterThan(0)
+      expect(appliedTx?.rowVersion).toBeGreaterThan(0)
+
+      leader.dispose()
+      follower.dispose()
+    })
+
+    it(`does not retry or consume a position when adapter application fails`, async () => {
+      const adapter = createStubAdapter()
+      const persistenceError = new Error(`write failed`)
+      let applyAttempts = 0
+      adapter.applyCommittedTx = (collectionId, tx) => {
+        applyAttempts++
+        if (applyAttempts === 1) return Promise.reject(persistenceError)
+        adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+        return Promise.resolve()
+      }
+      const coord = createCoordinator(adapter)
+      coord.subscribe(`todos`, () => {})
+      await flush(50)
+
+      await expect(
+        coord.requestApplyPersistedTransaction(`todos`, {
+          txId: `failed-source`,
+          mutations: [],
+        }),
+      ).rejects.toBe(persistenceError)
+
+      const response = await coord.requestApplyPersistedTransaction(`todos`, {
+        txId: `successful-source`,
+        mutations: [],
+      })
+      expect(response).toMatchObject({ ok: true, seq: 1, latestRowVersion: 1 })
+      expect(applyAttempts).toBe(2)
+
+      coord.dispose()
     })
 
     it(`deduplicates envelope ids`, async () => {

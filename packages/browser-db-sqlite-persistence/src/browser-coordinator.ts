@@ -1,10 +1,13 @@
 import { safeRandomUUID } from '@tanstack/db-sqlite-persistence-core'
 import type {
   ApplyLocalMutationsResponse,
+  ApplyPersistedTransactionResponse,
   PersistedCollectionCoordinator,
   PersistedIndexSpec,
   PersistedMutationEnvelope,
+  PersistedTx,
   PersistenceAdapter,
+  PositionlessPersistedTx,
   ProtocolEnvelope,
   PullSinceResponse,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -20,6 +23,7 @@ const RPC_RETRY_ATTEMPTS = 2
 const RPC_RETRY_DELAY_MS = 200
 const WRITER_LOCK_BUSY_RETRY_MS = 50
 const WRITER_LOCK_MAX_RETRIES = 20
+const TARGETED_INVALIDATION_KEY_LIMIT = 128
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -44,6 +48,11 @@ type RPCRequest =
       mutations: Array<PersistedMutationEnvelope>
     }
   | {
+      type: `rpc:applyPersistedTransaction:req`
+      rpcId: string
+      transaction: PositionlessPersistedTx
+    }
+  | {
       type: `rpc:pullSince:req`
       rpcId: string
       fromRowVersion: number
@@ -63,6 +72,7 @@ type RPCResponse =
       error?: string
     }
   | ApplyLocalMutationsResponse
+  | ApplyPersistedTransactionResponse
   | PullSinceResponse
 
 type PendingRPC = {
@@ -105,6 +115,8 @@ type AdapterWithPullSince = PersistenceAdapter & {
   }>
 }
 
+class LostLeadershipError extends Error {}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -126,6 +138,15 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
   private readonly appliedEnvelopeIds = new Map<string, number>()
+  private readonly appliedPersistedTransactions = new Map<
+    string,
+    {
+      timestamp: number
+      term: number
+      seq: number
+      latestRowVersion: number
+    }
+  >()
   private disposed = false
 
   /** Method indirection to prevent TypeScript from narrowing `disposed` across awaits */
@@ -179,7 +200,8 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     }
   }
 
-  publish(_collectionId: string, message: ProtocolEnvelope<unknown>): void {
+  publish(collectionId: string, message: ProtocolEnvelope<unknown>): void {
+    this.observeEnvelopePosition(collectionId, message)
     this.channel.postMessage(message)
   }
 
@@ -264,6 +286,25 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       rpcId: safeRandomUUID(),
       envelopeId: safeRandomUUID(),
       mutations,
+    })
+  }
+
+  async requestApplyPersistedTransaction(
+    collectionId: string,
+    transaction: PositionlessPersistedTx,
+  ): Promise<ApplyPersistedTransactionResponse> {
+    if (this.isLeader(collectionId)) {
+      return this.handleApplyPersistedTransaction(collectionId, {
+        type: `rpc:applyPersistedTransaction:req`,
+        rpcId: safeRandomUUID(),
+        transaction,
+      })
+    }
+
+    return this.sendRPC<ApplyPersistedTransactionResponse>(collectionId, {
+      type: `rpc:applyPersistedTransaction:req`,
+      rpcId: safeRandomUUID(),
+      transaction,
     })
   }
 
@@ -439,6 +480,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     if (!isProtocolEnvelope(data)) return
 
     const envelope = data
+    this.observeEnvelopePosition(envelope.collectionId, envelope)
 
     // Ignore own messages
     if (envelope.senderId === this.nodeId) return
@@ -559,6 +601,12 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         case `rpc:applyLocalMutations:req`:
           response = await this.handleApplyLocalMutations(collectionId, request)
           break
+        case `rpc:applyPersistedTransaction:req`:
+          response = await this.handleApplyPersistedTransaction(
+            collectionId,
+            request,
+          )
+          break
         case `rpc:pullSince:req`:
           response = await this.handlePullSince(collectionId, request)
           break
@@ -632,19 +680,48 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       mutations: Array<PersistedMutationEnvelope>
     },
   ): Promise<ApplyLocalMutationsResponse> {
-    // Dedupe by envelopeId
-    if (this.appliedEnvelopeIds.has(request.envelopeId)) {
-      return {
-        type: `rpc:applyLocalMutations:res`,
-        rpcId: request.rpcId,
-        ok: false,
-        code: `CONFLICT`,
-        error: `envelope ${request.envelopeId} already applied`,
-      }
-    }
+    try {
+      return await this.withWriterLock(async () => {
+        if (this.appliedEnvelopeIds.has(request.envelopeId)) {
+          return {
+            type: `rpc:applyLocalMutations:res` as const,
+            rpcId: request.rpcId,
+            ok: false as const,
+            code: `CONFLICT` as const,
+            error: `envelope ${request.envelopeId} already applied`,
+          }
+        }
 
-    const state = this.collections.get(collectionId)
-    if (!state || !state.isLeader) {
+        const tx = await this.applyPositionlessTransactionWithWriterLock(
+          collectionId,
+          {
+            txId: safeRandomUUID(),
+            mutations: request.mutations.map((mutation) => ({
+              type: mutation.type,
+              key: mutation.key,
+              value: mutation.value,
+            })),
+          },
+        )
+
+        this.appliedEnvelopeIds.set(request.envelopeId, Date.now())
+        this.pruneAppliedEnvelopeIds()
+        this.publishCommittedTransaction(collectionId, tx)
+
+        return {
+          type: `rpc:applyLocalMutations:res` as const,
+          rpcId: request.rpcId,
+          ok: true as const,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+          acceptedMutationIds: request.mutations.map(
+            (mutation) => mutation.mutationId,
+          ),
+        }
+      })
+    } catch (error) {
+      if (!(error instanceof LostLeadershipError)) throw error
       return {
         type: `rpc:applyLocalMutations:res`,
         rpcId: request.rpcId,
@@ -653,76 +730,155 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         error: `not the leader for ${collectionId}`,
       }
     }
+  }
 
-    // Assign stream position
-    state.latestSeq++
-    state.latestRowVersion++
+  private async handleApplyPersistedTransaction(
+    collectionId: string,
+    request: {
+      type: `rpc:applyPersistedTransaction:req`
+      rpcId: string
+      transaction: PositionlessPersistedTx
+    },
+  ): Promise<ApplyPersistedTransactionResponse> {
+    try {
+      return await this.withWriterLock(async () => {
+        const transactionKey = `${collectionId}:${request.transaction.txId}`
+        const prior = this.appliedPersistedTransactions.get(transactionKey)
+        if (prior) {
+          return {
+            type: `rpc:applyPersistedTransaction:res`,
+            rpcId: request.rpcId,
+            ok: true,
+            txId: request.transaction.txId,
+            term: prior.term,
+            seq: prior.seq,
+            latestRowVersion: prior.latestRowVersion,
+          }
+        }
 
-    const term = state.latestTerm
-    const seq = state.latestSeq
-    const rowVersion = state.latestRowVersion
+        const tx = await this.applyPositionlessTransactionWithWriterLock(
+          collectionId,
+          request.transaction,
+        )
+        this.appliedPersistedTransactions.set(transactionKey, {
+          timestamp: Date.now(),
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        })
+        this.pruneAppliedEnvelopeIds()
+        this.publishCommittedTransaction(collectionId, tx)
+        return {
+          type: `rpc:applyPersistedTransaction:res`,
+          rpcId: request.rpcId,
+          ok: true,
+          txId: tx.txId,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }
+      })
+    } catch (error) {
+      if (!(error instanceof LostLeadershipError)) throw error
+      return {
+        type: `rpc:applyPersistedTransaction:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `NOT_LEADER`,
+        error: `not the leader for ${collectionId}`,
+      }
+    }
+  }
 
-    // Build and apply the persisted transaction
-    const tx = {
-      txId: safeRandomUUID(),
-      term,
-      seq,
-      rowVersion,
-      mutations: request.mutations.map((m) => ({
-        type: m.type,
-        key: m.key,
-        value: m.value,
-      })),
+  /** Called only from inside the database writer lock. */
+  private async applyPositionlessTransactionWithWriterLock(
+    collectionId: string,
+    transaction: PositionlessPersistedTx,
+  ): Promise<PersistedTx> {
+    const state = this.collections.get(collectionId)
+    if (!state?.isLeader) throw new LostLeadershipError()
+
+    const adapter = this.requireAdapter()
+    if (adapter.getStreamPosition) {
+      const durablePosition = await adapter.getStreamPosition(collectionId)
+      if (!this.isLeader(collectionId)) throw new LostLeadershipError()
+      this.observeCollectionPosition(
+        state,
+        durablePosition.latestTerm,
+        durablePosition.latestSeq,
+        durablePosition.latestRowVersion,
+      )
     }
 
-    await this.withWriterLock(() =>
-      this.requireAdapter().applyCommittedTx(collectionId, tx),
-    )
+    if (!this.isLeader(collectionId)) throw new LostLeadershipError()
+    const tx: PersistedTx = {
+      ...transaction,
+      term: state.latestTerm,
+      seq: state.latestSeq + 1,
+      rowVersion: state.latestRowVersion + 1,
+    }
 
-    // Track envelope for dedup
-    this.appliedEnvelopeIds.set(request.envelopeId, Date.now())
-    this.pruneAppliedEnvelopeIds()
+    await adapter.applyCommittedTx(collectionId, tx)
+    this.observeCollectionPosition(state, tx.term, tx.seq, tx.rowVersion)
+    return tx
+  }
 
-    // Broadcast tx:committed to all tabs
-    const changedRows = request.mutations
-      .filter((m) => m.type !== `delete`)
-      .map((m) => ({ key: m.key, value: m.value }))
-    const deletedKeys = request.mutations
-      .filter((m) => m.type === `delete`)
-      .map((m) => m.key)
-
-    const txCommitted: ProtocolEnvelope<unknown> = {
+  private publishCommittedTransaction(
+    collectionId: string,
+    tx: PersistedTx,
+  ): void {
+    const changedRows = tx.mutations
+      .filter((mutation) => mutation.type !== `delete`)
+      .map((mutation) => ({ key: mutation.key, value: mutation.value }))
+    const deletedKeys = tx.mutations
+      .filter((mutation) => mutation.type === `delete`)
+      .map((mutation) => mutation.key)
+    const rowMetadataMutations = tx.rowMetadataMutations ?? []
+    const collectionMetadataMutations = tx.collectionMetadataMutations ?? []
+    const changedKeyCount =
+      changedRows.length +
+      deletedKeys.length +
+      rowMetadataMutations.length +
+      collectionMetadataMutations.length
+    const requiresFullReload =
+      tx.truncate === true ||
+      changedKeyCount === 0 ||
+      changedKeyCount > TARGETED_INVALIDATION_KEY_LIMIT
+    const payload = requiresFullReload
+      ? {
+          type: `tx:committed` as const,
+          term: tx.term,
+          seq: tx.seq,
+          txId: tx.txId,
+          latestRowVersion: tx.rowVersion,
+          requiresFullReload: true as const,
+        }
+      : {
+          type: `tx:committed` as const,
+          term: tx.term,
+          seq: tx.seq,
+          txId: tx.txId,
+          latestRowVersion: tx.rowVersion,
+          requiresFullReload: false as const,
+          changedRows,
+          deletedKeys,
+          rowMetadataMutations,
+          collectionMetadataMutations,
+        }
+    const envelope: ProtocolEnvelope<unknown> = {
       v: 1,
       dbName: this.dbName,
       collectionId,
       senderId: this.nodeId,
       ts: Date.now(),
-      payload: {
-        type: `tx:committed`,
-        term,
-        seq,
-        txId: tx.txId,
-        latestRowVersion: rowVersion,
-        requiresFullReload: false,
-        changedRows,
-        deletedKeys,
-      },
+      payload,
     }
-    this.channel.postMessage(txCommitted)
+    this.observeEnvelopePosition(collectionId, envelope)
+    this.channel.postMessage(envelope)
 
-    // Deliver to local subscribers too
-    for (const subscriber of state.subscribers) {
-      subscriber(txCommitted)
-    }
-
-    return {
-      type: `rpc:applyLocalMutations:res`,
-      rpcId: request.rpcId,
-      ok: true,
-      term,
-      seq,
-      latestRowVersion: rowVersion,
-      acceptedMutationIds: request.mutations.map((m) => m.mutationId),
+    const state = this.collections.get(collectionId)
+    for (const subscriber of state?.subscribers ?? []) {
+      subscriber(envelope)
     }
   }
 
@@ -784,9 +940,17 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     const lockName = `tsdb:writer:${this.dbName}`
 
     for (let attempt = 0; attempt <= WRITER_LOCK_MAX_RETRIES; attempt++) {
+      const lockAttempt = { enteredCallback: false }
       try {
-        return await navigator.locks.request(lockName, async () => fn())
+        return await navigator.locks.request(lockName, async () => {
+          lockAttempt.enteredCallback = true
+          return fn()
+        })
       } catch (error) {
+        // The lock request may transiently fail before entering the callback,
+        // but adapter and application failures must never be replayed.
+        if (lockAttempt.enteredCallback) throw error
+
         if (error instanceof DOMException && error.name === `AbortError`) {
           throw error
         }
@@ -808,12 +972,59 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   // Helpers
   // -----------------------------------------------------------------------
 
+  private observeEnvelopePosition(
+    collectionId: string,
+    envelope: ProtocolEnvelope<unknown>,
+  ): void {
+    const payload = envelope.payload
+    if (!payload || typeof payload !== `object`) return
+    const record = payload as Record<string, unknown>
+    if (
+      record.type !== `tx:committed` ||
+      typeof record.term !== `number` ||
+      typeof record.seq !== `number` ||
+      typeof record.latestRowVersion !== `number`
+    ) {
+      return
+    }
+
+    const state = this.collections.get(collectionId)
+    if (!state) return
+    this.observeCollectionPosition(
+      state,
+      record.term,
+      record.seq,
+      record.latestRowVersion,
+    )
+  }
+
+  private observeCollectionPosition(
+    state: CollectionState,
+    term: number,
+    seq: number,
+    rowVersion: number,
+  ): void {
+    if (
+      term > state.latestTerm ||
+      (term === state.latestTerm && seq > state.latestSeq)
+    ) {
+      state.latestTerm = term
+      state.latestSeq = seq
+    }
+    state.latestRowVersion = Math.max(state.latestRowVersion, rowVersion)
+  }
+
   private pruneAppliedEnvelopeIds(): void {
     // Keep envelopes for 60 seconds for dedup
     const cutoff = Date.now() - 60_000
     for (const [id, ts] of this.appliedEnvelopeIds) {
       if (ts < cutoff) {
         this.appliedEnvelopeIds.delete(id)
+      }
+    }
+    for (const [txId, applied] of this.appliedPersistedTransactions) {
+      if (applied.timestamp < cutoff) {
+        this.appliedPersistedTransactions.delete(txId)
       }
     }
   }

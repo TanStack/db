@@ -3,6 +3,7 @@ import {
   BasicIndex,
   DbClient,
   IR,
+  SyncTransactionAbortedError,
   collectionOptions,
   createCollection,
   createTransaction,
@@ -885,6 +886,85 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`does not report an application receipt rejection as a persistence failure`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-application-rejection`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const mutationGate = deferred()
+    const transaction = createTransaction({
+      mutationFn: () => mutationGate.promise,
+    })
+
+    try {
+      await collection.stateWhenReady()
+      await flushAsyncWork()
+      transaction.mutate(() => {
+        collection.insert({ id: `local`, title: `Optimistic gate` })
+      })
+      expect(transaction.state).toBe(`persisting`)
+
+      const abortController = new AbortController()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `remote`, title: `Canceled before application` },
+      })
+      const receipt = remoteCommit?.(abortController.signal)
+      expect(receipt).toBeInstanceOf(Promise)
+      if (receipt === true || receipt === undefined) {
+        throw new Error(`Persisting optimistic work did not hold remote sync`)
+      }
+
+      const applicationReceipt =
+        collection._state.pendingSyncedTransactions.at(-1)?.applied.promise
+      if (!applicationReceipt) {
+        throw new Error(`Expected a pending application receipt`)
+      }
+      const applicationRejection = applicationReceipt.catch((error) => error)
+
+      abortController.abort()
+      const [applicationError, callerError] = await Promise.all([
+        applicationRejection,
+        receipt.catch((error) => error),
+      ])
+      await flushAsyncWork()
+
+      expect(applicationError).toBeInstanceOf(SyncTransactionAbortedError)
+      expect(callerError).toBe(applicationError)
+      expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+      expect(collection.status).toBe(`ready`)
+      expect(collection._lifecycle.getSyncError()).toBeUndefined()
+      expect(collection.get(`remote`)).toBeUndefined()
+    } finally {
+      mutationGate.resolve()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
   it(`persists a wrapped sync transaction when abort follows application`, async () => {
     const adapter = createRecordingAdapter()
     let remoteBegin: (() => void) | undefined
@@ -1741,6 +1821,37 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
+  it(`keeps a successful local snapshot ready when the upstream first fails later`, async () => {
+    const upstreamError = new Error(`delayed upstream startup failure`)
+    const rows = [{ id: `1`, title: `Offline Todo` }]
+    let failUpstream: ((error: unknown) => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-success-before-upstream-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markError }) => {
+            failUpstream = markError
+            return {}
+          },
+        },
+        persistence: { adapter: createRecordingAdapter(rows) },
+      }),
+    )
+
+    await collection.preload()
+    expect(collection.status).toBe(`ready`)
+    expect(collection.toArray.map(stripVirtualProps)).toEqual(rows)
+
+    expect(failUpstream).toBeTypeOf(`function`)
+    failUpstream!(upstreamError)
+
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    expect(collection.toArray.map(stripVirtualProps)).toEqual(rows)
+    await collection.cleanup()
+  })
+
   it(`keeps waiting for upstream after local hydration fails`, async () => {
     const localAttempted = deferred()
     const localError = new Error(`local startup failed`)
@@ -1993,6 +2104,68 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection._lifecycle.getSyncError()).toBe(persistenceError)
 
     expect(recoverUpstream).toBeTypeOf(`function`)
+    recoverUpstream!()
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    await collection.cleanup()
+  })
+
+  it(`reports persistence failure when a network snapshot follows local readiness`, async () => {
+    const persistenceError = new Error(`post-local-ready persistence failed`)
+    const persistenceAttempted = deferred()
+    const adapter = createRecordingAdapter([
+      { id: `local`, title: `Local snapshot` },
+    ])
+    let remoteBegin: (() => void) | undefined
+    let remoteTruncate: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    let recoverUpstream: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-first-network-persistence-failure`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, truncate, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteTruncate = truncate
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            recoverUpstream = markReady
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    await collection.preload()
+    expect(collection.status).toBe(`ready`)
+    adapter.applyCommittedTx = () => {
+      persistenceAttempted.resolve()
+      return Promise.reject(persistenceError)
+    }
+
+    remoteBegin!()
+    remoteTruncate!()
+    remoteWrite!({
+      type: `insert`,
+      value: { id: `network`, title: `Network snapshot` },
+    })
+    const applied = remoteCommit!()
+    if (applied !== true) void applied.catch(() => undefined)
+    await persistenceAttempted.promise
+    await flushAsyncWork()
+
+    expect(collection.status).toBe(`error`)
+    expect(collection._lifecycle.getSyncError()).toBe(persistenceError)
+
     recoverUpstream!()
     await collection.stateWhenReady()
     expect(collection.status).toBe(`ready`)
@@ -2836,6 +3009,90 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
+  it(`does not let a stale invalidation reload overwrite an authoritative snapshot`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `cached`, title: `Cached snapshot` },
+    ])
+    const coordinator = createCoordinatorHarness()
+    const reloadStarted = deferred()
+    const releaseReload = deferred()
+    const originalLoadSubset = adapter.loadSubset.bind(adapter)
+    let loadCalls = 0
+    adapter.loadSubset = async (...args) => {
+      loadCalls++
+      if (loadCalls !== 2) return originalLoadSubset(...args)
+      const staleRows = [
+        {
+          key: `stale`,
+          value: { id: `stale`, title: `Stale reload` },
+        },
+      ]
+      reloadStarted.resolve()
+      await releaseReload.promise
+      return staleRows
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteTruncate: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, truncate, write, commit }) => {
+            remoteBegin = begin
+            remoteTruncate = truncate
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            return {}
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `full-reload-before-authoritative-snapshot`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+    await reloadStarted.promise
+
+    remoteBegin!()
+    remoteTruncate!()
+    remoteWrite!({
+      type: `insert`,
+      value: { id: `network`, title: `Authoritative network snapshot` },
+    })
+    const applied = remoteCommit!()
+    if (applied !== true) void applied.catch(() => undefined)
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Authoritative network snapshot`,
+    })
+
+    releaseReload.resolve()
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Authoritative network snapshot`,
+    })
+    expect(collection.get(`stale`)).toBeUndefined()
+    await collection.cleanup()
+  })
+
   it(`does not let stale reload metadata start row loading after restart`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Initial` }])
     const coordinator = createCoordinatorHarness()
@@ -3299,6 +3556,58 @@ describe(`persistedCollectionOptions`, () => {
       }
     },
   )
+
+  it(`does not start or retry remote demand after local hydration aborts`, async () => {
+    vi.useFakeTimers()
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const abortError = Object.assign(new Error(`local hydration aborted`), {
+      name: `AbortError`,
+    })
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => Promise.reject(abortError)
+    const ensure = vi.fn(async () => {
+      throw new Error(`remote ensure must not run for cancelled demand`)
+    })
+    const upstreamLoadSubset = vi.fn(async (): Promise<void> => {})
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `local-abort-ensure`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => true,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestEnsureRemoteSubset: ensure,
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-hydration-abort`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: upstreamLoadSubset }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await expect(collection._sync.loadSubset({ limit: 1 })).rejects.toBe(
+        abortError,
+      )
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(upstreamLoadSubset).not.toHaveBeenCalled()
+      expect(ensure).not.toHaveBeenCalled()
+    } finally {
+      await collection.cleanup()
+      warning.mockRestore()
+      vi.useRealTimers()
+    }
+  })
 
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()

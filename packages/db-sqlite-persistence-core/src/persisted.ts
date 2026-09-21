@@ -249,6 +249,29 @@ export type PersistedTx<
   collectionMetadataMutations?: Array<PersistedCollectionMetadataMutation>
 }
 
+export type PositionlessPersistedTx<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = Omit<PersistedTx<T, TKey>, `term` | `seq` | `rowVersion`>
+
+export type ApplyPersistedTransactionResponse =
+  | {
+      type: `rpc:applyPersistedTransaction:res`
+      rpcId: string
+      ok: true
+      txId: string
+      term: number
+      seq: number
+      latestRowVersion: number
+    }
+  | {
+      type: `rpc:applyPersistedTransaction:res`
+      rpcId: string
+      ok: false
+      code: `NOT_LEADER` | `VALIDATION_ERROR` | `CONFLICT` | `TIMEOUT`
+      error: string
+    }
+
 export interface PersistenceAdapter {
   loadSubset: (
     collectionId: string,
@@ -319,6 +342,10 @@ export interface PersistedCollectionCoordinator {
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ) => Promise<ApplyLocalMutationsResponse>
+  requestApplyPersistedTransaction?: (
+    collectionId: string,
+    transaction: PositionlessPersistedTx,
+  ) => Promise<ApplyPersistedTransactionResponse>
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,
@@ -554,6 +581,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === `object` && value !== null
 }
 
+function isAbortFailure(error: unknown, signal?: AbortSignal): boolean {
+  return (
+    signal?.aborted === true ||
+    (typeof error === `object` &&
+      error !== null &&
+      `name` in error &&
+      error.name === `AbortError`)
+  )
+}
+
+function createLocalUpstreamAggregateError(
+  localError: unknown,
+  upstreamError: unknown,
+  message: string,
+): AggregateError {
+  return new AggregateError([localError, upstreamError], message, {
+    cause: localError,
+  })
+}
+
 function isValidSyncConfig(value: unknown): value is SyncConfig<object> {
   if (!isRecord(value)) {
     return false
@@ -606,6 +653,10 @@ type OpenSyncTransaction<
 }
 
 class PersistedHydrationSupersededError extends Error {
+  constructor() {
+    super(`Persisted hydration was superseded by an upstream snapshot`)
+  }
+
   override readonly name = `PersistedHydrationSupersededError`
 }
 
@@ -893,9 +944,7 @@ class PersistedCollectionRuntime<
     if (!this.isHydratingNow()) return false
     this.hydrationSupersessionGeneration = this.lifecycleGeneration
     this.hydratingGeneration = null
-    const error = new PersistedHydrationSupersededError(
-      `Persisted hydration was superseded by an upstream snapshot`,
-    )
+    const error = new PersistedHydrationSupersededError()
     for (const transaction of this.queuedHydrationTransactions) {
       transaction.rejectApplied?.(error)
     }
@@ -1107,14 +1156,7 @@ class PersistedCollectionRuntime<
       localFailure = error
     }
 
-    if (
-      localFailed &&
-      (options.signal?.aborted ||
-        (typeof localFailure === `object` &&
-          localFailure !== null &&
-          `name` in localFailure &&
-          localFailure.name === `AbortError`))
-    ) {
+    if (localFailed && isAbortFailure(localFailure, options.signal)) {
       throw localFailure
     }
 
@@ -1122,23 +1164,17 @@ class PersistedCollectionRuntime<
       try {
         await upstreamLoadSubset(options)
       } catch (error) {
-        if (
-          options.signal?.aborted ||
-          (typeof error === `object` &&
-            error !== null &&
-            `name` in error &&
-            error.name === `AbortError`)
-        ) {
+        if (isAbortFailure(error, options.signal)) {
           this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
           throw error
         }
         console.warn(`Failed to trigger remote subset load:`, error)
         this.queueRemoteSubsetEnsure(options)
         if (localFailed) {
-          throw new AggregateError(
-            [localFailure, error],
+          throw createLocalUpstreamAggregateError(
+            localFailure,
+            error,
             `Persisted and upstream subset loading both failed`,
-            { cause: localFailure },
           )
         }
         // Hydration remains readable, but it does not satisfy remote demand.
@@ -1384,9 +1420,7 @@ class PersistedCollectionRuntime<
       const rows = await this.loadSubsetRowsUnsafe(options)
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
       if (this.hydratingGeneration !== config.lifecycleGeneration) {
-        throw new PersistedHydrationSupersededError(
-          `Persisted hydration was superseded by an upstream snapshot`,
-        )
+        throw new PersistedHydrationSupersededError()
       }
 
       this.applyRowsToCollection(rows)
@@ -1417,7 +1451,10 @@ class PersistedCollectionRuntime<
       await this.flushQueuedTxCommittedUnsafe()
     }
 
-    if (config.requestRemoteEnsure) {
+    const hydrationAborted =
+      hydrationFailed && isAbortFailure(hydrationFailure, options.signal)
+
+    if (config.requestRemoteEnsure && !hydrationAborted) {
       this.queueRemoteSubsetEnsure(options)
     }
 
@@ -1583,12 +1620,11 @@ class PersistedCollectionRuntime<
         await applied
       }
 
-      if (!transaction.internal) {
-        if (transaction.lifecycleGeneration === this.lifecycleGeneration) {
-          await this.persistAndBroadcastExternalSyncTransactionUnsafe(
-            transaction,
-          )
-        }
+      if (
+        !transaction.internal &&
+        transaction.lifecycleGeneration === this.lifecycleGeneration
+      ) {
+        await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
       }
       transaction.resolveApplied?.()
     } catch (error) {
@@ -1601,6 +1637,27 @@ class PersistedCollectionRuntime<
     transaction: BufferedSyncTransaction<T, TKey>,
   ): Promise<void> {
     if (transaction.internal) {
+      return
+    }
+
+    if (this.persistence.coordinator.requestApplyPersistedTransaction) {
+      const response =
+        await this.persistence.coordinator.requestApplyPersistedTransaction(
+          this.collectionId,
+          this.createPositionlessPersistedTxFromOperations(transaction),
+        )
+
+      if (!response.ok) {
+        throw new Error(
+          `failed to apply external sync transaction through coordinator: ${response.error}`,
+        )
+      }
+
+      this.observeStreamPosition(
+        response.term,
+        response.seq,
+        response.latestRowVersion,
+      )
       return
     }
 
@@ -1656,10 +1713,18 @@ class PersistedCollectionRuntime<
     streamPosition: { term: number; seq: number; rowVersion: number },
   ): PersistedTx {
     return {
-      txId: safeRandomUUID(),
+      ...this.createPositionlessPersistedTxFromOperations(transaction),
       term: streamPosition.term,
       seq: streamPosition.seq,
       rowVersion: streamPosition.rowVersion,
+    }
+  }
+
+  private createPositionlessPersistedTxFromOperations(
+    transaction: BufferedSyncTransaction<T, TKey>,
+  ): PositionlessPersistedTx {
+    return {
+      txId: safeRandomUUID(),
       truncate: transaction.truncate,
       mutations: transaction.operations.map((operation) =>
         operation.type === `update`
@@ -2328,6 +2393,8 @@ class PersistedCollectionRuntime<
         }
       }
 
+      if (this.hydratingGeneration !== lifecycleGeneration) return
+
       this.replaceCollectionSnapshot(
         Array.from(mergedRows.entries()).map(([key, row]) => ({
           key,
@@ -2455,7 +2522,6 @@ function createWrappedSyncConfig<
       const transactionStack: Array<OpenSyncTransaction<T, TKey>> = []
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
-      let fullStartPromise: Promise<void> | null = null
       const startupState: {
         cleanedUp: boolean
         signalled: `loading` | `ready` | `error`
@@ -2493,10 +2559,10 @@ function createWrappedSyncConfig<
         startupState.signalled = `error`
         const error =
           startupState.local === `failed`
-            ? new AggregateError(
-                [startupState.localError, startupState.upstreamError],
+            ? createLocalUpstreamAggregateError(
+                startupState.localError,
+                startupState.upstreamError,
                 `Persisted collection startup failed locally and upstream`,
-                { cause: startupState.localError },
               )
             : startupState.upstreamError
         params.markError(error)
@@ -2532,10 +2598,10 @@ function createWrappedSyncConfig<
         if (startupState.signalled === `error`) {
           if (startupState.upstream === `failed`) {
             params.markError(
-              new AggregateError(
-                [error, startupState.upstreamError],
+              createLocalUpstreamAggregateError(
+                error,
+                startupState.upstreamError,
                 `Persisted collection failed locally and upstream`,
-                { cause: error },
               ),
             )
           }
@@ -2551,17 +2617,17 @@ function createWrappedSyncConfig<
         reconcileAvailability()
       }
       const signalUpstreamFailure = (error: unknown) => {
-        const failedAfterReady = startupState.signalled === `ready`
+        const failedAfterUpstreamReady = startupState.upstream === `ready`
         startupState.upstream = `failed`
         startupState.upstreamError = error
-        if (failedAfterReady) {
+        if (failedAfterUpstreamReady) {
           startupState.signalled = `error`
           params.markError(
             startupState.local === `failed`
-              ? new AggregateError(
-                  [startupState.localError, error],
+              ? createLocalUpstreamAggregateError(
+                  startupState.localError,
+                  error,
                   `Persisted collection failed locally and upstream`,
-                  { cause: startupState.localError },
                 )
               : error,
           )
@@ -2570,10 +2636,10 @@ function createWrappedSyncConfig<
         if (startupState.signalled === `error`) {
           if (startupState.local === `failed`) {
             params.markError(
-              new AggregateError(
-                [startupState.localError, error],
+              createLocalUpstreamAggregateError(
+                startupState.localError,
+                error,
                 `Persisted collection failed locally and upstream`,
-                { cause: startupState.localError },
               ),
             )
           }
@@ -2866,35 +2932,28 @@ function createWrappedSyncConfig<
             return applied
           }
 
-          let applied: SyncAppliedReceipt
-          try {
-            applied = params.commit(signal)
-          } catch (error) {
+          const finishSupersession = () => {
             if (openTransaction.supersededHydration) {
               runtime.finishHydrationSupersession(
                 openTransaction.lifecycleGeneration,
               )
             }
+          }
+          let applied: SyncAppliedReceipt
+          try {
+            applied = params.commit(signal)
+          } catch (error) {
+            finishSupersession()
             throw error
           }
           if (!openTransaction.internal) {
             const persist = async () => {
               try {
-                await runtime.persistAndBroadcastExternalSyncTransaction({
-                  lifecycleGeneration: openTransaction.lifecycleGeneration,
-                  operations: openTransaction.operations,
-                  rowMetadataWrites: openTransaction.rowMetadataWrites,
-                  collectionMetadataWrites:
-                    openTransaction.collectionMetadataWrites,
-                  truncate: openTransaction.truncate,
-                  internal: false,
-                })
+                await runtime.persistAndBroadcastExternalSyncTransaction(
+                  openTransaction,
+                )
               } finally {
-                if (openTransaction.supersededHydration) {
-                  runtime.finishHydrationSupersession(
-                    openTransaction.lifecycleGeneration,
-                  )
-                }
+                finishSupersession()
               }
             }
             if (openTransaction.supersededHydration) {
@@ -2902,33 +2961,27 @@ function createWrappedSyncConfig<
                 signalUpstreamReady()
                 void persist().catch(signalPersistenceFailure)
               } else {
-                void applied.then(
-                  () => {
-                    signalUpstreamReady()
-                    return persist().catch(signalPersistenceFailure)
-                  },
-                  () =>
-                    runtime.finishHydrationSupersession(
-                      openTransaction.lifecycleGeneration,
-                    ),
-                )
+                void applied.then(() => {
+                  signalUpstreamReady()
+                  return persist().catch(signalPersistenceFailure)
+                }, finishSupersession)
               }
               return applied
             }
             const persistAfterApplication = async () => {
               if (applied !== true) await applied
-              await persist()
+              const persisted = persist()
+              void persisted.catch(signalPersistenceFailure)
+              return persisted
             }
-            const persisted = persistAfterApplication()
-            void persisted.catch(() => undefined)
-            return persisted
+            return persistAfterApplication()
           }
           return applied
         },
       }
 
       let sourceResult: SyncConfigRes = {}
-      fullStartPromise = runtime.ensureStarted()
+      const fullStartPromise = runtime.ensureStarted()
       const sourceResultPromise = (async () => {
         try {
           await runtime.ensureStartupMetadataLoaded()
@@ -2997,13 +3050,7 @@ function createWrappedSyncConfig<
             }
           }
           if (localStartupFailed) {
-            if (
-              options.signal?.aborted ||
-              (typeof localStartupFailure === `object` &&
-                localStartupFailure !== null &&
-                `name` in localStartupFailure &&
-                localStartupFailure.name === `AbortError`)
-            ) {
+            if (isAbortFailure(localStartupFailure, options.signal)) {
               throw localStartupFailure
             }
             if (!resolvedSourceResult.loadSubset) {
@@ -3012,19 +3059,13 @@ function createWrappedSyncConfig<
             try {
               await loadFromUpstream(options)
             } catch (upstreamError) {
-              if (
-                options.signal?.aborted ||
-                (typeof upstreamError === `object` &&
-                  upstreamError !== null &&
-                  `name` in upstreamError &&
-                  upstreamError.name === `AbortError`)
-              ) {
+              if (isAbortFailure(upstreamError, options.signal)) {
                 throw upstreamError
               }
-              throw new AggregateError(
-                [localStartupFailure, upstreamError],
+              throw createLocalUpstreamAggregateError(
+                localStartupFailure,
+                upstreamError,
                 `Persisted and upstream subset startup both failed`,
-                { cause: localStartupFailure },
               )
             }
             return
@@ -3133,6 +3174,7 @@ export function persistedCollectionOptions<
     const { schemaVersion, ...syncOptions } = options
     const collectionId =
       syncOptions.id ?? `persisted-collection:${safeRandomUUID()}`
+    const syncMode = syncOptions.syncMode ?? `eager`
     const persistence = resolvePersistenceForCollection(
       syncOptions.persistence,
       {
@@ -3146,7 +3188,7 @@ export function persistedCollectionOptions<
       `sync-present`,
       collectionId,
       persistence,
-      syncOptions.syncMode ?? `eager`,
+      syncMode,
       collectionId,
     )
 
@@ -3156,7 +3198,7 @@ export function persistedCollectionOptions<
       sync: createWrappedSyncConfig<T, TKey>(
         syncOptions.sync,
         runtime,
-        syncOptions.syncMode ?? `eager`,
+        syncMode,
       ),
       persistence,
     }
