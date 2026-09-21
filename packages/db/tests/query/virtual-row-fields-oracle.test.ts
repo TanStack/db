@@ -1,9 +1,26 @@
 /**
- * Runtime correspondence for the virtual-row-field type oracle.
+ * # Which published values carry virtual row fields?
  *
- * The published query row owns virtual metadata. Nested user objects and
- * opaque values selected through scalar child queries retain their original
- * runtime shapes and must not be decorated as rows.
+ * Law and source: `VirtualRowProps` gives Collection and live-query row roots
+ * `$synced`, `$origin`, `$key`, and `$collectionId`. The output contract
+ * established by `includes.test.ts` keeps inline `toArray` and `materialize`
+ * selections in their selected shape instead of publishing each selected value
+ * as a Collection row.
+ *
+ * `expectsVirtualFields` is the independent model: row roots and unprojected
+ * whole-row children are rows. Projected children, nested values, and opaque
+ * values are values. The paired type oracle uses the same classification.
+ *
+ * The legal query forms exercised here are an unprojected whole-row child and
+ * object, nested-object, array, `findOne`, and Date child projections. The
+ * production driver calls `createLiveQueryCollection`, `preload`, `toArray`,
+ * and `materialize`. The checkpoint is `live.toArray` after `preload` resolves.
+ *
+ * `hasVirtualProps` observes all four virtual fields. Exact `$key`, selected
+ * shapes, and nonempty child results prove the intended paths ran. This oracle
+ * does not cover joins, ordering, updates, callback boundaries, or sync-state
+ * transitions. Prior hostile controls made projected-value enrichment and a
+ * missing whole-row classification fail at these observations.
  */
 import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
@@ -23,8 +40,21 @@ type Row = {
   tags: Array<string>
 }
 
+type VirtualFieldSubject =
+  | `row-root`
+  | `whole-row-child`
+  | `projected-child`
+  | `nested-ref`
+  | `nested-value`
+  | `opaque-value`
+
+// Only row roots and unprojected whole-row children carry virtual row fields.
+function expectsVirtualFields(subject: VirtualFieldSubject): boolean {
+  return subject === `row-root` || subject === `whole-row-child`
+}
+
 describe(`virtual row field runtime boundary`, () => {
-  test(`decorates rows but not nested user objects or opaque child values`, async () => {
+  test(`matches the row and value classification after publication`, async () => {
     const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
     const rows = createCollection(
       mockSyncCollectionOptions<Row>({
@@ -95,28 +125,86 @@ describe(`virtual row field runtime boundary`, () => {
       await live.preload()
 
       const result = live.toArray[0]!
-      expect(hasVirtualProps(result)).toBe(true)
+      const observations: Array<{
+        name: string
+        subject: VirtualFieldSubject
+        value: unknown
+      }> = [
+        { name: `published query row`, subject: `row-root`, value: result },
+        {
+          name: `nested profile`,
+          subject: `nested-value`,
+          value: result.profile,
+        },
+        {
+          name: `selected Date`,
+          subject: `opaque-value`,
+          value: result.createdAt,
+        },
+        {
+          name: `toArray Date`,
+          subject: `opaque-value`,
+          value: result.dates[0],
+        },
+        {
+          name: `materialized Date`,
+          subject: `opaque-value`,
+          value: result.firstDate,
+        },
+        {
+          name: `whole-row child`,
+          subject: `whole-row-child`,
+          value: result.wholeRows[0],
+        },
+        {
+          name: `projected child object`,
+          subject: `projected-child`,
+          value: result.objects[0],
+        },
+        {
+          name: `projected child wrapper`,
+          subject: `projected-child`,
+          value: result.nestedObjects[0],
+        },
+        {
+          name: `nested projected value`,
+          subject: `nested-value`,
+          value: result.nestedObjects[0]!.nested,
+        },
+        {
+          name: `selected array value`,
+          subject: `opaque-value`,
+          value: result.arrays[0],
+        },
+        {
+          name: `materialized projected child`,
+          subject: `projected-child`,
+          value: result.firstObject,
+        },
+      ]
+
+      for (const observation of observations) {
+        expect(hasVirtualProps(observation.value), observation.name).toBe(
+          expectsVirtualFields(observation.subject),
+        )
+      }
+
       expect(result.$key).toBe(`row-1`)
 
       expect(result.profile).toEqual({ label: `nested` })
-      expect(hasVirtualProps(result.profile)).toBe(false)
       expect(`$key` in result.profile).toBe(false)
 
       expect(result.createdAt).toBeInstanceOf(Date)
-      expect(hasVirtualProps(result.createdAt)).toBe(false)
       expect(result.dates).toHaveLength(1)
       expect(result.dates[0]).toBeInstanceOf(Date)
-      expect(hasVirtualProps(result.dates[0])).toBe(false)
       expect(result.firstDate).toBeInstanceOf(Date)
-      expect(hasVirtualProps(result.firstDate)).toBe(false)
 
-      expect(hasVirtualProps(result.wholeRows[0])).toBe(true)
+      expect(result.wholeRows).toHaveLength(1)
       expect(result.wholeRows[0]!.$key).toBe(`row-1`)
-      expect(hasVirtualProps(result.objects[0])).toBe(false)
-      expect(hasVirtualProps(result.nestedObjects[0])).toBe(false)
-      expect(hasVirtualProps(result.nestedObjects[0]!.nested)).toBe(false)
-      expect(hasVirtualProps(result.arrays[0])).toBe(false)
-      expect(hasVirtualProps(result.firstObject)).toBe(false)
+      expect(result.objects).toEqual([{ label: `nested` }])
+      expect(result.nestedObjects).toEqual([{ nested: { label: `nested` } }])
+      expect(result.arrays).toEqual([[`one`, `two`]])
+      expect(result.firstObject).toEqual({ label: `nested` })
     } finally {
       await live.cleanup()
       await rows.cleanup()
