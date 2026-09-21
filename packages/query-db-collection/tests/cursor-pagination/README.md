@@ -136,7 +136,7 @@ The cache-publication review then exposed invalidation during held growth and
 protocol errors after cache publication. Its oracle was red in four cells before
 the fixes. The supported refresh procedure now cancels before invalidation;
 response validation runs before Query can publish or resolve shared waiters.
-The new five-cell suite retains an invalidation-only fault control and covers
+The new five-cell suite retains an invalidation-only mutant and covers
 shared readers, retries, malformed final tokens, recovery and bounded slice work.
 See LOSS-AUDIT.md for the distinct generator and observation gaps.
 

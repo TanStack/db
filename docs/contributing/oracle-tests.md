@@ -12,7 +12,7 @@ For an incremental query engine, production might maintain complex indexes while
 
 The payoff is broader bug detection and a stable check during refactoring. The challenge is making sure the reference, generated cases, and observations actually represent the behavior we promise.
 
-Start with [one small oracle](#build-one-small-oracle). Follow the later sections when your contract needs [richer state](#keep-only-state-that-can-matter), [controlled timing](#generate-histories-that-reach-the-problem), or [more observations](#observe-what-the-contract-promises). The [review card](#a-review-card) is a short way to apply the guide to an existing test. Historical cases and research are collected in the [companion notes](oracle-test-notes.md).
+Start with [one small oracle](#build-one-small-oracle). Follow the later sections when your contract needs [richer state](#keep-only-state-that-can-matter), [controlled timing](#generate-histories-that-reach-the-problem), or [more observations](#observe-what-the-contract-promises). The [review card](#a-review-card) is a short way to apply the guide to an existing test. Historical cases and research are collected in the [companion notes](oracle-test-notes.md). Use the [project glossary](glossary.md) for terms shared with production code.
 
 ## A quick start
 
@@ -49,6 +49,215 @@ How to prove it ran and rejects a wrong answer; how to rerun:
 An intentionally partial oracle is still useful. A rule that rejects duplicate completion cannot prove the rows are correct, but it can protect a real promise. A fixed regression can preserve a valuable history. Prefer an oracle that generalizes a bug's missing distinction where practical; keep the fixed witness when it adds clarity or reach. Randomness is not what makes either test trustworthy.
 
 Some concurrent contracts allow several results. In those cases, the reference must allow that freedom rather than invent one required order. We will return to that after establishing how to record an execution.
+
+## Write the oracle as executable subsystem documentation
+
+A good oracle can do more than catch regressions. Its model can give humans and
+agents a short, executable theory of the subsystem. Production code shows how
+the system works. The oracle should state what the system promises and why each
+observable result follows.
+
+This does not make the model the source of product policy. Derive the contract
+from an approved API, architecture document, established behavior, or design
+decision. The file then keeps that contract, its model, and its production
+evidence together.
+
+Two small examples show the form:
+
+- [`load-subset-transaction-refinement-oracle.test.ts`](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-transaction-refinement-oracle.test.ts)
+  explains when an abort can still cancel an on-demand load.
+- [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
+  explains why a ready transaction waits behind a delayed FIFO head.
+
+### Use five visible layers
+
+Keep these layers distinct even when they share one file:
+
+| Layer | What it must answer |
+| --- | --- |
+| Contract | What does the subsystem promise, and where is the boundary? |
+| Model | What is the smallest independent rule that predicts public results? |
+| History grammar | Which values, actions, relationships, and schedules can occur? |
+| Production driver | Which real entry point and event boundary does the test exercise? |
+| Refinement check | Which public observations must agree with the model, and when? |
+
+Do not create five classes merely to match this table. A short file can use one
+opening comment, one pure model function, a generated input, a production
+fixture, and assertions. A large state machine can split these layers into
+separate modules when that makes each layer easier to review.
+
+### Lead with the law
+
+Start with a question or a direct statement of the problem. Explain why a
+normal example can miss the failure. State the contract before introducing test
+mechanics.
+
+Put the central law beside the model too. The opening comment supplies context.
+The local comment lets a reader check the model without searching the file.
+These comments are not duplicates when they serve those separate jobs.
+
+For example:
+
+```ts
+// Publication is the boundary. An abort before publication rejects the load
+// and discards the row. An abort after publication starts resolves the load
+// and keeps the row visible.
+function expectedOutcome(phase: AbortPhase): ExpectedOutcome {
+  // ...
+}
+```
+
+### Make the model easy to distrust
+
+Prefer a pure function or a small state transition. Keep production queues,
+caches, classifiers, and helpers out of the expected result. A reader should be
+able to challenge the model without first learning the implementation.
+
+Name partial models honestly. If a model predicts rows but not callback counts,
+say so. If several outcomes are legal, return the permitted set or relation. Do
+not hide policy in scattered assertions outside the model.
+
+Check every modeled public fact at each relevant boundary. During the FIFO
+rewrite, prose exposed that the first draft modeled calls but checked outbox
+ownership only at the end. Moving both observations into one state model made
+the test and the documentation agree.
+
+### Decompose the model by law
+
+A reference model can become as hard to trust as production. Do not keep adding
+state until it becomes a second implementation of the subsystem.
+
+Treat the oracle as a small graph when the contract has independent laws:
+
+- A node owns one coherent rule and the least state needed to predict it.
+- An edge records a real dependency between two rules.
+- The production driver can feed the same action to several nodes.
+- The refinement check composes their observations at the named checkpoint.
+
+For example, demand generations, facade identity, and callback coherence can
+use separate models. They share actions, but they do not need one controller
+that reproduces every production queue and cache. A failure then names the law
+that diverged. A reviewer can also inspect each rule without learning the rest
+of the subsystem.
+
+Do not split state that a legal next action can observe only as a whole. Use the
+distinguishing-history test: if two states look equal to the proposed nodes,
+can one legal next action produce different promised results? If yes, add the
+missing edge or keep that state in one model.
+
+Decomposition does not mean one model per assertion. Group facts that form one
+state machine. Keep independent policies separate. When an integrated promise
+spans several nodes, add a relational check across their outputs instead of
+merging their internal machinery.
+
+This graph is a reasoning tool, not a required test framework. Plain functions
+and Maps are often enough.
+
+### Treat the input domain as a grammar
+
+Before choosing arbitraries, describe the language of legal cases. A useful
+grammar separates three kinds of fact:
+
+- **Dynamics:** actions and transformations that move the system.
+- **Constraints:** invariants, interfaces, and forbidden combinations.
+- **Boundary conditions:** starting state, scale, provider behavior, and value
+  domains that limit where the rules apply.
+
+Freeze the contract first. Mark which rules come from an API or architecture
+document and which rules the test author inferred. Then map containment,
+overlap, and dependency. Do not force overlapping concerns into a tree merely
+to make the generator neat.
+
+Use four controls before trusting the grammar:
+
+1. **Reconstruction:** Can the grammar rebuild every known valid witness?
+2. **Ablation:** Does removing each axis, rule, or overlap lose a promised case
+   or admit a forbidden one?
+3. **Range:** Does an independent marginal case require only new parameter
+   values, or does it expose a missing rule?
+4. **Exclusion:** Can the grammar reject a nearby invalid history or state?
+
+Generate adjacent valid forms from this grammar. Do not take a flat Cartesian
+product of unrelated axes merely because the tool makes that easy. When the
+contract does require a product, add a calibration assertion that proves every
+declared cell appears once.
+
+This approach exposes two common false greens. A grammar that cannot reconstruct
+a known bug omits a path. A grammar that generates valid and invalid histories
+without distinction makes skips and classifiers carry hidden policy.
+
+### Use controlled technical English
+
+Write prose that another agent can parse without asking what a term means:
+
+- Use active voice and short sentences.
+- Give one state or event one name. Do not rotate synonyms.
+- Define necessary domain terms when they first appear.
+- Keep `must`, `may`, and `does not` exact. They state different contracts.
+- Use a list for three or more phases, actions, or conditions.
+- Avoid metaphors when a boundary or transition has a precise name.
+- Explain laws, causes, omissions, and checkpoints. Do not narrate clear code.
+
+Aim for no more than 25 words in a descriptive sentence. Keep a longer sentence
+when splitting it would lose a condition or change its force. Clarity is the
+goal. A low word count is not.
+
+### Use production vocabulary
+
+The model and production code must use the same term for the same concept. Read
+the [project glossary](glossary.md) and the subsystem architecture before naming
+model states, actions, or observations.
+
+Shared vocabulary does not weaken model independence. Reuse a production term,
+not its queue, cache, transition helper, or semantic implementation. If the
+model deliberately combines or splits production concepts, declare that mapping
+beside the model. Never give a model-only convenience the name of a stronger
+production concept.
+
+Check the causal grammar as well as the nouns. Demand starts an acquisition
+attempt. Adapter acceptance establishes a physical acquisition and its lease.
+Committing source writes produces an applied receipt. Publication exposes one
+coherent public snapshot. Adapter acceptance, promise settlement, applied
+settlement, and publication are different boundaries even when one synchronous
+execution crosses all four.
+
+Avoid unqualified words that hide those distinctions. Name a `sync run`,
+`public snapshot`, `logical subset owner`, or `window-operation generation`
+rather than a generic session, state, owner, or generation. When production
+renames a concept, update its glossary entry and the models that represent it in
+the same change.
+
+### Audit prose, model, driver, and observations together
+
+Treat the layers as separate claims. Compare each pair during review:
+
+1. Does every promise in the prose have a model rule?
+2. Does the model retain every distinction that a legal next action can expose?
+3. Can the history grammar reach each modeled transition?
+4. Does the driver exercise the named production path and event boundary?
+5. Does each modeled output reach an assertion at the promised checkpoint?
+6. Can the recorder represent duplicate, missing, reordered, or partial output?
+7. Does any assertion impose behavior that the contract and model do not state?
+8. Do prose, model, driver, and production use the glossary's canonical term
+   and transition grammar for each shared concept?
+9. Does every model-only term declare how it maps to production, or that it has
+   no production counterpart?
+
+This comparison is a useful audit instrument. If the prose cannot explain an
+assertion through the model, the model may be incomplete. If the model predicts
+a fact that the test never observes, the test may be false green. If the driver
+cannot create a named phase, the prose claims more reach than the test has.
+
+### Keep the prose proportional
+
+Do not turn every regression test into an essay. Use this form when a file owns
+a reusable law, state machine, lifecycle boundary, or reference model. A focused
+test can remain short when its name and setup already state the whole contract.
+
+As a starting budget, add only prose that helps a reader answer one of the five
+layer questions. After the first draft, remove comments that only translate the
+next line of code into English. Run the test after the rewrite. A documentation
+edit that weakens the executable law changes behavior.
 
 ## Build one small oracle
 
@@ -131,6 +340,39 @@ Shrinking means reducing a failing input or action list while keeping its failur
 
 Pin the structural cases that matter: no rows, width zero, a boundary tie, and repeated changes to one key. Exhaust a small domain where that is cheap. Then randomize values and longer legal histories. Fixed cases, bounded enumeration and random exploration do different jobs; overlap between them is not a defect.
 
+### Run fixed and random seed lanes
+
+A fixed fast-check seed always generates the same cases. This makes a useful
+history stable, but it does not explore new histories on later runs. Do not
+describe a fixed-seed property as random coverage.
+
+Run important properties in two lanes:
+
+1. Run a fixed seed that preserves a known useful campaign.
+2. Run without a seed so fast-check chooses a new seed.
+
+When the random lane fails, retain the reported seed and shrink path. Give the
+suite environment variables or another checked replay interface when practical.
+The replay input must select both the seed and the path. A seed alone reruns the
+campaign but might not stop at the same reduced counterexample.
+
+When replay inputs are present, run only the requested replay lane. Do not spend
+time on the fixed campaign before reaching the failure the developer asked to
+reproduce.
+
+The fixed and random lanes should use the same property, generators,
+observations, and run budget. Only their seed source should differ. This keeps a
+random failure eligible for promotion into a pinned example or fixed campaign.
+
+[`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
+shows this shape. Its fixed lane preserves one scheduler campaign. Its second
+lane uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
+`OFFLINE_ORACLE_PATH` for replay.
+
+Do not use a larger random run count as a substitute for structural reach.
+Pinned examples force rare boundaries. Bounded enumeration proves small finite
+domains. A stress job increases sampling depth. Record each form separately.
+
 ### Make the comparison prove its usefulness
 
 Suppose the update test only asserts that the result changed. Returning `[]` passes that assertion. Keep the update—it is a useful cause—but compare against `[1, 2]`.
@@ -193,7 +435,7 @@ An example from the archive makes the risk concrete: a finite model represented 
 
 Before changing production to satisfy a red test, check the contract, representation and comparison. A genuinely unresolved product choice belongs with its owner. A missing value in a finite model belongs in the model. References—including newly written specifications—can be wrong.
 
-Review the accusation and suggested fix separately. In one recorded adapter episode, returning a Promise transferred a lease even when it later rejected. Clearing ownership on rejection looked like cleanup but reportedly leaked the release obligation. The concern was useful; that repair did not follow from it. Other adapters may use different acquisition rules.
+Review the accusation and suggested fix separately. In one recorded adapter episode, returning a Promise created an acquisition lease even when it later rejected. Clearing ownership on rejection looked like cleanup but reportedly leaked that release obligation. The concern was useful; that repair did not follow from it. Other adapters may use different acquisition rules.
 
 Projection deserves the same care. Removing internal metadata from a public-value comparison can be valid. Removing a contractual virtual field because it is called “metadata” cannot. Write down one difference the comparison may ignore and one it must retain.
 
@@ -378,9 +620,8 @@ For a new oracle or a claimed repair, ask:
 2. Which legal history distinguishes the proposed model from a weaker one?
 3. Does the fixture make production do the work being tested?
 4. Which concrete wrong answer can the comparison reject—and which can it miss?
-5. What proves the path and assertion ran? What did the fault control actually show?
+5. What proves the path and assertion ran? What did the mutant or fault injection actually show?
 6. Can capture, cleanup or shrinking turn this into a different failure?
 7. Which larger promises remain outside this test, and where are they tracked?
 
 The payoff is not a bigger test framework. It is a smaller distance between “this test is green” and a precise account of what that green result protects.
-

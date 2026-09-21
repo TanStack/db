@@ -217,7 +217,7 @@ export class CollectionLifecycleManager<
     this.setStatus(`error`)
   }
 
-  /** Return the cause supplied by the current sync session, if any. */
+  /** Return the cause supplied by the current sync run, if any. */
   public getSyncError(): unknown {
     return this.syncError
   }

@@ -5,6 +5,23 @@ import { createChangeProxy, withChangeTracking } from '../src/proxy.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { CollectionConfig } from '../src/types.js'
 
+/**
+ * # What crosses the draft-to-stored-row boundary by value?
+ *
+ * Plain objects, arrays, Maps, Sets, Dates, regular expressions, typed arrays,
+ * and their cycles become detached snapshots. Later caller mutation must not
+ * rewrite the stored row. Arbitrary class instances are the explicit exception:
+ * they retain reference identity because their hidden state cannot be cloned
+ * faithfully. Dangerous data keys remain own data properties and may not alter
+ * prototypes.
+ *
+ * The model uses native construction, `structuredClone` where its domain
+ * applies, explicit cycle-shape checks, and fresh Collection reads. Generated
+ * sparse arrays and adversarial keys cover shapes that JSON equality erases.
+ * Alias and back-reference tests observe both identity and stored values, so a
+ * flattened or accidentally shared result cannot pass.
+ */
+
 class Label {
   #text: string
   constructor(text: string) {

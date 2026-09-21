@@ -1,17 +1,22 @@
 /**
- * Laws: collection updates conserve independent SQLite fields; collection rows
- * expose the declared PowerSync view; comparison observes schema output.
+ * # Does a PowerSync Collection preserve the database's independent truth?
  *
- * Reference: disjoint logical changes are composed from their changed fields,
- * PowerSync's declared SQLite view defines the readable keys, and the supplied
- * Standard Schema defines collection output values.
+ * Collection updates change only their authored fields. A newer disjoint
+ * SQLite field must survive. Persistence waits for the final effective update,
+ * including metadata-only and falsey changes. Public rows expose exactly the
+ * declared PowerSync view, and equality compares transformed schema output
+ * rather than raw SQLite rows.
  *
- * Production path: a real node database, real collection sync, the registered
- * watcher callback, PowerSync CRUD rows, and the collection comparator.
- * The held watcher is the only timing control; assertions run after explicitly
- * releasing it. Each test proves path reach before comparing the full promised
- * observation. The comparison-sensitivity test rejects the historical stale
- * full-row patch and undeclared public key without invoking production.
+ * The reference laws are small: compose disjoint patches by changed field,
+ * derive readable keys from the declared view, and derive public values from
+ * the supplied Standard Schema. The production path uses a real native SQLite
+ * database, PowerSync CRUD rows, Collection sync, watcher callbacks, and the
+ * adapter comparator. A held watcher is the only timing control.
+ *
+ * Every test proves the native path was reached before it compares full rows,
+ * patches, metadata, logging, or cleanup. The suite skips when the native test
+ * database implementation is unavailable; portable declarations alone are not
+ * evidence of PowerSync execution.
  */
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'

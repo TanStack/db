@@ -116,7 +116,7 @@ The publication oracle keeps the same full-relation reference. It adds:
 
 - Immutable cursor sequences with held suffix delivery, a real active outer
   QueryObserver, and the documented cancel-then-invalidate procedure. Omitting
-  cancellation is a fault control rejected by the same row checker.
+  cancellation is a mutant rejected by the same row checker.
 - Growth and refresh with a malformed final continuation, generated page sizes,
   depths and backward token targets, shared waiters, and Query retry enabled or
   disabled. Assertions cover rejection, no successful cache publication, retained

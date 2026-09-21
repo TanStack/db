@@ -1,6 +1,14 @@
-/** Literal required shared laws, reviewed independently of the native registry.
- * The nine output-only label changes retain the original 113-law portfolio.
- * Query-only boundaries, hooks, moves and unsupported capabilities are not members.
+/**
+ * # Which shared Collection laws must every persisted adapter execute?
+ *
+ * This literal manifest is independent of each host's test registry. It names
+ * the 113 predicate, pagination, join, deduplication, collation, mutation, and
+ * live-update laws that persisted adapters promise. Registration checks compare
+ * native suites with this list so a renamed, skipped, or missing test is visible.
+ *
+ * Query-only boundaries, framework hooks, moves, progressive sync, and other
+ * unsupported capabilities are excluded deliberately. A matching manifest
+ * proves suite registration, not native execution.
  */
 export const persistedConformanceLaws = [
   'Predicates Suite > Equality Operators > should filter with eq() on string field',
