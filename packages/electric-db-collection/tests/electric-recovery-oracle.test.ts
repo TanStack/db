@@ -144,6 +144,19 @@ function fixture(
     },
     ensureIndex: () => Promise.resolve(),
   }
+  if (coordinator) {
+    coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+      await adapter.applyCommittedTx(collectionId, tx)
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+  }
   const collection = createCollection(
     persistedCollectionOptions<
       Item,
@@ -272,6 +285,17 @@ describe(`persisted Electric recovery laws`, () => {
       ensureLeadership: () => Promise.resolve(),
       requestEnsurePersistedIndex: () => Promise.resolve(),
       requestEnsureRemoteSubset: () => Promise.resolve(),
+      requestReleaseRemoteSubset: () => Promise.resolve(),
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
     }
     return {
       coordinator,
