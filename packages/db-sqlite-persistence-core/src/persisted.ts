@@ -1598,7 +1598,7 @@ class PersistedCollectionRuntime<
         ? transaction.shouldFailStopOnAbort?.()
           ? this.markTerminalFailure(error, transaction.lifecycleGeneration)
           : error
-        : this.markTerminalFailure(error)
+        : this.markTerminalFailure(error, transaction.lifecycleGeneration)
       transaction.rejectApplied?.(terminalError)
       throw terminalError
     }
@@ -1638,7 +1638,7 @@ class PersistedCollectionRuntime<
 
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
 
-    await this.applyCommittedTx(tx)
+    await this.applyCommittedTx(tx, transaction.lifecycleGeneration)
     if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
     this.publishTxCommittedEvent(
       this.createTxCommittedPayload({
@@ -1662,7 +1662,10 @@ class PersistedCollectionRuntime<
     )
   }
 
-  private async applyCommittedTx(tx: PersistedTx): Promise<void> {
+  private async applyCommittedTx(
+    tx: PersistedTx,
+    lifecycleGeneration: number,
+  ): Promise<void> {
     try {
       this.throwIfTerminal()
       await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
@@ -1674,7 +1677,7 @@ class PersistedCollectionRuntime<
               error,
               `persistence.adapter.applyCommittedTx`,
             )
-      throw this.markTerminalFailure(durabilityError)
+      throw this.markTerminalFailure(durabilityError, lifecycleGeneration)
     }
   }
 
@@ -1866,7 +1869,7 @@ class PersistedCollectionRuntime<
     // SingleProcessCoordinator). Apply directly and broadcast.
     const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromMutations(mutations, streamPosition)
-    await this.applyCommittedTx(tx)
+    await this.applyCommittedTx(tx, lifecycleGeneration)
 
     this.throwIfLifecycleReplaced(lifecycleGeneration)
 
@@ -2915,24 +2918,27 @@ function createWrappedSyncConfig<
                       .metadata!.collection.list()
                       .map(({ key, value }) => [key, value]),
                   )
+                  const pendingOwners = new Map<
+                    string,
+                    OpenSyncTransaction<T, TKey>
+                  >()
                   for (const transaction of pendingPublicationTransactions) {
-                    if (
-                      Array.from(
-                        transaction.collectionMetadataWrites.keys(),
-                      ).some((key) => !prefix || key.startsWith(prefix))
-                    ) {
-                      markPendingMetadataDependency(transaction)
-                    }
                     for (const [
                       key,
                       metadataWrite,
                     ] of transaction.collectionMetadataWrites) {
+                      if (!prefix || key.startsWith(prefix)) {
+                        pendingOwners.set(key, transaction)
+                      }
                       if (metadataWrite.type === `delete`) {
                         merged.delete(key)
                       } else {
                         merged.set(key, metadataWrite.value)
                       }
                     }
+                  }
+                  for (const owner of new Set(pendingOwners.values())) {
+                    markPendingMetadataDependency(owner)
                   }
                   const openTransaction = getOpenTransaction()
                   if (openTransaction) {

@@ -2099,6 +2099,160 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`does not fail-stop when an aborted staged collection metadata write was superseded`, async () => {
+    const adapter = createRecordingAdapter()
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await successfulApply(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `superseded-staged-collection-metadata`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const olderAbort = new AbortController()
+    let firstReceipt: Promise<void> | undefined
+    let olderReceipt: Promise<void> | undefined
+    let newerReceipt: Promise<void> | undefined
+    let dependentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `superseded collection metadata owner ready`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `first`, title: `durability gate` },
+      })
+      firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void firstReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `first persistence entered before superseded metadata writes`,
+      )
+
+      sourceParams.begin()
+      sourceParams.metadata!.collection.set(`shared`, { owner: `older` })
+      olderReceipt = Promise.resolve(
+        sourceParams.commit(olderAbort.signal),
+      ).then(() => undefined)
+      void olderReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      sourceParams.metadata!.collection.set(`shared`, { owner: `newer` })
+      newerReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void newerReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      const stagedOwner = sourceParams
+        .metadata!.collection.list()
+        .find(({ key }) => key === `shared`)?.value
+      sourceParams.write({
+        type: `insert`,
+        value: {
+          id: `dependent`,
+          title:
+            (stagedOwner as { owner?: string } | undefined)?.owner ?? `missing`,
+        },
+      })
+      dependentReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void dependentReceipt.catch(() => undefined)
+
+      expect(stagedOwner).toEqual({ owner: `newer` })
+      olderAbort.abort()
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(
+        firstReceipt,
+        `superseded metadata durability gate settled`,
+      )
+      const olderOutcome = await atPersistedOracleCheckpoint(
+        olderReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `superseded older metadata receipt settled`,
+      )
+      const newerOutcome = await atPersistedOracleCheckpoint(
+        newerReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `newer metadata receipt settled`,
+      )
+      const dependentOutcome = await atPersistedOracleCheckpoint(
+        dependentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `newest-owner dependent receipt settled`,
+      )
+
+      expect({
+        olderStatus: olderOutcome.status,
+        newerStatus: newerOutcome.status,
+        dependentStatus: dependentOutcome.status,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        visibleDependent: stripVirtualProps(collection.get(`dependent`)),
+        durableDependent: adapter.rows.get(`dependent`),
+        durableMetadata: adapter.collectionMetadata.get(`shared`),
+        applyCalls,
+      }).toEqual({
+        olderStatus: `rejected`,
+        newerStatus: `fulfilled`,
+        dependentStatus: `fulfilled`,
+        status: `ready`,
+        publicError: undefined,
+        visibleDependent: { id: `dependent`, title: `newer` },
+        durableDependent: { id: `dependent`, title: `newer` },
+        durableMetadata: { owner: `newer` },
+        applyCalls: 3,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => firstReceipt?.catch(() => undefined),
+          () => olderReceipt?.catch(() => undefined),
+          () => newerReceipt?.catch(() => undefined),
+          () => dependentReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`does not let an old external adapter success affect a restarted lifecycle`, async () => {
     const id = `external-lifecycle-success`
     const adapter = createRecordingAdapter()
@@ -2200,6 +2354,134 @@ describe(`persistedCollectionOptions`, () => {
         [
           () => oldSettlement,
           () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not let an old external adapter failure poison a restarted lifecycle`, async () => {
+    const id = `external-lifecycle-failure`
+    const adapter = createRecordingAdapter()
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    const oldPersistenceEntered = createEventGate()
+    const releaseOldPersistence = createEventGate()
+    const oldAdapterError = new Error(`old lifecycle adapter failure`)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        oldPersistenceEntered.resolve()
+        await releaseOldPersistence.promise
+        throw oldAdapterError
+      }
+      await successfulApply(...args)
+    }
+    const coordinator = createFailStopCoordinatorHarness(id)
+    let sourceParams!: TodoSyncParams
+    const replacement = {
+      id: `replacement`,
+      title: `owned by restarted lifecycle`,
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const startAndWaitForReady = async (label: string) => {
+      const ready = createEventGate()
+      const unsubscribe = collection.on(`status:ready`, () => ready.resolve())
+      collection.startSyncImmediate()
+      try {
+        await atPersistedOracleCheckpoint(ready.promise, label)
+      } finally {
+        unsubscribe()
+      }
+    }
+    let oldSettlement:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let replacementReceipt:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await startAndWaitForReady(`${id} initial lifecycle ready`)
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `old`, title: `must remain owned by old lifecycle` },
+      })
+      oldSettlement = Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        oldPersistenceEntered.promise,
+        `${id} old persistence entered`,
+      )
+
+      await collection.cleanup()
+      await startAndWaitForReady(
+        `${id} replacement lifecycle ready before old failure`,
+      )
+      sourceParams.begin()
+      sourceParams.write({ type: `insert`, value: replacement })
+      replacementReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      releaseOldPersistence.resolve()
+
+      const oldOutcome = await atPersistedOracleCheckpoint(
+        oldSettlement,
+        `${id} old receipt settled`,
+      )
+      const replacementOutcome = await atPersistedOracleCheckpoint(
+        replacementReceipt,
+        `${id} replacement transaction settled`,
+      )
+      await flushAsyncWork()
+
+      expect({
+        oldReceiptStatus: oldOutcome.status,
+        replacementStatus: replacementOutcome.status,
+        replacementVisible: stripVirtualProps(collection.get(replacement.id)),
+        replacementPublicError: collection._lifecycle.getSyncError(),
+        broadcasts: coordinator.publishCalls.length,
+        applyCalls,
+      }).toEqual({
+        oldReceiptStatus: `rejected`,
+        replacementStatus: `fulfilled`,
+        replacementVisible: replacement,
+        replacementPublicError: undefined,
+        broadcasts: 1,
+        applyCalls: 2,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseOldPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => oldSettlement,
+          () => replacementReceipt,
+          () => collection.cleanup(),
         ],
         hasPrimaryFailure,
       )
