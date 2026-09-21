@@ -1,4 +1,4 @@
-import type { AbstractPowerSyncDatabase, Table } from '@powersync/common'
+import type { CommonPowerSyncDatabase, Table } from '@powersync/common'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   BaseCollectionConfig,
@@ -22,7 +22,9 @@ import type {
 export type InferPowerSyncOutputType<
   TTable extends Table = Table,
   TSchema extends StandardSchemaV1<PowerSyncRecord> = never,
-> = TSchema extends never ? ExtractedTable<TTable> : InferSchemaOutput<TSchema>
+> = [TSchema] extends [never]
+  ? ExtractedTable<TTable>
+  : InferSchemaOutput<TSchema>
 
 /**
  * A mapping type for custom serialization of object properties to SQLite-compatible values.
@@ -202,15 +204,19 @@ export type OnDemandSyncHooks = {
 
 export type BasePowerSyncCollectionConfig<
   TTable extends Table = Table,
-  TSchema extends StandardSchemaV1 = never,
+  TSchema extends StandardSchemaV1<any> = never,
 > = Omit<
-  BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>,
+  BaseCollectionConfig<
+    InferPowerSyncOutputType<TTable, TSchema>,
+    string,
+    TSchema
+  >,
   `onInsert` | `onUpdate` | `onDelete` | `getKey` | `syncMode`
 > & {
   /** The PowerSync schema Table definition */
   table: TTable
   /** The PowerSync database instance */
-  database: AbstractPowerSyncDatabase
+  database: CommonPowerSyncDatabase
   /**
    * The maximum number of documents to read from the SQLite table
    * in a single batch during the initial sync between PowerSync and the

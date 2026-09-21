@@ -22,6 +22,33 @@ import type { Collection } from '../../src/collection/index.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
 
+/**
+ * # What does a Collection-valued include promise?
+ *
+ * A bare child query materializes as a public Collection facade. That facade
+ * has lifecycle and identity rules that inline arrays do not have:
+ *
+ * 1. Parents on the same active route share one facade.
+ * 2. Child changes update the facade without forcing a parent value change.
+ * 3. Moving a parent route gives it the destination route's facade.
+ * 4. A held facade becomes empty and ready when its last route retires.
+ * 5. A later active interval gets a new facade instead of retargeting the old
+ *    facade.
+ *
+ * The main Map model recomputes parent rows and ordered children after each
+ * generated action. It compares the bare Collection form with its `toArray`
+ * and `materialize` siblings. It also derives expected parent events from the prior
+ * and current model rows. Specialized models check facade sharing, retirement,
+ * reactivation, event identity, optimistic settlement, and callback-time root
+ * snapshots.
+ *
+ * The history grammar varies parent and child writes, route movement, shared
+ * routes, dormant buckets, ordering, parent-dependent filters, and joins. It
+ * also varies optimistic confirmation and rollback. A bounded exhaustive lane covers every
+ * two-step history in the smallest relationship domain. Random histories add
+ * longer combinations and shrink failures.
+ */
+
 type ParentRow = {
   id: number
   group: number
@@ -231,6 +258,8 @@ function projectLive(
   })
 }
 
+// This value model uses only current source Maps and the declared relation and
+// child order. Facade identity has separate focused models below.
 function recompute(context: CollectionContext): Array<ProjectedParent> {
   return [...context.model.parents.values()]
     .sort((left, right) => left.id - right.id)
@@ -497,6 +526,8 @@ const collectionProjection: TraceProjection<
   CollectionContext,
   CollectionObservation
 > = {
+  // Keep final reads, callback-time publications, and event payloads separate.
+  // A later repair of one channel cannot hide an earlier disagreement.
   observe: (context) => ({
     rows: projectLive(context.live),
     publications: context.publications,
@@ -514,7 +545,7 @@ const collectionProjection: TraceProjection<
     expect(observed.rows).toEqual(expected.rows)
     expect(observed.publications).toEqual(expected.publications)
     // The mixed fixture has array/materialized siblings, so user-value changes
-    // require root events. Bare-facade identity is tested separately. Do not
+    // require root events. Separate tests cover bare-facade identity. Do not
     // prohibit metadata-only events for otherwise unchanged rows here.
     const changedKeys = new Set(expected.events.map((event) => event.key))
     expect(
@@ -565,6 +596,8 @@ const orderSwapArbitrary = fc.integer({ min: 2, max: 8 }).chain((length) =>
   })),
 )
 
+// Enumeration proves the small finite domain. The generated lane explores
+// longer histories over a wider value domain. Neither replaces the other.
 function enumerateActionSequences(
   actions: ReadonlyArray<CollectionAction>,
   maxLength: number,

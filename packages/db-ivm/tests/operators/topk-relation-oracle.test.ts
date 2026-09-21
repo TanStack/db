@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { TopKRelation } from './topk-relation-oracle.js'
 
+/**
+ * # How do we know the top-K oracle can detect a fault?
+ *
+ * These tests calibrate the oracle. They do not test the production top-K
+ * operator. Each test gives the relation a valid history, then introduces one
+ * wrong change or expectation. The checker must reject that fault.
+ *
+ * The controls cover duplicate weight, missing retraction, wrong index, wrong
+ * payload, negative residue, shared-object mutation, and wrong numeric offset.
+ * The first control uses a fixed seed because it tests shrink and replay of one
+ * deliberate failure. It is not a random production campaign.
+ */
+
 describe(`Signed top-K observation controls`, () => {
   it(`shrinks and replays duplicate-weight detection through the same checker`, () => {
     const property = fc.property(fc.integer({ min: 10, max: 100 }), (id) => {

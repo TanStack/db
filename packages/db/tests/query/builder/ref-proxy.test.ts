@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createRefProxy,
+  createSingleRowRefProxy,
   isRefProxy,
   toExpression,
   val,
@@ -8,6 +9,28 @@ import {
 import { PropRef, Value } from '../../../src/query/ir.js'
 
 describe(`ref-proxy`, () => {
+  describe(`createSingleRowRefProxy`, () => {
+    it(`records a nested path through an optional schema field`, () => {
+      type Row = { timestamp?: { seconds: number } }
+      const proxy = createSingleRowRefProxy<Row>()
+
+      const expression = toExpression(proxy.timestamp?.seconds)
+
+      expect(expression).toBeInstanceOf(PropRef)
+      expect((expression as PropRef).path).toEqual([`timestamp`, `seconds`])
+    })
+
+    it(`records built-in method paths only when the type boundary is bypassed`, () => {
+      type Row = { updatedAt?: Date }
+      const proxy = createSingleRowRefProxy<Row>()
+
+      const expression = toExpression((proxy as any).updatedAt?.getTime)
+
+      expect(expression).toBeInstanceOf(PropRef)
+      expect((expression as PropRef).path).toEqual([`updatedAt`, `getTime`])
+    })
+  })
+
   describe(`createRefProxy`, () => {
     it(`creates a proxy with correct basic properties`, () => {
       const proxy = createRefProxy<{ users: { id: number; name: string } }>([

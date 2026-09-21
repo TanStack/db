@@ -108,7 +108,9 @@ export interface PendingMutation<
   changes: ResolveTransactionChanges<T, TOperation>
   globalKey: string
 
-  key: any
+  key: TCollection extends Collection<any, infer TKey, any, any, any>
+    ? TKey
+    : never
   type: TOperation
   metadata: unknown
   syncMetadata: Record<string, unknown>
@@ -148,6 +150,13 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TCollection extends Collection<T, any, any, any, any> = Collection<
+    T,
+    any,
+    any,
+    any,
+    any
+  >,
 > = Omit<Transaction<T>, `mutations`> & {
   /**
    * We must omit the `mutations` property from `Transaction<T>` before intersecting
@@ -168,7 +177,7 @@ export type TransactionWithMutations<
    * - TypeScript can properly narrow `TOperation` to the specific literal type
    * - This ensures `mutation.original` is correctly typed as `T` (not `{} | T`) when mapping
    */
-  mutations: NonEmptyArray<PendingMutation<T, TOperation>>
+  mutations: NonEmptyArray<PendingMutation<T, TOperation, TCollection>>
 }
 
 export interface TransactionConfig<T extends object = Record<string, unknown>> {
@@ -538,7 +547,11 @@ export type UpdateMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `update`>
+  transaction: TransactionWithMutations<
+    T,
+    `update`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 
@@ -547,7 +560,11 @@ export type InsertMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `insert`>
+  transaction: TransactionWithMutations<
+    T,
+    `insert`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 export type DeleteMutationFnParams<
@@ -555,10 +572,17 @@ export type DeleteMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `delete`>
+  transaction: TransactionWithMutations<
+    T,
+    `delete`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 
+/**
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+ */
 export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -566,6 +590,9 @@ export type InsertMutationFn<
   TReturn = any,
 > = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
+/**
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+ */
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -573,6 +600,9 @@ export type UpdateMutationFn<
   TReturn = any,
 > = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
+/**
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+ */
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -701,8 +731,8 @@ export interface BaseCollectionConfig<
   syncMode?: SyncMode
   /**
    * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
+   *
    * @example
    * // Basic insert handler
    * onInsert: async ({ transaction, collection }) => {
@@ -711,10 +741,33 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
+   * // Insert handler with refetch (Query Collection)
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.createTodo(newItem)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
+   * }
+   *
+   * @example
+   * // Insert handler with sync wait (Electric Collection)
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.createTodo(newItem)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
    * // Insert handler with multiple items
    * onInsert: async ({ transaction, collection }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   await api.createTodos(items)
+   *   // Refetch to get updated data from server
+   *   await collection.utils.refetch()
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -722,30 +775,22 @@ export interface BaseCollectionConfig<
    * onInsert: async ({ transaction, collection }) => {
    *   try {
    *     const newItem = transaction.mutations[0].modified
-   *     const result = await api.createTodo(newItem)
-   *     return result
+   *     await api.createTodo(newItem)
    *   } catch (error) {
    *     console.error('Insert failed:', error)
-   *     throw error // This will cause the transaction to fail
+   *     throw error // This will cause the transaction to rollback
    *   }
    * }
-   *
-   * @example
-   * // Insert handler with metadata
-   * onInsert: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.createTodo(mutation.modified, {
-   *     source: mutation.metadata?.source,
-   *     timestamp: mutation.createdAt
-   *   })
-   * }
    */
-  onInsert?: InsertMutationFn<T, TKey, TUtils, TReturn>
+  onInsert?:
+    | InsertMutationFn<T, TKey, TUtils, void>
+    // Return-value compatibility will be removed in v1.0.
+    | InsertMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
+   *
    * @example
    * // Basic update handler
    * onUpdate: async ({ transaction, collection }) => {
@@ -754,11 +799,24 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Update handler with partial updates
+   * // Update handler with refetch (Query Collection)
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const changes = mutation.changes // Only the changed fields
    *   await api.updateTodo(mutation.original.id, changes)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
+   * }
+   *
+   * @example
+   * // Update handler with sync wait (Electric Collection)
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.updateTodo(mutation.original.id, mutation.changes)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
@@ -769,6 +827,8 @@ export interface BaseCollectionConfig<
    *     changes: m.changes
    *   }))
    *   await api.updateTodos(updates)
+   *   await collection.utils.refetch()
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -784,11 +844,14 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onUpdate?: UpdateMutationFn<T, TKey, TUtils, TReturn>
+  onUpdate?:
+    | UpdateMutationFn<T, TKey, TUtils, void>
+    // Return-value compatibility will be removed in v1.0.
+    | UpdateMutationFn<T, TKey, TUtils, TReturn>
   /**
    * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
+   *
    * @example
    * // Basic delete handler
    * onDelete: async ({ transaction, collection }) => {
@@ -797,10 +860,23 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Delete handler with multiple items
+   * // Delete handler with refetch (Query Collection)
    * onDelete: async ({ transaction, collection }) => {
    *   const keysToDelete = transaction.mutations.map(m => m.key)
    *   await api.deleteTodos(keysToDelete)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
+   * }
+   *
+   * @example
+   * // Delete handler with sync wait (Electric Collection)
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.deleteTodo(mutation.original.id)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
@@ -827,7 +903,10 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+  onDelete?:
+    | DeleteMutationFn<T, TKey, TUtils, void>
+    // Return-value compatibility will be removed in v1.0.
+    | DeleteMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Specifies how to compare data in the collection.

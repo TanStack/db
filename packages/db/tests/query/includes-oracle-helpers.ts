@@ -2,6 +2,15 @@ import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 
+/**
+ * A controlled include source exposes only the environment operations the
+ * oracle grammar needs: atomic source batches and explicit startup settlement.
+ * Each write snapshots the row before it enters production, so later test code
+ * cannot mutate both the stimulus and an expected value through one reference.
+ * Query shape, route state, and expected nested results remain in the owning
+ * oracle; this helper is a driver, not a second model.
+ */
+
 export type OracleSyncChange<T> = {
   type: `insert` | `update` | `delete`
   value: T

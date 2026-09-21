@@ -2,26 +2,9 @@
 
 Companion to [Writing reliable oracle tests](oracle-tests.md). These notes keep evidence and deeper reading off the quick-start path. The historical entries describe archived reports and audits, not current failing tests or reruns performed for this guide.
 
-## A short glossary
-
-| Term | Meaning in this guide |
-| --- | --- |
-| Oracle | The rule or mechanism that judges behavior. |
-| Property or law | A claim expected to hold for the declared inputs and histories. |
-| Reference model | A simpler computation or state machine used to judge production. |
-| History | Starting conditions and a sequence of actions/events; may include their dependencies and timing. |
-| Driver | Test code that invokes production and controls relevant external events. |
-| Observation / trace | Recorded behavior; a trace preserves a sequence, not just its final state. |
-| Checkpoint / observation cut | The specific point at which a promise is checked. |
-| Projection / abstraction | Retaining the parts of concrete state relevant to a chosen judgment. |
-| Refinement | Implementation-visible behaviors are permitted by the specification; a sampled test is not a proof of this for all behaviors. |
-| Metamorphic relation | A justified relation between executions derived by a transformation. |
-| Partial oracle | A check of some promises, not the entire correct result. |
-| Reach witness | Evidence that the scenario exercised its claimed boundary. |
-| Fault control / mutant | A deliberate wrong answer or implementation change used to test sensitivity. |
-| Shrinking | Reducing a failing input/history while retaining the relevant failure. |
-| Bounded exhaustiveness | Every case within explicitly stated finite bounds, not every possible execution. |
-| Held-out challenge | A challenge not used to shape the design being tested. Once used for tuning, keep it but change the claim. |
+The shared terms used here are defined in the
+[project glossary](glossary.md). That glossary is the vocabulary owner for
+production code, models, tests, and design documents.
 
 ## Historical cases
 
@@ -34,7 +17,7 @@ These retained case notes come from the September 11–14, 2026 research archive
 | FIFO waiting versus a test's proposed liveness | Direct historical user choice accepted FIFO waiting. The expectation had to respect that choice; the passage does not establish a final execution result. | *August 24 history* (research archive), lines 247–285 |
 | Finite scores omit the predicate's tail | A model limited to scores ≤3 made `score > 3` falsely empty. Truly empty IN was a separate question. | *Early loss report* (research archive), lines 135–139 |
 | Source-owned ordering | Reported withdrawn accusation: sorting visible optimistic values modeled the wrong state for the promised position. | *Middle loss report* (research archive), lines 176–178 |
-| Ownership after rejected Promise | Reported lease obligation remained after Promise rejection; clearing ownership was not a valid repair for that API. A separate identity proposal compared a wrapper rather than the detached snapshot. Neither is a universal adapter rule. | *September 10 history* (research archive), lines 132–158 |
+| Ownership after rejected Promise | Reported acquisition-lease obligation remained after Promise rejection; clearing ownership was not a valid repair for that API. A separate identity proposal compared a wrapper rather than the detached snapshot. Neither is a universal adapter rule. | *September 10 history* (research archive), lines 132–158 |
 | Four receipt positions, two timing questions | Reported correction retained later pending peers for rejection timing, exact rejection identity and intact partial-prefix rows. The `allSettled` mutant died by timeout; terminal position alone cannot expose waiting for a later peer. | *August 29 history* (research archive), lines 564–611 |
 | Helpful repeated-page provider | Reported provider prefilter supplied unrequested progress. This followed a distinct joined-alias underfill finding; they are not one mechanism. | *September 8 history* (research archive), lines 207–225 |
 | Old-left/new-right publication | Reported asymmetric update exposed mixed graph state; copying evidence before cleanup preserved the local witness, not a universal deep snapshot. | *September 7 history* (research archive), lines 192–222 |
@@ -108,6 +91,4 @@ The guide combines historical reports, source-level audit findings, analytical c
 A supplied [testing-design gist](https://gist.github.com/KyleAMathews/72e0cb6f5f6bd36cac1332ea91893b44) influenced the archived grammar. The record initially treated a partial reading as insufficiently consequential, then corrected that judgment after the full text was considered. It added explicit input/recorder and cross-suite-premise obligations. The later record supersedes the earlier “no changes” assessment; source ingestion itself is not runtime validation. Its webhook account and example APIs were not independently executed for this guide. Its advice to broadly disable shrinking was not adopted.
 
 The guide's reference and ordered-comparison helpers are dependency-free JavaScript. The TLP partition rendering is an illustration; the archived SQLancer inventory establishes the strategy's broad query/recomposition relation, not an executed implementation of this example. The production loop is explicitly pseudocode. There is no runnable TanStack/fast-check integration recipe yet, and this guide must not be advertised as supplying one. The guide is accompanied by the repository's [coverage and closeout record](oracle-coverage.md). Historical archive titles above preserve provenance without pretending to be public permalinks. Runnable production examples are linked from that record; the guide's illustrative loop is not an executable integration recipe.
-
-
 

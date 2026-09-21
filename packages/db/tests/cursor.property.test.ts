@@ -6,6 +6,17 @@ import { buildCursor } from '../src/utils/cursor.js'
 import { evaluateReferenceExpression } from './reference-expression.js'
 import type { OrderBy } from '../src/query/ir.js'
 
+/**
+ * A cursor denotes the strict suffix after one ordered boundary.
+ *
+ * The reference compares candidate and boundary tuples directly, with explicit
+ * direction and null placement. Production builds an expression; the driver
+ * evaluates that expression against candidate rows and requires the same
+ * Boolean answer. Unsupported composite cursor construction must reject rather
+ * than silently approximate it. A retained local-snapshot path still checks
+ * multi-term nullable ordering without claiming composite cursor support.
+ */
+
 type Term = {
   direction: `asc` | `desc`
   nulls: `first` | `last`

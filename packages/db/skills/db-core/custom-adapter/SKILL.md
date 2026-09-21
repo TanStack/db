@@ -9,8 +9,8 @@ description: >
   (where, orderBy, limit, offset, cursor). Expression parsing:
   parseWhereExpression, parseOrderByExpression,
   extractSimpleComparisons, parseLoadSubsetOptions. Collection options creator
-  pattern. rowUpdateMode (partial vs full). Subscription lifecycle and cleanup
-  functions. Persisted sync metadata API (metadata.row and metadata.collection)
+  pattern. rowUpdateMode (partial vs full). Sync run, subscription lifecycle,
+  and cleanup functions. Persisted sync metadata API (metadata.row and metadata.collection)
   for storing per-row and per-collection adapter state.
 type: sub-skill
 library: db
@@ -23,6 +23,12 @@ sources:
 This skill builds on db-core and db-core/collection-setup. Read those first.
 
 # Custom Adapter Authoring
+
+Each call to an adapter's `sync()` function starts a **sync run**. The run owns
+the callbacks and resources installed by that call until its returned cleanup
+ends them. A sync run may make several backend requests or open a longer-lived
+provider session, so do not use “request” or “session” as a synonym for the
+run.
 
 ## Setup
 
@@ -344,7 +350,9 @@ If initial sync fails before it produces a usable snapshot, call
 `markError(error)` instead. This rejects readiness waits with the supplied cause
 and moves dependent live queries to the error state. Calling `markError()`
 without a cause remains supported and rejects with a generic collection-state
-error. A later successful sync can call `markReady()` to recover.
+error. Later successful work in the same sync run can call `markReady()` to
+recover. Cleanup ends that run; a restart invokes `sync()` again and starts a
+new one.
 
 Source: docs/guides/collection-options-creator.md
 
