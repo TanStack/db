@@ -19,6 +19,38 @@ import type {
 } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 
+/**
+ * # Does the incremental include graph equal full relationship recomputation?
+ *
+ * This is the central structural oracle for inline includes. Production updates
+ * nested results incrementally. The reference stores source rows in plain Maps
+ * and rebuilds the whole tree after every meaningful checkpoint.
+ *
+ * The suite protects five groups of laws:
+ *
+ * 1. Inserts, updates, deletes, and optimistic settlement match recomputation
+ *    at one to four include levels.
+ * 2. Rekey and reparent histories preserve route ownership through fresh,
+ *    shared, retired, restored, merged, and split routes.
+ * 3. Atomic and split full-row batches produce the same tree when they encode
+ *    the same logical source state.
+ * 4. Nested scalar materialization follows reference changes and shared paths.
+ * 5. Alpha-renaming, sibling order, and unrelated siblings do not change the
+ *    relevant result.
+ *
+ * These laws use a model graph, not one universal controller. The structural
+ * node recomputes relationship trees. A separate scalar-reference node follows
+ * explicit foreign keys. Metamorphic checks compare equivalent query forms.
+ * Scenario builders describe legal route histories, but they do not compute
+ * the expected result.
+ *
+ * The trace runner checks each intermediate cut that the contract exposes.
+ * Focused pinned histories preserve small boundary cases. Random or replayed
+ * campaigns explore longer action sequences and wider route values. Other
+ * include suites own Collection facades, demand lifetime, functional callbacks,
+ * and publication coherence.
+ */
+
 type IncludeDepth = 1 | 2 | 3 | 4
 
 type RootRow = {
@@ -223,6 +255,8 @@ function ensureActionsTargetRows(
   })
 }
 
+// This grammar constructs legal row histories. The Map model below, not the
+// grammar, decides their expected nested result.
 const scenarioArbitrary: fc.Arbitrary<Scenario> = depthArbitrary.chain(
   (depth) =>
     fc
@@ -1893,6 +1927,8 @@ type RouteDestination = {
   route: number
 }
 
+// Route lifecycle descriptors form a constrained design grammar. Their
+// constructors reject combinations that do not name a real lifecycle state.
 type RouteTransitionDescriptor = {
   row: 0 | 1
   stepsBefore?: ReadonlyArray<FullRowBatchStep>
@@ -3056,7 +3092,7 @@ function createRelationshipBatchShapeMatrix(
 
   for (const delivery of [`split`, `atomic`] as const) {
     for (const order of [`delete-insert`, `insert-delete`] as const) {
-      // Inserting the same public id before its existing row is retired is a
+      // Inserting the same public id before the batch retires its existing row is a
       // duplicate-key error, not a valid alternate delivery of the same final
       // state. The new-id cells exercise insert-before-delete in both forms.
       if (publicId === `same` && order === `insert-delete`) continue
@@ -4399,7 +4435,7 @@ describe(`includes recompute oracle`, () => {
               recomputeFullRowBatchScenario(candidate, candidate.steps.length),
             )
 
-            // Delivery boundaries and change order must not alter the final
+            // Delivery boundaries and change order must not affect the final
             // recompute semantics for one generated fixture.
             expect(finalStates.length).toBeGreaterThan(1)
             for (const finalState of finalStates.slice(1)) {
@@ -4861,26 +4897,15 @@ describe(`includes recompute oracle`, () => {
     },
   )
 
-  fcTest.prop([fc.constant(confirmedChildReorderSeed)], {
-    numRuns: 1,
-    seed: 2051245230,
-  })(
-    `regression seed: confirmed child reorder matches recomputation`,
-    expectScenarioMatches,
+  fcTest(`confirmed child reorder matches recomputation`, () =>
+    expectScenarioMatches(confirmedChildReorderSeed),
   )
 
-  fcTest.prop([fc.constant(sharedMaterializeSeed)], {
-    numRuns: 1,
-    seed: 1685,
-  })(
-    `shared scalar materialization preserves the deepest row`,
-    expectMaterializeScenarioMatches,
+  fcTest(`shared scalar materialization preserves the deepest row`, () =>
+    expectMaterializeScenarioMatches(sharedMaterializeSeed),
   )
 
-  fcTest.prop([fc.constant(`correlation-key-update`)], {
-    numRuns: 1,
-    seed: 1658,
-  })(`parent correlation-key update rematerializes children`, async () => {
+  fcTest(`parent correlation-key update rematerializes children`, async () => {
     const roots = createControlledCollection<RootRow>(`correlation-seed-roots`)
     const children = createControlledCollection<ChildRow>(
       `correlation-seed-children`,
@@ -4929,7 +4954,7 @@ describe(`includes recompute oracle`, () => {
     }
   })
 
-  fcTest.prop([fc.constant(`#1454`)], { numRuns: 1, seed: 1454 })(
+  fcTest(
     `alpha-renaming a duplicate sibling alias preserves results`,
     async () => {
       const roots = createControlledCollection<RootRow>(`alias-seed-roots`, [
@@ -5021,70 +5046,67 @@ describe(`includes recompute oracle`, () => {
     },
   )
 
-  fcTest.prop([fc.constant(`#1444`)], { numRuns: 1, seed: 1444 })(
-    `regression seed: optimistic child reorder matches recomputation`,
-    async () => {
-      const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
-        { id: 1, group: 1, value: 0, position: 0 },
-      ])
-      const children = createControlledCollection<ChildRow>(
-        `order-seed-children`,
-        [
+  fcTest(`optimistic child reorder matches recomputation`, async () => {
+    const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
+      { id: 1, group: 1, value: 0, position: 0 },
+    ])
+    const children = createControlledCollection<ChildRow>(
+      `order-seed-children`,
+      [
+        {
+          id: 1,
+          parentGroup: 1,
+          group: 1,
+          value: 1,
+          position: 0,
+        },
+        {
+          id: 2,
+          parentGroup: 1,
+          group: 1,
+          value: 2,
+          position: 1,
+        },
+      ],
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ root: roots.collection }).select(({ root }) => ({
+        id: root.id,
+        children: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, root.group))
+            .orderBy(({ child }) => child.position)
+            .select(({ child }) => ({
+              id: child.id,
+              position: child.position,
+            })),
+        ),
+      })),
+    )
+
+    const pending = new Set<PendingWork>()
+    await withPendingWorkCleanup(
+      pending,
+      [live, roots.collection, children.collection],
+      async () => {
+        await live.preload()
+        const transaction = children.collection.update([1, 2], (drafts) => {
+          drafts[0]!.position = 1
+          drafts[1]!.position = 0
+        })
+        trackPendingWork(pending, transaction, children.resolveSync)
+
+        expect(stripVirtualProperties(live.toArray)).toEqual([
           {
             id: 1,
-            parentGroup: 1,
-            group: 1,
-            value: 1,
-            position: 0,
+            children: [
+              { id: 2, position: 0 },
+              { id: 1, position: 1 },
+            ],
           },
-          {
-            id: 2,
-            parentGroup: 1,
-            group: 1,
-            value: 2,
-            position: 1,
-          },
-        ],
-      )
-      const live = createLiveQueryCollection((q) =>
-        q.from({ root: roots.collection }).select(({ root }) => ({
-          id: root.id,
-          children: toArray(
-            q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentGroup, root.group))
-              .orderBy(({ child }) => child.position)
-              .select(({ child }) => ({
-                id: child.id,
-                position: child.position,
-              })),
-          ),
-        })),
-      )
-
-      const pending = new Set<PendingWork>()
-      await withPendingWorkCleanup(
-        pending,
-        [live, roots.collection, children.collection],
-        async () => {
-          await live.preload()
-          const transaction = children.collection.update([1, 2], (drafts) => {
-            drafts[0]!.position = 1
-            drafts[1]!.position = 0
-          })
-          trackPendingWork(pending, transaction, children.resolveSync)
-
-          expect(stripVirtualProperties(live.toArray)).toEqual([
-            {
-              id: 1,
-              children: [
-                { id: 2, position: 0 },
-                { id: 1, position: 1 },
-              ],
-            },
-          ])
-        },
-      )
-    },
-  )
+        ])
+      },
+    )
+  })
 })

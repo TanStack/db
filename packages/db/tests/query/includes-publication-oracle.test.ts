@@ -13,6 +13,31 @@ import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
+/**
+ * # What makes a layered publication coherent?
+ *
+ * A source write can update a parent, its materialized children, and a query
+ * that reads the first query. The public contract does not permit a torn row at
+ * any one layer. When that layer invokes a listener, its installed reads,
+ * callback rows, and change payloads must describe the same complete result.
+ *
+ * A plain Map model recomputes both child arrays from current parent and child
+ * rows. The production driver builds two live-query layers. Q1 covers direct
+ * and joined source forms. Q2 covers pass-through, filter, order, and projection.
+ * After each synchronous source checkpoint, the oracle compares both layers
+ * with the model and checks each callback since the prior checkpoint.
+ *
+ * The action grammar covers parent-only changes, child-only changes, route
+ * moves, atomic replacement, optimistic confirmation and rollback, and two
+ * consecutive source writes. Fault controls corrupt transient reads, callback
+ * snapshots, optimistic state, and source-settled state. This proves that a
+ * final settled read alone is not the oracle.
+ *
+ * Q1 and Q2 can notify at different moments. Coherence applies within each
+ * callback and its own layer. The test does not require Q2 to advance while a
+ * Q1 callback is still running.
+ */
+
 type ParentRow = {
   id: number
   group: number
@@ -198,6 +223,8 @@ type PublicationContext = {
   }
 }
 
+// This model uses only source Maps, equality, and the declared child order. It
+// does not read either live query or any materialization state.
 function recomputeRows(context: PublicationContext): Array<PublishedRow> {
   return [...context.model.parents.values()]
     .sort((left, right) => left.id - right.id)
@@ -218,6 +245,8 @@ const publicationProjection: TraceProjection<
   PublicationContext,
   PublicationObservation
 > = {
+  // Observe both final reads and rows captured inside each listener. A later
+  // repair cannot hide a callback-time tear.
   observe: ({ queries, callbacks }) => ({
     q1: stripVirtualProperties(queries.q1.toArray) as Array<PublishedRow>,
     q2: stripVirtualProperties(queries.q2.toArray) as Array<PublishedRow>,
@@ -269,6 +298,9 @@ function createPublicationDriver(
   q2Shape: Q2Shape,
   checkpointOptimistic = false,
 ): TraceDriver<PublicationAction, PublicationContext> {
+  // The driver sends each action through real source, optimistic, graph, and
+  // Collection publication boundaries. The checkpoint marks each synchronous
+  // state that a caller can observe before the returned Promise settles.
   return {
     setup: () => {
       const parents = createControlledCollection(`publication-parents`, [
@@ -567,8 +599,8 @@ describe(`layered-query publication oracle`, () => {
           expect(callback).toBeDefined()
           callback!.rows[0]!.item.value = -999
           reached++
-          // The installed final reads still agree; only the captured callback
-          // was corrupted and then repaired before the write returned.
+          // The installed final reads still agree. This fault corrupts only the
+          // captured callback and repairs it before the write returns.
           const observed = publicationProjection.observe(context)
           const expected = publicationProjection.recompute(context)
           expect(observed.q1).toEqual(expected.q1)

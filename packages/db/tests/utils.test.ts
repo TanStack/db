@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { deepEquals } from '../src/utils'
+import { deepEquals, resetWarnings, warnOnce } from '../src/utils'
 import { normalizeError } from '../src/utils/error'
 import { isPromiseLike } from '../src/utils/type-guards'
 import {
@@ -34,6 +34,28 @@ describe(`normalizeError`, () => {
     for (const thrownValue of thrownValues) {
       expect(() => normalizeError(thrownValue)).not.toThrow()
       expect(normalizeError(thrownValue)).toEqual(new Error(`Unknown error`))
+    }
+  })
+})
+
+describe(`warnOnce`, () => {
+  it(`logs each warning key once and permits an explicit reset`, () => {
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    try {
+      resetWarnings()
+      warnOnce(`first`, `first message`)
+      warnOnce(`first`, `ignored replacement`)
+      warnOnce(`second`, `second message`)
+
+      expect(warn.mock.calls).toEqual([[`first message`], [`second message`]])
+
+      resetWarnings()
+      warnOnce(`first`, `after reset`)
+      expect(warn).toHaveBeenLastCalledWith(`after reset`)
+    } finally {
+      resetWarnings()
+      warn.mockRestore()
     }
   })
 })

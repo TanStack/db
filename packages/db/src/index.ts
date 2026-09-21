@@ -21,6 +21,8 @@ export * from './local-only'
 export * from './local-storage'
 export * from './errors'
 export { deepEquals } from './utils'
+/** @internal Used by first-party collection adapters. */
+export { warnOnce, resetWarnings } from './utils'
 export * from './paced-mutations'
 export * from './strategies/index.js'
 

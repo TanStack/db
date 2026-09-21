@@ -1,4 +1,18 @@
-/** Shared behavioral suite for every `useLiveInfiniteQuery` adapter. */
+/**
+ * Shared behavioral suite for every `useLiveInfiniteQuery` adapter.
+ *
+ * Histories vary source rows, visible page count, query parameters, collection
+ * identity, input form, request timing, failure, and unmount. The independent
+ * expectation is a finite ordered prefix sliced into fixed-size pages; the
+ * on-demand fixture recomputes requests from immutable source data rather than
+ * borrowing the hook's page cache. Every checkpoint checks the whole public
+ * page ledger, not only its newest page.
+ *
+ * A driver may differ in how its framework reaches the checkpoint. It may not
+ * differ in the value and lifecycle facts visible there. The suite tracks all
+ * handles, sources, and pending fetches so cleanup is itself part of the tested
+ * history instead of test-runner housekeeping.
+ */
 import { describe, expect, it, vi } from 'vitest'
 import { expectPageRows } from './page-laws'
 import { ScenarioLifetime } from './scenario-lifetime'

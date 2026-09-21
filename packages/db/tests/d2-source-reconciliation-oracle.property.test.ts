@@ -12,6 +12,22 @@ import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
+/**
+ * D2 source reconciliation turns source-key snapshots into exact signed row
+ * changes across graph lifetimes.
+ *
+ * The model has three separate nodes: authoritative source rows, production's
+ * sent-row memory, and an independently integrated weighted relation. Generated
+ * batches may lie about previous values, reuse equal keys of different JS
+ * types, replay rows, delete, truncate, tear down, and restart. The reference
+ * derives truth from the source-key map, never from reported previous values.
+ *
+ * After each cut the raw reconciled messages must integrate to the source
+ * relation, and a real live query must publish the same rows through both scan
+ * and index routes. This catches locally balanced messages that still leave the
+ * downstream graph wrong.
+ */
+
 type SourceRow = {
   id: number
   revision: number

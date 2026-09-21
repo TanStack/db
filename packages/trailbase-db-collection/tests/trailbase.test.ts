@@ -791,7 +791,7 @@ describe(`TrailBase Integration`, () => {
         },
       )
 
-      const updated = collection.update(data.id, (old: Data) => {
+      const updated = collection.update(data.id!, (old: Data) => {
         old.updated = updatedData.updated
       })
       outcomes.push(updated.isPersisted.promise)

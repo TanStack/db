@@ -7,10 +7,15 @@ import { readOracleRunConfig } from './oracle-config.js'
 import { oracleReplayManifest } from './oracle-replay-manifest.js'
 import type { OracleReplayWitness } from './oracle-replay-witness.js'
 
-// Run from the target package, with ordinary Vitest file/name filters:
-// TANSTACK_DB_ORACLE_SEED=42 TANSTACK_DB_ORACLE_PATH=0 \
-// TANSTACK_DB_ORACLE_PROPERTY=... node --import tsx tests/oracle-replay.ts tests/...
-// Legacy direct Vitest commands are unchanged and do not provide this guard.
+/**
+ * Guard one named replay in a real Vitest child process.
+ *
+ * The child inherits ordinary file/name filters but receives a private witness
+ * channel. Success requires both a zero Vitest exit and at least one completed,
+ * nonzero run for the exact manifest property, seed, and path. A skipped or
+ * filtered property therefore cannot look green. Direct Vitest commands remain
+ * valid discovery runs, but they do not make this replay-evidence claim.
+ */
 const config = readOracleRunConfig()
 const property = config.replayProperty
 if (property === undefined) {
