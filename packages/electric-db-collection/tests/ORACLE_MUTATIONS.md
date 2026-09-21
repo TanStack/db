@@ -83,7 +83,7 @@ a source wrapper rebuild the capability without forwarding the same complete
 Killed by: `fails fast when a persistence wrapper drops resume generation
 ownership` and `keeps generation ownership when a source wrapper
 shallow-forwards the persistence capability`. The direct-source control, `uses
-direct resume metadata when no persistence capability is present`, preserves
+direct resume metadata when persistence is explicitly null`, preserves
 the intentional no-capability path; completeness is required only after a
 persistence capability is advertised.
 

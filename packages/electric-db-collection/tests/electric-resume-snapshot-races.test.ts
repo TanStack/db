@@ -127,6 +127,7 @@ async function runRace(
   missingKeySetEvidence = false,
   startupReset: `none` | `tag-state` | `shape-identity` = `none`,
   metadataWrapper: `none` | `shallow-persistence` = `none`,
+  laterKeySetEvidence: `unchanged` | `unknown` | `missing` = `unchanged`,
 ): Promise<void> {
   const database = new DatabaseSync(`:memory:`)
   const driver = createDriver(database)
@@ -223,7 +224,8 @@ async function runRace(
               throw error
             }
             snapshotCalls++
-            if (snapshotCalls > 1) {
+            const isLaterSnapshot = snapshotCalls > 1
+            if (isLaterSnapshot) {
               laterSnapshotIncludedRows = args[1]?.includeRows
               if (startupReset !== `none`) {
                 resumeStateAtLaterSnapshot = (
@@ -234,6 +236,15 @@ async function runRace(
               await releaseLaterSnapshot.promise
             }
             const snapshot = await target.loadResumeSnapshot(...args)
+            if (isLaterSnapshot && laterKeySetEvidence !== `unchanged`) {
+              return {
+                ...snapshot,
+                keySet:
+                  laterKeySetEvidence === `unknown`
+                    ? { status: `unknown` as const }
+                    : undefined,
+              }
+            }
             return missingKeySetEvidence
               ? { ...snapshot, keySet: undefined }
               : snapshot
@@ -415,6 +426,13 @@ async function runRace(
       }
     } else {
       await vi.waitFor(() => expect(collection!.status).toBe(`error`))
+      if (laterKeySetEvidence !== `unchanged`) {
+        expect(collection._lifecycle.getSyncError()).toEqual(
+          expect.objectContaining({
+            message: `Electric persisted resume baseline could not be certified during hydration`,
+          }),
+        )
+      }
       await vi.waitFor(async () => {
         const metadata =
           await restartedAdapter.loadCollectionMetadata(collectionId)
@@ -429,9 +447,22 @@ async function runRace(
           expect(resumeState).toMatchObject({ kind: `reset` })
         }
       })
-      expect(Array.from(collection.values())).toEqual([])
+      // The persisted wrapper can apply the held baseline before Electric
+      // observes that its evidence was downgraded. Safety here means startup
+      // fails and never applies or publishes the queued stream batches.
+      const expectedErroredRows =
+        transition === `external-row-loss` &&
+        laterKeySetEvidence !== `unchanged`
+          ? [{ id: 2, name: `two` }]
+          : []
+      expect(
+        Array.from(collection.values(), ({ id, name }) => ({ id, name })),
+      ).toEqual(expectedErroredRows)
       expect(collection.status).not.toBe(`ready`)
-      expect(publications).toBe(0)
+      const publicationsBeforeLateDelivery = publications
+      if (laterKeySetEvidence === `unchanged`) {
+        expect(publicationsBeforeLateDelivery).toBe(0)
+      }
       const durableRowsBeforeLateDelivery = await restartedAdapter.loadSubset(
         collectionId,
         {},
@@ -452,11 +483,13 @@ async function runRace(
         { headers: { control: `up-to-date` } },
       ])
       await new Promise((resolve) => setTimeout(resolve, 0))
-      expect(Array.from(collection.values())).toEqual([])
+      expect(
+        Array.from(collection.values(), ({ id, name }) => ({ id, name })),
+      ).toEqual(expectedErroredRows)
       expect(await restartedAdapter.loadSubset(collectionId, {})).toEqual(
         durableRowsBeforeLateDelivery,
       )
-      expect(publications).toBe(0)
+      expect(publications).toBe(publicationsBeforeLateDelivery)
     }
     if (replacesUncertifiedBaseline) {
       expect(request.offset).toBeUndefined()
@@ -780,6 +813,30 @@ describe(`Electric resume snapshot races`, () => {
 
   it(`conservatively rejects a committed write between startup snapshots`, async () => {
     await runRace(`committed-write`)
+  })
+
+  it(`rejects row loss when later resume evidence becomes unknown`, async () => {
+    await runRace(
+      `external-row-loss`,
+      `eager`,
+      false,
+      false,
+      `none`,
+      `none`,
+      `unknown`,
+    )
+  })
+
+  it(`rejects row loss when later resume evidence becomes missing`, async () => {
+    await runRace(
+      `external-row-loss`,
+      `eager`,
+      false,
+      false,
+      `none`,
+      `none`,
+      `missing`,
+    )
   })
 
   it(`freshly replaces an unknown on-demand resume baseline`, async () => {

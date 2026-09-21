@@ -2065,12 +2065,16 @@ function createElectricSync<T extends Row<unknown>>(
           ? hydrateBaseline
             ? (async () => {
                 await hydrateBaseline()
+                const currentKeySetEvidence = getKeySetEvidence?.()
                 if (
-                  persistedKeySetEvidence?.status !== `incompatible` &&
-                  getKeySetEvidence?.()?.status === `incompatible`
+                  (canUsePersistedResume &&
+                    currentKeySetEvidence?.status !== `consistent`) ||
+                  (!canUsePersistedResume &&
+                    persistedKeySetEvidence?.status !== `incompatible` &&
+                    currentKeySetEvidence?.status === `incompatible`)
                 ) {
                   throw new Error(
-                    `Electric persisted resume baseline became incompatible during hydration`,
+                    `Electric persisted resume baseline could not be certified during hydration`,
                   )
                 }
               })()
@@ -2078,9 +2082,10 @@ function createElectricSync<T extends Row<unknown>>(
           : requiresKeySetCertification
             ? (async () => {
                 await certifyResumeSnapshot()
-                if (getKeySetEvidence?.()?.status === `incompatible`) {
+                const currentKeySetEvidence = getKeySetEvidence?.()
+                if (currentKeySetEvidence?.status !== `consistent`) {
                   throw new Error(
-                    `Electric persisted resume baseline became incompatible during certification`,
+                    `Electric persisted resume baseline could not be certified`,
                   )
                 }
               })()
