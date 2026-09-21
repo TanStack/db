@@ -10,6 +10,26 @@ import type { Message } from '@electric-sql/client'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 
+/**
+ * # Can reused Electric descriptors keep independent owners and tag state?
+ *
+ * One descriptor may create several Collections, but each Collection must own
+ * its sync run, acknowledgement waiters, persisted tag membership, and cleanup.
+ * A compatible resume restores selected tags; a fresh snapshot replaces them.
+ * A `move-out` removes a row only after its modeled tag membership is empty.
+ *
+ * Plain Maps and tag sets form the independent model. Generated histories vary
+ * descriptor form, sync mode, warm and cold restart, interrupted recovery,
+ * edits, and tag removals. The driver uses the real Collection, Electric
+ * adapter, persisted wrapper, and a controlled ShapeStream SDK boundary.
+ * Checkpoints compare coherent public snapshots, durable rows, recovery traces,
+ * acknowledgement ownership, and unsubscribe calls.
+ *
+ * Fixed and random campaigns retain replay inputs through the shared oracle
+ * configuration. The controlled stream does not establish live Electric HTTP
+ * framing or service behavior; those have separate owners.
+ */
+
 type TestRow = { id: number; name: string; stable: string }
 type TagExposure = { cut: string; rows: Array<TestRow> }
 

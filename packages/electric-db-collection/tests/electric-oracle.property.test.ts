@@ -20,6 +20,29 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
+/**
+ * # Does the Electric adapter preserve one coherent replica lifecycle?
+ *
+ * Electric delivers change messages, reset controls, offsets, handles, and
+ * snapshot availability through an SDK stream. The adapter must publish atomic
+ * callback cuts, wait for applied receipts before readiness, persist only a
+ * valid source prefix, reject unseen partial updates, and keep stale callbacks
+ * and metadata scoped to the sync run that created them.
+ *
+ * Independent Maps model rows, selected-tag membership, source commits, resume
+ * evidence, and persisted state. A controlled ShapeStream boundary supplies
+ * authored message partitions and settlement order. The real Collection,
+ * Query-backed persistence wrapper, metadata APIs, and cleanup run unchanged.
+ * Checks cover public and durable rows, exact batches, readiness, errors,
+ * metadata, waiters, stream ownership, and restart at named checkpoints.
+ *
+ * The suite retains fixed protocol histories, exhaustive contiguous
+ * partitions, fixed campaigns, random campaigns, and explicit seed/path replay
+ * for durability policies. Sensitivity checks reject missing prefix evidence.
+ * Installed-SDK HTTP delivery, PostgreSQL semantics, and live-service execution
+ * remain separate evidence.
+ */
+
 type OracleRow = Row & {
   id: number
   name: string
@@ -4232,9 +4255,15 @@ describe(`Electric adapter laws`, () => {
     const expected = rowsFromMap(
       foldSourceLedgerThrough(events, events.at(-1)!.offset),
     )
-    const omitted = expected.filter(([key]) => key !== ids[0])
-
-    expect(omitted).not.toEqual(expected)
+    // An intermediate durable checkpoint contains exactly its source prefix.
+    const prefix = rowsFromMap(
+      foldSourceLedgerThrough(events, events[0]!.offset),
+    )
+    expect(prefix).toEqual(expected.filter(([key]) => key === ids[0]))
+    // An offset outside the append-only ledger cannot justify resume state.
+    expect(() => foldSourceLedgerThrough(events, `absent_0`)).toThrow(
+      /absent from source ledger/,
+    )
   })
 
   it(`rehydrates persisted rows and resume metadata after cleanup and restart`, async () => {

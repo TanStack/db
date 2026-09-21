@@ -34,6 +34,29 @@ import type {
   SyncConfig,
 } from '@tanstack/db'
 
+/**
+ * # Does persisted wrapping preserve one Collection history?
+ *
+ * RFC #1659 invariant 7 requires each accepted sync transaction to become
+ * durable, remain replayable, or fail through an observable channel. Startup
+ * hydrates rows and metadata, buffers concurrent source work, then publishes a
+ * coherent public snapshot. Publication precedes durability, but a rejected
+ * durability boundary must reject its applied receipt and fail-stop that sync
+ * run without admitting a suffix.
+ *
+ * `foldDurabilityLedger` is the independent model for append-only source
+ * obligations. The history grammar crosses hydration, sibling commits, abort,
+ * receipt rejection, coordinator replay, cleanup, and restart. Tests drive the
+ * real persisted wrapper, Collection, coordinator, adapter, and local mutation
+ * path. Named checkpoints compare public and durable rows, metadata, receipt
+ * settlement, exact errors, call order, and lifecycle ownership.
+ *
+ * Fixed witnesses and bounded schedule tables preserve the known failure
+ * paths. The model's omission and reordering controls challenge its judgment.
+ * Native SQLite hosts, live Electric service behavior, adapter cancellation,
+ * and the open B2-failure/E4 schedule remain separate evidence.
+ */
+
 type Todo = {
   id: string
   title: string
