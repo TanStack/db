@@ -30,24 +30,24 @@ function continuation(
   return undefined
 }
 
-/** Test-only coordinator, not a replacement for the production window controller.
+/** Test-only demand model, not a replacement for the production window controller.
  * Acquire must settle at public-window completion. No source-lifecycle machinery
  * is duplicated here; the missing production bridge remains explicit. */
-export function createNoPeekSession(
+export function createNoPeekDemandModel(
   acquire: (limit: number) => Promise<PrefixPublication>,
   eligible = true,
 ) {
-  const leases = new Map<string, { count: number; peek: boolean }>()
+  const demands = new Map<string, { count: number; peek: boolean }>()
   const snapshots = new Map<string, WindowSnapshot>()
   const listeners = new Set<() => void>()
-  let generation = 0
+  let publicationGeneration = 0
   let tail = Promise.resolve()
   const desired = () =>
     Math.max(
-      ...[...leases.values()].map(({ count, peek }) => count + Number(peek)),
+      ...[...demands.values()].map(({ count, peek }) => count + Number(peek)),
     )
   return {
-    request(id: string, limit: number) {
+    retainDemand(id: string, limit: number) {
       if (
         !Number.isSafeInteger(limit) ||
         limit <= 0 ||
@@ -55,15 +55,18 @@ export function createNoPeekSession(
       ) {
         throw new RangeError(`Expected a positive safe window`)
       }
-      leases.set(id, { count: limit, peek: leases.get(id)?.peek ?? !eligible })
+      demands.set(id, {
+        count: limit,
+        peek: demands.get(id)?.peek ?? !eligible,
+      })
     },
-    release(id: string) {
-      leases.delete(id)
+    retireDemand(id: string) {
+      demands.delete(id)
       snapshots.delete(id)
     },
     reset() {
-      generation++
-      for (const lease of leases.values()) lease.peek = !eligible
+      publicationGeneration++
+      for (const demand of demands.values()) demand.peek = !eligible
       snapshots.clear()
     },
     subscribe(listener: () => void) {
@@ -74,14 +77,14 @@ export function createNoPeekSession(
       return snapshots.get(id)
     },
     refresh() {
-      const requestedGeneration = generation
+      const requestedPublicationGeneration = publicationGeneration
       const checkCurrent = () => {
-        if (requestedGeneration !== generation)
+        if (requestedPublicationGeneration !== publicationGeneration)
           throw new DOMException(`Publication was reset`, `AbortError`)
       }
       const result = tail.then(async () => {
         checkCurrent()
-        while (leases.size > 0) {
+        while (demands.size > 0) {
           const limit = desired()
           const publication = await acquire(limit)
           checkCurrent()
@@ -92,18 +95,18 @@ export function createNoPeekSession(
             throw new Error(`Publication does not match acquired prefix`)
           }
           const next = new Map<string, WindowSnapshot>()
-          for (const [id, lease] of leases) {
-            const more = continuation(publication, lease.count)
-            if (more === undefined) lease.peek = true
+          for (const [id, demand] of demands) {
+            const more = continuation(publication, demand.count)
+            if (more === undefined) demand.peek = true
             else
               next.set(id, {
-                rows: publication.rows.slice(0, lease.count),
+                rows: publication.rows.slice(0, demand.count),
                 hasNextPage: more,
               })
           }
-          // Keep fallback on each consumer's lease, including after deeper peers
+          // Keep fallback on each consumer's demand, including after deeper peers
           // release. A snapshot cache must also be invalidated by fact-only changes.
-          if (next.size !== leases.size) continue
+          if (next.size !== demands.size) continue
           for (const [id, snapshot] of next) snapshots.set(id, snapshot)
           for (const listener of listeners) listener()
           return

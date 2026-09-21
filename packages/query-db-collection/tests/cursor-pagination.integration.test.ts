@@ -14,7 +14,14 @@ import { createBackend } from './cursor-pagination/backend.js'
 import { expectedWindow } from './cursor-pagination/model.js'
 import type { Row, Scope } from './cursor-pagination/model.js'
 
-/** Real QueryClient -> QueryCollection -> graph -> shared window controller.
+/**
+ * # Does opaque pagination refine a real live-query window?
+ *
+ * This is the end-to-end path: QueryClient -> QueryCollection -> query graph ->
+ * shared window controller. The visible window and `hasNextPage` must match the
+ * independent full-relation model through growth, offset, ties, filtering,
+ * cancellation, replacement, and cache reuse.
+ *
  * The fixture endpoint supports prefix and rank-equality tie requests. Other
  * predicates and cursor expressions reject rather than silently dropping IR.
  * Each tie filter has its own opaque backend sequence, just like the prefix.

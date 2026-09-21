@@ -11,6 +11,8 @@ type LeafRow = { id: string; twigId: string }
 
 let fixtureId = 0
 
+// This regular tree separates result volume from facade ownership. Every root,
+// branch, and twig owns one outgoing relationship bucket. Leaves own none.
 function createRows(rootCount: number) {
   const roots: Array<RootRow> = []
   const branches: Array<BranchRow> = []

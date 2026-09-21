@@ -13,6 +13,22 @@ import {
 import type { CollectionSubscription } from '../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
+/**
+ * This is the boundary matrix for subscription acquisition and retirement.
+ *
+ * The model is a product of a small physical-acquisition state, logical owners,
+ * sync run, and callback entry point. The explicit cell table names every
+ * legal phase/entry pair and gives a reason for every excluded pair. Scenario
+ * drivers then add sync return/throw/resolve/reject, abort, release, peer loss,
+ * unsubscribe, cleanup, restart, and reentry in controlled orders.
+ *
+ * Each case declares the cells it may reach; undeclared reach is a failure and
+ * the final audit fails if a legal cell was never observed. Counts, signals,
+ * errors, readiness, owners, and rows are checked separately. This suite is the
+ * exhaustive boundary companion to the generated lifecycle histories, not a
+ * second copy of their transition implementation.
+ */
+
 type StartOutcome = `return` | `throw` | `resolve` | `reject`
 type StartReentry =
   | `none`
@@ -110,11 +126,11 @@ const acquisitionCellDefinitions = {
   },
   'retiring:markReady': {
     kind: `excluded`,
-    reason: `callbacks from a retiring session cannot restore availability`,
+    reason: `callbacks from a retiring sync run cannot restore availability`,
   },
   'retiring:markError': {
     kind: `excluded`,
-    reason: `callbacks from a retiring session are obsolete`,
+    reason: `callbacks from a retiring sync run are obsolete`,
   },
   'retiring:syncReturn': {
     kind: `excluded`,
@@ -123,7 +139,7 @@ const acquisitionCellDefinitions = {
   'unavailable:request': { kind: `covered` },
   'unavailable:resume': {
     kind: `excluded`,
-    reason: `same-session recovery uses markReady rather than defer resume`,
+    reason: `recovery in the same sync run uses markReady rather than defer resume`,
   },
   'unavailable:markReady': { kind: `covered` },
   'unavailable:markError': {
@@ -243,7 +259,7 @@ const physicalInteractionCellDefinitions = {
   },
   'obsolete:cleanup': {
     kind: `excluded`,
-    reason: `source cleanup retires the current session; obsolete work was retired once`,
+    reason: `sync-run cleanup retires the current sync run; obsolete work was retired once`,
   },
   'obsolete:unsubscribe': {
     kind: `excluded`,
@@ -251,7 +267,7 @@ const physicalInteractionCellDefinitions = {
   },
   'failed-release:release': {
     kind: `excluded`,
-    reason: `logical release already happened; the physical attempt is final`,
+    reason: `logical release already happened; the acquisition attempt is final`,
   },
   'failed-release:abort': {
     kind: `excluded`,
@@ -294,18 +310,18 @@ function observePhysicalInteraction(
   observedPhysicalInteractions.set(cell, interaction)
 }
 
-const requiredSourceSessionBoundaries = new Set([
+const requiredSyncRunBoundaries = new Set([
   `active-cleanup`,
   `restart-installed`,
   `cleanup-callback-reentry`,
   `obsolete-resource-return`,
 ] as const)
-type SourceSessionBoundary =
-  typeof requiredSourceSessionBoundaries extends Set<infer T> ? T : never
-const observedSourceSessionBoundaries = new Set<SourceSessionBoundary>()
+type SyncRunBoundary =
+  typeof requiredSyncRunBoundaries extends Set<infer T> ? T : never
+const observedSyncRunBoundaries = new Set<SyncRunBoundary>()
 
-function observeSourceSessionBoundary(boundary: SourceSessionBoundary): void {
-  observedSourceSessionBoundaries.add(boundary)
+function observeSyncRunBoundary(boundary: SyncRunBoundary): void {
+  observedSyncRunBoundaries.add(boundary)
 }
 
 const startOutcomes = [`return`, `throw`, `resolve`, `reject`] as const
@@ -364,24 +380,24 @@ const threeGenerationScenarios = ([`resolve`, `reject`] as const).flatMap(
 
 type AsyncRestartScenario = {
   demands: ReadonlyArray<`a` | `b`>
-  generationOutcomes: ReadonlyArray<ReadonlyArray<`resolve` | `reject`>>
+  syncRunOutcomes: ReadonlyArray<ReadonlyArray<`resolve` | `reject`>>
   settlementOrder: `obsolete-first` | `current-first` | `interleaved`
 }
 
 const asyncRestartCoverageScenarios = [
   {
     demands: [`a`],
-    generationOutcomes: [[`reject`]],
+    syncRunOutcomes: [[`reject`]],
     settlementOrder: `current-first`,
   },
   {
     demands: [`a`],
-    generationOutcomes: [[`resolve`], [`resolve`]],
+    syncRunOutcomes: [[`resolve`], [`resolve`]],
     settlementOrder: `obsolete-first`,
   },
   {
     demands: [`a`, `b`],
-    generationOutcomes: [
+    syncRunOutcomes: [
       [`reject`, `resolve`],
       [`resolve`, `reject`],
     ],
@@ -389,7 +405,7 @@ const asyncRestartCoverageScenarios = [
   },
   {
     demands: [`a`, `b`],
-    generationOutcomes: [
+    syncRunOutcomes: [
       [`resolve`, `resolve`],
       [`reject`, `reject`],
       [`resolve`, `resolve`],
@@ -406,7 +422,7 @@ const asyncRestartScenarioArbitrary: fc.Arbitrary<AsyncRestartScenario> = fc
   .chain((demands) =>
     fc.record({
       demands: fc.constant(demands),
-      generationOutcomes: fc.array(
+      syncRunOutcomes: fc.array(
         fc.array(fc.constantFrom(`resolve` as const, `reject` as const), {
           minLength: demands.length,
           maxLength: demands.length,
@@ -424,17 +440,17 @@ const asyncRestartScenarioArbitrary: fc.Arbitrary<AsyncRestartScenario> = fc
 if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
   fc.statistics(
     asyncRestartScenarioArbitrary,
-    ({ demands, generationOutcomes, settlementOrder }) => {
+    ({ demands, syncRunOutcomes, settlementOrder }) => {
       const realizesInterleaving =
         settlementOrder === `interleaved` &&
         demands.length > 1 &&
-        generationOutcomes.length > 1
+        syncRunOutcomes.length > 1
       return [
         `demands=${demands.length}`,
-        `generations=${generationOutcomes.length + 1}`,
-        `current=${generationOutcomes.at(-1)?.join(`+`)}`,
-        `mixed-current=${new Set(generationOutcomes.at(-1)).size > 1}`,
-        `obsolete-reject=${generationOutcomes
+        `sync-run-generations=${syncRunOutcomes.length + 1}`,
+        `current=${syncRunOutcomes.at(-1)?.join(`+`)}`,
+        `mixed-current=${new Set(syncRunOutcomes.at(-1)).size > 1}`,
+        `obsolete-reject=${syncRunOutcomes
           .slice(0, -1)
           .some((outcomes) => outcomes.includes(`reject`))}`,
         `requested-order=${
@@ -454,17 +470,17 @@ async function runAsyncRestartScenario(
   type DemandName = `a` | `b`
   type Row = { id: DemandName; version: number }
   type Attempt = {
-    session: number
+    syncRunGeneration: number
     demand: DemandName
     options: LoadSubsetOptions
     deferred: ReturnType<typeof createDeferred<void>>
   }
   type SettlementEvent = {
     attempt: Attempt
-    session: number
+    syncRunGeneration: number
     demand: DemandName
     outcome: `resolve` | `reject`
-    activeSession: number
+    activeSyncRunGeneration: number
   }
   const where = {
     a: new Func(`eq`, [new PropRef([`id`]), new Value(`a`)]),
@@ -479,23 +495,25 @@ async function runAsyncRestartScenario(
   const publications: Array<Array<Row>> = []
   const statuses: Array<string> = []
   const visible = new Map<string | number, Row>()
-  const unloads: Array<{ session: number; demand: DemandName }> = []
+  const unloads: Array<{ syncRunGeneration: number; demand: DemandName }> = []
   const settlements: Array<SettlementEvent> = []
   const settledAttempts = new Set<Attempt>()
   const publishedBeforeRetirement = new Set<number>()
-  const failures = scenario.generationOutcomes.map((_, generation) =>
+  const failures = scenario.syncRunOutcomes.map((_, restartIndex) =>
     scenario.demands.map(
-      (demand) => new Error(`session ${generation + 1} ${demand} failed`),
+      (demand) => new Error(`sync run ${restartIndex + 1} ${demand} failed`),
     ),
   )
-  let session = -1
+  let syncRunGeneration = -1
 
   const outcomeFor = (attempt: Attempt) =>
-    scenario.generationOutcomes[attempt.session - 1]![
+    scenario.syncRunOutcomes[attempt.syncRunGeneration - 1]![
       scenario.demands.indexOf(attempt.demand)
     ]!
   const failureFor = (attempt: Attempt) =>
-    failures[attempt.session - 1]![scenario.demands.indexOf(attempt.demand)]!
+    failures[attempt.syncRunGeneration - 1]![
+      scenario.demands.indexOf(attempt.demand)
+    ]!
 
   const settleAttempt = async (attempt: Attempt): Promise<void> => {
     const outcome = outcomeFor(attempt)
@@ -504,10 +522,10 @@ async function runAsyncRestartScenario(
     await flushPromises()
     settlements.push({
       attempt,
-      session: attempt.session,
+      syncRunGeneration: attempt.syncRunGeneration,
       demand: attempt.demand,
       outcome,
-      activeSession: session,
+      activeSyncRunGeneration: syncRunGeneration,
     })
     settledAttempts.add(attempt)
   }
@@ -516,8 +534,8 @@ async function runAsyncRestartScenario(
     id: `async-restart-lifecycle`,
     sync: {
       sync: (operations) => {
-        session++
-        const ownSession = session
+        syncRunGeneration++
+        const ownSyncRunGeneration = syncRunGeneration
         operations.markReady()
         return {
           loadSubset: (options) => {
@@ -526,7 +544,7 @@ async function runAsyncRestartScenario(
             const deferred = createDeferred<void>()
             void deferred.promise.catch(() => {})
             attempts.push({
-              session: ownSession,
+              syncRunGeneration: ownSyncRunGeneration,
               demand,
               options,
               deferred,
@@ -535,7 +553,7 @@ async function runAsyncRestartScenario(
               operations.begin()
               operations.write({
                 type: `insert`,
-                value: { id: demand, version: ownSession + 1 },
+                value: { id: demand, version: ownSyncRunGeneration + 1 },
               })
               const receipt = operations.commit()
               if (receipt !== true) return receipt
@@ -545,7 +563,10 @@ async function runAsyncRestartScenario(
           unloadSubset: (options) => {
             const demand = demandForWhere.get(options.where)
             if (!demand) throw new Error(`unknown async demand`)
-            unloads.push({ session: ownSession, demand })
+            unloads.push({
+              syncRunGeneration: ownSyncRunGeneration,
+              demand,
+            })
           },
         }
       },
@@ -584,7 +605,7 @@ async function runAsyncRestartScenario(
       subscription.requestSnapshot({ where: where[demand] })
     }
     for (const attempt of attempts.filter(
-      ({ session: value }) => value === 0,
+      ({ syncRunGeneration: value }) => value === 0,
     )) {
       attempt.deferred.resolve()
     }
@@ -598,11 +619,11 @@ async function runAsyncRestartScenario(
     )
 
     for (
-      let generation = 0;
-      generation < scenario.generationOutcomes.length;
-      generation++
+      let restartIndex = 0;
+      restartIndex < scenario.syncRunOutcomes.length;
+      restartIndex++
     ) {
-      const discardedSession = session
+      const discardedSyncRunGeneration = syncRunGeneration
       const prefixStart = publications.length
       const retainedVersion = publishedBeforeRetirement.size
         ? Math.max(...publishedBeforeRetirement) + 1
@@ -624,7 +645,8 @@ async function runAsyncRestartScenario(
       await collection.cleanup()
       assertRetainedPrefix()
       for (const attempt of attempts.filter(
-        ({ session: attemptSession }) => attemptSession === discardedSession,
+        ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+          attemptSyncRunGeneration === discardedSyncRunGeneration,
       )) {
         expect(attempt.options.signal?.aborted).toBe(true)
       }
@@ -632,72 +654,80 @@ async function runAsyncRestartScenario(
       assertRetainedPrefix()
       await flushPromises()
       assertRetainedPrefix()
-      const expectedSession = generation + 1
+      const expectedSyncRunGeneration = restartIndex + 1
       expect(
         attempts
           .filter(
-            ({ session: attemptSession }) => attemptSession <= expectedSession,
+            ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+              attemptSyncRunGeneration <= expectedSyncRunGeneration,
           )
-          .map(({ session: attemptSession, demand }) => ({
-            session: attemptSession,
+          .map(({ syncRunGeneration: attemptSyncRunGeneration, demand }) => ({
+            syncRunGeneration: attemptSyncRunGeneration,
             demand,
           })),
       ).toEqual(
-        Array.from({ length: expectedSession + 1 }, (_, attemptSession) =>
-          scenario.demands.map((demand) => ({
-            session: attemptSession,
-            demand,
-          })),
+        Array.from(
+          { length: expectedSyncRunGeneration + 1 },
+          (_, attemptSyncRunGeneration) =>
+            scenario.demands.map((demand) => ({
+              syncRunGeneration: attemptSyncRunGeneration,
+              demand,
+            })),
         ).flat(),
       )
 
       const publishesBeforeLaterRestart =
         scenario.settlementOrder === `interleaved` &&
-        generation === 0 &&
-        scenario.generationOutcomes.length > 1 &&
-        scenario.generationOutcomes[generation]!.every(
+        restartIndex === 0 &&
+        scenario.syncRunOutcomes.length > 1 &&
+        scenario.syncRunOutcomes[restartIndex]!.every(
           (outcome) => outcome === `resolve`,
         )
       if (publishesBeforeLaterRestart) {
         const publicationCount = publications.length
         for (const attempt of attempts.filter(
-          ({ session: attemptSession }) => attemptSession === expectedSession,
+          ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+            attemptSyncRunGeneration === expectedSyncRunGeneration,
         )) {
           await settleAttempt(attempt)
         }
         const expectedRows = [...scenario.demands]
           .sort((a, b) => a.localeCompare(b))
-          .map((id) => ({ id, version: expectedSession + 1 }))
+          .map((id) => ({ id, version: expectedSyncRunGeneration + 1 }))
         expect(
           [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
         ).toEqual(expectedRows)
         expect(publications.slice(publicationCount)).toEqual([expectedRows])
-        publishedBeforeRetirement.add(expectedSession)
+        publishedBeforeRetirement.add(expectedSyncRunGeneration)
       }
     }
 
-    const currentSession = scenario.generationOutcomes.length
+    const currentSyncRunGeneration = scenario.syncRunOutcomes.length
     expect(
-      attempts.map(({ session: attemptSession, demand }) => ({
-        session: attemptSession,
-        demand,
-      })),
-    ).toEqual(
-      Array.from({ length: currentSession + 1 }, (_, attemptSession) =>
-        scenario.demands.map((demand) => ({
-          session: attemptSession,
+      attempts.map(
+        ({ syncRunGeneration: attemptSyncRunGeneration, demand }) => ({
+          syncRunGeneration: attemptSyncRunGeneration,
           demand,
-        })),
+        }),
+      ),
+    ).toEqual(
+      Array.from(
+        { length: currentSyncRunGeneration + 1 },
+        (_, attemptSyncRunGeneration) =>
+          scenario.demands.map((demand) => ({
+            syncRunGeneration: attemptSyncRunGeneration,
+            demand,
+          })),
       ).flat(),
     )
     const obsolete = attempts.filter(
       (attempt) =>
-        attempt.session > 0 &&
-        attempt.session < currentSession &&
+        attempt.syncRunGeneration > 0 &&
+        attempt.syncRunGeneration < currentSyncRunGeneration &&
         !settledAttempts.has(attempt),
     )
     const current = attempts.filter(
-      ({ session: value }) => value === currentSession,
+      ({ syncRunGeneration: value }) => value === currentSyncRunGeneration,
     )
     const orderedAttempts =
       scenario.settlementOrder === `obsolete-first`
@@ -705,11 +735,11 @@ async function runAsyncRestartScenario(
         : scenario.settlementOrder === `current-first`
           ? [...current, ...obsolete]
           : attempts
-              .filter(({ session: value }) => value > 0)
+              .filter(({ syncRunGeneration: value }) => value > 0)
               .filter((attempt) => !settledAttempts.has(attempt))
               .sort((left, right) =>
                 left.demand === right.demand
-                  ? right.session - left.session
+                  ? right.syncRunGeneration - left.syncRunGeneration
                   : left.demand.localeCompare(right.demand),
               )
 
@@ -726,7 +756,7 @@ async function runAsyncRestartScenario(
       )
       const visibleVersion =
         currentComplete && currentSucceeded
-          ? currentSession + 1
+          ? currentSyncRunGeneration + 1
           : retainedVersion
       const expectedRows = [...scenario.demands]
         .sort((a, b) => a.localeCompare(b))
@@ -761,7 +791,8 @@ async function runAsyncRestartScenario(
 
     for (const attempt of orderedAttempts) {
       await settleAttempt(attempt)
-      if (attempt.session === currentSession) settledCurrent.push(attempt)
+      if (attempt.syncRunGeneration === currentSyncRunGeneration)
+        settledCurrent.push(attempt)
       assertObservableState()
     }
 
@@ -769,7 +800,7 @@ async function runAsyncRestartScenario(
       (attempt) => outcomeFor(attempt) === `resolve`,
     )
     const expectedVersion = currentSucceeded
-      ? currentSession + 1
+      ? currentSyncRunGeneration + 1
       : retainedVersion
     expect(
       [...visible.values()].sort((a, b) => a.id.localeCompare(b.id)),
@@ -800,8 +831,11 @@ async function runAsyncRestartScenario(
       expect(attempt.options.signal?.aborted).toBe(false)
     }
 
-    const finalScopes = settlements.map(({ session: attemptSession }) =>
-      attemptSession === currentSession ? `current` : `obsolete`,
+    const finalScopes = settlements.map(
+      ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+        attemptSyncRunGeneration === currentSyncRunGeneration
+          ? `current`
+          : `obsolete`,
     )
     const firstCurrent = finalScopes.indexOf(`current`)
     const lastCurrent = finalScopes.lastIndexOf(`current`)
@@ -817,31 +851,38 @@ async function runAsyncRestartScenario(
             : `interleaved`
     const currentOutcomes = settlements
       .filter(
-        ({ session: attemptSession }) => attemptSession === currentSession,
+        ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+          attemptSyncRunGeneration === currentSyncRunGeneration,
       )
       .map(({ outcome }) => outcome)
     expect(new Set(settlements.map(({ attempt }) => attempt)).size).toBe(
       settlements.length,
     )
     expect(settlements).toHaveLength(
-      attempts.filter(({ session: attemptSession }) => attemptSession > 0)
-        .length,
+      attempts.filter(
+        ({ syncRunGeneration: attemptSyncRunGeneration }) =>
+          attemptSyncRunGeneration > 0,
+      ).length,
     )
     const reach = new Set([
       `demands:${new Set(attempts.map(({ demand }) => demand)).size}`,
-      `sessions:${new Set(attempts.map(({ session: attemptSession }) => attemptSession)).size}`,
+      `sync-run-generations:${new Set(attempts.map(({ syncRunGeneration: attemptSyncRunGeneration }) => attemptSyncRunGeneration)).size}`,
       ...[...new Set(currentOutcomes)].map((outcome) => `current:${outcome}`),
       `mixed-current:${new Set(currentOutcomes).size > 1}`,
       `obsolete-reject:${settlements.some(
-        ({ session: attemptSession, outcome }) =>
-          attemptSession < currentSession && outcome === `reject`,
+        ({ syncRunGeneration: attemptSyncRunGeneration, outcome }) =>
+          attemptSyncRunGeneration < currentSyncRunGeneration &&
+          outcome === `reject`,
       )}`,
       ...(observedOrder ? [`order:${observedOrder}`] : []),
       `real-interleaving:${settlements.some(
-        ({ session: attemptSession, activeSession }) =>
-          attemptSession < currentSession &&
-          activeSession === attemptSession &&
-          publishedBeforeRetirement.has(attemptSession),
+        ({
+          syncRunGeneration: attemptSyncRunGeneration,
+          activeSyncRunGeneration,
+        }) =>
+          attemptSyncRunGeneration < currentSyncRunGeneration &&
+          activeSyncRunGeneration === attemptSyncRunGeneration &&
+          publishedBeforeRetirement.has(attemptSyncRunGeneration),
       )}`,
     ])
 
@@ -851,7 +892,7 @@ async function runAsyncRestartScenario(
     }
     expect(unloads).toEqual(
       scenario.demands.map((demand) => ({
-        session: currentSession,
+        syncRunGeneration: currentSyncRunGeneration,
         demand,
       })),
     )
@@ -874,7 +915,7 @@ async function runAsyncRestartScenario(
       collection.status === `cleaned-up` &&
       attempts.every(({ options }) => options.signal?.aborted === true)
     ) {
-      // Retire captured sessions before releasing any still-pending transport.
+      // Retire captured sync runs before releasing any still-pending transport.
       for (const { deferred } of attempts) deferred.resolve()
       try {
         await flushPromises()
@@ -906,7 +947,7 @@ async function runAsyncRestartScenario(
 /**
  * Exhaust the synchronous adapter-start boundary before adding more runtime
  * special cases. Logical demand is visible during this callback, but a
- * physical lease exists only if the callback returns.
+ * physical acquisition and its lease exist only if the callback returns.
  */
 describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`executes every required async restart regime`, async () => {
@@ -919,9 +960,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const required = [
       `demands:1`,
       `demands:2`,
-      `sessions:2`,
-      `sessions:3`,
-      `sessions:4`,
+      `sync-run-generations:2`,
+      `sync-run-generations:3`,
+      `sync-run-generations:4`,
       `current:resolve`,
       `current:reject`,
       `mixed-current:true`,
@@ -982,9 +1023,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   afterAll(() => {
     expect(observedAcquisitionCells).toEqual(legalAcquisitionCells)
     expect(observedPhysicalInteractions).toEqual(requiredPhysicalInteractions)
-    expect(observedSourceSessionBoundaries).toEqual(
-      requiredSourceSessionBoundaries,
-    )
+    expect(observedSyncRunBoundaries).toEqual(requiredSyncRunBoundaries)
     expect(observedFailureDeliverySuffixes).toEqual(
       requiredFailureDeliverySuffixes,
     )
@@ -1170,12 +1209,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const pending = createDeferred<void>()
       const loads: Array<LoadSubsetOptions> = []
       const attempts: Array<{
-        session: number
+        syncRunGeneration: number
         options: LoadSubsetOptions
         result: `peer-return` | `throw` | `pending` | `replay-return`
       }> = []
       const unloads: Array<LoadSubsetOptions> = []
-      const sourceCleanupSessions: Array<number> = []
+      const sourceCleanupSyncRuns: Array<number> = []
       const errors: Array<unknown> = []
       const statuses: Array<string> = []
       const controller = new AbortController()
@@ -1200,7 +1239,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                 loads.push(options)
                 if (options.where === peerWhere) {
                   attempts.push({
-                    session: 0,
+                    syncRunGeneration: 0,
                     options,
                     result: `peer-return`,
                   })
@@ -1209,21 +1248,29 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                 targetLoadCount++
                 if (targetLoadCount > 1) {
                   attempts.push({
-                    session: 0,
+                    syncRunGeneration: 0,
                     options,
                     result: `replay-return`,
                   })
                   return true
                 }
                 if (outcome === `throw`) {
-                  attempts.push({ session: 0, options, result: `throw` })
+                  attempts.push({
+                    syncRunGeneration: 0,
+                    options,
+                    result: `throw`,
+                  })
                   throw failure
                 }
-                attempts.push({ session: 0, options, result: `pending` })
+                attempts.push({
+                  syncRunGeneration: 0,
+                  options,
+                  result: `pending`,
+                })
                 return pending.promise
               },
               unloadSubset: (options) => unloads.push(options),
-              cleanup: () => sourceCleanupSessions.push(0),
+              cleanup: () => sourceCleanupSyncRuns.push(0),
             }
           },
         },
@@ -1282,7 +1329,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect.soft(errors).toEqual([failure])
       expect.soft(subscription.lastError).toBe(failure)
       expect.soft(targetAttempts[0]?.options).toBe(targetLoad)
-      expect.soft(targetAttempts[0]?.session).toBe(0)
+      expect.soft(targetAttempts[0]?.syncRunGeneration).toBe(0)
       expect
         .soft(targetAttempts[0]?.result)
         .toBe(outcome === `throw` ? `throw` : `pending`)
@@ -1330,7 +1377,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         if (outcome === `reject`) {
           expect.soft(replacement).not.toBe(targetLoad)
           expect.soft(replacement?.where).toBe(targetWhere)
-          expect.soft(targetAttempts[1]?.session).toBe(0)
+          expect.soft(targetAttempts[1]?.syncRunGeneration).toBe(0)
           expect.soft(targetAttempts[1]?.result).toBe(`replay-return`)
         } else {
           expect.soft(replacement).toBeUndefined()
@@ -1339,7 +1386,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         expect.soft(peerAttempts).toHaveLength(2)
         expect.soft(peerReplacement).not.toBe(peerLoad)
         expect.soft(peerReplacement?.where).toBe(peerWhere)
-        expect.soft(peerAttempts[1]?.session).toBe(0)
+        expect.soft(peerAttempts[1]?.syncRunGeneration).toBe(0)
         expect.soft(peerAttempts[1]?.result).toBe(`peer-return`)
         expect.soft(unloads).toHaveLength(outcome === `reject` ? 2 : 1)
       }
@@ -1385,7 +1432,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const terminalUnloads = [...unloads]
       const terminalStatuses = [...statuses]
       await collection.cleanup()
-      expect.soft(sourceCleanupSessions).toEqual([0])
+      expect.soft(sourceCleanupSyncRuns).toEqual([0])
       expect.soft(collection.status).toBe(`cleaned-up`)
       expect.soft(errors).toEqual([failure])
       expect.soft(subscription.lastError).toBe(failure)
@@ -1511,7 +1558,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let write!: (message: { type: `insert`; value: Row }) => void
       let commit!: () => void
       let truncate!: () => void
-      let syncSession = 0
+      let syncRunCount = 0
       let loadCount = 0
       const visible = new Map<string | number, Row>()
       const errors: Array<unknown> = []
@@ -1521,12 +1568,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         id: `cleanup-pending-replay-${outcome}`,
         sync: {
           sync: (operations) => {
-            syncSession++
+            syncRunCount++
             begin = operations.begin
             write = operations.write
             commit = operations.commit
             truncate = operations.truncate
-            if (syncSession > 1) {
+            if (syncRunCount > 1) {
               begin()
               write({ type: `insert`, value: { id: `row`, version: 3 } })
               commit()
@@ -1541,7 +1588,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                   value: { id: `row`, version: loadCount },
                 })
                 commit()
-                return loadCount === 1 || syncSession > 1
+                return loadCount === 1 || syncRunCount > 1
                   ? true
                   : replay.promise
               },
@@ -1577,7 +1624,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       await collection.cleanup()
       collection.startSyncImmediate()
-      expect(syncSession).toBe(2)
+      expect(syncRunCount).toBe(2)
       expect([...visible.values()]).toEqual([{ id: `row`, version: 3 }])
       expect(subscription.status).toBe(`loadingSubset`)
       await flushPromises()
@@ -1602,7 +1649,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     let begin!: () => void
     let write!: (message: { type: `insert`; value: Row }) => void
     let commit!: () => void
-    let syncSession = 0
+    let nextSyncRunGeneration = 0
     let loadCount = 0
     const loads: Array<LoadSubsetOptions> = []
     const unloads: Array<LoadSubsetOptions> = []
@@ -1611,7 +1658,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       id: `restart-surviving-demand`,
       sync: {
         sync: (operations) => {
-          syncSession++
+          nextSyncRunGeneration++
           begin = operations.begin
           write = operations.write
           commit = operations.commit
@@ -1656,7 +1703,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     expect(loads).toHaveLength(1)
     await flushPromises()
 
-    expect(syncSession).toBe(2)
+    expect(nextSyncRunGeneration).toBe(2)
     expect(loads).toHaveLength(2)
     expect(unloads).toEqual([])
     expect([...visible.values()]).toEqual([{ id: `row`, version: 2 }])
@@ -1670,21 +1717,28 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   it(`reacquires demand requested while the collection is cleaned up`, async () => {
     const oldWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`old`)])
     const newWhere = new Func(`eq`, [new PropRef([`id`]), new Value(`new`)])
-    let syncSession = 0
-    const loads: Array<{ session: number; options: LoadSubsetOptions }> = []
-    const unloads: Array<{ session: number; options: LoadSubsetOptions }> = []
+    let nextSyncRunGeneration = 0
+    const loads: Array<{
+      syncRunGeneration: number
+      options: LoadSubsetOptions
+    }> = []
+    const unloads: Array<{
+      syncRunGeneration: number
+      options: LoadSubsetOptions
+    }> = []
     const collection = createOnDemandCollection<{ id: string }>({
       id: `request-while-cleaned-up`,
       sync: {
         sync: ({ markReady }) => {
-          const session = syncSession++
+          const syncRunGeneration = nextSyncRunGeneration++
           markReady()
           return {
             loadSubset: (options) => {
-              loads.push({ session, options })
+              loads.push({ syncRunGeneration, options })
               return true
             },
-            unloadSubset: (options) => unloads.push({ session, options }),
+            unloadSubset: (options) =>
+              unloads.push({ syncRunGeneration, options }),
           }
         },
       },
@@ -1699,14 +1753,18 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     collection.startSyncImmediate()
     await flushPromises()
 
-    expect(loads.map(({ session }) => session)).toEqual([0, 1, 1])
+    expect(loads.map(({ syncRunGeneration }) => syncRunGeneration)).toEqual([
+      0, 1, 1,
+    ])
     expect(loads.slice(1).map(({ options }) => options.where)).toEqual([
       oldWhere,
       newWhere,
     ])
 
     subscription.unsubscribe()
-    expect(unloads.map(({ session }) => session)).toEqual([1, 1])
+    expect(unloads.map(({ syncRunGeneration }) => syncRunGeneration)).toEqual([
+      1, 1,
+    ])
     expect(unloads.map(({ options }) => options.where)).toEqual([
       oldWhere,
       newWhere,
@@ -1764,28 +1822,33 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         [oldWhere, `old`],
         [newWhere, `new`],
       ])
-      const loads: Array<{ session: number; demand: `old` | `new` }> = []
-      const unloads: Array<{ session: number; demand: `old` | `new` }> = []
-      let session = -1
+      const loads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
+      const unloads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
+      let nextSyncRunGeneration = -1
       let requestOnRestart = false
       const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-status-reentry`,
         sync: {
           sync: ({ markReady }) => {
-            session++
-            const adapterSession = session
+            const syncRunGeneration = ++nextSyncRunGeneration
             markReady()
             return {
               loadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown restart demand`)
-                loads.push({ session: adapterSession, demand })
+                loads.push({ syncRunGeneration, demand })
                 return true
               },
               unloadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown restart demand`)
-                unloads.push({ session: adapterSession, demand })
+                unloads.push({ syncRunGeneration, demand })
               },
             }
           },
@@ -1808,16 +1871,16 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
 
       expect(loads).toEqual([
-        { session: 0, demand: `old` },
-        { session: 1, demand: `old` },
-        { session: 1, demand: `new` },
+        { syncRunGeneration: 0, demand: `old` },
+        { syncRunGeneration: 1, demand: `old` },
+        { syncRunGeneration: 1, demand: `new` },
       ])
       expect(subscription.status).toBe(`ready`)
 
       subscription.unsubscribe()
       expect(unloads).toEqual([
-        { session: 1, demand: `old` },
-        { session: 1, demand: `new` },
+        { syncRunGeneration: 1, demand: `old` },
+        { syncRunGeneration: 1, demand: `new` },
       ])
       await collection.cleanup()
     },
@@ -1833,29 +1896,34 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         [oldWhere, `old`],
         [newWhere, `new`],
       ])
-      const loads: Array<{ session: number; demand: `old` | `new` }> = []
-      const unloads: Array<{ session: number; demand: `old` | `new` }> = []
+      const loads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
+      const unloads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
       const observed: Array<unknown> = []
-      let session = -1
+      let nextSyncRunGeneration = -1
       let requestOnReady = false
       const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-ready-reentry`,
         sync: {
           sync: ({ markReady }) => {
-            session++
-            const adapterSession = session
+            const syncRunGeneration = ++nextSyncRunGeneration
             markReady()
             return {
               loadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown ready demand`)
-                loads.push({ session: adapterSession, demand })
+                loads.push({ syncRunGeneration, demand })
                 return true
               },
               unloadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown ready unload`)
-                unloads.push({ session: adapterSession, demand })
+                unloads.push({ syncRunGeneration, demand })
               },
             }
           },
@@ -1884,9 +1952,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
 
       expect(loads).toEqual([
-        { session: 0, demand: `old` },
-        { session: 1, demand: `old` },
-        { session: 1, demand: `new` },
+        { syncRunGeneration: 0, demand: `old` },
+        { syncRunGeneration: 1, demand: `old` },
+        { syncRunGeneration: 1, demand: `new` },
       ])
       expect(observed).toEqual([expect.any(Promise)])
       expect(subscription.status).toBe(`ready`)
@@ -1894,8 +1962,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       removeReadyListener()
       subscription.unsubscribe()
       expect(unloads).toEqual([
-        { session: 1, demand: `old` },
-        { session: 1, demand: `new` },
+        { syncRunGeneration: 1, demand: `old` },
+        { syncRunGeneration: 1, demand: `new` },
       ])
       await collection.cleanup()
     },
@@ -1912,30 +1980,35 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         [oldWhere, `old`],
         [newWhere, `new`],
       ])
-      const loads: Array<{ session: number; demand: `old` | `new` }> = []
-      const unloads: Array<{ session: number; demand: `old` | `new` }> = []
+      const loads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
+      const unloads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
       const observed: Array<unknown> = []
-      let session = -1
+      let nextSyncRunGeneration = -1
       let requestOnError = false
       const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-error-reentry`,
         sync: {
           sync: ({ markReady }) => {
-            session++
-            const adapterSession = session
-            if (session === 1) throw syncFailure
+            const syncRunGeneration = ++nextSyncRunGeneration
+            if (syncRunGeneration === 1) throw syncFailure
             markReady()
             return {
               loadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown error demand`)
-                loads.push({ session: adapterSession, demand })
+                loads.push({ syncRunGeneration, demand })
                 return true
               },
               unloadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown error unload`)
-                unloads.push({ session: adapterSession, demand })
+                unloads.push({ syncRunGeneration, demand })
               },
             }
           },
@@ -1963,23 +2036,23 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(() => collection.startSyncImmediate()).toThrow(syncFailure)
       expect(observed).toEqual([expect.any(Promise)])
       expect(collection.status).toBe(`error`)
-      expect(loads).toEqual([{ session: 0, demand: `old` }])
+      expect(loads).toEqual([{ syncRunGeneration: 0, demand: `old` }])
 
       await collection.cleanup()
       collection.startSyncImmediate()
       await flushPromises()
       expect(loads).toEqual([
-        { session: 0, demand: `old` },
-        { session: 2, demand: `old` },
-        { session: 2, demand: `new` },
+        { syncRunGeneration: 0, demand: `old` },
+        { syncRunGeneration: 2, demand: `old` },
+        { syncRunGeneration: 2, demand: `new` },
       ])
       expect(subscription.status).toBe(`ready`)
 
       removeErrorListener()
       subscription.unsubscribe()
       expect(unloads).toEqual([
-        { session: 2, demand: `old` },
-        { session: 2, demand: `new` },
+        { syncRunGeneration: 2, demand: `old` },
+        { syncRunGeneration: 2, demand: `new` },
       ])
       await collection.cleanup()
     },
@@ -1995,29 +2068,34 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         [oldWhere, `old`],
         [newWhere, `new`],
       ])
-      const loads: Array<{ session: number; demand: `old` | `new` }> = []
-      const unloads: Array<{ session: number; demand: `old` | `new` }> = []
+      const loads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
+      const unloads: Array<{
+        syncRunGeneration: number
+        demand: `old` | `new`
+      }> = []
       const observed: Array<unknown> = []
-      let session = -1
+      let nextSyncRunGeneration = -1
       let requestDuringCleanup = false
       const collection = createOnDemandCollection<{ id: string }>({
         id: `adapter-cleanup-reentry`,
         sync: {
           sync: ({ markReady }) => {
-            session++
-            const adapterSession = session
+            const syncRunGeneration = ++nextSyncRunGeneration
             markReady()
             return {
               loadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown cleanup demand`)
-                loads.push({ session: adapterSession, demand })
+                loads.push({ syncRunGeneration, demand })
                 return true
               },
               unloadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown cleanup unload`)
-                unloads.push({ session: adapterSession, demand })
+                unloads.push({ syncRunGeneration, demand })
               },
               cleanup: () => {
                 if (!requestDuringCleanup) return
@@ -2027,7 +2105,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                   onLoadSubsetResult: (result) => observed.push(result),
                 })
                 reach(`retiring:request`)
-                observeSourceSessionBoundary(`cleanup-callback-reentry`)
+                observeSyncRunBoundary(`cleanup-callback-reentry`)
               },
             }
           },
@@ -2047,16 +2125,16 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
 
       expect(loads).toEqual([
-        { session: 0, demand: `old` },
-        { session: 1, demand: `old` },
-        { session: 1, demand: `new` },
+        { syncRunGeneration: 0, demand: `old` },
+        { syncRunGeneration: 1, demand: `old` },
+        { syncRunGeneration: 1, demand: `new` },
       ])
       expect(observed).toEqual([expect.any(Promise)])
 
       subscription.unsubscribe()
       expect(unloads).toEqual([
-        { session: 1, demand: `old` },
-        { session: 1, demand: `new` },
+        { syncRunGeneration: 1, demand: `old` },
+        { syncRunGeneration: 1, demand: `new` },
       ])
       await collection.cleanup()
     },
@@ -2589,15 +2667,15 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         | { status: `fulfilled`; value: unknown }
         | { status: `rejected`; error: unknown }
       const outcomes: Array<{ outcome: ResultOutcome }> = []
-      let session = 0
+      let nextSyncRunGeneration = 0
       let requestOnReady = false
       const collection = createOnDemandCollection<{ id: string }>({
         id: `ready-before-invalid-on-demand-return`,
         sync: {
           sync: ({ markReady }) => {
-            const ownSession = session++
+            const syncRunGeneration = nextSyncRunGeneration++
             markReady()
-            if (ownSession === 1) return
+            if (syncRunGeneration === 1) return
             return {
               loadSubset: (options) => {
                 loads.push(options)
@@ -2712,19 +2790,19 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )
 
   it(`retires resources returned after ready-callback cleanup invalidates sync`, async () => {
-    const cleanupSessions: Array<number> = []
-    let session = 0
+    const cleanupSyncRuns: Array<number> = []
+    let nextSyncRunGeneration = 0
     let cleanOnReady = false
     const collection = createOnDemandCollection<{ id: string }>({
       id: `obsolete-sync-return`,
       sync: {
         sync: ({ markReady }) => {
-          const ownSession = session++
+          const syncRunGeneration = nextSyncRunGeneration++
           markReady()
           return {
             loadSubset: () => true,
             unloadSubset: () => {},
-            cleanup: () => cleanupSessions.push(ownSession),
+            cleanup: () => cleanupSyncRuns.push(syncRunGeneration),
           }
         },
       },
@@ -2741,10 +2819,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
     cleanOnReady = true
     collection.startSyncImmediate()
-    observeSourceSessionBoundary(`obsolete-resource-return`)
+    observeSyncRunBoundary(`obsolete-resource-return`)
 
     expect(collection.status).toBe(`cleaned-up`)
-    expect(cleanupSessions).toEqual([0, 1])
+    expect(cleanupSyncRuns).toEqual([0, 1])
 
     removeReadyListener()
     subscription.unsubscribe()
@@ -2764,21 +2842,23 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const cleanups: Array<number> = []
       const loads: Array<number> = []
       const unloads: Array<number> = []
-      let session = -1
+      let syncRunGeneration = -1
       let retire = false
       const collection = createOnDemandCollection<{ id: string }>({
         sync: {
           sync: ({ markReady }) => {
-            const ownSession = ++session
+            const ownSyncRunGeneration = ++syncRunGeneration
             markReady()
-            if (ownSession === 1 && entry === `adapter-throw`) throw failure
+            if (ownSyncRunGeneration === 1 && entry === `adapter-throw`) {
+              throw failure
+            }
             return {
               loadSubset: () => {
-                loads.push(ownSession)
+                loads.push(ownSyncRunGeneration)
                 return true
               },
-              unloadSubset: () => unloads.push(ownSession),
-              cleanup: () => cleanups.push(ownSession),
+              unloadSubset: () => unloads.push(ownSyncRunGeneration),
+              cleanup: () => cleanups.push(ownSyncRunGeneration),
             }
           },
         },
@@ -2789,7 +2869,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       let removeListener = () => {}
       try {
         await collection.cleanup()
-        const retireSession = () => {
+        const retireSyncRun = () => {
           if (!retire) return
           retire = false
           void collection.cleanup()
@@ -2798,10 +2878,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         }
         removeListener =
           entry === `ready-effect-throw`
-            ? collection.onFirstReady(retireSession)
+            ? collection.onFirstReady(retireSyncRun)
             : collection.on(
                 entry === `loading` ? `status:loading` : `status:ready`,
-                retireSession,
+                retireSyncRun,
               )
         retire = true
         if (entry === `adapter-throw` || entry === `ready-effect-throw`) {
@@ -2815,7 +2895,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         const returnsObsoleteCleanup =
           entry === `ready` || entry === `ready-effect-throw`
         expect(cleanups).toEqual(returnsObsoleteCleanup ? [0, 1] : [0])
-        expect(session).toBe(
+        expect(syncRunGeneration).toBe(
           entry === `loading` ? (restart ? 1 : 0) : restart ? 2 : 1,
         )
 
@@ -2823,9 +2903,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           subscription.requestSnapshot({
             where: new Func(`eq`, [new PropRef([`id`]), new Value(`row`)]),
           })
-          expect(loads).toEqual([session])
+          expect(loads).toEqual([syncRunGeneration])
           subscription.unsubscribe()
-          expect(unloads).toEqual([session])
+          expect(unloads).toEqual([syncRunGeneration])
         } else {
           expect(loads).toEqual([])
           expect(unloads).toEqual([])
@@ -2840,19 +2920,19 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
   acquisitionCase(
     [`starting:markError`, `unavailable:markReady`],
-    `retains demand requested during initial error for same-session recovery`,
+    `retains demand requested during initial error for recovery in the same sync run`,
     async (reach) => {
       const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
       const loads: Array<LoadSubsetOptions> = []
       const observed: Array<unknown> = []
-      let syncSession = 0
+      let syncRunCount = 0
       let recover!: () => void
       const collection = createOnDemandCollection<{ id: string }>({
         id: `sync-entry-error-ready-recovery`,
         startSync: false,
         sync: {
           sync: ({ markError, markReady }) => {
-            if (syncSession++ === 0) {
+            if (syncRunCount++ === 0) {
               markReady()
               return {
                 loadSubset: (options) => {
@@ -3100,7 +3180,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  it(`re-enables an installed loader after same-session initial recovery`, async () => {
+  it(`re-enables an installed loader after initial recovery in the same sync run`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const loads: Array<LoadSubsetOptions> = []
     let markError!: (error: unknown) => void
@@ -3323,12 +3403,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
   it(`retires restart loading when the replacement sync fails`, async () => {
     const syncFailure = new Error(`replacement sync failed`)
-    let session = 0
+    let nextSyncRunGeneration = 0
     const collection = createOnDemandCollection<{ id: string }>({
       id: `failed-sync-restart`,
       sync: {
         sync: ({ markReady }) => {
-          if (session++ > 0) throw syncFailure
+          if (nextSyncRunGeneration++ > 0) throw syncFailure
           markReady()
           return { loadSubset: () => true }
         },
@@ -3350,7 +3430,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
   })
 
-  it(`retires failed physical release with its source session cleanup`, async () => {
+  it(`retires failed acquisition release with its sync run cleanup`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
     const releaseFailure = new Error(`release failed`)
     let unloads = 0
@@ -3382,7 +3462,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
     expect(unloads).toBe(1)
     expect(sourceCleanups).toBe(1)
-    observeSourceSessionBoundary(`active-cleanup`)
+    observeSyncRunBoundary(`active-cleanup`)
 
     await collection.cleanup()
     expect(unloads).toBe(1)
@@ -3585,22 +3665,22 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
   })
 
-  it(`does not repeat failed cleanup through a replacement adapter session`, async () => {
+  it(`does not repeat failed cleanup through a replacement sync run`, async () => {
     const where = new Func(`eq`, [new PropRef([`id`]), new Value(`row`)])
-    let syncSession = 0
-    const unloadSessions: Array<number> = []
-    const releaseFailure = new Error(`old session release failed`)
+    let nextSyncRunGeneration = 0
+    const unloadSyncRunGenerations: Array<number> = []
+    const releaseFailure = new Error(`old sync run release failed`)
     const collection = createOnDemandCollection<{ id: string }>({
-      id: `cleanup-debt-session`,
+      id: `cleanup-debt-sync-run`,
       sync: {
         sync: ({ markReady }) => {
-          const session = syncSession++
+          const syncRunGeneration = nextSyncRunGeneration++
           markReady()
           return {
             loadSubset: () => true,
             unloadSubset: () => {
-              unloadSessions.push(session)
-              if (session === 0) throw releaseFailure
+              unloadSyncRunGenerations.push(syncRunGeneration)
+              if (syncRunGeneration === 0) throw releaseFailure
             },
           }
         },
@@ -3617,7 +3697,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await flushPromises()
     subscription.unsubscribe()
 
-    expect(unloadSessions).toEqual([0])
+    expect(unloadSyncRunGenerations).toEqual([0])
     await collection.cleanup()
   })
 
@@ -3637,26 +3717,31 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const failure = new Error(`restart acquisition failed`)
       const pending = createDeferred<void>()
       void pending.promise.catch(() => {})
-      const loads: Array<{ session: number; demand: DemandName }> = []
-      const unloads: Array<{ session: number; demand: DemandName }> = []
+      const loads: Array<{
+        syncRunGeneration: number
+        demand: DemandName
+      }> = []
+      const unloads: Array<{
+        syncRunGeneration: number
+        demand: DemandName
+      }> = []
       const sourceCleanups: Array<number> = []
       const errors: Array<unknown> = []
-      let session = -1
+      let nextSyncRunGeneration = -1
       let ranReentry = false
 
       const collection = createOnDemandCollection<{ id: string }>({
         id: `restart-${outcome}-${reentry}`,
         sync: {
           sync: ({ markReady }) => {
-            session++
-            const adapterSession = session
+            const syncRunGeneration = ++nextSyncRunGeneration
             markReady()
             return {
               loadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown restart demand`)
-                loads.push({ session: adapterSession, demand })
-                if (adapterSession === 0 || demand === `peer`) return true
+                loads.push({ syncRunGeneration, demand })
+                if (syncRunGeneration === 0 || demand === `peer`) return true
                 if (!ranReentry) {
                   ranReentry = true
                   if (reentry === `release-self`) {
@@ -3676,9 +3761,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
               unloadSubset: (options) => {
                 const demand = demandForWhere.get(options.where)
                 if (!demand) throw new Error(`unknown restart demand`)
-                unloads.push({ session: adapterSession, demand })
+                unloads.push({ syncRunGeneration, demand })
               },
-              cleanup: () => sourceCleanups.push(adapterSession),
+              cleanup: () => sourceCleanups.push(syncRunGeneration),
             }
           },
         },
@@ -3697,7 +3782,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(sourceCleanups).toEqual([0])
       observePhysicalInteraction(`active:cleanup`, `retire`)
       collection.startSyncImmediate()
-      observeSourceSessionBoundary(`restart-installed`)
+      observeSyncRunBoundary(`restart-installed`)
       await flushPromises()
       if (outcome === `resolve`) pending.resolve()
       if (outcome === `reject`) pending.reject(failure)
@@ -3710,10 +3795,12 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         reentry !== `unsubscribe` &&
         reentry !== `cleanup`
       expect(loads).toEqual([
-        { session: 0, demand: `target` },
-        { session: 0, demand: `peer` },
-        { session: 1, demand: `target` },
-        ...(peerStarts ? [{ session: 1, demand: `peer` as const }] : []),
+        { syncRunGeneration: 0, demand: `target` },
+        { syncRunGeneration: 0, demand: `peer` },
+        { syncRunGeneration: 1, demand: `target` },
+        ...(peerStarts
+          ? [{ syncRunGeneration: 1, demand: `peer` as const }]
+          : []),
       ])
       expect(errors).toEqual(
         (outcome === `throw` || outcome === `reject`) && targetSurvives
@@ -3724,12 +3811,14 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       if (reentry !== `unsubscribe`) subscription.unsubscribe()
       expect(unloads).toEqual([
         ...(targetEstablished && !targetSurvives
-          ? [{ session: 1, demand: `target` as const }]
+          ? [{ syncRunGeneration: 1, demand: `target` as const }]
           : []),
         ...(targetEstablished && targetSurvives
-          ? [{ session: 1, demand: `target` as const }]
+          ? [{ syncRunGeneration: 1, demand: `target` as const }]
           : []),
-        ...(peerStarts ? [{ session: 1, demand: `peer` as const }] : []),
+        ...(peerStarts
+          ? [{ syncRunGeneration: 1, demand: `peer` as const }]
+          : []),
       ])
       await collection.cleanup()
       expect(sourceCleanups).toEqual([0, 1])
@@ -3893,30 +3982,30 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   )
 
   it.each(threeGenerationScenarios)(
-    `fences three generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
+    `fences three sync-run generations for $obsoleteOutcome/$currentOutcome settled $settlementOrder`,
     async ({ obsoleteOutcome, currentOutcome, settlementOrder }) => {
       type Row = { id: string; version: number }
       const obsolete = createDeferred<void>()
       const current = createDeferred<void>()
       void obsolete.promise.catch(() => {})
       void current.promise.catch(() => {})
-      const obsoleteFailure = new Error(`obsolete generation failed`)
-      const currentFailure = new Error(`current generation failed`)
+      const obsoleteFailure = new Error(`obsolete sync run failed`)
+      const currentFailure = new Error(`current sync run failed`)
       const visible = new Map<string | number, Row>()
       const errors: Array<unknown> = []
-      const unloadSessions: Array<number> = []
-      let session = -1
+      const unloadSyncRunGenerations: Array<number> = []
+      let syncRunGeneration = -1
 
       const collection = createOnDemandCollection<Row>({
-        id: `three-generation-${obsoleteOutcome}-${currentOutcome}-${settlementOrder}`,
+        id: `three-sync-run-generations-${obsoleteOutcome}-${currentOutcome}-${settlementOrder}`,
         sync: {
           sync: (operations) => {
-            session++
-            const ownSession = session
+            syncRunGeneration++
+            const ownSyncRunGeneration = syncRunGeneration
             operations.markReady()
             return {
               loadSubset: (options) => {
-                if (ownSession === 0) {
+                if (ownSyncRunGeneration === 0) {
                   operations.begin()
                   operations.write({
                     type: `insert`,
@@ -3925,24 +4014,28 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                   operations.commit(options.signal)
                   return true
                 }
-                const gate = ownSession === 1 ? obsolete : current
+                const gate = ownSyncRunGeneration === 1 ? obsolete : current
                 const outcome =
-                  ownSession === 1 ? obsoleteOutcome : currentOutcome
+                  ownSyncRunGeneration === 1 ? obsoleteOutcome : currentOutcome
                 const failure =
-                  ownSession === 1 ? obsoleteFailure : currentFailure
+                  ownSyncRunGeneration === 1 ? obsoleteFailure : currentFailure
                 return gate.promise.then(() => {
                   if (outcome === `reject`) throw failure
                   operations.begin()
                   operations.write({
                     type: `insert`,
-                    value: { id: `row`, version: ownSession + 1 },
+                    value: {
+                      id: `row`,
+                      version: ownSyncRunGeneration + 1,
+                    },
                   })
                   const receipt = operations.commit(options.signal)
                   if (receipt !== true) return receipt
                   return undefined
                 })
               },
-              unloadSubset: () => unloadSessions.push(ownSession),
+              unloadSubset: () =>
+                unloadSyncRunGenerations.push(ownSyncRunGeneration),
             }
           },
         },
@@ -4007,7 +4100,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       expect(subscription.status).toBe(`ready`)
 
       subscription.unsubscribe()
-      expect(unloadSessions).toEqual([2])
+      expect(unloadSyncRunGenerations).toEqual([2])
       await collection.cleanup()
     },
   )
@@ -4228,7 +4321,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     numRuns: 30 * multiplier,
     seed: 1_657_002,
   })(
-    `fences async demand settlements across restart generations for a fixed seed`,
+    `fences async demand settlements across sync-run generations for a fixed seed`,
     async (scenario) => {
       await runAsyncRestartScenario(scenario)
     },
@@ -4243,7 +4336,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       `subscription-lifecycle.async-restart`,
     ),
   )(
-    `fences async demand settlements across restart generations for a random or replayed seed`,
+    `fences async demand settlements across sync-run generations for a random or replayed seed`,
     async (scenario) => {
       await runAsyncRestartScenario(scenario)
     },

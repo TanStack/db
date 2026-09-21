@@ -1,5 +1,41 @@
 import { fc } from '@fast-check/vitest'
 
+/**
+ * # Which subscription histories are legal?
+ *
+ * A logical demand owns at most one current physical acquisition. Acquisition
+ * work may outlive that demand after abort, release, restart, or cleanup. The
+ * subscription must therefore track logical owners and acquisition attempts as
+ * separate nodes. A sync run groups attempts that can publish one private
+ * replacement. A replay generation orders replacements in that sync run.
+ *
+ * Commands form the history grammar. The model's `request` command combines a
+ * new logical owner with any acquisition attempt it starts. Its `release`
+ * command combines demand retirement with release of that owner's acquisition
+ * lease. `abort` only requests cancellation; it does not retire the owner.
+ * `settle` changes an acquisition attempt. `truncate` starts a private
+ * replacement. `restart`, `cleanup`, and `unsubscribe` change the enclosing
+ * sync run. The reducer is a pure reference machine: it never calls an
+ * adapter and never reads production state.
+ *
+ * The model is intentionally one graph rather than one model per assertion.
+ * Ownership decides which attempts are live; attempts decide readiness and
+ * replacement authority; authority decides publication. Splitting those laws
+ * would hide the cross-boundary histories this oracle exists to test. Row
+ * contents remain outside this grammar and have their own publication model.
+ *
+ * Pinned histories name important paths. Generated histories explore adjacent
+ * legal commands with fixed and random seeds. The drivers compare production
+ * loads, unloads, results, status, errors, and publication against this trace.
+ *
+ * `LifecycleAttempt` is deliberately broader than production's
+ * `SubsetAcquisition`: it begins when `loadSubset` is invoked, including a
+ * synchronous throw that creates no acquisition or acquisition lease. Its
+ * `syncRunGeneration` and `replayGeneration` map to production's
+ * sync-run and truncate-replay generations. These are model projections,
+ * not renamed production states.
+ */
+
 export type DemandName = `a` | `b`
 export type AttemptScope = `current` | `obsolete`
 export type AttemptAge = `oldest` | `newest`
@@ -57,8 +93,8 @@ export type LifecycleAttempt = {
   id: number
   ownerId: number
   demand: DemandName
-  session: number
-  replay: number
+  syncRunGeneration: number
+  replayGeneration: number
   outcome?: `resolve` | `reject`
   gating: boolean
   inReplacement: boolean
@@ -69,11 +105,11 @@ export type LifecycleAttempt = {
 
 export type LifecycleLoadEvent = Pick<
   LifecycleAttempt,
-  `id` | `demand` | `session` | `replay`
+  `id` | `demand` | `syncRunGeneration` | `replayGeneration`
 >
 export type LifecycleUnloadEvent = {
   attemptId: number
-  handlerSession: number
+  handlerSyncRunGeneration: number
 }
 export type LifecycleErrorEvent = { attemptId: number; error: Error }
 export type LifecycleResultKind = `promise` | `true`
@@ -94,8 +130,8 @@ export type LifecycleModel = {
   cancellation: `manual` | `reject`
   active: boolean
   unsubscribed: boolean
-  session: number
-  replay: number
+  syncRunGeneration: number
+  replayGeneration: number
   publicationBarrierOpen: boolean
   nextOwnerId: number
   nextAttemptId: number
@@ -132,8 +168,8 @@ export function createLifecycleModel(
     cancellation,
     active: true,
     unsubscribed: false,
-    session: 0,
-    replay: 0,
+    syncRunGeneration: 0,
+    replayGeneration: 0,
     publicationBarrierOpen: false,
     nextOwnerId: 0,
     nextAttemptId: 0,
@@ -192,8 +228,8 @@ function startAttempt(
     id,
     ownerId: owner.id,
     demand: owner.demand,
-    session: model.session,
-    replay: model.replay,
+    syncRunGeneration: model.syncRunGeneration,
+    replayGeneration: model.replayGeneration,
     ...(model.acquisitionMode === `sync-success`
       ? { outcome: `resolve` as const }
       : {}),
@@ -207,27 +243,27 @@ function startAttempt(
   }
   model.attempts.push(attempt)
   model.reach.add(
-    `attempt-session:${attempt.session === 0 ? `initial` : `restarted`}`,
+    `attempt-sync-run:${attempt.syncRunGeneration === 0 ? `initial` : `restarted`}`,
   )
   model.reach.add(
-    `attempt-replay:${attempt.replay === 0 ? `initial` : `replayed`}`,
+    `attempt-replay:${attempt.replayGeneration === 0 ? `initial` : `replayed`}`,
   )
   model.reach.add(
-    `attempt-location:${attempt.session === 0 ? `initial` : `restarted`}:${attempt.replay === 0 ? `initial` : `replayed`}`,
+    `attempt-location:${attempt.syncRunGeneration === 0 ? `initial` : `restarted`}:${attempt.replayGeneration === 0 ? `initial` : `replayed`}`,
   )
   model.loads.push({
     id,
     demand: attempt.demand,
-    session: attempt.session,
-    replay: attempt.replay,
+    syncRunGeneration: attempt.syncRunGeneration,
+    replayGeneration: attempt.replayGeneration,
   })
   if (trace) {
     model.trace.push({
       type: `load`,
       id,
       demand: attempt.demand,
-      session: attempt.session,
-      replay: attempt.replay,
+      syncRunGeneration: attempt.syncRunGeneration,
+      replayGeneration: attempt.replayGeneration,
     })
   }
   owner.attemptId = id
@@ -247,12 +283,15 @@ function retireAttempt(
   attempt.reportable = false
   abortAttempt(model, attempt)
   if (options.unload) {
-    model.unloads.push({ attemptId: attempt.id, handlerSession: model.session })
+    model.unloads.push({
+      attemptId: attempt.id,
+      handlerSyncRunGeneration: model.syncRunGeneration,
+    })
     if (options.trace !== false) {
       model.trace.push({
         type: `unload`,
         attemptId: attempt.id,
-        handlerSession: model.session,
+        handlerSyncRunGeneration: model.syncRunGeneration,
       })
     }
   }
@@ -300,8 +339,8 @@ export function reduceLifecycle(
     } else if (command.type === `restart` && !model.active) {
       model.reach.add(`effective:restart`)
       model.active = true
-      model.session++
-      model.replay = 0
+      model.syncRunGeneration++
+      model.replayGeneration = 0
       model.publicationBarrierOpen = false
       model.collectionStatus = `ready`
     } else {
@@ -424,15 +463,16 @@ export function reduceLifecycle(
     }
     model.reach.add(`effective:truncate`)
     if (
-      model.replay > 0 &&
+      model.replayGeneration > 0 &&
       model.attempts.some(
-        ({ session, outcome }) =>
-          session === model.session && outcome === undefined,
+        ({ syncRunGeneration, outcome }) =>
+          syncRunGeneration === model.syncRunGeneration &&
+          outcome === undefined,
       )
     ) {
       model.reach.add(`overlapping-replay`)
     }
-    model.replay++
+    model.replayGeneration++
     // Replay setup is asynchronous even when every acquisition is synchronous
     // or canceled. Logical owners queue setup; live owners start acquisitions.
     setStatus(model, model.owners.length > 0)
@@ -468,7 +508,7 @@ export function reduceLifecycle(
     }
     model.reach.add(`effective:cleanup`)
     const current = model.attempts.filter(
-      ({ session }) => session === model.session,
+      ({ syncRunGeneration }) => syncRunGeneration === model.syncRunGeneration,
     )
     if (
       current.some(({ outcome }) => outcome !== undefined) &&
@@ -493,8 +533,8 @@ export function reduceLifecycle(
     }
     model.reach.add(`effective:restart`)
     model.active = true
-    model.session++
-    model.replay = 0
+    model.syncRunGeneration++
+    model.replayGeneration = 0
     model.publicationBarrierOpen = model.owners.some(({ aborted }) => !aborted)
     model.collectionStatus = `ready`
     setStatus(model, model.owners.length > 0)
@@ -512,8 +552,8 @@ export function reduceLifecycle(
         type: `load`,
         id: load.id,
         demand: load.demand,
-        session: load.session,
-        replay: load.replay,
+        syncRunGeneration: load.syncRunGeneration,
+        replayGeneration: load.replayGeneration,
       })
     }
     setStatus(model)

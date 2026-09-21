@@ -8,6 +8,20 @@ import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model.js'
 import type { Row } from './cursor-pagination/model.js'
 
+/**
+ * # Which cursor sequence may become the next public result?
+ *
+ * Growth, refresh, and nested readers can overlap. A forced refresh must not
+ * join stale growth unless the old request is deliberately retained. A canceled
+ * or failed sequence may settle and clean up, but its pages cannot become the
+ * next public snapshot or clear the authority of a newer sequence.
+ *
+ * Real Query observers supply publication and next-use evidence. Immutable
+ * fixture backends make stale cursor use visible. The full-relation model still
+ * owns row truth; this file adds generation, cancellation, and publication
+ * observations rather than copying Query's cache state.
+ */
+
 const scope = { group: undefined, descending: false }
 const rowsFor = (count: number, version = 0): Array<Row> =>
   Array.from({ length: count }, (_, id) => ({ id, rank: id, group: version }))
@@ -18,8 +32,6 @@ const createClient = () =>
     },
   })
 
-// The reference remains a whole relation. These laws add publication and
-// next-use observations, not a model of Query's retryer or page cache.
 describe(`cursor cache publication`, () => {
   it.each(
     [true, false].flatMap((cancel) =>

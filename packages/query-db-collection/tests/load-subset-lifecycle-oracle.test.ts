@@ -13,6 +13,23 @@ import { queryCollectionOptions } from '../src/query.js'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
 
+/**
+ * # Does Query-backed loadSubset preserve identity and lifecycle?
+ *
+ * Canonically equal demands share one Query transport. Distinct predicates,
+ * values, order, cursor, and scope remain distinct. The final live-query owner
+ * controls cancellation, and a replacement owner starts fresh after abort.
+ * Initial failure reaches existing and late dependents; recovery becomes public
+ * only after every failed source recovers. A later refetch failure retains the
+ * last ready snapshot.
+ *
+ * Small identity forms and lifecycle histories drive a real QueryClient and
+ * Collection. The oracle records query calls, values, request options, abort
+ * signals, metadata, source and dependent status, exact errors, and cleanup.
+ * Fault cases prove correct call counts cannot hide wrong returned values or a
+ * stale replacement snapshot.
+ */
+
 type Row = {
   id: string
   group?: string
@@ -252,7 +269,7 @@ async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
 async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
   // Internal ordering seam: this deliberately reuses old sync controls and
   // observers. It does not establish a public cleanup/restart path; real
-  // cleanup clears those observers before a new sync session starts.
+  // cleanup clears those observers before a new sync run starts.
   const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
   const queryClient = createQueryClient()
   const id = `load-subset-deferred-ready-${collectionSequence++}`
