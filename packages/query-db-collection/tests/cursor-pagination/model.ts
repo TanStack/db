@@ -3,9 +3,12 @@ export type Scope = { group: number | undefined; descending: boolean }
 export type Window = { offset: number; limit: number | undefined }
 
 /**
- * Reference authority: an exact ordered request is a slice of the whole
- * filtered relation. Backend pages, cursors, caches and promises do not enter
- * this model. Numeric rank then ID is the declared total order in this domain.
+ * # What is an opaque cursor window?
+ *
+ * An exact ordered request is a slice of the whole filtered relation. Numeric
+ * rank then ID is the declared total order in this bounded domain. Backend
+ * pages, cursor tokens, Query caches, promises, retries, and publication do not
+ * enter the value model. Their separate drivers must refine this answer.
  */
 export function expectedRows(
   source: ReadonlyArray<Row>,

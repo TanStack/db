@@ -6,6 +6,25 @@ import { trailBaseCollectionOptions } from '../src/trailbase'
 import { MockRecordApi } from './mock-record-api'
 import type { Event, ListResponse } from 'trailbase'
 
+/**
+ * # Does a TrailBase provider session publish and retire one valid row history?
+ *
+ * An eager provider session needs both its list and stream before readiness. An
+ * on-demand provider session does not claim an initial list. Stream events update an independent
+ * key/value relation. Startup failure rejects; later failure keeps the last
+ * rows and reports the error. Cleanup clears rows, cancels work, and fences all
+ * late results from the replacement provider session.
+ *
+ * A controlled RecordApi and native ReadableStream provide explicit gates for
+ * subscribe, list, events, closure, parse failure, cancellation, and cleanup.
+ * The same interpreter runs a fixed boundary corpus and generated one-to-three
+ * provider-session histories. It compares rows, readiness, exact reports, reader locks,
+ * timers, cancellations, and detached rejections after every step.
+ *
+ * See `ORACLE.md` for the full domain, replay commands, mutation evidence, and
+ * the boundary intentionally left to service-backed tests.
+ */
+
 type Row = { id: number; value: number }
 type Change = { operation: `set` | `delete`; id: number; value: number }
 type Ending =
@@ -14,7 +33,7 @@ type Ending =
   | `read-error`
   | `parse-error`
   | `cleanup`
-type Session =
+type ProviderSessionPlan =
   | {
       kind: `cancel-subscribe`
       late: `resolve` | `reject`
@@ -29,7 +48,10 @@ type Session =
       ending: Ending
       immediate: boolean
     }
-type Scenario = { mode: `eager` | `on-demand`; sessions: Array<Session> }
+type Scenario = {
+  mode: `eager` | `on-demand`
+  providerSessions: Array<ProviderSessionPlan>
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -38,7 +60,7 @@ function deferred<T>() {
     resolve = yes
     reject = no
   })
-  // Every adapter promise is observed even when its session is abandoned.
+  // Every adapter promise is observed even when its provider session is abandoned.
   void promise.catch(() => undefined)
   return { promise, resolve, reject }
 }
@@ -97,7 +119,7 @@ function source() {
  * The model never reads adapter bookkeeping, pending transactions or caches.
  */
 async function checkLifecycle(
-  { mode, sessions }: Scenario,
+  { mode, providerSessions }: Scenario,
   providerFault?: `list` | `set` | `buffered`,
 ) {
   const api = new MockRecordApi<Row>()
@@ -176,7 +198,7 @@ async function checkLifecycle(
   }
   const failures: Array<unknown> = []
   try {
-    for (const [epoch, plan] of sessions.entries()) {
+    for (const [epoch, plan] of providerSessions.entries()) {
       current = source()
       const active = current
       allSources.push(active)
@@ -392,7 +414,7 @@ const changeArb = fc.record({
   id: fc.integer({ min: 0, max: 3 }),
   value: fc.integer({ min: -20, max: 20 }),
 })
-const sessionArb: fc.Arbitrary<Session> = fc.oneof(
+const providerSessionArb: fc.Arbitrary<ProviderSessionPlan> = fc.oneof(
   fc.record({
     kind: fc.constantFrom(`cancel-subscribe` as const, `cancel-load` as const),
     late: fc.constantFrom(`resolve` as const, `reject` as const),
@@ -415,9 +437,12 @@ const sessionArb: fc.Arbitrary<Session> = fc.oneof(
 )
 const scenarioArb = fc.record({
   mode: fc.constantFrom(`eager` as const, `on-demand` as const),
-  sessions: fc.array(sessionArb, { minLength: 1, maxLength: 3 }),
+  providerSessions: fc.array(providerSessionArb, {
+    minLength: 1,
+    maxLength: 3,
+  }),
 })
-const live = (ending: Ending, immediate = false): Session => ({
+const live = (ending: Ending, immediate = false): ProviderSessionPlan => ({
   kind: `stream`,
   ending,
   immediate,
@@ -430,24 +455,27 @@ const live = (ending: Ending, immediate = false): Session => ({
 
 // Fixed witnesses ensure every lifecycle boundary is exercised, independently
 // of the random distribution. The same interpreter runs corpus and fuzz cases.
-const corpus: Array<{ name: string; sessions: Array<Session> }> = [
+const corpus: Array<{
+  name: string
+  providerSessions: Array<ProviderSessionPlan>
+}> = [
   ...(
     [`close`, `buffered-close`, `read-error`, `parse-error`, `cleanup`] as const
   ).flatMap((ending) =>
     [false, true].map((immediate) => ({
       name: `${ending}, immediate=${immediate}`,
-      sessions: [live(ending, immediate)],
+      providerSessions: [live(ending, immediate)],
     })),
   ),
   ...([`cancel-subscribe`, `cancel-load`] as const).flatMap((kind) =>
     ([`resolve`, `reject`] as const).map((late) => ({
       name: `${kind}, stale ${late} after restart`,
-      sessions: [{ kind, late }, live(`close`)],
+      providerSessions: [{ kind, late }, live(`close`)],
     })),
   ),
   ...([`reject-subscribe`, `reject-load`] as const).map((kind) => ({
     name: kind,
-    sessions: [{ kind }, live(`close`)],
+    providerSessions: [{ kind }, live(`close`)],
   })),
 ]
 it.each([`resolve`, `reject`] as const)(
@@ -539,15 +567,15 @@ it.each(
   corpus.flatMap((entry) =>
     ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
   ),
-)(`preserves lifecycle laws: $mode / $name`, ({ mode, sessions }) =>
-  checkLifecycle({ mode, sessions }),
+)(`preserves lifecycle laws: $mode / $name`, ({ mode, providerSessions }) =>
+  checkLifecycle({ mode, providerSessions }),
 )
 it.each([`eager`, `on-demand`] as const)(
   `releases a late acquired stream even when native cancellation rejects: %s`,
   (mode) =>
     checkLifecycle({
       mode,
-      sessions: [
+      providerSessions: [
         { kind: `cancel-subscribe`, late: `resolve`, cancelRejects: true },
         live(`close`),
       ],
@@ -558,7 +586,7 @@ it.each([`list`, `set`, `buffered`] as const)(
   async (cut) => {
     const scenario: Scenario = {
       mode: `eager`,
-      sessions: [live(`buffered-close`)],
+      providerSessions: [live(`buffered-close`)],
     }
     await checkLifecycle(scenario)
     await expect(checkLifecycle(scenario, cut)).rejects.toMatchObject({

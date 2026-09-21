@@ -10,6 +10,21 @@ import { describe, expect, it } from 'vitest'
 import { queryCollectionOptions } from '../src/query'
 import type { Collection } from '@tanstack/db'
 
+/**
+ * Nested Query-backed includes should acquire work proportional to reachable
+ * demand, not to the cartesian size of the backing tree.
+ *
+ * A deterministic four-level tree supplies the value model: traverse parent
+ * links from the selected roots to compute reachable rows and child collection
+ * counts. Independent loadSubset counters record physical rows delivered before
+ * and after public traversal. Generated root counts vary scale while fixed
+ * branching exposes accidental full-tree acquisition.
+ *
+ * The oracle checks both complete nested values and work bounds. Correct rows
+ * alone would allow an implementation that scans every branch; low counters
+ * alone could hide missing descendants or leaked child collections.
+ */
+
 let nextCollectionId = 0
 
 type RootRow = { id: string; value: string }

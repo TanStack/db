@@ -10,6 +10,22 @@ import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import type { OfflineTransaction } from '../src/types'
 
+/**
+ * # May leadership replay an offline transaction more than once?
+ *
+ * Only the current leader may read and schedule the outbox. Losing leadership
+ * or disposing fences startup, provider work, acknowledgement, retry hooks, and
+ * stale reads. Regaining leadership may replay durable pending rows, but an ID
+ * already pending, running, completed, or permanently rejected in the current
+ * boundary must not execute twice.
+ *
+ * A fake durable outbox, explicit leadership callbacks, and gated provider and
+ * delete acknowledgements form the history grammar. The real OfflineExecutor,
+ * TransactionExecutor, scheduler, and transaction path run unchanged. Checks
+ * cover mutation calls and idempotency keys, outbox contents, scheduler counts,
+ * leadership ownership, retry records, restoration, disposal, and cleanup.
+ */
+
 function gate() {
   let resolve!: () => void
   const promise = new Promise<void>((done) => {

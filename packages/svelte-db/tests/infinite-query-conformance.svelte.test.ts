@@ -1,4 +1,11 @@
-/** Svelte driver for the shared infinite-query conformance suite. */
+/**
+ * Svelte driver for the shared infinite-query conformance suite.
+ *
+ * `flushSync` and the effect root define Svelte's ownership and observation
+ * cuts. A public fetch may begin before a queued effect attaches, so the bridge
+ * preserves that native schedule while the shared suite judges the same
+ * ordered-prefix and page-ledger contract as the other frameworks.
+ */
 import {
   BTreeIndex,
   createCollection,

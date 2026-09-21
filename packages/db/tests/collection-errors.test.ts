@@ -79,16 +79,16 @@ describe(`Collection Error Handling`, () => {
       async (restart) => {
         const failure = new Error(`cleanup failed`)
         const cleanups: Array<number> = []
-        let session = 0
+        let syncRunCount = 0
         const collection = createCollection<{ id: string }>({
-          id: `failed-cleanup-session-${restart}`,
+          id: `failed-cleanup-sync-run-${restart}`,
           getKey: ({ id }) => id,
           sync: {
             sync: ({ markReady }) => {
-              const currentSession = session++
+              const currentSyncRun = syncRunCount++
               markReady()
               return () => {
-                cleanups.push(currentSession)
+                cleanups.push(currentSyncRun)
                 if (cleanups.length !== 1) return
                 if (restart) {
                   void collection.cleanup()
@@ -116,7 +116,7 @@ describe(`Collection Error Handling`, () => {
           expect(reportedError).toBeInstanceOf(SyncCleanupError)
           expect((reportedError as Error).cause).toBe(failure)
 
-          expect(session).toBe(1)
+          expect(syncRunCount).toBe(1)
           if (restart) collection.startSyncImmediate()
           await collection.cleanup()
           expect(cleanups).toEqual(restart ? [0, 1] : [0, 0])
@@ -349,7 +349,7 @@ describe(`Collection Error Handling`, () => {
     })
   })
 
-  describe(`Sync Session Isolation`, () => {
+  describe(`Sync Run Isolation`, () => {
     it(`preserves an asynchronous sync error and removes its first-ready waiter`, async () => {
       let markError: (error?: unknown) => void = () => {
         throw new Error(`Sync has not started`)
@@ -430,8 +430,8 @@ describe(`Collection Error Handling`, () => {
       expect(collection.status).toBe(`cleaned-up`)
     })
 
-    it(`ignores an error callback retained by an earlier sync session`, async () => {
-      const sessions: Array<{
+    it(`ignores an error callback retained by an earlier sync run`, async () => {
+      const syncRuns: Array<{
         markError: () => void
         markReady: () => void
       }> = []
@@ -441,23 +441,23 @@ describe(`Collection Error Handling`, () => {
         startSync: false,
         sync: {
           sync: ({ markError, markReady }) => {
-            sessions.push({ markError, markReady })
+            syncRuns.push({ markError, markReady })
           },
         },
       })
 
       await collection.cleanup()
       const preload = collection.preload()
-      expect(sessions).toHaveLength(1)
-      const first = sessions[0]!
+      expect(syncRuns).toHaveLength(1)
+      const first = syncRuns[0]!
       const cancelled = expect(preload).rejects.toMatchObject({
         name: `AbortError`,
       })
       await collection.cleanup()
       await cancelled
       const restartedPreload = collection.preload()
-      expect(sessions).toHaveLength(2)
-      const second = sessions[1]!
+      expect(syncRuns).toHaveLength(2)
+      const second = syncRuns[1]!
 
       first.markError()
       expect(collection.status).toBe(`loading`)
@@ -467,23 +467,23 @@ describe(`Collection Error Handling`, () => {
       expect(collection.status).toBe(`ready`)
     })
 
-    it(`ignores transaction callbacks retained by an earlier sync session`, async () => {
+    it(`ignores transaction callbacks retained by an earlier sync run`, async () => {
       type Item = { id: string }
       type SyncMethods = Parameters<SyncConfig<Item>[`sync`]>[0]
-      const sessions: Array<SyncMethods> = []
+      const syncRuns: Array<SyncMethods> = []
       const collection = createCollection<Item>({
         id: `stale-transaction-after-restart`,
         getKey: (item) => item.id,
         startSync: false,
         sync: {
           sync: (sync) => {
-            sessions.push(sync)
+            syncRuns.push(sync)
           },
         },
       })
 
       const firstPreload = collection.preload()
-      const first = sessions[0]!
+      const first = syncRuns[0]!
       const cancelled = expect(firstPreload).rejects.toMatchObject({
         name: `AbortError`,
       })
@@ -491,7 +491,7 @@ describe(`Collection Error Handling`, () => {
       await cancelled
 
       const secondPreload = collection.preload()
-      const second = sessions[1]!
+      const second = syncRuns[1]!
       first.begin()
       first.write({ type: `insert`, value: { id: `stale` } })
       first.commit()

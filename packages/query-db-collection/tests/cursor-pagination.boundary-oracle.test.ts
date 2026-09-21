@@ -7,6 +7,20 @@ import { createDeferred } from '../../db/src/deferred.js'
 import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 
+/**
+ * # Do browser-facing readers release the right cursor work?
+ *
+ * A nested QueryCollection reader may cancel, be replaced, retry, or lose its
+ * last owner while cursor pages are pending. Reader abort releases its queue;
+ * it does not cancel a transport still owned by a peer. A replacement sequence
+ * may satisfy the nested collection only after its own rows are authoritative.
+ *
+ * These jsdom histories cross real QueryClient cancellation and retry defaults,
+ * QueryCollection preload, shared transports, manual writes, and cleanup. They
+ * observe fetch status, errors, rows, calls, abort signals, and later recovery.
+ * Native browser page ownership remains in the OPFS oracle.
+ */
+
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 const makeClient = () =>
   new QueryClient({
