@@ -27,6 +27,27 @@ import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src/in
 import type { NonSingleResult } from '../../db/src/types.js'
 import type { QueryCollectionUtils } from '../src/query.js'
 
+/**
+ * # Who owns a Query-backed row, and when may it disappear?
+ *
+ * Query cache entries acquire rows for one or more exact subset demands. A row
+ * remains public while any committed owner needs it. Provisional ownership
+ * begins during result application, becomes durable only after publication and
+ * persistence, and retires when superseded, canceled, cleaned up, or released.
+ * Mutation refetches add a second authority path but do not bypass those rules.
+ *
+ * The reference view is an ownership graph: query scope and demand nodes point
+ * to row keys; sync generations order competing results; publication
+ * and persistence are separate commit boundaries. Tests use real QueryClient
+ * observers, cache events, collection metadata, persisted scans, and live
+ * queries. They compare source rows, derived rows, cache rows, metadata writes,
+ * exact request lifetimes, and bounded refetch work at each boundary.
+ *
+ * The file is large because it crosses the real Query cache boundary, not
+ * because it duplicates Query internals. Each history names one ownership edge
+ * or generation race; shared fixtures provide the graph and observations.
+ */
+
 type Item = {
   id: string
   category: string

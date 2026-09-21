@@ -33,6 +33,27 @@ import type {
   SyncMetadataApi,
 } from '@tanstack/db'
 
+/**
+ * # Does persisted wrapping preserve one Collection history?
+ *
+ * Persistence adds a durable replica beneath an optional upstream sync source.
+ * Startup hydrates rows and metadata, buffers concurrent remote work, then
+ * publishes one coherent state. Committed transactions persist in sequence;
+ * gaps recover through deltas or reload. Subset demands keep local and upstream
+ * ownership separate so cancellation, release, offline mode, and retry cannot
+ * steal a sibling acquisition lease.
+ *
+ * The recording adapter is a plain durable-state model: Maps for rows and
+ * metadata plus ordered transaction, index, load, and reload calls. Tests drive
+ * the real wrapper, Collection, coordinator, receipts, transactions, indexes,
+ * cleanup, and restart. They compare durable state, public rows, metadata,
+ * request options, sequence evidence, errors, and late-work fencing.
+ *
+ * Driver SQL behavior, browser page ownership, native runtimes, and the shared
+ * conformance portfolio have separate owners. This file models persistence
+ * protocol state, not a particular SQLite engine.
+ */
+
 type Todo = {
   id: string
   title: string

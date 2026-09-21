@@ -6,6 +6,29 @@ import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
+/**
+ * # Which rows should optimistic and synced histories expose?
+ *
+ * A mutation authors a whole-row snapshot. That snapshot does not rebase onto
+ * later synced data. While active, an optimistic intent overlays the synced
+ * base. After success it remains as an accepted local snapshot until source
+ * acknowledgement retires it. Failure removes it. An update authored from an
+ * unacknowledged insert depends on that insert's existence.
+ *
+ * The reference graph has three small nodes: a synced base Map, an ordered list
+ * of authored intents, and a queue of source batches. `visible()` folds accepted
+ * intents before active intents over the base. Settlement changes intent state;
+ * source drain changes the base and acknowledgement. It does not reuse
+ * production caches, pending-mutation mergers, or publication code.
+ *
+ * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
+ * to this model and a real Collection. After every step it compares rows,
+ * metadata, immutable handler payloads, promise outcomes, downstream query
+ * state, and complete publication cuts. Fault injection proves those
+ * observations can reject wrong keys, partial batches, stale previous values,
+ * and transient fields.
+ */
+
 export type HistoryRow = { id: number; a: number; b: number; c: number }
 type Fields = Partial<Omit<HistoryRow, `id`>>
 export type OptimisticStep =
@@ -43,11 +66,7 @@ type ObservedRow = HistoryRow & {
   $synced: boolean
 }
 
-/** Specification state is an event history, never a copy of production caches.
- * Mutations own whole-row snapshots, never patches over changing synced rows.
- * Accepted snapshots precede active snapshots. An insert supplies row existence;
- * accepted updates dependent on it survive its success, but not its failed birth.
- */
+/** Pure event-history model. It never reads production caches or callbacks. */
 class HistoryModel {
   base = new Map<number, HistoryRow>()
   origins = new Map<number, `local` | `remote`>()

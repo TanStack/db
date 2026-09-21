@@ -22,6 +22,28 @@ import type {
   SyncConfig,
 } from '../../src/types.js'
 
+/**
+ * # Does an ordered window equal independent recomputation?
+ *
+ * A page is not whatever rows the loader happened to retain. It is the result
+ * of filtering the authoritative finite source, sorting with the declared
+ * terms and public-key tie-breaker, then slicing by offset and limit. Window
+ * changes, source inserts, updates, deletes, ties, nulls, locale order, and
+ * failed requests must all preserve that definition.
+ *
+ * Plain arrays and `makeComparator` form the value oracle. Separate state
+ * nodes track requested windows, authoritative coverage, pending acquisition,
+ * and public batches. The production drivers cross scan and indexed routes,
+ * direct and joined queries, synchronous and asynchronous delivery, reentry,
+ * restart, rejection, and abort. They compare exact request options, visible
+ * rows, readiness, errors, and every publication cut.
+ *
+ * Finite products pin boundary cells; fixed and random fast-check histories
+ * explore adjacent legal actions. Fault probes establish that wrong order,
+ * false coverage, duplicate work, partial publication, and bad delete payloads
+ * are observable. The model does not infer rows beyond provider evidence.
+ */
+
 type PageRow = {
   id: number
   rank: number
@@ -3718,7 +3740,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it.each([`return-only`, `write-after-cleanup`])(
-    `does not settle a window move after its sync session is cleaned up: %s`,
+    `does not settle a window move after its sync run is cleaned up: %s`,
     async (delivery) => {
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
