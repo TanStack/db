@@ -295,22 +295,15 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
   const maintenanceDeleted = new Promise<void>((resolve) => {
     resolveMaintenanceDelete = resolve
   })
-  type MetadataWithPersistedScan = SyncMetadataApi<string | number> & {
-    row: SyncMetadataApi<string | number>[`row`] & {
-      scanPersisted: () => Promise<
-        Array<{ key: string | number; value: Row; metadata?: unknown }>
-      >
-    }
-  }
-  const metadata: MetadataWithPersistedScan = {
+  const scanPersistedRows = vi.fn(async () => {
+    await scanReleased
+    return []
+  })
+  const metadata: SyncMetadataApi<string | number> = {
     row: {
       get: () => undefined,
       set: () => {},
       delete: () => {},
-      scanPersisted: async () => {
-        await scanReleased
-        return []
-      },
     },
     collection: {
       get: () => undefined,
@@ -325,6 +318,17 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
         },
       ],
     },
+    persistence: {
+      protocol: `@tanstack/db/sync-persistence`,
+      version: 1,
+      hydrateBaseline: async () => {},
+      scanPersistedRows,
+      resumeSnapshot: {
+        certify: async () => {},
+        getKeySetEvidence: () => ({ status: `consistent` }),
+        expectCurrentCommit: () => {},
+      },
+    },
   }
 
   collection._lifecycle.setStatus(`cleaned-up`)
@@ -333,6 +337,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
 
   try {
     expect(collection.status).toBe(`error`)
+    await vi.waitFor(() => expect(scanPersistedRows).toHaveBeenCalledOnce())
     releaseScan()
     await maintenanceDeleted
     for (let turn = 0; turn < 10; turn++) await Promise.resolve()

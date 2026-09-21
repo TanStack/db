@@ -27,7 +27,11 @@ import type {
   PullSinceResponse,
   TxCommitted,
 } from '../src'
-import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+import type {
+  LoadSubsetOptions,
+  SyncConfig,
+  SyncMetadataApi,
+} from '@tanstack/db'
 
 type Todo = {
   id: string
@@ -56,6 +60,11 @@ type RecordingAdapter = PersistenceAdapter & {
     requiredIndexSignatures: ReadonlyArray<string>
   }>
   loadCollectionMetadataCalls: Array<string>
+  loadResumeSnapshotCalls: Array<{
+    collectionId: string
+    includeRows: boolean | undefined
+    requiredIndexSignatures: ReadonlyArray<string>
+  }>
   rows: Map<string, Todo>
   rowMetadata: Map<string, unknown>
   collectionMetadata: Map<string, unknown>
@@ -76,6 +85,7 @@ function createRecordingAdapter(
     markIndexRemovedCalls: [],
     loadSubsetCalls: [],
     loadCollectionMetadataCalls: [],
+    loadResumeSnapshotCalls: [],
     loadSubset: (collectionId, options, ctx) => {
       adapter.loadSubsetCalls.push({
         collectionId,
@@ -89,6 +99,33 @@ function createRecordingAdapter(
           metadata: rowMetadata.get(value.id),
         })),
       )
+    },
+    loadResumeSnapshot: (collectionId, options) => {
+      adapter.loadResumeSnapshotCalls.push({
+        collectionId,
+        includeRows: options?.includeRows,
+        requiredIndexSignatures: options?.requiredIndexSignatures ?? [],
+      })
+      const latest = adapter.applyCommittedTxCalls.at(-1)?.tx
+      return Promise.resolve({
+        rows:
+          options?.includeRows === false
+            ? []
+            : Array.from(rows.values()).map((value) => ({
+                key: value.id,
+                value,
+                metadata: rowMetadata.get(value.id),
+              })),
+        keySet: { status: `consistent` },
+        collectionMetadata: Array.from(
+          adapter.collectionMetadata,
+          ([key, value]) => ({ key, value }),
+        ),
+        latestTerm: latest?.term ?? 0,
+        latestSeq: latest?.seq ?? 0,
+        latestRowVersion: latest?.rowVersion ?? 0,
+        resetEpoch: 0,
+      })
     },
     loadCollectionMetadata: (collectionId) => {
       adapter.loadCollectionMetadataCalls.push(collectionId)
@@ -178,6 +215,16 @@ function createRecordingAdapter(
 function createNoopAdapter(): PersistenceAdapter {
   return {
     loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
     applyCommittedTx: () => Promise.resolve(),
     ensureIndex: () => Promise.resolve(),
   }
@@ -347,9 +394,10 @@ describe(`persistedCollectionOptions`, () => {
 
     await collection.stateWhenReady()
 
-    expect(adapter.loadCollectionMetadataCalls).toEqual([
-      `persisted-startup-metadata`,
-    ])
+    expect(adapter.loadResumeSnapshotCalls[0]).toMatchObject({
+      collectionId: `persisted-startup-metadata`,
+      includeRows: false,
+    })
     expect(
       collection._state.syncedCollectionMetadata.get(`electric:resume`),
     ).toEqual({
@@ -1080,7 +1128,7 @@ describe(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
 
     expect(collection.id).toBe(options.id)
-    expect(adapter.loadSubsetCalls[0]?.collectionId).toBe(collection.id)
+    expect(adapter.loadResumeSnapshotCalls[0]?.collectionId).toBe(collection.id)
   })
 
   it(`keeps hydrated rows ahead of persisted startup rows`, async () => {
@@ -1193,19 +1241,14 @@ describe(`persistedCollectionOptions`, () => {
       },
     ])
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return [
-        {
-          key: `cached-1`,
-          value: {
-            id: `cached-1`,
-            title: `Cached row`,
-          },
-        },
-      ]
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
 
     let remoteBegin: (() => void) | undefined
@@ -1271,11 +1314,14 @@ describe(`persistedCollectionOptions`, () => {
   it(`discards a hydration-buffered transaction aborted before replay`, async () => {
     const adapter = createRecordingAdapter()
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return []
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
@@ -1334,11 +1380,14 @@ describe(`persistedCollectionOptions`, () => {
   it(`rejects every hydration-buffered receipt when replay fails`, async () => {
     const adapter = createRecordingAdapter()
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return []
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
 
     const replayError = new Error(`replay key failed`)
@@ -1415,8 +1464,12 @@ describe(`persistedCollectionOptions`, () => {
 
   it(`marks ready even when persisted startup fails before markReady`, async () => {
     const adapter = createRecordingAdapter()
-    adapter.loadSubset = async () => {
-      throw new Error(`startup failure`)
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = (...args) => {
+      if (args[1]?.includeRows === true) {
+        return Promise.reject(new Error(`startup failure`))
+      }
+      return loadResumeSnapshot(...args)
     }
 
     const collection = createCollection(
@@ -1451,20 +1504,14 @@ describe(`persistedCollectionOptions`, () => {
     adapter.collectionMetadata.set(`startup:key`, { ready: true })
 
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return [
-        {
-          key: `cached-1`,
-          value: {
-            id: `cached-1`,
-            title: `Cached row`,
-          },
-          metadata: adapter.rowMetadata.get(`cached-1`),
-        },
-      ]
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
 
     let remoteBegin: (() => void) | undefined
@@ -1754,16 +1801,12 @@ describe(`persistedCollectionOptions`, () => {
     const originalLoadSubset = adapter.loadSubset.bind(adapter)
     let loadCalls = 0
     let releaseStaleReload!: () => void
-    let releaseFreshReload!: () => void
     const staleReloadGate = new Promise<void>((resolve) => {
       releaseStaleReload = resolve
     })
-    const freshReloadGate = new Promise<void>((resolve) => {
-      releaseFreshReload = resolve
-    })
     adapter.loadSubset = async (...args) => {
       loadCalls++
-      if (loadCalls === 2) {
+      if (loadCalls === 1) {
         await staleReloadGate
         return [
           {
@@ -1772,7 +1815,6 @@ describe(`persistedCollectionOptions`, () => {
           },
         ]
       }
-      if (loadCalls === 3) await freshReloadGate
       return originalLoadSubset(...args)
     }
 
@@ -1799,22 +1841,17 @@ describe(`persistedCollectionOptions`, () => {
       latestRowVersion: 1,
       requiresFullReload: true,
     })
-    for (let attempt = 0; attempt < 20 && loadCalls < 2; attempt++) {
+    for (let attempt = 0; attempt < 20 && loadCalls < 1; attempt++) {
       await flushAsyncWork()
     }
-    expect(loadCalls).toBe(2)
+    expect(loadCalls).toBe(1)
 
     await collection.cleanup()
     adapter.rows.set(`1`, { id: `1`, title: `Restarted` })
     collection.startSyncImmediate()
     releaseStaleReload()
-    for (let attempt = 0; attempt < 20 && loadCalls < 3; attempt++) {
-      await flushAsyncWork()
-    }
-    expect(loadCalls).toBe(3)
     expect(collection.get(`1`)?.title).not.toBe(`Stale reload`)
 
-    releaseFreshReload()
     for (
       let attempt = 0;
       attempt < 20 && collection.get(`1`)?.title !== `Restarted`;
@@ -1866,8 +1903,8 @@ describe(`persistedCollectionOptions`, () => {
 
     await collection.preload()
     await flushAsyncWork()
-    expect(metadataCalls).toBe(1)
-    expect(subsetCalls).toBe(1)
+    expect(metadataCalls).toBe(0)
+    expect(subsetCalls).toBe(0)
 
     coordinator.emit({
       type: `tx:committed`,
@@ -1877,10 +1914,10 @@ describe(`persistedCollectionOptions`, () => {
       latestRowVersion: 1,
       requiresFullReload: true,
     })
-    for (let attempt = 0; attempt < 20 && metadataCalls < 2; attempt++) {
+    for (let attempt = 0; attempt < 20 && metadataCalls < 1; attempt++) {
       await flushAsyncWork()
     }
-    expect(metadataCalls).toBe(2)
+    expect(metadataCalls).toBe(1)
 
     await collection.cleanup()
     adapter.rows.set(`1`, { id: `1`, title: `Restarted` })
@@ -1888,14 +1925,14 @@ describe(`persistedCollectionOptions`, () => {
     releaseStaleMetadata()
     for (
       let attempt = 0;
-      attempt < 20 && (metadataCalls < 3 || subsetCalls < 2);
+      attempt < 20 && collection.get(`1`)?.title !== `Restarted`;
       attempt++
     ) {
       await flushAsyncWork()
     }
 
-    expect(metadataCalls).toBe(3)
-    expect(subsetCalls).toBe(2)
+    expect(metadataCalls).toBe(1)
+    expect(subsetCalls).toBe(1)
     expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
       title: `Restarted`,
@@ -2512,6 +2549,9 @@ describe(`persistedCollectionOptions`, () => {
     }
     const coordinator = createCoordinatorHarness()
     let hydrateBaseline: (() => Promise<void>) | undefined
+    let persistenceCapability:
+      | NonNullable<SyncMetadataApi<string>[`persistence`]>
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present`,
@@ -2519,11 +2559,8 @@ describe(`persistedCollectionOptions`, () => {
         getKey: (item) => item.id,
         sync: {
           sync: ({ markReady, metadata }) => {
-            hydrateBaseline = (
-              metadata?.row as
-                | { whenHydrated?: () => Promise<void> }
-                | undefined
-            )?.whenHydrated
+            persistenceCapability = metadata?.persistence
+            hydrateBaseline = metadata?.persistence?.hydrateBaseline
             markReady()
             return { loadSubset: () => true }
           },
@@ -2534,6 +2571,18 @@ describe(`persistedCollectionOptions`, () => {
 
     collection.startSyncImmediate()
     await vi.waitFor(() => expect(hydrateBaseline).toBeTypeOf(`function`))
+    expect(persistenceCapability).toMatchObject({
+      protocol: `@tanstack/db/sync-persistence`,
+      version: 1,
+    })
+    expect(persistenceCapability?.scanPersistedRows).toBeTypeOf(`function`)
+    expect(persistenceCapability?.resumeSnapshot.certify).toBeTypeOf(`function`)
+    expect(persistenceCapability?.resumeSnapshot.getKeySetEvidence).toBeTypeOf(
+      `function`,
+    )
+    expect(
+      persistenceCapability?.resumeSnapshot.expectCurrentCommit,
+    ).toBeTypeOf(`function`)
     await hydrateBaseline!()
     expect(collection.has(`2`)).toBe(true)
 

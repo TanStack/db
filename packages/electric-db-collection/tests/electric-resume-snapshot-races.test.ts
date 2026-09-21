@@ -126,6 +126,7 @@ async function runRace(
   legacyUnknown = false,
   missingKeySetEvidence = false,
   startupReset: `none` | `tag-state` | `shape-identity` = `none`,
+  metadataWrapper: `none` | `shallow-persistence` = `none`,
 ): Promise<void> {
   const database = new DatabaseSync(`:memory:`)
   const driver = createDriver(database)
@@ -138,6 +139,9 @@ async function runRace(
     | Collection<Item, string | number, ElectricCollectionUtils<Item>>
     | undefined
   let unsubscribe: (() => void) | undefined
+  let receivedPersistenceCapability: unknown
+  let forwardedPersistenceCapability: unknown
+  let getExpectedCommitCallCount = () => 0
   let primaryFailure: unknown
   const cleanupFailures: Array<unknown> = []
   try {
@@ -240,6 +244,49 @@ async function runRace(
       },
     }) as unknown as PersistenceAdapter
 
+    const electricOptions = electricCollectionOptions<Item>({
+      id: collectionId,
+      shapeOptions: {
+        url: `http://test-url`,
+        params: { table: `test_table` },
+      },
+      syncMode,
+      getKey: (row) => row.id,
+      startSync: false,
+    })
+    const electricSync = electricOptions.sync
+    const wrappedElectricOptions =
+      metadataWrapper === `shallow-persistence`
+        ? {
+            ...electricOptions,
+            sync: {
+              ...electricSync,
+              sync: (params: Parameters<typeof electricSync.sync>[0]) => {
+                const sourceMetadata = params.metadata
+                const persistence = sourceMetadata?.persistence
+                if (!sourceMetadata || !persistence) {
+                  throw new Error(`Expected a persistence resume capability`)
+                }
+
+                receivedPersistenceCapability = persistence
+                const expectedCommit = vi.spyOn(
+                  persistence.resumeSnapshot,
+                  `expectCurrentCommit`,
+                )
+                getExpectedCommitCallCount = () =>
+                  expectedCommit.mock.calls.length
+
+                const metadata = {
+                  ...sourceMetadata,
+                  persistence,
+                }
+                forwardedPersistenceCapability = metadata.persistence
+                return electricSync.sync({ ...params, metadata })
+              },
+            },
+          }
+        : electricOptions
+
     collection = createCollection(
       persistedCollectionOptions<
         Item,
@@ -247,16 +294,7 @@ async function runRace(
         never,
         ElectricCollectionUtils<Item>
       >({
-        ...electricCollectionOptions<Item>({
-          id: collectionId,
-          shapeOptions: {
-            url: `http://test-url`,
-            params: { table: `test_table` },
-          },
-          syncMode,
-          getKey: (row) => row.id,
-          startSync: false,
-        }),
+        ...wrappedElectricOptions,
         persistence: { adapter: gatedAdapter },
       }),
     )
@@ -296,6 +334,10 @@ async function runRace(
       legacyUnknown || missingKeySetEvidence || startupReset !== `none`
     if (startupReset !== `none`) {
       expect(resumeStateAtLaterSnapshot).toMatchObject({ kind: `reset` })
+    }
+    if (metadataWrapper === `shallow-persistence`) {
+      expect(forwardedPersistenceCapability).toBe(receivedPersistenceCapability)
+      expect(getExpectedCommitCallCount()).toBe(1)
     }
 
     if (startupReset === `none`) {
@@ -359,6 +401,18 @@ async function runRace(
         { id: 1, name: `one` },
         { id: 2, name: `two` },
       ])
+      if (startupReset !== `none`) {
+        await vi.waitFor(async () => {
+          const resumeState = (
+            await restartedAdapter.loadCollectionMetadata(collectionId)
+          ).find(({ key }) => key === `electric:resume`)?.value
+          expect(resumeState).toMatchObject({
+            kind: `resume`,
+            offset: `20_0`,
+            handle: `shape-current`,
+          })
+        })
+      }
     } else {
       await vi.waitFor(() => expect(collection!.status).toBe(`error`))
       await vi.waitFor(async () => {
@@ -703,6 +757,17 @@ describe(`Electric resume snapshot races`, () => {
 
   it(`keeps a healthy cache when a changed shape commits its reset before hydration`, async () => {
     await runRace(`none`, `eager`, false, false, `shape-identity`)
+  })
+
+  it(`keeps generation ownership when a source wrapper shallow-forwards the persistence capability`, async () => {
+    await runRace(
+      `none`,
+      `eager`,
+      false,
+      false,
+      `shape-identity`,
+      `shallow-persistence`,
+    )
   })
 
   it(`rejects row loss between resume metadata and baseline hydration`, async () => {

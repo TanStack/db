@@ -67,7 +67,7 @@ while still handling per-collection schema versions correctly.
 
 ### Atomic resume snapshots
 
-Persistence adapters may implement
+Persistence adapters implement
 `loadResumeSnapshot(collectionId, options)` to let a sync source certify a
 persisted resume baseline. One call must read rows, collection metadata, stream
 position, reset epoch, and key-set evidence from the same atomic database
@@ -84,9 +84,12 @@ row-bearing snapshot.
 - `unknown`: the adapter has no authoritative pre-migration key set and does
   not claim completeness.
 
-The method is optional so existing adapters remain assignable. Without it, the
-wrapper retains the legacy stream-position and metadata path. Adapter methods
-are invoked with their receiver and may rely on instance state through `this`.
+The method is required because the versioned `metadata.persistence` capability
+always carries hydration, durable row scanning, certification, evidence, and
+generation ownership as one complete bundle. Sync wrappers must forward the
+capability object unchanged rather than copying individual methods. Adapter
+methods are invoked with their receiver and may rely on instance state through
+`this`.
 
 ### SQLite core adapter APIs
 

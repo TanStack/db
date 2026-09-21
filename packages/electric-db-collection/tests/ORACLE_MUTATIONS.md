@@ -76,11 +76,16 @@ counts key iteration for both new and deduplicated acquisitions.
 
 ## 7. Resume capability fencing
 
-Accept a persisted offset when `scanPersisted` exists but `whenHydrated`
-does not.
+Delete `expectCurrentCommit` from an advertised persistence capability, or let
+a source wrapper rebuild the capability without forwarding the same complete
+`resumeSnapshot` object.
 
-Killed by: `warns once and restarts a persisted resume when hydration completion is unavailable`.
-The restart control also verifies that the compatibility warning is not repeated.
+Killed by: `fails fast when a persistence wrapper drops resume generation
+ownership` and `keeps generation ownership when a source wrapper
+shallow-forwards the persistence capability`. The direct-source control, `uses
+direct resume metadata when no persistence capability is present`, preserves
+the intentional no-capability path; completeness is required only after a
+persistence capability is advertised.
 
 ## 8. Complete-row discrimination
 

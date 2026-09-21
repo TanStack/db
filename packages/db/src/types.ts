@@ -476,6 +476,44 @@ export interface SyncMetadataApi<
       value: unknown
     }>
   }
+  /**
+   * Versioned persistence bridge used by sync adapters that can hydrate and
+   * inspect a durable collection baseline. Custom sync wrappers must forward
+   * this object unchanged.
+   */
+  persistence?: SyncPersistenceCapabilityV1<TKey>
+}
+
+export type SyncPersistenceKeySetEvidence = {
+  status: `unknown` | `consistent` | `incompatible`
+}
+
+export type SyncPersistenceScanOptions = {
+  metadataOnly?: boolean
+}
+
+export type SyncPersistenceScannedRow<
+  TKey extends string | number = string | number,
+> = {
+  key: TKey
+  value: object
+  metadata?: unknown
+}
+
+export type SyncPersistenceCapabilityV1<
+  TKey extends string | number = string | number,
+> = {
+  readonly protocol: `@tanstack/db/sync-persistence`
+  readonly version: 1
+  readonly hydrateBaseline: () => Promise<void>
+  readonly scanPersistedRows: (
+    options?: SyncPersistenceScanOptions,
+  ) => Promise<Array<SyncPersistenceScannedRow<TKey>>>
+  readonly resumeSnapshot: {
+    readonly certify: () => Promise<void>
+    readonly getKeySetEvidence: () => SyncPersistenceKeySetEvidence | undefined
+    readonly expectCurrentCommit: () => void
+  }
 }
 
 export interface ChangeMessage<

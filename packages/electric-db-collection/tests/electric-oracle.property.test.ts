@@ -143,6 +143,10 @@ function createPersistedAdapter(
   rows: Map<string | number, OracleRow>,
   loadGate: Promise<void> = Promise.resolve(),
 ): PersistenceAdapter {
+  let latestTerm = 0
+  let latestSeq = 0
+  let latestRowVersion = 0
+  let resetEpoch = 0
   return {
     loadSubset: () =>
       loadGate.then(() =>
@@ -151,6 +155,27 @@ function createPersistedAdapter(
           value: structuredClone(value),
         })),
       ),
+    loadResumeSnapshot: async (_collectionId, ctx) => {
+      if (ctx?.includeRows !== false) await loadGate
+      return {
+        rows:
+          ctx?.includeRows === false
+            ? []
+            : Array.from(rows, ([key, value]) => ({
+                key,
+                value: structuredClone(value),
+              })),
+        keySet: { status: `consistent` },
+        collectionMetadata: Array.from(collectionMetadata, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
+        latestTerm,
+        latestSeq,
+        latestRowVersion,
+        resetEpoch,
+      }
+    },
     loadCollectionMetadata: () =>
       Promise.resolve(
         Array.from(collectionMetadata, ([key, value]) => ({
@@ -166,7 +191,10 @@ function createPersistedAdapter(
           collectionMetadata.set(mutation.key, structuredClone(mutation.value))
         }
       }
-      if (tx.truncate) rows.clear()
+      if (tx.truncate) {
+        rows.clear()
+        resetEpoch++
+      }
       for (const mutation of tx.mutations) {
         if (mutation.type === `delete`) {
           rows.delete(mutation.key)
@@ -179,6 +207,9 @@ function createPersistedAdapter(
           rows.set(mutation.key, structuredClone(mutation.value) as OracleRow)
         }
       }
+      latestTerm = tx.term
+      latestSeq = tx.seq
+      latestRowVersion = tx.rowVersion
       return Promise.resolve()
     },
     ensureIndex: () => Promise.resolve(),
@@ -2892,10 +2923,11 @@ describe(`Electric adapter laws`, () => {
     const metadataStarted = createDeferred<void>()
     const metadataGate = createDeferred<void>()
     const adapter = createPersistedAdapter(new Map(), new Map())
-    adapter.loadCollectionMetadata = async () => {
+    const loadResumeSnapshot = adapter.loadResumeSnapshot
+    adapter.loadResumeSnapshot = async (...args) => {
       metadataStarted.resolve()
       await metadataGate.promise
-      return []
+      return loadResumeSnapshot(args[0], args[1])
     }
     const collection = createCollection(
       persistedCollectionOptions<
@@ -2937,9 +2969,10 @@ describe(`Electric adapter laws`, () => {
   it(`retires pre-start waiters through automatic collection GC`, async () => {
     const metadataGate = createDeferred<void>()
     const adapter = createPersistedAdapter(new Map(), new Map())
-    adapter.loadCollectionMetadata = vi.fn(async () => {
+    const loadResumeSnapshot = adapter.loadResumeSnapshot
+    adapter.loadResumeSnapshot = vi.fn(async (...args) => {
       await metadataGate.promise
-      return []
+      return loadResumeSnapshot(args[0], args[1])
     })
     const collection = createCollection(
       persistedCollectionOptions<
@@ -2966,7 +2999,7 @@ describe(`Electric adapter laws`, () => {
     // A pending preload owns retention; exercise unowned sync for automatic GC.
     collection.startSyncImmediate()
     await vi.waitFor(
-      () => expect(adapter.loadCollectionMetadata).toHaveBeenCalledOnce(),
+      () => expect(adapter.loadResumeSnapshot).toHaveBeenCalledOnce(),
       { interval: 1, timeout: 250 },
     )
     const subscription = collection.subscribeChanges(() => {})
@@ -3639,19 +3672,25 @@ describe(`Electric adapter laws`, () => {
       [1, { id: 1, name: `current`, stable: `stable-1` }],
     ])
     const adapter = createPersistedAdapter(collectionMetadata, persistedRows)
+    const loadResumeSnapshot = adapter.loadResumeSnapshot
     let hydrationCall = 0
-    adapter.loadSubset = vi.fn(async () => {
+    adapter.loadResumeSnapshot = vi.fn(async (collectionId, ctx) => {
+      const snapshot = await loadResumeSnapshot(collectionId, ctx)
+      if (ctx?.includeRows === false) return snapshot
       hydrationCall++
       if (hydrationCall === 1) {
         await firstHydration.promise
-        return [
-          {
-            key: 1,
-            value: { id: 1, name: `stale`, stable: `stable-1` },
-          },
-        ]
+        return {
+          ...snapshot,
+          rows: [
+            {
+              key: 1,
+              value: { id: 1, name: `stale`, stable: `stable-1` },
+            },
+          ],
+        }
       }
-      return Array.from(persistedRows, ([key, value]) => ({ key, value }))
+      return snapshot
     })
     const collection = createCollection(
       persistedCollectionOptions<
@@ -3675,13 +3714,13 @@ describe(`Electric adapter laws`, () => {
     )
 
     collection.startSyncImmediate()
-    await vi.waitFor(() => expect(adapter.loadSubset).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(hydrationCall).toBe(1))
     await collection.cleanup()
     collection.startSyncImmediate()
     await vi.waitFor(() => expect(subscribers).toHaveLength(2))
 
     firstHydration.resolve()
-    await vi.waitFor(() => expect(adapter.loadSubset).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(hydrationCall).toBe(2))
     await vi.waitFor(() => expect(collection.get(1)?.name).toBe(`current`))
     subscribers[1]!([upToDate])
     await collection.stateWhenReady()
@@ -4411,42 +4450,6 @@ describe(`Electric adapter laws`, () => {
       }
     },
   )
-
-  it(`warns once and restarts a persisted resume when hydration completion is unavailable`, async () => {
-    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
-    const metadata = createMetadata(resumeState())
-    Object.assign(metadata.api.row, {
-      scanPersisted: () => Promise.resolve([{ key: 1 }]),
-    })
-    const trace = createOracleCollection(
-      `unverifiable-persisted-resume`,
-      `eager`,
-      metadata.api,
-    )
-
-    try {
-      expect(vi.mocked(ShapeStream).mock.calls.at(-1)?.[0]).toMatchObject({
-        offset: undefined,
-        handle: undefined,
-      })
-      trace.subscriber([change(`insert`, 1, `full snapshot`), upToDate])
-
-      expect(trace.collection.status).toBe(`ready`)
-      expect(trace.collection.get(1)).toEqual(
-        expect.objectContaining({ stable: `stable-1` }),
-      )
-      await trace.collection.cleanup()
-      trace.collection.startSyncImmediate()
-      mockSubscribe.mock.calls.at(-1)![0]([upToDate])
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn.mock.calls[0]?.[0]).toMatch(
-        /persistence.*cannot verify hydration.*[Uu]pdate/,
-      )
-    } finally {
-      await trace.collection.cleanup()
-      warn.mockRestore()
-    }
-  })
 
   it(`ignores an unseen on-demand update without blocking readiness`, async () => {
     const metadata = createMetadata(resumeState())

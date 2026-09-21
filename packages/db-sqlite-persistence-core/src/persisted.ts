@@ -1,4 +1,6 @@
 import {
+  SYNC_PERSISTENCE_PROTOCOL,
+  SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
   compileSingleRowExpression,
   safeRandomUUID,
@@ -28,6 +30,9 @@ import type {
   SyncConfig,
   SyncConfigRes,
   SyncMetadataApi,
+  SyncPersistenceCapabilityV1,
+  SyncPersistenceKeySetEvidence,
+  SyncPersistenceScanOptions,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
@@ -215,13 +220,9 @@ export type PersistedScannedRow<
   metadata?: unknown
 }
 
-export type PersistedRowScanOptions = {
-  metadataOnly?: boolean
-}
+export type PersistedRowScanOptions = SyncPersistenceScanOptions
 
-export type PersistedKeySetEvidence = {
-  status: `unknown` | `consistent` | `incompatible`
-}
+export type PersistedKeySetEvidence = SyncPersistenceKeySetEvidence
 
 type PersistedResumeGeneration = {
   latestTerm: number
@@ -272,7 +273,7 @@ export interface PersistenceAdapter {
       metadata?: unknown
     }>
   >
-  loadResumeSnapshot?: (
+  loadResumeSnapshot: (
     collectionId: string,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
@@ -450,9 +451,9 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
 const REQUIRED_ADAPTER_METHODS: ReadonlyArray<
   keyof Pick<
     PersistenceAdapter,
-    `loadSubset` | `applyCommittedTx` | `ensureIndex`
+    `loadSubset` | `loadResumeSnapshot` | `applyCommittedTx` | `ensureIndex`
   >
-> = [`loadSubset`, `applyCommittedTx`, `ensureIndex`]
+> = [`loadSubset`, `loadResumeSnapshot`, `applyCommittedTx`, `ensureIndex`]
 
 const TARGETED_INVALIDATION_KEY_LIMIT = 128
 const DEFAULT_DB_NAME = `tanstack-db`
@@ -971,24 +972,21 @@ class PersistedCollectionRuntime<
       await this.ensureStarted()
       if (lifecycleGeneration !== this.lifecycleGeneration) return
 
-      const adapter = this.persistence.adapter
-      if (!adapter.loadResumeSnapshot) return
-      const snapshot = await adapter.loadResumeSnapshot(this.collectionId, {
-        requiredIndexSignatures: this.getRequiredIndexSignatures(),
-        includeRows: false,
-      })
+      const snapshot = await this.persistence.adapter.loadResumeSnapshot(
+        this.collectionId,
+        {
+          requiredIndexSignatures: this.getRequiredIndexSignatures(),
+          includeRows: false,
+        },
+      )
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       this.bindResumeSnapshotEvidence(snapshot)
     })()
     return this.resumeCertificationPromise
   }
 
-  getPersistedKeySetEvidence(): PersistedKeySetEvidence | undefined {
+  getKeySetEvidence(): PersistedKeySetEvidence | undefined {
     return this.persistedKeySetEvidence
-  }
-
-  supportsResumeSnapshot(): boolean {
-    return this.persistence.adapter.loadResumeSnapshot !== undefined
   }
 
   getResumeGenerationOwner(): symbol {
@@ -1047,45 +1045,19 @@ class PersistedCollectionRuntime<
   private async loadStartupMetadataInternal(
     lifecycleGeneration: number,
   ): Promise<void> {
-    if (this.persistence.adapter.loadResumeSnapshot) {
-      const snapshot = await this.persistence.adapter.loadResumeSnapshot(
-        this.collectionId,
-        { includeRows: false },
-      )
-      if (lifecycleGeneration !== this.lifecycleGeneration) return
-      this.persistedResumeGeneration =
-        this.getResumeSnapshotGeneration(snapshot)
-      this.persistedKeySetEvidence = snapshot.keySet
-      this.observeStreamPosition(
-        snapshot.latestTerm,
-        snapshot.latestSeq,
-        snapshot.latestRowVersion,
-      )
-      this.replaceCollectionMetadataSnapshot(snapshot.collectionMetadata)
-      return
-    }
-
-    // Restore stream position from the database so that new mutations
-    // don't collide with previously applied transactions.
-    if (this.persistence.adapter.getStreamPosition) {
-      const position = await this.persistence.adapter.getStreamPosition(
-        this.collectionId,
-      )
-      if (lifecycleGeneration !== this.lifecycleGeneration) return
-      this.persistedKeySetEvidence =
-        position.keySet?.status === `consistent`
-          ? { status: `unknown` }
-          : position.keySet
-      this.observeStreamPosition(
-        position.latestTerm,
-        position.latestSeq,
-        position.latestRowVersion,
-      )
-    }
-
-    const collectionMetadata = await this.loadCollectionMetadataSnapshot()
+    const snapshot = await this.persistence.adapter.loadResumeSnapshot(
+      this.collectionId,
+      { includeRows: false },
+    )
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    this.replaceCollectionMetadataSnapshot(collectionMetadata)
+    this.persistedResumeGeneration = this.getResumeSnapshotGeneration(snapshot)
+    this.persistedKeySetEvidence = snapshot.keySet
+    this.observeStreamPosition(
+      snapshot.latestTerm,
+      snapshot.latestSeq,
+      snapshot.latestRowVersion,
+    )
+    this.replaceCollectionMetadataSnapshot(snapshot.collectionMetadata)
   }
 
   private async loadCollectionMetadataSnapshot(): Promise<
@@ -1403,10 +1375,7 @@ class PersistedCollectionRuntime<
     this.hydratingGeneration = config.lifecycleGeneration
     try {
       let rows: Array<{ key: TKey; value: T; metadata?: unknown }>
-      if (
-        config.bindKeySetEvidence &&
-        this.persistence.adapter.loadResumeSnapshot
-      ) {
+      if (config.bindKeySetEvidence) {
         const snapshot = await this.persistence.adapter.loadResumeSnapshot(
           this.collectionId,
           {
@@ -2526,6 +2495,38 @@ function createWrappedSyncConfig<
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
       )
 
+      const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
+        protocol: SYNC_PERSISTENCE_PROTOCOL,
+        version: SYNC_PERSISTENCE_VERSION,
+        hydrateBaseline: () =>
+          startupState.cleanedUp
+            ? Promise.resolve()
+            : runtime.ensureResumeBaselineHydrated(),
+        scanPersistedRows: (options) =>
+          startupState.cleanedUp
+            ? Promise.resolve([])
+            : runtime.scanPersistedRows(options),
+        resumeSnapshot: {
+          certify: () =>
+            startupState.cleanedUp
+              ? Promise.resolve()
+              : runtime.ensureResumeBaselineCertified(),
+          getKeySetEvidence: () =>
+            startupState.cleanedUp ? undefined : runtime.getKeySetEvidence(),
+          expectCurrentCommit: () => {
+            if (startupState.cleanedUp) return
+            const openTransaction = getOpenTransaction()
+            if (!openTransaction) {
+              throw new InvalidPersistedCollectionConfigError(
+                `resumeSnapshot.expectCurrentCommit must be called within an open sync transaction`,
+              )
+            }
+            openTransaction.expectedResumeGenerationOwner =
+              runtime.getResumeGenerationOwner()
+          },
+        },
+      }
+
       const wrappedParams = {
         ...params,
         markReady: () => {
@@ -2607,17 +2608,8 @@ function createWrappedSyncConfig<
         },
         metadata: params.metadata
           ? {
+              persistence: persistenceCapability,
               row: {
-                whenHydrated: () =>
-                  startupState.cleanedUp
-                    ? Promise.resolve()
-                    : runtime.ensureResumeBaselineHydrated(),
-                certifyPersistedResume: runtime.supportsResumeSnapshot()
-                  ? () =>
-                      startupState.cleanedUp
-                        ? Promise.resolve()
-                        : runtime.ensureResumeBaselineCertified()
-                  : undefined,
                 get: (key: TKey) => {
                   if (startupState.cleanedUp) return undefined
                   const openTransaction = getOpenTransaction()
@@ -2633,30 +2625,6 @@ function createWrappedSyncConfig<
                   }
                   return params.metadata!.row.get(key)
                 },
-                scanPersisted: (options?: PersistedRowScanOptions) =>
-                  startupState.cleanedUp
-                    ? Promise.resolve([])
-                    : runtime.scanPersistedRows(options),
-                getPersistedKeySetEvidence: runtime.supportsResumeSnapshot()
-                  ? () =>
-                      startupState.cleanedUp
-                        ? undefined
-                        : runtime.getPersistedKeySetEvidence()
-                  : undefined,
-                expectCurrentCommitInResumeSnapshot:
-                  runtime.supportsResumeSnapshot()
-                    ? () => {
-                        if (startupState.cleanedUp) return
-                        const openTransaction = getOpenTransaction()
-                        if (!openTransaction) {
-                          throw new InvalidPersistedCollectionConfigError(
-                            `expectCurrentCommitInResumeSnapshot must be called within an open sync transaction`,
-                          )
-                        }
-                        openTransaction.expectedResumeGenerationOwner =
-                          runtime.getResumeGenerationOwner()
-                      }
-                    : undefined,
                 set: (key: TKey, value: unknown) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
@@ -2856,6 +2824,9 @@ function createWrappedSyncConfig<
         )
         return sourceResult
       })()
+      void sourceResultPromise.catch((error) => {
+        if (!startupState.cleanedUp) params.markError(error)
+      })
 
       return {
         cleanup: () => {

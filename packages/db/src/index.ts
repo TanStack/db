@@ -20,6 +20,7 @@ export * from './live-query-window-controller'
 export * from './local-only'
 export * from './local-storage'
 export * from './errors'
+export * from './sync-persistence'
 export { deepEquals } from './utils'
 /** @internal Used by first-party collection adapters. */
 export { warnOnce, resetWarnings } from './utils'

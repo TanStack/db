@@ -9,6 +9,7 @@ import {
   DeduplicatedLoadSubset,
   LoadSubsetOperationAbortedError,
   and,
+  validateSyncPersistenceCapability,
   warnOnce,
   withCollectionConfigFactory,
   withCollectionSyncConfigCleanup,
@@ -52,7 +53,6 @@ import type {
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
-  SyncMetadataApi,
   SyncMode,
   UpdateMutationFnParams,
 } from '@tanstack/db'
@@ -66,19 +66,6 @@ import type {
   Row,
   ShapeStreamOptions,
 } from '@electric-sql/client'
-
-type ElectricSyncMetadataWithHydration = SyncMetadataApi<string | number> & {
-  row: SyncMetadataApi<string | number>[`row`] & {
-    whenHydrated?: () => Promise<void>
-    // Capability marker for wrappers predating the hydration barrier.
-    scanPersisted?: unknown
-    certifyPersistedResume?: () => Promise<void>
-    getPersistedKeySetEvidence?: () =>
-      | { status: `unknown` | `consistent` | `incompatible` }
-      | undefined
-    expectCurrentCommitInResumeSnapshot?: () => void
-  }
-}
 
 // Re-export for user convenience in custom match functions
 export { isChangeMessage, isControlMessage } from '@electric-sql/client'
@@ -1391,7 +1378,6 @@ function createElectricSync<T extends Row<unknown>>(
   const { getLifecycle, syncMode, collectionId, testHooks } = options
 
   let relationSchema: string | undefined
-  let warnedUnverifiableResume = false
 
   const createTagState = () => {
     const tagCache = new Map<MoveTag, ParsedMoveTag>()
@@ -1762,18 +1748,15 @@ function createElectricSync<T extends Row<unknown>>(
         return parseElectricResumeState(persistedResumeState)
       }
 
-      const persistedMetadata = metadata as
-        | ElectricSyncMetadataWithHydration
-        | undefined
-      const scanPersisted = persistedMetadata?.row.scanPersisted
-      const whenHydrated = persistedMetadata?.row.whenHydrated
-      const certifyPersistedResume =
-        persistedMetadata?.row.certifyPersistedResume
-      const getPersistedKeySetEvidence =
-        persistedMetadata?.row.getPersistedKeySetEvidence
-      const expectCurrentCommitInResumeSnapshot =
-        persistedMetadata?.row.expectCurrentCommitInResumeSnapshot
-      const persistedKeySetEvidence = getPersistedKeySetEvidence?.()
+      const persistence = validateSyncPersistenceCapability(
+        metadata?.persistence,
+      )
+      const hydrateBaseline = persistence?.hydrateBaseline
+      const resumeSnapshot = persistence?.resumeSnapshot
+      const certifyResumeSnapshot = resumeSnapshot?.certify
+      const getKeySetEvidence = resumeSnapshot?.getKeySetEvidence
+      const expectCurrentCommit = resumeSnapshot?.expectCurrentCommit
+      const persistedKeySetEvidence = getKeySetEvidence?.()
 
       const persistedResumeState = getNewestElectricResumeState(
         readPersistedResumeState(),
@@ -1786,24 +1769,12 @@ function createElectricSync<T extends Row<unknown>>(
       const hasIncompatiblePersistedResume =
         persistedResumeState?.kind === `resume` &&
         persistedResumeState.shapeId !== shapeIdentity
-      const hasUnverifiablePersistedResume =
-        shapeOptions.offset === undefined &&
-        shapeOptions.handle === undefined &&
-        persistedResumeState?.kind === `resume` &&
-        scanPersisted !== undefined &&
-        whenHydrated === undefined
       // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
       // One fresh replacement establishes consistent evidence for later resumes.
       const lacksCompletePersistedKeySet =
         persistedResumeState?.kind === `resume` &&
-        getPersistedKeySetEvidence !== undefined &&
+        getKeySetEvidence !== undefined &&
         persistedKeySetEvidence?.status !== `consistent`
-      if (hasUnverifiablePersistedResume && !warnedUnverifiableResume) {
-        warnedUnverifiableResume = true
-        console.warn(
-          `Electric persistence cannot verify hydration for saved resume state. Update the persistence adapter alongside Electric to enable safe resume.`,
-        )
-      }
       const needsFullSnapshot =
         shapeOptions.offset === undefined &&
         shapeOptions.handle === undefined &&
@@ -1816,7 +1787,6 @@ function createElectricSync<T extends Row<unknown>>(
         shapeOptions.handle === undefined &&
         persistedResumeState?.kind === `resume` &&
         !hasIncompatiblePersistedResume &&
-        !hasUnverifiablePersistedResume &&
         // Cached rows do not contain authoritative tag/active-condition state.
         // Only a complete adapter ledger can justify a persisted cursor.
         !needsFullSnapshot
@@ -1827,7 +1797,7 @@ function createElectricSync<T extends Row<unknown>>(
       }
       const receivesCompleteRows = shapeOptions.params?.replica === `full`
       const requiresKeySetCertification =
-        canUsePersistedResume && certifyPersistedResume !== undefined
+        canUsePersistedResume && certifyResumeSnapshot !== undefined
       // Eager and progressive streams that start after the initial offset can
       // only apply partial updates when the local materialization is complete.
       const requiresCompleteResume =
@@ -1840,7 +1810,7 @@ function createElectricSync<T extends Row<unknown>>(
         (syncMode === `eager` || needsFullSnapshot) &&
         !canUsePersistedResume &&
         !hasExplicitResumeOffset &&
-        whenHydrated !== undefined
+        hydrateBaseline !== undefined
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -1998,7 +1968,7 @@ function createElectricSync<T extends Row<unknown>>(
           begin({ immediate: true })
           metadata.collection.set(`electric:resume`, resetState)
           if (expectInResumeSnapshot) {
-            expectCurrentCommitInResumeSnapshot?.()
+            expectCurrentCommit?.()
           }
           commit()
         }
@@ -2006,7 +1976,6 @@ function createElectricSync<T extends Row<unknown>>(
 
       if (
         hasIncompatiblePersistedResume ||
-        hasUnverifiablePersistedResume ||
         (needsFullSnapshot && persistedResumeState.kind === `resume`)
       ) {
         // This reset is part of the current runtime's startup decision. The
@@ -2093,12 +2062,12 @@ function createElectricSync<T extends Row<unknown>>(
 
       const resumeKeysPromise =
         requiresCompleteResume || freshSnapshotPending
-          ? whenHydrated
+          ? hydrateBaseline
             ? (async () => {
-                await whenHydrated()
+                await hydrateBaseline()
                 if (
                   persistedKeySetEvidence?.status !== `incompatible` &&
-                  getPersistedKeySetEvidence?.()?.status === `incompatible`
+                  getKeySetEvidence?.()?.status === `incompatible`
                 ) {
                   throw new Error(
                     `Electric persisted resume baseline became incompatible during hydration`,
@@ -2108,8 +2077,8 @@ function createElectricSync<T extends Row<unknown>>(
             : undefined
           : requiresKeySetCertification
             ? (async () => {
-                await certifyPersistedResume()
-                if (getPersistedKeySetEvidence?.()?.status === `incompatible`) {
+                await certifyResumeSnapshot()
+                if (getKeySetEvidence?.()?.status === `incompatible`) {
                   throw new Error(
                     `Electric persisted resume baseline became incompatible during certification`,
                   )

@@ -193,6 +193,16 @@ function createStubAdapter(): PersistenceAdapter & {
   return {
     appliedTxs,
     loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
     applyCommittedTx: (collectionId, tx) => {
       appliedTxs.push({ collectionId, txId: tx.txId })
       return Promise.resolve()

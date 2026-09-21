@@ -95,7 +95,7 @@ function createInMemorySyncMetadataApi<
   const rowMetadata = new Map(seed?.rowMetadata)
   const collectionMetadata = new Map(seed?.collectionMetadata)
   const persistedRows = new Map(seed?.persistedRows)
-  const api = {
+  const api: SyncMetadataApi<TKey> = {
     row: {
       get: (key: TKey) => rowMetadata.get(key),
       set: (key: TKey, value: unknown) => {
@@ -104,12 +104,22 @@ function createInMemorySyncMetadataApi<
       delete: (key: TKey) => {
         rowMetadata.delete(key)
       },
-      scanPersisted: async () =>
+    },
+    persistence: {
+      protocol: `@tanstack/db/sync-persistence`,
+      version: 1,
+      hydrateBaseline: async () => {},
+      scanPersistedRows: async () =>
         Array.from(persistedRows.entries()).map(([key, value]) => ({
           key,
           value,
           metadata: rowMetadata.get(key),
         })),
+      resumeSnapshot: {
+        certify: async () => {},
+        getKeySetEvidence: () => ({ status: `consistent` }),
+        expectCurrentCommit: () => {},
+      },
     },
     collection: {
       get: (key: string) => collectionMetadata.get(key),
@@ -130,7 +140,7 @@ function createInMemorySyncMetadataApi<
     rowMetadata,
     collectionMetadata,
     persistedRows,
-    api: api as SyncMetadataApi<TKey>,
+    api,
   }
 }
 
@@ -144,6 +154,9 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
   const rows = new Map(seed.rows)
   const rowMetadata = new Map(seed.rowMetadata)
   const collectionMetadata = new Map(seed.collectionMetadata)
+  let latestTerm = 0
+  let latestSeq = 0
+  let latestRowVersion = 0
 
   return {
     rows,
@@ -155,6 +168,28 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
         value,
         metadata: rowMetadata.get(value.id),
       })),
+    loadResumeSnapshot: async (
+      _collectionId: string,
+      options?: { includeRows?: boolean },
+    ) => ({
+      rows:
+        options?.includeRows === false
+          ? []
+          : Array.from(rows.values()).map((value) => ({
+              key: value.id,
+              value,
+              metadata: rowMetadata.get(value.id),
+            })),
+      keySet: { status: `consistent` as const },
+      collectionMetadata: Array.from(
+        collectionMetadata.entries(),
+        ([key, value]) => ({ key, value }),
+      ),
+      latestTerm,
+      latestSeq,
+      latestRowVersion,
+      resetEpoch: 0,
+    }),
     loadCollectionMetadata: async () =>
       Array.from(collectionMetadata.entries()).map(([key, value]) => ({
         key,
@@ -193,6 +228,9 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
           collectionMetadata.set(mutation.key, mutation.value)
         }
       }
+      latestTerm = tx.term
+      latestSeq = tx.seq
+      latestRowVersion = tx.rowVersion
     },
     ensureIndex: async () => {},
   }
@@ -6693,14 +6731,21 @@ describe(`QueryCollection`, () => {
           ],
         ]),
       })
-      const scanPersisted = vi.fn().mockReturnValue(persistedScan.promise)
-      const metadataApi = {
+      const scanPersistedRows = vi.fn().mockReturnValue(persistedScan.promise)
+      const metadataApi: SyncMetadataApi<string | number> = {
         ...metadataHarness.api,
-        row: {
-          ...metadataHarness.api.row,
-          scanPersisted,
+        persistence: {
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+          hydrateBaseline: async () => {},
+          scanPersistedRows,
+          resumeSnapshot: {
+            certify: async () => {},
+            getKeySetEvidence: () => ({ status: `consistent` }),
+            expectCurrentCommit: () => {},
+          },
         },
-      } as SyncMetadataApi<string | number>
+      }
 
       const baseOptions = queryCollectionOptions<CategorisedItem>({
         id: `stale-retained-reconciliation`,
@@ -6724,7 +6769,8 @@ describe(`QueryCollection`, () => {
       })
       const load = collection._sync.loadSubset({})
       await vi.waitFor(() => {
-        expect(scanPersisted).toHaveBeenCalledOnce()
+        expect(scanPersistedRows).toHaveBeenCalledOnce()
+        expect(scanPersistedRows).toHaveBeenCalledWith()
       })
 
       collection._sync.unloadSubset({})

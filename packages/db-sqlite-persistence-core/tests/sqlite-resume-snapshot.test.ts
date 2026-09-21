@@ -1,6 +1,10 @@
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
-import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import {
+  SQLiteCorePersistenceAdapter,
+  createPersistedTableName,
+  encodePersistedStorageKey,
+} from '../src'
 import type { SQLiteDriver } from '../src'
 
 type CachedSchemaState = {
@@ -415,6 +419,15 @@ describe(`SQLite resume snapshots`, () => {
            deleted_at TEXT NOT NULL
          )`,
       )
+      await driver.run(
+        `INSERT INTO "${tableName}" (key, value, metadata, row_version)
+         VALUES (?, ?, ?, 0)`,
+        [
+          encodePersistedStorageKey(`legacy-row`),
+          JSON.stringify({ id: `legacy-row`, n: 0 }),
+          JSON.stringify({ source: `legacy` }),
+        ],
+      )
       await driver.exec(
         `CREATE TABLE collection_version (
            collection_id TEXT PRIMARY KEY,
@@ -473,9 +486,16 @@ describe(`SQLite resume snapshots`, () => {
         ]),
       )
 
-      expect((await migrated.loadResumeSnapshot(collectionId)).keySet).toEqual({
-        status: `unknown`,
-      })
+      const migratedLegacySnapshot =
+        await migrated.loadResumeSnapshot(collectionId)
+      expect(migratedLegacySnapshot.keySet).toEqual({ status: `unknown` })
+      expect(migratedLegacySnapshot.rows).toEqual([
+        {
+          key: `legacy-row`,
+          value: { id: `legacy-row`, n: 0 },
+          metadata: { source: `legacy` },
+        },
+      ])
       await migrated.applyCommittedTx(collectionId, {
         txId: `legacy-insert`,
         term: 1,

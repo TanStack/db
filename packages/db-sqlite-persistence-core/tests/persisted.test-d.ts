@@ -23,35 +23,27 @@ interface SyncExtraUtils extends UtilsRecord {
 
 const adapter: PersistenceAdapter = {
   loadSubset: () => Promise.resolve([]),
+  loadResumeSnapshot: () =>
+    Promise.resolve({
+      rows: [],
+      keySet: { status: `consistent` },
+      collectionMetadata: [],
+      latestTerm: 0,
+      latestSeq: 0,
+      latestRowVersion: 0,
+      resetEpoch: 0,
+    }),
   applyCommittedTx: () => Promise.resolve(),
   ensureIndex: () => Promise.resolve(),
 }
 
 describe(`persisted collection types`, () => {
-  it(`keeps the atomic resume snapshot extension optional and exact`, () => {
-    const legacyAdapter: PersistenceAdapter = adapter
-    const snapshotAdapter: PersistenceAdapter = {
-      ...adapter,
-      loadResumeSnapshot: (_collectionId, _options) =>
-        Promise.resolve({
-          rows: [],
-          keySet: { status: `consistent` },
-          collectionMetadata: [],
-          latestTerm: 1,
-          latestSeq: 2,
-          latestRowVersion: 3,
-          resetEpoch: 4,
-        }),
-    }
-    type LoadResumeSnapshot = NonNullable<
-      PersistenceAdapter[`loadResumeSnapshot`]
-    >
+  it(`requires an exact atomic resume snapshot contract`, () => {
+    type LoadResumeSnapshot = PersistenceAdapter[`loadResumeSnapshot`]
     type ResumeSnapshot = Awaited<ReturnType<LoadResumeSnapshot>>
 
-    expectTypeOf(legacyAdapter).toMatchTypeOf<PersistenceAdapter>()
-    expectTypeOf(snapshotAdapter.loadResumeSnapshot).toMatchTypeOf<
-      LoadResumeSnapshot | undefined
-    >()
+    expectTypeOf(adapter).toMatchTypeOf<PersistenceAdapter>()
+    expectTypeOf(adapter.loadResumeSnapshot).toMatchTypeOf<LoadResumeSnapshot>()
     expectTypeOf<Parameters<LoadResumeSnapshot>[1]>().toEqualTypeOf<
       | {
           requiredIndexSignatures?: ReadonlyArray<string>

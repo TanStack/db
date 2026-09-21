@@ -176,6 +176,10 @@ function fixture(
   ])
   let hydrationGate = Promise.resolve()
   const commits: Array<PersistedTx> = []
+  let latestTerm = 0
+  let latestSeq = 0
+  let latestRowVersion = 0
+  let resetEpoch = 0
   const adapter: PersistenceAdapter = {
     loadSubset: () => {
       const snapshot = Array.from(rows, ([key, value]) => ({
@@ -183,6 +187,27 @@ function fixture(
         value: { ...value },
       }))
       return hydrationGate.then(() => snapshot)
+    },
+    loadResumeSnapshot: async (_collectionId, ctx) => {
+      if (ctx?.includeRows !== false) await hydrationGate
+      return {
+        rows:
+          ctx?.includeRows === false
+            ? []
+            : Array.from(rows, ([key, value]) => ({
+                key,
+                value: { ...value },
+              })),
+        keySet: { status: `consistent` },
+        collectionMetadata: Array.from(metadata, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
+        latestTerm,
+        latestSeq,
+        latestRowVersion,
+        resetEpoch,
+      }
     },
     loadCollectionMetadata: () =>
       Promise.resolve(
@@ -196,7 +221,10 @@ function fixture(
         if (mutation.type === `delete`) metadata.delete(mutation.key)
         else metadata.set(mutation.key, structuredClone(mutation.value))
       }
-      if (tx.truncate) rows.clear()
+      if (tx.truncate) {
+        rows.clear()
+        resetEpoch++
+      }
       for (const mutation of tx.mutations) {
         if (mutation.type === `delete`) rows.delete(mutation.key)
         else {
@@ -206,6 +234,9 @@ function fixture(
           } as Item)
         }
       }
+      latestTerm = tx.term
+      latestSeq = tx.seq
+      latestRowVersion = tx.rowVersion
       commits.push(structuredClone(tx))
       return Promise.resolve()
     },
