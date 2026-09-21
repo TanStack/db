@@ -1346,9 +1346,7 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     const routeRemoteDemandThroughCoordinator =
-      this.mode === `sync-present` &&
-      this.remoteSubsetOwnerUnsubscribe !== null &&
-      !(this.persistence.coordinator instanceof SingleProcessCoordinator)
+      this.canRouteRemoteDemandThroughCoordinator()
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
     const appliedCursor = this.appliedReceiptSequence
@@ -2229,11 +2227,25 @@ class PersistedCollectionRuntime<
     return id
   }
 
-  private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
+  private canRouteRemoteDemandThroughCoordinator(): boolean {
     if (
       this.mode !== `sync-present` ||
-      this.remoteSubsetOwnerUnsubscribe === null ||
-      this.persistence.coordinator instanceof SingleProcessCoordinator ||
+      this.persistence.coordinator instanceof SingleProcessCoordinator
+    ) {
+      return false
+    }
+
+    // A follower routes demand to the elected owner even when its own source
+    // cannot own acquisitions. Only an elected node needs a local owner.
+    return (
+      !this.persistence.coordinator.isLeader(this.collectionId) ||
+      this.remoteSubsetOwnerUnsubscribe !== null
+    )
+  }
+
+  private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
+    if (
+      !this.canRouteRemoteDemandThroughCoordinator() ||
       this.activeSubsets.get(this.getSubsetKey(options)) !== options
     ) {
       return

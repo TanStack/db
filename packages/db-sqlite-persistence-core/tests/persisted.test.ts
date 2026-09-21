@@ -3302,7 +3302,7 @@ describe(`persistedCollectionOptions`, () => {
     expect(ensureCalls).toBeGreaterThanOrEqual(2)
   })
 
-  it(`does not route remote demand without a subset owner`, async () => {
+  it(`does not route remote demand from an ownerless elected leader`, async () => {
     const ensure = vi.fn(async () => {
       throw new Error(`no remote subset owner registered`)
     })
@@ -3354,6 +3354,63 @@ describe(`persistedCollectionOptions`, () => {
       await flushAsyncWork(120)
 
       expect(ensure).not.toHaveBeenCalled()
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`routes follower demand without a local subset owner`, async () => {
+    const ensure = vi.fn(async () => {})
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `ownerless-follower`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      requestEnsureRemoteSubset: ensure,
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+    }
+    const collectionId = `ownerless-on-demand-follower`
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter: createRecordingAdapter(),
+          coordinator,
+        },
+      }),
+    )
+    const options = { limit: 1 }
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+
+      await expect(
+        Promise.resolve(collection._sync.loadSubset(options)),
+      ).resolves.toBeUndefined()
+
+      expect(ensure).toHaveBeenCalledTimes(1)
+      expect(ensure).toHaveBeenCalledWith(collectionId, options)
     } finally {
       await collection.cleanup()
     }
