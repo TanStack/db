@@ -1,7 +1,7 @@
 import { createCollection, createTransaction } from '@tanstack/db'
 import { expect, it, vi } from 'vitest'
 import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
-import type { AbstractPowerSyncDatabase } from '@powersync/common'
+import type { CommonPowerSyncDatabase } from '@powersync/common'
 
 it.each([`cleanup`, `error`, `ready`] as const)(
   `settles a transaction waiting for source readiness on %s`,
@@ -11,7 +11,7 @@ it.each([`cleanup`, `error`, `ready`] as const)(
       .mockResolvedValue({ whenComplete: Promise.resolve() })
     // This boundary must settle before taking a database lock; no SQL runs.
     const transactor = new PowerSyncTransactor({
-      database: { writeTransaction } as unknown as AbstractPowerSyncDatabase,
+      database: { writeTransaction } as unknown as CommonPowerSyncDatabase,
     })
     let markSourceReady!: () => void
     const collection = createCollection<{ id: string }>({

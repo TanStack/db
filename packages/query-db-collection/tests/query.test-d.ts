@@ -16,7 +16,11 @@ import type {
   QueryFunctionContext,
   QueryObserverOptions,
 } from '@tanstack/query-core'
-import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
+import type {
+  QueryCollectionConfig,
+  QueryCollectionUtils,
+  RefetchFn,
+} from '../src/query'
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -81,6 +85,14 @@ describe(`Query collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.refetch,
+        ).toEqualTypeOf<RefetchFn>()
+        // @ts-expect-error Query Collection does not expose Electric acknowledgement helpers
+        params.transaction.mutations[0].collection.utils.awaitTxId(1)
         return Promise.resolve()
       },
       onUpdate: (params) => {
@@ -88,6 +100,12 @@ describe(`Query collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.refetch,
+        ).toEqualTypeOf<RefetchFn>()
         return Promise.resolve()
       },
       onDelete: (params) => {
@@ -95,6 +113,12 @@ describe(`Query collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.refetch,
+        ).toEqualTypeOf<RefetchFn>()
         return Promise.resolve()
       },
     })

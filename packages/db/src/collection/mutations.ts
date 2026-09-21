@@ -47,11 +47,14 @@ export class CollectionMutationsManager<
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private collection!: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
-  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private config!: CollectionConfig<TOutput, TKey, TSchema, TUtils>
   private transactionScope?: TransactionScope
   private id: string
 
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, TUtils>,
+    id: string,
+  ) {
     this.id = id
     this.config = config
   }
@@ -206,9 +209,9 @@ export class CollectionMutationsManager<
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
 
-      // Check if an item with this ID already exists in the collection or in the current batch
+      // Reject duplicate keys within this batch before starting sync.
       const key = this.config.getKey(validatedData)
-      if (this.state.has(key) || keysInCurrentBatch.has(key)) {
+      if (keysInCurrentBatch.has(key)) {
         throw new DuplicateKeyError(key)
       }
       keysInCurrentBatch.add(key)
@@ -241,6 +244,14 @@ export class CollectionMutationsManager<
       mutations.push(mutation)
     })
 
+    // Reject duplicates already visible before explicitly starting sync; startup may
+    // synchronously reveal additional keys, so check again afterward.
+    let duplicate = mutations.find(({ key }) => state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
+    this.collection._sync.startSync()
+    duplicate = mutations.find(({ key }) => state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
+
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
       ambientTransaction.applyMutations(mutations)
@@ -260,9 +271,14 @@ export class CollectionMutationsManager<
             transaction:
               params.transaction as unknown as TransactionWithMutations<
                 TOutput,
-                `insert`
+                `insert`,
+                Collection<TOutput, TKey, TUtils>
               >,
-            collection: this.collection as unknown as Collection<TOutput, TKey>,
+            collection: this.collection as unknown as Collection<
+              TOutput,
+              TKey,
+              TUtils
+            >,
           })
         },
       })
@@ -286,7 +302,7 @@ export class CollectionMutationsManager<
    * Updates one or more items in the collection using a callback function
    */
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
@@ -317,9 +333,12 @@ export class CollectionMutationsManager<
     }
 
     const callback =
-      typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
+      typeof configOrCallback === `function` ? configOrCallback : maybeCallback
+    if (typeof callback !== `function`) throw new TypeError()
     const config =
       typeof configOrCallback === `function` ? {} : configOrCallback
+
+    this.collection._sync.startSync()
 
     // Get the current objects or empty objects if they don't exist
     const currentObjects = keysArray.map((key) => {
@@ -453,9 +472,14 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `update`
+              `update`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })
@@ -497,6 +521,7 @@ export class CollectionMutationsManager<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
+    this.collection._sync.startSync()
     const mutations: Array<
       PendingMutation<
         TOutput,
@@ -557,9 +582,14 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `delete`
+              `delete`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })

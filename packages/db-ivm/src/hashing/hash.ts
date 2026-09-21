@@ -13,6 +13,7 @@ const UNDEFINED = randomHash()
 const KEY = randomHash()
 const FUNCTIONS = randomHash()
 const DATE_MARKER = randomHash()
+const REGEXP_MARKER = randomHash()
 const STRUCTURAL_MARKERS = {
   object: randomHash(),
   array: randomHash(),
@@ -89,12 +90,19 @@ function hashObject(input: object, context: HashContext): number {
       valueHash = hashUint8Array(input)
     } else if (isTemporal(input)) {
       valueHash = hashTemporal(input)
+    } else if (input instanceof RegExp) {
+      valueHash = hashPlainObject(input, REGEXP_MARKER, context, [
+        input.source,
+        input.flags,
+        input.lastIndex,
+      ])
     } else {
       const [kind, plainObjectInput] = structuralShape(input)
       valueHash = hashPlainObject(
         plainObjectInput,
         STRUCTURAL_MARKERS[kind],
         context,
+        kind === `array` ? [input instanceof Array ? input.length : 0] : [],
       )
     }
   } finally {
@@ -136,11 +144,13 @@ function hashPlainObject(
   input: object,
   marker: number,
   context: HashContext,
+  headerValues: ReadonlyArray<unknown> = [],
 ): number {
   const hasher = new MurmurHashStream()
 
   // Mark the type of the input
   hasher.update(marker)
+  for (const value of headerValues) updateHasher(hasher, value, context)
   const keys = Object.keys(input)
   keys.sort(keySort)
   for (const key of keys) {
@@ -239,7 +249,7 @@ function getCachedHash(input: object, context?: HashContext): number {
 
 function isReferenceHashedObject(input: object): boolean {
   return (
-    input instanceof File ||
+    (typeof File !== `undefined` && input instanceof File) ||
     (isBinaryValue(input) &&
       input.byteLength > UINT8ARRAY_CONTENT_HASH_THRESHOLD)
   )
@@ -302,6 +312,17 @@ export function equalHashValues(left: unknown, right: unknown): boolean {
         a[Symbol.toStringTag] === b[Symbol.toStringTag] &&
         a.toString() === b.toString()
       )
+    if (a instanceof RegExp || b instanceof RegExp) {
+      if (
+        !(a instanceof RegExp && b instanceof RegExp) ||
+        a.source !== b.source ||
+        a.flags !== b.flags ||
+        a.lastIndex !== b.lastIndex
+      )
+        return false
+    }
+    if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length)
+      return false
 
     // Revisited pairs close cycles and avoid expanding shared subtrees.
     const peers = compared.get(a)

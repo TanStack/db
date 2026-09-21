@@ -28,7 +28,6 @@ import type {
   CollectionConfig,
   CollectionStatus,
   CurrentStateAsChangesOptions,
-  Fn,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -57,20 +56,23 @@ const collectionSyncConfigCleanup: unique symbol = Symbol.for(
 
 type CollectionSyncConfigWithFactory<TSync extends object> = TSync & {
   readonly [collectionSyncConfigFactory]: (
-    this: TSync,
+    source: TSync,
     utilities: object,
+    startSyncIfIdle: () => void,
   ) => TSync
 }
 
-/** @internal Lets adapters bind a sync config to each collection instance. */
+/** @internal The factory must defer `startSyncIfIdle` until construction ends. */
 export function withCollectionSyncConfigFactory<TSync extends object>(
   sync: TSync,
-  factory: (source: TSync, utilities: object) => TSync,
+  factory: (
+    source: TSync,
+    utilities: object,
+    startSyncIfIdle: () => void,
+  ) => TSync,
 ): CollectionSyncConfigWithFactory<TSync> {
   Object.defineProperty(sync, collectionSyncConfigFactory, {
-    value(this: TSync, utilities: object) {
-      return factory(this, utilities)
-    },
+    value: factory,
     // Preserve the hook when callers wrap a sync config with object spread.
     enumerable: true,
   })
@@ -92,7 +94,11 @@ export function withCollectionSyncConfigCleanup<TSync extends object>(
 function materializeCollectionSyncConfig<
   TSync extends object,
   TUtils extends object,
->(sync: TSync, utilities: TUtils): { sync: TSync; utilities: TUtils } {
+>(
+  sync: TSync,
+  utilities: TUtils,
+  startSyncIfIdle: () => void,
+): { sync: TSync; utilities: TUtils } {
   const factory = (
     sync as unknown as Partial<CollectionSyncConfigWithFactory<TSync>>
   )[collectionSyncConfigFactory]
@@ -104,7 +110,10 @@ function materializeCollectionSyncConfig<
     Object.getPrototypeOf(utilities),
     Object.getOwnPropertyDescriptors(utilities),
   ) as TUtils
-  return { sync: factory.call(sync, ownedUtilities), utilities: ownedUtilities }
+  return {
+    sync: factory(sync, ownedUtilities, startSyncIfIdle),
+    utilities: ownedUtilities,
+  }
 }
 
 function cleanupCollectionSyncConfig(sync: object): void {
@@ -331,6 +340,18 @@ export function createCollection(
   return collection
 }
 
+type CollectionImplConfig<
+  TOutput extends object,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+  TSchema extends StandardSchemaV1,
+> = CollectionConfig<TOutput, TKey, TSchema, TUtils> &
+  (string extends keyof TUtils
+    ? object
+    : keyof TUtils extends never
+      ? object
+      : { utils: TUtils })
+
 export class CollectionImpl<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -339,11 +360,11 @@ export class CollectionImpl<
   TInput extends object = TOutput,
 > {
   public id: string
-  public config: CollectionConfig<TOutput, TKey, TSchema>
+  public config: CollectionConfig<TOutput, TKey, TSchema, TUtils>
 
   // Utilities namespace
   // This is populated by createCollection
-  public utils: Record<string, Fn> = {}
+  public utils: TUtils = {} as TUtils
 
   // Managers
   private _events: CollectionEventsManager
@@ -377,7 +398,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+  constructor(config: CollectionImplConfig<TOutput, TKey, TUtils, TSchema>) {
     // eslint-disable-next-line
     if (!config) {
       throw new CollectionRequiresConfigError()
@@ -396,7 +417,13 @@ export class CollectionImpl<
 
     // Set default values for optional config properties
     const { sync: collectionSync, utilities: collectionUtils } =
-      materializeCollectionSyncConfig(config.sync, config.utils ?? {})
+      materializeCollectionSyncConfig(
+        config.sync,
+        config.utils ?? ({} as TUtils),
+        () => {
+          if (this._lifecycle.status === `idle`) this._sync.startSync()
+        },
+      )
     this.config = {
       ...config,
       sync: collectionSync,
@@ -859,32 +886,32 @@ export class CollectionImpl<
 
   // Overload 1: Update multiple items with a callback
   update(
-    key: Array<TKey | unknown>,
+    key: Array<TKey>,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update(
-    keys: Array<TKey | unknown>,
+    keys: Array<TKey>,
     config: OperationConfig,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     config: OperationConfig,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
@@ -1126,19 +1153,24 @@ export class CollectionImpl<
 }
 
 function buildCompareOptionsFromConfig(
-  config: CollectionConfig<any, any, any>,
+  config: CollectionConfig<any, any, any, any>,
 ): StringCollationConfig {
-  if (config.defaultStringCollation) {
-    const options = config.defaultStringCollation
-    return {
-      stringSort: options.stringSort ?? `locale`,
-      locale: options.stringSort === `locale` ? options.locale : undefined,
-      localeOptions:
-        options.stringSort === `locale` ? options.localeOptions : undefined,
-    }
-  } else {
-    return {
-      stringSort: `locale`,
-    }
+  const options = config.defaultStringCollation
+  if (!options) {
+    return { stringSort: `locale` }
+  }
+
+  if (options.stringSort === `lexical`) {
+    return { stringSort: `lexical` }
+  }
+
+  return {
+    stringSort: `locale`,
+    ...(`locale` in options &&
+      options.locale !== undefined && { locale: options.locale }),
+    ...(`localeOptions` in options &&
+      options.localeOptions !== undefined && {
+        localeOptions: options.localeOptions,
+      }),
   }
 }

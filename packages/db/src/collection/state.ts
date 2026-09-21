@@ -73,7 +73,7 @@ export class CollectionStateManager<
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  public config!: CollectionConfig<TOutput, TKey, TSchema>
+  public config!: CollectionConfig<TOutput, TKey, TSchema, any>
   public collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
   public lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
@@ -149,7 +149,7 @@ export class CollectionStateManager<
   /**
    * Creates a new CollectionState manager
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+  constructor(config: CollectionConfig<TOutput, TKey, TSchema, any>) {
     this.config = config
     this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
       a.compareCreatedAt(b),
@@ -1016,11 +1016,17 @@ export class CollectionStateManager<
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
+      const firstSyncOperations = new Map<
+        TKey,
+        OptimisticChangeMessage<TOutput>
+      >()
       for (const transaction of committedSyncedTransactions) {
         for (const operation of transaction.operations) {
-          changedKeys.add(operation.key as TKey)
-          if (operation.type !== `delete`)
-            syncedInsertedOrUpdatedKeys.add(operation.key as TKey)
+          const key = operation.key as TKey
+          changedKeys.add(key)
+          if (!firstSyncOperations.has(key))
+            firstSyncOperations.set(key, operation)
+          if (operation.type !== `delete`) syncedInsertedOrUpdatedKeys.add(key)
         }
         for (const [key] of transaction.rowMetadataWrites) {
           changedKeys.add(key)
@@ -1148,6 +1154,11 @@ export class CollectionStateManager<
               : 'remote'
           if (origin === `local`) localKeys.add(key)
 
+          // A sync source may reuse a live-reading row object, making an
+          // enriched snapshot cached for an earlier publication stale.
+          if (operation.type !== `delete`)
+            this.virtualPropsCache.delete(operation.value)
+
           // Update synced data
           switch (operation.type) {
             case `insert`:
@@ -1226,17 +1237,22 @@ export class CollectionStateManager<
       // sync commit has been applied, stop retaining completed optimistic keys
       // that were not confirmed by this commit so the temporary row is removed.
       for (const key of this.pendingOptimisticDirectUpserts) {
-        // Truncate republishes this captured snapshot. Keep its existing
-        // retention marker so the next sync can also publish its removal.
+        // An active delete can hide an accepted snapshot. Retain it through
+        // truncate so rollback can restore it. A direct insert completed after
+        // snapshot capture has no support in the replacement and must retire.
         if (
           hasTruncateSync &&
-          truncateOptimisticSnapshot?.upserts.has(key) &&
+          this.pendingOptimisticUpserts.has(key) &&
+          (truncateOptimisticSnapshot?.upserts.has(key) === true ||
+            truncateOptimisticSnapshot?.deletes.has(key) === true) &&
           !changedKeys.has(key)
         )
           continue
         if (!changedKeys.has(key)) {
           changedKeys.add(key)
-          if (!currentVisibleState.has(key)) {
+          // Truncate already emitted the prior visible rows as its clear
+          // prefix. Reconstructing one here would publish a duplicate delete.
+          if (!hasTruncateSync && !currentVisibleState.has(key)) {
             const previousValue = previousOptimisticUpserts.get(key)
             if (previousValue !== undefined) {
               currentVisibleState.set(key, previousValue)
@@ -1376,7 +1392,21 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
-        const previousVisibleValue = currentVisibleState.get(key)
+        const firstSyncOperation = firstSyncOperations.get(key)
+        // A live-reading source can change a reused row before this commit
+        // captures it. Later writes must not substitute an intermediate value.
+        const syncPreviousValue =
+          firstSyncOperation?.type === `update` &&
+          currentVisibleState.get(key) === firstSyncOperation.value
+            ? firstSyncOperation.previousValue
+            : undefined
+        const previousVisibleValue =
+          !hasTruncateSync &&
+          !previousOptimisticUpserts.has(key) &&
+          !previousOptimisticDeletes.has(key) &&
+          syncPreviousValue !== undefined
+            ? syncPreviousValue
+            : currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
         const previousVirtualProps =
           this.preSyncVirtualState.get(key) ??

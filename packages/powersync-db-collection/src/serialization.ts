@@ -2,9 +2,9 @@ import { ColumnType } from '@powersync/common'
 import type { Table } from '@powersync/common'
 import type { CustomSQLiteSerializer } from './definitions'
 import type {
+  AnyTableColumnType,
   ExtractedTable,
   ExtractedTableColumns,
-  MapBaseColumnType,
 } from './helpers'
 
 /**
@@ -12,10 +12,6 @@ import type {
  *
  * This function takes an object representing a row, a table schema, and an optional custom serializer map.
  * It returns a new object with values transformed to be compatible with SQLite column types.
- *
- * ## Generics
- * - `TOutput`: The shape of the input object, typically matching the row data.
- * - `TTable`: The table schema, which must match the keys of `TOutput`.
  *
  * ## Parameters
  * - `value`: The object to serialize (row data).
@@ -37,17 +33,12 @@ import type {
  * - Throws if a key in `value` does not exist in the schema.
  * - Throws if a value cannot be converted to the required SQLite type.
  */
-export function serializeForSQLite<
-  TOutput extends Record<string, unknown>,
-  // The keys should match
-  TTable extends Table<MapBaseColumnType<TOutput>> = Table<
-    MapBaseColumnType<TOutput>
-  >,
->(
-  value: TOutput,
+export function serializeForSQLite<TTable extends Table>(
+  value: AnyTableColumnType<TTable>,
   tableSchema: TTable,
-  customSerializer: Partial<
-    CustomSQLiteSerializer<TOutput, ExtractedTableColumns<TTable>>
+  customSerializer: CustomSQLiteSerializer<
+    AnyTableColumnType<TTable>,
+    ExtractedTableColumns<TTable>
   > = {},
 ): ExtractedTable<TTable> {
   return Object.fromEntries(
@@ -68,7 +59,7 @@ export function serializeForSQLite<
 
       const customTransform = customSerializer[key]
       if (customTransform) {
-        return [key, customTransform(value as TOutput[string])]
+        return [key, customTransform(value)]
       }
 
       // Map to the output
@@ -98,5 +89,5 @@ export function serializeForSQLite<
           }
       }
     }),
-  )
+  ) as ExtractedTable<TTable>
 }

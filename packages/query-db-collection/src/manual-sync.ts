@@ -52,7 +52,7 @@ export interface SyncContext<
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (items: Array<TRow>) => void
+  updateCacheData?: (getItems: () => Array<TRow>) => void
 }
 
 interface NormalizedOperation<
@@ -221,12 +221,16 @@ export function performWriteOperations<
   ctx.commit()
 
   // Update query cache after successful commit
-  const updatedData = Array.from(ctx.collection._state.syncedData.values())
   if (ctx.updateCacheData) {
-    ctx.updateCacheData(updatedData)
+    ctx.updateCacheData(() =>
+      Array.from(ctx.collection._state.syncedData.values()),
+    )
   } else {
     // Fallback: directly set the cache with raw array (for non-Query Collection consumers)
-    ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
+    ctx.queryClient.setQueryData(
+      ctx.queryKey,
+      Array.from(ctx.collection._state.syncedData.values()),
+    )
   }
 }
 
