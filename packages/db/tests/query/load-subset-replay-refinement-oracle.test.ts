@@ -15,11 +15,29 @@ import type {
   SyncConfig,
 } from '../../src/types.js'
 
+/**
+ * # Which replay may replace a loadSubset publication?
+ *
+ * A replay is authoritative only when its full participating source set
+ * succeeds. Rows written by a failed, obsolete, or incomplete replay remain
+ * private. The last complete public snapshot stays visible until a newer
+ * complete replay replaces it. Direct subscribers may restart after source
+ * cleanup; a dependent live query that entered a terminal source error does not
+ * revive merely because that source restarts.
+ *
+ * Each distinguishing history uses small plain row sets and explicit deferred
+ * attempts. The driver observes exact publications, readiness, errors, loads,
+ * unloads, and final rows across single-source, include-route, and joined-source
+ * replays. These are refinement checks for production replay boundaries, not a
+ * second general lifecycle model.
+ */
+
 type Row = { id: string; version: number }
 type ObservedRow = { sourceId: string; rowKey: string; version: number }
 
 describe(`loadSubset replay refinement`, () => {
-  // A direct subscriber survives source cleanup. A dependent live query enters
+  // A direct subscriber survives source Collection cleanup. A dependent live
+  // query enters
   // a terminal error instead; restarting only its source must not revive it.
   it.each(
     ([`direct`, `live`] as const).flatMap((consumer) =>
@@ -29,7 +47,7 @@ describe(`loadSubset replay refinement`, () => {
       })),
     ),
   )(
-    `separates direct restart from fatal live source cleanup: %j`,
+    `separates direct restart from fatal source Collection cleanup for a live query: %j`,
     async ({ consumer, outcome }) => {
       let operations!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
       let loads = 0

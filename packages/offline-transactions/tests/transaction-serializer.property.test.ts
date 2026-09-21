@@ -3,7 +3,26 @@ import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import { TransactionSerializer } from '../src/outbox/TransactionSerializer'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
+import { readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
+
+/**
+ * # Does an offline transaction survive durable serialization exactly?
+ *
+ * The wire format supports JSON trees plus Date values. User keys that resemble
+ * codec markers remain data. Insert, update, and delete mutations retain their
+ * original, modified, changes, collection registry, timestamps, and order across
+ * restart. Unknown encodings fail rather than creating a zombie transaction.
+ *
+ * The generator builds semantic runtime and wire pairs from leaves; it never
+ * walks a production value with a copy of the serializer. A restarted set of
+ * Collections with different object identities decodes the record and replays
+ * it. Encoder and decoder fault modes prove Date/string confusion, wrong
+ * registry, omitted changes, and unknown versions are observed.
+ *
+ * Cycles, undefined, non-finite numbers, and arbitrary native objects are
+ * outside this declared durable format.
+ */
 
 type Value =
   | null
@@ -29,10 +48,7 @@ type Fault =
   | `omit-changes`
   | `unknown-encoding`
 
-// Construct both representations from semantic leaves, not by walking a
-// production value with a copy of serializeValue. This is JSON trees + Date,
-// not arbitrary JS: cycles, undefined, non-finite numbers and other native
-// objects are outside this format. User keys, including codec markers, are data.
+// Construct both representations from semantic leaves, not production output.
 const datePair = (time: number): Pair => ({
   runtime: new Date(time),
   wire: { __type: `Date`, value: new Date(time).toISOString() },
@@ -378,22 +394,14 @@ const pinned: Array<Edit> = [
 ]
 // This package's test root is separate from core's named replay portfolio.
 // Keep a local replay entry point rather than importing files outside rootDir.
-const numRuns = Number(process.env.OFFLINE_ORACLE_RUNS ?? 100)
-if (!Number.isSafeInteger(numRuns) || numRuns < 1)
-  throw new Error(`Invalid OFFLINE_ORACLE_RUNS`)
-const seedText = process.env.OFFLINE_ORACLE_SEED
-const replaySeed = seedText === undefined ? undefined : Number(seedText)
-if (
-  seedText !== undefined &&
-  (seedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-)
-  throw new Error(`Invalid OFFLINE_ORACLE_SEED`)
-const replayPath = process.env.OFFLINE_ORACLE_PATH
-if (
-  replayPath !== undefined &&
-  (replaySeed === undefined || !/^\d+(?::\d+)*$/.test(replayPath))
-)
-  throw new Error(`OFFLINE_ORACLE_PATH requires a seed and numeric shrink path`)
+const {
+  runs: numRuns,
+  seed: replaySeed,
+  path: replayPath,
+} = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 100,
+})
 it.each([20260914, undefined])(
   `preserves mutation wire meaning across restart (seed %s)`,
   async (seed) => {

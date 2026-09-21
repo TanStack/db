@@ -2,14 +2,28 @@ import { expect } from 'vitest'
 import { MessageTracker } from '../test-utils.js'
 import type { MultiSet } from '../../src/multiset.js'
 
+/**
+ * # What does the signed top-K oracle remember?
+ *
+ * A top-K operator emits signed changes. A positive weight inserts one entry.
+ * A negative weight retracts one matching entry. The oracle adds these weights
+ * across all messages and keeps nonzero residue.
+ *
+ * A valid visible result has weight one for every live entry. Numeric indexes
+ * must equal the requested offset and position. Fractional string indexes are
+ * opaque, so the oracle checks only their strict order.
+ *
+ * This model covers finite scalar keys, scalar indexes, and rows with numeric
+ * IDs and string values. It does not define identity for rich or cyclic values.
+ */
+
 type Row = { id: number; value: string }
 type Entry<K, I> = [K, [Row, I]]
 type Expected<K> = Array<[K, number, string]>
 
-/** Independent signed relation for the finite scalar, unit-live-row tests.
- * Unlike the work tracker, it never resets, drops negatives or merges weight 2
- * into one row. Exact fractional tokens are not an expected-result authority.
- */
+// Identity includes every scalar field that can distinguish two modeled
+// entries. A zero weight removes an entry. Every other weight stays visible to
+// the checker, including negative and duplicate residue.
 export class TopKRelation<
   K extends string | number | null,
   I extends number | string,
@@ -19,7 +33,7 @@ export class TopKRelation<
   add(messages: Array<[Entry<K, I>, number]>) {
     for (const [[key, [row, index]], weight] of messages) {
       expect(Number.isInteger(weight)).toBe(true)
-      // This finite-scalar oracle must not silently serialize NaN as null.
+      // JSON encodes NaN as null, so reject it outside the model's domain.
       if (typeof key === `number`) expect(Number.isFinite(key)).toBe(true)
       const identity = JSON.stringify([key, row.id, row.value, index])
       const next = (this.entries.get(identity)?.weight ?? 0) + weight
@@ -56,8 +70,8 @@ export class TopKRelation<
   }
 }
 
-// Keep existing resettable transfer-work observations. Only the separate
-// semantic relation persists through reset; it uses no MultiSet consolidation.
+// MessageTracker measures transfer work and can reset. The semantic relation
+// must persist across that reset so later checks still include earlier changes.
 export class TopKMessageTracker<
   K extends string | number | null,
   I extends number | string,

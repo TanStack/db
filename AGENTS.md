@@ -13,6 +13,41 @@ Treat that document's component boundaries and normative laws as constraints.
 If a change intentionally revises an architectural contract, update the
 architecture document in the same pull request.
 
+## Required reading: executable subsystem models
+
+Read `docs/contributing/glossary.md` before naming or renaming a subsystem
+state, action, boundary, or observation. Production code, executable models,
+tests, and design documents must use the same term for the same concept. A
+model may stay structurally independent, but it must declare any abstraction
+that combines, splits, or does not correspond to production concepts.
+
+Some oracle files are also the shortest documentation for their subsystem.
+Before changing a covered contract or its machinery, use
+`docs/contributing/oracle-coverage.md` to find the primary executable owner and
+read its stated limits. Do not infer authority from a filename alone.
+
+Read these stable entry points before the narrower owner:
+
+- For correlated live-query materialization, read the architecture document
+  required above.
+- For Collection mutation admission, subscription ownership, replay,
+  publication, or disposal, read
+  `packages/db/tests/collection-subscription-lifecycle-grammar.ts`.
+- For optimistic snapshots and settlement, read
+  `packages/db/tests/optimistic-history-oracle.ts`.
+- For opaque cursor pagination, read
+  `packages/query-db-collection/tests/cursor-pagination/model.ts`.
+- For TrailBase lifecycle work, read
+  `packages/trailbase-db-collection/tests/ORACLE.md`.
+- For cross-framework behavior, read the shared contract under
+  `packages/db/tests/conformance/` and the receiving framework's driver. One
+  framework's scheduling cut does not prove another's.
+
+The opening prose states the contract. The small model states the expected
+behavior. The production driver proves that the implementation refines the
+model. If a change revises one of these contracts, update all three in the same
+pull request. Do not update only the assertions to match new production output.
+
 ## Table of Contents
 
 1. [Type Safety](#type-safety)
@@ -367,6 +402,11 @@ read [Writing reliable oracle tests](docs/contributing/oracle-tests.md).
 Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
 owner and its limits before adding another model. The guide explains testing
 methods; it does not authorize new product behavior or retire existing laws.
+
+When an oracle has a stable subsystem model, write it as executable subsystem
+documentation. Follow the guide's section on literate oracle files. Keep the
+contract, model, generated history grammar, production driver, and observations
+close enough that a reviewer can compare them directly.
 
 ### Always Add Tests for Bugs
 

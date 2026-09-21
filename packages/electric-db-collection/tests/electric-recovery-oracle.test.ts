@@ -45,7 +45,6 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * The fixture does not establish live HTTP delivery, native SQLite host
  * behavior, or callback multiplicity beyond the observations named below.
  */
-
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }

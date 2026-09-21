@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 
+/**
+ * A failed structural traversal must publish no reusable hash state.
+ *
+ * The model is a left-to-right row of observable getters. One getter rejects
+ * for several attempts, then succeeds. Each failure may read only the prefix
+ * through that getter; a later retry must read that prefix again, finish the
+ * untouched tail, and agree with a plain structural copy. Only the successful
+ * traversal may make a later call read nothing. This separates atomic cache
+ * publication from cycle, depth, and work-limit rejection.
+ */
+
 type History = {
   completed: number
   tail: number

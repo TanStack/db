@@ -42,13 +42,13 @@ async function withReplayResources(
 }
 
 function expectDelegatedStorageAbsent(
-  sessions: Array<{ delegated: boolean; privateRows: number | null }>,
+  states: Array<{ delegated: boolean; privateRows: number | null }>,
 ) {
-  const delegated = sessions.filter((session) => session.delegated)
+  const delegated = states.filter((replayState) => replayState.delegated)
   expect(delegated, `delegated replay reached`).toHaveLength(1)
-  for (const session of delegated) {
+  for (const replayState of delegated) {
     expect(
-      session.privateRows === null || session.privateRows === 0,
+      replayState.privateRows === null || replayState.privateRows === 0,
       `delegated replay does not copy replacement rows`,
     ).toBe(true)
   }
@@ -59,21 +59,21 @@ const shape = (changes: Array<ChangeMessage<Row, string | number>>): Batch =>
   changes.map((c) => [c.type, c.key, c.value.version])
 
 /** Retention witness: private replacement rows held per subscription. */
-function replaySessions(collection: unknown) {
+function replayStates(collection: unknown) {
   const internals = collection as {
     _changes: {
       changeSubscriptions: Iterable<{
         options: { truncateReplayPublication?: unknown }
-        truncateReplaySession?: { privateRows?: ReadonlyMap<unknown, unknown> }
+        truncateReplayState?: { privateRows?: ReadonlyMap<unknown, unknown> }
       }>
     }
   }
   return [...internals._changes.changeSubscriptions].flatMap((s) =>
-    s.truncateReplaySession
+    s.truncateReplayState
       ? [
           {
             delegated: Boolean(s.options.truncateReplayPublication),
-            privateRows: s.truncateReplaySession.privateRows?.size ?? null,
+            privateRows: s.truncateReplayState.privateRows?.size ?? null,
           },
         ]
       : [],
@@ -272,7 +272,7 @@ describe(`Replay publication storage`, () => {
       // Reentrant acquisition while the replay is open joins the barrier.
       sub.requestSnapshot({ where: eq(idRef(), 3), optimizedOnly: false })
       expect(batches).toEqual([])
-      const retention = replaySessions(s.source)
+      const retention = replayStates(s.source)
       expect(retention).toContainEqual({ delegated: false, privateRows: 3 })
       expect(retention.filter((r) => r.delegated)).toHaveLength(1)
       expectDelegatedStorageAbsent(retention)
@@ -288,7 +288,7 @@ describe(`Replay publication storage`, () => {
         [`update`, 2, 2],
       ])
       expect(peerLive.get(2)?.version).toBe(2)
-      expect(replaySessions(s.source)).toEqual([])
+      expect(replayStates(s.source)).toEqual([])
 
       // A later plain delta publishes normally.
       s.sync.begin()
@@ -338,7 +338,7 @@ describe(`Replay publication storage`, () => {
       expect(sub.status).toBe(`ready`)
       expect(sub.hasPendingTruncateReplacement).toBe(false)
       expect(visible.get(1)).toBe(1)
-      expect(replaySessions(s.source)).toEqual([])
+      expect(replayStates(s.source)).toEqual([])
 
       // Late settlement of the released transport changes nothing.
       hold.resolve()

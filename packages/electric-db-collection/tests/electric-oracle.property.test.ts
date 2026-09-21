@@ -17,6 +17,28 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
+/**
+ * # Does the Electric adapter preserve one coherent replica lifecycle?
+ *
+ * Electric delivers change messages, reset controls, offsets, handles, and
+ * snapshot availability through an SDK stream. The adapter must publish atomic
+ * callback cuts, wait for applied receipts before readiness, persist valid
+ * resume evidence, reject unseen partial updates, and keep stale callbacks and
+ * metadata scoped to the lifecycle that created them.
+ *
+ * Independent Maps model rows, selected-tag membership, resume evidence, and
+ * persisted state. A controlled ShapeStream boundary supplies authored message
+ * partitions and settlement order. The production Collection, Query-backed
+ * persistence wrapper, metadata APIs, and cleanup all run unchanged. Checks
+ * cover rows, exact batches, readiness, errors, metadata, waiters, stream
+ * ownership, and restart.
+ *
+ * The suite uses fixed protocol histories, exhaustive contiguous partitions,
+ * and fixed plus random generated campaigns. The installed-SDK delivery oracle
+ * separately owns real HTTP framing and pause behavior; PostgreSQL expression
+ * semantics and service-backed execution remain separate evidence.
+ */
+
 type OracleRow = Row & {
   id: number
   name: string
@@ -1094,7 +1116,7 @@ async function runProcessGrammar(
       if (!preload.settled) preload.expectedRejection = reason
     }
   }
-  let generation = 0
+  let runtimeInstanceSequence = 0
   mockSubscribe.mockReset()
   mockSubscribe.mockImplementation((callback) => {
     const observed: NonNullable<ProcessRuntime[`subscriber`]> = (messages) => {
@@ -1112,10 +1134,10 @@ async function runProcessGrammar(
       expectPendingRejection(previous, `cleanup`)
       await previous.collection.cleanup()
     }
-    generation++
+    runtimeInstanceSequence++
     const collection = createCollection(
       electricCollectionOptions<OracleRow>({
-        id: `${idPrefix}-${slot}-${generation}`,
+        id: `${idPrefix}-${slot}-${runtimeInstanceSequence}`,
         shapeOptions: {
           url: `http://test-url`,
           params: { table: `test_table` },
@@ -3186,7 +3208,7 @@ describe(`Electric adapter laws`, () => {
     trigger: number
   }) {
     // Same ownership law, with retirement either outside or inside a callback.
-    // Previously the grammar only retired a session between complete callbacks.
+    // Previously the grammar only retired a sync run between complete callbacks.
     for (const insideCallback of [false, true]) {
       const subscribers: Array<(messages: Array<Message<OracleRow>>) => void> =
         []
@@ -3230,7 +3252,7 @@ describe(`Electric adapter laws`, () => {
           restart()
         return false
       }, 20)
-      // Observe the old waiter before any callback can retire its session.
+      // Observe the old waiter before any callback can retire its sync run.
       const oldOutcome = waiting.then(
         () => `resolved`,
         () => `rejected`,
@@ -3273,14 +3295,14 @@ describe(`Electric adapter laws`, () => {
   }
 
   fcTest.prop([reentryHistory], { seed: 42713, numRuns: oracleRuns(6) })(
-    `replacement sessions reject evidence from callback reentry histories (fixed)`,
+    `replacement sync runs reject evidence from callback reentry histories (fixed)`,
     runReentryHistory,
   )
   fcTest.prop(
     [reentryHistory],
     oraclePropertyOptions(10, `electric.match-reentry`),
   )(
-    `replacement sessions reject evidence from callback reentry histories (random)`,
+    `replacement sync runs reject evidence from callback reentry histories (random)`,
     runReentryHistory,
   )
 

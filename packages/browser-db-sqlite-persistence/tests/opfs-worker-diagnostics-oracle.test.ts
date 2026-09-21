@@ -5,6 +5,19 @@ import type {
   BrowserOPFSWorkerResponse,
 } from '../src/opfs-worker-protocol'
 
+/**
+ * # Does an OPFS worker retain the useful cause of initialization failure?
+ *
+ * Opening may fail with an Error or TypeError while the VFS exposes a separate
+ * Error or DOMException cause. The worker response must preserve the primary
+ * message and, when present, the cause name and message in stable order.
+ *
+ * A tiny string-concatenation model supplies the expected diagnostic. Generated
+ * error classes and messages drive the real worker module through mocked
+ * wa-sqlite and OPFS boundaries. Exact response comparison catches a dropped,
+ * reordered, or replaced cause without claiming native lock behavior.
+ */
+
 type DiagnosticInput = {
   primaryKind: `Error` | `TypeError`
   primaryMessage: string

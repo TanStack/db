@@ -12,6 +12,28 @@ import type {
   SyncConfig,
 } from '../../src/types.js'
 
+/**
+ * # Does a cold join reconcile to independent relational truth?
+ *
+ * A live join may begin before its on-demand child source contains rows. The
+ * compiled query must acquire that source, publish the complete join, then keep
+ * it equal to a fresh relational recomputation through child deletion,
+ * restoration, and route moves. Join equality must follow the same established
+ * value classes as predicate equality without merging binary, string, or
+ * nullish domains.
+ *
+ * Plain parent and child arrays plus a Map-based backend form the model. The
+ * reference joins matching keys from scratch after each command. The production
+ * driver starts with a cold child Collection and observes the actual acquisition,
+ * raw batches, reconstructed replica, and live rows across scan and indexed
+ * paths. Faults prove a hidden acquisition, dropped delete, or wrong result is
+ * detected independently.
+ *
+ * Compound join syntax and demand minimization are outside this contract. The
+ * cold witness requires real acquisition and correct rows, not a particular
+ * optimization plan.
+ */
+
 type Parent = { id: number; name: string }
 type Child = { id: number; parentId: number; amount: number }
 type Joined = { id: number; parentId: number; name: string; amount: number }
