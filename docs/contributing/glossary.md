@@ -128,7 +128,7 @@ materialization laws.
 | observation | One recorded public fact. |
 | trace | An ordered sequence of observations. |
 | checkpoint or observation cut | The exact point where the contract requires comparison. |
-| oracle replay | Re-running a recorded oracle failure from its seed, shrink path, actions, or other replay inputs. | Runtime truncate replay, retry, or a new random campaign. |
+| oracle replay | Re-running a recorded oracle failure from its seed, shrink path, actions, or other replay inputs. Do not use it for runtime truncate replay, retry, or a new random campaign. |
 | projection or abstraction | The parts of concrete state retained for one judgment. |
 | refinement check | A check that observed production behavior is allowed by the model. A sampled check is not a proof for every behavior. |
 | partial oracle | An oracle that judges only named parts of the contract. |

@@ -52,6 +52,12 @@ type OuterJoinOutput = [number, [number | null, number | null]]
 type GroupedOutput = [string, { bucket: number; total: number }]
 
 const FIXED_SEED = 1741
+type GeneratedCampaign = {
+  name: `fixed` | `random` | `replay`
+  seed: number | undefined
+  path: string | undefined
+}
+
 const replaySeedText = process.env.TANSTACK_DB_IVM_ORACLE_SEED
 const replaySeed =
   replaySeedText === undefined ? undefined : Number(replaySeedText)
@@ -72,7 +78,7 @@ if (REPLAY_PATH !== undefined && replaySeed === undefined) {
   )
 }
 
-const generatedCampaigns =
+const generatedCampaigns: Array<GeneratedCampaign> =
   replaySeed === undefined
     ? [
         { name: `fixed`, seed: FIXED_SEED, path: undefined },
