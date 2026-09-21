@@ -54,9 +54,9 @@ import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * multiprocess transport and host-specific replay partitions.
  *
  * Driver SQL behavior, native host ownership, and the shared conformance
- * portfolio have separate owners. This file does not yet prove that
- * non-single-process remote demand is gated by successful remote-subset owner
- * registration; that completed-review finding remains open.
+ * portfolio have separate owners. This file proves the role partition for
+ * non-single-process remote demand: an ownerless elected node does not route,
+ * while a follower may route to the elected owner's registered source.
  */
 
 /**

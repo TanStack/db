@@ -116,8 +116,9 @@ Reach, challenge, replay, cleanup, and limits:
 - The BroadcastChannel and Web Locks seams below perform real structuredClone
   and real coordinator code but are deterministic Node controls. They do not
   earn real-browser, multi-context, OPFS exclusive-handle, worker, Electric,
-  PowerSync, or service credit. Bounded retry after follower transport or
-  remote-owner admission failure also remains an open review finding.
+  PowerSync, or service credit. The focused Browser coordinator owner proves
+  bounded replay after retryable follower transport or remote-owner admission
+  failure, plus cancellation on release and disposal.
 */
 
 type MessageHandler = (event: { data: unknown }) => void
