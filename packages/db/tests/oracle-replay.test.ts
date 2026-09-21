@@ -13,6 +13,23 @@ import {
   registeredOracleProperties,
 } from './oracle-config.js'
 
+/**
+ * Guarded replay is the evidence boundary for a named property run.
+ *
+ * A green child Vitest process is not enough. A filter can select the wrong
+ * test, a property can be skipped, or a caller can override the requested
+ * seed/path. The replay wrapper therefore treats a run as a small protocol:
+ * the requested property must be known and available, its exact owner must
+ * execute, fast-check must receive the requested replay coordinates, and the
+ * witness must report a completed property with nonzero runs.
+ *
+ * These tests drive real child processes because process arguments, filtering,
+ * environment variables, reporter failures, and exit status are the behavior
+ * under test. The model is the manifest plus one expected witness record. The
+ * negative cases remove or corrupt one protocol fact at a time and require a
+ * nonzero exit even when Vitest itself would otherwise report success.
+ */
+
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), `..`)
 const repositoryDirectory = resolve(packageDirectory, `../..`)
 const fixture = `tests/oracle-replay.fixture.test.ts`

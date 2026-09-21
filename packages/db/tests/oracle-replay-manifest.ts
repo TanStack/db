@@ -1,7 +1,12 @@
 import { registeredOracleProperties } from './oracle-config.js'
 
-// This is the named replay portfolio, not all DB laws or every test: fixed,
-// work, provider, and unnamed generated suites remain separate campaign gates.
+/**
+ * This manifest maps a replay name to the source file that can prove it ran.
+ * It is a named replay portfolio, not a catalog of every DB law. Fixed cases,
+ * work bounds, provider suites, and unnamed generated properties remain
+ * separate campaign gates. An absent or statistics-only entry must not be
+ * promoted to assertion evidence merely because a process exited cleanly.
+ */
 const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [`db/tests/cleanup-queue.property.test.ts`, `cleanup-queue`, `history`],
   [`db/tests/SortedMap.test.ts`, `sorted-map`, `key ascending descending`],
@@ -110,6 +115,16 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `db/tests/query/includes-oracle.property.test.ts`,
     `includes`,
     `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming optimistic-convergence`,
+  ],
+  [
+    `db/tests/query/includes-query-shape-oracle.test.ts`,
+    `includes-query-shape`,
+    `correlation multiplicity nullable`,
+  ],
+  [
+    `db/tests/query/includes-work-counter-oracle.test.ts`,
+    `includes-work`,
+    `correlated-links join-free join-targets`,
   ],
   [
     `db/tests/query/includes-publication-oracle.test.ts`,

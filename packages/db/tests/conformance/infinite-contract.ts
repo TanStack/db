@@ -1,12 +1,21 @@
 /**
  * Cross-adapter contract for `useLiveInfiniteQuery`.
  *
+ * The model is an ordered source plus a visible prefix split into pages. A
+ * fetch may extend that prefix; changing the query, collection, or page shape
+ * creates a new demand generation. The public observation includes flattened
+ * rows, page boundaries and params, continuation, in-flight state, errors, and
+ * the backing collection. Those facts must agree; final rows alone cannot show
+ * a stale page ledger or a duplicate request.
+ *
  * Drivers preserve native framework scheduling and package-realm details.
  * Controllable handles allow setter-to-fetch calls without an explicit driver
  * flush; this does not prove one shared invalidation-to-subscription interval.
  * Current React act and Vue synchronous effects attach during the setter.
  * Svelte's public fetch can start before its queued effect attaches, then waits
- * internally. Preserve those distinct measured cuts, not a universal timing law.
+ * internally. Preserve those distinct measured cuts, not a universal timing
+ * law. This is why each driver remains separate even though the semantic model
+ * and scenario grammar are shared.
  */
 import type { Collection } from '@tanstack/db'
 import type { QueryBuild, SourceHandle } from './contract'

@@ -16,6 +16,21 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import type { CollectionImpl } from '../../src/collection/index.js'
 import type { QueryIR } from '../../src/query/ir.js'
 
+/**
+ * Query identity may erase syntax only when compiled output stays observable-
+ * equivalent.
+ *
+ * The model builds pairs of query IRs across explicit projection, nested query,
+ * implicit join/union, and empty grouping forms. Fresh D2 graphs materialize
+ * both queries over the same finite source rows. Equal identity is permitted
+ * only when complete output bags—including lexical keys and multiplicity—match;
+ * output-sensitive aliases remain part of identity.
+ *
+ * Fault drivers remove peers, collapse identity, corrupt aliases or weights,
+ * and require the checker to fail. This calibrates the implication that matters:
+ * equal QueryIdentity implies equal compiled results, not merely equal hashes.
+ */
+
 type User = { id: number; label: string }
 type Post = { id: number; userId: number; title: string }
 type Row = User | Post
