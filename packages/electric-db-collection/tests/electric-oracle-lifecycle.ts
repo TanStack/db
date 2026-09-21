@@ -1,5 +1,12 @@
-// A deadline reports a missing semantic checkpoint. It does not cancel work;
-// callers still own and release their SDK stream and HTTP provider.
+/**
+ * Bound oracle observation without changing provider semantics.
+ *
+ * A deadline reports a missing semantic checkpoint. It does not cancel work;
+ * callers still own and release their SDK stream and HTTP provider. Cleanup is
+ * exhaustive: every registered resource gets one attempt. A primary test error
+ * remains primary, while cleanup failures stay visible as warnings; without a
+ * primary error, the first cleanup failure rejects after later releases run.
+ */
 export async function atCheckpoint<T>(
   promise: Promise<T>,
   label: string,

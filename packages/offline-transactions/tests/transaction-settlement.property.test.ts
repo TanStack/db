@@ -7,6 +7,22 @@ import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import type { TestItem } from './harness'
 
+/**
+ * # Does each offline transaction settle only from its own durable history?
+ *
+ * Transactions enter a global FIFO, but commit and wait promises belong to one
+ * transaction ID. Success applies its server rows and fulfills both promises.
+ * Permanent failure rejects those promises with the same error and rolls back
+ * only its local overlay. A peer's provider, retry-record, or durable-admission
+ * failure cannot settle or erase independently admitted work.
+ *
+ * Generated histories vary shared keys, transaction width, and success/failure
+ * sequences. Gates expose each provider boundary. The driver compares exact
+ * calls, IDs, promise outcomes, durable outbox state, server state, local rows,
+ * pending counts, and later progress after every settlement. The simple expected
+ * Maps do not copy executor or scheduler internals.
+ */
+
 function gate() {
   let resolve!: () => void
   const promise = new Promise<void>((done) => {

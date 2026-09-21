@@ -86,7 +86,6 @@ function ProjectPage() {
     todoCollection.delete(id)
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!project || !usersInProject) {
     return null
   }

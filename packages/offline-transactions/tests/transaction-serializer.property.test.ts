@@ -8,8 +8,45 @@ import {
 } from '../src/outbox/TransactionSerializer'
 import { cleanupOfflineOracle } from './oracle-lifecycle'
 import { FakeStorageAdapter } from './harness'
+import { readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 import type { PendingMutation } from '@tanstack/db'
+
+/**
+ * # Does an offline transaction survive durable serialization exactly?
+ *
+ * Contract and source: SerializedOfflineTransaction and the established restart
+ * contract preserve mutation meaning across process boundaries. Encoding v3
+ * supports JSON trees, Date, and the eight restorable Temporal scalar types.
+ * Marker-shaped user objects remain data. Unversioned and v2 records retain
+ * their prior meanings. Unsupported or malformed encodings fail visibly.
+ *
+ * Model: each generated Pair derives runtime and wire values from one semantic
+ * leaf. It never walks production output or imports serializer helpers. Focused
+ * metadata witnesses use JSON's toJSON, boxed-scalar, and array-index rules.
+ * Mutation values deliberately retain the package's structural encoding rules.
+ *
+ * History grammar: insert, update, and delete edits span two collection registry
+ * keys. Trees contain bounded arrays, objects, hostile keys, Date values, and
+ * date-like strings. Separate histories cover unversioned, v2, and v3 records,
+ * metadata replacements, Temporal constructors, and corrupted wire markers.
+ *
+ * Production driver and refinement check: real Collections create mutations.
+ * TransactionSerializer writes the record. New Collection identities then read
+ * it through the same registry keys. Each checkpoint compares the wire tree,
+ * decoded transaction fields, registry binding, order, errors, and retained
+ * storage after a failed read.
+ *
+ * Reach and controls: pinned histories force every edit kind and hostile marker.
+ * Fixed and random lanes support seed/path replay. Encoder and decoder faults
+ * inject Date/string confusion, wrong registry, omitted changes, and unknown
+ * versions. Malformed markers and missing Temporal constructors test failure
+ * paths before durable data can be replaced.
+ *
+ * Limits: cycles, undefined, non-finite numbers, arbitrary native objects, and
+ * cross-realm boxed values are outside current evidence. This oracle does not
+ * claim byte stability for object key order beyond JSON's established rules.
+ */
 
 type Value =
   | null
@@ -35,10 +72,7 @@ type Fault =
   | `omit-changes`
   | `unknown-encoding`
 
-// Construct both representations from semantic leaves, not by walking a
-// production value with a copy of serializeValue. This is JSON trees + Date,
-// not arbitrary JS: cycles, undefined, non-finite numbers and other native
-// objects are outside this format. User keys, including codec markers, are data.
+// Construct both representations from semantic leaves, not production output.
 const datePair = (time: number): Pair => ({
   runtime: new Date(time),
   wire: { __type: `Date`, value: new Date(time).toISOString() },
@@ -108,6 +142,8 @@ function objectWire(fields: { [key: string]: Value }): Value {
     : fields
 }
 
+// Model law: v3 wire values escape marker-shaped objects exactly once. The
+// expected tree is built from semantic Pairs, independently of production.
 async function checkRoundtrip(
   edits: Array<Edit>,
   time: number,
@@ -1013,22 +1049,14 @@ const pinned: Array<Edit> = [
 ]
 // This package's test root is separate from core's named replay portfolio.
 // Keep a local replay entry point rather than importing files outside rootDir.
-const numRuns = Number(process.env.OFFLINE_ORACLE_RUNS ?? 100)
-if (!Number.isSafeInteger(numRuns) || numRuns < 1)
-  throw new Error(`Invalid OFFLINE_ORACLE_RUNS`)
-const seedText = process.env.OFFLINE_ORACLE_SEED
-const replaySeed = seedText === undefined ? undefined : Number(seedText)
-if (
-  seedText !== undefined &&
-  (seedText.trim() === `` || !Number.isSafeInteger(replaySeed))
-)
-  throw new Error(`Invalid OFFLINE_ORACLE_SEED`)
-const replayPath = process.env.OFFLINE_ORACLE_PATH
-if (
-  replayPath !== undefined &&
-  (replaySeed === undefined || !/^\d+(?::\d+)*$/.test(replayPath))
-)
-  throw new Error(`OFFLINE_ORACLE_PATH requires a seed and numeric shrink path`)
+const {
+  runs: numRuns,
+  seed: replaySeed,
+  path: replayPath,
+} = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 100,
+})
 it.each([20260914, undefined])(
   `preserves mutation wire meaning across restart (seed %s)`,
   async (seed) => {

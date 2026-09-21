@@ -5,6 +5,7 @@ declare module '@journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js' {
       module: unknown,
     ): Promise<{
       close?: () => Promise<void> | void
+      lastError?: unknown
     }>
   }
 }

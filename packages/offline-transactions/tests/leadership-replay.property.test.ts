@@ -8,7 +8,44 @@ import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { NonRetriableError } from '../src/types'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import { readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction, OnlineDetector } from '../src/types'
+
+/**
+ * # May leadership replay an offline transaction more than once?
+ *
+ * Contract and source: OfflineExecutor leadership, TransactionExecutor serial
+ * scheduling, and OutboxManager durability define this boundary. Only the
+ * current leader may admit stored work. Issued work may settle after leadership
+ * loss, but loss or disposal forbids new provider work. A durable row remains
+ * owned until its acknowledgement or permanent rejection is durably removed.
+ *
+ * Model: this file is a partial relational oracle, not a second executor. Each
+ * history relates three independent projections: durable outbox IDs, scheduler
+ * lifecycle, and caller settlement with optimistic rows. Expected relations
+ * come from those contracts rather than production queues or classifiers.
+ *
+ * History grammar: leadership may be acquired, lost, regained, or disposed at
+ * construction, outbox read, retry hook, provider, acknowledgement, or retry
+ * boundaries. Controlled storage may hold, reject, or finish individual reads,
+ * writes, and deletes. Histories include concurrent scans, repeated leadership
+ * reports, filtered replay snapshots, mixed deletion outcomes, and later work.
+ *
+ * Production driver and refinement check: the real OfflineExecutor,
+ * TransactionExecutor, KeyScheduler, OutboxManager, and transaction path run
+ * unchanged. Gates control causal events. Named checkpoints compare provider
+ * calls and idempotency keys, outbox contents, scheduler counts, leadership,
+ * retry records, caller promise settlement, optimistic rows, and cleanup.
+ *
+ * Reach and controls: pinned histories force each lifecycle boundary and both
+ * mixed-deletion positions. Fixed and random campaigns cover legal adjacent
+ * histories and support seed/path replay. Delayed-read, stale-admission, and
+ * mixed-removal witnesses reject the recorded pre-fix behaviors.
+ *
+ * Limits: the fake storage adapter proves ordering and ownership, not a native
+ * storage engine. Exactly-once network execution across independent leaders is
+ * not promised. Provider side effects after an issued call remain provider-owned.
+ */
 
 function gate() {
   let resolve!: () => void
@@ -30,6 +67,21 @@ const storedTransaction = (id: string): OfflineTransaction => ({
   retryCount: 0,
   nextAttemptAt: 0,
   version: 1,
+})
+
+// These campaigns share the package replay variables. Target this file and one
+// test name when replaying a shrink path, because paths are property-specific.
+const serialWorkOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 20,
+})
+const leadershipReportOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 40,
+})
+const delayedReadOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 30,
 })
 
 it(`revokes only replay work excluded by the retry hook`, async () => {
@@ -1046,7 +1098,15 @@ it.each(
           }
         },
       ),
-      { seed, numRuns: 20 },
+      {
+        numRuns: serialWorkOracle.runs,
+        ...((seed ?? serialWorkOracle.seed) === undefined
+          ? {}
+          : { seed: seed ?? serialWorkOracle.seed }),
+        ...(seed === undefined && serialWorkOracle.path !== undefined
+          ? { path: serialWorkOracle.path }
+          : {}),
+      },
     )
   },
 )
@@ -1227,8 +1287,13 @@ it.each(
         },
       ),
       {
-        seed,
-        numRuns: 40,
+        numRuns: leadershipReportOracle.runs,
+        ...((seed ?? leadershipReportOracle.seed) === undefined
+          ? {}
+          : { seed: seed ?? leadershipReportOracle.seed }),
+        ...(seed === undefined && leadershipReportOracle.path !== undefined
+          ? { path: leadershipReportOracle.path }
+          : {}),
         examples: [
           [
             {
@@ -1580,8 +1645,13 @@ it.each([20260919, undefined])(
         },
       ),
       {
-        seed,
-        numRuns: 30,
+        numRuns: delayedReadOracle.runs,
+        ...((seed ?? delayedReadOracle.seed) === undefined
+          ? {}
+          : { seed: seed ?? delayedReadOracle.seed }),
+        ...(seed === undefined && delayedReadOracle.path !== undefined
+          ? { path: delayedReadOracle.path }
+          : {}),
         examples: [
           [
             {

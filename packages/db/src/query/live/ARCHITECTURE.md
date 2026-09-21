@@ -105,17 +105,18 @@ reduction that enforces public-key congruence and multiplicity.
 These owners cooperate; they are not phases of one exclusive state machine.
 The detailed loading and publication laws below still apply.
 
-| Owner                             | Accepts / retires                                                                                                                                    | Does not establish                                        |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| Subscription acquisition          | Retires the old physical lease before replay acquisition; installs tentative ownership before adapter callbacks; each lease gets one cleanup attempt | Replay completion or permission to publish                |
-| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                            | Provider exhaustion or acceptance of an imperative window |
-| Subscription replay               | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold | Success of a previously failed window operation           |
-| Query builder                     | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation                                   | Physical adapter ownership or cancellation                |
-| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                   | Source completeness merely because graph work drained     |
+| Owner                             | Accepts / retires                                                                                                                                       | Does not establish                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Subscription acquisition          | Retires the old acquisition lease before replay acquisition; installs tentative ownership before adapter callbacks; each lease gets one cleanup attempt | Replay completion or permission to publish                |
+| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                               | Provider exhaustion or acceptance of an imperative window |
+| Subscription replay               | Counts setup and logical demand participants; checks completion after reentrant release callbacks; success releases the source replacement hold         | Success of a previously failed window operation           |
+| Query builder                     | Tracks ordered publication participants in one sync run and accepts a window only for its operation generation                                          | Physical adapter ownership or cancellation                |
+| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                      | Source completeness merely because graph work drained     |
 
-Session and participant checks precede changes to the builder's ordered failure
-state, not just scheduling. An obsolete rejection cannot close a replacement
-session's publication gate. Loader-local stale-result guards are separate.
+Sync-run and participant checks precede changes to the builder's ordered
+failure state, not just scheduling. An obsolete rejection cannot close a
+replacement sync run's publication gate. Loader-local stale-result guards are
+separate.
 
 `hasPendingTruncateReplacement` means publication is still withheld, including
 after replay failure. `pendingTruncateReplacement` exposes only an unsettled
@@ -280,7 +281,7 @@ A failed hash does not publish partial
 structural cache entries, so retrying the same value cannot bypass a guard.
 A graph-run failure marks the current live query as errored and preserves the
 thrown error. It must not continue publishing from a partly advanced graph;
-recovery requires a fresh query session.
+recovery requires a fresh live-query sync run.
 Opaque reference-hashed leaves are resolved before structural recursion; their
 own properties, including self-references, are not traversed. Hash inputs must
 remain immutable once successfully cached, as with other retained D2 values.
@@ -606,7 +607,7 @@ repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
 and a cleanup failure cannot replace an earlier request failure. Core reports
 the error but retains no retry debt: a broken adapter can leak external resources
 if it throws before freeing them. Adapters must make their own cleanup reliable.
-Replay replaces physical leases sequentially: detach and release the old lease,
+Replay replaces acquisition leases sequentially: detach and release the old lease,
 then acquire a fresh one only if the logical demand and replay are still current.
 A release failure fails that replay without starting a replacement. A load
 throw leaves the logical demand detached; a later authoritative replay can
@@ -625,7 +626,7 @@ successful authoritative replacement reconciles the retained public snapshot.
 This rule also applies when another demand overlaps the released predicate or
 an independent source write happens to match it. Source deletions during replay
 stay private until successful publication; failure preserves the last complete
-snapshot. Query filters and routes, not request release, decide which retained
+snapshot. Query filters and routes, not demand retirement, decide which retained
 source rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
@@ -639,20 +640,20 @@ including from its final `cleaned-up` status event, remains supported. This
 avoids letting old teardown clear a replacement graph or its source ownership.
 
 Collection cleanup detaches surviving logical demand from the discarded sync
-session. It aborts that session's physical work and rejects its replay barrier,
+run. It aborts that sync run's physical work and rejects its replay barrier,
 and rejects an unfinished initial preload with `AbortError`. Cleanup never
 invokes first-ready callbacks; those callbacks belong to the discarded run.
-Physical acquisitions belong to the sync session that created them; cleanup
+Physical acquisitions belong to the sync run that created them; cleanup
 retires them instead of sending an old release to a replacement adapter.
 Unlike individual subset releases, a failed sync adapter cleanup callback
 remains retryable only while that
-retirement is current; it cannot replace a newer session's cleanup callback.
+retirement is current; it cannot replace a newer sync run's cleanup callback.
 Demand requested while the Collection is cleaned up remains detached
 rather than pretending that a physical acquisition succeeded. When the
-Collection starts a new sync session, the subscription enters `loadingSubset`
+Collection starts a new sync run, the subscription enters `loadingSubset`
 before it queues reacquisition, then reacquires all detached demand through a
-fresh private publication barrier. Settlements from the old session cannot
-publish rows, report errors, or change readiness in the new session.
+fresh private publication barrier. Settlements from the old sync run cannot
+publish rows, report errors, or change readiness in the new sync run.
 
 This is the direct subscription's restart contract, not automatic recovery of
 a dependent live query. Manually cleaning up a source puts its live queries in
@@ -662,7 +663,7 @@ live query itself. This differs from a source truncate, which keeps the live
 query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
-the adapter has installed a loader. Same-session `markReady()` resumes that
+the adapter has installed a loader. `markReady()` in the same sync run resumes that
 demand; releasing it before recovery creates no physical acquisition or unload.
 Queued reacquisition must not retry a failed attempt merely because both
 loading and ready notifications scheduled it.
@@ -674,7 +675,7 @@ its result before the snapshot request returns. This promise waits for the
 recovery's publication barrier, not just adapter return. Failure rejects it with
 the replay error; release, external abort, unsubscribe, or another cleanup
 rejects it with `AbortError`. Later transport settlement cannot change that
-outcome. Cleanup may retain logical demand for the next session, but it does
+outcome. Cleanup may retain logical demand for the next sync run, but it does
 not retain the old caller's unfinished wait.
 
 Eager collections have no subset reacquisition barrier. After cleanup, their
@@ -796,8 +797,8 @@ It also rejects window changes during graph publication, before mutating top-K.
 A synchronous result callback is provisional until the whole snapshot request
 returns: a later local read or publication throw fails and retires that
 acquisition instead of letting its queued success erase the failure.
-A later explicit window operation has a new generation and may retry from the
-safe source boundary.
+A later explicit window operation has a new window-operation generation and
+may retry from the safe source boundary.
 
 The ordered loader retains one settled loading boundary, independently of
 live rows sent to D2. It derives invalidation from the existing contribution
@@ -866,15 +867,15 @@ after discarding the graph and requested window.
 That error belongs to the operation even if cleanup precedes registration of
 its waiter. Cleanup does not retroactively cancel an already completed operation.
 Window-operation generations stay monotonic across cleanup and restart, so a
-late rejection from an abandoned session cannot reset the replacement
-session's requested window.
+late rejection from an abandoned sync run cannot reset the replacement sync
+run's requested window.
 A window move started during an active source replay waits for that replay and
 applies only after its replacement is complete. A failed replay rejects the
 move without advancing the reported window. Replay completion callbacks carry
-their sync-session identity and become no-ops after cleanup or restart.
+their sync-run identity and become no-ops after cleanup or restart.
 Cleanup rejects the replay barrier, and therefore every window move waiting on
 it, with `AbortError`; no waiter may outlive the discarded subscription.
-Subscription-owned Promise observers carry the Collection's load-session
+Subscription-owned Promise observers carry the Collection's sync-run
 generation. Cleanup invalidates that generation before adapter teardown, so an
 obsolete replay cannot publish its private rows, report a late error, or emit a
 late `ready` transition even when the transport ignores cancellation.
@@ -928,7 +929,7 @@ later listener when reentry supersedes it, including an ABA transition back to
 the same status label. Subscription teardown is a one-shot logical transition:
 it stops the listener set already being walked, emits no later status, and
 removes subscriber ownership once. A later `unsubscribe()` is a no-op, including
-after a physical subset release failed.
+after an acquisition release failed.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source
@@ -956,8 +957,8 @@ collection demand.
 
 This project uses a single graph-run order rather than multi-dimensional
 timely-dataflow frontiers. Do not introduce a general timestamp or frontier
-framework unless a source contract proves that the generation and up-to-date
-protocol cannot express its ordering.
+framework unless a source contract proves that the sync-run generation and
+source up-to-date protocol cannot express its ordering.
 
 **Initial readiness:** preload is complete when every demand currently
 reachable from the initial query graph is covered by a settled request. Demand
@@ -1091,6 +1092,10 @@ create recursive Collection machinery.
     raw delta history.
 
 ## Glossary
+
+This subsystem glossary extends the shared
+[project glossary](../../../../../docs/contributing/glossary.md). Shared terms
+keep the meanings defined there.
 
 - **Relation:** an internal weighted multiset maintained by D2, not a public
   TanStack Collection.

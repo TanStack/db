@@ -4,6 +4,7 @@ import {
   KeyScheduler,
   reconcilePendingTransactions,
 } from '../src/executor/KeyScheduler'
+import { readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
 type Command =
@@ -54,36 +55,47 @@ type Snapshot = {
 }
 
 const BASE_TIME = Date.parse(`2026-01-01T00:00:00.000Z`)
-const SEED = Number(process.env.TANSTACK_DB_OFFLINE_ORACLE_SEED ?? 1815)
-const RUNS = Number(process.env.TANSTACK_DB_OFFLINE_ORACLE_RUNS ?? 150)
-const PATH = process.env.TANSTACK_DB_OFFLINE_ORACLE_PATH
+const {
+  runs: RUNS,
+  seed: SEED,
+  path: PATH,
+} = readOfflineOracleConfig({
+  prefix: `TANSTACK_DB_OFFLINE_ORACLE`,
+  defaultRuns: 150,
+  defaultSeed: 1815,
+})
 
-/*
-Test card:
-- Law and source: KeyScheduler is globally serial in creation order. Equal
-  creation times retain scheduling order, as owned by KeyScheduler.test.ts's
-  "processes transactions with identical createdAt in scheduling order" test.
-- Domain and legal histories: the event table below, including retry deadline
-  orderings, payload replacement, clear during either state, and reuse.
-- Reference: a declarative ledger, clock, stable creation sequence, and at most
-  one active transaction.
-- Production path and checkpoint: KeyScheduler's executor-facing methods;
-  compare after every legal event returns.
-- Observed result: returned identity/payload, ordered pending records, pending
-  and running counts, and current eligibility.
-- Known omissions: persistence, Promise settlement, timers outside the modeled
-  clock, and leadership are owned by the retained integration oracles.
-- Reach/fault/replay: fixed transition/deadline witnesses, four path-specific
-  fault controls, and TANSTACK_DB_OFFLINE_ORACLE_{SEED,PATH,RUNS}.
-
-Legal event table:
-- schedule/getNext may occur while idle or active
-- start requires the FIFO head to be ready and no active transaction
-- complete/fail require one active transaction
-- retry update immediately follows fail, as TransactionExecutor invokes it
-- bulk update, clock advance, and clear are legal while otherwise reachable
-- clear retires active and pending work, after which the scheduler is reusable
-*/
+/**
+ * # Which offline transaction may run next?
+ *
+ * Contract and source: the established KeyScheduler FIFO tests and
+ * TransactionExecutor calling order require one globally serial queue. Equal
+ * creation times retain scheduling order. A delayed FIFO head blocks younger
+ * work. Failure makes the active transaction retryable without changing its
+ * place. Replay reconciliation may retire only unissued IDs. Clear retires all
+ * scheduler work and leaves the scheduler reusable.
+ *
+ * Model: a declarative ledger, fake clock, stable creation sequence, and active
+ * ID predict scheduler observations. The model does not import scheduler state
+ * or production classifiers.
+ *
+ * History grammar: legal commands schedule, inspect, start, fulfill, reject,
+ * update one or all pending records, reconcile one replay snapshot, advance
+ * the clock, and clear. A reject is followed immediately by its retry update.
+ * IDs are unique while pending. At most five IDs exist in generated histories.
+ *
+ * Production driver and refinement check: the driver calls the real
+ * executor-facing scheduler methods. After every command, it compares the next
+ * eligible ID and payload, ordered pending records, counts, and active state.
+ *
+ * Reach and controls: one fixed history reaches every transition. Two fixed
+ * histories cross retry-deadline order. Five injected observation faults prove
+ * the comparison rejects bypass, double issue, stale payload, stale clear, and
+ * failed selective retirement. The generated lane supports seed/path replay.
+ *
+ * Limits: persistence, caller promise settlement, leadership, and real timers
+ * have separate owners. The model does not promise fairness beyond FIFO order.
+ */
 
 type CommandToken = {
   selector: number
@@ -283,6 +295,8 @@ function ordered(model: Model): Array<LedgerEntry> {
   )
 }
 
+// Model law: only the oldest pending transaction can become eligible. An
+// active transaction or a delayed FIFO head makes the next result empty.
 function expectedNext(model: Model): OfflineTransaction | undefined {
   if (model.activeId) return undefined
   const first = ordered(model)[0]?.transaction

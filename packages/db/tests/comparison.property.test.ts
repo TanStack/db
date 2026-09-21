@@ -10,17 +10,17 @@ import {
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
- * Property-based tests for comparison functions
+ * Comparison defines the order and equality domains used by queries and
+ * indexes. The laws are reflexivity, deterministic sign, antisymmetry, and
+ * transitivity under one resolved option set. Null placement, direction, and
+ * lexical/locale string modes are independent axes.
  *
- * A valid comparator must satisfy:
- * 1. Consistency: compare(a, b) always returns the same value
- * 2. Antisymmetry: sign(compare(a, b)) === -sign(compare(b, a))
- * 3. Transitivity: if compare(a, b) <= 0 and compare(b, c) <= 0 then compare(a, c) <= 0
- * 4. Reflexivity: compare(a, a) === 0
- *
- * Note: Object comparison uses stable IDs based on creation order, which means
- * comparing two different object instances has order-dependent behavior.
- * These tests focus on primitives, dates, and arrays where comparison is deterministic.
+ * The model uses direct primitive, Date, array, and byte comparisons from the
+ * declared domain. It excludes unrelated object identities because production
+ * intentionally assigns those a creation-order ID. Equality laws separately
+ * cover the normalized value classes and changed-byte controls. Invalid
+ * non-finite comparator results are rejected before sign reduction, so NaN
+ * cannot masquerade as equality.
  */
 
 const defaultOpts: CompareOptions = {
