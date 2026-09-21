@@ -64,16 +64,16 @@ function replaySessions(collection: unknown) {
     _changes: {
       changeSubscriptions: Iterable<{
         options: { truncateReplayPublication?: unknown }
-        truncateReplaySession?: { privateRows?: ReadonlyMap<unknown, unknown> }
+        truncateReplayState?: { privateRows?: ReadonlyMap<unknown, unknown> }
       }>
     }
   }
   return [...internals._changes.changeSubscriptions].flatMap((s) =>
-    s.truncateReplaySession
+    s.truncateReplayState
       ? [
           {
             delegated: Boolean(s.options.truncateReplayPublication),
-            privateRows: s.truncateReplaySession.privateRows?.size ?? null,
+            privateRows: s.truncateReplayState.privateRows?.size ?? null,
           },
         ]
       : [],
