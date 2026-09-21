@@ -17,6 +17,38 @@ import type { RefProxy } from '../../src/query/builder/ref-proxy.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { OutputWithVirtual } from '../utils.js'
 
+/**
+ * Which values may cross the public aggregate-builder boundary, and which
+ * result type does each accepted value produce?
+ *
+ * Contract and laws:
+ * - `sum` and `avg` accept numeric values, expressions, and query refs. They
+ *   return `Aggregate<number>` because the runtime reduces them to numbers.
+ * - `min` and `max` accept number, string, bigint, or Date domains. Their
+ *   result preserves the accepted value domain.
+ * - A nullable wrapper remains valid when its non-nullish domain is valid.
+ *   A null-only wrapper and `unknown` have no aggregate value domain.
+ * - A generic helper constrained to a supported domain must forward its value
+ *   through the same public overloads without widening or failing inference.
+ *
+ * Production path and observation cut:
+ * Calls go through the exported overloads in `query/builder/functions.ts`,
+ * both directly and from real select and left-join callbacks. TypeScript
+ * overload resolution is the boundary. `expectTypeOf` observes accepted calls
+ * and exact result types; `@ts-expect-error` observes rejected calls.
+ *
+ * Reach witnesses and fault controls:
+ * Positive assertions cover raw values, branded values, expressions, refs,
+ * nullable refs, generic forwarders, and projected query results. Negative
+ * controls would fail the type test if unsupported values became accepted.
+ * The broad generic forwarder proves that a weak constraint cannot bypass the
+ * domain law.
+ *
+ * Known omission:
+ * This partial oracle does not require `min` or `max` to reject a union of
+ * individually orderable domains such as `number | string`. Mixed-domain
+ * ordering remains outside the settled contract.
+ */
 type BrandedAmount = number & { readonly __brand: `amount` }
 
 type AggregateRow = {
