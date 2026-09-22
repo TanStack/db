@@ -264,13 +264,15 @@ describe(`PowerSync schema transform conformance`, () => {
 
     // The member probe isolates the schema relation. This public call also
     // protects overload and configuration-union selection.
-    powerSyncCollectionOptions({
+    const wrongPublicOptions = {
       database,
       table: appSchema.props.rows,
       schema: applicationSchema,
-      // @ts-expect-error public options require exact collection output
       deserializationSchema: wrongDeserializer,
       onDeserializationError: () => {},
-    })
+    }
+
+    // @ts-expect-error public options require exact collection output
+    powerSyncCollectionOptions(wrongPublicOptions)
   })
 })
