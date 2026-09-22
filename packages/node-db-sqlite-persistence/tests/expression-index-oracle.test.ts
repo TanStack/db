@@ -16,10 +16,11 @@
  * distractors for suffixes 0..10_000, or booleans with duplicated opposite
  * distractors. Legal `_root`/`Upper_2` paths, fractional numbers, and empty
  * strings are omitted from the generated campaign; their same-path audit probes
- * are GREEN, so they are not a permanent matrix. Null and persisted tagged
- * values remain outside this query-planning law because their operators or
- * coercions can change the indexed expression. Each generated history inserts
- * rows, creates the serialized ref index, scans, and loads the subset.
+ * are GREEN, so they are not a permanent matrix. Known omissions: null and
+ * persisted tagged values remain outside this query-planning law because their
+ * operators or coercions can change the indexed expression. Each generated
+ * history inserts rows, creates the serialized ref index, scans, and loads the
+ * subset.
  *
  * Independent model: a full adapter scan followed by a small path walker and
  * strict scalar equality. It does not call the SQL compiler or reuse its path
