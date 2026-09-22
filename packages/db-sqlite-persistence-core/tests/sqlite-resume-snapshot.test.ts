@@ -225,6 +225,9 @@ async function observeCachedSchemaState(
  * compares the entire projected schema state; the held boundary and reset epoch
  * are reach witnesses, while compatible reopen and recertifying truncate cases
  * prevent an oracle that merely rejects every resume.
+ * The focused work law first executes one controlled expected-key table read to
+ * prove its SQL observer can detect the forbidden membership work, then resets
+ * the counters before measuring the public position and snapshot operations.
  *
  * This narrow fixture supplies the same-connection concurrency seam that the
  * serialized copy-on-commit CLI harness cannot. It does not claim native host
@@ -242,7 +245,7 @@ describe(`SQLite resume snapshots`, () => {
       let keyMembershipScans = 0
       const driver = createDriver(database, undefined, (sql) => {
         if (sql.includes(`key_set_evidence_available`)) keyEvidenceReads += 1
-        if (sql.includes(`FROM collection_expected_keys AS expected`)) {
+        if (sql.includes(`collection_expected_keys`)) {
           keyMembershipScans += 1
         }
       })
@@ -260,6 +263,14 @@ describe(`SQLite resume snapshots`, () => {
         keyEvidenceReads = 0
         keyMembershipScans = 0
       }
+
+      await driver.query(
+        `SELECT key FROM collection_expected_keys
+         WHERE collection_id = ?
+         LIMIT 0`,
+        [collectionId],
+      )
+      expect(observeWork().keyMembershipScans).toBe(1)
 
       resetWork()
       const position = await adapter.getStreamPosition(collectionId)
