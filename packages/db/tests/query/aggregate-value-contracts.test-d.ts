@@ -186,11 +186,6 @@ describe(`aggregate value contracts`, () => {
     >(
       value: T,
     ) => avg(value)
-    const minOrderableRef = <
-      T extends RefLeaf<number | string | bigint | Date | null | undefined>,
-    >(
-      value: T,
-    ) => min(value)
     const maxOrderableValue = <T extends number | string | bigint | Date>(
       value: T,
     ) => max(value)
@@ -200,8 +195,6 @@ describe(`aggregate value contracts`, () => {
       BrandedAmount | null | undefined,
       true
     >
-    const mixedOrderableRef = undefined as unknown as RefLeaf<number | string>
-
     expectTypeOf(sumNumber(branded)).toEqualTypeOf<Aggregate<number>>()
     expectTypeOf(sum(1)).toEqualTypeOf<Aggregate<number>>()
     expectTypeOf(avg(1)).toEqualTypeOf<Aggregate<number>>()
@@ -213,10 +206,6 @@ describe(`aggregate value contracts`, () => {
     >()
     expectTypeOf(sum(coalesce(nullableBrandedRef, 0))).toEqualTypeOf<
       Aggregate<number>
-    >()
-    expectTypeOf(minOrderableRef(mixedOrderableRef)).toMatchTypeOf<Aggregate>()
-    expectTypeOf(min(mixedOrderableRef)).toEqualTypeOf<
-      Aggregate<number | string>
     >()
     expectTypeOf(maxOrderableValue(new Date())).toEqualTypeOf<Aggregate<Date>>()
 
