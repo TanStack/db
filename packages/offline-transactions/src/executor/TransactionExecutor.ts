@@ -2,7 +2,6 @@ import { createTransaction } from '@tanstack/db'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
-import { reconcilePendingTransactions } from './KeyScheduler'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
@@ -262,7 +261,7 @@ export class TransactionExecutor {
             !filteredTransactions.some((filtered) => filtered.id === tx.id),
         )
         .map(({ id }) => id)
-      removedIds = reconcilePendingTransactions(this.scheduler, removedIds)
+      removedIds = this.scheduler.removePendingTransactions(removedIds)
 
       // Restore optimistic state for loaded transactions
       // This ensures the UI shows the optimistic data while transactions are pending

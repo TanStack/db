@@ -14,7 +14,7 @@ export class ReactNativeOnlineDetector implements OnlineDetector {
   private netInfoUnsubscribe: (() => void) | null = null
   private appStateSubscription: NativeEventSubscription | null = null
   private isListening = false
-  private wasConnected = true
+  private wasConnected = false
 
   constructor() {
     this.startListening()

@@ -140,11 +140,3 @@ export class KeyScheduler {
     )
   }
 }
-
-/** @internal Reconcile one replay snapshot without canceling issued work. */
-export function reconcilePendingTransactions(
-  scheduler: KeyScheduler,
-  transactionIds: Iterable<string>,
-): Array<string> {
-  return scheduler.removePendingTransactions(transactionIds)
-}

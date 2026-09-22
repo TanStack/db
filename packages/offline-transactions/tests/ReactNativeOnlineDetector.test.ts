@@ -142,7 +142,7 @@ describe(`ReactNativeOnlineDetector`, () => {
       }
     })
 
-    it(`accepts an asynchronously delivered initial subscription state`, async () => {
+    it(`does not claim online before the initial subscription state arrives`, async () => {
       ;(NetInfo as any).__setLatestState({
         isConnected: false,
         isInternetReachable: false,
@@ -150,7 +150,7 @@ describe(`ReactNativeOnlineDetector`, () => {
       ;(NetInfo as any).__deliverNextSubscriptionAsync()
       const detector = new ReactNativeOnlineDetector()
       try {
-        expect(detector.isOnline()).toBe(true)
+        expect(detector.isOnline()).toBe(false)
         await Promise.resolve()
         expect(detector.isOnline()).toBe(false)
         expect(NetInfo.fetch).not.toHaveBeenCalled()

@@ -1,9 +1,6 @@
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  KeyScheduler,
-  reconcilePendingTransactions,
-} from '../src/executor/KeyScheduler'
+import { KeyScheduler } from '../src/executor/KeyScheduler'
 import { readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction } from '../src/types'
 
@@ -462,7 +459,7 @@ function runHistory(
       const expectedRemoved = [
         ...new Set(nextCommand.ids.filter((id) => id !== model.activeId)),
       ]
-      expect(reconcilePendingTransactions(scheduler, nextCommand.ids)).toEqual(
+      expect(scheduler.removePendingTransactions(nextCommand.ids)).toEqual(
         expectedRemoved,
       )
       const ids = new Set(nextCommand.ids)
@@ -687,11 +684,7 @@ describe(`KeyScheduler generated lifecycle`, () => {
     scheduler.markStarted(active)
 
     expect(
-      reconcilePendingTransactions(scheduler, [
-        active.id,
-        removed.id,
-        `missing`,
-      ]),
+      scheduler.removePendingTransactions([active.id, removed.id, `missing`]),
     ).toEqual([removed.id, `missing`])
 
     expect({
