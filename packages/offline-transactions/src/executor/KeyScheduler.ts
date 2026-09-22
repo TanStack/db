@@ -110,9 +110,8 @@ export class KeyScheduler {
     this.activeTransactionId = undefined
   }
 
-  private removePendingTransactions(
-    transactionIds: Iterable<string>,
-  ): Array<string> {
+  /** @internal Reconcile one replay snapshot without canceling issued work. */
+  removePendingTransactions(transactionIds: Iterable<string>): Array<string> {
     const ids = new Set(transactionIds)
     if (this.activeTransactionId !== undefined)
       ids.delete(this.activeTransactionId)
@@ -147,5 +146,5 @@ export function reconcilePendingTransactions(
   scheduler: KeyScheduler,
   transactionIds: Iterable<string>,
 ): Array<string> {
-  return scheduler[`removePendingTransactions`](transactionIds)
+  return scheduler.removePendingTransactions(transactionIds)
 }

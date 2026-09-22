@@ -406,7 +406,8 @@ it.each([0, 1])(
       expect(commitStatuses).toEqual([`pending`, `pending`])
       expect(waitStatuses).toEqual([`pending`, `pending`])
       expect(warning).toHaveBeenCalledWith(
-        `Failed to load and replay transactions:`,
+        `Failed to remove transaction excluded by beforeRetry:`,
+        ids[failedIndex],
         storageError,
       )
       expect(env.executor.getPendingCount()).toBe(0)
@@ -1731,6 +1732,72 @@ it.each([`keys`, `get`] as const)(
     )
   },
 )
+
+it(`keeps startup replay available when discarded-work cleanup fails`, async () => {
+  const discarded = storedTransaction(`discarded-at-startup`)
+  const retained = {
+    ...storedTransaction(`retained-at-startup`),
+    createdAt: new Date(1),
+  }
+  const cleanupError = new Error(`discarded cleanup unavailable`)
+  class Storage extends FakeStorageAdapter {
+    override async delete(key: string): Promise<void> {
+      if (key === `tx:${discarded.id}`) throw cleanupError
+      await super.delete(key)
+    }
+  }
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  await outbox.add(discarded)
+  await outbox.add(retained)
+  const replayed = gate()
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  const env = createTestOfflineEnvironment({
+    storage,
+    mutationFn: ({ transaction }) => {
+      if (transaction.id === retained.id) replayed.resolve()
+    },
+    config: {
+      beforeRetry: (transactions) =>
+        transactions.filter(({ id }) => id !== discarded.id),
+    },
+  })
+  let hasPrimaryFailure = false
+  try {
+    await expect(
+      atOracleCheckpoint(
+        env.executor.waitForInit(),
+        `startup replay admitted despite discarded cleanup failure`,
+      ),
+    ).resolves.toBeUndefined()
+    await atOracleCheckpoint(replayed.promise, `retained startup work replayed`)
+    await turn()
+
+    expect(env.mutationCalls.map(({ transaction }) => transaction.id)).toEqual([
+      retained.id,
+    ])
+    expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      discarded.id,
+    ])
+    expect(warning).toHaveBeenCalledWith(
+      `Failed to remove transaction excluded by beforeRetry:`,
+      discarded.id,
+      cleanupError,
+    )
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupOfflineOracle(
+      [
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+        () => warning.mockRestore(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
 
 it.each([false, true])(
   `fences each successful clear deletion while a peer is pending or fails, failure=%s`,
