@@ -501,6 +501,65 @@ it(`preserves spoofed Temporal tags as data while restoring branded values`, asy
   }
 })
 
+it(`preserves plain user data with a Temporal tag when Temporal is unavailable`, () => {
+  const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
+  const previousTemporal = temporalGlobal.Temporal
+  delete temporalGlobal.Temporal
+  const transaction = metadataTransaction({
+    spoofed: {
+      keep: `user data`,
+      [Symbol.toStringTag]: `Temporal.Instant`,
+    },
+  })
+
+  try {
+    const wire = JSON.parse(
+      new TransactionSerializer({}).serialize(transaction),
+    )
+
+    expect(wire.metadata).toEqual({ spoofed: { keep: `user data` } })
+  } finally {
+    if (previousTemporal === undefined) delete temporalGlobal.Temporal
+    else temporalGlobal.Temporal = previousTemporal
+  }
+})
+
+it(`does not invoke a mutation value's plain Symbol.toStringTag getter`, () => {
+  let reads = 0
+  const value = { keep: `user data` }
+  Object.defineProperty(value, Symbol.toStringTag, {
+    get() {
+      reads++
+      throw new Error(`do not inspect user getters`)
+    },
+  })
+  const collection = { id: `tag-getter-writer` } as any
+  const modified = { id: `one`, value }
+  const transaction: OfflineTransaction = {
+    ...metadataTransaction({}),
+    mutations: [
+      {
+        globalKey: `tag-getter-writer:one`,
+        type: `insert`,
+        modified,
+        original: {},
+        changes: modified,
+        collection,
+      } as PendingMutation,
+    ],
+    keys: [`tag-getter-writer:one`],
+  }
+
+  const wire = JSON.parse(
+    new TransactionSerializer({ rows: collection }).serialize(transaction),
+  )
+
+  expect({ reads, modified: wire.mutations[0].modified }).toEqual({
+    reads: 0,
+    modified: { id: `one`, value: { keep: `user data` } },
+  })
+})
+
 it(`rejects native scalars before storage when global restoration is unavailable`, async () => {
   const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
   const previousTemporal = temporalGlobal.Temporal

@@ -68,6 +68,15 @@ function serializeTemporalValue(
   }
 }
 
+function mayBeNativeScalar(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value)
+  return (
+    prototype !== null &&
+    prototype !== Object.prototype &&
+    !Array.isArray(value)
+  )
+}
+
 export class MissingTemporalConstructorError extends Error {}
 
 function setDataProperty(
@@ -217,7 +226,7 @@ export class TransactionSerializer {
     }
 
     const temporalConstructorName =
-      jsonKey !== false
+      jsonKey !== false && mayBeNativeScalar(value)
         ? getTemporalConstructorName(value[Symbol.toStringTag])
         : undefined
     if (temporalConstructorName) {
