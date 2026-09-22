@@ -37,10 +37,10 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * advance the released-tombstone clock. Exact call counts and error identities
  * prevent a final-state-only false green.
  *
- * The composed public-Collection and generated route models live in
- * `per-collection-coordinator-oracle.test.ts`. These seams do not prove real
- * browser scheduling, Web Locks, BroadcastChannel, OPFS ownership, or worker
- * behavior. Bounded replay retry is covered for retryable transport and
+ * Known omissions: the composed public-Collection and generated route models
+ * live in `per-collection-coordinator-oracle.test.ts`. These seams do not prove
+ * real browser scheduling, Web Locks, BroadcastChannel, OPFS ownership, or
+ * worker behavior. Bounded replay retry is covered for retryable transport and
  * admission failures, including cancellation on release and disposal.
  */
 

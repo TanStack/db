@@ -113,7 +113,7 @@ Reach, challenge, replay, cleanup, and limits:
 - Coordinators, Collections, and databases use failure-preserving cleanup. A
   final lifecycle test proves no channel, held lock, queued lock, or delayed
   delivery remains and that a fresh database name elects normally.
-- The BroadcastChannel and Web Locks seams below perform real structuredClone
+- Known omissions: the BroadcastChannel and Web Locks seams below perform real structuredClone
   and real coordinator code but are deterministic Node controls. They do not
   earn real-browser, multi-context, OPFS exclusive-handle, worker, Electric,
   PowerSync, or service credit. The focused Browser coordinator owner proves

@@ -59,10 +59,11 @@ import type {
  * and durability classification. Focused Browser and Electron suites own the
  * multiprocess transport and host-specific replay partitions.
  *
- * Driver SQL behavior, native host ownership, and the shared conformance
- * portfolio have separate owners. This file proves the role partition for
- * non-single-process remote demand: an ownerless elected node does not route,
- * while a follower may route to the elected owner's registered source.
+ * Known omissions: driver SQL behavior, native host ownership, and the shared
+ * conformance portfolio have separate owners. This file proves the role
+ * partition for non-single-process remote demand: an ownerless elected node
+ * does not route, while a follower may route to the elected owner's registered
+ * source.
  */
 
 /**
@@ -81,9 +82,9 @@ import type {
  * cleanup, and restart. They compare durable state, public rows, metadata,
  * request options, sequence evidence, errors, and late-work fencing.
  *
- * Driver SQL behavior, browser page ownership, native runtimes, and the shared
- * conformance portfolio have separate owners. This file models persistence
- * protocol state, not a particular SQLite engine.
+ * Known omissions: driver SQL behavior, browser page ownership, native
+ * runtimes, and the shared conformance portfolio have separate owners. This
+ * file models persistence protocol state, not a particular SQLite engine.
  */
 
 type Todo = {

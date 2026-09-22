@@ -62,10 +62,11 @@ import type {
  * held work, changed leaders, rejected owner operations, and released-tombstone
  * clock advances challenge the assertions.
  *
- * The default invoke and Web Locks seams are deterministic process-local
- * controls. They prove an actual Electron process only when explicit runtime-
- * bridge mode runs. Bounded replay retry is covered for retryable transport
- * and admission failures, including cancellation on release and disposal.
+ * Known omissions: the default invoke and Web Locks seams are deterministic
+ * process-local controls. They prove an actual Electron process only when
+ * explicit runtime-bridge mode runs. Bounded replay retry is covered for
+ * retryable transport and admission failures, including cancellation on
+ * release and disposal.
  */
 
 type InvokeHarness = {
