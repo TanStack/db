@@ -295,6 +295,27 @@ it(`materializes a declared statement row list exactly once`, async () => {
   expect(requestedIndexes).toEqual([0, 1])
 })
 
+it.each([
+  { name: `NaN`, length: Number.NaN },
+  { name: `negative`, length: -1 },
+  { name: `fractional`, length: 1.5 },
+])(`rejects a $name statement row-list length`, async ({ length }) => {
+  await expect(
+    queryInjectedResult(
+      [{ rowsAffected: 0, rows: { length, item: () => ({ id: `row` }) } }],
+      `statement-results`,
+    ),
+  ).rejects.toThrow(`recognized statement envelope`)
+})
+
+it(`rejects an empty array in statement-results mode`, async () => {
+  await expect(queryInjectedResult([], `statement-results`)).rejects.toThrow(
+    `statement-result arrays must contain exactly one result`,
+  )
+  await expect(queryInjectedResult([], `rows`)).resolves.toEqual([])
+  await expect(queryInjectedResult([])).resolves.toEqual([])
+})
+
 it(`reads op-sqlite execute rows when columnNames metadata is also present`, async () => {
   await expect(
     queryInjectedResult({

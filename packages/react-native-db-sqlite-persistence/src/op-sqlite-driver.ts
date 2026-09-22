@@ -152,6 +152,20 @@ function unsupportedQueryResult(sql: string, details?: string): never {
   )
 }
 
+function isValidRowList(
+  rowsObject: OpSQLiteRowListLike,
+): rowsObject is OpSQLiteRowListLike & {
+  length: number
+  item: (index: number) => unknown
+} {
+  return (
+    typeof rowsObject.length === `number` &&
+    Number.isSafeInteger(rowsObject.length) &&
+    rowsObject.length >= 0 &&
+    typeof rowsObject.item === `function`
+  )
+}
+
 function toRowArray(rowsValue: unknown): Array<unknown> | null {
   if (Array.isArray(rowsValue)) {
     return rowsValue
@@ -166,14 +180,10 @@ function toRowArray(rowsValue: unknown): Array<unknown> | null {
     return rowsObject._array
   }
 
-  if (
-    typeof rowsObject.length === `number` &&
-    typeof rowsObject.item === `function`
-  ) {
-    const item = rowsObject.item as (index: number) => unknown
+  if (isValidRowList(rowsObject)) {
     const rows: Array<unknown> = []
     for (let index = 0; index < rowsObject.length; index++) {
-      rows.push(item(index))
+      rows.push(rowsObject.item(index))
     }
     return rows
   }
@@ -191,11 +201,7 @@ function isRowCarrier(rowsValue: unknown): boolean {
   }
 
   const rowsObject = rowsValue as OpSQLiteRowListLike
-  return (
-    Array.isArray(rowsObject._array) ||
-    (typeof rowsObject.length === `number` &&
-      typeof rowsObject.item === `function`)
-  )
+  return Array.isArray(rowsObject._array) || isValidRowList(rowsObject)
 }
 
 function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
@@ -340,6 +346,12 @@ function extractRowsFromExecuteResult(
 
   if (Array.isArray(result)) {
     if (result.length === 0) {
+      if (arrayResultMode === `statement-results`) {
+        return unsupportedQueryResult(
+          sql,
+          `statement-result arrays must contain exactly one result`,
+        )
+      }
       return []
     }
 
