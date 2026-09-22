@@ -477,10 +477,13 @@ export interface SyncMetadataApi<
     }>
   }
   /**
-   * Versioned persistence bridge used by sync adapters that can hydrate and
-   * inspect a durable collection baseline. Custom sync wrappers must forward
-   * this value unchanged. `null` explicitly means that the collection has no
-   * persistence capability; a missing property is invalid.
+   * Unstable, versioned bridge between persistence-aware collection adapters
+   * and sync adapters. Application code should not construct this capability.
+   * Custom adapter wrappers must forward it unchanged. `null` explicitly means
+   * that the collection has no persistence capability; a missing property is
+   * invalid.
+   *
+   * @internal Adapter infrastructure; not an application-facing API.
    */
   persistence: SyncPersistenceCapabilityV1<TKey> | null
 }
@@ -501,6 +504,9 @@ export type SyncPersistenceScannedRow<
   metadata?: unknown
 }
 
+/**
+ * @internal Unstable cross-package protocol for persistence-aware adapters.
+ */
 export type SyncPersistenceCapabilityV1<
   TKey extends string | number = string | number,
 > = {
