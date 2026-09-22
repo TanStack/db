@@ -8,6 +8,7 @@ export type OpSQLiteTestResultShape =
   | `rows-object`
   | `rows-list`
   | `statement-array`
+  | `execute-rows-with-column-names`
   | `execute-async-columnar`
 
 type OpSQLiteRowsListLike<T> = {
@@ -54,7 +55,9 @@ function formatQueryRows<T>(
         rows: createRowsList(rows),
       }
     case `statement-array`:
-      return [{ rows }]
+      return [{ rows, rowsAffected: 0 }]
+    case `execute-rows-with-column-names`:
+      throw new Error(`Rows with metadata require statement column metadata`)
     case `execute-async-columnar`:
       throw new Error(`Columnar query rows require statement column metadata`)
     default:
@@ -131,6 +134,17 @@ export function createOpSQLiteTestDatabase(options: {
           rawRows,
           columnNames,
         }
+      }
+
+      if (resultShape === `execute-rows-with-column-names`) {
+        const columnNames = statement
+          .columns()
+          .map((column: { name: string }) => column.name)
+        const rows =
+          parameterValues.length > 0
+            ? statement.all(...parameterValues)
+            : statement.all()
+        return { rowsAffected: 0, rows, columnNames }
       }
 
       const rows =

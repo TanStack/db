@@ -19,6 +19,17 @@ const WRITE_RESULT_KEYS = new Set([
   `lastInsertRowId`,
 ])
 
+const STATEMENT_RESULT_KEYS = new Set([
+  ...WRITE_RESULT_KEYS,
+  `rows`,
+  `resultRows`,
+  `rawRows`,
+  `columnNames`,
+  `results`,
+  `metadata`,
+  `res`,
+])
+
 export type OpSQLiteDatabaseLike = {
   execute?: OpSQLiteExecuteFn
   executeAsync?: OpSQLiteExecuteFn
@@ -116,6 +127,13 @@ function hasWriteResultMarker(value: Record<string, unknown>): boolean {
   return false
 }
 
+function isWriteResultEnvelope(value: Record<string, unknown>): boolean {
+  return (
+    hasWriteResultMarker(value) &&
+    Object.keys(value).every((key) => WRITE_RESULT_KEYS.has(key))
+  )
+}
+
 function unsupportedQueryResult(sql: string, details?: string): never {
   throw new InvalidPersistedCollectionConfigError(
     `Unsupported op-sqlite query result shape for SQL "${sql}"${
@@ -154,12 +172,21 @@ function toRowArray(rowsValue: unknown): Array<unknown> | null {
 }
 
 function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
-  return (
+  if (!Object.keys(value).every((key) => STATEMENT_RESULT_KEYS.has(key))) {
+    return false
+  }
+
+  const hasStructuralCarrier =
     toRowArray(value.rows) !== null ||
     toRowArray(value.resultRows) !== null ||
     Array.isArray(value.rawRows) ||
     Array.isArray(value.columnNames) ||
     Array.isArray(value.results)
+
+  return (
+    isWriteResultEnvelope(value) ||
+    (hasWriteResultMarker(value) && hasStructuralCarrier) ||
+    (Array.isArray(value.rawRows) && Array.isArray(value.columnNames))
   )
 }
 
@@ -179,14 +206,6 @@ function decodeColumnarRows(
       `columnar results require both rawRows and columnNames`,
     )
   }
-  if (
-    hasOwnKey(value, `rows`) ||
-    hasOwnKey(value, `resultRows`) ||
-    hasOwnKey(value, `results`)
-  ) {
-    unsupportedQueryResult(sql, `columnar results contain conflicting carriers`)
-  }
-
   const rawRows = value.rawRows
   const columnNames = value.columnNames
   if (
@@ -197,13 +216,6 @@ function decodeColumnarRows(
     unsupportedQueryResult(sql, `invalid columnar row or column metadata`)
   }
 
-  const uniqueColumnNames = new Set(columnNames)
-  if (uniqueColumnNames.size !== columnNames.length) {
-    unsupportedQueryResult(
-      sql,
-      `columnar results contain duplicate column names`,
-    )
-  }
   if (rawRows.length > 0 && columnNames.length === 0) {
     unsupportedQueryResult(
       sql,
@@ -230,17 +242,13 @@ function extractRowsFromStatementResult(
   sql: string,
   allowResultsWrapper: boolean,
 ): Array<unknown> {
-  const columnarRows = decodeColumnarRows(record, sql)
-  if (columnarRows) {
-    return columnarRows
-  }
-
   const rowCarrierKeys = [`rows`, `resultRows`].filter((key) =>
     hasOwnKey(record, key),
   )
   if (
     rowCarrierKeys.length > 1 ||
-    (rowCarrierKeys.length > 0 && hasOwnKey(record, `results`))
+    (rowCarrierKeys.length > 0 &&
+      (hasOwnKey(record, `rawRows`) || hasOwnKey(record, `results`)))
   ) {
     unsupportedQueryResult(sql, `query result contains conflicting carriers`)
   }
@@ -251,6 +259,18 @@ function extractRowsFromStatementResult(
       unsupportedQueryResult(sql, `invalid ${rowCarrierKeys[0]} carrier`)
     }
     return rows
+  }
+
+  if (
+    (hasOwnKey(record, `rawRows`) || hasOwnKey(record, `columnNames`)) &&
+    hasOwnKey(record, `results`)
+  ) {
+    unsupportedQueryResult(sql, `query result contains conflicting carriers`)
+  }
+
+  const columnarRows = decodeColumnarRows(record, sql)
+  if (columnarRows) {
+    return columnarRows
   }
 
   if (hasOwnKey(record, `results`)) {
@@ -268,10 +288,7 @@ function extractRowsFromStatementResult(
     return extractRowsFromStatementResult(nestedResults[0], sql, false)
   }
 
-  if (
-    hasWriteResultMarker(record) &&
-    Object.keys(record).every((key) => WRITE_RESULT_KEYS.has(key))
-  ) {
+  if (isWriteResultEnvelope(record)) {
     return []
   }
 

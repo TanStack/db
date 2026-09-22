@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fc } from '@fast-check/vitest'
 import { afterEach, expect, it } from 'vitest'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
@@ -106,9 +106,10 @@ async function withColumnarDriver<T>(
  * Law: SQLiteDriver.query returns the complete ordered object rows supplied by
  * the database after exec/run writes. SQL aliases remain row data even when
  * their names match envelope fields; malformed result envelopes reject.
- * Source: SQLiteDriver's public query contract and op-sqlite v14's documented
- * executeAsync `{ rawRows, columnNames, rowsAffected }` envelope.
- * Domain: deterministic object-row wrappers and v14 columnar rows, including
+ * Source: SQLiteDriver's public query contract and op-sqlite's documented
+ * execute `{ rows, columnNames }` and executeAsync
+ * `{ rawRows, columnNames, rowsAffected }` envelopes.
+ * Domain: deterministic object-row wrappers and columnar rows, including
  * empty, asymmetric/reordered multirow, legal reserved-looking SQL aliases,
  * and malformed or conflicting envelopes.
  * Reference/history grammar: `aliasQueryCase` builds two ordered object rows
@@ -131,6 +132,7 @@ it.each([
   `rows-object`,
   `rows-list`,
   `statement-array`,
+  `execute-rows-with-column-names`,
   `execute-async-columnar`,
 ] as const)(`reads query rows across result shape: %s`, async (resultShape) => {
   const dbPath = createTempSqlitePath()
@@ -174,11 +176,70 @@ it.each([
   ])
 })
 
+async function queryInjectedResult(
+  result: unknown,
+): Promise<ReadonlyArray<unknown>> {
+  return new OpSQLiteDriver({
+    database: {
+      executeAsync: () => Promise.resolve(result),
+    },
+  }).query(`SELECT * FROM injected_result`)
+}
+
+it(`reads op-sqlite execute rows when columnNames metadata is also present`, async () => {
+  await expect(
+    queryInjectedResult({
+      rowsAffected: 0,
+      rows: [{ id: `node-or-web-row` }],
+      columnNames: [`id`],
+    }),
+  ).resolves.toEqual([{ id: `node-or-web-row` }])
+})
+
+it.each([`rows`, `resultRows`, `rawRows`, `columnNames`, `results`] as const)(
+  `preserves a direct data row with non-scalar %s alias`,
+  async (alias) => {
+    const row = {
+      [alias]: [`nested`, `value`],
+      ...(alias === `rowsAffected` ? {} : { rowsAffected: 17 }),
+      ordinary_name: `ordinary-value`,
+    }
+    await expect(queryInjectedResult([row])).resolves.toEqual([row])
+  },
+)
+
+it(`decodes legal duplicate SQLite column names with the last-value law`, async () => {
+  await withColumnarDriver(async ({ driver }) => {
+    await expect(
+      driver.query(`SELECT 'left-id' AS id, 'right-id' AS id`),
+    ).resolves.toEqual([{ id: `right-id` }])
+  })
+})
+
+it(`treats array and object write envelopes symmetrically`, async () => {
+  const writeResult = { rowsAffected: 1, insertId: 17 }
+  await expect(queryInjectedResult(writeResult)).resolves.toEqual([])
+  await expect(queryInjectedResult([writeResult])).resolves.toEqual([])
+})
+
 function expectExactRows<T>(
   actual: ReadonlyArray<T>,
   expected: ReadonlyArray<T>,
 ): void {
-  expect(actual).toEqual(expected)
+  expect(actual).toHaveLength(expected.length)
+  expected.forEach((row, rowIndex) => {
+    if (isRecord(row)) {
+      const actualRow = actual[rowIndex]
+      expect(Object.keys(isRecord(actualRow) ? actualRow : {})).toEqual(
+        Object.keys(row),
+      )
+    }
+    expect(actual[rowIndex]).toEqual(row)
+  })
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === `object` && value !== null && !Array.isArray(value)
 }
 
 function expectExactAliasRows(
@@ -424,14 +485,6 @@ const malformedColumnarResults: ReadonlyArray<{
       rowsAffected: 0,
       rawRows: [[]],
       columnNames: [],
-    },
-  },
-  {
-    name: `duplicate column names`,
-    result: {
-      rowsAffected: 0,
-      rawRows: [[`left`, `right`]],
-      columnNames: [`id`, `id`],
     },
   },
   {
@@ -863,39 +916,98 @@ it(`throws config error when db execute methods are missing`, () => {
   )
 })
 
-const createColumnarDriverHarness: SQLiteDriverContractHarnessFactory = () => {
+function createColumnarDriverHarness(
+  createDatabase: typeof createOpSQLiteTestDatabase = createOpSQLiteTestDatabase,
+): ReturnType<SQLiteDriverContractHarnessFactory> {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-rn-op-sqlite-contract-`))
-  const database = createOpSQLiteTestDatabase({
-    filename: join(tempDirectory, `state.sqlite`),
-    resultShape: `execute-async-columnar`,
-  })
-  const driver = new OpSQLiteDriver({ database })
+  let database: ReturnType<typeof createOpSQLiteTestDatabase> | undefined
+  try {
+    database = createDatabase({
+      filename: join(tempDirectory, `state.sqlite`),
+      resultShape: `execute-async-columnar`,
+    })
+    const driver = new OpSQLiteDriver({ database })
 
-  return {
-    driver,
-    cleanup: async () => {
-      const cleanupErrors: Array<unknown> = []
-      try {
-        await Promise.resolve(database.close())
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-      try {
-        rmSync(tempDirectory, { recursive: true, force: true })
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-      if (cleanupErrors.length === 1) throw cleanupErrors[0]
-      if (cleanupErrors.length > 1) {
-        throw new AggregateError(
-          cleanupErrors,
-          `op-sqlite contract cleanup failed`,
-          { cause: cleanupErrors[0] },
-        )
-      }
-    },
+    return {
+      driver,
+      cleanup: async () => {
+        const cleanupErrors: Array<unknown> = []
+        try {
+          await Promise.resolve(database.close())
+        } catch (error) {
+          cleanupErrors.push(error)
+        }
+        try {
+          rmSync(tempDirectory, { recursive: true, force: true })
+        } catch (error) {
+          cleanupErrors.push(error)
+        }
+        if (cleanupErrors.length === 1) throw cleanupErrors[0]
+        if (cleanupErrors.length > 1) {
+          throw new AggregateError(
+            cleanupErrors,
+            `op-sqlite contract cleanup failed`,
+            { cause: cleanupErrors[0] },
+          )
+        }
+      },
+    }
+  } catch (error) {
+    const cleanupErrors: Array<unknown> = []
+    try {
+      database?.close()
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError)
+    }
+    try {
+      rmSync(tempDirectory, { recursive: true, force: true })
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError)
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        `op-sqlite contract construction and cleanup failed`,
+        { cause: error },
+      )
+    }
+    throw error
   }
 }
+
+it(`removes the contract directory when database construction fails`, () => {
+  let tempDirectory: string | undefined
+  expect(() =>
+    createColumnarDriverHarness(({ filename }) => {
+      const directory = dirname(filename)
+      tempDirectory = directory
+      activeCleanupFns.push(() => {
+        rmSync(directory, { recursive: true, force: true })
+      })
+      throw new Error(`construction failed`)
+    }),
+  ).toThrow(`construction failed`)
+  expect(tempDirectory).toBeDefined()
+  expect(existsSync(tempDirectory!)).toBe(false)
+})
+
+it(`closes the database and removes the contract directory when driver construction fails`, () => {
+  let tempDirectory: string | undefined
+  let closed = false
+  expect(() =>
+    createColumnarDriverHarness(({ filename }) => {
+      tempDirectory = dirname(filename)
+      return {
+        close: () => {
+          closed = true
+        },
+      }
+    }),
+  ).toThrow(`execute/executeAsync/executeRaw/execAsync`)
+  expect(closed).toBe(true)
+  expect(tempDirectory).toBeDefined()
+  expect(existsSync(tempDirectory!)).toBe(false)
+})
 
 runSQLiteDriverContractSuite(
   `op-sqlite executeAsync columnar driver`,
