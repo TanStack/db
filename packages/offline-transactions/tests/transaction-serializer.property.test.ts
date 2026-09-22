@@ -545,7 +545,7 @@ it(`does not invoke a mutation value's plain Symbol.toStringTag getter`, () => {
         original: {},
         changes: modified,
         collection,
-      } as PendingMutation,
+      } as unknown as PendingMutation,
     ],
     keys: [`tag-getter-writer:one`],
   }
