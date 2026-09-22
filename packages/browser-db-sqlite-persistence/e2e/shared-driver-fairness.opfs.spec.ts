@@ -14,11 +14,32 @@ async function readOracleResult(
   page: Page,
   mode: `neutral` | `storm`,
 ): Promise<OPFSOracleResult> {
-  await page.goto(`/e2e/shared-driver-fairness.opfs.html?mode=${mode}`)
-  await page.waitForFunction(
-    () => window.__tanstackDriverFairnessOracle !== undefined,
-  )
-  return page.evaluate(() => window.__tanstackDriverFairnessOracle!)
+  let rejectPageError!: (error: Error) => void
+  const pageError = new Promise<never>((_resolve, reject) => {
+    rejectPageError = reject
+  })
+  void pageError.catch(() => undefined)
+  const onPageError = (error: Error) => {
+    rejectPageError(
+      new Error(
+        `OPFS fairness page failed before publishing a result: ${error.message}`,
+      ),
+    )
+  }
+  page.on(`pageerror`, onPageError)
+
+  try {
+    await page.goto(`/e2e/shared-driver-fairness.opfs.html?mode=${mode}`)
+    await Promise.race([
+      page.waitForFunction(
+        () => window.__tanstackDriverFairnessOracle !== undefined,
+      ),
+      pageError,
+    ])
+    return page.evaluate(() => window.__tanstackDriverFairnessOracle!)
+  } finally {
+    page.off(`pageerror`, onPageError)
+  }
 }
 
 function expectedHydratedCollections(scenarioId: string, count: number) {
