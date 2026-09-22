@@ -229,10 +229,11 @@ async function observeCachedSchemaState(
  * prove its SQL observer can detect the forbidden membership work, then resets
  * the counters before measuring the public position and snapshot operations.
  *
- * This narrow fixture supplies the same-connection concurrency seam that the
- * serialized copy-on-commit CLI harness cannot. It does not claim native host
- * execution or judge whether a consumer such as Electric may use the certified
- * cursor; those remain separate driver-contract and Electric recovery owners.
+ * Known omissions: this narrow fixture supplies the same-connection
+ * concurrency seam that the serialized copy-on-commit CLI harness cannot. It
+ * does not claim native host execution or judge whether a consumer such as
+ * Electric may use the certified cursor; those remain separate driver-contract
+ * and Electric recovery owners.
  */
 describe(`SQLite resume snapshots`, () => {
   it(`reads key-set evidence without rescanning key membership`, async () => {

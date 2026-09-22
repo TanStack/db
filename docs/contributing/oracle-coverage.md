@@ -196,10 +196,14 @@ boundary. Track the generalized repairs here instead of accumulating isolated
 regressions. Completion requires an executable owner, a production-path witness,
 a hostile wrong-answer control, and an explicit statement of remaining limits.
 
-- [ ] **Real-provider conformance fixtures.** Record representative result
-  envelopes from each supported OP-SQLite runtime and other persistence hosts.
-  Make the driver-contract suites prove their shims accept those exact shapes.
-  Owner: SQLite driver contracts and native-host suites.
+- [x] **Real-provider conformance fixtures.** Frozen 15.2.7 React Native and
+  Node receipts cover the supported peer version; 18.2.1 React Native, Node,
+  and browser receipts cover the known forward shapes. Exact-row checks and a
+  row-dropping hostile control prove the shim accepts those envelopes without
+  mutating them. Owner:
+  `packages/react-native-db-sqlite-persistence/tests/fixtures/op-sqlite-provider-results.ts`
+  and `packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver.test.ts`.
+  Native device/host execution remains a separate runtime receipt.
 - [x] **Minimal ambiguity and name invariance.** Generate one-field and
   otherwise minimally distinguishable results. Renaming a selected column to a
   structural-looking alias must not turn a data row into a write envelope.
@@ -227,7 +231,10 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
 - [x] **On-demand persistence after evidence changes.** Cross baseline versus
   on-demand hydration with consistent, unknown, and incompatible key-set
   evidence. A baseline certification failure must not silently erase valid
-  on-demand rows. Owner:
+  on-demand rows. `loadSubset` checks baseline visibility and on-demand rows;
+  the sync-absent `forceReloadSubset` route crosses the same startup evidence
+  states but records baseline visibility as unobserved because that API does
+  not expose baseline hydration. Owner:
   `packages/db-sqlite-persistence-core/tests/persisted.test.ts`.
 - [x] **Deterministic value-and-work laws.** Pair row correctness with stable
   statement, scan, trigger, or queue-cardinality observations where the

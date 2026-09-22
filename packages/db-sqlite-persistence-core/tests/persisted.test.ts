@@ -49,14 +49,48 @@ import type {
  * cleanup, and restart. They compare durable state, public rows, metadata,
  * request options, sequence evidence, errors, and late-work fencing.
  *
- * Driver SQL behavior, browser page ownership, native runtimes, and the shared
- * conformance portfolio have separate owners. This file models persistence
- * protocol state, not a particular SQLite engine.
+ * Known omissions: driver SQL behavior, browser page ownership, native
+ * runtimes, and the shared conformance portfolio have separate owners. This
+ * file models persistence protocol state, not a particular SQLite engine.
  */
 
 type Todo = {
   id: string
   title: string
+}
+
+const persistedKeySetEvidenceStatuses = [
+  `consistent`,
+  `unknown`,
+  `incompatible`,
+] as const
+
+type OnDemandEvidenceObservation = {
+  status: (typeof persistedKeySetEvidenceStatuses)[number]
+  route: `loadSubset` | `forceReloadSubset`
+  baselineVisible: boolean | `not-observed`
+  onDemandVisible: boolean
+}
+
+function expectOnDemandEvidenceLaw(
+  observation: OnDemandEvidenceObservation,
+): void {
+  try {
+    expect(observation).toEqual({
+      status: observation.status,
+      route: observation.route,
+      baselineVisible:
+        observation.route === `loadSubset`
+          ? observation.status !== `incompatible`
+          : `not-observed`,
+      onDemandVisible: true,
+    })
+  } catch (cause) {
+    throw new Error(
+      `on-demand rows must not inherit baseline evidence rejection`,
+      { cause },
+    )
+  }
 }
 
 type RecordingAdapter = PersistenceAdapter & {
@@ -2630,21 +2664,81 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
-  it(`applies on-demand subsets even when the full baseline is incompatible`, async () => {
-    const hydrateUsing = async (
-      route: `loadSubset` | `forceReloadSubset`,
-    ): Promise<boolean> => {
+  it.each(persistedKeySetEvidenceStatuses.map((status) => ({ status })))(
+    `keeps on-demand rows independent from $status baseline evidence`,
+    async ({ status }) => {
       const adapter = createRecordingAdapter([
-        { id: `1`, title: `Locally cached` },
+        { id: `on-demand`, title: `On-demand row` },
       ])
       const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
       adapter.loadResumeSnapshot = async (...args) => ({
         ...(await loadResumeSnapshot(...args)),
-        keySet: { status: `incompatible` },
+        rows: [
+          {
+            key: `baseline`,
+            value: { id: `baseline`, title: `Baseline row` },
+          },
+        ],
+        keySet: { status },
+      })
+      let hydrateBaseline: (() => Promise<void>) | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `${status}-baseline-and-on-demand`,
+          syncMode: `on-demand`,
+          getKey: (item) => item.id,
+          sync: {
+            sync: ({ markReady, metadata }) => {
+              const capability = metadata?.persistence
+              if (!capability) {
+                throw new Error(`Expected persisted sync capability`)
+              }
+              hydrateBaseline = capability.hydrateBaseline
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+
+      try {
+        collection.startSyncImmediate()
+        await vi.waitFor(() => expect(hydrateBaseline).toBeTypeOf(`function`))
+        await hydrateBaseline!()
+        await flushAsyncWork()
+        await flushAsyncWork()
+
+        const baselineVisible = collection.has(`baseline`)
+        expect(collection.has(`on-demand`)).toBe(false)
+        await collection._sync.loadSubset({})
+
+        expectOnDemandEvidenceLaw({
+          status,
+          route: `loadSubset`,
+          baselineVisible,
+          onDemandVisible: collection.has(`on-demand`),
+        })
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each(persistedKeySetEvidenceStatuses.map((status) => ({ status })))(
+    `keeps force reload rows independent from $status startup evidence`,
+    async ({ status }) => {
+      const adapter = createRecordingAdapter([
+        { id: `on-demand`, title: `On-demand row` },
+      ])
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      adapter.loadResumeSnapshot = async (...args) => ({
+        ...(await loadResumeSnapshot(...args)),
+        keySet: { status },
       })
       const collection = createCollection(
         persistedCollectionOptions<Todo, string>({
-          id: `incompatible-${route}`,
+          id: `${status}-local-only-force-reload`,
           syncMode: `on-demand`,
           getKey: (item) => item.id,
           persistence: { adapter },
@@ -2656,24 +2750,39 @@ describe(`persistedCollectionOptions`, () => {
         await vi.waitFor(() =>
           expect(adapter.loadResumeSnapshotCalls.length).toBeGreaterThan(0),
         )
-        expect(collection.has(`1`)).toBe(false)
-        if (route === `loadSubset`) {
-          await collection._sync.loadSubset({})
-        } else {
-          await collection.utils.forceReloadSubset!({})
-        }
-        return collection.has(`1`)
+        await collection.utils.forceReloadSubset!({})
+
+        expect(adapter.loadResumeSnapshotCalls[0]?.includeRows).toBe(false)
+        expectOnDemandEvidenceLaw({
+          status,
+          route: `forceReloadSubset`,
+          // This local-only route reads startup evidence but does not expose
+          // baseline hydration. Do not claim a baseline observation here.
+          baselineVisible: `not-observed`,
+          onDemandVisible: collection.has(`on-demand`),
+        })
       } finally {
         await collection.cleanup()
       }
-    }
+    },
+  )
 
-    expect(
-      await Promise.all([
-        hydrateUsing(`loadSubset`),
-        hydrateUsing(`forceReloadSubset`),
-      ]),
-    ).toEqual([true, true])
+  it(`rejects an evidence-coupled on-demand hydration mutant`, () => {
+    expect(() =>
+      expectOnDemandEvidenceLaw({
+        status: `incompatible`,
+        route: `loadSubset`,
+        baselineVisible: false,
+        onDemandVisible: false,
+      }),
+    ).toThrow(`on-demand rows must not inherit baseline evidence rejection`)
+
+    expectOnDemandEvidenceLaw({
+      status: `incompatible`,
+      route: `loadSubset`,
+      baselineVisible: false,
+      onDemandVisible: true,
+    })
   })
 
   it(`keeps resume certification consistent after an owned no-op commit`, async () => {
