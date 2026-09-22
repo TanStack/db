@@ -30,7 +30,12 @@ import type {
   RemoteSubsetOwner,
   TxCommitted,
 } from '../src'
-import type { Collection, LoadSubsetOptions, SyncConfig } from '@tanstack/db'
+import type {
+  Collection,
+  LoadSubsetOptions,
+  Subscription,
+  SyncConfig,
+} from '@tanstack/db'
 
 /**
  * # Does persisted wrapping preserve one Collection history?
@@ -843,6 +848,38 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`preserves process-local subset lifecycle fields for owner load and unload`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-live-fields`)
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(),
+      onError: vi.fn(),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const signal = new AbortController().signal
+    const subscription = {
+      on: () => () => {},
+    } as unknown as Subscription
+    const options: LoadSubsetOptions = { limit: 1, signal, subscription }
+
+    try {
+      await coordinator.requestEnsureRemoteSubset(`todos`, options)
+      expect(owner).toHaveBeenCalledTimes(1)
+      const delivered = owner.mock.calls[0]![0] as LoadSubsetOptions
+      expect(delivered).toMatchObject({ limit: 1 })
+      expect(delivered.signal).toBe(signal)
+      expect(delivered.subscription).toBe(subscription)
+
+      await coordinator.requestReleaseRemoteSubset(`todos`, options)
+      expect(owner.unloadSubset).toHaveBeenCalledTimes(1)
+      expect(owner.unloadSubset).toHaveBeenCalledWith(delivered)
+    } finally {
+      unregisterOwner()
+    }
+  })
+
   it(`coalesces same-stack single-process subset reentry until owner work finishes`, async () => {
     const coordinator = new SingleProcessCoordinator(`single-reentrant`)
     let releaseLoad = (): void => {}
@@ -1052,6 +1089,42 @@ describe(`persistedCollectionOptions`, () => {
       locale: `en`,
       localeOptions: { sensitivity: `base` },
     })
+  })
+
+  it.each([
+    [`limit`, { limit: Number.NaN }, `options.limit`],
+    [`limit`, { limit: Number.POSITIVE_INFINITY }, `options.limit`],
+    [`limit`, { limit: -1 }, `options.limit`],
+    [`limit`, { limit: 0.5 }, `options.limit`],
+    [`limit`, { limit: Number.MAX_SAFE_INTEGER + 1 }, `options.limit`],
+    [`offset`, { offset: Number.NaN }, `options.offset`],
+    [`offset`, { offset: Number.NEGATIVE_INFINITY }, `options.offset`],
+    [`offset`, { offset: -1 }, `options.offset`],
+    [`offset`, { offset: 0.5 }, `options.offset`],
+    [`offset`, { offset: Number.MAX_SAFE_INTEGER + 1 }, `options.offset`],
+  ] as const)(
+    `rejects an invalid transported subset %s before owner work`,
+    (_field, options, path) => {
+      let error: unknown
+      try {
+        toTransportedLoadSubsetOptions(options)
+      } catch (caught) {
+        error = caught
+      }
+      expect(error).toMatchObject({
+        name: `RemoteSubsetWireValueError`,
+        path,
+      })
+    },
+  )
+
+  it(`preserves valid transported subset window boundaries`, () => {
+    expect(
+      toTransportedLoadSubsetOptions({
+        limit: 0,
+        offset: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toEqual({ limit: 0, offset: Number.MAX_SAFE_INTEGER })
   })
 
   it(`reports and rethrows a single-process owner unload rejection`, async () => {
@@ -3402,6 +3475,77 @@ describe(`persistedCollectionOptions`, () => {
 
       expect(ensure).not.toHaveBeenCalled()
     } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`uses dispatch-time ownership after follower hydration becomes ownerless leader`, async () => {
+    const adapter = createRecordingAdapter()
+    const loadSubset = adapter.loadSubset
+    let markHydrationStarted = (): void => {}
+    const hydrationStarted = new Promise<void>((resolve) => {
+      markHydrationStarted = resolve
+    })
+    let releaseHydration = (): void => {}
+    const hydrationGate = new Promise<void>((resolve) => {
+      releaseHydration = resolve
+    })
+    adapter.loadSubset = async (...args) => {
+      markHydrationStarted()
+      await hydrationGate
+      return loadSubset(...args)
+    }
+
+    let isLeader = false
+    const staleEnsure = new Error(`ownerless leader must not route demand`)
+    const ensure = vi.fn(() => Promise.reject(staleEnsure))
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `transitioning-node`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => isLeader,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
+      requestEnsureRemoteSubset: ensure,
+      requestReleaseRemoteSubset: async () => {},
+      registerRemoteSubsetOwner: () => () => {},
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `dispatch-time-ownerless-leader`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {}
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+      const load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      await hydrationStarted
+      isLeader = true
+      releaseHydration()
+
+      await expect(load).resolves.toBeUndefined()
+      expect(ensure).not.toHaveBeenCalled()
+    } finally {
+      releaseHydration()
       await collection.cleanup()
     }
   })

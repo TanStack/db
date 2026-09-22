@@ -187,6 +187,34 @@ export function toTransportedLoadSubsetOptions(
   return projected
 }
 
+/** Adds live lifecycle references only to an already validated local request. */
+export function toProcessLocalLoadSubsetOptions(
+  options: LoadSubsetOptions,
+  transported = toTransportedLoadSubsetOptions(options),
+): TransportedLoadSubsetOptions &
+  Pick<LoadSubsetOptions, `signal` | `subscription`> {
+  const projected = {
+    ...transported,
+  } as TransportedLoadSubsetOptions &
+    Pick<LoadSubsetOptions, `signal` | `subscription`>
+  const signal = readDataProperty(options, `signal`, `options.signal`)
+  const subscription = readDataProperty(
+    options,
+    `subscription`,
+    `options.subscription`,
+  )
+
+  if (signal.present) {
+    projected.signal = signal.value as LoadSubsetOptions[`signal`]
+  }
+  if (subscription.present) {
+    projected.subscription =
+      subscription.value as LoadSubsetOptions[`subscription`]
+  }
+
+  return projected
+}
+
 function projectExpression(
   value: unknown,
   path: string,
@@ -690,8 +718,8 @@ function projectWireRecord(
 }
 
 function projectNumber(value: unknown, path: string): number {
-  if (typeof value !== `number`) {
-    throw new RemoteSubsetWireValueError(path, describe(value))
+  if (typeof value !== `number` || !Number.isSafeInteger(value) || value < 0) {
+    throw new RemoteSubsetWireValueError(path, `non-negative safe integer`)
   }
   return value
 }

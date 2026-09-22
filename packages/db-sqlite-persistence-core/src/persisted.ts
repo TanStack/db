@@ -16,7 +16,10 @@ import {
   PersistedCollectionDurabilityError,
   toPersistedCollectionDurabilityError,
 } from './errors'
-import { toTransportedLoadSubsetOptions } from './remote-subset-wire'
+import {
+  toProcessLocalLoadSubsetOptions,
+  toTransportedLoadSubsetOptions,
+} from './remote-subset-wire'
 import type { TransportedLoadSubsetOptions } from './remote-subset-wire'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -615,6 +618,7 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
     options: LoadSubsetOptions,
   ): Promise<void> {
     const transported = toTransportedLoadSubsetOptions(options)
+    const localOptions = toProcessLocalLoadSubsetOptions(options, transported)
     const owner = this.remoteSubsetOwners.get(collectionId)
     if (!owner) {
       throw new InvalidPersistedCollectionConfigError(
@@ -638,9 +642,9 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
       resolveLoad = resolve
       rejectLoad = reject
     })
-    acquisitions.set(options, { owner, options: transported, load })
+    acquisitions.set(options, { owner, options: localOptions, load })
     try {
-      const ownerLoad = owner(transported)
+      const ownerLoad = owner(localOptions)
       void Promise.resolve(ownerLoad).then(resolveLoad, (error) => {
         reportRemoteSubsetOwnerError(owner, error)
         rejectLoad(error)
@@ -1345,7 +1349,7 @@ class PersistedCollectionRuntime<
     upstreamLoadSubset?: LoadSubsetFn,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
-    const routeRemoteDemandThroughCoordinator =
+    const routeRemoteDemandDuringHydration =
       this.canRouteRemoteDemandThroughCoordinator()
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
@@ -1353,14 +1357,14 @@ class PersistedCollectionRuntime<
     await this.applyMutex.run(() =>
       this.hydrateSubsetUnsafe(options, {
         requestRemoteEnsure:
-          this.mode === `sync-present` && !routeRemoteDemandThroughCoordinator,
+          this.mode === `sync-present` && !routeRemoteDemandDuringHydration,
         lifecycleGeneration,
       }),
     )
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.waitForAppliedReceiptsAfter(appliedCursor)
 
-    if (routeRemoteDemandThroughCoordinator) {
+    if (this.canRouteRemoteDemandThroughCoordinator()) {
       try {
         await this.persistence.coordinator.requestEnsureRemoteSubset(
           this.collectionId,

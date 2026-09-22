@@ -2198,6 +2198,49 @@ describe(`electron sqlite persistence bridge`, () => {
     await pending
   })
 
+  it(`preserves process-local Electron subset lifecycle fields`, async () => {
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `electron-subset-local-lifecycle-fields`,
+    })
+    registerCleanup(() => coordinator.dispose())
+    coordinator.isLeader = () => true
+
+    const received: Array<TransportedLoadSubsetOptions> = []
+    const owner = Object.assign(
+      vi.fn((options: TransportedLoadSubsetOptions) => {
+        received.push(options)
+      }),
+      {
+        unloadSubset: vi.fn(),
+        onError: vi.fn(),
+      },
+    ) satisfies RemoteSubsetOwner
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const signal = new AbortController().signal
+    const subscription = {
+      on: () => () => {},
+    } as unknown as Subscription
+    const options: LoadSubsetOptions = { limit: 1, signal, subscription }
+
+    try {
+      await coordinator.requestEnsureRemoteSubset(`todos`, options)
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({ limit: 1 })
+      const local = received[0] as TransportedLoadSubsetOptions &
+        Pick<LoadSubsetOptions, `signal` | `subscription`>
+      expect(local.signal).toBe(signal)
+      expect(local.subscription).toBe(subscription)
+
+      await coordinator.requestReleaseRemoteSubset(`todos`, options)
+      expect(owner.unloadSubset).toHaveBeenCalledWith(received[0])
+    } finally {
+      unregisterOwner()
+    }
+  })
+
   it(`loads and releases exact Electron remote-subset acquisitions`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-owner-routing`,

@@ -2758,16 +2758,18 @@ describe(`BrowserCollectionCoordinator`, () => {
       },
     )
 
-    it(`preserves supported native values, aliases, and cycles for both routes`, async () => {
+    it(`preserves local lifecycle fields while transporting only wire values`, async () => {
       const leader = createCoordinator()
       const follower = createCoordinator()
       const received: Array<TransportedLoadSubsetOptions> = []
-      const owner = withUnusedUnloadSubset(
+      const unloadSubset = vi.fn((_options: TransportedLoadSubsetOptions) => {})
+      const owner = Object.assign(
         vi.fn((options: TransportedLoadSubsetOptions) => {
           received.push(options)
           return Promise.resolve()
         }),
-      )
+        { unloadSubset, onError: vi.fn() },
+      ) satisfies RemoteSubsetOwner
       const unregisterOwner = leader.registerRemoteSubsetOwner(`todos`, owner)
       leader.subscribe(`todos`, () => {})
       follower.subscribe(`todos`, () => {})
@@ -2843,7 +2845,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         await follower.requestEnsureRemoteSubset(`todos`, options)
         expect(received).toHaveLength(2)
 
-        for (const decoded of received) {
+        for (const [routeIndex, decoded] of received.entries()) {
           const value = (
             decoded.where as unknown as {
               args: Array<{ value?: typeof richValue }>
@@ -2930,12 +2932,25 @@ describe(`BrowserCollectionCoordinator`, () => {
             configurable: true,
           })
           expect(value.reservedKeys.constructor).toBe(`own constructor value`)
-          expect(decoded).not.toHaveProperty(`signal`)
-          expect(decoded).not.toHaveProperty(`subscription`)
+          if (routeIndex === 0) {
+            const local = decoded as TransportedLoadSubsetOptions &
+              Pick<LoadSubsetOptions, `signal` | `subscription`>
+            expect(local.signal).toBe(options.signal)
+            expect(local.subscription).toBe(options.subscription)
+          } else {
+            expect(decoded).not.toHaveProperty(`signal`)
+            expect(decoded).not.toHaveProperty(`subscription`)
+          }
         }
-        // Local delivery need not clone identity, but it must receive the same
-        // validated, live-field-free wire domain as follower delivery.
+        // Both routes validate immutable request data. Only process-local
+        // delivery retains live lifecycle references.
         expect(received[1]).not.toBe(options)
+
+        await leader.requestReleaseRemoteSubset(`todos`, options)
+        await follower.requestReleaseRemoteSubset(`todos`, options)
+        expect(unloadSubset.mock.calls.map(([value]) => value)).toEqual(
+          received,
+        )
       } finally {
         unregisterOwner()
         leader.dispose()

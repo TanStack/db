@@ -5,6 +5,7 @@ import {
   RetryableRemoteSubsetAcquisitionError,
   safeRandomUUID,
   toPersistedCollectionDurabilityError,
+  toProcessLocalLoadSubsetOptions,
   toTransportedLoadSubsetOptions,
 } from '@tanstack/db-sqlite-persistence-core'
 import type {
@@ -163,6 +164,7 @@ type OutboundRemoteSubsetAcquisition = {
   collectionId: string
   acquisitionId: string
   options: TransportedLoadSubsetOptions
+  localOptions: TransportedLoadSubsetOptions
   acquiredLeaderId: string | null
   inFlight: Promise<void> | null
   forceReplay: boolean
@@ -336,6 +338,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     options: LoadSubsetOptions,
   ): Promise<void> {
     const transportedOptions = toTransportedLoadSubsetOptions(options)
+    const localOptions = toProcessLocalLoadSubsetOptions(
+      options,
+      transportedOptions,
+    )
     let collectionIds = this.remoteSubsetIds.get(collectionId)
     if (!collectionIds) {
       collectionIds = new WeakMap()
@@ -354,6 +360,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         collectionId,
         acquisitionId,
         options: transportedOptions,
+        localOptions,
         acquiredLeaderId: null,
         inFlight: null,
         forceReplay: false,
@@ -431,6 +438,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
               acquisition.collectionId,
               request,
               this.nodeId,
+              acquisition.localOptions,
             )
           : await this.sendRPC<EnsureRemoteSubsetResponse>(
               acquisition.collectionId,
@@ -1124,6 +1132,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     collectionId: string,
     request: Extract<RPCRequest, { type: `rpc:ensureRemoteSubset:req` }>,
     requesterId: string,
+    localOptions?: TransportedLoadSubsetOptions,
   ): Promise<EnsureRemoteSubsetResponse> {
     this.pruneReleasedRemoteSubsetAcquisitions()
     const key = inboundRemoteSubsetAcquisitionKey(
@@ -1179,7 +1188,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       requesterId,
       acquisitionId: request.acquisitionId,
       owner,
-      options: awaitingOwner?.options ?? request.options,
+      options: awaitingOwner?.options ?? localOptions ?? request.options,
       load: Promise.resolve(),
       transferred: false,
       released: false,
