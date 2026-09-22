@@ -271,11 +271,6 @@ describe(`PowerSync schema transform conformance`, () => {
       // @ts-expect-error public options require exact collection output
       deserializationSchema: wrongDeserializer,
       onDeserializationError: () => {},
-      serializer: {
-        created_at: (value) => value.toISOString(),
-        score: (value) => value,
-        enabled: (value) => (value ? 1 : 0),
-      },
     })
   })
 })
