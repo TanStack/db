@@ -18,7 +18,7 @@ import type { DbClient, DehydratedDbState } from '../../db/src/index'
 import type { JSX } from 'react'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
-import type { QueryBuilder } from '../../db/src/query/index'
+import type { Prettify, QueryBuilder } from '../../db/src/query/index'
 import type {
   ConditionalUseLiveQueryConfig,
   UseLiveQueryConfig,
@@ -176,6 +176,36 @@ describe(`useLiveQuery type assertions`, () => {
     >()
     expectTypeOf(result.current.status).toEqualTypeOf<UseLiveQueryStatus>()
     expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
+  })
+
+  /**
+   * React's public disabled result is absent rather than empty-reactive. The
+   * observation cut is `result.current` from the real `useLiveQuery` hook; the
+   * negative `map` call rejects an array-only disabled type. Runtime lifecycle
+   * and scheduler behavior remain in React conformance tests.
+   */
+  it(`types disabled callbacks with React's absent result representation`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-conditional-callback`,
+        getKey: (person: Person) => person.id,
+        initialData: [],
+      }),
+    )
+    const enabled = null as unknown as boolean
+
+    const { result } = renderHook(() =>
+      useLiveQuery((q) => (enabled ? q.from({ collection }) : null)),
+    )
+
+    expectTypeOf(result.current.data).toEqualTypeOf<
+      Array<Prettify<OutputWithVirtual<Person>>> | undefined
+    >()
+    expectTypeOf(result.current.status).toEqualTypeOf<UseLiveQueryStatus>()
+    expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()
+
+    // @ts-expect-error React omits disabled query data until the callback enables it.
+    result.current.data.map((person) => person.id)
   })
 
   it(`rejects a conditional config with a top-level scalar result`, () => {
