@@ -6,6 +6,15 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const adapter: PersistenceAdapter = {
   loadSubset: () => Promise.resolve([]),
+  loadResumeSnapshot: () =>
+    Promise.resolve({
+      rows: [],
+      collectionMetadata: [],
+      latestTerm: 0,
+      latestSeq: 0,
+      latestRowVersion: 0,
+      resetEpoch: 0,
+    }),
   applyCommittedTx: () => Promise.resolve(),
   ensureIndex: () => Promise.resolve(),
 }
