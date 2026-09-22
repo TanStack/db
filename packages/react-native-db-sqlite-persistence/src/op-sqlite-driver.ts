@@ -27,7 +27,6 @@ const STATEMENT_RESULT_KEYS = new Set([
   `columnNames`,
   `results`,
   `metadata`,
-  `res`,
 ])
 
 export type OpSQLiteDatabaseLike = {
@@ -176,6 +175,9 @@ function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
     return false
   }
 
+  // Bare arrays are also a supported row carrier. A legitimate row can contain
+  // only write-marker aliases, so markers alone cannot prove that an array is a
+  // statement wrapper; wrappers need an actual row structure.
   const hasStructuralCarrier =
     toRowArray(value.rows) !== null ||
     toRowArray(value.resultRows) !== null ||
@@ -184,7 +186,6 @@ function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
     Array.isArray(value.results)
 
   return (
-    isWriteResultEnvelope(value) ||
     (hasWriteResultMarker(value) && hasStructuralCarrier) ||
     (Array.isArray(value.rawRows) && Array.isArray(value.columnNames))
   )
@@ -245,18 +246,20 @@ function extractRowsFromStatementResult(
   const rowCarrierKeys = [`rows`, `resultRows`].filter((key) =>
     hasOwnKey(record, key),
   )
+  const rowCarrierKey = rowCarrierKeys[0]
   if (
     rowCarrierKeys.length > 1 ||
     (rowCarrierKeys.length > 0 &&
-      (hasOwnKey(record, `rawRows`) || hasOwnKey(record, `results`)))
+      (hasOwnKey(record, `results`) ||
+        (rowCarrierKey === `resultRows` && hasOwnKey(record, `rawRows`))))
   ) {
     unsupportedQueryResult(sql, `query result contains conflicting carriers`)
   }
 
   if (rowCarrierKeys.length === 1) {
-    const rows = toRowArray(record[rowCarrierKeys[0]!])
+    const rows = toRowArray(record[rowCarrierKey!])
     if (!rows) {
-      unsupportedQueryResult(sql, `invalid ${rowCarrierKeys[0]} carrier`)
+      unsupportedQueryResult(sql, `invalid ${rowCarrierKey} carrier`)
     }
     return rows
   }

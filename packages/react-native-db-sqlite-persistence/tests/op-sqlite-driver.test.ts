@@ -105,7 +105,10 @@ async function withColumnarDriver<T>(
 /**
  * Law: SQLiteDriver.query returns the complete ordered object rows supplied by
  * the database after exec/run writes. SQL aliases remain row data even when
- * their names match envelope fields; malformed result envelopes reject.
+ * their names match envelope fields, including direct rows made only of write
+ * marker aliases. When OP-SQLite supplies object rows and raw columnar rows
+ * together, the already-decoded object rows are authoritative. Malformed or
+ * undocumented result carriers reject.
  * Source: SQLiteDriver's public query contract and op-sqlite's documented
  * execute `{ rows, columnNames }` and executeAsync
  * `{ rawRows, columnNames, rowsAffected }` envelopes.
@@ -176,14 +179,14 @@ it.each([
   ])
 })
 
-async function queryInjectedResult(
+async function queryInjectedResult<T = unknown>(
   result: unknown,
-): Promise<ReadonlyArray<unknown>> {
+): Promise<ReadonlyArray<T>> {
   return new OpSQLiteDriver({
     database: {
       executeAsync: () => Promise.resolve(result),
     },
-  }).query(`SELECT * FROM injected_result`)
+  }).query<T>(`SELECT * FROM injected_result`)
 }
 
 it(`reads op-sqlite execute rows when columnNames metadata is also present`, async () => {
@@ -196,7 +199,25 @@ it(`reads op-sqlite execute rows when columnNames metadata is also present`, asy
   ).resolves.toEqual([{ id: `node-or-web-row` }])
 })
 
-it.each([`rows`, `resultRows`, `rawRows`, `columnNames`, `results`] as const)(
+it(`prefers object rows when op-sqlite also supplies raw columnar rows`, async () => {
+  await expect(
+    queryInjectedResult({
+      rowsAffected: 0,
+      rows: [{ id: `object-row` }],
+      rawRows: [[`raw-row`]],
+      columnNames: [`id`],
+    }),
+  ).resolves.toEqual([{ id: `object-row` }])
+})
+
+it.each([
+  `rows`,
+  `resultRows`,
+  `rawRows`,
+  `columnNames`,
+  `results`,
+  `res`,
+] as const)(
   `preserves a direct data row with non-scalar %s alias`,
   async (alias) => {
     const row = {
@@ -216,11 +237,29 @@ it(`decodes legal duplicate SQLite column names with the last-value law`, async 
   })
 })
 
-it(`treats array and object write envelopes symmetrically`, async () => {
+it(`reads object and structural statement-array write envelopes as empty`, async () => {
   const writeResult = { rowsAffected: 1, insertId: 17 }
   await expect(queryInjectedResult(writeResult)).resolves.toEqual([])
-  await expect(queryInjectedResult([writeResult])).resolves.toEqual([])
+  await expect(
+    queryInjectedResult([{ ...writeResult, rows: [] }]),
+  ).resolves.toEqual([])
 })
+
+it.each([
+  {
+    name: `one row with a rowsAffected alias`,
+    rows: [{ rowsAffected: 42 }],
+  },
+  {
+    name: `multiple rows with a changes alias`,
+    rows: [{ changes: 1 }, { changes: 2 }],
+  },
+])(
+  `preserves direct data rows containing only write aliases: $name`,
+  async ({ rows }) => {
+    await expect(queryInjectedResult(rows)).resolves.toEqual(rows)
+  },
+)
 
 function expectExactRows<T>(
   actual: ReadonlyArray<T>,
@@ -269,12 +308,20 @@ const statementResultFieldNames = [
   `changes`,
   `insertId`,
   `lastInsertRowId`,
+  `res`,
 ] as const
 
 const statementResultAliasNames = [
   ...statementResultFieldNames,
   `ordinary_name`,
   `another_value`,
+] as const
+
+const writeResultFieldNames = [
+  `rowsAffected`,
+  `changes`,
+  `insertId`,
+  `lastInsertRowId`,
 ] as const
 
 const aliasOracleSeed = Number(
@@ -295,6 +342,29 @@ if (aliasOraclePath !== undefined && !/^\d+(?::\d+)*$/.test(aliasOraclePath)) {
     `TANSTACK_DB_OP_SQLITE_ORACLE_PATH requires a numeric shrink path`,
   )
 }
+
+it(`preserves generated single-row write-marker aliases in direct row arrays`, async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.uniqueArray(fc.constantFrom(...writeResultFieldNames), {
+        minLength: 1,
+        maxLength: writeResultFieldNames.length,
+      }),
+      async (aliases) => {
+        const row = Object.fromEntries(
+          aliases.map((alias, index) => [alias, `${index}:${alias}`]),
+        )
+        const actual = await queryInjectedResult<Record<string, unknown>>([row])
+        expectExactAliasRows(actual, [row])
+      },
+    ),
+    {
+      seed: aliasOracleSeed,
+      numRuns: aliasOracleRuns,
+      examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]],
+    },
+  )
+})
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll(`"`, `""`)}"`
@@ -496,13 +566,8 @@ const malformedColumnarResults: ReadonlyArray<{
     result: { mysteryRows: [[`1`]] },
   },
   {
-    name: `columnar rows with a conflicting rows carrier`,
-    result: {
-      rowsAffected: 0,
-      rawRows: [[`columnar`]],
-      columnNames: [`id`],
-      rows: [{ id: `conflict` }],
-    },
+    name: `undocumented res carrier`,
+    result: { rowsAffected: 0, res: [{ id: `legacy` }] },
   },
   {
     name: `columnar rows with a conflicting resultRows carrier`,
