@@ -7,6 +7,7 @@ import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
+import { opSQLiteProviderQueryFixtures } from './fixtures/op-sqlite-provider-results'
 import type { OpSQLiteDatabaseLike } from '../src/op-sqlite-driver'
 import type { SQLiteDriverContractHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 
@@ -130,9 +131,12 @@ async function withColumnarDriver<T>(
  * adapter. Empty, reordered, duplicated, missing-key, and swapped-value mutants
  * challenge the checker; the alias property records a seed and shrink path and
  * verifies replay of the same exact-row violation.
- * Known omissions: this shim establishes adapter normalization, not native
- * device/host execution. Native op-sqlite still needs a separate runtime
- * receipt for every supported major result contract.
+ * Real-provider refinement: frozen receipts from the published 15.2.7 Native
+ * and Node sources, plus forward receipts from 18.2.1 Native, Node, and browser
+ * sources, prove the shim's accepted envelopes match provider output.
+ * Known omissions: frozen provider values establish result-shape conformance,
+ * not native device/host execution. A real runtime campaign still owns JSI,
+ * worker, and platform delivery.
  */
 it.each([
   `rows-array`,
@@ -186,6 +190,50 @@ it.each([
       id: `1`,
     },
   ])
+})
+
+it.each(opSQLiteProviderQueryFixtures)(
+  `decodes frozen provider receipt: $label`,
+  async ({ result, expectedRows }) => {
+    const receiptBeforeDecode = structuredClone(result)
+    const actual = await queryInjectedResult<Record<string, unknown>>(result)
+
+    expectExactRows(actual, expectedRows)
+    expect(result).toEqual(receiptBeforeDecode)
+  },
+)
+
+it(`keeps a receipt for every runtime in the current peer major`, () => {
+  expect(
+    opSQLiteProviderQueryFixtures
+      .filter(({ support }) => support === `current-peer`)
+      .map(({ providerVersion, runtime, method }) => ({
+        providerVersion,
+        runtime,
+        method,
+      })),
+  ).toEqual([
+    {
+      providerVersion: `15.2.7`,
+      runtime: `react-native`,
+      method: `executeAsync`,
+    },
+    {
+      providerVersion: `15.2.7`,
+      runtime: `node`,
+      method: `executeAsync`,
+    },
+  ])
+})
+
+it(`provider-receipt checker rejects a shim that drops provider rows`, async () => {
+  for (const { result, expectedRows } of opSQLiteProviderQueryFixtures) {
+    const decoded = await queryInjectedResult<Record<string, unknown>>({
+      ...(result as Record<string, unknown>),
+      rows: [],
+    })
+    expect(() => expectExactRows(decoded, expectedRows)).toThrow()
+  }
 })
 
 async function queryInjectedResult<T = unknown>(
