@@ -181,6 +181,23 @@ function toRowArray(rowsValue: unknown): Array<unknown> | null {
   return null
 }
 
+function isRowCarrier(rowsValue: unknown): boolean {
+  if (Array.isArray(rowsValue)) {
+    return true
+  }
+
+  if (!isObjectRecord(rowsValue)) {
+    return false
+  }
+
+  const rowsObject = rowsValue as OpSQLiteRowListLike
+  return (
+    Array.isArray(rowsObject._array) ||
+    (typeof rowsObject.length === `number` &&
+      typeof rowsObject.item === `function`)
+  )
+}
+
 function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
   if (!Object.keys(value).every((key) => STATEMENT_RESULT_KEYS.has(key))) {
     return false
@@ -189,14 +206,17 @@ function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
   // Bare arrays are also a supported row carrier. A legitimate row can contain
   // only write-marker aliases, so markers alone cannot prove that an array is a
   // statement wrapper; wrappers need an actual row structure.
-  const hasStructuralCarrier =
-    toRowArray(value.rows) !== null ||
-    toRowArray(value.resultRows) !== null ||
-    Array.isArray(value.rawRows) ||
-    Array.isArray(value.columnNames) ||
+  const hasRowCarrier =
+    isRowCarrier(value.rows) ||
+    isRowCarrier(value.resultRows) ||
     Array.isArray(value.results)
+  const hasStructuralCarrier =
+    hasRowCarrier ||
+    Array.isArray(value.rawRows) ||
+    Array.isArray(value.columnNames)
 
   return (
+    hasRowCarrier ||
     (hasWriteResultMarker(value) && hasStructuralCarrier) ||
     (Array.isArray(value.rawRows) && Array.isArray(value.columnNames))
   )

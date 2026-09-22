@@ -109,11 +109,13 @@ async function withColumnarDriver<T>(
  * their names match envelope fields, including direct rows made only of write
  * marker aliases. When OP-SQLite supplies object rows and raw columnar rows
  * together, the already-decoded object rows are authoritative. Malformed or
- * undocumented result carriers reject. A bare array whose first entry can be
+ * incomplete result carriers reject. A bare array whose first entry can be
  * both a row and a statement envelope has no self-describing interpretation;
- * its driver must declare `rows` or `statement-results` mode.
+ * its driver must declare `rows` or `statement-results` mode. The declared
+ * mode, rather than reserved field names, decides markerless `{ rows }`
+ * wrappers.
  * Source: SQLiteDriver's public query contract and op-sqlite's documented
- * execute `{ rows, columnNames }` and executeAsync
+ * required `QueryResult.rows`, execute `{ rows, columnNames }`, and executeAsync
  * `{ rawRows, columnNames, rowsAffected }` envelopes.
  * Domain: deterministic object-row wrappers and columnar rows, including
  * empty, asymmetric/reordered multirow, legal reserved-looking SQL aliases,
@@ -260,6 +262,37 @@ it(`requires an explicit mode for an ambiguous bare result array`, async () => {
   await expect(
     queryInjectedResult(ambiguous, `statement-results`),
   ).resolves.toEqual([`nested`])
+})
+
+it(`uses the declared mode for a markerless statement-array envelope`, async () => {
+  const ambiguous = [{ rows: [{ id: `nested-row` }] }]
+
+  await expect(queryInjectedResult(ambiguous)).rejects.toThrow(
+    `ambiguous bare result array`,
+  )
+  await expect(queryInjectedResult(ambiguous, `rows`)).resolves.toEqual(
+    ambiguous,
+  )
+  await expect(
+    queryInjectedResult(ambiguous, `statement-results`),
+  ).resolves.toEqual([{ id: `nested-row` }])
+})
+
+it(`materializes a declared statement row list exactly once`, async () => {
+  const expected = [{ id: `first` }, { id: `second` }]
+  const requestedIndexes: Array<number> = []
+  const rows = {
+    length: expected.length,
+    item: (index: number) => {
+      requestedIndexes.push(index)
+      return expected[index]
+    },
+  }
+
+  await expect(
+    queryInjectedResult([{ rowsAffected: 0, rows }], `statement-results`),
+  ).resolves.toEqual(expected)
+  expect(requestedIndexes).toEqual([0, 1])
 })
 
 it(`reads op-sqlite execute rows when columnNames metadata is also present`, async () => {
@@ -701,7 +734,7 @@ const malformedColumnarResults: ReadonlyArray<{
     result: { mysteryRows: [[`1`]] },
   },
   {
-    name: `undocumented res carrier`,
+    name: `optional res field without the required rows carrier`,
     result: { rowsAffected: 0, res: [{ id: `legacy` }] },
   },
   {
@@ -768,6 +801,35 @@ it(`supports exactly one results wrapper`, async () => {
     new OpSQLiteDriver({ database }).query(`SELECT id FROM wrapped_result`),
   ).resolves.toEqual([{ id: `one-level` }])
   expect(queryExecutions).toBe(1)
+})
+
+it(`rejects a multi-statement results wrapper instead of dropping results`, async () => {
+  await expect(
+    queryInjectedResult({
+      results: [
+        { rows: [{ id: `first-statement` }] },
+        { rows: [{ id: `second-statement` }] },
+      ],
+    }),
+  ).rejects.toThrow(`invalid nested results carrier`)
+})
+
+it(`models OP-SQLite writes with an empty rows carrier`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({
+    filename: dbPath,
+    resultShape: `execute-async-columnar`,
+  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
+  const executeAsync = database.executeAsync
+  if (!executeAsync) {
+    throw new Error(`columnar fixture must expose executeAsync`)
+  }
+
+  await executeAsync(`CREATE TABLE write_receipt (id INTEGER PRIMARY KEY)`)
+  await expect(
+    executeAsync(`INSERT INTO write_receipt (id) VALUES (?)`, [1]),
+  ).resolves.toMatchObject({ rowsAffected: 1, rows: [] })
 })
 
 it.each([

@@ -94,6 +94,7 @@ function formatWriteResult(
       return {
         rowsAffected,
         insertId,
+        rows: [],
       }
     default:
       return {
