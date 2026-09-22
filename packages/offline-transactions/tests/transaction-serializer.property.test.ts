@@ -724,6 +724,20 @@ it(`does not invoke toJSON again on its immediate replacement`, () => {
   expect(wire.metadata).toEqual({ value: { nested: `nested:nested` } })
 })
 
+it(`rejects a toJSON replacement that references its receiver`, () => {
+  const source = {
+    toJSON() {
+      return { back: source }
+    },
+  }
+
+  expect(() =>
+    new TransactionSerializer({}).serialize(
+      metadataTransaction({ value: source }),
+    ),
+  ).toThrowError(new TypeError(`Converting circular structure to JSON`))
+})
+
 it(`treats immediate native-scalar replacements as ordinary JSON values`, () => {
   const temporalReplacement = {
     [Symbol.toStringTag]: `Temporal.PlainDate`,

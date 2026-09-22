@@ -242,9 +242,23 @@ export class TransactionSerializer {
         }
     }
 
+    if (ancestors.has(value))
+      throw new TypeError(`Converting circular structure to JSON`)
+
     const toJSON = typeof jsonKey === `string` && value.toJSON
-    if (typeof toJSON === `function`)
-      return this.serializeValue(toJSON.call(value, jsonKey), false, ancestors)
+    if (typeof toJSON === `function`) {
+      const replacement = toJSON.call(value, jsonKey)
+      if (replacement === value) {
+        return this.serializeValue(replacement, false, ancestors)
+      }
+
+      ancestors.add(value)
+      try {
+        return this.serializeValue(replacement, false, ancestors)
+      } finally {
+        ancestors.delete(value)
+      }
+    }
     if (
       jsonKey !== undefined &&
       (value instanceof Boolean ||
@@ -255,8 +269,6 @@ export class TransactionSerializer {
       return value.valueOf()
     }
 
-    if (ancestors.has(value))
-      throw new TypeError(`Converting circular structure to JSON`)
     ancestors.add(value)
 
     const isArray = Array.isArray(value)
