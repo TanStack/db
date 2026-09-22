@@ -132,7 +132,9 @@ export type WithVirtualProps<
  * // { id: string; name: string }
  * ```
  */
-export type WithoutVirtualProps<T> = Omit<T, keyof VirtualRowProps>
+export type WithoutVirtualProps<T> = T extends unknown
+  ? Omit<T, keyof VirtualRowProps>
+  : never
 
 /**
  * Checks if a value has virtual properties attached.

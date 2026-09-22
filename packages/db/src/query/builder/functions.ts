@@ -5,7 +5,7 @@ import type { RefProxy } from './ref-proxy.js'
 import type { SingleResult } from '../../types.js'
 import type {
   Context,
-  GetRawResult,
+  GetInlineResult,
   RefLeaf,
   StringifiableScalar,
 } from './types.js'
@@ -797,7 +797,7 @@ export class MaterializeWrapper<
 
 export function toArray<TContext extends Context>(
   query: QueryBuilder<TContext>,
-): ToArrayWrapper<GetRawResult<TContext>> {
+): ToArrayWrapper<GetInlineResult<TContext>> {
   return new ToArrayWrapper(query)
 }
 
@@ -894,7 +894,7 @@ function isConditionValue(value: CaseWhenValue | undefined): boolean {
 export function materialize<TContext extends Context>(
   query: QueryBuilder<TContext>,
 ): MaterializeWrapper<
-  GetRawResult<TContext>,
+  GetInlineResult<TContext>,
   TContext extends SingleResult ? true : false
 > {
   return new MaterializeWrapper(query)
