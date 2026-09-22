@@ -56,6 +56,7 @@ export class TransactionExecutor {
     } finally {
       this.isExecuting = false
       this.executionPromise = null
+      this.scheduleNextRetry()
     }
   }
 
@@ -73,9 +74,6 @@ export class TransactionExecutor {
 
       await this.executeTransaction(transaction)
     }
-
-    // Schedule next retry after execution completes
-    this.scheduleNextRetry()
   }
 
   private async executeTransaction(
@@ -97,18 +95,9 @@ export class TransactionExecutor {
             span.setAttribute(`retry.attempt`, transaction.retryCount)
           }
 
+          let result: void
           try {
-            const result = await this.runMutationFn(transaction)
-
-            try {
-              // Replay can still see this ID until durable deletion settles.
-              await this.outbox.remove(transaction.id)
-            } finally {
-              this.scheduler.markCompleted(transaction)
-            }
-
-            span.setAttribute(`result`, `success`)
-            this.offlineExecutor.resolveTransaction(transaction.id, result)
+            result = await this.runMutationFn(transaction)
           } catch (error) {
             const err =
               error instanceof Error ? error : new Error(String(error))
@@ -119,6 +108,20 @@ export class TransactionExecutor {
             ;(err as any)[HANDLED_EXECUTION_ERROR] = true
             throw err
           }
+
+          let removalError: unknown
+          try {
+            // Replay can still see this ID until durable deletion settles.
+            await this.outbox.remove(transaction.id)
+          } catch (error) {
+            removalError = error
+          } finally {
+            this.scheduler.markCompleted(transaction)
+          }
+
+          span.setAttribute(`result`, `success`)
+          this.offlineExecutor.resolveTransaction(transaction.id, result)
+          if (removalError !== undefined) throw removalError
         },
       )
     } catch (error) {
@@ -180,8 +183,14 @@ export class TransactionExecutor {
         span.setAttribute(`shouldRetry`, shouldRetry)
 
         if (!shouldRetry) {
-          this.scheduler.markCompleted(transaction)
-          await this.outbox.remove(transaction.id)
+          let removalError: unknown
+          try {
+            await this.outbox.remove(transaction.id)
+          } catch (cleanupError) {
+            removalError = cleanupError
+          } finally {
+            this.scheduler.markCompleted(transaction)
+          }
           console.warn(
             `Transaction ${transaction.id} failed permanently:`,
             error,
@@ -190,6 +199,7 @@ export class TransactionExecutor {
           span.setAttribute(`result`, `permanent_failure`)
           // Signal permanent failure to the waiting transaction
           this.offlineExecutor.rejectTransaction(transaction.id, error)
+          if (removalError !== undefined) throw removalError
           return
         }
 
@@ -211,7 +221,6 @@ export class TransactionExecutor {
         span.setAttribute(`retryDelay`, delay)
         span.setAttribute(`nextRetryCount`, updatedTransaction.retryCount)
 
-        this.scheduler.markFailed(transaction)
         this.scheduler.updateTransaction(updatedTransaction)
 
         try {
@@ -221,10 +230,9 @@ export class TransactionExecutor {
           span.recordException(persistError as Error)
           span.setAttribute(`result`, `persist_failed`)
           throw persistError
+        } finally {
+          this.scheduler.markFailed(transaction)
         }
-
-        // Schedule retry timer
-        this.scheduleNextRetry()
       },
     )
   }
@@ -240,12 +248,20 @@ export class TransactionExecutor {
         filteredTransactions = this.config.beforeRetry(transactions)
       }
 
-      // The outbox read or retry hook may outlive this owner's right to replay.
+      // The retry hook is user code and may synchronously revoke replay rights.
       if (!this.offlineExecutor.isOfflineEnabled) return
 
       const newlyLoaded = filteredTransactions.filter((transaction) =>
         this.scheduler.schedule(transaction),
       )
+
+      removedIds = transactions
+        .filter(
+          (tx) =>
+            !filteredTransactions.some((filtered) => filtered.id === tx.id),
+        )
+        .map(({ id }) => id)
+      removedIds = this.scheduler.removePendingTransactions(removedIds)
 
       // Restore optimistic state for loaded transactions
       // This ensures the UI shows the optimistic data while transactions are pending
@@ -256,17 +272,24 @@ export class TransactionExecutor {
 
       // Schedule retry timer for loaded transactions
       this.scheduleNextRetry()
-
-      removedIds = transactions
-        .filter(
-          (tx) =>
-            !filteredTransactions.some((filtered) => filtered.id === tx.id),
-        )
-        .map(({ id }) => id)
     })
 
     if (removedIds.length > 0) {
-      await this.outbox.removeMany(removedIds)
+      const error = new NonRetriableError(`Transaction excluded by beforeRetry`)
+      await Promise.all(
+        removedIds.map(async (id) => {
+          try {
+            await this.outbox.remove(id)
+            this.offlineExecutor.rejectTransaction(id, error)
+          } catch (cleanupError) {
+            console.warn(
+              `Failed to remove transaction excluded by beforeRetry:`,
+              id,
+              cleanupError,
+            )
+          }
+        }),
+      )
     }
   }
 
