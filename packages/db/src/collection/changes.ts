@@ -260,7 +260,7 @@ export class CollectionChangesManager<
    */
   public subscribeChanges(
     callback: (
-      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
     ) => void,
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {

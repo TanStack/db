@@ -1045,7 +1045,7 @@ export class CollectionImpl<
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions = {},
-  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>> | void {
+  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>> | void {
     return currentStateAsChanges(this, options)
   }
 
@@ -1093,7 +1093,7 @@ export class CollectionImpl<
    */
   public subscribeChanges(
     callback: (
-      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
     ) => void,
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
