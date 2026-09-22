@@ -20,7 +20,12 @@ import {
   toProcessLocalLoadSubsetOptions,
   toTransportedLoadSubsetOptions,
 } from './remote-subset-wire'
+import {
+  reportRemoteSubsetOwnerError,
+  unloadRemoteSubsetOwner,
+} from './remote-subset-owner'
 import type { TransportedLoadSubsetOptions } from './remote-subset-wire'
+import type { RemoteSubsetOwner } from './remote-subset-owner'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -358,40 +363,7 @@ export interface PersistenceAdapter {
   }>
 }
 
-export type RemoteSubsetOwner = ((
-  options: TransportedLoadSubsetOptions,
-) => Promise<void> | void) & {
-  unloadSubset: (options: TransportedLoadSubsetOptions) => void
-  onError: (error: unknown) => void
-}
-
-function reportRemoteSubsetOwnerError(
-  owner: RemoteSubsetOwner,
-  error: unknown,
-): void {
-  try {
-    owner.onError(error)
-  } catch {
-    // Reporting must not replace the original owner failure.
-  }
-}
-
-async function unloadRemoteSubsetOwner(
-  owner: RemoteSubsetOwner,
-  options: TransportedLoadSubsetOptions,
-): Promise<void> {
-  try {
-    const result = (
-      owner.unloadSubset as unknown as (
-        options: TransportedLoadSubsetOptions,
-      ) => unknown
-    )(options)
-    await Promise.resolve(result)
-  } catch (error) {
-    reportRemoteSubsetOwnerError(owner, error)
-    throw error
-  }
-}
+export type { RemoteSubsetOwner } from './remote-subset-owner'
 
 type SingleProcessRemoteSubsetAcquisition = {
   owner: RemoteSubsetOwner

@@ -47,15 +47,17 @@ import type {
  * RFC #1659 requires renderer work to reach the exact collection adapter in
  * the elected main-process owner. Complete committed transactions retain row
  * and collection metadata. Mutating RPC replay is limited to the same known
- * leader and term. Remote subset request data stays inside the clone-safe wire
- * domain, and each accepted physical acquisition has one acquisition lease.
+ * leader and term, and one envelope id cannot identify two mutation request
+ * types. Remote subset request data stays inside the clone-safe wire domain,
+ * and each accepted physical acquisition has one acquisition lease.
  *
  * Expected transactions, adapter call logs, SQLite rows, metadata, owner
  * callbacks, and coordinator snapshots form the reference observations.
  * Histories vary response loss, leadership change, owner replacement,
  * duplicate delivery, acquisition release, durability failure, cleanup, and
- * reopen. The driver crosses the real Electron coordinator and IPC persistence
- * adapter; the durable witness reopens a real SQLite database.
+ * reopen. The driver crosses the real Electron coordinator, its shared
+ * broadcast coordination engine, and the IPC persistence adapter; the durable
+ * witness reopens a real SQLite database.
  *
  * Checkpoints sit at adapter entry, RPC settlement, acquisition acceptance and
  * release, lifecycle error, disposal, and durable reopen. Hostile wire values,
@@ -1436,6 +1438,68 @@ describe(`electron sqlite persistence bridge`, () => {
     expect(applyCalls).toBe(1)
   })
 
+  it(`rejects a different mutation operation that reuses a completed envelope`, async () => {
+    registerCleanup(installImmediatelyGrantedWebLocks())
+    let applyCalls = 0
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `electron-cross-operation-envelope`,
+      adapter: {
+        loadSubset: () => Promise.resolve([]),
+        applyCommittedTx: () => {
+          applyCalls++
+          return Promise.resolve()
+        },
+        ensureIndex: () => Promise.resolve(),
+      },
+    })
+    registerCleanup(() => coordinator.dispose())
+    coordinator.subscribe(`todos`, () => {})
+    await waitForLeadership(coordinator, `todos`)
+
+    const internals = coordinator as unknown as {
+      handleApplyLocalMutations: (
+        collectionId: string,
+        request: ApplyLocalMutationsRequest,
+      ) => Promise<unknown>
+      handleApplyCommittedTx: (
+        collectionId: string,
+        request: ApplyCommittedTxRequest,
+      ) => Promise<unknown>
+    }
+    const envelopeId = `cross-operation-envelope`
+
+    await expect(
+      internals.handleApplyLocalMutations(`todos`, {
+        type: `rpc:applyLocalMutations:req`,
+        rpcId: `local-rpc`,
+        envelopeId,
+        mutations: [],
+      }),
+    ).resolves.toMatchObject({ ok: true })
+
+    await expect(
+      internals.handleApplyCommittedTx(`todos`, {
+        type: `rpc:applyCommittedTx:req`,
+        rpcId: `committed-rpc`,
+        envelopeId,
+        tx: {
+          txId: `committed-tx`,
+          term: 0,
+          seq: 0,
+          rowVersion: 0,
+          mutations: [],
+        },
+      }),
+    ).resolves.toMatchObject({
+      type: `rpc:applyCommittedTx:res`,
+      rpcId: `committed-rpc`,
+      ok: false,
+      code: `CONFLICT`,
+      error: expect.stringContaining(`already applied`),
+    })
+    expect(applyCalls).toBe(1)
+  })
+
   it(`classifies Electron durability failures on local and follower routes`, async () => {
     registerCleanup(installImmediatelyGrantedWebLocks())
     const persistenceError = Object.assign(new Error(`electron disk failed`), {
@@ -1567,8 +1631,8 @@ describe(`electron sqlite persistence bridge`, () => {
         collectionId: string,
         request: ApplyCommittedTxRequest,
       ) => Promise<unknown>
-      appliedCommittedTxEnvelopes: Map<string, unknown>
-      inFlightCommittedTxEnvelopes: Map<string, unknown>
+      appliedEnvelopes: Map<string, unknown>
+      inFlightEnvelopes: Map<string, unknown>
     }
     const outcomePromise = internals
       .handleApplyCommittedTx(`todos`, {
@@ -1607,8 +1671,8 @@ describe(`electron sqlite persistence bridge`, () => {
       expect(durableTransactions).toHaveLength(1)
       expect(durableTransactions[0]?.txId).toBe(`held-committed-tx`)
       expect({
-        completed: internals.appliedCommittedTxEnvelopes.size,
-        inFlight: internals.inFlightCommittedTxEnvelopes.size,
+        completed: internals.appliedEnvelopes.size,
+        inFlight: internals.inFlightEnvelopes.size,
       }).toEqual({ completed: 0, inFlight: 0 })
     } finally {
       releaseApply()
@@ -1645,7 +1709,7 @@ describe(`electron sqlite persistence bridge`, () => {
         collectionId: string,
         request: ApplyLocalMutationsRequest,
       ) => Promise<unknown>
-      appliedEnvelopeIds: Map<string, unknown>
+      appliedEnvelopes: Map<string, unknown>
     }
     const outcomePromise = internals
       .handleApplyLocalMutations(`todos`, {
@@ -1691,7 +1755,7 @@ describe(`electron sqlite persistence bridge`, () => {
           value: { id: `held-local-row` },
         },
       ])
-      expect(internals.appliedEnvelopeIds.size).toBe(0)
+      expect(internals.appliedEnvelopes.size).toBe(0)
     } finally {
       releaseApply()
       coordinator.dispose()
@@ -3483,8 +3547,8 @@ describe(`electron sqlite persistence bridge`, () => {
 
     const leaderInternals = leader as unknown as {
       channel: BroadcastChannel
-      appliedCommittedTxEnvelopes: Map<string, unknown>
-      inFlightCommittedTxEnvelopes: Map<string, unknown>
+      appliedEnvelopes: Map<string, unknown>
+      inFlightEnvelopes: Map<string, unknown>
     }
     const followerInternals = follower as unknown as {
       sendRPCOnce: (
@@ -3530,8 +3594,8 @@ describe(`electron sqlite persistence bridge`, () => {
 
       expect({
         postAfterDispose,
-        completed: leaderInternals.appliedCommittedTxEnvelopes.size,
-        inFlight: leaderInternals.inFlightCommittedTxEnvelopes.size,
+        completed: leaderInternals.appliedEnvelopes.size,
+        inFlight: leaderInternals.inFlightEnvelopes.size,
       }).toEqual({ postAfterDispose: 0, completed: 0, inFlight: 0 })
 
       follower.dispose()

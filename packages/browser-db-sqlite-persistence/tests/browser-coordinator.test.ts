@@ -21,14 +21,16 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * RFC #1659 requires every adapter operation to use the elected owner for its
  * collection. Complete committed transactions must cross that boundary
  * without losing metadata. A mutating RPC may replay only through the same
- * known leader and term. Remote subset request data must be clone-safe, and
- * each accepted physical acquisition creates one exact acquisition lease.
+ * known leader and term, and one envelope id cannot identify two mutation
+ * request types. Remote subset request data must be clone-safe, and each
+ * accepted physical acquisition creates one exact acquisition lease.
  *
  * The adapter call logs, transport controls, owner callbacks, and internal-map
  * snapshots are focused reference ledgers. Histories vary local and follower
  * routes, response loss, leadership change, owner replacement, duplicate
  * delivery, release, failure, and disposal. The production driver is the real
- * `BrowserCollectionCoordinator`; only BroadcastChannel and Web Locks are
+ * `BrowserCollectionCoordinator`, which names the shared broadcast
+ * coordination engine for this host; only BroadcastChannel and Web Locks are
  * replaced with deterministic seams.
  *
  * Checkpoints sit at adapter entry, RPC response delivery, acquisition

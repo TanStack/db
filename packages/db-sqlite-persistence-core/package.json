@@ -37,6 +37,16 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./broadcast-coordinator": {
+      "import": {
+        "types": "./dist/esm/broadcast-coordinator.d.ts",
+        "default": "./dist/esm/broadcast-coordinator.js"
+      },
+      "require": {
+        "types": "./dist/cjs/broadcast-coordinator.d.cts",
+        "default": "./dist/cjs/broadcast-coordinator.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,
