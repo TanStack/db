@@ -127,8 +127,9 @@ async function withColumnarDriver<T>(
  * adapter. Empty, reordered, duplicated, missing-key, and swapped-value mutants
  * challenge the checker; the alias property records a seed and shrink path and
  * verifies replay of the same exact-row violation.
- * Limit: this shim establishes adapter normalization, not native device/host
- * execution; native op-sqlite v14 still needs a separate runtime receipt.
+ * Known omissions: this shim establishes adapter normalization, not native
+ * device/host execution. Native op-sqlite still needs a separate runtime
+ * receipt for every supported major result contract.
  */
 it.each([
   `rows-array`,
@@ -222,7 +223,7 @@ it.each([
   async (alias) => {
     const row = {
       [alias]: [`nested`, `value`],
-      ...(alias === `rowsAffected` ? {} : { rowsAffected: 17 }),
+      rowsAffected: 17,
       ordinary_name: `ordinary-value`,
     }
     await expect(queryInjectedResult([row])).resolves.toEqual([row])
@@ -362,6 +363,52 @@ it(`preserves generated single-row write-marker aliases in direct row arrays`, a
       seed: aliasOracleSeed,
       numRuns: aliasOracleRuns,
       examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]],
+    },
+  )
+})
+
+it(`returns the same rows across equivalent documented result carriers`, async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.uniqueArray(fc.constantFrom(...statementResultAliasNames), {
+        minLength: 1,
+        maxLength: statementResultAliasNames.length,
+      }),
+      async (aliases) => {
+        const { expected } = aliasQueryCase(aliases)
+        const rawRows = expected.map((row) =>
+          aliases.map((alias) => row[alias]),
+        )
+        const equivalentResults: ReadonlyArray<unknown> = [
+          expected,
+          { rows: expected },
+          { resultRows: expected },
+          [{ rowsAffected: 0, rows: expected }],
+          { rowsAffected: 0, rows: expected, columnNames: aliases },
+          { rowsAffected: 0, rawRows, columnNames: aliases },
+          {
+            rowsAffected: 0,
+            rows: expected,
+            rawRows,
+            columnNames: aliases,
+          },
+          { results: [{ rows: expected }] },
+        ]
+
+        for (const result of equivalentResults) {
+          const actual =
+            await queryInjectedResult<Record<string, unknown>>(result)
+          expectExactAliasRows(actual, expected)
+        }
+      },
+    ),
+    {
+      seed: aliasOracleSeed,
+      numRuns: aliasOracleRuns,
+      examples: [
+        [[`rowsAffected`]],
+        [[`rows`, `rawRows`, `columnNames`, `ordinary_name`]],
+      ],
     },
   )
 })
@@ -987,18 +1034,19 @@ function createColumnarDriverHarness(
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-rn-op-sqlite-contract-`))
   let database: ReturnType<typeof createOpSQLiteTestDatabase> | undefined
   try {
-    database = createDatabase({
+    const createdDatabase = createDatabase({
       filename: join(tempDirectory, `state.sqlite`),
       resultShape: `execute-async-columnar`,
     })
-    const driver = new OpSQLiteDriver({ database })
+    database = createdDatabase
+    const driver = new OpSQLiteDriver({ database: createdDatabase })
 
     return {
       driver,
       cleanup: async () => {
         const cleanupErrors: Array<unknown> = []
         try {
-          await Promise.resolve(database.close())
+          await Promise.resolve(createdDatabase.close())
         } catch (error) {
           cleanupErrors.push(error)
         }
