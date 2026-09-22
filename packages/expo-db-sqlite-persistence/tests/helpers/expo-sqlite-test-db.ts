@@ -5,6 +5,7 @@ import type {
   ExpoSQLiteRunResult,
   ExpoSQLiteTransaction,
 } from '../../src/expo-sqlite-driver'
+import type { SQLiteBindValue } from 'expo-sqlite'
 
 export type ExpoSQLiteTestDatabase = ExpoSQLiteDatabaseLike & {
   closeAsync: () => Promise<void>
@@ -35,7 +36,7 @@ function normalizeRunResult(
 
 function hasNamedParameters(
   params: ExpoSQLiteBindParams | undefined,
-): params is Record<string, unknown> {
+): params is Record<string, SQLiteBindValue> {
   return params !== undefined && !Array.isArray(params)
 }
 
