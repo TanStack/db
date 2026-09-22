@@ -46,9 +46,9 @@ import type { LoadSubsetOptions, SyncConfig } from '@tanstack/db'
  * cleanup, and restart. They compare durable state, public rows, metadata,
  * request options, sequence evidence, errors, and late-work fencing.
  *
- * Driver SQL behavior, browser page ownership, native runtimes, and the shared
- * conformance portfolio have separate owners. This file models persistence
- * protocol state, not a particular SQLite engine.
+ * Known omissions: driver SQL behavior, browser page ownership, native
+ * runtimes, and the shared conformance portfolio have separate owners. This
+ * file models persistence protocol state, not a particular SQLite engine.
  */
 
 type Todo = {

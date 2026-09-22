@@ -22,10 +22,10 @@
  * wrapper identity or treating a function key as a getter synchronously admits
  * the second query and fails the exact admission assertion.
  *
- * This focused contract test does not establish K=1 lane fairness, SQL result
- * correctness, eventual progress under arbitrary I/O, or cross-process
- * coordination. Those belong to the shared-driver oracle and provider
- * refinements.
+ * Known omissions: this focused contract test does not establish K=1 lane
+ * fairness, SQL result correctness, eventual progress under arbitrary I/O, or
+ * cross-process coordination. Those belong to the shared-driver oracle and
+ * provider refinements.
  */
 import { describe, expect, it } from 'vitest'
 import {

@@ -24,10 +24,10 @@
  *
  * Observed public facts: admitted and completed logical IDs, completed and
  * pending persists at every hydrate checkpoint, independently seeded public
- * collection rows, raw SQL dequeue reach, and cleanup diagnostics. The oracle
- * does not establish elapsed-time latency, unbounded eventuality, multi-process
- * coordination, or a browser matrix; the Chromium OPFS fixture separately
- * refines the provider boundary.
+ * collection rows, raw SQL dequeue reach, and cleanup diagnostics. Known
+ * omissions: the oracle does not establish elapsed-time latency, unbounded
+ * eventuality, multi-process coordination, or a browser matrix; the Chromium
+ * OPFS fixture separately refines the provider boundary.
  *
  * Challenge and replay: the executable persist-first FIFO driver must violate
  * the same K=1 checker while using the public/core/driver path. Re-run a
