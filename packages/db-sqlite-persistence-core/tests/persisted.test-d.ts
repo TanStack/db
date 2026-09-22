@@ -123,9 +123,9 @@ describe(`persisted collection types`, () => {
   })
 
   it(`requires persistence config`, () => {
-    // @ts-expect-error persistedCollectionOptions requires a persistence config
     persistedCollectionOptions({
       getKey: (item: Todo) => item.id,
+      // @ts-expect-error persistedCollectionOptions requires persistence when sync is provided
       sync: {
         sync: ({ markReady }: { markReady: () => void }) => {
           markReady()

@@ -1053,7 +1053,7 @@ export interface SubscribeChangesOptions<
    * })
    * ```
    */
-  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>>) => any
+  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>, TKey, true>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**

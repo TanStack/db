@@ -58,7 +58,7 @@ export interface OfflineTransaction {
 // Serialized representation for storage
 export interface SerializedOfflineTransaction {
   /** Absent for the original Date-marker format. */
-  valueEncoding?: 2
+  valueEncoding?: 2 | 3
   id: string
   mutationFnName: string
   mutations: Array<SerializedMutation>

@@ -30,6 +30,11 @@ import type {
   SingleResult,
 } from '@tanstack/db'
 
+type InferConditionalResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? InferResultType<TContext> | []
+    : InferResultType<TContext>
+
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
@@ -123,12 +128,12 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): Accessor<InferResultType<TContext>> & {
+): Accessor<InferConditionalResultType<TContext>> & {
   /**
    * @deprecated use function result instead
    * query.data -> query()
    */
-  data: InferResultType<TContext>
+  data: InferConditionalResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
   status: CollectionStatus | `disabled`
