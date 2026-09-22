@@ -108,7 +108,9 @@ async function withColumnarDriver<T>(
  * their names match envelope fields, including direct rows made only of write
  * marker aliases. When OP-SQLite supplies object rows and raw columnar rows
  * together, the already-decoded object rows are authoritative. Malformed or
- * undocumented result carriers reject.
+ * undocumented result carriers reject. A bare array whose first entry can be
+ * both a row and a statement envelope has no self-describing interpretation;
+ * its driver must declare `rows` or `statement-results` mode.
  * Source: SQLiteDriver's public query contract and op-sqlite's documented
  * execute `{ rows, columnNames }` and executeAsync
  * `{ rawRows, columnNames, rowsAffected }` envelopes.
@@ -117,9 +119,10 @@ async function withColumnarDriver<T>(
  * and malformed or conflicting envelopes.
  * Reference/history grammar: `aliasQueryCase` builds two ordered object rows
  * directly from unique legal aliases and distinct scalar values. Histories
- * choose wrapper shape or columnar aliases, execute real writes or one SELECT,
- * and then either return the exact rows or reject an invalid envelope; the
- * reference never calls the production decoder.
+ * choose wrapper shape, explicit mode for ambiguous arrays, or columnar
+ * aliases, execute real writes or one SELECT, and then either return the exact
+ * rows or reject an invalid envelope; the reference never calls the production
+ * decoder.
  * Path/checkpoint: OpSQLiteDriver over a real better-sqlite3 shim, observed
  * when each query Promise settles. Exact row values, keys, order, and count are
  * compared.
@@ -146,7 +149,12 @@ it.each([
   })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const driver = new OpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({
+    database,
+    ...(resultShape === `statement-array`
+      ? { arrayResultMode: `statement-results` as const }
+      : {}),
+  })
   await driver.exec(
     `CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL, score INTEGER NOT NULL)`,
   )
@@ -182,13 +190,29 @@ it.each([
 
 async function queryInjectedResult<T = unknown>(
   result: unknown,
+  arrayResultMode?: `rows` | `statement-results`,
 ): Promise<ReadonlyArray<T>> {
   return new OpSQLiteDriver({
     database: {
       executeAsync: () => Promise.resolve(result),
     },
+    ...(arrayResultMode ? { arrayResultMode } : {}),
   }).query<T>(`SELECT * FROM injected_result`)
 }
+
+it(`requires an explicit mode for an ambiguous bare result array`, async () => {
+  const ambiguous = [{ rowsAffected: 17, rows: [`nested`] }]
+
+  await expect(queryInjectedResult(ambiguous)).rejects.toThrow(
+    `ambiguous bare result array`,
+  )
+  await expect(queryInjectedResult(ambiguous, `rows`)).resolves.toEqual(
+    ambiguous,
+  )
+  await expect(
+    queryInjectedResult(ambiguous, `statement-results`),
+  ).resolves.toEqual([`nested`])
+})
 
 it(`reads op-sqlite execute rows when columnNames metadata is also present`, async () => {
   await expect(
@@ -242,7 +266,7 @@ it(`reads object and structural statement-array write envelopes as empty`, async
   const writeResult = { rowsAffected: 1, insertId: 17 }
   await expect(queryInjectedResult(writeResult)).resolves.toEqual([])
   await expect(
-    queryInjectedResult([{ ...writeResult, rows: [] }]),
+    queryInjectedResult([{ ...writeResult, rows: [] }], `statement-results`),
   ).resolves.toEqual([])
 })
 
@@ -379,25 +403,41 @@ it(`returns the same rows across equivalent documented result carriers`, async (
         const rawRows = expected.map((row) =>
           aliases.map((alias) => row[alias]),
         )
-        const equivalentResults: ReadonlyArray<unknown> = [
-          expected,
-          { rows: expected },
-          { resultRows: expected },
-          [{ rowsAffected: 0, rows: expected }],
-          { rowsAffected: 0, rows: expected, columnNames: aliases },
-          { rowsAffected: 0, rawRows, columnNames: aliases },
+        const equivalentResults: ReadonlyArray<{
+          result: unknown
+          arrayResultMode?: `rows` | `statement-results`
+        }> = [
+          { result: expected, arrayResultMode: `rows` },
+          { result: { rows: expected } },
+          { result: { resultRows: expected } },
           {
-            rowsAffected: 0,
-            rows: expected,
-            rawRows,
-            columnNames: aliases,
+            result: [{ rowsAffected: 0, rows: expected }],
+            arrayResultMode: `statement-results`,
           },
-          { results: [{ rows: expected }] },
+          {
+            result: {
+              rowsAffected: 0,
+              rows: expected,
+              columnNames: aliases,
+            },
+          },
+          { result: { rowsAffected: 0, rawRows, columnNames: aliases } },
+          {
+            result: {
+              rowsAffected: 0,
+              rows: expected,
+              rawRows,
+              columnNames: aliases,
+            },
+          },
+          { result: { results: [{ rows: expected }] } },
         ]
 
-        for (const result of equivalentResults) {
-          const actual =
-            await queryInjectedResult<Record<string, unknown>>(result)
+        for (const { result, arrayResultMode } of equivalentResults) {
+          const actual = await queryInjectedResult<Record<string, unknown>>(
+            result,
+            arrayResultMode,
+          )
           expectExactAliasRows(actual, expected)
         }
       },

@@ -37,11 +37,22 @@ export type OpSQLiteDatabaseLike = {
   close?: () => Promise<void> | void
 }
 
-type OpSQLiteExistingDatabaseOptions = {
+export type OpSQLiteArrayResultMode = `rows` | `statement-results`
+
+type OpSQLiteResultOptions = {
+  /**
+   * Declares how to interpret a bare array when its first entry could be either
+   * a data row or a statement-result envelope. Published op-sqlite methods
+   * return object envelopes and do not need this option.
+   */
+  arrayResultMode?: OpSQLiteArrayResultMode
+}
+
+type OpSQLiteExistingDatabaseOptions = OpSQLiteResultOptions & {
   database: OpSQLiteDatabaseLike
 }
 
-type OpSQLiteOpenDatabaseOptions = {
+type OpSQLiteOpenDatabaseOptions = OpSQLiteResultOptions & {
   openDatabase: () => OpSQLiteDatabaseLike
 }
 
@@ -301,6 +312,7 @@ function extractRowsFromStatementResult(
 function extractRowsFromExecuteResult(
   result: unknown,
   sql: string,
+  arrayResultMode?: OpSQLiteArrayResultMode,
 ): Array<unknown> {
   if (result == null) {
     return unsupportedQueryResult(sql)
@@ -311,8 +323,24 @@ function extractRowsFromExecuteResult(
       return []
     }
 
+    if (arrayResultMode === `rows`) {
+      return result
+    }
+
     const firstEntry = result[0]
-    if (isObjectRecord(firstEntry) && isStatementResultEnvelope(firstEntry)) {
+    const isStructuralStatementResult =
+      isObjectRecord(firstEntry) && isStatementResultEnvelope(firstEntry)
+    const isStatementResult =
+      isStructuralStatementResult ||
+      (isObjectRecord(firstEntry) && isWriteResultEnvelope(firstEntry))
+
+    if (arrayResultMode === `statement-results`) {
+      if (!isStatementResult) {
+        return unsupportedQueryResult(
+          sql,
+          `statement-results mode requires a recognized statement envelope`,
+        )
+      }
       if (result.length !== 1) {
         return unsupportedQueryResult(
           sql,
@@ -320,6 +348,13 @@ function extractRowsFromExecuteResult(
         )
       }
       return extractRowsFromStatementResult(firstEntry, sql, false)
+    }
+
+    if (isStructuralStatementResult) {
+      return unsupportedQueryResult(
+        sql,
+        `ambiguous bare result array; set arrayResultMode to "rows" or "statement-results"`,
+      )
     }
 
     return result
@@ -375,6 +410,7 @@ function resolveExecuteMethod(
 export class OpSQLiteDriver implements SQLiteDriver {
   private readonly database: OpSQLiteDatabaseLike
   private readonly executeMethod: OpSQLiteExecuteFn
+  private readonly arrayResultMode: OpSQLiteArrayResultMode | undefined
   private readonly ownsDatabase: boolean
   private queue: Promise<void> = Promise.resolve()
   private nextSavepointId = 1
@@ -391,6 +427,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
     }
 
     this.executeMethod = resolveExecuteMethod(this.database)
+    this.arrayResultMode = options.arrayResultMode
   }
 
   async exec(sql: string): Promise<void> {
@@ -416,7 +453,11 @@ export class OpSQLiteDriver implements SQLiteDriver {
 
     return this.enqueue(async () => {
       const result = await this.execute(sql, params)
-      return extractRowsFromExecuteResult(result, sql) as ReadonlyArray<T>
+      return extractRowsFromExecuteResult(
+        result,
+        sql,
+        this.arrayResultMode,
+      ) as ReadonlyArray<T>
     })
   }
 
@@ -557,7 +598,11 @@ export class OpSQLiteDriver implements SQLiteDriver {
         params: ReadonlyArray<unknown> = [],
       ): Promise<ReadonlyArray<T>> => {
         const result = await this.execute(sql, params)
-        return extractRowsFromExecuteResult(result, sql) as ReadonlyArray<T>
+        return extractRowsFromExecuteResult(
+          result,
+          sql,
+          this.arrayResultMode,
+        ) as ReadonlyArray<T>
       },
       run: async (sql, params = []) => {
         await this.execute(sql, params)
