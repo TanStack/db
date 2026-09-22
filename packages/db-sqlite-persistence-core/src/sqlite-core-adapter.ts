@@ -1206,20 +1206,9 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          WHERE collection_id = ?`,
         [collectionId],
       )
-      const termRows = await transactionDriver.query<{ latest_term: number }>(
-        `SELECT latest_term
-         FROM leader_term
-         WHERE collection_id = ?
-         LIMIT 1`,
-        [collectionId],
-      )
-      const seqRows = await transactionDriver.query<{ max_seq: number }>(
-        `SELECT MAX(seq) AS max_seq
-         FROM applied_tx
-         WHERE collection_id = ? AND term = (
-           SELECT latest_term FROM leader_term WHERE collection_id = ? LIMIT 1
-         )`,
-        [collectionId, collectionId],
+      const { latestTerm, latestSeq } = await this.readStreamPosition(
+        collectionId,
+        transactionDriver,
       )
       const resetRows = await transactionDriver.query<{ reset_epoch: number }>(
         `SELECT reset_epoch
@@ -1240,8 +1229,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           key: row.key,
           value: deserializePersistedRowValue(row.value),
         })),
-        latestTerm: termRows[0]?.latest_term ?? 0,
-        latestSeq: seqRows[0]?.max_seq ?? 0,
+        latestTerm,
+        latestSeq,
         latestRowVersion,
         resetEpoch: resetRows[0]?.reset_epoch ?? 0,
       }
@@ -1662,16 +1651,31 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     keySet?: PersistedKeySetEvidence
   }> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
-    const [termRows, version, seqRows] = await Promise.all([
-      this.driver.query<{ latest_term: number }>(
+    const [position, version] = await Promise.all([
+      this.readStreamPosition(collectionId, this.driver),
+      this.readKeySetEvidence(collectionId, tableMapping, this.driver),
+    ])
+
+    return {
+      ...position,
+      latestRowVersion: version.latestRowVersion,
+      keySet: version.keySet,
+    }
+  }
+
+  private async readStreamPosition(
+    collectionId: string,
+    driver: SQLiteDriver,
+  ): Promise<{ latestTerm: number; latestSeq: number }> {
+    const [termRows, seqRows] = await Promise.all([
+      driver.query<{ latest_term: number }>(
         `SELECT latest_term
          FROM leader_term
          WHERE collection_id = ?
          LIMIT 1`,
         [collectionId],
       ),
-      this.readKeySetEvidence(collectionId, tableMapping, this.driver),
-      this.driver.query<{ max_seq: number }>(
+      driver.query<{ max_seq: number }>(
         `SELECT MAX(seq) AS max_seq
          FROM applied_tx
          WHERE collection_id = ? AND term = (
@@ -1684,8 +1688,6 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     return {
       latestTerm: termRows[0]?.latest_term ?? 0,
       latestSeq: seqRows[0]?.max_seq ?? 0,
-      latestRowVersion: version.latestRowVersion,
-      keySet: version.keySet,
     }
   }
 
@@ -2173,7 +2175,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
        ON CONFLICT(collection_id) DO NOTHING`,
       [collectionId],
     )
-    await this.ensureCollectionKeyEvidenceTriggers(tableName)
+    await this.ensureCollectionKeyEvidenceTriggers(collectionId, tableName)
     const mapping = {
       tableName,
       tombstoneTableName,
@@ -2183,10 +2185,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }
 
   private async ensureCollectionKeyEvidenceTriggers(
+    collectionId: string,
     tableName: string,
   ): Promise<void> {
     const collectionTableSql = quoteIdentifier(tableName)
-    const tableNameLiteral = toSqliteLiteral(tableName)
+    const collectionIdLiteral = toSqliteLiteral(collectionId)
     const insertTriggerSql = quoteIdentifier(`${tableName}_key_evidence_insert`)
     const deleteTriggerSql = quoteIdentifier(`${tableName}_key_evidence_delete`)
     const updateTriggerSql = quoteIdentifier(`${tableName}_key_evidence_update`)
@@ -2194,23 +2197,21 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     await this.driver.exec(
       `CREATE TRIGGER IF NOT EXISTS ${insertTriggerSql}
        AFTER INSERT ON ${collectionTableSql}
-       WHEN NOT EXISTS (
+       WHEN EXISTS (
+         SELECT 1
+         FROM collection_version
+         WHERE collection_id = ${collectionIdLiteral}
+           AND key_set_evidence_available = 1
+       ) AND NOT EXISTS (
          SELECT 1
          FROM collection_expected_keys
-         WHERE collection_id = (
-           SELECT collection_id
-           FROM collection_registry
-           WHERE table_name = ${tableNameLiteral}
-         ) AND key = NEW.key
+         WHERE collection_id = ${collectionIdLiteral}
+           AND key = NEW.key
        )
        BEGIN
          UPDATE collection_version
          SET key_set_evidence_incompatible = 1
-         WHERE collection_id = (
-           SELECT collection_id
-           FROM collection_registry
-           WHERE table_name = ${tableNameLiteral}
-         );
+         WHERE collection_id = ${collectionIdLiteral};
        END`,
     )
     await this.driver.exec(
@@ -2218,35 +2219,34 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
        AFTER DELETE ON ${collectionTableSql}
        WHEN EXISTS (
          SELECT 1
+         FROM collection_version
+         WHERE collection_id = ${collectionIdLiteral}
+           AND key_set_evidence_available = 1
+       ) AND EXISTS (
+         SELECT 1
          FROM collection_expected_keys
-         WHERE collection_id = (
-           SELECT collection_id
-           FROM collection_registry
-           WHERE table_name = ${tableNameLiteral}
-         ) AND key = OLD.key
+         WHERE collection_id = ${collectionIdLiteral}
+           AND key = OLD.key
        )
        BEGIN
          UPDATE collection_version
          SET key_set_evidence_incompatible = 1
-         WHERE collection_id = (
-           SELECT collection_id
-           FROM collection_registry
-           WHERE table_name = ${tableNameLiteral}
-         );
+         WHERE collection_id = ${collectionIdLiteral};
        END`,
     )
     await this.driver.exec(
       `CREATE TRIGGER IF NOT EXISTS ${updateTriggerSql}
        AFTER UPDATE OF key ON ${collectionTableSql}
-       WHEN OLD.key <> NEW.key
+       WHEN OLD.key <> NEW.key AND EXISTS (
+         SELECT 1
+         FROM collection_version
+         WHERE collection_id = ${collectionIdLiteral}
+           AND key_set_evidence_available = 1
+       )
        BEGIN
          UPDATE collection_version
          SET key_set_evidence_incompatible = 1
-         WHERE collection_id = (
-           SELECT collection_id
-           FROM collection_registry
-           WHERE table_name = ${tableNameLiteral}
-         );
+         WHERE collection_id = ${collectionIdLiteral};
        END`,
     )
   }

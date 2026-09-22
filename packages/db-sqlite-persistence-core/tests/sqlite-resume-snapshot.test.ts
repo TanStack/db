@@ -229,6 +229,82 @@ async function observeCachedSchemaState(
  * cursor; those remain separate driver-contract and Electric recovery owners.
  */
 describe(`SQLite resume snapshots`, () => {
+  it(`does not amplify legacy writes while key-set evidence is unavailable`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const collectionId = `legacy-write-'work`
+      const tableName = createPersistedTableName(collectionId, `c`)
+      const driver = createDriver(database)
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+
+      await adapter.loadResumeSnapshot(collectionId, { includeRows: false })
+      await driver.run(
+        `UPDATE collection_version
+         SET key_set_evidence_available = 0,
+             key_set_evidence_incompatible = 0
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      const before = await driver.query<{ count: number }>(
+        `SELECT total_changes() AS count`,
+      )
+
+      await driver.run(
+        `INSERT INTO "${tableName}" (key, value, metadata, row_version)
+         VALUES (?, ?, NULL, 1)`,
+        [encodePersistedStorageKey(`legacy`), `{}`],
+      )
+
+      const after = await driver.query<{ count: number }>(
+        `SELECT total_changes() AS count`,
+      )
+      const version = await driver.query<{
+        key_set_evidence_incompatible: number
+      }>(
+        `SELECT key_set_evidence_incompatible
+         FROM collection_version
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      expect((after[0]?.count ?? 0) - (before[0]?.count ?? 0)).toBe(1)
+      expect(version).toEqual([{ key_set_evidence_incompatible: 0 }])
+
+      const beforeKeyUpdate = await driver.query<{ count: number }>(
+        `SELECT total_changes() AS count`,
+      )
+      await driver.run(`UPDATE "${tableName}" SET key = ? WHERE key = ?`, [
+        encodePersistedStorageKey(`legacy-renamed`),
+        encodePersistedStorageKey(`legacy`),
+      ])
+      const afterKeyUpdate = await driver.query<{ count: number }>(
+        `SELECT total_changes() AS count`,
+      )
+      expect(
+        (afterKeyUpdate[0]?.count ?? 0) - (beforeKeyUpdate[0]?.count ?? 0),
+      ).toBe(1)
+
+      const triggerDefinitions = await driver.query<{ sql: string }>(
+        `SELECT sql
+         FROM sqlite_schema
+         WHERE type = 'trigger' AND tbl_name = ?`,
+        [tableName],
+      )
+      expect(triggerDefinitions).toHaveLength(3)
+      expect(triggerDefinitions.map(({ sql }) => sql).join(`\n`)).not.toContain(
+        `collection_registry`,
+      )
+      expect(
+        (await adapter.loadResumeSnapshot(collectionId, { includeRows: false }))
+          .keySet,
+      ).toEqual({ status: `unknown` })
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
   it(`keeps raw key loss sticky until a full replacement recertifies the baseline`, async () => {
     const database = new DatabaseSync(`:memory:`)
     let primaryFailure: unknown

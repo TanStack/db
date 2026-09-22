@@ -2630,6 +2630,88 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
+  it(`invalidates resume evidence when storage advances outside the owned commit generation`, async () => {
+    const adapter = createRecordingAdapter()
+    let durableGeneration = {
+      latestTerm: 0,
+      latestSeq: 0,
+      latestRowVersion: 0,
+      resetEpoch: 0,
+    }
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => ({
+      ...(await loadResumeSnapshot(...args)),
+      ...durableGeneration,
+    })
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    adapter.applyCommittedTx = async (collectionId, tx) => {
+      await applyCommittedTx(collectionId, tx)
+      durableGeneration = {
+        latestTerm: tx.term,
+        latestSeq: tx.seq,
+        latestRowVersion: Math.max(
+          durableGeneration.latestRowVersion + 1,
+          tx.rowVersion,
+        ),
+        resetEpoch: durableGeneration.resetEpoch,
+      }
+    }
+
+    let remoteBegin: (() => void) | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    let remoteMetadata:
+      | Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`]
+      | undefined
+    let persistenceCapability:
+      | SyncMetadataApi<string>[`persistence`]
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `generation-fence`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, commit, markReady, metadata }) => {
+            remoteBegin = begin
+            remoteCommit = commit
+            remoteMetadata = metadata
+            persistenceCapability = metadata?.persistence
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() =>
+        expect(persistenceCapability).toMatchObject({
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+        }),
+      )
+
+      // This is not a supported writer path. It models storage advancing
+      // without the runtime observing the generation that now precedes its
+      // commit. The exact-generation fence must reject that uncertainty.
+      durableGeneration.latestRowVersion = 5
+
+      remoteBegin?.()
+      persistenceCapability?.resumeSnapshot.expectCurrentCommit()
+      remoteMetadata?.collection.set(`cursor`, `next`)
+      const applied = remoteCommit?.()
+      if (applied !== true) await applied
+
+      await persistenceCapability?.resumeSnapshot.certify()
+      expect(persistenceCapability?.resumeSnapshot.getKeySetEvidence()).toEqual(
+        { status: `incompatible` },
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`ignores late wrapped sync writes after cleanup`, async () => {
     let lateWrite!: (message: { type: `insert`; value: Todo }) => void
     const collection = createCollection(
