@@ -280,10 +280,18 @@ function planUsesNamedIndex(
   tableName: string,
   indexName: string,
 ): boolean {
+  const tablePattern = sqlitePlanIdentifierPattern(tableName)
+  const indexPattern = sqlitePlanIdentifierPattern(indexName)
+  const searchPattern = new RegExp(
+    `\\bSEARCH(?: TABLE)? ${tablePattern}(?:\\s|$)`,
+  )
+  const indexUsagePattern = new RegExp(
+    `\\bUSING INDEX ${indexPattern}(?:\\s|$)`,
+  )
+
   return plan.some(
     ({ detail }) =>
-      detail.includes(`SEARCH ${tableName}`) &&
-      detail.includes(`USING INDEX ${indexName}`),
+      searchPattern.test(detail) && indexUsagePattern.test(detail),
   )
 }
 
@@ -291,7 +299,14 @@ function planScansTable(
   plan: ReadonlyArray<QueryPlanRow>,
   tableName: string,
 ): boolean {
-  return plan.some(({ detail }) => detail.startsWith(`SCAN ${tableName}`))
+  const tablePattern = sqlitePlanIdentifierPattern(tableName)
+  const scanPattern = new RegExp(`^SCAN(?: TABLE)? ${tablePattern}(?:\\s|$)`)
+  return plan.some(({ detail }) => scanPattern.test(detail))
+}
+
+function sqlitePlanIdentifierPattern(identifier: string): string {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
+  return `(?:"${escaped}"|${escaped})`
 }
 
 async function assertExpressionIndexHistory(
@@ -447,6 +462,39 @@ async function assertExpressionIndexHistory(
 }
 
 describe(`SQLite expression-index oracle`, () => {
+  it(`recognizes equivalent SQLite plan identifier formats without prefix collisions`, () => {
+    const tableName = `rows`
+    const indexName = `literal_ddl`
+
+    for (const detail of [
+      `SEARCH rows USING INDEX literal_ddl (<expr>=?)`,
+      `SEARCH TABLE rows USING INDEX literal_ddl (<expr>=?)`,
+      `SEARCH "rows" USING INDEX "literal_ddl" (<expr>=?)`,
+      `SEARCH TABLE "rows" USING INDEX "literal_ddl" (<expr>=?)`,
+    ]) {
+      expect(planUsesNamedIndex([{ detail }], tableName, indexName)).toBe(true)
+    }
+
+    for (const detail of [`SCAN rows`, `SCAN TABLE rows`, `SCAN "rows"`]) {
+      expect(planScansTable([{ detail }], tableName)).toBe(true)
+    }
+
+    expect(
+      planUsesNamedIndex(
+        [
+          {
+            detail: `SEARCH rows_archive USING INDEX literal_ddl_backup (<expr>=?)`,
+          },
+        ],
+        tableName,
+        indexName,
+      ),
+    ).toBe(false)
+    expect(planScansTable([{ detail: `SCAN rows_archive` }], tableName)).toBe(
+      false,
+    )
+  })
+
   it(`distinguishes rejected DDL path binding from correct predicate rows without index use`, async () => {
     const tempDirectory = mkdtempSync(join(tmpdir(), `db-index-controls-`))
     const databasePath = join(tempDirectory, `state.sqlite`)
