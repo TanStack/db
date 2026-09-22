@@ -188,6 +188,51 @@ project, worker progress RPC starvation produced passing assertions with a
 nonzero process exit. Such a run is not green. Raising a test timeout alone
 does not let the worker process its progress messages.
 
+## Reusable-law backlog
+
+RFC #1659 reviews found several green oracles whose stated laws remained valid
+but whose fixtures, grammars, or observations did not cover a neighboring
+boundary. Track the generalized repairs here instead of accumulating isolated
+regressions. Completion requires an executable owner, a production-path witness,
+a hostile wrong-answer control, and an explicit statement of remaining limits.
+
+- [ ] **Real-provider conformance fixtures.** Record representative result
+  envelopes from each supported OP-SQLite runtime and other persistence hosts.
+  Make the driver-contract suites prove their shims accept those exact shapes.
+  Owner: SQLite driver contracts and native-host suites.
+- [ ] **Minimal ambiguity and name invariance.** Generate one-field and
+  otherwise minimally distinguishable results. Renaming a selected column to a
+  structural-looking alias must not turn a data row into a write envelope.
+  Owner: React Native OP-SQLite decoding.
+- [ ] **Carrier coexistence and representation symmetry.** Cross `rows`,
+  `rawRows`, `columnNames`, and supported result containers, including legal
+  coexistence. Equivalent array and object forms must agree on rows or on the
+  documented rejection. Owner: SQLite driver contracts.
+- [ ] **Transitions at every relevant await.** Hold each coordination boundary,
+  then change leadership, remote-subset ownership, abort state, cleanup, or
+  restart generation before release. Owner: browser/electron coordination and
+  collection cleanup/restart oracles.
+- [ ] **Local-versus-transport refinement.** Compare local-leader and transported
+  remote-subset behavior for immutable values. Separately prove that local
+  `signal` and `subscription` references survive delivery and reach matching
+  unload cleanup. Owner: remote-subset coordination.
+- [ ] **Partial-construction cleanup.** Fail database, driver, worker, and
+  subscription construction after each acquired resource. Preserve the primary
+  failure while proving all acquired resources are released exactly once.
+  Owner: native-host harnesses and collection lifecycle owners.
+- [ ] **On-demand persistence after evidence changes.** Cross baseline versus
+  on-demand hydration with consistent, unknown, and incompatible key-set
+  evidence. A baseline certification failure must not silently erase valid
+  on-demand rows. Owner: persisted hydration histories.
+- [ ] **Deterministic value-and-work laws.** Pair row correctness with stable
+  statement, scan, trigger, or queue-cardinality observations where the
+  subsystem promises bounded work. Owner: SQLite persistence and shared-driver
+  scheduling suites.
+- [ ] **Explicit omission records.** Add a short `Known omissions` section to
+  each primary executable owner touched above and keep this map synchronized as
+  laws land. An omission record narrows evidence; it does not waive a product
+  obligation.
+
 ## Deferred contracts and evidence
 
 The maintainer assigned offline policy work to
