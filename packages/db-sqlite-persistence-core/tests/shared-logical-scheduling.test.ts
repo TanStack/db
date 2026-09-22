@@ -17,9 +17,9 @@
  *
  * Production boundary and checkpoint: both operations use
  * `createSQLiteCorePersistenceAdapter`; the hydration operation enters through
- * `runInHydrationScope`. The first checkpoint is after the regular request has
- * had microtasks to reach the gated driver, while the first query remains
- * held. Losing wrapper identity or treating a function key as a getter admits
+ * `runInHydrationScope`. The first checkpoint is immediately after the regular
+ * request enters the adapter, while the first query remains held. Losing
+ * wrapper identity or treating a function key as a getter synchronously admits
  * the second query and fails the exact admission assertion.
  *
  * This focused contract test does not establish K=1 lane fairness, SQL result
@@ -140,8 +140,6 @@ describe(`shared logical scheduling`, () => {
       await underlying.firstQueryEntered.promise
 
       const regular = regularAdapter.loadCollectionMetadata!(`regular`)
-      await Promise.resolve()
-      await Promise.resolve()
 
       expect(underlying.admissions).toEqual([`query`])
 
