@@ -18,7 +18,7 @@ import type { DbClient, DehydratedDbState } from '../../db/src/index'
 import type { JSX } from 'react'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
-import type { QueryBuilder } from '../../db/src/query/index'
+import type { Prettify, QueryBuilder } from '../../db/src/query/index'
 import type {
   ConditionalUseLiveQueryConfig,
   UseLiveQueryConfig,
@@ -198,10 +198,8 @@ describe(`useLiveQuery type assertions`, () => {
       useLiveQuery((q) => (enabled ? q.from({ collection }) : null)),
     )
 
-    const data: Array<OutputWithVirtual<Person>> | undefined =
-      result.current.data
-    expectTypeOf(data).toEqualTypeOf<
-      Array<OutputWithVirtual<Person>> | undefined
+    expectTypeOf(result.current.data).toEqualTypeOf<
+      Array<Prettify<OutputWithVirtual<Person>>> | undefined
     >()
     expectTypeOf(result.current.status).toEqualTypeOf<UseLiveQueryStatus>()
     expectTypeOf(result.current.isEnabled).toEqualTypeOf<boolean>()

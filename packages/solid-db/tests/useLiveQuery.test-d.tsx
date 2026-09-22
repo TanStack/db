@@ -105,8 +105,9 @@ describe(`useLiveQuery type assertions`, () => {
       useLiveQuery((q) => (enabled ? q.from({ collection }) : null)),
     )
 
-    const data: Array<OutputWithVirtual<Person>> = rendered.result()
-    expectTypeOf(data).toEqualTypeOf<Array<OutputWithVirtual<Person>>>()
+    expectTypeOf(rendered.result()).toEqualTypeOf<
+      Array<Prettify<OutputWithVirtual<Person>>>
+    >()
     expectTypeOf(rendered.result.collection).toEqualTypeOf<Collection<
       Prettify<OutputWithVirtual<Person>>,
       string | number,
