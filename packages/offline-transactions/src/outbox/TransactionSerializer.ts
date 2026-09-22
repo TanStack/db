@@ -18,7 +18,10 @@ const temporalConstructorNames = [
 ] as const
 
 type TemporalConstructorName = (typeof temporalConstructorNames)[number]
-type TemporalConstructor = { from: (value: string) => unknown }
+type TemporalConstructor = {
+  from: (value: string) => unknown
+  prototype?: { toString?: () => string }
+}
 
 function getTemporalConstructorName(
   type: unknown,
@@ -45,6 +48,24 @@ function requireTemporalConstructor(
       `Missing global Temporal.${name} constructor`,
     )
   return constructor
+}
+
+function serializeTemporalValue(
+  value: object,
+  name: TemporalConstructorName,
+): string | undefined {
+  const constructor = requireTemporalConstructor(name)
+  const toString = constructor.prototype?.toString
+  if (typeof toString !== `function` || toString === Object.prototype.toString)
+    return
+  try {
+    const serialized = toString.call(value)
+    return typeof serialized === `string` ? serialized : undefined
+  } catch {
+    // Temporal prototype methods brand-check their receiver. A matching
+    // Symbol.toStringTag without the corresponding internal slots is user data.
+    return
+  }
 }
 
 export class MissingTemporalConstructorError extends Error {}
@@ -184,7 +205,11 @@ export class TransactionSerializer {
     } as PendingMutation
   }
 
-  private serializeValue(value: any, jsonKey?: string | false): any {
+  private serializeValue(
+    value: any,
+    jsonKey?: string | false,
+    ancestors = new WeakSet<object>(),
+  ): any {
     if (value === null || typeof value !== `object`) return value
 
     if (jsonKey !== false && value instanceof Date) {
@@ -196,17 +221,21 @@ export class TransactionSerializer {
         ? getTemporalConstructorName(value[Symbol.toStringTag])
         : undefined
     if (temporalConstructorName) {
-      requireTemporalConstructor(temporalConstructorName)
-      return {
-        __type: `Temporal`,
-        type: `Temporal.${temporalConstructorName}`,
-        value: value.toString(),
-      }
+      const temporalValue = serializeTemporalValue(
+        value,
+        temporalConstructorName,
+      )
+      if (temporalValue !== undefined)
+        return {
+          __type: `Temporal`,
+          type: `Temporal.${temporalConstructorName}`,
+          value: temporalValue,
+        }
     }
 
     const toJSON = typeof jsonKey === `string` && value.toJSON
     if (typeof toJSON === `function`)
-      return this.serializeValue(toJSON.call(value, jsonKey), false)
+      return this.serializeValue(toJSON.call(value, jsonKey), false, ancestors)
     if (
       jsonKey !== undefined &&
       (value instanceof Boolean ||
@@ -216,20 +245,43 @@ export class TransactionSerializer {
     ) {
       return value.valueOf()
     }
+
+    if (ancestors.has(value))
+      throw new TypeError(`Converting circular structure to JSON`)
+    ancestors.add(value)
+
     const isArray = Array.isArray(value)
     const result: any = isArray ? [] : {}
-    const keys = isArray
-      ? Array.from({ length: value.length }, (_, index) => String(index))
-      : Object.keys(value)
-    for (const key of keys) {
-      setDataProperty(
-        result,
-        key,
-        this.serializeValue(
-          value[key],
-          jsonKey === undefined ? undefined : key,
-        ),
-      )
+    try {
+      if (isArray) {
+        const length = value.length
+        for (let index = 0; index < length; index++) {
+          const key = String(index)
+          setDataProperty(
+            result,
+            key,
+            this.serializeValue(
+              value[index],
+              jsonKey === undefined ? undefined : key,
+              ancestors,
+            ),
+          )
+        }
+      } else {
+        for (const key of Object.keys(value)) {
+          setDataProperty(
+            result,
+            key,
+            this.serializeValue(
+              value[key],
+              jsonKey === undefined ? undefined : key,
+              ancestors,
+            ),
+          )
+        }
+      }
+    } finally {
+      ancestors.delete(value)
     }
     if (jsonKey === false && typeof result.toJSON === `function`)
       delete result.toJSON

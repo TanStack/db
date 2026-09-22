@@ -43,9 +43,11 @@ import type { PendingMutation } from '@tanstack/db'
  * versions. Malformed markers and missing Temporal constructors test failure
  * paths before durable data can be replaced.
  *
- * Limits: cycles, undefined, non-finite numbers, arbitrary native objects, and
- * cross-realm boxed values are outside current evidence. This oracle does not
- * claim byte stability for object key order beyond JSON's established rules.
+ * Limits: undefined, non-finite numbers, arbitrary native objects, and
+ * cross-realm boxed values are outside current evidence. Cycles must fail
+ * visibly while repeated non-cyclic references retain their values. This
+ * oracle does not claim byte stability for object key order beyond JSON's
+ * established rules.
  */
 
 type Value =
@@ -375,6 +377,18 @@ class TemporalStub {
   }
 }
 
+function temporalStubConstructor(name: TemporalName) {
+  return class extends TemporalStub {
+    constructor(value: string) {
+      super(name, value)
+    }
+
+    static from(value: string): TemporalStub {
+      return new TemporalStub(name, value)
+    }
+  }
+}
+
 function metadataTransaction(
   metadata: Record<string, unknown>,
 ): OfflineTransaction {
@@ -391,6 +405,101 @@ function metadataTransaction(
     version: 1,
   }
 }
+
+it(`rejects cyclic metadata with a bounded JSON-style error`, () => {
+  const metadata: Record<string, unknown> = {}
+  metadata.self = metadata
+
+  expect(() =>
+    new TransactionSerializer({}).serialize(metadataTransaction(metadata)),
+  ).toThrowError(new TypeError(`Converting circular structure to JSON`))
+})
+
+it(`rejects cyclic mutation values with a bounded JSON-style error`, () => {
+  const collection = { id: `cycle-writer` } as any
+  const modified: Record<string, unknown> = { id: `one` }
+  modified.self = modified
+  const transaction: OfflineTransaction = {
+    ...metadataTransaction({}),
+    mutations: [
+      {
+        globalKey: `cycle-writer:one`,
+        type: `insert`,
+        modified,
+        original: {},
+        changes: modified,
+        collection,
+      } as PendingMutation,
+    ],
+    keys: [`cycle-writer:one`],
+  }
+
+  expect(() =>
+    new TransactionSerializer({ rows: collection }).serialize(transaction),
+  ).toThrowError(new TypeError(`Converting circular structure to JSON`))
+})
+
+it(`preserves repeated references that do not form a cycle`, () => {
+  const shared = { nested: [`value`] }
+  const transaction = metadataTransaction({ left: shared, right: shared })
+
+  const wire = JSON.parse(new TransactionSerializer({}).serialize(transaction))
+
+  expect(wire.metadata).toEqual({
+    left: { nested: [`value`] },
+    right: { nested: [`value`] },
+  })
+})
+
+it(`preserves spoofed Temporal tags as data while restoring branded values`, async () => {
+  class PlainDateStub {
+    readonly #value: string
+
+    constructor(value: string) {
+      this.#value = value
+    }
+
+    static from(value: string): PlainDateStub {
+      return new PlainDateStub(value)
+    }
+
+    get [Symbol.toStringTag](): `Temporal.PlainDate` {
+      return `Temporal.PlainDate`
+    }
+
+    toString(): string {
+      return this.#value
+    }
+  }
+
+  const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
+  const previousTemporal = temporalGlobal.Temporal
+  temporalGlobal.Temporal = { PlainDate: PlainDateStub }
+  const storage = new FakeStorageAdapter()
+  const outbox = new OutboxManager(storage, {})
+  const transaction = metadataTransaction({
+    spoofed: {
+      keep: `user data`,
+      [Symbol.toStringTag]: `Temporal.PlainDate`,
+      toString: () => `not-a-date`,
+    },
+    genuine: new PlainDateStub(`2026-09-22`),
+  })
+
+  try {
+    await outbox.add(transaction)
+    const restored = await outbox.get(transaction.id)
+
+    expect(restored?.metadata).toMatchObject({
+      spoofed: { keep: `user data` },
+      genuine: expect.any(PlainDateStub),
+    })
+    expect(String((restored?.metadata as any).genuine)).toBe(`2026-09-22`)
+  } finally {
+    if (previousTemporal === undefined) delete temporalGlobal.Temporal
+    else temporalGlobal.Temporal = previousTemporal
+  }
+})
 
 it(`rejects native scalars before storage when global restoration is unavailable`, async () => {
   const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
@@ -428,16 +537,28 @@ it(`uses one validated Temporal tag when writing a marker`, () => {
   const temporalGlobal = globalThis as { Temporal?: Record<string, unknown> }
   const previousTemporal = temporalGlobal.Temporal
   let reads = 0
-  temporalGlobal.Temporal = {
-    PlainDate: { from: (value: string) => value },
-  }
-  const value = {
+  class PlainDateStub {
+    readonly #value: string
+
+    constructor(value: string) {
+      this.#value = value
+    }
+
+    static from(value: string): PlainDateStub {
+      return new PlainDateStub(value)
+    }
+
     get [Symbol.toStringTag]() {
       reads++
       return reads === 1 ? `Temporal.PlainDate` : `Temporal.Invalid`
-    },
-    toString: () => `2026-09-16`,
+    }
+
+    toString(): string {
+      return this.#value
+    }
   }
+  temporalGlobal.Temporal = { PlainDate: PlainDateStub }
+  const value = new PlainDateStub(`2026-09-16`)
 
   try {
     const wire = JSON.parse(
@@ -656,10 +777,7 @@ it(`preserves native scalar identity across storage restart`, async () => {
   ).Temporal
   ;(globalThis as { Temporal?: Record<string, unknown> }).Temporal =
     Object.fromEntries(
-      temporalCases.map(([name]) => [
-        name,
-        { from: (value: string) => new TemporalStub(name, value) },
-      ]),
+      temporalCases.map(([name]) => [name, temporalStubConstructor(name)]),
     )
 
   const values = Object.fromEntries(
