@@ -46,7 +46,8 @@ const synchronizedOutput = {
  * `electricCollectionOptions` carries Electric shape rows into sync change
  * messages as schema output. `getKey`, `compare`, Collection rows, and handler
  * mutations observe that output. Public insert and update entry points accept
- * schema input.
+ * schema input. Electric deliberately keeps its public Collection key domain
+ * at `string | number`; it does not infer the schema's branded ID type.
  *
  * The assertions observe those production type paths after overload
  * resolution. Hostile controls reject an untransformed shape row at the sync
@@ -78,6 +79,7 @@ describe(`Electric schema transform conformance`, () => {
     const collection = createCollection(options)
 
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[RowOutput]>()
+    expectTypeOf(options.getKey).returns.toEqualTypeOf<string | number>()
     expectTypeOf(collection.toArray).toEqualTypeOf<
       Array<WithVirtualProps<RowOutput, string | number>>
     >()
@@ -95,7 +97,14 @@ describe(`Electric schema transform conformance`, () => {
     >()
 
     const assertShapeBoundary = (write: SyncParams[`write`]) => {
+      const wrongDate = {
+        ...synchronizedOutput,
+        createdAt: rawInput.createdAt,
+      }
+
       write({ type: `insert`, value: synchronizedOutput })
+      // @ts-expect-error one untransformed field cannot cross the sync boundary
+      write({ type: `insert`, value: wrongDate })
       // @ts-expect-error an untransformed shape row is not collection output
       write({ type: `insert`, value: rawInput })
     }

@@ -47,7 +47,8 @@ const synchronizedOutput = {
  * `rxdbCollectionOptions` requires the RxDB document type to equal schema
  * output because RxDB supplies sync rows. `getKey`, `compare`, Collection rows,
  * and sync change messages observe that output. Public insert and update entry
- * points accept schema input.
+ * points accept schema input. RxDB keys remain strings because the runtime
+ * reads its string-only `primaryPath`; schema branding does not narrow them.
  *
  * The assertions observe those production type paths after option and
  * Collection inference. Hostile controls reject an input row at the sync
@@ -74,6 +75,7 @@ describe(`RxDB schema transform conformance`, () => {
     const collection = createCollection(options)
 
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[RowOutput]>()
+    expectTypeOf(options.getKey).returns.toEqualTypeOf<string>()
     expectTypeOf(collection.toArray).toEqualTypeOf<
       Array<WithVirtualProps<RowOutput, string>>
     >()
@@ -91,7 +93,14 @@ describe(`RxDB schema transform conformance`, () => {
     >()
 
     const assertRxDBBoundary = (write: SyncParams[`write`]) => {
+      const wrongDate = {
+        ...synchronizedOutput,
+        createdAt: rawInput.createdAt,
+      }
+
       write({ type: `insert`, value: synchronizedOutput })
+      // @ts-expect-error one untransformed field cannot cross the sync boundary
+      write({ type: `insert`, value: wrongDate })
       // @ts-expect-error RxDB sync must not publish schema input rows
       write({ type: `insert`, value: rawInput })
     }

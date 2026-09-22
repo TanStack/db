@@ -120,6 +120,8 @@ const synchronizedOutput = {
  * schema, `deserializationSchema` maps SQLite rows to that schema's exact
  * output. In both paths, public mutations accept the Collection schema input;
  * compare, serializer, Collection rows, and sync change messages use output.
+ * PowerSync keys are strings because every runtime key comes from the table's
+ * string `id`; schema branding does not narrow the public Collection key.
  *
  * The assertions observe both paths after TypeScript resolves the public
  * options and Collection types. Hostile controls reject SQLite values at an
@@ -154,6 +156,7 @@ describe(`PowerSync schema transform conformance`, () => {
     })
     const collection = createCollection(options)
 
+    expectTypeOf(options.getKey).returns.toEqualTypeOf<string>()
     expectTypeOf(collection.toArray).toEqualTypeOf<
       Array<WithVirtualProps<SqliteOutput, string>>
     >()
@@ -201,6 +204,7 @@ describe(`PowerSync schema transform conformance`, () => {
     })
     const collection = createCollection(options)
 
+    expectTypeOf(options.getKey).returns.toEqualTypeOf<string>()
     expectTypeOf(collection.toArray).toEqualTypeOf<
       Array<WithVirtualProps<ApplicationOutput, string>>
     >()
@@ -218,7 +222,14 @@ describe(`PowerSync schema transform conformance`, () => {
     >()
 
     const assertSyncBoundary = (write: SyncParams[`write`]) => {
+      const wrongDate = {
+        ...synchronizedOutput,
+        created_at: sqliteInput.created_at,
+      }
+
       write({ type: `insert`, value: synchronizedOutput })
+      // @ts-expect-error one SQLite field cannot cross the sync boundary
+      write({ type: `insert`, value: wrongDate })
       // @ts-expect-error SQLite/mutation input is not synchronized output
       write({ type: `insert`, value: sqliteInput })
     }
@@ -250,5 +261,21 @@ describe(`PowerSync schema transform conformance`, () => {
 
     // @ts-expect-error deserialization must produce collection output
     acceptDeserializer(wrongDeserializer)
+
+    // The member probe isolates the schema relation. This public call also
+    // protects overload and configuration-union selection.
+    powerSyncCollectionOptions({
+      database,
+      table: appSchema.props.rows,
+      schema: applicationSchema,
+      // @ts-expect-error public options require exact collection output
+      deserializationSchema: wrongDeserializer,
+      onDeserializationError: () => {},
+      serializer: {
+        created_at: (value) => value.toISOString(),
+        score: (value) => value,
+        enabled: (value) => (value ? 1 : 0),
+      },
+    })
   })
 })

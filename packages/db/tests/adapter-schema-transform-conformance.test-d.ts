@@ -66,7 +66,9 @@ type ItemOf<T> = T extends Array<infer U> ? U : T
  * `@ts-expect-error` controls send an input-only row through the sync boundary
  * or an invalid value through the mutation boundary. This partial oracle does
  * not execute schema parsing, local storage, change publication, or provider
- * I/O. Package-specific files map the same law to their production paths.
+ * I/O. Package-specific files map the same law to their production paths. Each
+ * package owns its fixture so the oracle crosses that package's real compile
+ * boundary without importing test types from a sibling package.
  */
 describe(`local adapter schema transform conformance`, () => {
   it(`keeps local-only synchronized rows on the output side`, () => {
@@ -104,7 +106,14 @@ describe(`local adapter schema transform conformance`, () => {
     >()
 
     const assertBoundary = (write: SyncParams[`write`]) => {
+      const wrongDate = {
+        ...synchronizedOutput,
+        createdAt: rawInput.createdAt,
+      }
+
       write({ type: `insert`, value: synchronizedOutput })
+      // @ts-expect-error one untransformed field cannot cross the sync boundary
+      write({ type: `insert`, value: wrongDate })
       // @ts-expect-error input-only rows have not crossed the schema boundary
       write({ type: `insert`, value: rawInput })
     }
@@ -153,7 +162,14 @@ describe(`local adapter schema transform conformance`, () => {
     >()
 
     const assertBoundary = (write: SyncParams[`write`]) => {
+      const wrongDate = {
+        ...synchronizedOutput,
+        createdAt: rawInput.createdAt,
+      }
+
       write({ type: `insert`, value: synchronizedOutput })
+      // @ts-expect-error one untransformed field cannot cross the sync boundary
+      write({ type: `insert`, value: wrongDate })
       // @ts-expect-error storage parsing must produce schema output rows
       write({ type: `insert`, value: rawInput })
     }
