@@ -18,6 +18,7 @@ import {
   decodePersistedStorageKey,
   encodePersistedStorageKey,
   persistedCollectionOptions,
+  toTransportedLoadSubsetOptions,
 } from '../src'
 import type {
   PersistedCollectionCoordinator,
@@ -1005,6 +1006,52 @@ describe(`persistedCollectionOptions`, () => {
     } finally {
       unregisterOwner()
     }
+  })
+
+  it(`projects lexical comparison options without locale-only wire fields`, () => {
+    const projected = toTransportedLoadSubsetOptions({
+      orderBy: [
+        {
+          expression: new IR.PropRef([`todos`, `title`]),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+            locale: `en`,
+            localeOptions: { sensitivity: `base` },
+          },
+        },
+      ],
+    } as unknown as LoadSubsetOptions)
+
+    expect(projected.orderBy?.[0]?.compareOptions).toEqual({
+      direction: `asc`,
+      nulls: `last`,
+      stringSort: `lexical`,
+    })
+  })
+
+  it(`preserves locale comparison fields when the optional sort mode is omitted`, () => {
+    const projected = toTransportedLoadSubsetOptions({
+      orderBy: [
+        {
+          expression: new IR.PropRef([`todos`, `title`]),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+            locale: `en`,
+            localeOptions: { sensitivity: `base` },
+          },
+        },
+      ],
+    } as LoadSubsetOptions)
+
+    expect(projected.orderBy?.[0]?.compareOptions).toEqual({
+      direction: `asc`,
+      nulls: `last`,
+      locale: `en`,
+      localeOptions: { sensitivity: `base` },
+    })
   })
 
   it(`reports and rethrows a single-process owner unload rejection`, async () => {

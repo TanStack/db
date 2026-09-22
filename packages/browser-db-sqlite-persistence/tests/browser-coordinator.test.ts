@@ -695,6 +695,33 @@ describe(`BrowserCollectionCoordinator`, () => {
       expect(received.length).toBe(0)
       coord.dispose()
     })
+
+    it(`ignores unsupported Browser RPC request types without answering`, async () => {
+      const coordinator = createCoordinator()
+      coordinator.isLeader = () => true
+      const postMessage = vi.fn()
+      const internals = coordinator as unknown as {
+        onChannelMessage: (message: unknown) => void
+        channel: { postMessage: (message: unknown) => void }
+      }
+      internals.channel.postMessage = postMessage
+
+      internals.onChannelMessage({
+        v: 1,
+        dbName: `test-db`,
+        collectionId: `todos`,
+        senderId: `future-browser-peer`,
+        ts: Date.now(),
+        payload: {
+          type: `rpc:futureProtocol:req`,
+          rpcId: `future-browser-rpc`,
+        },
+      })
+      await flush(0)
+
+      expect(postMessage).not.toHaveBeenCalled()
+      coordinator.dispose()
+    })
   })
 
   describe(`RPC - applyLocalMutations`, () => {
@@ -3460,7 +3487,14 @@ describe(`BrowserCollectionCoordinator`, () => {
 
     it(`ignores a lower-term Browser heartbeat without replaying to its stale leader`, async () => {
       const coordinator = createCoordinator()
-      coordinator.subscribe(`todos`, () => {})
+      let forwardedHeartbeats = 0
+      coordinator.subscribe(`todos`, (message) => {
+        if (
+          (message.payload as { type?: unknown }).type === `leader:heartbeat`
+        ) {
+          forwardedHeartbeats++
+        }
+      })
       coordinator.isLeader = () => false
       const internals = coordinator as unknown as {
         onChannelMessage: (message: unknown) => void
@@ -3498,10 +3532,12 @@ describe(`BrowserCollectionCoordinator`, () => {
           leaderId: state?.leaderId,
           latestTerm: state?.latestTerm,
           replayCalls: replay.mock.calls.length,
+          forwardedHeartbeats,
         }).toEqual({
           leaderId: `remote-browser-b`,
           latestTerm: 2,
           replayCalls: 0,
+          forwardedHeartbeats: 1,
         })
       } finally {
         coordinator.dispose()

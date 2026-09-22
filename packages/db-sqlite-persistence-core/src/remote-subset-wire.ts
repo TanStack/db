@@ -413,27 +413,29 @@ function projectCompareOptions(
     }
     projected.stringSort = stringSort.value
   }
-  const locale = readDataProperty(source, `locale`, `${path}.locale`)
-  if (locale.present && locale.value !== undefined) {
-    if (typeof locale.value !== `string`) {
-      throw new RemoteSubsetWireValueError(
-        `${path}.locale`,
-        describe(locale.value),
+  if (projected.stringSort !== `lexical`) {
+    const locale = readDataProperty(source, `locale`, `${path}.locale`)
+    if (locale.present && locale.value !== undefined) {
+      if (typeof locale.value !== `string`) {
+        throw new RemoteSubsetWireValueError(
+          `${path}.locale`,
+          describe(locale.value),
+        )
+      }
+      projected.locale = locale.value
+    }
+    const localeOptions = readDataProperty(
+      source,
+      `localeOptions`,
+      `${path}.localeOptions`,
+    )
+    if (localeOptions.present && localeOptions.value !== undefined) {
+      projected.localeOptions = projectWireRecord(
+        localeOptions.value,
+        `${path}.localeOptions`,
+        state,
       )
     }
-    projected.locale = locale.value
-  }
-  const localeOptions = readDataProperty(
-    source,
-    `localeOptions`,
-    `${path}.localeOptions`,
-  )
-  if (localeOptions.present && localeOptions.value !== undefined) {
-    projected.localeOptions = projectWireRecord(
-      localeOptions.value,
-      `${path}.localeOptions`,
-      state,
-    )
   }
   const result = projected as RemoteSubsetWireCompareOptions
   state.compareOptions.set(source, result)

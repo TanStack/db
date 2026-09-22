@@ -910,13 +910,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
     // Handle RPC requests (leader only)
     if (type && type.endsWith(`:req`)) {
+      if (!isRPCRequest(payload)) return
       const collectionId = envelope.collectionId
       if (this.isLeader(collectionId)) {
-        void this.handleRPCRequest(
-          collectionId,
-          payload as RPCRequest,
-          envelope.senderId,
-        )
+        void this.handleRPCRequest(collectionId, payload, envelope.senderId)
       }
       return
     }
@@ -1929,6 +1926,21 @@ function isProtocolEnvelope(data: unknown): data is ProtocolEnvelope<unknown> {
     typeof record.senderId === `string` &&
     typeof record.ts === `number`
   )
+}
+
+function isRPCRequest(payload: unknown): payload is RPCRequest {
+  if (!payload || typeof payload !== `object`) return false
+  switch ((payload as { type?: unknown }).type) {
+    case `rpc:ensureRemoteSubset:req`:
+    case `rpc:releaseRemoteSubset:req`:
+    case `rpc:ensurePersistedIndex:req`:
+    case `rpc:applyLocalMutations:req`:
+    case `rpc:applyCommittedTx:req`:
+    case `rpc:pullSince:req`:
+      return true
+    default:
+      return false
+  }
 }
 
 function sleep(ms: number): Promise<void> {

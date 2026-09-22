@@ -820,6 +820,37 @@ describe(`electron sqlite persistence bridge`, () => {
     },
   )
 
+  it(`ignores unsupported Electron RPC request types without answering`, async () => {
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `electron-future-rpc`,
+      adapter: createElectronCoordinatorTestAdapter(),
+    })
+    registerCleanup(() => coordinator.dispose())
+    coordinator.isLeader = () => true
+    const postMessage = vi.fn()
+    const internals = coordinator as unknown as {
+      onChannelMessage: (message: unknown) => void
+      channel: { postMessage: (message: unknown) => void }
+    }
+    internals.channel.postMessage = postMessage
+
+    internals.onChannelMessage({
+      v: 1,
+      dbName: `electron-future-rpc`,
+      collectionId: `todos`,
+      senderId: `future-electron-peer`,
+      ts: Date.now(),
+      payload: {
+        type: `rpc:futureProtocol:req`,
+        rpcId: `future-electron-rpc`,
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(postMessage).not.toHaveBeenCalled()
+  })
+
   it(`fails indeterminate instead of retrying a committed mutation across leaders`, async () => {
     const bEffects: Array<PersistedTx> = []
     const coordinator = new ElectronCollectionCoordinator({
@@ -3170,6 +3201,12 @@ describe(`electron sqlite persistence bridge`, () => {
       replayRemoteSubsetAcquisitions: (collectionId: string) => Promise<void>
     }
     internals.acquireLeadership = async () => {}
+    let forwardedHeartbeats = 0
+    coordinator.subscribe(`todos`, (message) => {
+      if ((message.payload as { type?: unknown }).type === `leader:heartbeat`) {
+        forwardedHeartbeats++
+      }
+    })
     const replay = vi.fn(() => Promise.resolve())
     internals.replayRemoteSubsetAcquisitions = replay
     const heartbeat = (leaderId: string, term: number) =>
@@ -3197,10 +3234,12 @@ describe(`electron sqlite persistence bridge`, () => {
       leaderId: state?.leaderId,
       latestTerm: state?.latestTerm,
       replayCalls: replay.mock.calls.length,
+      forwardedHeartbeats,
     }).toEqual({
       leaderId: `remote-electron-b`,
       latestTerm: 2,
       replayCalls: 0,
+      forwardedHeartbeats: 1,
     })
   })
 
