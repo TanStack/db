@@ -2630,6 +2630,100 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
+  it(`applies on-demand subsets even when the full baseline is incompatible`, async () => {
+    const hydrateUsing = async (
+      route: `loadSubset` | `forceReloadSubset`,
+    ): Promise<boolean> => {
+      const adapter = createRecordingAdapter([
+        { id: `1`, title: `Locally cached` },
+      ])
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      adapter.loadResumeSnapshot = async (...args) => ({
+        ...(await loadResumeSnapshot(...args)),
+        keySet: { status: `incompatible` },
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `incompatible-${route}`,
+          syncMode: `on-demand`,
+          getKey: (item) => item.id,
+          persistence: { adapter },
+        }),
+      )
+
+      try {
+        collection.startSyncImmediate()
+        await vi.waitFor(() =>
+          expect(adapter.loadResumeSnapshotCalls.length).toBeGreaterThan(0),
+        )
+        expect(collection.has(`1`)).toBe(false)
+        if (route === `loadSubset`) {
+          await collection._sync.loadSubset({})
+        } else {
+          await collection.utils.forceReloadSubset!({})
+        }
+        return collection.has(`1`)
+      } finally {
+        await collection.cleanup()
+      }
+    }
+
+    expect(
+      await Promise.all([
+        hydrateUsing(`loadSubset`),
+        hydrateUsing(`forceReloadSubset`),
+      ]),
+    ).toEqual([true, true])
+  })
+
+  it(`keeps resume certification consistent after an owned no-op commit`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    let persistenceCapability:
+      | SyncMetadataApi<string>[`persistence`]
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `owned-no-op-generation`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, commit, markReady, metadata }) => {
+            remoteBegin = begin
+            remoteCommit = commit
+            persistenceCapability = metadata?.persistence
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() =>
+        expect(persistenceCapability).toMatchObject({
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+        }),
+      )
+
+      remoteBegin?.()
+      persistenceCapability?.resumeSnapshot.expectCurrentCommit()
+      const applied = remoteCommit?.()
+      if (applied !== true) await applied
+
+      expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+      await persistenceCapability?.resumeSnapshot.certify()
+      expect(persistenceCapability?.resumeSnapshot.getKeySetEvidence()).toEqual(
+        { status: `consistent` },
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`invalidates resume evidence when storage advances outside the owned commit generation`, async () => {
     const adapter = createRecordingAdapter()
     let durableGeneration = {

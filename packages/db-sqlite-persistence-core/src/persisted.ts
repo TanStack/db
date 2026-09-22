@@ -311,7 +311,6 @@ export interface PersistenceAdapter {
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
-    keySet?: PersistedKeySetEvidence
   }>
 }
 
@@ -1396,7 +1395,10 @@ class PersistedCollectionRuntime<
       }
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
 
-      if (this.persistedKeySetEvidence?.status !== `incompatible`) {
+      if (
+        !config.bindKeySetEvidence ||
+        this.persistedKeySetEvidence?.status !== `incompatible`
+      ) {
         this.applyRowsToCollection(rows)
       }
     } finally {

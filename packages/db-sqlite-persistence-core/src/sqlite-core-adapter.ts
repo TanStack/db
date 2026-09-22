@@ -1194,7 +1194,6 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         : []
       const { latestRowVersion, keySet } = await this.readKeySetEvidence(
         collectionId,
-        tableMapping,
         transactionDriver,
       )
       const collectionMetadataRows = await transactionDriver.query<{
@@ -1648,19 +1647,31 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
-    keySet?: PersistedKeySetEvidence
   }> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
-    const [position, version] = await Promise.all([
+    await this.ensureCollectionReady(collectionId)
+    const [position, latestRowVersion] = await Promise.all([
       this.readStreamPosition(collectionId, this.driver),
-      this.readKeySetEvidence(collectionId, tableMapping, this.driver),
+      this.readLatestRowVersion(collectionId, this.driver),
     ])
 
     return {
       ...position,
-      latestRowVersion: version.latestRowVersion,
-      keySet: version.keySet,
+      latestRowVersion,
     }
+  }
+
+  private async readLatestRowVersion(
+    collectionId: string,
+    driver: SQLiteDriver,
+  ): Promise<number> {
+    const versionRows = await driver.query<{ latest_row_version: number }>(
+      `SELECT latest_row_version
+       FROM collection_version
+       WHERE collection_id = ?
+       LIMIT 1`,
+      [collectionId],
+    )
+    return versionRows[0]?.latest_row_version ?? 0
   }
 
   private async readStreamPosition(
@@ -1693,13 +1704,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
   private async readKeySetEvidence(
     collectionId: string,
-    tableMapping: CollectionTableMapping,
     driver: SQLiteDriver,
   ): Promise<{
     latestRowVersion: number
     keySet: PersistedKeySetEvidence
   }> {
-    const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const versionRows = await driver.query<{
       latest_row_version: number
       key_set_evidence_available: number
@@ -1708,31 +1717,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       `SELECT
          latest_row_version,
          key_set_evidence_available,
-         CASE
-           WHEN key_set_evidence_available = 0 THEN 0
-           WHEN key_set_evidence_incompatible = 1 THEN 1
-           WHEN EXISTS (
-             SELECT 1
-             FROM ${collectionTableSql} AS actual
-             LEFT JOIN collection_expected_keys AS expected
-               ON expected.collection_id = ?
-              AND expected.key = actual.key
-             WHERE expected.key IS NULL
-             UNION ALL
-             SELECT 1
-             FROM collection_expected_keys AS expected
-             LEFT JOIN ${collectionTableSql} AS actual
-               ON actual.key = expected.key
-             WHERE expected.collection_id = ?
-               AND actual.key IS NULL
-             LIMIT 1
-           ) THEN 1
-           ELSE 0
-         END AS key_set_incompatible
+         key_set_evidence_incompatible AS key_set_incompatible
        FROM collection_version
        WHERE collection_id = ?
        LIMIT 1`,
-      [collectionId, collectionId, collectionId],
+      [collectionId],
     )
     const version = versionRows[0]
 

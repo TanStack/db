@@ -41,19 +41,22 @@ function toBinding(value: unknown): string | number | bigint | null {
 function createDriver(
   database: DatabaseSync,
   failTransactionRun?: (sql: string) => boolean,
+  observeQuery?: (sql: string) => void,
 ): SQLiteDriver {
   const driver: SQLiteDriver = {
     exec: (sql) => {
       database.exec(sql)
       return Promise.resolve()
     },
-    query: (sql, params = []) =>
-      Promise.resolve(
+    query: (sql, params = []) => {
+      observeQuery?.(sql)
+      return Promise.resolve(
         database
           .prepare(sql)
           .all(...params.map(toBinding))
           .map((row) => ({ ...row })) as Array<never>,
-      ),
+      )
+    },
     run: (sql, params = []) => {
       database.prepare(sql).run(...params.map(toBinding))
       return Promise.resolve()
@@ -229,6 +232,87 @@ async function observeCachedSchemaState(
  * cursor; those remain separate driver-contract and Electric recovery owners.
  */
 describe(`SQLite resume snapshots`, () => {
+  it(`reads key-set evidence without rescanning key membership`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const collectionId = `evidence-work`
+      const tableName = createPersistedTableName(collectionId, `c`)
+      let keyEvidenceReads = 0
+      let keyMembershipScans = 0
+      const driver = createDriver(database, undefined, (sql) => {
+        if (sql.includes(`key_set_evidence_available`)) keyEvidenceReads += 1
+        if (sql.includes(`FROM collection_expected_keys AS expected`)) {
+          keyMembershipScans += 1
+        }
+      })
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: 1, value: { id: 1, name: `one` } }],
+      })
+
+      const observeWork = () => ({ keyEvidenceReads, keyMembershipScans })
+      const resetWork = () => {
+        keyEvidenceReads = 0
+        keyMembershipScans = 0
+      }
+
+      resetWork()
+      const position = await adapter.getStreamPosition(collectionId)
+      const leadershipClaim = observeWork()
+
+      resetWork()
+      const consistent = await adapter.loadResumeSnapshot(collectionId, {
+        includeRows: false,
+      })
+      const consistentSnapshot = observeWork()
+
+      await driver.run(`DELETE FROM "${tableName}"`)
+      resetWork()
+      const incompatible = await adapter.loadResumeSnapshot(collectionId, {
+        includeRows: false,
+      })
+      const incompatibleSnapshot = observeWork()
+
+      expect({
+        position,
+        leadershipClaim,
+        consistentKeySet: consistent.keySet,
+        consistentSnapshot,
+        incompatibleKeySet: incompatible.keySet,
+        incompatibleSnapshot,
+      }).toEqual({
+        position: {
+          latestTerm: 1,
+          latestSeq: 1,
+          latestRowVersion: 1,
+        },
+        leadershipClaim: {
+          keyEvidenceReads: 0,
+          keyMembershipScans: 0,
+        },
+        consistentKeySet: { status: `consistent` },
+        consistentSnapshot: {
+          keyEvidenceReads: 1,
+          keyMembershipScans: 0,
+        },
+        incompatibleKeySet: { status: `incompatible` },
+        incompatibleSnapshot: {
+          keyEvidenceReads: 1,
+          keyMembershipScans: 0,
+        },
+      })
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
   it(`does not amplify legacy writes while key-set evidence is unavailable`, async () => {
     const database = new DatabaseSync(`:memory:`)
     let primaryFailure: unknown
