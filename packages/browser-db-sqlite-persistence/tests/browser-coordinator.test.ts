@@ -23,7 +23,11 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * without losing metadata. A mutating RPC may replay only through the same
  * known leader and term, and one envelope id cannot identify two mutation
  * request types. Remote subset request data must be clone-safe, and each
- * accepted physical acquisition creates one exact acquisition lease.
+ * accepted physical acquisition creates one exact acquisition lease. A
+ * passive heartbeat can update a route, but only a local participant may join
+ * that collection's leadership. Durable stream positions advance after the
+ * adapter accepts the write, and failed release transport retains its retry
+ * route.
  *
  * The adapter call logs, transport controls, owner callbacks, and internal-map
  * snapshots are focused reference ledgers. Histories vary local and follower
@@ -704,6 +708,52 @@ describe(`BrowserCollectionCoordinator`, () => {
       coord2.dispose()
     })
 
+    it(`records an unrelated heartbeat without joining that collection's leadership`, async () => {
+      const adapter = createStubAdapter()
+      const getStreamPosition = vi.spyOn(adapter, `getStreamPosition`)
+      const coordinator = createCoordinator(adapter)
+      coordinator.subscribe(`todos`, () => {})
+      await flush(50)
+
+      injectBroadcastMessage(`tsdb:coord:test-db`, {
+        v: 1,
+        dbName: `test-db`,
+        collectionId: `notes`,
+        senderId: `notes-owner`,
+        ts: Date.now(),
+        payload: {
+          type: `leader:heartbeat`,
+          term: 4,
+          leaderId: `notes-owner`,
+          latestSeq: 3,
+          latestRowVersion: 8,
+        },
+      })
+      await flush(0)
+
+      const state = (
+        coordinator as unknown as {
+          collections: Map<
+            string,
+            { leaderId: string | null; latestTerm: number }
+          >
+        }
+      ).collections.get(`notes`)
+      expect({
+        leaderId: state?.leaderId,
+        latestTerm: state?.latestTerm,
+        joinedLeadership: coordinator.isLeader(`notes`),
+        streamPositionCollections: getStreamPosition.mock.calls.map(
+          ([collectionId]) => collectionId,
+        ),
+      }).toEqual({
+        leaderId: `notes-owner`,
+        latestTerm: 4,
+        joinedLeadership: false,
+        streamPositionCollections: [`todos`],
+      })
+    })
+
     it(`returns unique node ids`, () => {
       const coord1 = createCoordinator()
       const coord2 = createCoordinator()
@@ -1253,6 +1303,61 @@ describe(`BrowserCollectionCoordinator`, () => {
         follower.dispose()
       }
     })
+
+    it(`reuses the durable stream position after local mutation persistence fails`, async () => {
+      const adapter = createStubAdapter()
+      const persistenceError = new Error(`local disk full`)
+      const attemptedPositions: Array<{ seq: number; rowVersion: number }> = []
+      adapter.applyCommittedTx = vi.fn((_collectionId, tx) => {
+        attemptedPositions.push({ seq: tx.seq, rowVersion: tx.rowVersion })
+        return attemptedPositions.length === 1
+          ? Promise.reject(persistenceError)
+          : Promise.resolve()
+      })
+      const coordinator = createCoordinator(adapter)
+      coordinator.subscribe(`todos`, () => {})
+      await flush(50)
+
+      try {
+        await expect(
+          coordinator.requestApplyLocalMutations(`todos`, [
+            {
+              mutationId: `failed-local-mutation`,
+              type: `insert`,
+              key: `failed-local-mutation`,
+              value: { id: `failed-local-mutation` },
+            },
+          ]),
+        ).rejects.toMatchObject({ cause: persistenceError })
+
+        const response = await coordinator.requestApplyLocalMutations(`todos`, [
+          {
+            mutationId: `successful-local-mutation`,
+            type: `insert`,
+            key: `successful-local-mutation`,
+            value: { id: `successful-local-mutation` },
+          },
+        ])
+
+        expect({ attemptedPositions, response }).toEqual({
+          attemptedPositions: [
+            { seq: 1, rowVersion: 1 },
+            { seq: 1, rowVersion: 1 },
+          ],
+          response: {
+            type: `rpc:applyLocalMutations:res`,
+            rpcId: expect.any(String),
+            ok: true,
+            term: 1,
+            seq: 1,
+            latestRowVersion: 1,
+            acceptedMutationIds: [`successful-local-mutation`],
+          },
+        })
+      } finally {
+        coordinator.dispose()
+      }
+    })
   })
 
   describe(`RPC - applyCommittedTx`, () => {
@@ -1441,6 +1546,66 @@ describe(`BrowserCollectionCoordinator`, () => {
       } finally {
         coordinator.dispose()
         vi.useRealTimers()
+      }
+    })
+
+    it(`reuses the durable stream position after a committed transaction fails`, async () => {
+      const adapter = createStubAdapter()
+      const persistenceError = new Error(`disk full`)
+      const attemptedPositions: Array<{
+        term: number
+        seq: number
+        rowVersion: number
+      }> = []
+      adapter.applyCommittedTx = vi.fn((_collectionId, tx) => {
+        attemptedPositions.push({
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: tx.rowVersion,
+        })
+        return attemptedPositions.length === 1
+          ? Promise.reject(persistenceError)
+          : Promise.resolve()
+      })
+      const coordinator = createCoordinator(adapter)
+      coordinator.subscribe(`todos`, () => {})
+      await flush(50)
+
+      try {
+        await expect(
+          coordinator.requestApplyCommittedTx(`todos`, {
+            txId: `failed-source-tx`,
+            term: 0,
+            seq: 0,
+            rowVersion: 0,
+            mutations: [],
+          }),
+        ).rejects.toMatchObject({ cause: persistenceError })
+
+        const response = await coordinator.requestApplyCommittedTx(`todos`, {
+          txId: `successful-source-tx`,
+          term: 0,
+          seq: 0,
+          rowVersion: 0,
+          mutations: [],
+        })
+
+        expect({ attemptedPositions, response }).toEqual({
+          attemptedPositions: [
+            { term: 1, seq: 1, rowVersion: 1 },
+            { term: 1, seq: 1, rowVersion: 1 },
+          ],
+          response: {
+            type: `rpc:applyCommittedTx:res`,
+            rpcId: expect.any(String),
+            ok: true,
+            term: 1,
+            seq: 1,
+            latestRowVersion: 1,
+          },
+        })
+      } finally {
+        coordinator.dispose()
       }
     })
 
@@ -2399,6 +2564,70 @@ describe(`BrowserCollectionCoordinator`, () => {
         process.off(`unhandledRejection`, onUnhandled)
         unregisterOwner()
         coordinator.dispose()
+      }
+    })
+
+    it(`retains a follower acquisition when its release transport fails`, async () => {
+      const leader = createCoordinator()
+      const follower = createCoordinator()
+      leader.subscribe(`todos`, () => {})
+      follower.subscribe(`todos`, () => {})
+      await flush(50)
+      const owner = Object.assign(
+        vi.fn(() => Promise.resolve()),
+        {
+          unloadSubset: vi.fn(() => Promise.resolve()),
+          onError: vi.fn(),
+        },
+      )
+      const unregisterOwner = leader.registerRemoteSubsetOwner(`todos`, owner)
+      const options: LoadSubsetOptions = { limit: 1 }
+      const followerInternals = follower as unknown as {
+        sendRPC: (collectionId: string, request: unknown) => Promise<unknown>
+        outboundRemoteSubsetAcquisitions: Map<string, unknown>
+      }
+
+      try {
+        await follower.requestEnsureRemoteSubset(`todos`, options)
+        const sendRPC = followerInternals.sendRPC.bind(follower)
+        let releaseAttempts = 0
+        followerInternals.sendRPC = async (collectionId, request) => {
+          if (
+            (request as { type?: string }).type ===
+            `rpc:releaseRemoteSubset:req`
+          ) {
+            releaseAttempts++
+            if (releaseAttempts === 1) {
+              return {
+                type: `rpc:releaseRemoteSubset:res`,
+                rpcId: (request as { rpcId: string }).rpcId,
+                ok: false,
+                error: `transient release transport failure`,
+              }
+            }
+          }
+          return sendRPC(collectionId, request)
+        }
+
+        await expect(
+          follower.requestReleaseRemoteSubset(`todos`, options),
+        ).rejects.toThrow(`transient release transport failure`)
+        expect({
+          releaseAttempts,
+          retained: followerInternals.outboundRemoteSubsetAcquisitions.size,
+          unloads: owner.unloadSubset.mock.calls.length,
+        }).toEqual({ releaseAttempts: 1, retained: 1, unloads: 0 })
+
+        await follower.requestReleaseRemoteSubset(`todos`, options)
+        expect({
+          releaseAttempts,
+          retained: followerInternals.outboundRemoteSubsetAcquisitions.size,
+          unloads: owner.unloadSubset.mock.calls.length,
+        }).toEqual({ releaseAttempts: 2, retained: 0, unloads: 1 })
+      } finally {
+        unregisterOwner()
+        leader.dispose()
+        follower.dispose()
       }
     })
 

@@ -101,6 +101,7 @@ type PendingRPC = {
 }
 
 type CollectionState = {
+  participatesInLeadership: boolean
   isLeader: boolean
   leaderId: string | null
   lockAbortController: AbortController | null
@@ -174,6 +175,7 @@ type OutboundRemoteSubsetAcquisition = {
   localOptions: TransportedLoadSubsetOptions
   acquiredLeaderId: string | null
   inFlight: Promise<void> | null
+  release: Promise<void> | null
   forceReplay: boolean
   retryTimer: ReturnType<typeof setTimeout> | null
   retryAttempts: number
@@ -374,6 +376,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         localOptions,
         acquiredLeaderId: null,
         inFlight: null,
+        release: null,
         forceReplay: false,
         retryTimer: null,
         retryAttempts: 0,
@@ -397,24 +400,41 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     const key = remoteSubsetAcquisitionKey(collectionId, acquisitionId)
     const acquisition = this.outboundRemoteSubsetAcquisitions.get(key)
     if (!acquisition) return
-    this.outboundRemoteSubsetAcquisitions.delete(key)
     this.cancelRemoteSubsetReplayRetry(acquisition)
-    collectionIds!.delete(options)
+    if (!acquisition.release) {
+      acquisition.release = (async () => {
+        const request: Extract<
+          RPCRequest,
+          { type: `rpc:releaseRemoteSubset:req` }
+        > = {
+          type: `rpc:releaseRemoteSubset:req`,
+          rpcId: safeRandomUUID(),
+          acquisitionId,
+        }
+        const response = this.isLeader(collectionId)
+          ? await this.handleReleaseRemoteSubset(
+              collectionId,
+              request,
+              this.nodeId,
+            )
+          : await this.sendRPC<ReleaseRemoteSubsetResponse>(
+              collectionId,
+              request,
+            )
 
-    const request: Extract<
-      RPCRequest,
-      { type: `rpc:releaseRemoteSubset:req` }
-    > = {
-      type: `rpc:releaseRemoteSubset:req`,
-      rpcId: safeRandomUUID(),
-      acquisitionId,
+        if (!response.ok) {
+          throw new Error(`releaseRemoteSubset failed: ${response.error}`)
+        }
+        if (this.outboundRemoteSubsetAcquisitions.get(key) === acquisition) {
+          this.outboundRemoteSubsetAcquisitions.delete(key)
+          collectionIds!.delete(options)
+        }
+      })()
     }
-    const response = this.isLeader(collectionId)
-      ? await this.handleReleaseRemoteSubset(collectionId, request, this.nodeId)
-      : await this.sendRPC<ReleaseRemoteSubsetResponse>(collectionId, request)
-
-    if (!response.ok) {
-      throw new Error(`releaseRemoteSubset failed: ${response.error}`)
+    try {
+      await acquisition.release
+    } finally {
+      acquisition.release = null
     }
   }
 
@@ -638,10 +658,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   // Leadership via Web Locks
   // -----------------------------------------------------------------------
 
-  private ensureCollectionState(collectionId: string): CollectionState {
+  private getOrCreateCollectionState(collectionId: string): CollectionState {
     let state = this.collections.get(collectionId)
     if (!state) {
       state = {
+        participatesInLeadership: false,
         isLeader: false,
         leaderId: null,
         lockAbortController: null,
@@ -652,6 +673,14 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         subscribers: new Set(),
       }
       this.collections.set(collectionId, state)
+    }
+    return state
+  }
+
+  private ensureCollectionState(collectionId: string): CollectionState {
+    const state = this.getOrCreateCollectionState(collectionId)
+    if (!state.participatesInLeadership) {
+      state.participatesInLeadership = true
       void this.acquireLeadership(collectionId, state)
     }
     return state
@@ -753,6 +782,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private postRemoteSubsetRelease(
     acquisition: OutboundRemoteSubsetAcquisition,
   ): void {
+    if (acquisition.release) return
     const request: Extract<
       RPCRequest,
       { type: `rpc:releaseRemoteSubset:req` }
@@ -836,6 +866,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     for (const acquisition of this.outboundRemoteSubsetAcquisitions.values()) {
       if (
         acquisition.collectionId !== collectionId ||
+        acquisition.release ||
         (!acquisition.forceReplay && acquisition.acquiredLeaderId === leaderId)
       ) {
         continue
@@ -902,7 +933,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         typeof heartbeat.latestSeq === `number` &&
         typeof heartbeat.latestRowVersion === `number`
       ) {
-        const state = this.ensureCollectionState(envelope.collectionId)
+        const state = this.getOrCreateCollectionState(envelope.collectionId)
         if (heartbeat.term < state.latestTerm) return
         const changedLeader = state.leaderId !== heartbeat.leaderId
         state.leaderId = heartbeat.leaderId
@@ -1567,14 +1598,6 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
     }
 
-    // Assign stream position
-    state.latestSeq++
-    state.latestRowVersion++
-
-    const term = state.latestTerm
-    const seq = state.latestSeq
-    const rowVersion = state.latestRowVersion
-
     // Build and apply the persisted transaction
     const rowMetadataMutations: Array<PersistedRowMetadataMutation> = []
     for (const mutation of request.mutations) {
@@ -1591,11 +1614,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             },
       )
     }
-    const tx = {
+    const pendingTx = {
       txId: safeRandomUUID(),
-      term,
-      seq,
-      rowVersion,
       mutations: request.mutations.map((m) => ({
         type: m.type,
         key: m.key,
@@ -1607,9 +1627,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rowMetadataMutations,
     }
 
+    let tx: PersistedTx
     try {
-      await this.withWriterLock(() =>
-        this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx),
+      tx = await this.applyDurablyAtNextStreamPosition(
+        collectionId,
+        state,
+        pendingTx,
       )
     } catch (error) {
       throw toPersistedCollectionDurabilityError(collectionId, error)
@@ -1619,9 +1642,9 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       type: `rpc:applyLocalMutations:res`,
       rpcId: request.rpcId,
       ok: true,
-      term,
-      seq,
-      latestRowVersion: rowVersion,
+      term: tx.term,
+      seq: tx.seq,
+      latestRowVersion: tx.rowVersion,
       acceptedMutationIds: request.mutations.map((m) => m.mutationId),
     }
     if (this.isDisposed()) {
@@ -1653,10 +1676,10 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       ts: Date.now(),
       payload: {
         type: `tx:committed`,
-        term,
-        seq,
+        term: tx.term,
+        seq: tx.seq,
         txId: tx.txId,
-        latestRowVersion: rowVersion,
+        latestRowVersion: tx.rowVersion,
         requiresFullReload: false,
         changedRows,
         deletedKeys,
@@ -1737,18 +1760,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
     }
 
-    state.latestSeq++
-    state.latestRowVersion++
-    const tx: PersistedTx = {
-      ...request.tx,
-      term: state.latestTerm,
-      seq: state.latestSeq,
-      rowVersion: state.latestRowVersion,
-    }
-
+    let tx: PersistedTx
     try {
-      await this.withWriterLock(() =>
-        this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx),
+      tx = await this.applyDurablyAtNextStreamPosition(
+        collectionId,
+        state,
+        request.tx,
       )
     } catch (error) {
       throw toPersistedCollectionDurabilityError(collectionId, error)
@@ -1815,6 +1832,25 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
 
     return response
+  }
+
+  private async applyDurablyAtNextStreamPosition(
+    collectionId: string,
+    state: CollectionState,
+    pendingTx: Omit<PersistedTx, `term` | `seq` | `rowVersion`>,
+  ): Promise<PersistedTx> {
+    return this.withWriterLock(async () => {
+      const tx: PersistedTx = {
+        ...pendingTx,
+        term: state.latestTerm,
+        seq: state.latestSeq + 1,
+        rowVersion: state.latestRowVersion + 1,
+      }
+      await this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx)
+      state.latestSeq = tx.seq
+      state.latestRowVersion = tx.rowVersion
+      return tx
+    })
   }
 
   private async handlePullSince(

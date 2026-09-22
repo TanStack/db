@@ -51,7 +51,9 @@ export type PersistedMutationEnvelope =
       type: `insert`
       key: string | number
       value: Record<string, unknown>
+      /** Persisted row metadata, not optimistic-transaction metadata. */
       metadata?: unknown
+      /** Whether this envelope replaces or deletes the persisted row metadata. */
       metadataChanged?: boolean
     }
   | {
@@ -59,7 +61,9 @@ export type PersistedMutationEnvelope =
       type: `update`
       key: string | number
       value: Record<string, unknown>
+      /** Persisted row metadata, not optimistic-transaction metadata. */
       metadata?: unknown
+      /** Whether this envelope replaces or deletes the persisted row metadata. */
       metadataChanged?: boolean
     }
   | {
@@ -1019,6 +1023,8 @@ function toPersistedMutationEnvelope(
       ? (mutation.original as Record<string, unknown>)
       : mutation.modified
 
+  // PendingMutation.metadata belongs to the optimistic transaction and is
+  // consumed by mutation handlers. It must not overwrite persisted row metadata.
   return {
     mutationId: mutation.mutationId,
     type: mutation.type,
