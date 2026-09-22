@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
 import { DbClient, collectionOptions } from '../src/index.js'
 import type { OutputWithVirtual } from './utils'
+import type { Collection } from '../src/collection/index.js'
 import type {
   ChangeListener,
   ChangeMessage,
@@ -90,6 +91,14 @@ describe(`Collection change key type tests`, () => {
     const numericListener: ChangeListener<Item, number> = () => {}
     // @ts-expect-error - A number-key listener cannot consume branded-string changes.
     collection.subscribeChanges(numericListener)
+  })
+
+  it(`keeps custom-utility collections assignable to the default collection type`, () => {
+    type ItemUtils = { refresh: () => void }
+
+    expectTypeOf<Collection<Item, ItemKey, ItemUtils>>().toMatchTypeOf<
+      Collection<Item, ItemKey>
+    >()
   })
 })
 
