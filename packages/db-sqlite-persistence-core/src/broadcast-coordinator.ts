@@ -41,6 +41,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const HEARTBEAT_INTERVAL_MS = 3_000
+const LEADERSHIP_RETRY_DELAY_MS = 200
 const RPC_TIMEOUT_MS = 10_000
 const RPC_RETRY_ATTEMPTS = 2
 const RPC_RETRY_DELAY_MS = 200
@@ -721,6 +722,9 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         return
       }
       console.warn(`Failed to acquire leadership for ${collectionId}:`, error)
+      if (!this.isDisposed()) {
+        await sleep(LEADERSHIP_RETRY_DELAY_MS)
+      }
     }
 
     // Re-acquire if not disposed (leadership was released by another means)

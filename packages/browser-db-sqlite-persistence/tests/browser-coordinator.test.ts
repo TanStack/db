@@ -28,10 +28,10 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * The adapter call logs, transport controls, owner callbacks, and internal-map
  * snapshots are focused reference ledgers. Histories vary local and follower
  * routes, response loss, leadership change, owner replacement, duplicate
- * delivery, release, failure, and disposal. The production driver is the real
- * `BrowserCollectionCoordinator`, which names the shared broadcast
- * coordination engine for this host; only BroadcastChannel and Web Locks are
- * replaced with deterministic seams.
+ * delivery, paced leadership retry, release, failure, and disposal. The
+ * production driver is the real `BrowserCollectionCoordinator`, which names
+ * the shared broadcast coordination engine for this host; only
+ * BroadcastChannel and Web Locks are replaced with deterministic seams.
  *
  * Checkpoints sit at adapter entry, RPC response delivery, acquisition
  * acceptance, acquisition release, lifecycle failure, and disposal. Fault
@@ -568,6 +568,91 @@ describe(`BrowserCollectionCoordinator`, () => {
 
       expect(coord.isLeader(`todos`)).toBe(true)
       coord.dispose()
+    })
+
+    it(`paces leadership retry after stream-position failure`, async () => {
+      vi.useFakeTimers()
+      const streamError = new Error(`stream position unavailable`)
+      const adapter = createStubAdapter()
+      const getStreamPosition = vi
+        .fn()
+        .mockRejectedValueOnce(streamError)
+        .mockResolvedValue({
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+        })
+      adapter.getStreamPosition = getStreamPosition
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const coordinator = createCoordinator(adapter)
+
+      try {
+        coordinator.subscribe(`todos`, () => {})
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect({
+          streamPositionReads: getStreamPosition.mock.calls.length,
+          isLeader: coordinator.isLeader(`todos`),
+          warnings: warning.mock.calls.length,
+        }).toEqual({
+          streamPositionReads: 1,
+          isLeader: false,
+          warnings: 1,
+        })
+
+        await vi.advanceTimersByTimeAsync(1_000)
+
+        expect({
+          streamPositionReads: getStreamPosition.mock.calls.length,
+          isLeader: coordinator.isLeader(`todos`),
+          warnings: warning.mock.calls.length,
+        }).toEqual({
+          streamPositionReads: 2,
+          isLeader: true,
+          warnings: 1,
+        })
+      } finally {
+        coordinator.dispose()
+        warning.mockRestore()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`cancels a delayed leadership retry on disposal`, async () => {
+      vi.useFakeTimers()
+      const adapter = createStubAdapter()
+      const getStreamPosition = vi
+        .fn()
+        .mockRejectedValueOnce(new Error(`stream position unavailable`))
+        .mockResolvedValue({
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+        })
+      adapter.getStreamPosition = getStreamPosition
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const coordinator = createCoordinator(adapter)
+
+      try {
+        coordinator.subscribe(`todos`, () => {})
+        await vi.advanceTimersByTimeAsync(0)
+        coordinator.dispose()
+        await vi.advanceTimersByTimeAsync(1_000)
+
+        expect({
+          streamPositionReads: getStreamPosition.mock.calls.length,
+          isLeader: coordinator.isLeader(`todos`),
+          warnings: warning.mock.calls.length,
+        }).toEqual({
+          streamPositionReads: 1,
+          isLeader: false,
+          warnings: 1,
+        })
+      } finally {
+        coordinator.dispose()
+        warning.mockRestore()
+        vi.useRealTimers()
+      }
     })
 
     it(`second coordinator waits for leadership`, async () => {
