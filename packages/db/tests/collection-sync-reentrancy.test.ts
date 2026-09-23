@@ -219,6 +219,49 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
+  it(`keeps explicit sync transaction handles bound to their reserved owners`, async () => {
+    const harness = createSyncHarness(`owned-sync-transactions`)
+    const { collection, sync } = harness
+
+    try {
+      const first = sync.begin()
+      const second = sync.begin()
+      expect(first).toBeDefined()
+      expect(second).toBeDefined()
+      first!.write({ type: `insert`, value: { id: 1, value: `first` } })
+      second!.write({ type: `insert`, value: { id: 2, value: `second` } })
+
+      expect(
+        collection._state.pendingSyncedTransactions.map((transaction) =>
+          transaction.operations.map((operation) => operation.key),
+        ),
+      ).toEqual([[1], [2]])
+
+      first!.commit()
+      expect([...collection.keys()]).toEqual([1])
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(1)
+
+      second!.truncate()
+      second!.write({ type: `insert`, value: { id: 2, value: `replacement` } })
+      expect(collection._state.pendingSyncedTransactions[0]).toMatchObject({
+        truncate: true,
+        operations: [{ key: 2 }],
+      })
+      second!.commit()
+      expect([...collection.entries()]).toEqual([
+        [2, expect.objectContaining({ id: 2, value: `replacement` })],
+      ])
+
+      const abandoned = sync.begin()
+      abandoned!.write({ type: `insert`, value: { id: 3, value: `abandoned` } })
+      abandoned!.abort()
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
+      expect(collection.has(3)).toBe(false)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`publishes nested deferrals as one coherent batch`, async () => {
     const harness = createSyncHarness(`nested-publication-cycle`)
     const { collection } = harness

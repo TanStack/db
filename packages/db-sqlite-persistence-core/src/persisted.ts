@@ -1,4 +1,6 @@
 import {
+  NoPendingSyncTransactionCommitError,
+  NoPendingSyncTransactionWriteError,
   SyncTransactionAbortedError,
   compileSingleRowExpression,
   safeRandomUUID,
@@ -29,6 +31,7 @@ import type {
   SyncConfig,
   SyncConfigRes,
   SyncMetadataApi,
+  SyncTransactionHandle,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
@@ -605,6 +608,9 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   BufferedSyncTransaction<T, TKey>,
   `applyToCollection` | `shouldFailStopOnAbort`
 > & {
+  reservation?: SyncTransactionHandle<T, TKey>
+  signal?: AbortSignal
+  applicationReceipt?: SyncAppliedReceipt
   queuedBecauseHydrating: boolean
   hasDependentSuccessor: boolean
   terminalFailure?: { error: unknown }
@@ -628,7 +634,7 @@ class ApplyMutex {
   private queue: Promise<void> = Promise.resolve()
   private pending = 0
 
-  run<T>(task: () => Promise<T>): Promise<T> {
+  run<T>(task: () => Promise<T> | T): Promise<T> {
     const runImmediately = this.pending === 0
     this.pending++
 
@@ -1225,9 +1231,46 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     const failure = this.getCurrentTerminalFailure()
     if (failure) return Promise.reject(failure.error)
+    if (transaction.beginOptions?.immediate) {
+      return this.applyImmediateBufferedSyncTransaction(transaction)
+    }
     return this.applyMutex.run(() =>
       this.applyBufferedSyncTransactionUnsafe(transaction),
     )
+  }
+
+  private async applyImmediateBufferedSyncTransaction(
+    transaction: BufferedSyncTransaction<T, TKey>,
+  ): Promise<void> {
+    try {
+      this.throwIfTerminal()
+      this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
+      if (transaction.signal?.aborted) {
+        throw new SyncTransactionAbortedError()
+      }
+      // Core immediate transactions are the escape hatch for a user mutation
+      // that depends on sync work. Apply that owned reservation without waiting
+      // behind a normal receipt, then serialize its durability suffix.
+      const applied = transaction.internal
+        ? this.withInternalApply(transaction.applyToCollection)
+        : transaction.applyToCollection()
+      if (applied !== true) await applied
+      this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
+
+      if (!transaction.internal) {
+        await this.applyMutex.run(() =>
+          this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction),
+        )
+      }
+      transaction.resolveApplied?.()
+    } catch (error) {
+      const terminalError = this.classifyBufferedTransactionFailure(
+        transaction,
+        error,
+      )
+      transaction.rejectApplied?.(terminalError)
+      throw terminalError
+    }
   }
 
   normalizeSyncWriteMessage(
@@ -1565,17 +1608,6 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     this.throwIfTerminal()
     this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
-    if (transaction.signal?.aborted) {
-      const error = new SyncTransactionAbortedError()
-      transaction.rejectApplied?.(error)
-      if (transaction.shouldFailStopOnAbort?.()) {
-        throw this.markTerminalFailure(error, transaction.lifecycleGeneration)
-      }
-      if (!transaction.rejectApplied) {
-        throw error
-      }
-      return
-    }
 
     try {
       const applied = transaction.internal
@@ -1594,14 +1626,31 @@ class PersistedCollectionRuntime<
       const aborted =
         transaction.signal?.aborted ||
         error instanceof SyncTransactionAbortedError
-      const terminalError = aborted
-        ? transaction.shouldFailStopOnAbort?.()
-          ? this.markTerminalFailure(error, transaction.lifecycleGeneration)
-          : error
-        : this.markTerminalFailure(error, transaction.lifecycleGeneration)
+      const shouldFailStop =
+        aborted && transaction.shouldFailStopOnAbort?.() === true
+      const terminalError = this.classifyBufferedTransactionFailure(
+        transaction,
+        error,
+      )
       transaction.rejectApplied?.(terminalError)
+      if (aborted && !shouldFailStop && transaction.rejectApplied) {
+        return
+      }
       throw terminalError
     }
+  }
+
+  private classifyBufferedTransactionFailure(
+    transaction: BufferedSyncTransaction<T, TKey>,
+    error: unknown,
+  ): unknown {
+    const aborted =
+      transaction.signal?.aborted ||
+      error instanceof SyncTransactionAbortedError
+    if (aborted && transaction.shouldFailStopOnAbort?.() !== true) {
+      return error
+    }
+    return this.markTerminalFailure(error, transaction.lifecycleGeneration)
   }
 
   private async persistAndBroadcastExternalSyncTransactionUnsafe(
@@ -1621,7 +1670,6 @@ class PersistedCollectionRuntime<
       transaction.rowMetadataWrites.size === 0 &&
       transaction.collectionMetadataWrites.size === 0
     ) {
-      if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
       this.publishTxCommittedEvent(
         this.createTxCommittedPayload({
           term: streamPosition.term,
@@ -2513,10 +2561,6 @@ function createWrappedSyncConfig<
       const pendingPublicationTransactions: Array<
         OpenSyncTransaction<T, TKey>
       > = []
-      const publicationMarkers = new Map<
-        OpenSyncTransaction<T, TKey>,
-        (typeof params.collection._state.pendingSyncedTransactions)[number]
-      >()
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       const markPendingMetadataDependency = (
@@ -2533,51 +2577,33 @@ function createWrappedSyncConfig<
         const index = pendingPublicationTransactions.indexOf(transaction)
         if (index !== -1) pendingPublicationTransactions.splice(index, 1)
       }
-      const reservePublicationMarker = (
+      const reservePublicationTransaction = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
-        const pending = params.collection._state.pendingSyncedTransactions
-        const previousLength = pending.length
-        params.begin(transaction.beginOptions)
-        const marker = pending.at(-1)
-        if (!marker || pending.length !== previousLength + 1) {
+        const reservation = params.begin(transaction.beginOptions)
+        if (!reservation) {
           throw new InvalidPersistedCollectionConfigError(
             `wrapped sync begin did not reserve a publication transaction`,
           )
         }
-        publicationMarkers.set(transaction, marker)
-      }
-      const activatePublicationMarker = (
-        transaction: OpenSyncTransaction<T, TKey>,
-      ) => {
-        const marker = publicationMarkers.get(transaction)
-        const pending = params.collection._state.pendingSyncedTransactions
-        const index = marker ? pending.indexOf(marker) : -1
-        if (!marker || index === -1) {
-          throw new InvalidPersistedCollectionConfigError(
-            `wrapped sync transaction lost its publication reservation`,
-          )
-        }
-        if (index !== pending.length - 1) {
-          pending.splice(index, 1)
-          pending.push(marker)
-        }
-      }
-      const removePublicationMarker = (
-        transaction: OpenSyncTransaction<T, TKey>,
-      ) => {
-        const marker = publicationMarkers.get(transaction)
-        if (!marker) return
-        const pending = params.collection._state.pendingSyncedTransactions
-        const index = pending.indexOf(marker)
-        if (index !== -1) pending.splice(index, 1)
-        publicationMarkers.delete(transaction)
+        transaction.reservation = reservation
       }
       const settlePendingTransaction = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
         removePendingPublicationTransaction(transaction)
-        removePublicationMarker(transaction)
+      }
+      const settleRuntimeTransaction = (
+        transaction: OpenSyncTransaction<T, TKey>,
+        applied: Promise<void>,
+      ) => {
+        void applied.then(
+          () => settlePendingTransaction(transaction),
+          () => {
+            transaction.reservation?.abort()
+            settlePendingTransaction(transaction)
+          },
+        )
       }
       const getPendingRowMetadataWrite = (key: TKey) => {
         for (
@@ -2629,47 +2655,26 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
         signal?: AbortSignal,
       ): SyncAppliedReceipt => {
-        activatePublicationMarker(transaction)
+        if (transaction.applicationReceipt !== undefined) {
+          return transaction.applicationReceipt
+        }
+        const reservation = transaction.reservation
+        if (!reservation) {
+          throw new InvalidPersistedCollectionConfigError(
+            `wrapped sync transaction lost its publication reservation`,
+          )
+        }
         try {
-          if (transaction.truncate) {
-            params.truncate()
-          }
-
-          for (const operation of transaction.operations) {
-            if (operation.type === `delete`) {
-              params.write({
-                type: `delete`,
-                key: operation.key,
-              })
-            } else {
-              params.write({
-                type: `update`,
-                value: operation.value,
-                metadata: operation.metadata,
-              })
+          if (transaction.beginOptions?.immediate) {
+            const index = pendingPublicationTransactions.indexOf(transaction)
+            const predecessors =
+              index === -1 ? [] : pendingPublicationTransactions.slice(0, index)
+            for (const predecessor of predecessors) {
+              applyTransactionToCollection(predecessor, predecessor.signal)
             }
           }
-
-          for (const [key, metadataWrite] of transaction.rowMetadataWrites) {
-            if (metadataWrite.type === `delete`) {
-              params.metadata?.row.delete(key)
-            } else {
-              params.metadata?.row.set(key, metadataWrite.value)
-            }
-          }
-
-          for (const [
-            key,
-            metadataWrite,
-          ] of transaction.collectionMetadataWrites) {
-            if (metadataWrite.type === `delete`) {
-              params.metadata?.collection.delete(key)
-            } else {
-              params.metadata?.collection.set(key, metadataWrite.value)
-            }
-          }
-
-          const applied = params.commit(signal)
+          const applied = reservation.commit(signal)
+          transaction.applicationReceipt = applied
           if (applied === true) {
             removePendingPublicationTransaction(transaction)
           } else {
@@ -2685,6 +2690,7 @@ function createWrappedSyncConfig<
           // publication is pending. Once publication runs, the collection's
           // metadata API becomes authoritative again. A prepublication failure
           // removes the layer without exposing it.
+          reservation.abort()
           removePendingPublicationTransaction(transaction)
           throw error
         }
@@ -2713,7 +2719,7 @@ function createWrappedSyncConfig<
             .catch(() => undefined)
         },
         begin: (options?: { immediate?: boolean }) => {
-          if (startupState.cleanedUp) return
+          if (startupState.cleanedUp) return undefined
           const terminalFailure = getTerminalFailure()
           const internal = runtime.isApplyingInternally()
           const transaction: OpenSyncTransaction<T, TKey> = {
@@ -2731,12 +2737,14 @@ function createWrappedSyncConfig<
               runtime.isHydratingNow(),
             ...(terminalFailure === undefined ? {} : { terminalFailure }),
           }
-          if (transaction.internal && !terminalFailure) {
-            params.begin(options)
-          } else if (!transaction.internal && !terminalFailure) {
-            reservePublicationMarker(transaction)
+          if (!terminalFailure) {
+            reservePublicationTransaction(transaction)
           }
           transactionStack.push(transaction)
+          // The persisted wrapper owns the core reservation. Upstream source
+          // callbacks continue through the wrapped write/commit surface so
+          // publication and durability remain one transaction.
+          return undefined
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
           if (startupState.cleanedUp) return
@@ -2748,11 +2756,25 @@ function createWrappedSyncConfig<
               openTransaction.terminalFailure = terminalFailure
             return
           }
+          if (!openTransaction) {
+            throw new NoPendingSyncTransactionWriteError()
+          }
           const normalization = runtime.normalizeSyncWriteMessage(message)
 
-          if (!openTransaction) {
-            params.write(normalization.forwardMessage)
-            return
+          if (
+            message.type === `update` &&
+            sourceSyncConfig.rowUpdateMode !== `full`
+          ) {
+            for (const pending of pendingPublicationTransactions) {
+              if (
+                pending.truncate ||
+                pending.operations.some(
+                  (operation) => operation.key === normalization.operation.key,
+                )
+              ) {
+                markPendingMetadataDependency(pending)
+              }
+            }
           }
 
           openTransaction.operations.push(normalization.operation)
@@ -2785,8 +2807,22 @@ function createWrappedSyncConfig<
               value: normalization.operation.metadata,
             })
           }
-          if (openTransaction.internal) {
-            params.write(normalization.forwardMessage)
+          openTransaction.reservation?.write(
+            normalization.forwardMessage,
+            normalization.operation.key,
+          )
+          const stagedMetadata = openTransaction.rowMetadataWrites.get(
+            normalization.operation.key,
+          )
+          if (stagedMetadata?.type === `delete`) {
+            openTransaction.reservation?.metadata.row.delete(
+              normalization.operation.key,
+            )
+          } else if (stagedMetadata) {
+            openTransaction.reservation?.metadata.row.set(
+              normalization.operation.key,
+              stagedMetadata.value,
+            )
           }
         },
         metadata: params.metadata
@@ -2835,9 +2871,7 @@ function createWrappedSyncConfig<
                     type: `set`,
                     value,
                   })
-                  if (openTransaction.internal) {
-                    params.metadata!.row.set(key, value)
-                  }
+                  openTransaction.reservation?.metadata.row.set(key, value)
                 },
                 delete: (key: TKey) => {
                   if (startupState.cleanedUp) return
@@ -2852,9 +2886,7 @@ function createWrappedSyncConfig<
                   openTransaction.rowMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  if (openTransaction.internal) {
-                    params.metadata!.row.delete(key)
-                  }
+                  openTransaction.reservation?.metadata.row.delete(key)
                 },
               },
               collection: {
@@ -2890,9 +2922,10 @@ function createWrappedSyncConfig<
                     type: `set`,
                     value,
                   })
-                  if (openTransaction.internal) {
-                    params.metadata!.collection.set(key, value)
-                  }
+                  openTransaction.reservation?.metadata.collection.set(
+                    key,
+                    value,
+                  )
                 },
                 delete: (key: string) => {
                   if (startupState.cleanedUp) return
@@ -2907,9 +2940,7 @@ function createWrappedSyncConfig<
                   openTransaction.collectionMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  if (openTransaction.internal) {
-                    params.metadata!.collection.delete(key)
-                  }
+                  openTransaction.reservation?.metadata.collection.delete(key)
                 },
                 list: (prefix?: string) => {
                   if (startupState.cleanedUp) return []
@@ -2969,8 +3000,7 @@ function createWrappedSyncConfig<
           const openTransaction = getOpenTransaction()
           if (openTransaction?.terminalFailure ?? getTerminalFailure()) return
           if (!openTransaction) {
-            params.truncate()
-            return
+            throw new NoPendingSyncTransactionWriteError()
           }
 
           openTransaction.operations = []
@@ -2980,9 +3010,7 @@ function createWrappedSyncConfig<
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
           openTransaction.truncate = true
-          if (openTransaction.internal) {
-            params.truncate()
-          }
+          openTransaction.reservation?.truncate()
         },
         commit: (signal?: AbortSignal) => {
           if (startupState.cleanedUp) return true
@@ -2990,18 +3018,22 @@ function createWrappedSyncConfig<
           const terminalFailure =
             openTransaction?.terminalFailure ?? getTerminalFailure()
           if (terminalFailure) {
-            if (openTransaction) settlePendingTransaction(openTransaction)
+            if (openTransaction) {
+              openTransaction.reservation?.abort()
+              settlePendingTransaction(openTransaction)
+            }
             return createHandledRejection(terminalFailure.error)
           }
           if (!openTransaction) {
-            return params.commit(signal)
+            throw new NoPendingSyncTransactionCommitError()
           }
 
           if (openTransaction.internal) {
-            return params.commit(signal)
+            return openTransaction.reservation?.commit(signal) ?? true
           }
 
           if (signal?.aborted) {
+            openTransaction.reservation?.abort()
             settlePendingTransaction(openTransaction)
             return createHandledRejection(new SyncTransactionAbortedError())
           }
@@ -3018,6 +3050,7 @@ function createWrappedSyncConfig<
               applyTransactionToCollection(openTransaction, signal),
             shouldFailStopOnAbort: () => openTransaction.hasDependentSuccessor,
           }
+          openTransaction.signal = signal
           pendingPublicationTransactions.push(openTransaction)
           if (
             openTransaction.queuedBecauseHydrating &&
@@ -3035,18 +3068,12 @@ function createWrappedSyncConfig<
               resolveApplied,
               rejectApplied,
             })
-            void applied.then(
-              () => settlePendingTransaction(openTransaction),
-              () => settlePendingTransaction(openTransaction),
-            )
+            settleRuntimeTransaction(openTransaction, applied)
             return applied
           }
 
           const applied = runtime.applyHydrationBufferedTransaction(transaction)
-          void applied.then(
-            () => settlePendingTransaction(openTransaction),
-            () => settlePendingTransaction(openTransaction),
-          )
+          settleRuntimeTransaction(openTransaction, applied)
           return applied
         },
       }
@@ -3070,10 +3097,14 @@ function createWrappedSyncConfig<
         cleanup: () => {
           startupState.cleanedUp = true
           acquisitions.clear()
-          pendingPublicationTransactions.length = 0
-          for (const transaction of publicationMarkers.keys()) {
-            removePublicationMarker(transaction)
+          for (const transaction of new Set([
+            ...transactionStack,
+            ...pendingPublicationTransactions,
+          ])) {
+            transaction.reservation?.abort()
           }
+          pendingPublicationTransactions.length = 0
+          transactionStack.length = 0
           sourceResult.cleanup?.()
           runtime.cleanup()
         },

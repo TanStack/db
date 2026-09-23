@@ -477,6 +477,133 @@ function rowsFromMap(
   ]).sort(([left], [right]) => String(left).localeCompare(String(right)))
 }
 
+type QueuedPresenceHistory =
+  | `insert-update`
+  | `update-update`
+  | `delete-update`
+  | `truncate-update`
+
+let queuedPresenceHistoryId = 0
+
+async function runQueuedPresenceHistory(
+  history: QueuedPresenceHistory,
+  queuedName: string,
+  laterName: string,
+): Promise<void> {
+  const historyId = ++queuedPresenceHistoryId
+  let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
+  mockSubscribe.mockImplementationOnce((callback) => {
+    subscriber = callback
+    return vi.fn()
+  })
+  const firstPersistenceEntered = createDeferred<void>()
+  const releaseFirstPersistence = createDeferred<void>()
+  const persistedMetadata = new Map<string, unknown>()
+  const persistedRows = new Map<string | number, OracleRow>()
+  const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
+  const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+  let heldGate = false
+  adapter.applyCommittedTx = async (...args) => {
+    if (!heldGate && args[1].mutations.some((mutation) => mutation.key === 1)) {
+      heldGate = true
+      firstPersistenceEntered.resolve()
+      await releaseFirstPersistence.promise
+    }
+    await applyCommittedTx(...args)
+  }
+  const collection = createCollection(
+    persistedCollectionOptions<
+      OracleRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<OracleRow>
+    >({
+      ...electricCollectionOptions<OracleRow>({
+        id: `generated-queued-presence-${historyId}`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive`,
+        getKey: (row) => row.id,
+        startSync: true,
+      }),
+      persistence: { adapter },
+    }),
+  )
+
+  await withElectricCleanup(async () => {
+    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
+      interval: 1,
+      timeout: 250,
+    })
+    mockStream.lastOffset = `100_0`
+    subscriber!([upToDate])
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
+      interval: 1,
+      timeout: 250,
+    })
+
+    if (history !== `insert-update`) {
+      const baseline = change(`insert`, 2, `baseline`)
+      baseline.value = { id: 2, name: `baseline`, stable: `stable-2` }
+      mockStream.lastOffset = `101_0`
+      subscriber!([baseline, upToDate])
+      await vi.waitFor(
+        () => expect(persistedRows.get(2)).toEqual(baseline.value),
+        { interval: 1, timeout: 250 },
+      )
+    }
+
+    const gate = change(`insert`, 1, `holds persistence`)
+    gate.value = { id: 1, name: `holds persistence`, stable: `stable-1` }
+    mockStream.lastOffset = `102_0`
+    subscriber!([gate, upToDate])
+    await atCheckpoint(
+      firstPersistenceEntered.promise,
+      `generated Electric persistence hold`,
+    )
+
+    mockStream.lastOffset = `103_0`
+    if (history === `truncate-update`) {
+      subscriber!([mustRefetch, upToDate])
+    } else {
+      const operation = history.split(`-`)[0] as `insert` | `update` | `delete`
+      const queued = change(operation, 2, queuedName)
+      if (operation === `insert`) {
+        queued.value = { id: 2, name: queuedName, stable: `stable-2` }
+      }
+      subscriber!([queued, upToDate])
+    }
+
+    const laterUpdate = change(`update`, 2, laterName)
+    mockStream.lastOffset = `104_0`
+    subscriber!([laterUpdate, upToDate])
+
+    const expectedRows = new Map<string | number, OracleRow>()
+    if (history !== `truncate-update`) expectedRows.set(1, gate.value)
+    if (history === `insert-update` || history === `update-update`) {
+      expectedRows.set(2, {
+        id: 2,
+        name: laterName,
+        stable: `stable-2`,
+      })
+    }
+
+    releaseFirstPersistence.resolve()
+    await vi.waitFor(
+      () =>
+        expect(rowsFromMap(persistedRows)).toEqual(rowsFromMap(expectedRows)),
+      { interval: 1, timeout: 250 },
+    )
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
+      interval: 1,
+      timeout: 250,
+    })
+    expect(rowsFromCollection(collection)).toEqual(rowsFromMap(expectedRows))
+  }, [() => releaseFirstPersistence.resolve(), () => collection.cleanup()])
+}
+
 function applyReferenceBatch(
   state: ReferenceState,
   batch: ReadonlyArray<Message<OracleRow>>,
@@ -2264,6 +2391,130 @@ describe(`Electric adapter laws`, () => {
       741,
     )
   })
+
+  it(`keeps queued persisted writes visible to later Electric callbacks`, async () => {
+    let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
+    mockSubscribe.mockImplementationOnce((callback) => {
+      subscriber = callback
+      return vi.fn()
+    })
+    const firstPersistenceEntered = createDeferred<void>()
+    const releaseFirstPersistence = createDeferred<void>()
+    const persistedMetadata = new Map<string, unknown>()
+    const persistedRows = new Map<string | number, OracleRow>()
+    const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    let heldFirstRow = false
+    adapter.applyCommittedTx = async (...args) => {
+      if (
+        !heldFirstRow &&
+        args[1].mutations.some((mutation) => mutation.key === 1)
+      ) {
+        heldFirstRow = true
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await applyCommittedTx(...args)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<
+        OracleRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<OracleRow>
+      >({
+        ...electricCollectionOptions<OracleRow>({
+          id: `queued-persisted-presence`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `progressive`,
+          getKey: (row) => row.id,
+          startSync: true,
+        }),
+        persistence: { adapter },
+      }),
+    )
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
+        interval: 1,
+        timeout: 250,
+      })
+      mockStream.lastOffset = `90_0`
+      subscriber!([upToDate])
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
+        interval: 1,
+        timeout: 250,
+      })
+
+      const first = change(`insert`, 1, `holds persistence`)
+      first.value = { id: 1, name: `holds persistence`, stable: `stable-1` }
+      mockStream.lastOffset = `91_0`
+      subscriber!([first, upToDate])
+      await atCheckpoint(
+        firstPersistenceEntered.promise,
+        `first Electric persistence entered`,
+      )
+
+      const queued = change(`insert`, 2, `queued insert`)
+      queued.value = { id: 2, name: `queued insert`, stable: `stable-2` }
+      mockStream.lastOffset = `92_0`
+      subscriber!([queued, upToDate])
+
+      const laterUpdate = change(`update`, 2, `later update`)
+      laterUpdate.value = { id: 2, name: `later update`, stable: `stable-2` }
+      mockStream.lastOffset = `93_0`
+      subscriber!([laterUpdate, upToDate])
+
+      releaseFirstPersistence.resolve()
+      await vi.waitFor(
+        () =>
+          expect(rowsFromMap(persistedRows)).toEqual(
+            rowsFromMap(
+              new Map([
+                [1, first.value],
+                [2, laterUpdate.value],
+              ]),
+            ),
+          ),
+        { interval: 1, timeout: 250 },
+      )
+      expect(rowsFromCollection(collection)).toEqual(
+        rowsFromMap(
+          new Map([
+            [1, first.value],
+            [2, laterUpdate.value],
+          ]),
+        ),
+      )
+      expect(collection.status).toBe(`ready`)
+    }, [() => releaseFirstPersistence.resolve(), () => collection.cleanup()])
+  })
+
+  fcTest.prop(
+    [
+      fc.uniqueArray(
+        fc.constantFrom(
+          `insert-update`,
+          `update-update`,
+          `delete-update`,
+          `truncate-update`,
+        ) as fc.Arbitrary<QueuedPresenceHistory>,
+        { minLength: 4, maxLength: 4 },
+      ),
+      fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
+    ],
+    persistencePolicyPropertyOptions(),
+  )(
+    `generated queued Electric histories preserve staged presence and reset fences`,
+    async (histories, names) => {
+      for (const history of histories) {
+        await runQueuedPresenceHistory(history, names[0], names[1])
+      }
+    },
+  )
 
   fcTest.prop(
     [fc.integer({ min: 1, max: 20 }), fc.string({ maxLength: 12 })],

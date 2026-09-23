@@ -33,6 +33,18 @@ import type { ElectricCollectionUtils } from '../src/electric'
 type TestRow = { id: number; name: string; stable: string }
 type TagExposure = { cut: string; rows: Array<TestRow> }
 
+function expectMoveOutCheckpoint(observation: {
+  status: string
+  publicRowPresent: boolean
+  durableRowPresent: boolean
+}) {
+  expect(observation).toEqual({
+    status: `ready`,
+    publicRowPresent: false,
+    durableRowPresent: false,
+  })
+}
+
 function expectWholeTagRecovery(
   entries: Array<TagExposure>,
   allowed: Array<Array<TestRow>>,
@@ -626,6 +638,21 @@ it(`keeps insert acknowledgements on the owner of a reused persisted descriptor`
   }
 })
 
+it(`rejects a descriptor move-out checkpoint that deletes rows by fail-stopping`, () => {
+  expectMoveOutCheckpoint({
+    status: `ready`,
+    publicRowPresent: false,
+    durableRowPresent: false,
+  })
+  expect(() =>
+    expectMoveOutCheckpoint({
+      status: `error`,
+      publicRowPresent: false,
+      durableRowPresent: false,
+    }),
+  ).toThrow()
+})
+
 it.each([`resume`, `fresh`] as const)(
   `restores compatible tags and discards obsolete tags on persisted $0 restart`,
   async (restart) => {
@@ -672,6 +699,12 @@ it.each([`resume`, `fresh`] as const)(
       streams[1]!.send([moveOut(currentTag), upToDate])
       await vi.waitFor(() => expect(collection.has(1)).toBe(false))
       await vi.waitFor(() => expect(rows.has(1)).toBe(false))
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      expectMoveOutCheckpoint({
+        status: collection.status,
+        publicRowPresent: collection.has(1),
+        durableRowPresent: rows.has(1),
+      })
     } finally {
       await collection.cleanup()
     }
