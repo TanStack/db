@@ -15,16 +15,17 @@
  * exact adapter calls, durable transaction count, returned result, promise
  * settlement, and request posts.
  *
- * Known omissions: these laws do not establish native browser scheduling,
- * concurrent delivery of one in-flight envelope, or behavior after the dedup
- * retention window. Electron keeps focused parity witnesses for the same
- * protocol boundaries.
+ * Known omissions: these laws do not establish native browser scheduling or
+ * concurrent delivery of one in-flight envelope. Electron keeps focused
+ * parity witnesses for the same protocol boundaries.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
+import { BasicIndex, createCollection } from '@tanstack/db'
+import { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
-import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordinator'
 import type { PersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
+import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordinator'
 
 // ---------------------------------------------------------------------------
 // BroadcastChannel mock
@@ -258,6 +259,31 @@ function createCoordinator(
 
 async function flush(ms: number = 10): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+type Deferred = {
+  promise: Promise<void>
+  resolve: () => void
+}
+
+function createDeferred(): Deferred {
+  let resolve!: () => void
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
+}
+
+type CoordinatorInspection = {
+  collectionAdapters: Map<string, unknown>
+  collections: Map<string, unknown>
+  appliedEnvelopeIds: Map<string, unknown>
+}
+
+function inspectCoordinator(
+  coordinator: BrowserCollectionCoordinator,
+): CoordinatorInspection {
+  return coordinator as unknown as CoordinatorInspection
 }
 
 // ---------------------------------------------------------------------------
@@ -755,6 +781,175 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
+    it(`keeps production collection bootstrap index work exact-once on the leader`, async () => {
+      const adapter = createStubAdapter()
+      adapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      const coordinator = createCoordinator(adapter)
+      const leaderReady = createDeferred()
+      observePostedMessage = (data) => {
+        const envelope = data as {
+          collectionId?: string
+          payload?: { type?: string }
+        }
+        if (
+          envelope.collectionId === `leader-bootstrap-index` &&
+          envelope.payload?.type === `leader:heartbeat`
+        ) {
+          leaderReady.resolve()
+        }
+      }
+      const releaseLeader = coordinator.subscribe(
+        `leader-bootstrap-index`,
+        () => {},
+      )
+      await leaderReady.promise
+      observePostedMessage = undefined
+
+      const collection = createCollection(
+        persistedCollectionOptions<{ id: string; title: string }, string>({
+          id: `leader-bootstrap-index`,
+          getKey: (row) => row.id,
+          defaultIndexType: BasicIndex,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      collection.createIndex((row) => row.title, { name: `title` })
+
+      try {
+        await collection.preload()
+        expect(adapter.ensureIndex).toHaveBeenCalledOnce()
+      } finally {
+        await collection.cleanup()
+        releaseLeader()
+        coordinator.dispose()
+      }
+    })
+
+    it(`reaches crossed production RPC leadership only after both hydration scopes exit`, async () => {
+      const bothLocalIndexesEntered = createDeferred()
+      const bothLeaderRPCsEntered = createDeferred()
+      const releaseSchedulerCycle = createDeferred()
+      let localIndexEntries = 0
+      let leaderRPCEntries = 0
+
+      const createTab = () => {
+        const adapter = createStubAdapter()
+        const baseEnsureIndex = adapter.ensureIndex.bind(adapter)
+        let hydrationScopeActive = false
+        const leaderRPCScopeObservations: Array<boolean> = []
+        const scopedAdapter: PersistenceAdapter = {
+          ...adapter,
+          ensureIndex: async (...args) => {
+            localIndexEntries++
+            if (localIndexEntries === 2) bothLocalIndexesEntered.resolve()
+            await bothLocalIndexesEntered.promise
+            await baseEnsureIndex(...args)
+          },
+        }
+        adapter.runInHydrationScope = async (task) => {
+          hydrationScopeActive = true
+          try {
+            return await task(scopedAdapter)
+          } finally {
+            hydrationScopeActive = false
+          }
+        }
+        adapter.ensureIndex = async (...args) => {
+          leaderRPCScopeObservations.push(hydrationScopeActive)
+          leaderRPCEntries++
+          if (leaderRPCEntries === 2) bothLeaderRPCsEntered.resolve()
+          if (hydrationScopeActive) await releaseSchedulerCycle.promise
+          await baseEnsureIndex(...args)
+        }
+        return { adapter, leaderRPCScopeObservations }
+      }
+
+      const tab1 = createTab()
+      const tab2 = createTab()
+      const coordinator1 = createCoordinator(tab1.adapter)
+      const coordinator2 = createCoordinator(tab2.adapter)
+      const leaderCollections = new Set<string>()
+      const bothLeadersReady = createDeferred()
+      observePostedMessage = (data) => {
+        const envelope = data as {
+          collectionId?: string
+          payload?: { type?: string }
+        }
+        if (
+          envelope.payload?.type === `leader:heartbeat` &&
+          (envelope.collectionId === `crossed-a` ||
+            envelope.collectionId === `crossed-b`)
+        ) {
+          leaderCollections.add(envelope.collectionId)
+          if (leaderCollections.size === 2) bothLeadersReady.resolve()
+        }
+      }
+      coordinator1.setAdapterForCollection(`crossed-b`, tab1.adapter)
+      coordinator2.setAdapterForCollection(`crossed-a`, tab2.adapter)
+      const releaseLeaderB = coordinator1.subscribe(`crossed-b`, () => {})
+      const releaseLeaderA = coordinator2.subscribe(`crossed-a`, () => {})
+      await bothLeadersReady.promise
+      observePostedMessage = undefined
+
+      const createFollowerCollection = (
+        id: string,
+        adapter: PersistenceAdapter,
+        coordinator: BrowserCollectionCoordinator,
+      ) => {
+        const collection = createCollection(
+          persistedCollectionOptions<{ id: string; title: string }, string>({
+            id,
+            getKey: (row) => row.id,
+            defaultIndexType: BasicIndex,
+            sync: {
+              sync: ({ markReady }) => {
+                markReady()
+              },
+            },
+            persistence: { adapter, coordinator },
+          }),
+        )
+        collection.createIndex((row) => row.title, { name: `${id}-title` })
+        return collection
+      }
+      const followerA = createFollowerCollection(
+        `crossed-a`,
+        tab1.adapter,
+        coordinator1,
+      )
+      const followerB = createFollowerCollection(
+        `crossed-b`,
+        tab2.adapter,
+        coordinator2,
+      )
+      const preloadA = Promise.resolve(followerA.preload())
+      const preloadB = Promise.resolve(followerB.preload())
+      void preloadA.catch(() => undefined)
+      void preloadB.catch(() => undefined)
+
+      try {
+        await bothLeaderRPCsEntered.promise
+        expect({
+          tab1: tab1.leaderRPCScopeObservations,
+          tab2: tab2.leaderRPCScopeObservations,
+        }).toEqual({ tab1: [false], tab2: [false] })
+        await Promise.all([preloadA, preloadB])
+      } finally {
+        releaseSchedulerCycle.resolve()
+        await Promise.all([preloadA, preloadB]).catch(() => undefined)
+        await Promise.all([followerA.cleanup(), followerB.cleanup()])
+        releaseLeaderA()
+        releaseLeaderB()
+        coordinator2.dispose()
+        coordinator1.dispose()
+      }
+    })
+
     it(`uses a supplied leader-local adapter when local work is not complete`, async () => {
       const registeredAdapter = createStubAdapter()
       const scopedAdapter = createStubAdapter()
@@ -956,6 +1151,161 @@ describe(`BrowserCollectionCoordinator`, () => {
         ),
         { seed: 1868, numRuns: 18, endOnFailure: true },
       )
+    })
+  })
+
+  describe(`collection and retry-result retention`, () => {
+    it(`releases generated collection-owned state after the last subscriber`, async () => {
+      let run = 0
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 1, max: 4 }).chain((collectionCount) =>
+            fc.record({
+              collectionCount: fc.constant(collectionCount),
+              releaseOrder: fc.shuffledSubarray(
+                Array.from({ length: collectionCount }, (_, index) => index),
+                { minLength: collectionCount, maxLength: collectionCount },
+              ),
+            }),
+          ),
+          async ({ collectionCount, releaseOrder }) => {
+            run++
+            const coordinator = createCoordinator()
+            const collectionIds = Array.from(
+              { length: collectionCount },
+              (_, index) => `lifecycle-${run}-${index}`,
+            )
+            const readyCollections = new Set<string>()
+            const allReady = createDeferred()
+            observePostedMessage = (data) => {
+              const envelope = data as {
+                collectionId?: string
+                payload?: { type?: string }
+              }
+              if (
+                envelope.payload?.type === `leader:heartbeat` &&
+                envelope.collectionId &&
+                collectionIds.includes(envelope.collectionId)
+              ) {
+                readyCollections.add(envelope.collectionId)
+                if (readyCollections.size === collectionCount) {
+                  allReady.resolve()
+                }
+              }
+            }
+            for (const collectionId of collectionIds) {
+              coordinator.setAdapterForCollection(
+                collectionId,
+                createStubAdapter(),
+              )
+            }
+            const releases = collectionIds.map((collectionId) =>
+              coordinator.subscribe(collectionId, () => {}),
+            )
+
+            try {
+              await allReady.promise
+              observePostedMessage = undefined
+              expect(
+                inspectCoordinator(coordinator).collectionAdapters.size,
+              ).toBe(collectionCount)
+
+              let remaining = collectionCount
+              for (const releasedIndex of releaseOrder) {
+                releases[releasedIndex]!()
+                remaining--
+                expect({
+                  adapters:
+                    inspectCoordinator(coordinator).collectionAdapters.size,
+                  collections: inspectCoordinator(coordinator).collections.size,
+                }).toEqual({
+                  adapters: remaining,
+                  collections: remaining,
+                })
+              }
+            } finally {
+              observePostedMessage = undefined
+              for (const release of releases) release()
+              coordinator.dispose()
+            }
+          },
+        ),
+        { seed: 1868, numRuns: 12, endOnFailure: true },
+      )
+    })
+
+    it(`bounds generated retry-result histories by retention and collection lifecycle`, async () => {
+      vi.useFakeTimers()
+      let run = 0
+      try {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.record({
+              mutationCount: fc.integer({ min: 1, max: 4 }),
+              terminal: fc.constantFrom(`retention`, `unsubscribe`, `dispose`),
+            }),
+            async ({ mutationCount, terminal }) => {
+              run++
+              vi.setSystemTime(0)
+              const adapter = createStubAdapter()
+              const coordinator = createCoordinator(adapter)
+              const collectionId = `envelope-retention-${run}`
+              const ready = createDeferred()
+              observePostedMessage = (data) => {
+                const envelope = data as {
+                  collectionId?: string
+                  payload?: { type?: string }
+                }
+                if (
+                  envelope.collectionId === collectionId &&
+                  envelope.payload?.type === `leader:heartbeat`
+                ) {
+                  ready.resolve()
+                }
+              }
+              const release = coordinator.subscribe(collectionId, () => {})
+
+              try {
+                await ready.promise
+                observePostedMessage = undefined
+                for (let index = 0; index < mutationCount; index++) {
+                  await coordinator.requestApplyLocalMutations(collectionId, [
+                    {
+                      mutationId: `mutation-${run}-${index}`,
+                      type: `insert`,
+                      key: `${index}`,
+                      value: { id: `${index}`, title: `row ${index}` },
+                    },
+                  ])
+                }
+                expect(
+                  inspectCoordinator(coordinator).appliedEnvelopeIds.size,
+                ).toBe(mutationCount)
+
+                if (terminal === `retention`) {
+                  await vi.advanceTimersByTimeAsync(60_000)
+                } else if (terminal === `unsubscribe`) {
+                  release()
+                } else {
+                  coordinator.dispose()
+                }
+
+                expect(
+                  inspectCoordinator(coordinator).appliedEnvelopeIds.size,
+                ).toBe(0)
+              } finally {
+                observePostedMessage = undefined
+                release()
+                coordinator.dispose()
+                vi.clearAllTimers()
+              }
+            },
+          ),
+          { seed: 1868, numRuns: 12, endOnFailure: true },
+        )
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

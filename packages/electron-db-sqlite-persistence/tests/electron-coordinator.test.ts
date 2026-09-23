@@ -165,6 +165,18 @@ async function waitForLeadership(
   expect(coordinator.isLeader(collectionId)).toBe(true)
 }
 
+type CoordinatorInspection = {
+  collectionAdapters: Map<string, unknown>
+  collections: Map<string, unknown>
+  appliedEnvelopeIds: Map<string, unknown>
+}
+
+function inspectCoordinator(
+  coordinator: ElectronCollectionCoordinator,
+): CoordinatorInspection {
+  return coordinator as unknown as CoordinatorInspection
+}
+
 describe(`ElectronCollectionCoordinator parity`, () => {
   beforeEach(() => {
     ;(globalThis as Record<string, unknown>).BroadcastChannel =
@@ -319,6 +331,65 @@ describe(`ElectronCollectionCoordinator parity`, () => {
     } finally {
       follower.dispose()
       leader.dispose()
+    }
+  })
+
+  it(`releases collection-owned state and retry results with the last subscriber`, async () => {
+    const adapter = createStubAdapter()
+    const coordinator = createCoordinator(adapter)
+    const release = coordinator.subscribe(`todos`, () => {})
+    try {
+      await waitForLeadership(coordinator, `todos`)
+      await coordinator.requestApplyLocalMutations(`todos`, [
+        {
+          mutationId: `mut-release`,
+          type: `insert`,
+          key: `1`,
+          value: { id: `1` },
+        },
+      ])
+      expect({
+        adapters: inspectCoordinator(coordinator).collectionAdapters.size,
+        collections: inspectCoordinator(coordinator).collections.size,
+        envelopes: inspectCoordinator(coordinator).appliedEnvelopeIds.size,
+      }).toEqual({ adapters: 1, collections: 1, envelopes: 1 })
+
+      release()
+      expect({
+        adapters: inspectCoordinator(coordinator).collectionAdapters.size,
+        collections: inspectCoordinator(coordinator).collections.size,
+        envelopes: inspectCoordinator(coordinator).appliedEnvelopeIds.size,
+      }).toEqual({ adapters: 0, collections: 0, envelopes: 0 })
+    } finally {
+      release()
+      coordinator.dispose()
+    }
+  })
+
+  it(`expires retry results without later mutation traffic`, async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const adapter = createStubAdapter()
+    const coordinator = createCoordinator(adapter)
+    const release = coordinator.subscribe(`todos`, () => {})
+    try {
+      await waitForLeadership(coordinator, `todos`)
+      await coordinator.requestApplyLocalMutations(`todos`, [
+        {
+          mutationId: `mut-expire`,
+          type: `insert`,
+          key: `1`,
+          value: { id: `1` },
+        },
+      ])
+      expect(inspectCoordinator(coordinator).appliedEnvelopeIds.size).toBe(1)
+
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(inspectCoordinator(coordinator).appliedEnvelopeIds.size).toBe(0)
+    } finally {
+      release()
+      coordinator.dispose()
+      vi.useRealTimers()
     }
   })
 

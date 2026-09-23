@@ -21,6 +21,7 @@ const RPC_RETRY_ATTEMPTS = 2
 const RPC_RETRY_DELAY_MS = 200
 const WRITER_LOCK_BUSY_RETRY_MS = 50
 const WRITER_LOCK_MAX_RETRIES = 20
+const APPLIED_ENVELOPE_RETENTION_MS = 60_000
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -83,6 +84,7 @@ type CollectionState = {
 }
 
 type AppliedEnvelope = {
+  collectionId: string
   appliedAt: number
   response: ApplyLocalMutationsResponse
 }
@@ -133,6 +135,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
   private readonly appliedEnvelopeIds = new Map<string, AppliedEnvelope>()
+  private appliedEnvelopePruneTimer: ReturnType<typeof setTimeout> | null = null
   private readonly disposedPromise: Promise<never>
   private rejectDisposed: ((error: Error) => void) | null = null
   private disposed = false
@@ -202,6 +205,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     state.subscribers.add(onMessage)
     return () => {
       state.subscribers.delete(onMessage)
+      this.releaseCollectionIfUnused(collectionId, state)
     }
   }
 
@@ -346,6 +350,12 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     }
     this.pendingRPCs.clear()
 
+    if (this.appliedEnvelopePruneTimer !== null) {
+      clearTimeout(this.appliedEnvelopePruneTimer)
+      this.appliedEnvelopePruneTimer = null
+    }
+    this.appliedEnvelopeIds.clear()
+
     this.channel.close()
     this.collections.clear()
     this.collectionAdapters.clear()
@@ -388,7 +398,12 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
         lockName,
         { signal: abortController.signal },
         async () => {
-          if (this.isDisposed()) return
+          if (
+            this.isDisposed() ||
+            this.collections.get(collectionId) !== state
+          ) {
+            return
+          }
 
           try {
             // Restore stream position from DB before claiming leadership
@@ -398,6 +413,13 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
               state.latestTerm = pos.latestTerm
               state.latestSeq = pos.latestSeq
               state.latestRowVersion = pos.latestRowVersion
+            }
+
+            if (
+              this.isDisposed() ||
+              this.collections.get(collectionId) !== state
+            ) {
+              return
             }
 
             state.latestTerm++
@@ -437,7 +459,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     }
 
     // Re-acquire if not disposed (leadership was released by another means)
-    if (!this.isDisposed()) {
+    if (!this.isDisposed() && this.collections.get(collectionId) === state) {
       void this.acquireLeadership(collectionId, state)
     }
   }
@@ -455,6 +477,23 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       state.heartbeatTimer = null
     }
     state.isLeader = false
+  }
+
+  private releaseCollectionIfUnused(
+    collectionId: string,
+    state: CollectionState,
+  ): void {
+    if (
+      state.subscribers.size > 0 ||
+      this.collections.get(collectionId) !== state
+    ) {
+      return
+    }
+
+    this.releaseLeadership(collectionId, state)
+    this.collections.delete(collectionId)
+    this.collectionAdapters.delete(collectionId)
+    this.deleteAppliedEnvelopeIdsForCollection(collectionId)
   }
 
   private emitHeartbeat(collectionId: string, state: CollectionState): void {
@@ -683,6 +722,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     },
   ): Promise<ApplyLocalMutationsResponse> {
     // Dedupe by envelopeId
+    this.pruneAppliedEnvelopeIds()
     const appliedEnvelope = this.appliedEnvelopeIds.get(request.envelopeId)
     if (appliedEnvelope) {
       return { ...appliedEnvelope.response, rpcId: request.rpcId }
@@ -737,10 +777,12 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     // Retain the completed result so transport retries observe the same
     // durable outcome without applying the envelope again.
     this.appliedEnvelopeIds.set(request.envelopeId, {
+      collectionId,
       appliedAt: Date.now(),
       response,
     })
     this.pruneAppliedEnvelopeIds()
+    this.scheduleAppliedEnvelopePrune()
 
     // Broadcast tx:committed to all tabs
     const changedRows = request.mutations
@@ -861,13 +903,43 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
   // -----------------------------------------------------------------------
 
   private pruneAppliedEnvelopeIds(): void {
-    // Keep envelopes for 60 seconds for dedup
-    const cutoff = Date.now() - 60_000
+    const cutoff = Date.now() - APPLIED_ENVELOPE_RETENTION_MS
     for (const [id, applied] of this.appliedEnvelopeIds) {
-      if (applied.appliedAt < cutoff) {
+      if (applied.appliedAt <= cutoff) {
         this.appliedEnvelopeIds.delete(id)
       }
     }
+  }
+
+  private deleteAppliedEnvelopeIdsForCollection(collectionId: string): void {
+    for (const [id, applied] of this.appliedEnvelopeIds) {
+      if (applied.collectionId === collectionId) {
+        this.appliedEnvelopeIds.delete(id)
+      }
+    }
+    this.scheduleAppliedEnvelopePrune()
+  }
+
+  private scheduleAppliedEnvelopePrune(): void {
+    if (this.appliedEnvelopePruneTimer !== null) {
+      clearTimeout(this.appliedEnvelopePruneTimer)
+      this.appliedEnvelopePruneTimer = null
+    }
+    if (this.disposed || this.appliedEnvelopeIds.size === 0) return
+
+    let earliestAppliedAt = Number.POSITIVE_INFINITY
+    for (const applied of this.appliedEnvelopeIds.values()) {
+      earliestAppliedAt = Math.min(earliestAppliedAt, applied.appliedAt)
+    }
+    const delay = Math.max(
+      0,
+      earliestAppliedAt + APPLIED_ENVELOPE_RETENTION_MS - Date.now(),
+    )
+    this.appliedEnvelopePruneTimer = setTimeout(() => {
+      this.appliedEnvelopePruneTimer = null
+      this.pruneAppliedEnvelopeIds()
+      this.scheduleAppliedEnvelopePrune()
+    }, delay)
   }
 }
 
