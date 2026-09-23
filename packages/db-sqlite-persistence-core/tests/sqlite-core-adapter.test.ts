@@ -947,6 +947,43 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(sqliteMasterAfter).toHaveLength(0)
     })
 
+    it(`rebuilds a physical index when the normalized spec changes`, async () => {
+      const { adapter, driver } = registerContractHarness()
+      const collectionId = `todos`
+      const signature = `idx-upgraded-expression`
+
+      await adapter.ensureIndex(collectionId, signature, {
+        expressionSql: [`json_extract(value, '$.title')`],
+      })
+
+      const registryRows = await driver.query<{ index_name: string }>(
+        `SELECT index_name
+         FROM persisted_index_registry
+         WHERE collection_id = ? AND signature = ?`,
+        [collectionId, signature],
+      )
+      const indexName = registryRows[0]?.index_name
+      expect(indexName).toBeTruthy()
+
+      await adapter.ensureIndex(collectionId, signature, {
+        expressionSql: [`json_extract(value, '$.score')`],
+      })
+
+      const sqliteMasterRows = await driver.query<{ sql: string }>(
+        `SELECT sql
+         FROM sqlite_master
+         WHERE type = 'index' AND name = ?`,
+        [indexName],
+      )
+      expect(sqliteMasterRows).toHaveLength(1)
+      expect(sqliteMasterRows[0]?.sql).toContain(
+        `json_extract(value, '$.score')`,
+      )
+      expect(sqliteMasterRows[0]?.sql).not.toContain(
+        `json_extract(value, '$.title')`,
+      )
+    })
+
     it(`enforces schema mismatch policies`, async () => {
       const baseHarness = registerContractHarness({
         schemaVersion: 1,

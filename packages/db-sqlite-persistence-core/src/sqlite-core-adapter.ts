@@ -1457,11 +1457,39 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       normalizeIndexSqlFragment(fragment),
     )
     const expressionSql = normalizedExpressionSql.join(`, `)
+    const persistedExpressionSql = JSON.stringify(normalizedExpressionSql)
     const whereSql = spec.whereSql
       ? normalizeIndexSqlFragment(spec.whereSql)
       : undefined
+    const persistedWhereSql = whereSql ?? null
 
     await this.runInTransaction(async (transactionDriver) => {
+      const existingRows = await transactionDriver.query<{
+        index_name: string
+        expression_sql: string
+        where_sql: string | null
+      }>(
+        `SELECT index_name, expression_sql, where_sql
+         FROM persisted_index_registry
+         WHERE collection_id = ? AND signature = ?
+         LIMIT 1`,
+        [collectionId, signature],
+      )
+      const existing = existingRows[0]
+      if (
+        existing &&
+        (existing.index_name !== indexName ||
+          existing.expression_sql !== persistedExpressionSql ||
+          existing.where_sql !== persistedWhereSql)
+      ) {
+        // A compiler upgrade can change normalized SQL without changing the
+        // logical index signature. Rebuild only that stale physical index so
+        // the registry and SQLite planner describe the same expression.
+        await transactionDriver.exec(
+          `DROP INDEX IF EXISTS ${quoteIdentifier(existing.index_name)}`,
+        )
+      }
+
       await transactionDriver.run(
         `INSERT INTO persisted_index_registry (
            collection_id,
@@ -1489,8 +1517,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           collectionId,
           signature,
           indexName,
-          JSON.stringify(normalizedExpressionSql),
-          whereSql ?? null,
+          persistedExpressionSql,
+          persistedWhereSql,
         ],
       )
 

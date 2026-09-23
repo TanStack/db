@@ -342,6 +342,11 @@ type ExpressionIndexScenario = {
     key: string
     value: Record<string, unknown>
   }>
+  preparePreviousIndex?: (
+    adapter: ReturnType<typeof createSQLiteCorePersistenceAdapter>,
+    collectionId: string,
+    signature: string,
+  ) => Promise<void>
   transformQuery?: QueryTransform
 }
 
@@ -379,6 +384,7 @@ async function observeExpressionIndexScenario({
   orderBy,
   preserveResultOrder = false,
   rows,
+  preparePreviousIndex,
   transformQuery,
 }: ExpressionIndexScenario): Promise<ExpressionIndexObservation> {
   const baseDriver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
@@ -423,6 +429,7 @@ async function observeExpressionIndexScenario({
         value: row.value,
       })),
     })
+    await preparePreviousIndex?.(adapter, collectionId, signature)
     await adapter.ensureIndex(collectionId, signature, {
       expressionSql: [serializeIndexExpression(indexExpression)],
     })
@@ -1021,6 +1028,45 @@ describe(`SQLite expression-index oracle`, () => {
       ).toBe(true)
     },
   )
+
+  it(`rebuilds a persisted BigInt-constant index when its normalized spec changes`, async () => {
+    const indexExpression = new IR.Func(`coalesce`, [
+      new IR.PropRef([`largeViewCount`]),
+      new IR.Value(SQLITE_BIGINT_MIN),
+    ])
+    const observation = await observeExpressionIndexScenario({
+      label: `bigint-constant-upgrade`,
+      indexExpression,
+      where: new IR.Func<boolean>(`eq`, [
+        indexExpression,
+        new IR.Value(SQLITE_BIGINT_MIN),
+      ]),
+      rows: [
+        { key: `missing`, value: { largeViewCount: null } },
+        { key: `minimum`, value: { largeViewCount: SQLITE_BIGINT_MIN } },
+        { key: `zero`, value: { largeViewCount: 0n } },
+      ],
+      preparePreviousIndex: async (adapter, collectionId, signature) => {
+        await adapter.ensureIndex(collectionId, signature, {
+          expressionSql: [
+            JSON.stringify(indexExpression, (_key, value: unknown) =>
+              typeof value === `bigint` ? value.toString() : value,
+            ),
+          ],
+        })
+      },
+    })
+
+    expect(observation.adapterKeys).toEqual([`minimum`, `missing`])
+    expect(observation.directSqlKeys).toEqual([`minimum`, `missing`])
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+    ).toBe(true)
+  })
 
   it.each([
     {
