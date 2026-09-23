@@ -33,6 +33,7 @@ import type {
   CollectionConfig,
   CollectionIndexMetadata,
   DeleteMutationFnParams,
+  InferSchemaOutput,
   InsertMutationFnParams,
   LoadSubsetFn,
   LoadSubsetOptions,
@@ -3169,12 +3170,58 @@ function createLoopbackSyncConfig<
 }
 
 export function persistedCollectionOptions<
+  TSchema extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: PersistedSyncWrappedOptions<
+    InferSchemaOutput<TSchema>,
+    TKey,
+    TSchema,
+    TUtils
+  > & {
+    schema: TSchema
+  },
+): PersistedSyncOptionsResult<
+  InferSchemaOutput<TSchema>,
+  TKey,
+  TSchema,
+  TUtils
+> & {
+  schema: TSchema
+}
+
+export function persistedCollectionOptions<
+  TSchema extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: PersistedLocalOnlyOptions<
+    InferSchemaOutput<TSchema>,
+    TKey,
+    TSchema,
+    TUtils
+  > & {
+    schema: TSchema
+  },
+): PersistedLocalOnlyOptionsResult<
+  InferSchemaOutput<TSchema>,
+  TKey,
+  TSchema,
+  TUtils
+> & {
+  schema: TSchema
+}
+
+export function persistedCollectionOptions<
   T extends object,
   TKey extends string | number,
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: PersistedSyncWrappedOptions<T, TKey, TSchema, TUtils>,
+  options: PersistedSyncWrappedOptions<T, TKey, TSchema, TUtils> & {
+    schema?: never
+  },
 ): PersistedSyncOptionsResult<T, TKey, TSchema, TUtils>
 
 export function persistedCollectionOptions<
@@ -3183,7 +3230,9 @@ export function persistedCollectionOptions<
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: PersistedLocalOnlyOptions<T, TKey, TSchema, TUtils>,
+  options: PersistedLocalOnlyOptions<T, TKey, TSchema, TUtils> & {
+    schema?: never
+  },
 ): PersistedLocalOnlyOptionsResult<T, TKey, TSchema, TUtils>
 
 export function persistedCollectionOptions<
@@ -3244,7 +3293,7 @@ export function persistedCollectionOptions<
         persistedCollectionOptions({
           ...options,
           id: collectionId,
-        }) as typeof result,
+        } as never) as typeof result,
     )
   }
 
@@ -3352,7 +3401,7 @@ export function persistedCollectionOptions<
       persistedCollectionOptions({
         ...options,
         id: collectionId,
-      }) as typeof result,
+      } as never) as typeof result,
   )
 }
 

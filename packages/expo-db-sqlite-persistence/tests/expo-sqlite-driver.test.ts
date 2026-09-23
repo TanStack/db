@@ -5,6 +5,10 @@ import { afterEach, expect, it } from 'vitest'
 import { ExpoSQLiteDriver } from '../src/expo-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
 import { createExpoSQLiteTestDatabase } from './helpers/expo-sqlite-test-db'
+import type {
+  ExpoSQLiteDatabaseLike,
+  ExpoSQLiteTransaction,
+} from '../src/expo-sqlite-driver'
 
 const activeCleanupFns: Array<() => void | Promise<void>> = []
 
@@ -191,6 +195,61 @@ it(`throws when transaction callback omits transaction driver argument`, async (
   await expect(
     driver.transaction((() => Promise.resolve(undefined)) as never),
   ).rejects.toThrow(`transaction driver argument`)
+})
+
+/**
+ * Runtime checkpoint for the paired type assertion: `transaction<T>` resolves
+ * to the callback's value after Expo's void-returning exclusive transaction
+ * boundary settles. This test does not claim an intermediate publication or
+ * independently recheck commit and rollback behavior.
+ */
+it(`returns callback values when Expo's transaction boundary returns void`, async () => {
+  const transaction: ExpoSQLiteTransaction = {
+    execAsync: () => Promise.resolve(),
+    getAllAsync: <T>() => Promise.resolve([] as Array<T>),
+    runAsync: () =>
+      Promise.resolve({
+        changes: 0,
+        lastInsertRowId: 0,
+      }),
+  }
+  const database: ExpoSQLiteDatabaseLike = {
+    ...transaction,
+    withExclusiveTransactionAsync: async (task) => {
+      await task(transaction)
+    },
+  }
+  const driver = new ExpoSQLiteDriver({ database })
+
+  await expect(
+    driver.transaction((transactionDriver) => {
+      void transactionDriver
+      return Promise.resolve({ status: `committed` as const })
+    }),
+  ).resolves.toEqual({ status: `committed` })
+})
+
+it(`rejects values outside Expo's SQLite bind domain`, async () => {
+  const transaction: ExpoSQLiteTransaction = {
+    execAsync: () => Promise.resolve(),
+    getAllAsync: <T>() => Promise.resolve([] as Array<T>),
+    runAsync: () =>
+      Promise.resolve({
+        changes: 0,
+        lastInsertRowId: 0,
+      }),
+  }
+  const database: ExpoSQLiteDatabaseLike = {
+    ...transaction,
+    withExclusiveTransactionAsync: async (task) => {
+      await task(transaction)
+    },
+  }
+  const driver = new ExpoSQLiteDriver({ database })
+
+  await expect(driver.run(`SELECT ?`, [{ unsupported: true }])).rejects.toThrow(
+    `Expo SQLite bind parameters`,
+  )
 })
 
 it(`throws config error when expo database methods are missing`, () => {

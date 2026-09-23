@@ -2186,5 +2186,48 @@ describe(`Query Collections`, () => {
         expect(query.state.size).toBe(0)
       })
     })
+
+    /**
+     * Driver: public `useLiveQuery` with Svelte state. Each `flushSync` is the
+     * observation cut after disabled, enabled, and disabled-again updates. This
+     * test observes conditional `findOne` data and status; shared conformance
+     * owns array-query Collection/state behavior.
+     */
+    it(`keeps conditional findOne data empty while disabled`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-find-one-svelte`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        let enabled = $state(false)
+        const query = useLiveQuery(
+          (q) =>
+            enabled
+              ? q
+                  .from({ collection })
+                  .where(({ collection: person }) => eq(person.id, `3`))
+                  .findOne()
+              : null,
+          [() => enabled],
+        )
+
+        flushSync()
+        expect(query.status).toBe(`disabled`)
+        expect(query.data).toEqual([])
+
+        enabled = true
+        flushSync()
+        expect(query.data).toMatchObject({ id: `3` })
+
+        enabled = false
+        flushSync()
+        expect(query.status).toBe(`disabled`)
+        expect(query.data).toEqual([])
+      })
+    })
   })
 })

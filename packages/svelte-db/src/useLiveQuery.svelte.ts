@@ -56,6 +56,19 @@ export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   isCleanedUp: boolean
 }
 
+type InferConditionalResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? InferResultType<TContext> | []
+    : InferResultType<TContext>
+
+export type ConditionalUseLiveQueryReturn<
+  T extends object,
+  TData = Array<T>,
+> = Omit<UseLiveQueryReturn<T, TData>, `collection` | `status`> & {
+  collection: Collection<T, string | number, {}> | null
+  status: CollectionStatus | `disabled`
+}
+
 export interface UseLiveQueryReturnWithCollection<
   T extends object,
   TKey extends string | number,
@@ -188,9 +201,9 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
   deps?: Array<() => unknown>,
-): UseLiveQueryReturn<
+): ConditionalUseLiveQueryReturn<
   GetResult<TContext>,
-  InferResultType<TContext> | undefined
+  InferConditionalResultType<TContext>
 >
 
 /**
