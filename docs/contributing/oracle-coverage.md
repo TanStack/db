@@ -34,8 +34,9 @@ The command includes tracked and untracked package files so an in-progress
 audit cannot hide a new owner. A surface is complete only when each primary
 owner does one of these things:
 
-- states its contract, model, history grammar, production path, and observations
-  in the executable file, or
+- states its contract, model, history grammar, production driver, and refinement
+  check—including its public observations and checkpoint—in the executable
+  file, or
 - records why that structure would add no useful information to a focused test.
 
 The pass must not change product behavior. If clearer prose exposes a missing

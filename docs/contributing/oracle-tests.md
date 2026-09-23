@@ -42,12 +42,12 @@ probe is not an important generated property merely because it uses test data.
 The executable oracle MUST keep its contract, model, history grammar,
 production driver, and refinement check visible in the oracle file or in
 companion modules that the file names directly. Pull-request evidence and a
-durable review ledger may supplement those five responsibilities, but cannot
-replace them. Unless a requirement says otherwise, other conformance evidence
-MAY live in the executable test, an oracle-file comment, the pull-request
-description, or a durable review ledger linked from the change. Reviewers MUST
-score the stated obligation, not the presence of a preferred heading, class,
-comment template, or helper.
+versioned review record tied to the exact reviewed head may supplement those
+five responsibilities, but cannot replace them. Unless a requirement says
+otherwise, other conformance evidence MAY live in the executable test, an
+oracle-file comment, the pull-request description, or a versioned review record
+linked from the change. Reviewers MUST score the stated obligation, not the
+presence of a preferred heading, class, comment template, or helper.
 
 ### ORC-001: Contract authority and limits
 
@@ -96,8 +96,9 @@ comment template, or helper.
   states the bounded domains and marginal cases; and names a nearby invalid
   history or state the grammar rejects.
 - **Evidence location:** These controls MAY be executable calibration checks,
-  comments, pull-request evidence, or a durable review ledger. Stable executable
-  checks are preferred when the claim is cheap to preserve.
+  comments, pull-request evidence, or a versioned review record tied to the exact
+  reviewed head. Stable executable checks are preferred when the claim is cheap
+  to preserve.
 - **Not required:** One test per control, a Cartesian product of unrelated axes,
   or a permanent source mutant.
 
@@ -131,15 +132,16 @@ comment template, or helper.
 
 - **Trigger:** An important generated property.
 - **Obligation:** The package's oracle campaign MUST execute the same property,
-  generators, observations, and run budget twice: once with a documented fixed
-  seed and once without a seed. A replay interface MUST accept both the seed and
-  shrink path and MUST run the requested replay directly.
+  generators, observation recorder, refinement check, and run budget twice:
+  once with a documented fixed seed and once without a seed. A replay interface
+  MUST accept both the seed and shrink path and MUST run the requested replay
+  directly.
 - **Acceptance evidence:** The normal test command reaches both campaigns, each
   campaign records its execution, and a checked replay command reproduces a
   captured seed-and-path failure.
 - **Does not satisfy:** Fixed examples do not replace the fixed-seed campaign.
-  Different generators, observations, or budgets do not establish campaign
-  parity.
+  Different generators, observation recorders, refinement checks, or budgets do
+  not establish campaign parity.
 - **Not required:** Running either normal campaign before an explicit replay.
 
 ### ORC-008: Stateful-model minimality
@@ -205,6 +207,10 @@ comment template, or helper.
 - **Acceptance evidence:** Each applicable requirement has concrete evidence or
   an explicit unresolved gap. Each non-applicable requirement has a reason tied
   to its trigger.
+- **Evidence location:** At closeout, verdict-critical evidence outside the
+  executable oracle MUST live in a versioned review record tied to the exact
+  reviewed head. An editable pull-request description alone does not satisfy
+  this requirement.
 - **Not required:** Copying the layer-comparison questions or review card into
   every test, answering them in their printed order, or placing the audit in the
   oracle file.
@@ -563,8 +569,9 @@ time on the fixed campaign before reaching the failure the developer asked to
 reproduce.
 
 The fixed and random campaigns must use the same property, generators,
-observations, and run budget. Only their seed source may differ. This keeps a
-random failure eligible for promotion into a pinned example or fixed campaign.
+observation recorder, refinement check, and run budget. Only their seed source
+may differ. This keeps a random failure eligible for promotion into a pinned
+example or fixed campaign.
 
 [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
 shows this shape. Its fixed run preserves one scheduler campaign. Its second

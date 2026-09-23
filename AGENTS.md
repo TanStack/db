@@ -405,8 +405,9 @@ methods; it does not authorize new product behavior or retire existing laws.
 
 When an oracle has a stable subsystem model, write it as executable subsystem
 documentation. Follow the guide's section on literate oracle files. Keep the
-contract, model, generated history grammar, production driver, and observations
-close enough that a reviewer can compare them directly.
+contract, model, generated history grammar, production driver, and refinement
+check—including its public observations and checkpoint—close enough that a
+reviewer can compare them directly.
 
 ### Always Add Tests for Bugs
 
