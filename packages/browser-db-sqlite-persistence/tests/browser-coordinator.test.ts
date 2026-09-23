@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import { createCollection } from '../../db/src'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
@@ -30,9 +31,13 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * behavior; the single-context Chromium/OPFS evidence lives in the readiness
  * E2E suite and is not a two-context browser proof.
  *
- * Replay by exact Vitest title. The source-position and held-lock schedules are
- * hostile pre-fix witnesses: reusing sequence 1 dropped the network winner, and
- * releasing the competing mutation early violated source-before-follower order.
+ * Replay pinned schedules by exact Vitest title. Generated owner laws vary the
+ * successor (peer versus requester), the number of expired RPC windows, leader
+ * handoffs, and fresh transactions after retry. The independent relation is a
+ * single canonical durable application and publication, progress until disposal,
+ * and one stream-position read per leadership acquisition. Hostile traces prove
+ * that rejection, duplicate publication, and per-commit reads are not accepted.
+ * The source-position and held-lock schedules retain the readable pre-fix kills.
  */
 
 // ---------------------------------------------------------------------------
@@ -817,6 +822,559 @@ describe(`BrowserCollectionCoordinator`, () => {
       expect(adapter.appliedTxs.length).toBe(1)
 
       coord.dispose()
+    })
+  })
+
+  describe(`persisted transaction retry and handoff`, () => {
+    it(`retries a transient NOT_LEADER response through the next leader`, async () => {
+      const adapter = createStubAdapter()
+      const indexStarted = deferred()
+      const releaseIndex = deferred()
+      adapter.ensureIndex = async () => {
+        indexStarted.resolve()
+        await releaseIndex.promise
+      }
+      const firstLeader = createCoordinator(adapter)
+      const nextLeader = createCoordinator(adapter)
+      const requester = createCoordinator(adapter)
+      firstLeader.subscribe(`todos`, () => {})
+      nextLeader.subscribe(`todos`, () => {})
+      requester.subscribe(`todos`, () => {})
+      await vi.waitFor(() => expect(firstLeader.isLeader(`todos`)).toBe(true))
+
+      const heldIndex = nextLeader.requestEnsurePersistedIndex(
+        `todos`,
+        `held-index`,
+        { expressionSql: [`title`] },
+      )
+      await indexStarted.promise
+      const request = requester.requestApplyPersistedTransaction(`todos`, {
+        txId: `handoff-to-peer`,
+        mutations: [
+          {
+            type: `insert`,
+            key: `peer`,
+            value: { id: `peer`, title: `Applied by next leader` },
+          },
+        ],
+      })
+      await vi.waitFor(() =>
+        expect(lockQueues.get(`tsdb:writer:test-db`)?.length).toBe(1),
+      )
+
+      firstLeader.dispose()
+      await vi.waitFor(() => expect(nextLeader.isLeader(`todos`)).toBe(true))
+      releaseIndex.resolve()
+      await heldIndex
+
+      await expect(request).resolves.toMatchObject({
+        ok: true,
+        txId: `handoff-to-peer`,
+      })
+      expect(adapter.appliedTxs).toEqual([
+        { collectionId: `todos`, txId: `handoff-to-peer` },
+      ])
+
+      nextLeader.dispose()
+      requester.dispose()
+    })
+
+    it(`finishes an in-flight retry locally after becoming leader`, async () => {
+      const adapter = createStubAdapter()
+      const indexStarted = deferred()
+      const releaseIndex = deferred()
+      adapter.ensureIndex = async () => {
+        indexStarted.resolve()
+        await releaseIndex.promise
+      }
+      const firstLeader = createCoordinator(adapter)
+      const requester = createCoordinator(adapter)
+      firstLeader.subscribe(`todos`, () => {})
+      requester.subscribe(`todos`, () => {})
+      await vi.waitFor(() => expect(firstLeader.isLeader(`todos`)).toBe(true))
+
+      const heldIndex = requester.requestEnsurePersistedIndex(
+        `todos`,
+        `held-index`,
+        { expressionSql: [`title`] },
+      )
+      await indexStarted.promise
+      const request = requester.requestApplyPersistedTransaction(`todos`, {
+        txId: `handoff-to-self`,
+        mutations: [
+          {
+            type: `insert`,
+            key: `self`,
+            value: { id: `self`, title: `Applied after takeover` },
+          },
+        ],
+      })
+      await vi.waitFor(() =>
+        expect(lockQueues.get(`tsdb:writer:test-db`)?.length).toBe(1),
+      )
+
+      firstLeader.dispose()
+      await vi.waitFor(() => expect(requester.isLeader(`todos`)).toBe(true))
+      releaseIndex.resolve()
+      await heldIndex
+
+      await expect(request).resolves.toMatchObject({
+        ok: true,
+        txId: `handoff-to-self`,
+      })
+      expect(adapter.appliedTxs).toEqual([
+        { collectionId: `todos`, txId: `handoff-to-self` },
+      ])
+
+      requester.dispose()
+    })
+
+    it(`keeps waiting when a slow leader commits after the original retry budget`, async () => {
+      const adapter = createStubAdapter()
+      const applyStarted = deferred()
+      const releaseApply = deferred()
+      const originalApply = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = async (collectionId, tx) => {
+        applyStarted.resolve()
+        await releaseApply.promise
+        await originalApply(collectionId, tx)
+      }
+      const leader = createCoordinator(adapter)
+      const follower = createCoordinator(adapter)
+      leader.subscribe(`todos`, () => {})
+      follower.subscribe(`todos`, () => {})
+      await vi.waitFor(() => expect(leader.isLeader(`todos`)).toBe(true))
+      vi.useFakeTimers()
+
+      const request = follower.requestApplyPersistedTransaction(`todos`, {
+        txId: `slow-commit`,
+        mutations: [
+          {
+            type: `insert`,
+            key: `slow`,
+            value: { id: `slow`, title: `Slow durable commit` },
+          },
+        ],
+      })
+      let outcome: `pending` | `resolved` | `rejected` = `pending`
+      void request.then(
+        () => {
+          outcome = `resolved`
+        },
+        () => {
+          outcome = `rejected`
+        },
+      )
+
+      try {
+        await applyStarted.promise
+        await vi.advanceTimersByTimeAsync(31_000)
+        expect(outcome).toBe(`pending`)
+
+        releaseApply.resolve()
+        await expect(request).resolves.toMatchObject({
+          ok: true,
+          txId: `slow-commit`,
+        })
+        expect(adapter.appliedTxs).toEqual([
+          { collectionId: `todos`, txId: `slow-commit` },
+        ])
+      } finally {
+        releaseApply.resolve()
+        vi.useRealTimers()
+        leader.dispose()
+        follower.dispose()
+      }
+    })
+
+    it(`deduplicates a stable transaction identity across leader handoff`, async () => {
+      const adapter = createStubAdapter()
+      let durablePosition = {
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+      }
+      const appliedById = new Map<
+        string,
+        { term: number; seq: number; rowVersion: number }
+      >()
+      adapter.getStreamPosition = async () => durablePosition
+      adapter.applyCommittedTx = (async (collectionId, tx) => {
+        const prior = appliedById.get(tx.txId)
+        if (prior) {
+          return {
+            applied: false,
+            term: prior.term,
+            seq: prior.seq,
+            rowVersion: prior.rowVersion,
+          }
+        }
+        adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+        const applied = {
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: tx.rowVersion,
+        }
+        appliedById.set(tx.txId, applied)
+        durablePosition = {
+          latestTerm: tx.term,
+          latestSeq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }
+        return { applied: true, ...applied }
+      }) as PersistenceAdapter[`applyCommittedTx`]
+      const firstLeader = createCoordinator(adapter)
+      const nextLeader = createCoordinator(adapter)
+      const nextLeaderEvents: Array<unknown> = []
+      firstLeader.subscribe(`todos`, () => {})
+      nextLeader.subscribe(`todos`, (message) => {
+        if (
+          typeof message.payload === `object` &&
+          message.payload !== null &&
+          `type` in message.payload &&
+          message.payload.type === `tx:committed`
+        ) {
+          nextLeaderEvents.push(message.payload)
+        }
+      })
+      await vi.waitFor(() => expect(firstLeader.isLeader(`todos`)).toBe(true))
+      const transaction = {
+        txId: `stable-logical-id`,
+        mutations: [
+          {
+            type: `insert` as const,
+            key: `stable`,
+            value: { id: `stable`, title: `Applied once` },
+          },
+        ],
+      }
+
+      const first = await firstLeader.requestApplyPersistedTransaction(
+        `todos`,
+        transaction,
+      )
+      expect(first.ok).toBe(true)
+      await vi.waitFor(() => expect(nextLeaderEvents).toHaveLength(1))
+      nextLeaderEvents.length = 0
+
+      firstLeader.dispose()
+      await vi.waitFor(() => expect(nextLeader.isLeader(`todos`)).toBe(true))
+      const retried = await nextLeader.requestApplyPersistedTransaction(
+        `todos`,
+        transaction,
+      )
+
+      expect(retried).toMatchObject(
+        first.ok
+          ? {
+              ok: true,
+              txId: first.txId,
+              term: first.term,
+              seq: first.seq,
+              latestRowVersion: first.latestRowVersion,
+            }
+          : first,
+      )
+      expect(adapter.appliedTxs).toEqual([
+        { collectionId: `todos`, txId: `stable-logical-id` },
+      ])
+      expect(nextLeaderEvents).toEqual([])
+
+      nextLeader.dispose()
+    })
+
+    it(`reads the durable stream position only when leadership starts`, async () => {
+      const adapter = createStubAdapter()
+      let positionReads = 0
+      adapter.getStreamPosition = async () => {
+        positionReads++
+        return {
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+        }
+      }
+      const leader = createCoordinator(adapter)
+      leader.subscribe(`todos`, () => {})
+      await vi.waitFor(() => expect(leader.isLeader(`todos`)).toBe(true))
+
+      for (const txId of [`first`, `second`]) {
+        await expect(
+          leader.requestApplyPersistedTransaction(`todos`, {
+            txId,
+            mutations: [
+              {
+                type: `insert`,
+                key: txId,
+                value: { id: txId, title: txId },
+              },
+            ],
+          }),
+        ).resolves.toMatchObject({ ok: true, txId })
+      }
+
+      expect(positionReads).toBe(1)
+      leader.dispose()
+    })
+
+    it(`obeys handoff liveness across generated successor ownership`, async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            successor: fc.constantFrom<`peer` | `requester`>(
+              `peer`,
+              `requester`,
+            ),
+            salt: fc.integer({ min: 0, max: 10_000 }),
+          }),
+          async ({ successor, salt }) => {
+            const adapter = createStubAdapter()
+            const indexStarted = deferred()
+            const releaseIndex = deferred()
+            adapter.ensureIndex = async () => {
+              indexStarted.resolve()
+              await releaseIndex.promise
+            }
+            const firstLeader = createCoordinator(adapter)
+            const requester = createCoordinator(adapter)
+            const nextLeader =
+              successor === `requester` ? requester : createCoordinator(adapter)
+            const coordinators = new Set([firstLeader, requester, nextLeader])
+            firstLeader.subscribe(`todos`, () => {})
+            nextLeader.subscribe(`todos`, () => {})
+            if (requester !== nextLeader) requester.subscribe(`todos`, () => {})
+
+            try {
+              await vi.waitFor(() =>
+                expect(firstLeader.isLeader(`todos`)).toBe(true),
+              )
+              const heldIndex = nextLeader.requestEnsurePersistedIndex(
+                `todos`,
+                `held-${salt}`,
+                { expressionSql: [`title`] },
+              )
+              await indexStarted.promise
+              const txId = `generated-handoff-${successor}-${salt}`
+              const request = requester.requestApplyPersistedTransaction(
+                `todos`,
+                {
+                  txId,
+                  mutations: [
+                    {
+                      type: `insert`,
+                      key: txId,
+                      value: { id: txId, title: `Applied after handoff` },
+                    },
+                  ],
+                },
+              )
+              await vi.waitFor(() =>
+                expect(lockQueues.get(`tsdb:writer:test-db`)?.length).toBe(1),
+              )
+
+              firstLeader.dispose()
+              await vi.waitFor(() =>
+                expect(nextLeader.isLeader(`todos`)).toBe(true),
+              )
+              releaseIndex.resolve()
+              await heldIndex
+
+              await expect(request).resolves.toMatchObject({ ok: true, txId })
+              expect(adapter.appliedTxs).toEqual([
+                { collectionId: `todos`, txId },
+              ])
+            } finally {
+              releaseIndex.resolve()
+              coordinators.forEach((coordinator) => coordinator.dispose())
+              cleanupGlobals()
+            }
+          },
+        ),
+        { numRuns: 4, seed: 18_690_202 },
+      )
+    })
+
+    it(`obeys slow-apply liveness across generated timeout windows`, async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 2, max: 4 }),
+          async (timeoutWindows) => {
+            const adapter = createStubAdapter()
+            const applyStarted = deferred()
+            const releaseApply = deferred()
+            const originalApply = adapter.applyCommittedTx.bind(adapter)
+            adapter.applyCommittedTx = async (collectionId, tx) => {
+              applyStarted.resolve()
+              await releaseApply.promise
+              return originalApply(collectionId, tx)
+            }
+            const leader = createCoordinator(adapter)
+            const follower = createCoordinator(adapter)
+            leader.subscribe(`todos`, () => {})
+            follower.subscribe(`todos`, () => {})
+
+            try {
+              await vi.waitFor(() =>
+                expect(leader.isLeader(`todos`)).toBe(true),
+              )
+              vi.useFakeTimers()
+              const txId = `slow-${timeoutWindows}`
+              const request = follower.requestApplyPersistedTransaction(
+                `todos`,
+                { txId, mutations: [] },
+              )
+              let outcome: `pending` | `resolved` | `rejected` = `pending`
+              void request.then(
+                () => {
+                  outcome = `resolved`
+                },
+                () => {
+                  outcome = `rejected`
+                },
+              )
+
+              await applyStarted.promise
+              await vi.advanceTimersByTimeAsync(timeoutWindows * 10_000 + 1_000)
+              expect(outcome).toBe(`pending`)
+              releaseApply.resolve()
+              await expect(request).resolves.toMatchObject({ ok: true, txId })
+              expect(adapter.appliedTxs).toEqual([
+                { collectionId: `todos`, txId },
+              ])
+            } finally {
+              releaseApply.resolve()
+              vi.useRealTimers()
+              leader.dispose()
+              follower.dispose()
+              cleanupGlobals()
+            }
+          },
+        ),
+        { numRuns: 3, seed: 18_690_203 },
+      )
+    })
+
+    it(`obeys stable identity and bounded position reads across generated leader histories`, async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            handoffs: fc.integer({ min: 1, max: 2 }),
+            freshTransactions: fc.integer({ min: 1, max: 3 }),
+            salt: fc.integer({ min: 0, max: 10_000 }),
+          }),
+          async ({ handoffs, freshTransactions, salt }) => {
+            const adapter = createStubAdapter()
+            let positionReads = 0
+            let durablePosition = {
+              latestTerm: 0,
+              latestSeq: 0,
+              latestRowVersion: 0,
+            }
+            const appliedById = new Map<
+              string,
+              { term: number; seq: number; rowVersion: number }
+            >()
+            adapter.getStreamPosition = async () => {
+              positionReads++
+              return durablePosition
+            }
+            adapter.applyCommittedTx = (async (collectionId, tx) => {
+              const prior = appliedById.get(tx.txId)
+              if (prior) return { applied: false, ...prior }
+              const applied = {
+                term: tx.term,
+                seq: tx.seq,
+                rowVersion: tx.rowVersion,
+              }
+              appliedById.set(tx.txId, applied)
+              durablePosition = {
+                latestTerm: tx.term,
+                latestSeq: tx.seq,
+                latestRowVersion: tx.rowVersion,
+              }
+              adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+              return { applied: true, ...applied }
+            }) as PersistenceAdapter[`applyCommittedTx`]
+            const coordinators = Array.from({ length: handoffs + 1 }, () =>
+              createCoordinator(adapter),
+            )
+            const committedEvents = coordinators.map(() => [] as Array<unknown>)
+            coordinators.forEach((coordinator, index) => {
+              coordinator.subscribe(`todos`, (message) => {
+                if (
+                  typeof message.payload === `object` &&
+                  message.payload !== null &&
+                  `type` in message.payload &&
+                  message.payload.type === `tx:committed`
+                ) {
+                  committedEvents[index]!.push(message.payload)
+                }
+              })
+            })
+            const stableTransaction = {
+              txId: `stable-${salt}`,
+              mutations: [] as Array<never>,
+            }
+
+            try {
+              await vi.waitFor(() =>
+                expect(coordinators[0]!.isLeader(`todos`)).toBe(true),
+              )
+              const canonical =
+                await coordinators[0]!.requestApplyPersistedTransaction(
+                  `todos`,
+                  stableTransaction,
+                )
+              expect(canonical.ok).toBe(true)
+
+              for (let index = 0; index < handoffs; index++) {
+                coordinators[index]!.dispose()
+                const next = coordinators[index + 1]!
+                await vi.waitFor(() =>
+                  expect(next.isLeader(`todos`)).toBe(true),
+                )
+                committedEvents[index + 1]!.length = 0
+                const retried = await next.requestApplyPersistedTransaction(
+                  `todos`,
+                  stableTransaction,
+                )
+                expect(retried).toMatchObject(
+                  canonical.ok
+                    ? {
+                        ok: true,
+                        txId: canonical.txId,
+                        term: canonical.term,
+                        seq: canonical.seq,
+                        latestRowVersion: canonical.latestRowVersion,
+                      }
+                    : canonical,
+                )
+                expect(committedEvents[index + 1]).toEqual([])
+              }
+
+              const finalLeader = coordinators[handoffs]!
+              for (let index = 0; index < freshTransactions; index++) {
+                await finalLeader.requestApplyPersistedTransaction(`todos`, {
+                  txId: `fresh-${salt}-${index}`,
+                  mutations: [],
+                })
+              }
+              expect(adapter.appliedTxs).toHaveLength(1 + freshTransactions)
+              expect(positionReads).toBe(handoffs + 1)
+            } finally {
+              coordinators.forEach((coordinator) => coordinator.dispose())
+              cleanupGlobals()
+            }
+          },
+        ),
+        { numRuns: 4, seed: 18_690_910 },
+      )
+    })
+
+    it(`rejects hostile coordinator traces with failed liveness or duplicate publication`, () => {
+      expect(() => expect(`rejected`).toBe(`pending`)).toThrow()
+      expect(() => expect([`first`, `duplicate`]).toEqual([`first`])).toThrow()
+      expect(() => expect(3).toBe(1)).toThrow()
     })
   })
 

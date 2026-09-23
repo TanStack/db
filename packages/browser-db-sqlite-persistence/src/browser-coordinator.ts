@@ -293,19 +293,36 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     collectionId: string,
     transaction: PositionlessPersistedTx,
   ): Promise<ApplyPersistedTransactionResponse> {
-    if (this.isLeader(collectionId)) {
-      return this.handleApplyPersistedTransaction(collectionId, {
-        type: `rpc:applyPersistedTransaction:req`,
+    while (!this.isDisposed()) {
+      const request = {
+        type: `rpc:applyPersistedTransaction:req` as const,
         rpcId: safeRandomUUID(),
         transaction,
-      })
+      }
+
+      if (this.isLeader(collectionId)) {
+        const response = await this.handleApplyPersistedTransaction(
+          collectionId,
+          request,
+        )
+        if (response.ok || response.code !== `NOT_LEADER`) return response
+      } else {
+        try {
+          const response =
+            await this.sendRPCOnce<ApplyPersistedTransactionResponse>(
+              collectionId,
+              request,
+            )
+          if (response.ok || response.code !== `NOT_LEADER`) return response
+        } catch (error) {
+          if (this.isDisposed()) throw error
+        }
+      }
+
+      await sleep(RPC_RETRY_DELAY_MS)
     }
 
-    return this.sendRPC<ApplyPersistedTransactionResponse>(collectionId, {
-      type: `rpc:applyPersistedTransaction:req`,
-      rpcId: safeRandomUUID(),
-      transaction,
-    })
+    throw new Error(`coordinator disposed`)
   }
 
   async pullSince(
@@ -692,21 +709,22 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
           }
         }
 
-        const tx = await this.applyPositionlessTransactionWithWriterLock(
-          collectionId,
-          {
+        const appliedTransaction =
+          await this.applyPositionlessTransactionWithWriterLock(collectionId, {
             txId: safeRandomUUID(),
             mutations: request.mutations.map((mutation) => ({
               type: mutation.type,
               key: mutation.key,
               value: mutation.value,
             })),
-          },
-        )
+          })
+        const tx = appliedTransaction.tx
 
         this.appliedEnvelopeIds.set(request.envelopeId, Date.now())
         this.pruneAppliedEnvelopeIds()
-        this.publishCommittedTransaction(collectionId, tx)
+        if (appliedTransaction.applied) {
+          this.publishCommittedTransaction(collectionId, tx)
+        }
 
         return {
           type: `rpc:applyLocalMutations:res` as const,
@@ -756,10 +774,12 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
           }
         }
 
-        const tx = await this.applyPositionlessTransactionWithWriterLock(
-          collectionId,
-          request.transaction,
-        )
+        const appliedTransaction =
+          await this.applyPositionlessTransactionWithWriterLock(
+            collectionId,
+            request.transaction,
+          )
+        const tx = appliedTransaction.tx
         this.appliedPersistedTransactions.set(transactionKey, {
           timestamp: Date.now(),
           term: tx.term,
@@ -767,7 +787,9 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
           latestRowVersion: tx.rowVersion,
         })
         this.pruneAppliedEnvelopeIds()
-        this.publishCommittedTransaction(collectionId, tx)
+        if (appliedTransaction.applied) {
+          this.publishCommittedTransaction(collectionId, tx)
+        }
         return {
           type: `rpc:applyPersistedTransaction:res`,
           rpcId: request.rpcId,
@@ -794,33 +816,30 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private async applyPositionlessTransactionWithWriterLock(
     collectionId: string,
     transaction: PositionlessPersistedTx,
-  ): Promise<PersistedTx> {
+  ): Promise<{ tx: PersistedTx; applied: boolean }> {
     const state = this.collections.get(collectionId)
     if (!state?.isLeader) throw new LostLeadershipError()
 
     const adapter = this.requireAdapter()
-    if (adapter.getStreamPosition) {
-      const durablePosition = await adapter.getStreamPosition(collectionId)
-      if (!this.isLeader(collectionId)) throw new LostLeadershipError()
-      this.observeCollectionPosition(
-        state,
-        durablePosition.latestTerm,
-        durablePosition.latestSeq,
-        durablePosition.latestRowVersion,
-      )
-    }
-
     if (!this.isLeader(collectionId)) throw new LostLeadershipError()
-    const tx: PersistedTx = {
+    const proposedTx: PersistedTx = {
       ...transaction,
       term: state.latestTerm,
       seq: state.latestSeq + 1,
       rowVersion: state.latestRowVersion + 1,
     }
 
-    await adapter.applyCommittedTx(collectionId, tx)
+    const application = await adapter.applyCommittedTx(collectionId, proposedTx)
+    const tx = application
+      ? {
+          ...proposedTx,
+          term: application.term,
+          seq: application.seq,
+          rowVersion: application.rowVersion,
+        }
+      : proposedTx
     this.observeCollectionPosition(state, tx.term, tx.seq, tx.rowVersion)
-    return tx
+    return { tx, applied: application?.applied ?? true }
   }
 
   private publishCommittedTransaction(

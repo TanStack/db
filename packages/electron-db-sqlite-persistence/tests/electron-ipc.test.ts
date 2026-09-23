@@ -181,22 +181,56 @@ describe(`electron sqlite persistence bridge`, () => {
       timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
 
-    await rendererPersistence.adapter.applyCommittedTx(`todos`, {
-      txId: `tx-1`,
+    const firstApplication = await rendererPersistence.adapter.applyCommittedTx(
+      `todos`,
+      {
+        txId: `tx-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `From renderer`,
+              score: 10,
+            },
+          },
+        ],
+      },
+    )
+    const retriedApplication =
+      await rendererPersistence.adapter.applyCommittedTx(`todos`, {
+        txId: `tx-1`,
+        term: 2,
+        seq: 2,
+        rowVersion: 2,
+        mutations: [
+          {
+            type: `insert`,
+            key: `duplicate`,
+            value: {
+              id: `duplicate`,
+              title: `Must not cross the bridge as a second application`,
+              score: 11,
+            },
+          },
+        ],
+      })
+
+    expect(firstApplication).toEqual({
+      applied: true,
       term: 1,
       seq: 1,
       rowVersion: 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: `1`,
-          value: {
-            id: `1`,
-            title: `From renderer`,
-            score: 10,
-          },
-        },
-      ],
+    })
+    expect(retriedApplication).toEqual({
+      applied: false,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
     })
 
     const rows = await rendererPersistence.adapter.loadSubset(`todos`, {})

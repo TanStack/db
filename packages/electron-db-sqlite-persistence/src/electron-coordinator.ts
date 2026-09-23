@@ -654,30 +654,49 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
       }
     }
 
-    // Assign stream position
-    state.latestSeq++
-    state.latestRowVersion++
+    const tx = await this.withWriterLock(async () => {
+      const currentState = this.collections.get(collectionId)
+      if (!currentState?.isLeader) {
+        throw new Error(`not the leader for ${collectionId}`)
+      }
 
-    const term = state.latestTerm
-    const seq = state.latestSeq
-    const rowVersion = state.latestRowVersion
+      const proposedTx = {
+        txId: safeRandomUUID(),
+        term: currentState.latestTerm,
+        seq: currentState.latestSeq + 1,
+        rowVersion: currentState.latestRowVersion + 1,
+        mutations: request.mutations.map((m) => ({
+          type: m.type,
+          key: m.key,
+          value: m.value,
+        })),
+      }
 
-    // Build and apply the persisted transaction
-    const tx = {
-      txId: safeRandomUUID(),
-      term,
-      seq,
-      rowVersion,
-      mutations: request.mutations.map((m) => ({
-        type: m.type,
-        key: m.key,
-        value: m.value,
-      })),
-    }
+      const application = await this.requireAdapter().applyCommittedTx(
+        collectionId,
+        proposedTx,
+      )
+      const appliedTx = application
+        ? {
+            ...proposedTx,
+            term: application.term,
+            seq: application.seq,
+            rowVersion: application.rowVersion,
+          }
+        : proposedTx
+      currentState.latestTerm = Math.max(
+        currentState.latestTerm,
+        appliedTx.term,
+      )
+      currentState.latestSeq = Math.max(currentState.latestSeq, appliedTx.seq)
+      currentState.latestRowVersion = Math.max(
+        currentState.latestRowVersion,
+        appliedTx.rowVersion,
+      )
+      return appliedTx
+    })
 
-    await this.withWriterLock(() =>
-      this.requireAdapter().applyCommittedTx(collectionId, tx),
-    )
+    const { term, seq, rowVersion } = tx
 
     // Track envelope for dedup
     this.appliedEnvelopeIds.set(request.envelopeId, Date.now())
@@ -784,9 +803,15 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     const lockName = `tsdb:writer:${this.dbName}`
 
     for (let attempt = 0; attempt <= WRITER_LOCK_MAX_RETRIES; attempt++) {
+      const lockAttempt = { enteredCallback: false }
       try {
-        return await navigator.locks.request(lockName, async () => fn())
+        return await navigator.locks.request(lockName, async () => {
+          lockAttempt.enteredCallback = true
+          return fn()
+        })
       } catch (error) {
+        if (lockAttempt.enteredCallback) throw error
+
         if (error instanceof DOMException && error.name === `AbortError`) {
           throw error
         }

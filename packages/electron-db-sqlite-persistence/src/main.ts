@@ -156,13 +156,16 @@ async function executeRequestAgainstAdapter(
     }
 
     case `applyCommittedTx`: {
-      await adapter.applyCommittedTx(request.collectionId, request.payload.tx)
+      const result = await adapter.applyCommittedTx(
+        request.collectionId,
+        request.payload.tx,
+      )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
         requestId: request.requestId,
         method: request.method,
         ok: true,
-        result: null,
+        result: result || null,
       }
     }
 

@@ -13,6 +13,7 @@ import type {
   PersistedCollectionPersistence,
   PersistedIndexSpec,
   PersistedTx,
+  PersistedTxApplicationResult,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 import type {
@@ -203,8 +204,8 @@ function createResolvedRendererAdapter(
     applyCommittedTx: async (
       collectionId: string,
       tx: PersistedTx<Record<string, unknown>, string | number>,
-    ): Promise<void> => {
-      await executeRequest(
+    ): Promise<void | PersistedTxApplicationResult> => {
+      const result = await executeRequest(
         `applyCommittedTx`,
         collectionId,
         {
@@ -212,6 +213,7 @@ function createResolvedRendererAdapter(
         },
         resolution,
       )
+      return result ?? undefined
     },
     loadCollectionMetadata: async (
       collectionId: string,

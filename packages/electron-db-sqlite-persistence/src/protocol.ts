@@ -3,6 +3,7 @@ import type {
   PersistedCollectionMode,
   PersistedIndexSpec,
   PersistedTx,
+  PersistedTxApplicationResult,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
@@ -62,7 +63,7 @@ export type ElectronPersistenceResultMap = {
     value: ElectronPersistedRow
     metadata?: unknown
   }>
-  applyCommittedTx: null
+  applyCommittedTx: PersistedTxApplicationResult | null
   ensureIndex: null
   markIndexRemoved: null
   pullSince: SQLitePullSinceResult<ElectronPersistedKey>

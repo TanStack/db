@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import { IR } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import { harnessScope } from './contracts/harness-scope'
@@ -339,6 +340,160 @@ export function runSQLiteCoreAdapterContractSuite(
       }>(`SELECT key, row_version FROM "${tombstoneTable}"`)
       expect(tombstoneRows).toHaveLength(1)
       expect(tombstoneRows[0]?.row_version).toBe(3)
+    })
+
+    it(`returns the canonical application for a stable transaction id at a new leader position`, async () => {
+      const { adapter, driver } = registerContractHarness()
+      const collectionId = `stable-transaction-identity`
+      const first = await adapter.applyCommittedTx(collectionId, {
+        txId: `logical-transaction`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Applied once`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+          },
+        ],
+      })
+      const retry = await adapter.applyCommittedTx(collectionId, {
+        txId: `logical-transaction`,
+        term: 2,
+        seq: 2,
+        rowVersion: 2,
+        mutations: [
+          {
+            type: `insert`,
+            key: `2`,
+            value: {
+              id: `2`,
+              title: `Must not be applied`,
+              createdAt: `2026-01-02T00:00:00.000Z`,
+              score: 2,
+            },
+          },
+        ],
+      })
+
+      expect(first).toEqual({
+        applied: true,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+      })
+      expect(retry).toEqual({
+        applied: false,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+      })
+      expect(await adapter.loadSubset(collectionId, {})).toEqual([
+        {
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Applied once`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+          },
+        },
+      ])
+      const txRows = await driver.query<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM applied_tx WHERE collection_id = ?`,
+        [collectionId],
+      )
+      expect(txRows[0]?.count).toBe(1)
+    })
+
+    it(`obeys stable transaction identity across generated leader positions`, async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            retryTerm: fc.integer({ min: 2, max: 6 }),
+            retrySeq: fc.integer({ min: 1, max: 6 }),
+            retryRowVersion: fc.integer({ min: 2, max: 12 }),
+            salt: fc.integer({ min: 0, max: 1_000_000 }),
+          }),
+          async ({ retryTerm, retrySeq, retryRowVersion, salt }) => {
+            const { adapter } = registerContractHarness()
+            const collectionId = `stable-id-law-${salt}`
+            const txId = `logical-${salt}`
+            const first = await adapter.applyCommittedTx(collectionId, {
+              txId,
+              term: 1,
+              seq: 1,
+              rowVersion: 1,
+              mutations: [
+                {
+                  type: `insert`,
+                  key: `first`,
+                  value: {
+                    id: `first`,
+                    title: `Canonical`,
+                    createdAt: `2026-01-01T00:00:00.000Z`,
+                    score: salt,
+                  },
+                },
+              ],
+            })
+            const retry = await adapter.applyCommittedTx(collectionId, {
+              txId,
+              term: retryTerm,
+              seq: retrySeq,
+              rowVersion: retryRowVersion,
+              mutations: [
+                {
+                  type: `insert`,
+                  key: `duplicate`,
+                  value: {
+                    id: `duplicate`,
+                    title: `Duplicate`,
+                    createdAt: `2026-01-02T00:00:00.000Z`,
+                    score: salt + 1,
+                  },
+                },
+              ],
+            })
+
+            expect(first).toEqual({
+              applied: true,
+              term: 1,
+              seq: 1,
+              rowVersion: 1,
+            })
+            expect(retry).toEqual({
+              applied: false,
+              term: 1,
+              seq: 1,
+              rowVersion: 1,
+            })
+            expect(
+              (await adapter.loadSubset(collectionId, {})).map(
+                (row) => row.key,
+              ),
+            ).toEqual([`first`])
+          },
+        ),
+        { numRuns: 6, seed: 18_690_909 },
+      )
+    })
+
+    it(`rejects a hostile stable-id trace that reports the retry position`, () => {
+      expect(() =>
+        expect({ applied: false, term: 2, seq: 2, rowVersion: 2 }).toEqual({
+          applied: false,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+        }),
+      ).toThrow()
     })
 
     it(`rolls back partially applied mutations when transaction fails`, async () => {

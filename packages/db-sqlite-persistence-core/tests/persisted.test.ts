@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import {
   BasicIndex,
   DbClient,
@@ -58,10 +59,14 @@ import type {
  * Checkpoints compare exact public rows, Collection status and errors, durable
  * calls, and settlement before controlled gates are released.
  *
- * These are pinned schedules, not a generated lifecycle model. Replay one with
- * its exact Vitest title. The schedules retain pre-fix kills for stale overwrite,
+ * Pinned schedules retain readable pre-fix witnesses for stale overwrite,
  * false readiness errors, misclassified receipt rejection, remote-ensure retry,
- * and hidden durability failure. PowerSync does not currently use this
+ * and hidden durability failure. The generated owner laws below vary delivery
+ * channel and width, snapshot failure phase, peer/RPC queue width, and demand
+ * failure/unload history. Their independent relations are exact delivered keys,
+ * cached-snapshot preservation before commit, peer-before-response inclusion,
+ * and one reload per live owner. Hostile trace tests prove each comparison
+ * rejects the production fault. PowerSync does not currently use this
  * authoritative-truncate path.
  */
 
@@ -306,6 +311,10 @@ function deferred<T = void>(): {
     reject = rejectPromise
   })
   return { promise, resolve, reject }
+}
+
+function expectExactKeys(actual: Array<string>, expected: Array<string>): void {
+  expect([...actual].sort()).toEqual([...expected].sort())
 }
 
 describe(`persistedCollectionOptions`, () => {
@@ -2507,7 +2516,7 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
-  it(`rejects buffered upstream rows when eager local hydration fails`, async () => {
+  it(`replays buffered upstream rows when eager local hydration fails`, async () => {
     const localError = new Error(`persisted rows unavailable`)
     const hydrationStarted = deferred()
     const hydration = deferred<Array<{ key: string; value: Todo }>>()
@@ -2543,14 +2552,743 @@ describe(`persistedCollectionOptions`, () => {
     collection.startSyncImmediate()
     await hydrationStarted.promise
     hydration.reject(localError)
-    const upstreamOutcome = await upstreamDone.promise.catch((error) => error)
+    const upstreamOutcome = await upstreamDone.promise.then(
+      () => `applied` as const,
+      (error: unknown) => error,
+    )
     await flushAsyncWork()
 
-    expect(upstreamOutcome).toBe(localError)
-    expect(collection.status).toBe(`loading`)
-    expect(collection.get(`network`)).toBeUndefined()
+    expect(upstreamOutcome).toBe(`applied`)
+    expect(collection.status).toBe(`ready`)
+    expect(stripVirtualProps(collection.get(`network`))).toEqual({
+      id: `network`,
+      title: `Loaded from network`,
+    })
+    expect(adapter.rows.get(`network`)).toEqual({
+      id: `network`,
+      title: `Loaded from network`,
+    })
+    expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    await collection.cleanup()
+  })
+
+  it(`applies peer commits buffered before eager hydration fails`, async () => {
+    const localError = new Error(`persisted rows unavailable`)
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    const coordinator = createCoordinatorHarness()
+    const upstreamStarted = deferred()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            upstreamStarted.resolve()
+            return {}
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await Promise.all([hydrationStarted.promise, upstreamStarted.promise])
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `peer-during-failed-hydration`,
+      latestRowVersion: 1,
+      requiresFullReload: false,
+      changedRows: [
+        {
+          key: `peer`,
+          value: { id: `peer`, title: `Peer survives local failure` },
+        },
+      ],
+      deletedKeys: [],
+    })
+    hydration.reject(localError)
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(stripVirtualProps(collection.get(`peer`))).toEqual({
+      id: `peer`,
+      title: `Peer survives local failure`,
+    })
+    await collection.cleanup()
+  })
+
+  it(`obeys the buffered-delivery law across generated hydration failure histories`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          channel: fc.constantFrom<`source` | `peer`>(`source`, `peer`),
+          width: fc.integer({ min: 1, max: 3 }),
+          salt: fc.integer({ min: 0, max: 10_000 }),
+        }),
+        async ({ channel, width, salt }) => {
+          const localError = new Error(`generated hydration failure ${salt}`)
+          const hydrationStarted = deferred()
+          const hydration = deferred<Array<{ key: string; value: Todo }>>()
+          void hydration.promise.catch(() => undefined)
+          const adapter = createRecordingAdapter()
+          adapter.loadSubset = () => {
+            hydrationStarted.resolve()
+            return hydration.promise
+          }
+          const coordinator = createCoordinatorHarness()
+          const upstreamStarted = deferred()
+          let remoteBegin: (() => void) | undefined
+          let remoteWrite:
+            | ((message: { type: `insert`; value: Todo }) => void)
+            | undefined
+          let remoteCommit: (() => SyncAppliedReceipt) | undefined
+          const collection = createCollection(
+            persistedCollectionOptions<Todo, string>({
+              id: `sync-present`,
+              getKey: (item) => item.id,
+              sync: {
+                sync: ({ begin, write, commit, markReady }) => {
+                  remoteBegin = begin
+                  remoteWrite = write as typeof remoteWrite
+                  remoteCommit = commit
+                  markReady()
+                  upstreamStarted.resolve()
+                  return {}
+                },
+              },
+              persistence: { adapter, coordinator },
+            }),
+          )
+          const rows = Array.from({ length: width }, (_, index) => ({
+            id: `${channel}-${salt}-${index}`,
+            title: `Generated ${index}`,
+          }))
+
+          try {
+            collection.startSyncImmediate()
+            await Promise.all([
+              hydrationStarted.promise,
+              upstreamStarted.promise,
+            ])
+
+            let sourceReceipt: SyncAppliedReceipt | undefined
+            if (channel === `source`) {
+              remoteBegin?.()
+              rows.forEach((row) => {
+                remoteWrite?.({ type: `insert`, value: row })
+              })
+              sourceReceipt = remoteCommit?.()
+            } else {
+              rows.forEach((row, index) => {
+                coordinator.emit({
+                  type: `tx:committed`,
+                  term: 1,
+                  seq: index + 1,
+                  txId: `peer-${salt}-${index}`,
+                  latestRowVersion: index + 1,
+                  requiresFullReload: false,
+                  changedRows: [{ key: row.id, value: row }],
+                  deletedKeys: [],
+                })
+              })
+            }
+
+            hydration.reject(localError)
+            if (sourceReceipt !== undefined && sourceReceipt !== true) {
+              await sourceReceipt
+            }
+            await flushAsyncWork()
+            await flushAsyncWork()
+
+            const actualKeys = rows
+              .filter((row) => collection.get(row.id) !== undefined)
+              .map((row) => row.id)
+            expectExactKeys(
+              actualKeys,
+              rows.map((row) => row.id),
+            )
+            if (channel === `source`) {
+              expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+            }
+          } finally {
+            await collection.cleanup()
+          }
+        },
+      ),
+      { numRuns: 8, seed: 18_690_311 },
+    )
+  })
+
+  it(`rejects a hostile hydration trace that drops one buffered delivery`, () => {
+    expect(() => expectExactKeys([`kept`], [`kept`, `dropped`])).toThrow()
+  })
+
+  it(`keeps cached hydration usable when an uncommitted truncate snapshot fails`, async () => {
+    const upstreamError = new Error(`snapshot stream failed`)
+    const cached = { id: `cached`, title: `Cached snapshot` }
+    const adapter = createRecordingAdapter([cached])
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteTruncate: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let failUpstream: ((error: unknown) => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `failed-uncommitted-snapshot`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, truncate, write, markError }) => {
+            remoteBegin = begin
+            remoteTruncate = truncate
+            remoteWrite = write as typeof remoteWrite
+            failUpstream = markError
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await hydrationStarted.promise
+    remoteBegin?.()
+    remoteTruncate?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `partial`, title: `Incomplete snapshot` },
+    })
+    failUpstream?.(upstreamError)
+    hydration.resolve([{ key: cached.id, value: cached }])
+
+    await collection.stateWhenReady()
+    expect(collection.status).toBe(`ready`)
+    expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([cached])
     expect(adapter.applyCommittedTxCalls).toHaveLength(0)
     await collection.cleanup()
+  })
+
+  it(`obeys the cache-snapshot phase law across generated pre-commit failures`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          phase: fc.constantFrom<`before-begin` | `open-truncate`>(
+            `before-begin`,
+            `open-truncate`,
+          ),
+          cachedWidth: fc.integer({ min: 1, max: 3 }),
+          partialWidth: fc.integer({ min: 0, max: 3 }),
+          salt: fc.integer({ min: 0, max: 10_000 }),
+        }),
+        async ({ phase, cachedWidth, partialWidth, salt }) => {
+          const cached = Array.from({ length: cachedWidth }, (_, index) => ({
+            id: `cached-${salt}-${index}`,
+            title: `Cached ${index}`,
+          }))
+          const adapter = createRecordingAdapter(cached)
+          const hydrationStarted = deferred()
+          const hydration = deferred<Array<{ key: string; value: Todo }>>()
+          adapter.loadSubset = () => {
+            hydrationStarted.resolve()
+            return hydration.promise
+          }
+          let remoteBegin: (() => void) | undefined
+          let remoteTruncate: (() => void) | undefined
+          let remoteWrite:
+            | ((message: { type: `insert`; value: Todo }) => void)
+            | undefined
+          let failUpstream: ((error: unknown) => void) | undefined
+          const collection = createCollection(
+            persistedCollectionOptions<Todo, string>({
+              id: `snapshot-phase-${salt}`,
+              getKey: (item) => item.id,
+              sync: {
+                sync: ({ begin, truncate, write, markError }) => {
+                  remoteBegin = begin
+                  remoteTruncate = truncate
+                  remoteWrite = write as typeof remoteWrite
+                  failUpstream = markError
+                  return {}
+                },
+              },
+              persistence: { adapter },
+            }),
+          )
+
+          try {
+            collection.startSyncImmediate()
+            await hydrationStarted.promise
+            if (phase === `open-truncate`) {
+              remoteBegin?.()
+              remoteTruncate?.()
+              for (let index = 0; index < partialWidth; index++) {
+                remoteWrite?.({
+                  type: `insert`,
+                  value: {
+                    id: `partial-${salt}-${index}`,
+                    title: `Partial ${index}`,
+                  },
+                })
+              }
+            }
+            failUpstream?.(new Error(`generated snapshot failure ${salt}`))
+            hydration.resolve(
+              cached.map((row) => ({ key: row.id, value: row })),
+            )
+
+            await collection.stateWhenReady()
+            expect(collection.status).toBe(`ready`)
+            expectExactKeys(
+              collection.toArray.map((row) => row.id),
+              cached.map((row) => row.id),
+            )
+            expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+          } finally {
+            await collection.cleanup()
+          }
+        },
+      ),
+      { numRuns: 8, seed: 18_690_404 },
+    )
+  })
+
+  it(`rejects a hostile pre-commit snapshot that replaces cached rows`, () => {
+    expect(() =>
+      expectExactKeys([`partial`], [`cached-a`, `cached-b`]),
+    ).toThrow()
+  })
+
+  // Approval-gated contract decision (F007): core Collection state currently
+  // marks every committed truncate ready. Keep the complete witness without
+  // making normal CI choose multi-transaction snapshot semantics.
+  it.skip(`waits for a custom chunked truncate source to declare its snapshot ready`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `cached`, title: `Cached snapshot` },
+    ])
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteTruncate: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `custom-chunked-truncate`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, truncate, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteTruncate = truncate
+            remoteWrite = write as typeof remoteWrite
+            remoteCommit = commit
+            markUpstreamReady = markReady
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await hydrationStarted.promise
+
+    remoteBegin?.()
+    remoteTruncate?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `chunk-1`, title: `First chunk` },
+    })
+    const firstApplied = remoteCommit?.()
+    if (firstApplied !== true) await firstApplied
+
+    expect(collection.status).toBe(`loading`)
+
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `chunk-2`, title: `Second chunk` },
+    })
+    const secondApplied = remoteCommit?.()
+    if (secondApplied !== true) await secondApplied
+
+    expect(collection.status).toBe(`loading`)
+    markUpstreamReady?.()
+    await collection.stateWhenReady()
+    expect(collection.toArray.map(stripVirtualProps)).toEqual([
+      { id: `chunk-1`, title: `First chunk` },
+      { id: `chunk-2`, title: `Second chunk` },
+    ])
+
+    hydration.resolve([
+      { key: `cached`, value: { id: `cached`, title: `Cached snapshot` } },
+    ])
+    await collection.cleanup()
+  })
+
+  it(`calibrates current upstream fallback when the saved stream position is unavailable`, async () => {
+    const startupError = new Error(`stream position unavailable`)
+    const positionAttempted = deferred()
+    const adapter = createRecordingAdapter()
+    adapter.getStreamPosition = () => {
+      positionAttempted.resolve()
+      return Promise.reject(startupError)
+    }
+    let sourceStarts = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `missing-startup-stream-position`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            sourceStarts++
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `unsafe`, title: `Unsafe fallback write` },
+            })
+            const applied = commit()
+            if (applied === true) {
+              markReady()
+            } else {
+              void applied.then(markReady, () => undefined)
+            }
+            return {}
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    const preloadOutcome = collection.preload()
+    await positionAttempted.promise
+    await preloadOutcome
+
+    // This is a calibration of the pre-existing contract, not approval of the
+    // opposing F005 expectation. Changing this behavior is design-gated because
+    // on-demand coverage also requires upstream fallback after metadata failure.
+    expect(sourceStarts).toBe(1)
+    expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    expect(adapter.rows.has(`unsafe`)).toBe(true)
+    await collection.cleanup()
+  })
+
+  it(`applies queued peer commits before a later coordinator response position`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const requestStarted = deferred()
+    const response = deferred<{
+      type: `rpc:applyPersistedTransaction:res`
+      rpcId: string
+      ok: true
+      txId: string
+      term: number
+      seq: number
+      latestRowVersion: number
+    }>()
+    coordinator.requestApplyPersistedTransaction = async (
+      _collectionId,
+      transaction,
+    ) => {
+      requestStarted.resolve()
+      const result = await response.promise
+      return { ...result, txId: transaction.txId }
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as typeof remoteWrite
+            remoteCommit = commit
+            markReady()
+            return {}
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `local`, title: `Coordinator transaction` },
+    })
+    const applied = remoteCommit?.()
+    expect(applied).not.toBe(true)
+    await requestStarted.promise
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `peer-first`,
+      latestRowVersion: 1,
+      requiresFullReload: false,
+      changedRows: [
+        {
+          key: `peer`,
+          value: { id: `peer`, title: `Peer transaction` },
+        },
+      ],
+      deletedKeys: [],
+    })
+    response.resolve({
+      type: `rpc:applyPersistedTransaction:res`,
+      rpcId: `source-second`,
+      ok: true,
+      txId: `placeholder`,
+      term: 1,
+      seq: 2,
+      latestRowVersion: 2,
+    })
+    if (applied !== true) await applied
+    await flushAsyncWork()
+
+    expect(stripVirtualProps(collection.get(`peer`))).toEqual({
+      id: `peer`,
+      title: `Peer transaction`,
+    })
+    expect(stripVirtualProps(collection.get(`local`))).toEqual({
+      id: `local`,
+      title: `Coordinator transaction`,
+    })
+    await collection.cleanup()
+  })
+
+  it(`obeys the peer-before-response ordering law across generated queue widths`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          peerCount: fc.integer({ min: 1, max: 4 }),
+          salt: fc.integer({ min: 0, max: 10_000 }),
+        }),
+        async ({ peerCount, salt }) => {
+          const adapter = createRecordingAdapter()
+          const coordinator = createCoordinatorHarness()
+          const requestStarted = deferred()
+          const response = deferred<{
+            type: `rpc:applyPersistedTransaction:res`
+            rpcId: string
+            ok: true
+            txId: string
+            term: number
+            seq: number
+            latestRowVersion: number
+          }>()
+          coordinator.requestApplyPersistedTransaction = async (
+            _collectionId,
+            transaction,
+          ) => {
+            requestStarted.resolve()
+            const result = await response.promise
+            return { ...result, txId: transaction.txId }
+          }
+          let remoteBegin: (() => void) | undefined
+          let remoteWrite:
+            | ((message: { type: `insert`; value: Todo }) => void)
+            | undefined
+          let remoteCommit: (() => SyncAppliedReceipt) | undefined
+          const collection = createCollection(
+            persistedCollectionOptions<Todo, string>({
+              id: `sync-present`,
+              getKey: (item) => item.id,
+              sync: {
+                sync: ({ begin, write, commit, markReady }) => {
+                  remoteBegin = begin
+                  remoteWrite = write as typeof remoteWrite
+                  remoteCommit = commit
+                  markReady()
+                  return {}
+                },
+              },
+              persistence: { adapter, coordinator },
+            }),
+          )
+          const peerRows = Array.from({ length: peerCount }, (_, index) => ({
+            id: `peer-${salt}-${index}`,
+            title: `Peer ${index}`,
+          }))
+          const local = { id: `local-${salt}`, title: `Local` }
+
+          try {
+            await collection.preload()
+            remoteBegin?.()
+            remoteWrite?.({ type: `insert`, value: local })
+            const applied = remoteCommit?.()
+            expect(applied).not.toBe(true)
+            await requestStarted.promise
+
+            peerRows.forEach((row, index) => {
+              coordinator.emit({
+                type: `tx:committed`,
+                term: 1,
+                seq: index + 1,
+                txId: `peer-before-response-${salt}-${index}`,
+                latestRowVersion: index + 1,
+                requiresFullReload: false,
+                changedRows: [{ key: row.id, value: row }],
+                deletedKeys: [],
+              })
+            })
+            response.resolve({
+              type: `rpc:applyPersistedTransaction:res`,
+              rpcId: `local-after-peers-${salt}`,
+              ok: true,
+              txId: `placeholder`,
+              term: 1,
+              seq: peerCount + 1,
+              latestRowVersion: peerCount + 1,
+            })
+            if (applied !== true) await applied
+            await flushAsyncWork()
+
+            const expectedKeys = [...peerRows.map((row) => row.id), local.id]
+            const actualKeys = expectedKeys.filter(
+              (key) => collection.get(key) !== undefined,
+            )
+            expectExactKeys(actualKeys, expectedKeys)
+          } finally {
+            await collection.cleanup()
+          }
+        },
+      ),
+      { numRuns: 8, seed: 18_690_606 },
+    )
+  })
+
+  it(`rejects a hostile ordering trace that advances past a queued peer`, () => {
+    expect(() =>
+      expectExactKeys([`local`], [`peer-before-response`, `local`]),
+    ).toThrow()
+  })
+
+  it(`tracks fallback subset demand for peer reload and remote ensure retry`, async () => {
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const startupError = new Error(`startup metadata unavailable`)
+    const sourceStarted = deferred()
+    const metadataAttempted = deferred()
+    const adapter = createRecordingAdapter()
+    adapter.getStreamPosition = async () => {
+      metadataAttempted.resolve()
+      throw startupError
+    }
+    let localLoads = 0
+    adapter.loadSubset = async (collectionId, options, ctx) => {
+      adapter.loadSubsetCalls.push({
+        collectionId,
+        options,
+        requiredIndexSignatures: ctx?.requiredIndexSignatures ?? [],
+      })
+      localLoads++
+      return []
+    }
+    const coordinator = createCoordinatorHarness()
+    let ensureCalls = 0
+    coordinator.requestEnsureRemoteSubset = async () => {
+      ensureCalls++
+      if (ensureCalls === 1) throw new Error(`leader unavailable`)
+    }
+    let upstreamLoads = 0
+    let upstreamBegin: (() => void) | undefined
+    let upstreamWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let upstreamCommit: (() => SyncAppliedReceipt) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            sourceStarted.resolve()
+            upstreamBegin = begin
+            upstreamWrite = write as typeof upstreamWrite
+            upstreamCommit = commit
+            markReady()
+            return {
+              loadSubset: async () => {
+                upstreamLoads++
+                upstreamBegin?.()
+                upstreamWrite?.({
+                  type: `insert`,
+                  value: { id: `remote`, title: `Remote subset` },
+                })
+                const applied = upstreamCommit?.()
+                if (applied !== true) await applied
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const subsetOptions: LoadSubsetOptions = { limit: 7, offset: 2 }
+
+    try {
+      collection.startSyncImmediate()
+      await Promise.all([sourceStarted.promise, metadataAttempted.promise])
+      vi.useFakeTimers()
+      await collection._sync.loadSubset(subsetOptions)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect({ localLoads, upstreamLoads, ensureCalls }).toEqual({
+        localLoads: 1,
+        upstreamLoads: 1,
+        ensureCalls: 1,
+      })
+
+      await vi.advanceTimersByTimeAsync(50)
+      expect(ensureCalls).toBe(2)
+
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `peer-reload`,
+        latestRowVersion: 2,
+        requiresFullReload: true,
+      })
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(localLoads).toBe(2)
+      expect(adapter.loadSubsetCalls.at(-1)?.options).toBe(subsetOptions)
+    } finally {
+      await collection.cleanup()
+      warning.mockRestore()
+      vi.useRealTimers()
+    }
   })
 
   it(`signals readiness once when eager hydration and upstream readiness race`, async () => {
@@ -3271,6 +4009,164 @@ describe(`persistedCollectionOptions`, () => {
       }
     },
   )
+
+  it(`does not reload an on-demand collection after its final subset unloads`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Owned while subscribed` },
+    ])
+    const coordinator = createCoordinatorHarness()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const options: LoadSubsetOptions = { limit: 1 }
+
+    collection.startSyncImmediate()
+    await collection._sync.loadSubset(options)
+    collection._sync.unloadSubset(options)
+    const callsAfterUnload = adapter.loadSubsetCalls.length
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `peer-after-final-unload`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(adapter.loadSubsetCalls).toHaveLength(callsAfterUnload)
+    await collection.cleanup()
+  })
+
+  it(`obeys the demand-ownership law across generated failure and unload histories`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          history: fc.constantFrom<`fallback-active` | `released`>(
+            `fallback-active`,
+            `released`,
+          ),
+          limit: fc.integer({ min: 1, max: 4 }),
+          offset: fc.integer({ min: 0, max: 2 }),
+          salt: fc.integer({ min: 0, max: 10_000 }),
+        }),
+        async ({ history, limit, offset, salt }) => {
+          const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+          const adapter = createRecordingAdapter()
+          const metadataAttempted = deferred()
+          if (history === `fallback-active`) {
+            adapter.getStreamPosition = async () => {
+              metadataAttempted.resolve()
+              throw new Error(`generated startup failure ${salt}`)
+            }
+          } else {
+            metadataAttempted.resolve()
+          }
+          const originalLoadSubset = adapter.loadSubset.bind(adapter)
+          let localLoads = 0
+          adapter.loadSubset = async (collectionId, options, ctx) => {
+            localLoads++
+            return originalLoadSubset(collectionId, options, ctx)
+          }
+          const coordinator = createCoordinatorHarness()
+          let ensureCalls = 0
+          coordinator.requestEnsureRemoteSubset = async () => {
+            ensureCalls++
+            if (history === `fallback-active` && ensureCalls === 1) {
+              throw new Error(`generated leader failure ${salt}`)
+            }
+          }
+          const sourceStarted = deferred()
+          let upstreamLoads = 0
+          const collection = createCollection(
+            persistedCollectionOptions<Todo, string>({
+              id: `sync-present`,
+              syncMode: `on-demand`,
+              getKey: (item) => item.id,
+              sync: {
+                sync: ({ markReady }) => {
+                  markReady()
+                  sourceStarted.resolve()
+                  return {
+                    loadSubset: () => {
+                      upstreamLoads++
+                      return true
+                    },
+                  }
+                },
+              },
+              persistence: { adapter, coordinator },
+            }),
+          )
+          const options: LoadSubsetOptions = { limit, offset }
+
+          try {
+            collection.startSyncImmediate()
+            await Promise.all([
+              sourceStarted.promise,
+              metadataAttempted.promise,
+            ])
+            vi.useFakeTimers()
+            await collection._sync.loadSubset(options)
+            await vi.advanceTimersByTimeAsync(0)
+
+            expect(localLoads).toBe(1)
+            expect(upstreamLoads).toBe(1)
+
+            if (history === `fallback-active`) {
+              expect(ensureCalls).toBe(1)
+              await vi.advanceTimersByTimeAsync(50)
+              expect(ensureCalls).toBe(2)
+            } else {
+              collection._sync.unloadSubset(options)
+            }
+
+            const callsBeforeReload = localLoads
+            coordinator.emit({
+              type: `tx:committed`,
+              term: 1,
+              seq: 1,
+              txId: `generated-demand-${salt}`,
+              latestRowVersion: 1,
+              requiresFullReload: true,
+            })
+            await vi.advanceTimersByTimeAsync(0)
+
+            if (history === `fallback-active`) {
+              expect(localLoads).toBe(callsBeforeReload + 1)
+              expect(adapter.loadSubsetCalls.at(-1)?.options).toBe(options)
+            } else {
+              expect(localLoads).toBe(callsBeforeReload)
+            }
+          } finally {
+            await collection.cleanup()
+            vi.useRealTimers()
+            warning.mockRestore()
+          }
+        },
+      ),
+      { numRuns: 8, seed: 18_690_812 },
+    )
+  })
+
+  it(`rejects hostile demand traces that fabricate or replace ownership`, () => {
+    const owned = { limit: 1 }
+    expect(() => expect({}).toBe(owned)).toThrow()
+    expect(() => expect(2).toBe(1)).toThrow()
+  })
 
   it(`does not retain refresh history as permanent subset demand`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Before` }])

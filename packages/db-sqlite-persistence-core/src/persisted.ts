@@ -254,6 +254,13 @@ export type PositionlessPersistedTx<
   TKey extends string | number = string | number,
 > = Omit<PersistedTx<T, TKey>, `term` | `seq` | `rowVersion`>
 
+export type PersistedTxApplicationResult = {
+  applied: boolean
+  term: number
+  seq: number
+  rowVersion: number
+}
+
 export type ApplyPersistedTransactionResponse =
   | {
       type: `rpc:applyPersistedTransaction:res`
@@ -284,7 +291,10 @@ export interface PersistenceAdapter {
       metadata?: unknown
     }>
   >
-  applyCommittedTx: (collectionId: string, tx: PersistedTx) => Promise<void>
+  applyCommittedTx: (
+    collectionId: string,
+    tx: PersistedTx,
+  ) => Promise<void | PersistedTxApplicationResult>
   loadCollectionMetadata?: (
     collectionId: string,
   ) => Promise<Array<{ key: string; value: unknown }>>
@@ -1433,23 +1443,8 @@ class PersistedCollectionRuntime<
       }
     }
 
-    if (hydrationFailed) {
-      for (const transaction of this.queuedHydrationTransactions) {
-        transaction.rejectApplied?.(hydrationFailure)
-      }
-      this.queuedHydrationTransactions.length = 0
-      for (const txCommitted of this.queuedTxCommitted) {
-        this.observeLocalStreamPosition(
-          txCommitted.term,
-          txCommitted.seq,
-          txCommitted.latestRowVersion,
-        )
-      }
-      this.queuedTxCommitted.length = 0
-    } else {
-      await this.flushQueuedHydrationTransactionsUnsafe()
-      await this.flushQueuedTxCommittedUnsafe()
-    }
+    await this.flushQueuedHydrationTransactionsUnsafe()
+    await this.flushQueuedTxCommittedUnsafe()
 
     const hydrationAborted =
       hydrationFailed && isAbortFailure(hydrationFailure, options.signal)
@@ -1653,6 +1648,7 @@ class PersistedCollectionRuntime<
         )
       }
 
+      await this.flushQueuedTxCommittedUnsafe()
       this.observeStreamPosition(
         response.term,
         response.seq,
@@ -1867,6 +1863,7 @@ class PersistedCollectionRuntime<
         )
       }
 
+      await this.flushQueuedTxCommittedUnsafe()
       this.observeStreamPosition(
         response.term,
         response.seq,
@@ -2151,8 +2148,9 @@ class PersistedCollectionRuntime<
         return
       }
 
+      this.queuedTxCommitted.push(payload)
       void this.applyMutex
-        .run(() => this.processCommittedTxUnsafe(payload))
+        .run(() => this.flushQueuedTxCommittedUnsafe())
         .catch((error) => {
           console.warn(`Failed to process tx:committed message:`, error)
         })
@@ -2372,10 +2370,11 @@ class PersistedCollectionRuntime<
 
   private async reloadActiveSubsetsUnsafe(): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
-    const activeSubsetOptions =
-      this.activeSubsets.size > 0
-        ? Array.from(this.activeSubsets.values())
-        : [{}]
+    const activeSubsetOptions = Array.from(this.activeSubsets.values())
+    if (activeSubsetOptions.length === 0) {
+      if (this.syncMode === `on-demand`) return
+      activeSubsetOptions.push({})
+    }
 
     this.hydratingGeneration = lifecycleGeneration
     try {
@@ -2875,13 +2874,41 @@ function createWrappedSyncConfig<
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
           openTransaction.truncate = true
-          if (
-            openTransaction.queuedBecauseHydrating &&
-            runtime.supersedeHydration()
-          ) {
-            openTransaction.queuedBecauseHydrating = false
-            openTransaction.supersededHydration = true
+          if (!openTransaction.queuedBecauseHydrating) {
+            params.truncate()
+          }
+        },
+        commit: (signal?: AbortSignal) => {
+          if (startupState.cleanedUp) return true
+          const openTransaction = transactionStack.pop()
+          if (!openTransaction) {
+            return params.commit(signal)
+          }
+
+          const forwardBufferedTransaction = () => {
             params.begin(openTransaction.beginOptions)
+            if (openTransaction.truncate) params.truncate()
+            for (const operation of openTransaction.operations) {
+              if (operation.type === `delete`) {
+                params.write({ type: `delete`, key: operation.key })
+              } else {
+                params.write({
+                  type: `update`,
+                  value: operation.value,
+                  metadata: operation.metadata,
+                })
+              }
+            }
+            for (const [
+              key,
+              metadataWrite,
+            ] of openTransaction.rowMetadataWrites) {
+              if (metadataWrite.type === `delete`) {
+                params.metadata?.row.delete(key)
+              } else {
+                params.metadata?.row.set(key, metadataWrite.value)
+              }
+            }
             for (const [
               key,
               metadataWrite,
@@ -2893,15 +2920,15 @@ function createWrappedSyncConfig<
               }
             }
           }
-          if (!openTransaction.queuedBecauseHydrating) {
-            params.truncate()
-          }
-        },
-        commit: (signal?: AbortSignal) => {
-          if (startupState.cleanedUp) return true
-          const openTransaction = transactionStack.pop()
-          if (!openTransaction) {
-            return params.commit(signal)
+
+          if (
+            openTransaction.queuedBecauseHydrating &&
+            (!runtime.isHydratingNow() ||
+              (openTransaction.truncate && runtime.supersedeHydration()))
+          ) {
+            openTransaction.queuedBecauseHydrating = false
+            openTransaction.supersededHydration = true
+            forwardBufferedTransaction()
           }
 
           if (openTransaction.queuedBecauseHydrating) {
@@ -3056,19 +3083,7 @@ function createWrappedSyncConfig<
             if (!resolvedSourceResult.loadSubset) {
               throw localStartupFailure
             }
-            try {
-              await loadFromUpstream(options)
-            } catch (upstreamError) {
-              if (isAbortFailure(upstreamError, options.signal)) {
-                throw upstreamError
-              }
-              throw createLocalUpstreamAggregateError(
-                localStartupFailure,
-                upstreamError,
-                `Persisted and upstream subset startup both failed`,
-              )
-            }
-            return
+            return runtime.loadSubset(options, loadFromUpstream)
           }
           return runtime.loadSubset(options, loadFromUpstream)
         },

@@ -18,6 +18,7 @@ import type {
   PersistedRowScanOptions,
   PersistedScannedRow,
   PersistedTx,
+  PersistedTxApplicationResult,
   PersistenceAdapter,
   ReplayableTxDelta,
   SQLiteDriver,
@@ -1159,22 +1160,57 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }))
   }
 
-  async applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
+  async applyCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+  ): Promise<PersistedTxApplicationResult> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    await this.runInTransaction(async (transactionDriver) => {
-      const alreadyApplied = await transactionDriver.query<{ applied: number }>(
-        `SELECT 1 AS applied
+    return this.runInTransaction(async (transactionDriver) => {
+      const sameLogicalTransaction = await transactionDriver.query<{
+        term: number
+        seq: number
+        row_version: number
+      }>(
+        `SELECT term, seq, row_version
+         FROM applied_tx
+         WHERE collection_id = ? AND tx_id = ?
+         LIMIT 1`,
+        [collectionId, tx.txId],
+      )
+
+      const priorLogicalTransaction = sameLogicalTransaction[0]
+      if (priorLogicalTransaction) {
+        return {
+          applied: false,
+          term: priorLogicalTransaction.term,
+          seq: priorLogicalTransaction.seq,
+          rowVersion: priorLogicalTransaction.row_version,
+        }
+      }
+
+      const alreadyApplied = await transactionDriver.query<{
+        term: number
+        seq: number
+        row_version: number
+      }>(
+        `SELECT term, seq, row_version
          FROM applied_tx
          WHERE collection_id = ? AND term = ? AND seq = ?
          LIMIT 1`,
         [collectionId, tx.term, tx.seq],
       )
 
-      if (alreadyApplied.length > 0) {
-        return
+      const priorPosition = alreadyApplied[0]
+      if (priorPosition) {
+        return {
+          applied: false,
+          term: priorPosition.term,
+          seq: priorPosition.seq,
+          rowVersion: priorPosition.row_version,
+        }
       }
 
       const versionRows = await transactionDriver.query<{
@@ -1376,6 +1412,13 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )
 
       await this.pruneAppliedTxRows(collectionId, transactionDriver)
+
+      return {
+        applied: true,
+        term: tx.term,
+        seq: tx.seq,
+        rowVersion: nextRowVersion,
+      }
     })
   }
 
