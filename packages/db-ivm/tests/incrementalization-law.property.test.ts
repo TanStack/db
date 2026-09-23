@@ -42,14 +42,28 @@ import type { Weighted } from './incrementalization-law.js'
  *
  * The generated domain uses small JSON tuples with integer weights. Named
  * cases force empty batches, duplicate weights, replacements, cancellation,
- * presence changes, boundary ties, and a zero-width window. Fault controls
- * prove that the checker rejects missing, sign-flipped, and wrong-member output.
+ * presence changes, falsey group extrema, boundary ties, and a zero-width
+ * window. Fault controls prove that the checker rejects missing, sign-flipped,
+ * wrong-member, and truthiness-filtered aggregate output.
+ *
+ * Before this repair the groupBy branch observed only sums. Truthiness defects
+ * in `min` and `max` were therefore outside both its model and its assertions.
+ * The small direct reducer cases remain readable replay witnesses; this suite
+ * owns the generated incremental-versus-recompute law.
  */
 
 type Keyed = [number, number]
 type JoinOutput = [number, [number, number]]
 type OuterJoinOutput = [number, [number | null, number | null]]
-type GroupedOutput = [string, { bucket: number; total: number }]
+type GroupedOutput = [
+  string,
+  {
+    bucket: number
+    total: number
+    minimum: number | undefined
+    maximum: number | undefined
+  },
+]
 
 const FIXED_SEED = 1741
 type GeneratedCampaign = {
@@ -219,14 +233,32 @@ function joinedSums(
   return [...sums].map(([key, value]) => [[key, value], 1])
 }
 
-function groupedSums(input: Weighted<Keyed>): Weighted<GroupedOutput> {
-  const groups = new Map<number, number>()
+/**
+ * Group extrema come from every retained defined value. Zero is a value, not
+ * absence. The model recomputes from plain weighted rows and shares no
+ * aggregate reducer with production.
+ */
+function groupedAggregates(input: Weighted<Keyed>): Weighted<GroupedOutput> {
+  const groups = new Map<
+    number,
+    { total: number; minimum: number; maximum: number }
+  >()
   for (const [[key, value], weight] of keyedIdentity(input)) {
     const bucket = key % 2
-    groups.set(bucket, (groups.get(bucket) ?? 0) + value * weight)
+    const current = groups.get(bucket)
+    groups.set(
+      bucket,
+      current === undefined
+        ? { total: value * weight, minimum: value, maximum: value }
+        : {
+            total: current.total + value * weight,
+            minimum: Math.min(current.minimum, value),
+            maximum: Math.max(current.maximum, value),
+          },
+    )
   }
-  return [...groups].map(([bucket, total]) => [
-    [JSON.stringify({ bucket }), { bucket, total }],
+  return [...groups].map(([bucket, aggregates]) => [
+    [JSON.stringify({ bucket }), { bucket, ...aggregates }],
     1,
   ])
 }
@@ -332,9 +364,11 @@ describe(`DBSP incrementalization laws`, () => {
                 input.pipe(
                   groupBy(([key]) => ({ bucket: key % 2 }), {
                     total: groupByOperators.sum(([, value]) => value),
+                    minimum: groupByOperators.min(([, value]) => value),
+                    maximum: groupByOperators.max(([, value]) => value),
                   }),
                 ),
-              evaluate: groupedSums,
+              evaluate: groupedAggregates,
             })
             assertUnaryIncrementalization({
               name: `top-K`,
@@ -555,6 +589,35 @@ describe(`DBSP incrementalization laws`, () => {
       splitDeliveries: 4,
     })
 
+    const extremaReach = assertUnaryIncrementalization({
+      name: `grouped falsey extrema`,
+      initial: [
+        [[0, 5], 1],
+        [[2, 0], 1],
+        [[1, -2], 1],
+        [[3, 0], 1],
+      ],
+      batches: [],
+      inputPolicy: keyedPolicy,
+      outputPolicy: groupedPolicy,
+      splitDomain: uniqueRowSplitDomain,
+      build: (input) =>
+        input.pipe(
+          groupBy(([key]) => ({ bucket: key % 2 }), {
+            total: groupByOperators.sum(([, value]) => value),
+            minimum: groupByOperators.min(([, value]) => value),
+            maximum: groupByOperators.max(([, value]) => value),
+          }),
+        ),
+      evaluate: groupedAggregates,
+    })
+    expect(extremaReach).toEqual({
+      atomicCheckpoints: 1,
+      atomicDeliveries: 1,
+      splitCheckpoints: 1,
+      splitDeliveries: 4,
+    })
+
     assertUnaryIncrementalization({
       name: `grouped-order boundary tie`,
       initial: [
@@ -617,7 +680,7 @@ describe(`DBSP incrementalization laws`, () => {
     })
   })
 
-  it(`rejects omitted, sign-flipped, wrong-member, and wrong-window output`, () => {
+  it(`rejects omitted, sign-flipped, wrong-member, wrong-window, and truthiness-filtered output`, () => {
     expect(() =>
       assertUnaryIncrementalization({
         name: `omitted output fault`,
@@ -672,6 +735,57 @@ describe(`DBSP incrementalization laws`, () => {
             }),
           ),
         evaluate: firstThree,
+      }),
+    ).toThrow(/output delta diverged/)
+
+    const truthinessMinimum = {
+      preMap: ([, value]: Keyed): number | undefined => value,
+      reduce: (values: Array<[number | undefined, number]>) => {
+        let minimum: number | undefined
+        for (const [value] of values) {
+          if (!minimum || (value !== undefined && value && value < minimum)) {
+            minimum = value
+          }
+        }
+        return minimum
+      },
+      postMap: (result: number | undefined) => result,
+    }
+    const truthinessMaximum = {
+      preMap: ([, value]: Keyed): number | undefined => value,
+      reduce: (values: Array<[number | undefined, number]>) => {
+        let maximum: number | undefined
+        for (const [value] of values) {
+          if (!maximum || (value !== undefined && value && value > maximum)) {
+            maximum = value
+          }
+        }
+        return maximum
+      },
+      postMap: (result: number | undefined) => result,
+    }
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `truthiness-filtered extrema fault`,
+        initial: [
+          [[0, 5], 1],
+          [[2, 0], 1],
+          [[1, -2], 1],
+          [[3, 0], 1],
+        ],
+        batches: [],
+        inputPolicy: keyedPolicy,
+        outputPolicy: groupedPolicy,
+        splitDomain: uniqueRowSplitDomain,
+        build: (input) =>
+          input.pipe(
+            groupBy(([key]) => ({ bucket: key % 2 }), {
+              total: groupByOperators.sum(([, value]) => value),
+              minimum: truthinessMinimum,
+              maximum: truthinessMaximum,
+            }),
+          ),
+        evaluate: groupedAggregates,
       }),
     ).toThrow(/output delta diverged/)
   })
