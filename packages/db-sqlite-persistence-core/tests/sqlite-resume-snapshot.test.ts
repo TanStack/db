@@ -1,7 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
-import { fc } from '@fast-check/vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -244,164 +245,194 @@ async function observeCachedSchemaState(
  * and Electric recovery owners.
  */
 describe(`SQLite resume snapshots`, () => {
-  it(`preserves local-only startup histories across managed generation advancement`, async () => {
-    const historyArbitrary = fc.record({
-      baselineSize: fc.integer({ min: 1, max: 3 }),
-      transition: fc.constantFrom(
-        `none` as const,
-        `managed-insert` as const,
-        `raw-delete` as const,
-      ),
-    })
+  const startupHistoryArbitrary = fc.record({
+    baselineSize: fc.integer({ min: 1, max: 3 }),
+    transition: fc.constantFrom(
+      `none` as const,
+      `managed-insert` as const,
+      `raw-delete` as const,
+    ),
+  })
 
-    await fc.assert(
-      fc.asyncProperty(historyArbitrary, async (history) => {
-        const database = new DatabaseSync(`:memory:`)
-        let primaryFailure: unknown
-        let releaseInitialSnapshot = () => {}
-        let collection:
-          | Collection<{ id: string; title: string }, string>
-          | undefined
-        try {
-          const driver = createDriver(database)
-          const collectionId = `generated-local-startup`
-          const adapter = new SQLiteCorePersistenceAdapter({ driver })
-          const baselineRows = Array.from(
-            { length: history.baselineSize },
-            (_, index) => ({
-              id: `baseline-${index}`,
-              title: `baseline-${index}`,
-            }),
-          )
-          await adapter.applyCommittedTx(collectionId, {
-            txId: `seed`,
-            term: 1,
-            seq: 1,
-            rowVersion: 1,
-            truncate: true,
-            mutations: baselineRows.map((row) => ({
-              type: `insert` as const,
-              key: row.id,
-              value: row,
-            })),
-          })
+  type StartupRow = { id: string; title: string }
+  const expectStartupRows = (
+    actual: Array<StartupRow>,
+    expected: Array<StartupRow>,
+  ) => expect(actual).toEqual(expected)
 
-          const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
-          const reachedInitialSnapshot = deferred()
-          const reachedHydrationSnapshot = deferred()
-          const initialSnapshotRelease = deferred()
-          releaseInitialSnapshot = initialSnapshotRelease.resolve
-          let snapshotCalls = 0
-          adapter.loadResumeSnapshot = async (...args) => {
-            const snapshot = await loadResumeSnapshot(...args)
-            snapshotCalls++
-            if (snapshotCalls === 1) {
-              reachedInitialSnapshot.resolve()
-              await initialSnapshotRelease.promise
-            } else if (snapshotCalls === 2) {
-              reachedHydrationSnapshot.resolve()
-            }
-            return snapshot
-          }
+  const assertStartupHistory = async (history: {
+    baselineSize: number
+    transition: `none` | `managed-insert` | `raw-delete`
+  }) => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    let releaseInitialSnapshot = () => {}
+    let collection:
+      | Collection<{ id: string; title: string }, string>
+      | undefined
+    try {
+      const driver = createDriver(database)
+      const collectionId = `generated-local-startup`
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+      const baselineRows = Array.from(
+        { length: history.baselineSize },
+        (_, index) => ({
+          id: `baseline-${index}`,
+          title: `baseline-${index}`,
+        }),
+      )
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        truncate: true,
+        mutations: baselineRows.map((row) => ({
+          type: `insert` as const,
+          key: row.id,
+          value: row,
+        })),
+      })
 
-          collection = createCollection(
-            persistedCollectionOptions<{ id: string; title: string }, string>({
-              id: collectionId,
-              startSync: false,
-              getKey: (row) => row.id,
-              persistence: { adapter },
-            }),
-          )
-          collection.startSyncImmediate()
-          await reachCheckpoint(
-            reachedInitialSnapshot.promise,
-            `generated local startup metadata snapshot`,
-          )
-
-          const managedRow = {
-            id: `managed`,
-            title: `managed-during-startup`,
-          }
-          let managedPersistence: Promise<unknown> | undefined
-          let managedPersistenceSettled = false
-          if (history.transition === `managed-insert`) {
-            managedPersistence =
-              collection.insert(managedRow).isPersisted.promise
-            void managedPersistence.then(
-              () => {
-                managedPersistenceSettled = true
-              },
-              () => {
-                managedPersistenceSettled = true
-              },
-            )
-            for (let attempt = 0; attempt < 20; attempt++) {
-              await Promise.resolve()
-            }
-            expect(managedPersistenceSettled).toBe(false)
-          } else if (history.transition === `raw-delete`) {
-            const tableName = createPersistedTableName(collectionId, `c`)
-            await driver.run(`DELETE FROM "${tableName}" WHERE key = ?`, [
-              encodePersistedStorageKey(baselineRows[0]!.id),
-            ])
-          }
-
-          releaseInitialSnapshot()
-          await managedPersistence
-          await collection.stateWhenReady()
-          await reachCheckpoint(
-            reachedHydrationSnapshot.promise,
-            `generated local startup hydration snapshot`,
-          )
-          const visibleRows = Array.from(
-            collection.values(),
-            ({ id, title }) => ({
-              id,
-              title,
-            }),
-          ).sort((left, right) => left.id.localeCompare(right.id))
-          const expectedRows =
-            history.transition === `raw-delete`
-              ? []
-              : [
-                  ...baselineRows,
-                  ...(history.transition === `managed-insert`
-                    ? [managedRow]
-                    : []),
-                ].sort((left, right) => left.id.localeCompare(right.id))
-
-          expect(visibleRows).toEqual(expectedRows)
-          if (history.transition === `managed-insert`) {
-            const durableRows = (await loadResumeSnapshot(collectionId)).rows
-              .map(({ value }) => value)
-              .sort((left, right) =>
-                String(left.id).localeCompare(String(right.id)),
-              )
-            expect(durableRows).toEqual(expectedRows)
-          }
-          if (history.transition === `raw-delete`) {
-            expect((await loadResumeSnapshot(collectionId)).keySet).toEqual({
-              status: `incompatible`,
-            })
-          }
-        } catch (error) {
-          primaryFailure = error
-        } finally {
-          releaseInitialSnapshot()
-          try {
-            await collection?.cleanup()
-          } catch (cleanupError) {
-            if (primaryFailure === undefined) primaryFailure = cleanupError
-          }
-          closeDatabasePreservingPrimary(database, primaryFailure)
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      const reachedInitialSnapshot = deferred()
+      const reachedHydrationSnapshot = deferred()
+      const initialSnapshotRelease = deferred()
+      releaseInitialSnapshot = initialSnapshotRelease.resolve
+      let snapshotCalls = 0
+      adapter.loadResumeSnapshot = async (...args) => {
+        const snapshot = await loadResumeSnapshot(...args)
+        snapshotCalls++
+        if (snapshotCalls === 1) {
+          reachedInitialSnapshot.resolve()
+          await initialSnapshotRelease.promise
+        } else if (snapshotCalls === 2) {
+          reachedHydrationSnapshot.resolve()
         }
-      }),
-      {
-        seed: 1659,
-        numRuns: 12,
-      },
+        return snapshot
+      }
+
+      collection = createCollection(
+        persistedCollectionOptions<{ id: string; title: string }, string>({
+          id: collectionId,
+          startSync: false,
+          getKey: (row) => row.id,
+          persistence: { adapter },
+        }),
+      )
+      collection.startSyncImmediate()
+      await reachCheckpoint(
+        reachedInitialSnapshot.promise,
+        `generated local startup metadata snapshot`,
+      )
+
+      const managedRow = {
+        id: `managed`,
+        title: `managed-during-startup`,
+      }
+      let managedPersistence: Promise<unknown> | undefined
+      let managedPersistenceSettled = false
+      if (history.transition === `managed-insert`) {
+        managedPersistence = collection.insert(managedRow).isPersisted.promise
+        void managedPersistence.then(
+          () => {
+            managedPersistenceSettled = true
+          },
+          () => {
+            managedPersistenceSettled = true
+          },
+        )
+        for (let attempt = 0; attempt < 20; attempt++) {
+          await Promise.resolve()
+        }
+        expect(managedPersistenceSettled).toBe(false)
+      } else if (history.transition === `raw-delete`) {
+        const tableName = createPersistedTableName(collectionId, `c`)
+        await driver.run(`DELETE FROM "${tableName}" WHERE key = ?`, [
+          encodePersistedStorageKey(baselineRows[0]!.id),
+        ])
+      }
+
+      releaseInitialSnapshot()
+      await managedPersistence
+      await collection.stateWhenReady()
+      await reachCheckpoint(
+        reachedHydrationSnapshot.promise,
+        `generated local startup hydration snapshot`,
+      )
+      const visibleRows = Array.from(collection.values(), ({ id, title }) => ({
+        id,
+        title,
+      })).sort((left, right) => left.id.localeCompare(right.id))
+      const expectedRows =
+        history.transition === `raw-delete`
+          ? []
+          : [
+              ...baselineRows,
+              ...(history.transition === `managed-insert` ? [managedRow] : []),
+            ].sort((left, right) => left.id.localeCompare(right.id))
+
+      expectStartupRows(visibleRows, expectedRows)
+      if (history.transition === `managed-insert`) {
+        const durableRows = (await loadResumeSnapshot(collectionId)).rows
+          .map(({ value }) => value)
+          .sort((left, right) =>
+            String(left.id).localeCompare(String(right.id)),
+          )
+        expect(durableRows).toEqual(expectedRows)
+      }
+      if (history.transition === `raw-delete`) {
+        expect((await loadResumeSnapshot(collectionId)).keySet).toEqual({
+          status: `incompatible`,
+        })
+      }
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      releaseInitialSnapshot()
+      try {
+        await collection?.cleanup()
+      } catch (cleanupError) {
+        if (primaryFailure === undefined) primaryFailure = cleanupError
+      }
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  }
+
+  it(`rejects a startup answer that suppresses the older baseline after a managed generation advance`, () => {
+    const baseline = { id: `baseline-0`, title: `baseline-0` }
+    const managed = { id: `managed`, title: `managed-during-startup` }
+    expect(() => expectStartupRows([managed], [baseline, managed])).toThrow()
+  })
+
+  it(`fixed startup corpus reaches every baseline size and transition`, () => {
+    const histories = fc.sample(startupHistoryArbitrary, {
+      seed: 1659,
+      numRuns: 12,
+    })
+    expect(new Set(histories.map(({ baselineSize }) => baselineSize))).toEqual(
+      new Set([1, 2, 3]),
+    )
+    expect(new Set(histories.map(({ transition }) => transition))).toEqual(
+      new Set([`none`, `managed-insert`, `raw-delete`]),
     )
   })
+
+  fcTest.prop([startupHistoryArbitrary], {
+    seed: 1659,
+    numRuns: oracleRuns(12),
+  })(
+    `preserves local-only startup histories across managed generation advancement (fixed)`,
+    assertStartupHistory,
+  )
+
+  fcTest.prop(
+    [startupHistoryArbitrary],
+    oraclePropertyOptions(12, `sqlite-resume.startup-generation`),
+  )(
+    `preserves local-only startup histories across managed generation advancement (random or replayed)`,
+    assertStartupHistory,
+  )
 
   it(`reads key-set evidence without rescanning key membership`, async () => {
     const database = new DatabaseSync(`:memory:`)

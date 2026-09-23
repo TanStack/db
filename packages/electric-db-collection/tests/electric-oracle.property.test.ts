@@ -2224,69 +2224,91 @@ describe(`Electric adapter laws`, () => {
     },
   )
 
-  fcTest.prop(
-    [fc.array(designTokenArb, { minLength: 1, maxLength: 7 }), fc.nat()],
-    {
-      numRuns: 20,
-      examples: [
-        [
-          [
-            { operation: `insert`, id: 2, name: `` },
-            { operation: `commit` },
-            { operation: `delete`, id: 2, name: `` },
-          ],
-          2032071466,
-        ],
-        [
-          [
-            { operation: `reset` },
-            { operation: `subset` },
-            { operation: `reset` },
-          ],
-          30,
-        ],
+  const publicationEpochTokensArbitrary = fc.array(designTokenArb, {
+    minLength: 1,
+    maxLength: 7,
+  })
+  const publicationEpochPartitionArbitrary = fc.nat()
+  const assertPublicationEpochHistory = async (
+    tokens: Array<DesignToken>,
+    partitionSeed: number,
+  ) => {
+    const messages = buildDifferentialHistory(tokens)
+    const partitions = everyContiguousPartition(messages).filter(
+      isSdkResetFramedPartition,
+    )
+    const partition = partitions[partitionSeed % partitions.length]!
+    const referenceSnapshots = recomputedSnapshots([], partition)
+
+    for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
+      const direct = await runTrace(
+        `direct-differential-${syncMode}`,
+        syncMode,
+        [],
+        partition,
+      )
+      const persisted = await runPersistedTrace(
+        `persisted-differential-${syncMode}`,
+        syncMode,
+        partition,
+      )
+      const query = await runQueryTrace(
+        `query-differential-${syncMode}`,
+        partition,
+      )
+
+      expect(direct.snapshots).toEqual(referenceSnapshots)
+      expect(persisted.snapshots).toEqual(referenceSnapshots)
+      expect(query.snapshots).toEqual(referenceSnapshots)
+      expect(persisted.rows).toEqual(direct.rows)
+      expect(query.rows).toEqual(direct.rows)
+      expect(persisted.status).toBe(direct.status)
+      expect(query.status).toBe(`ready`)
+      expect(persisted.resume).toEqual(direct.resume)
+      expect(persisted.durableRows).toEqual(direct.rows)
+      expect(persisted.durableResume).toEqual(direct.resume)
+      expect(persisted.persistenceCommits).toBeGreaterThan(0)
+    }
+  }
+  const publicationEpochExamples: Array<[Array<DesignToken>, number]> = [
+    [
+      [
+        { operation: `insert`, id: 2, name: `` },
+        { operation: `commit` },
+        { operation: `delete`, id: 2, name: `` },
       ],
+      2032071466,
+    ],
+    [
+      [{ operation: `reset` }, { operation: `subset` }, { operation: `reset` }],
+      30,
+    ],
+  ]
+
+  it.each(publicationEpochExamples)(
+    `reconstructs the authored publication-epoch history`,
+    assertPublicationEpochHistory,
+    30_000,
+  )
+
+  fcTest.prop(
+    [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
+    {
+      seed: 42714,
+      numRuns: oracleRuns(20),
     },
   )(
-    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs`,
-    async (tokens, partitionSeed) => {
-      const messages = buildDifferentialHistory(tokens)
-      const partitions = everyContiguousPartition(messages).filter(
-        isSdkResetFramedPartition,
-      )
-      const partition = partitions[partitionSeed % partitions.length]!
-      const referenceSnapshots = recomputedSnapshots([], partition)
+    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (fixed)`,
+    assertPublicationEpochHistory,
+    30_000,
+  )
 
-      for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
-        const direct = await runTrace(
-          `direct-differential-${syncMode}`,
-          syncMode,
-          [],
-          partition,
-        )
-        const persisted = await runPersistedTrace(
-          `persisted-differential-${syncMode}`,
-          syncMode,
-          partition,
-        )
-        const query = await runQueryTrace(
-          `query-differential-${syncMode}`,
-          partition,
-        )
-
-        expect(direct.snapshots).toEqual(referenceSnapshots)
-        expect(persisted.snapshots).toEqual(referenceSnapshots)
-        expect(query.snapshots).toEqual(referenceSnapshots)
-        expect(persisted.rows).toEqual(direct.rows)
-        expect(query.rows).toEqual(direct.rows)
-        expect(persisted.status).toBe(direct.status)
-        expect(query.status).toBe(`ready`)
-        expect(persisted.resume).toEqual(direct.resume)
-        expect(persisted.durableRows).toEqual(direct.rows)
-        expect(persisted.durableResume).toEqual(direct.resume)
-        expect(persisted.persistenceCommits).toBeGreaterThan(0)
-      }
-    },
+  fcTest.prop(
+    [publicationEpochTokensArbitrary, publicationEpochPartitionArbitrary],
+    oraclePropertyOptions(20, `electric.publication-epoch-convergence`),
+  )(
+    `Electric drivers converge with the denotational reference and model-fed Query projection across publication epochs (random or replayed)`,
+    assertPublicationEpochHistory,
     30_000,
   )
 

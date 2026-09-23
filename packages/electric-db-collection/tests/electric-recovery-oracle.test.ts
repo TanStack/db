@@ -4,6 +4,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
+import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
@@ -180,8 +181,10 @@ function fixture(
   let latestSeq = 0
   let latestRowVersion = 0
   let resetEpoch = 0
+  let subsetLoads = 0
   const adapter: PersistenceAdapter = {
     loadSubset: () => {
+      subsetLoads++
       const snapshot = Array.from(rows, ([key, value]) => ({
         key,
         value: { ...value },
@@ -293,6 +296,7 @@ function fixture(
     durableRows,
     exposures,
     record,
+    subsetLoadCount: () => subsetLoads,
     start,
     stopObserving: () => stopObserving(),
     pauseHydration: (gate: Promise<void>) => {
@@ -957,106 +961,157 @@ describe(`persisted Electric recovery laws`, () => {
     },
   )
 
-  fcTest.prop(
-    [
-      fc.array(
-        fc.record({
-          id: fc.integer({ min: 2, max: 4 }),
-          name: fc.string({ maxLength: 8 }),
-          deleted: fc.boolean(),
-          fullReload: fc.boolean(),
-        }),
-        { minLength: 1, maxLength: 8 },
-      ),
-    ],
-    {
-      numRuns: 20,
-      examples: [
-        [
-          [
-            { id: 2, name: `external`, deleted: false, fullReload: false },
-            { id: 2, name: `removed`, deleted: true, fullReload: true },
-          ],
-        ],
-      ],
-    },
-  )(
-    `independent persistence publications and stream deltas agree with complete-row state`,
-    async (commands) => {
-      subscribers.length = 0
-      const peer = externalPublisher()
-      const f = fixture(`on-demand`, peer.coordinator)
-      const expected = new Map([[oldRow.id, structuredClone(oldRow)]])
-      const expectedRows = () =>
-        structuredClone([...expected.values()].sort((a, b) => a.id - b.id))
-      try {
-        f.start()
-        await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
-          interval: 1,
-        })
-        await f.collection._sync.loadSubset({})
-        subscribers[0]!([upToDate])
-        for (const command of commands) {
-          const before = expectedRows()
-          const cut = f.exposures.length
-          f.record(`before peer ${JSON.stringify(command)}`)
-          const row = {
-            id: command.id,
-            name: command.name,
-            stable: `peer-${command.id}`,
-          }
-          if (command.deleted) {
-            f.rows.delete(row.id)
-            expected.delete(row.id)
-          } else {
-            f.rows.set(row.id, structuredClone(row))
-            expected.set(row.id, structuredClone(row))
-          }
-          const revision = peer.publish(
-            row,
-            command.deleted,
-            command.fullReload,
-            f.metadata,
-          )
-          f.record(`after peer revision ${revision}`)
-          // An unchanged row set is not proof that the peer publication ran.
-          // Its metadata marker commits with the rows, including empty deletes.
+  type PublicationHistoryCommand = {
+    id: number
+    name: string
+    deleted: boolean
+    fullReload: boolean
+  }
+
+  const publicationHistoryArbitrary = fc.array(
+    fc.record({
+      id: fc.integer({ min: 2, max: 4 }),
+      name: fc.string({ maxLength: 8 }),
+      deleted: fc.boolean(),
+      fullReload: fc.boolean(),
+    }),
+    { minLength: 1, maxLength: 8 },
+  )
+
+  const assertPublicationHistory = async (
+    commands: Array<PublicationHistoryCommand>,
+  ) => {
+    subscribers.length = 0
+    const peer = externalPublisher()
+    const f = fixture(`on-demand`, peer.coordinator)
+    const expected = new Map([[oldRow.id, structuredClone(oldRow)]])
+    const expectedRows = () =>
+      structuredClone([...expected.values()].sort((a, b) => a.id - b.id))
+    try {
+      f.start()
+      await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
+        interval: 1,
+      })
+      await f.collection._sync.loadSubset({})
+      subscribers[0]!([upToDate])
+      for (const command of commands) {
+        const before = expectedRows()
+        const cut = f.exposures.length
+        f.record(`before peer ${JSON.stringify(command)}`)
+        const row = {
+          id: command.id,
+          name: command.name,
+          stable: `peer-${command.id}`,
+        }
+        if (command.deleted) {
+          f.rows.delete(row.id)
+          expected.delete(row.id)
+        } else {
+          f.rows.set(row.id, structuredClone(row))
+          expected.set(row.id, structuredClone(row))
+        }
+        const subsetLoadsBeforeSettlement = f.subsetLoadCount()
+        const revision = peer.publish(
+          row,
+          command.deleted,
+          command.fullReload,
+          f.metadata,
+        )
+        f.record(`after peer revision ${revision}`)
+        // An unchanged row set is not proof that the peer publication ran.
+        // Its metadata marker commits with the rows, including empty deletes.
+        await vi.waitFor(
+          () =>
+            expect(
+              f.collection._state.syncedCollectionMetadata.get(
+                `oracle:publication`,
+              ),
+            ).toBe(revision),
+          { interval: 1 },
+        )
+        if (command.fullReload) {
           await vi.waitFor(
             () =>
-              expect(
-                f.collection._state.syncedCollectionMetadata.get(
-                  `oracle:publication`,
-                ),
-              ).toBe(revision),
+              expect(f.subsetLoadCount()).toBeGreaterThan(
+                subsetLoadsBeforeSettlement,
+              ),
             { interval: 1 },
           )
-          expect(f.publicRows()).toEqual(expectedRows())
-          f.record(`peer revision ${revision} settled`)
-          const afterPeer = expectedRows()
-          expectWholeRecoveryTrace(f.exposures.slice(cut), [before, afterPeer])
-          const streamCut = f.exposures.length
-          f.record(`before stream revision ${revision}`)
-          subscribers[0]!([
-            change(`update`, { id: row.id, name: `stream` }),
-            upToDate,
-          ])
-          if (!command.deleted) expected.set(row.id, { ...row, name: `stream` })
-          f.record(`after stream revision ${revision}`)
-          expect(f.publicRows()).toEqual(expectedRows())
-          await vi.waitFor(
-            () => expect(f.durableRows()).toEqual(expectedRows()),
-            { interval: 1 },
-          )
-          expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
-            afterPeer,
-            expectedRows(),
-          ])
+        } else {
+          expect(f.subsetLoadCount()).toBe(subsetLoadsBeforeSettlement)
         }
-      } finally {
-        f.stopObserving()
-        await f.collection.cleanup()
+        expect(f.publicRows()).toEqual(expectedRows())
+        f.record(`peer revision ${revision} settled`)
+        const afterPeer = expectedRows()
+        expectWholeRecoveryTrace(f.exposures.slice(cut), [before, afterPeer])
+        const streamCut = f.exposures.length
+        f.record(`before stream revision ${revision}`)
+        subscribers[0]!([
+          change(`update`, { id: row.id, name: `stream` }),
+          upToDate,
+        ])
+        if (!command.deleted) expected.set(row.id, { ...row, name: `stream` })
+        f.record(`after stream revision ${revision}`)
+        expect(f.publicRows()).toEqual(expectedRows())
+        await vi.waitFor(
+          () => expect(f.durableRows()).toEqual(expectedRows()),
+          { interval: 1 },
+        )
+        expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
+          afterPeer,
+          expectedRows(),
+        ])
       }
-    },
+    } finally {
+      f.stopObserving()
+      await f.collection.cleanup()
+    }
+  }
+
+  const publicationHistoryExamples: Array<[Array<PublicationHistoryCommand>]> =
+    [
+      [
+        [
+          { id: 2, name: `external`, deleted: false, fullReload: false },
+          { id: 2, name: `removed`, deleted: true, fullReload: true },
+        ],
+      ],
+    ]
+
+  it.each(publicationHistoryExamples)(
+    `reconstructs the authored persistence publication history`,
+    assertPublicationHistory,
+  )
+
+  it(`fixed recovery corpus reaches every deletion and reload combination`, () => {
+    const combinations = new Set(
+      fc
+        .sample(publicationHistoryArbitrary, { seed: 1659, numRuns: 20 })
+        .flat()
+        .map(({ deleted, fullReload }) => `${deleted}:${fullReload}`),
+    )
+    expect(combinations).toEqual(
+      new Set([`false:false`, `false:true`, `true:false`, `true:true`]),
+    )
+  })
+
+  fcTest.prop([publicationHistoryArbitrary], {
+    seed: 1659,
+    numRuns: oracleRuns(20),
+  })(
+    `independent persistence publications and stream deltas agree with complete-row state (fixed)`,
+    assertPublicationHistory,
+  )
+
+  fcTest.prop(
+    [publicationHistoryArbitrary],
+    oraclePropertyOptions(
+      20,
+      `electric-recovery.publication-stream-convergence`,
+    ),
+  )(
+    `independent persistence publications and stream deltas agree with complete-row state (random or replayed)`,
+    assertPublicationHistory,
   )
 
   it.each(scenarios)(
