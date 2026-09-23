@@ -429,6 +429,73 @@ describe(`BrowserCollectionCoordinator`, () => {
       expect(received.length).toBe(0)
       coord.dispose()
     })
+
+    it.each([Number.NaN, Number.POSITIVE_INFINITY])(
+      `ignores a peer transaction with a non-finite position: %s`,
+      async (nonFinitePosition) => {
+        const adapter = createStubAdapter()
+        let appliedTx: PersistedTx | undefined
+        adapter.applyCommittedTx = (collectionId, tx) => {
+          appliedTx = tx
+          adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+          return Promise.resolve()
+        }
+        const leader = createCoordinator(adapter)
+        const peer = createCoordinator()
+        leader.subscribe(`todos`, () => {})
+        await flush(50)
+        peer.subscribe(`todos`, () => {})
+
+        try {
+          peer.publish(`todos`, {
+            v: 1,
+            dbName: `test-db`,
+            collectionId: `todos`,
+            senderId: peer.getNodeId(),
+            ts: Date.now(),
+            payload: {
+              type: `tx:committed`,
+              term: nonFinitePosition,
+              seq: nonFinitePosition,
+              txId: `hostile-peer-position`,
+              latestRowVersion: nonFinitePosition,
+              requiresFullReload: true,
+            },
+          })
+          await flush()
+
+          const response = await leader.requestApplyPersistedTransaction(
+            `todos`,
+            {
+              txId: `valid-after-hostile-peer`,
+              mutations: [],
+            },
+          )
+          if (!response.ok) {
+            throw new Error(`valid transaction was rejected: ${response.error}`)
+          }
+
+          expect({
+            applied: appliedTx && {
+              term: appliedTx.term,
+              seq: appliedTx.seq,
+              rowVersion: appliedTx.rowVersion,
+            },
+            response: {
+              term: response.term,
+              seq: response.seq,
+              latestRowVersion: response.latestRowVersion,
+            },
+          }).toEqual({
+            applied: { term: 1, seq: 1, rowVersion: 1 },
+            response: { term: 1, seq: 1, latestRowVersion: 1 },
+          })
+        } finally {
+          peer.dispose()
+          leader.dispose()
+        }
+      },
+    )
   })
 
   describe(`RPC - applyLocalMutations`, () => {

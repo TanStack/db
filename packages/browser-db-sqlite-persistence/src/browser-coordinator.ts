@@ -821,7 +821,6 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     if (!state?.isLeader) throw new LostLeadershipError()
 
     const adapter = this.requireAdapter()
-    if (!this.isLeader(collectionId)) throw new LostLeadershipError()
     const proposedTx: PersistedTx = {
       ...transaction,
       term: state.latestTerm,
@@ -1002,7 +1001,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       record.type !== `tx:committed` ||
       typeof record.term !== `number` ||
       typeof record.seq !== `number` ||
-      typeof record.latestRowVersion !== `number`
+      typeof record.latestRowVersion !== `number` ||
+      !Number.isFinite(record.term) ||
+      !Number.isFinite(record.seq) ||
+      !Number.isFinite(record.latestRowVersion)
     ) {
       return
     }
