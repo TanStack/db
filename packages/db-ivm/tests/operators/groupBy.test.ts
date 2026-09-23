@@ -631,8 +631,19 @@ describe(`Operators`, () => {
       const minBig = min<bigint>()
       const maxBig = max<bigint>()
 
+      if (
+        !(`reduce` in minNum) ||
+        !(`reduce` in maxNum) ||
+        !(`reduce` in minStr) ||
+        !(`reduce` in minBig) ||
+        !(`reduce` in maxBig)
+      ) {
+        throw new Error(`Expected direct min/max aggregates`)
+      }
+
       expect(
         minNum.reduce([
+          [undefined, 1],
           [5, 1],
           [0, 1],
         ]),
@@ -645,6 +656,7 @@ describe(`Operators`, () => {
       ).toBe(0)
       expect(
         maxNum.reduce([
+          [undefined, 1],
           [-2, 1],
           [0, 1],
           [-1, 1],
