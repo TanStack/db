@@ -3,8 +3,6 @@ id: EagerSyncHooks
 title: EagerSyncHooks
 ---
 
-# Type Alias: EagerSyncHooks
-
 ```ts
 type EagerSyncHooks = object;
 ```

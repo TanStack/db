@@ -128,6 +128,82 @@ function makeControlledTruncateSource() {
 }
 
 describe(`createLiveQueryObserver`, () => {
+  it.each(
+    ([`granular`, `wholesale`] as const).flatMap((mode) =>
+      ([`ordinary`, `reentrant`, `dispose`] as const).flatMap((scenario) =>
+        [false, true].map((throwUndefined) => ({
+          mode,
+          scenario,
+          throwUndefined,
+        })),
+      ),
+    ),
+  )(
+    `delivers peer publications before reporting a listener failure: %j`,
+    async ({ mode, scenario, throwUndefined }) => {
+      const source = makeSource()
+      const observer = createLiveQueryObserver(source, { mode })
+      const firstError = throwUndefined
+        ? undefined
+        : new Error(`First listener failed`)
+      const secondError = new Error(`Peer listener failed`)
+      const peerRows = new Map<string | number, Row>()
+      const publications: Array<Array<string | number>> = []
+      let armed = false
+      observer.subscribe(() => {
+        if (!armed) return
+        armed = false
+        if (scenario === `reentrant`) {
+          source.utils.begin()
+          source.utils.write({ type: `insert`, value: { id: `4`, name: `D` } })
+          source.utils.commit()
+        }
+        if (scenario === `dispose`) observer.dispose()
+        throw firstError
+      })
+      observer.subscribe((changes) => {
+        if (mode === `wholesale`) {
+          peerRows.clear()
+          for (const [key, row] of observer.getSnapshot().state ?? [])
+            peerRows.set(key, row)
+        } else {
+          for (const change of changes ?? []) {
+            if (change.type === `delete`) peerRows.delete(change.key)
+            else peerRows.set(change.key, change.value)
+          }
+        }
+        publications.push([...peerRows.keys()].sort())
+        if (peerRows.has(`3`)) throw secondError
+      })
+      publications.length = 0
+      armed = true
+      try {
+        source.utils.begin()
+        source.utils.write({ type: `insert`, value: { id: `3`, name: `C` } })
+        let caught: { error: unknown } | undefined
+        try {
+          source.utils.commit()
+        } catch (error) {
+          caught = { error }
+        }
+        expect(caught).toEqual({ error: firstError })
+        expect(publications).toEqual(
+          scenario === `dispose`
+            ? []
+            : scenario === `reentrant`
+              ? [
+                  [`1`, `2`, `3`],
+                  [`1`, `2`, `3`, `4`],
+                ]
+              : [[`1`, `2`, `3`]],
+        )
+      } finally {
+        observer.dispose()
+        await source.cleanup()
+      }
+    },
+  )
+
   it(`registers SSR live-query resources for client-owned cleanup`, async () => {
     const errorSpy = vi.spyOn(console, `error`).mockImplementation(() => {})
     const client = new DbClient()
@@ -530,6 +606,52 @@ describe(`createLiveQueryObserver`, () => {
     // Same identity when nothing changed.
     expect(observer.getSnapshot()).toBe(snap)
     observer.dispose()
+  })
+
+  it(`separates value publications from layout revisions`, async () => {
+    const source = makeSource()
+    const observer = createLiveQueryObserver<Row, string>(source as any, {
+      mode: `wholesale`,
+    })
+    let notifications = 0
+    const unsubscribe = observer.subscribe(() => notifications++)
+
+    try {
+      const before = observer.getSnapshot()
+      source.utils.begin()
+      source.utils.write({
+        type: `update`,
+        value: { id: `1`, name: `Updated` },
+      })
+      source.utils.commit()
+      const afterValue = observer.getSnapshot()
+
+      expect(notifications).toBe(1)
+      expect(afterValue).not.toBe(before)
+      expect(afterValue.layoutRevision).toBe(before.layoutRevision)
+      expect(afterValue.state?.get(`1`)?.name).toBe(`Updated`)
+      expect(before.state?.get(`1`)?.name).toBe(`A`)
+
+      source.utils.begin()
+      source.utils.write({ type: `delete`, value: SEED[1]! })
+      source.utils.write({
+        type: `insert`,
+        value: { id: `3`, name: `C` },
+      })
+      source.utils.commit()
+      const afterLayout = observer.getSnapshot()
+
+      expect(notifications).toBe(2)
+      expect(afterLayout.layoutRevision).toBeGreaterThan(
+        afterValue.layoutRevision,
+      )
+      expect([...afterLayout.state!.keys()]).toEqual([`1`, `3`])
+      expect([...afterValue.state!.keys()]).toEqual([`1`, `2`])
+    } finally {
+      unsubscribe()
+      observer.dispose()
+      await source.cleanup()
+    }
   })
 
   it(`delivers initial state then change deltas to subscribers (granular path)`, () => {

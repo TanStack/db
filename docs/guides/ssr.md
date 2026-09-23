@@ -3,8 +3,6 @@ title: SSR and Hydration
 id: ssr
 ---
 
-# SSR and Hydration
-
 TanStack DB SSR transports the smallest useful snapshot for the work the server
 performed:
 
@@ -148,6 +146,10 @@ const todoCollection = collectionOptions(
   })
 )
 ```
+
+Within one `DbClient`, descriptors with the same `id` resolve to the same
+collection. Only the first descriptor is materialized. Include every dynamic
+parameter that changes the collection in its `id`.
 
 A descriptor created from an arbitrary concrete config can be materialized by
 one `DbClient` only. Use the explicit factory form for custom adapters and

@@ -3,15 +3,13 @@ id: getActiveTransaction
 title: getActiveTransaction
 ---
 
-# Function: getActiveTransaction()
-
 ```ts
 function getActiveTransaction(): 
   | Transaction<Record<string, unknown>>
   | undefined;
 ```
 
-Defined in: [packages/db/src/transactions.ts:176](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L176)
+Defined in: [packages/db/src/transactions.ts:301](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L301)
 
 Gets the currently active ambient transaction, if any
 Used internally by collection operations to join existing transactions

@@ -1,4 +1,5 @@
 import { isTemporal } from '../utils'
+import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import type { CompareOptions } from '../query/builder/types'
 
 // WeakMap to store stable IDs for objects
@@ -80,14 +81,22 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
     return a.getTime() - b.getTime()
   }
 
-  // If both are Temporal objects of the same type, compare by string representation
+  // If both are Temporal objects, use compareTemporalValues for correct semantic ordering
   if (isTemporal(a) && isTemporal(b)) {
-    const aStr = a.toString()
-    const bStr = b.toString()
-    if (aStr < bStr) return -1
-    if (aStr > bStr) return 1
-    return 0
+    return compareTemporalValues(a, b)
   }
+
+  // Symbols have identity but no built-in order: relational comparison throws.
+  // A stable runtime ID gives tree indexes a total order while preserving
+  // equality only for the same symbol.
+  const aIsSymbol = typeof a === `symbol`
+  const bIsSymbol = typeof b === `symbol`
+  if (aIsSymbol && bIsSymbol) {
+    if (a === b) return 0
+    return getRuntimeReferenceIdentity(a)[2] - getRuntimeReferenceIdentity(b)[2]
+  }
+  if (aIsSymbol) return 1
+  if (bIsSymbol) return -1
 
   // If at least one of the values is an object, use stable IDs for comparison
   const aIsObject = typeof a === `object`
@@ -146,9 +155,15 @@ export const defaultComparator = makeComparator({
   stringSort: `locale`,
 })
 
-/**
- * Compare two Uint8Arrays for content equality
- */
+/** Include host Buffers when the current realm has a different Uint8Array. */
+export function isUint8Array(value: unknown): value is Uint8Array {
+  return (
+    value instanceof Uint8Array ||
+    (typeof Buffer !== `undefined` && value instanceof Buffer)
+  )
+}
+
+/** Compare two Uint8Arrays for content equality. */
 function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.byteLength !== b.byteLength) {
     return false
@@ -161,20 +176,26 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true
 }
 
-/**
- * Threshold for normalizing Uint8Arrays to string representations.
- * Arrays larger than this will use reference equality to avoid memory overhead.
- * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
- * while avoiding excessive string allocation for large binary data.
- */
-const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
+const NORMALIZED_KEY_PREFIX = `\u0000tanstack-db:`
+
+function normalizedKey(kind: string, value: string): string {
+  return `${NORMALIZED_KEY_PREFIX}${kind}:${value}`
+}
+
+function normalizeBinary(value: Uint8Array): string {
+  let bytes = ``
+  for (let index = 0; index < value.byteLength; index++) {
+    bytes += String.fromCharCode(value[index]!)
+  }
+  return normalizedKey(`binary`, bytes)
+}
 
 /**
  * Sentinel value representing undefined in normalized form.
  * This allows distinguishing between "start from beginning" (undefined parameter)
  * and "start from the key undefined" (actual undefined value in the tree).
  */
-export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
+export const UNDEFINED_SENTINEL = normalizedKey(`undefined`, ``)
 
 /**
  * Normalize a value for comparison and Map key usage
@@ -185,6 +206,12 @@ export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
  * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
+  if (typeof value === `string`) {
+    return value.startsWith(NORMALIZED_KEY_PREFIX)
+      ? normalizedKey(`string`, value)
+      : value
+  }
+
   if (typeof value !== `object` || value === null) {
     return value
   }
@@ -194,24 +221,16 @@ export function normalizeValue(value: any): any {
   }
 
   if (isTemporal(value)) {
-    return `__temporal__${value[Symbol.toStringTag]}__${value.toString()}`
+    return normalizedKey(
+      `temporal`,
+      `${value[Symbol.toStringTag]}:${value.toString()}`,
+    )
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
   // This enables content-based equality for binary data like ULIDs
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
-    value instanceof Uint8Array
-
-  if (isUint8Array) {
-    // Only normalize small arrays to avoid memory overhead for large binary data
-    if (value.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
-      // Convert to a string representation that can be used as a Map key
-      // Use a special prefix to avoid collisions with user strings
-      return `__u8__${Array.from(value).join(`,`)}`
-    }
-    // For large arrays, fall back to reference equality
-    // Users working with large binary data should use a derived key if needed
+  if (isUint8Array(value)) {
+    return normalizeBinary(value)
   }
 
   return value
@@ -248,6 +267,68 @@ export function denormalizeUndefined(value: any): any {
   return value
 }
 
+// Cached map from Symbol.toStringTag → static compare function (null = none defined).
+// Populated lazily on first encounter of each Temporal type so we never access
+// `.constructor` more than once per type, and dispatch is keyed on the already-
+// computed brand tag rather than on the constructor itself.
+const temporalCompareByTag = new Map<
+  string,
+  ((a: unknown, b: unknown) => number) | null
+>()
+
+/**
+ * Compare two Temporal values of the same type, returning -1, 0, or 1.
+ *
+ * Dispatch is keyed on `Symbol.toStringTag` (the brand already checked by
+ * `isTemporal`) rather than `a.constructor`, making it robust across realms
+ * and resistant to a shadowed `constructor` property. Types without a static
+ * `.compare` (e.g. `PlainMonthDay`) throw rather than fall back to string
+ * comparison, matching Temporal's design intent.
+ *
+ * Callers must ensure both arguments are Temporal objects; mixed types throw.
+ */
+export function compareTemporalValues(a: unknown, b: unknown): number {
+  const aTag = (a as Record<symbol, unknown>)[Symbol.toStringTag] as string
+  const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag] as string
+  if (aTag !== bTag) {
+    throw new TypeError(
+      `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`,
+    )
+  }
+  let compare = temporalCompareByTag.get(aTag)
+  if (compare === undefined) {
+    const fn = (
+      (a as { constructor: unknown }).constructor as {
+        compare?: (x: unknown, y: unknown) => number
+      }
+    ).compare
+    compare = typeof fn === `function` ? fn : null
+    temporalCompareByTag.set(aTag, compare)
+  }
+  if (compare === null) {
+    throw new TypeError(`${aTag} has no defined ordering`)
+  }
+  return compare(a, b)
+}
+
+/**
+ * Order two non-null values, returning -1, 0, or 1.
+ *
+ * Temporal types intentionally throw from `valueOf` to prevent silent
+ * miscomparison via the native relational operators — delegate to
+ * `compareTemporalValues` for them. For everything else (numbers, strings,
+ * Dates via `valueOf`, etc.) the native operators do the right thing.
+ *
+ * Callers must handle null/undefined themselves — this helper assumes both
+ * arguments are non-null.
+ */
+export function compareValues(a: unknown, b: unknown): number {
+  if (isTemporal(a) && isTemporal(b)) {
+    return compareTemporalValues(a, b)
+  }
+  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
+}
+
 /**
  * Compare two values for equality, with special handling for Uint8Arrays and Buffers
  */
@@ -258,15 +339,8 @@ export function areValuesEqual(a: any, b: any): boolean {
   }
 
   // Check for Uint8Array/Buffer comparison
-  const aIsUint8Array =
-    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
-    a instanceof Uint8Array
-  const bIsUint8Array =
-    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
-    b instanceof Uint8Array
-
   // If both are Uint8Arrays, compare by content
-  if (aIsUint8Array && bIsUint8Array) {
+  if (isUint8Array(a) && isUint8Array(b)) {
     return areUint8ArraysEqual(a, b)
   }
 

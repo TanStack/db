@@ -1,5 +1,23 @@
-/** Shared behavioral suite for every `useLiveInfiniteQuery` adapter. */
+/**
+ * Shared behavioral suite for every `useLiveInfiniteQuery` adapter.
+ *
+ * Histories vary source rows, visible page count, query parameters, collection
+ * identity, input form, request timing, failure, and unmount. The independent
+ * expectation is a finite ordered prefix sliced into fixed-size pages; the
+ * on-demand fixture recomputes requests from immutable source data rather than
+ * borrowing the hook's page cache. Every checkpoint checks the whole public
+ * page ledger, not only its newest page.
+ *
+ * A driver may differ in how its framework reaches the checkpoint. It may not
+ * differ in the value and lifecycle facts visible there. The suite tracks all
+ * handles, sources, and pending fetches so cleanup is itself part of the tested
+ * history instead of test-runner housekeeping.
+ */
 import { describe, expect, it, vi } from 'vitest'
+import { expectPageRows } from './page-laws'
+import { ScenarioLifetime } from './scenario-lifetime'
+import { ScenarioSources } from './scenario-sources'
+import { scenarioRegistry } from './registration'
 import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
@@ -47,16 +65,26 @@ async function waitForAsync(check: () => boolean): Promise<void> {
 }
 
 export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
-  const gaps = new Set(rawDriver.knownGaps ?? [])
-  const registeredKeys = new Set<string>()
-  let mounted: Array<InfiniteQueryHandle> | null = null
+  const registry = scenarioRegistry(rawDriver.knownGaps)
+  let lifetime: ScenarioLifetime | null = null
+  let sources: ScenarioSources | null = null
 
   const track = <H extends InfiniteQueryHandle>(handle: H): H => {
-    mounted?.push(handle)
+    const unmount = handle.unmount.bind(handle)
+    if (lifetime) handle.unmount = lifetime.defer(unmount)
     return handle
+  }
+  const trackPromise = (promise: Promise<void>): Promise<void> => {
+    void promise.catch(() => undefined)
+    lifetime!.defer(() => promise)
+    return promise
   }
   const driver: InfiniteQueryDriver = {
     ...rawDriver,
+    makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
+    makeOnDemandSource: (data, delay) =>
+      sources!.track(rawDriver.makeOnDemandSource(data, delay)),
+    makePrecreated: (build) => sources!.track(rawDriver.makePrecreated(build)),
     mount: (build, config) => track(rawDriver.mount(build, config)),
     mountControllable: (build, initial, config) =>
       track(rawDriver.mountControllable(build, initial, config)),
@@ -75,27 +103,27 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     name: string,
     fn: () => Promise<void> | void,
   ) => {
-    registeredKeys.add(key)
-    const expectFail = gaps.has(key)
-    const label = `[${key}] ${name}${expectFail ? ` (expected-fail)` : ``}`
+    registry.register(key)
+    const label = `[${key}] ${name}`
     const run = async () => {
-      const handles: Array<InfiniteQueryHandle> = []
-      mounted = handles
+      const resources = new ScenarioLifetime()
+      const ownedSources = new ScenarioSources()
+      lifetime = resources
+      sources = ownedSources
       try {
-        await fn()
-      } finally {
-        mounted = null
-        for (const handle of handles) {
+        await resources.run(async () => {
           try {
-            handle.unmount()
-          } catch {
-            // Teardown is best-effort and idempotent.
+            await fn()
+          } finally {
+            ownedSources.defer(resources)
           }
-        }
+        })
+      } finally {
+        lifetime = null
+        sources = null
       }
     }
-    if (expectFail) it.fails(label, run)
-    else it(label, run)
+    it(label, run)
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
@@ -120,6 +148,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().pages.map((page) => page.length)).toEqual([3])
         expect(handle.current().pageParams).toEqual([4])
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
         expect(handle.current().hasNextPage).toBe(true)
 
         await handle.fetchNextPage()
@@ -133,6 +162,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           `6`,
         ])
         expect(handle.current().pageParams).toEqual([4, 5])
+        expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
 
         await handle.fetchNextPage()
         await handle.flush()
@@ -140,6 +170,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3, 2,
         ])
         expect(handle.current().pageParams).toEqual([4, 5, 6])
+        expectPageRows(handle.current(), rows(8), 3)
         expect(handle.current().hasNextPage).toBe(false)
       },
     )
@@ -161,6 +192,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         await handle.fetchNextPage()
         await handle.flush()
         expect(handle.current().pages.map((page) => page.length)).toEqual([2])
+        expectPageRows(handle.current(), rows(2), 3)
         expect(handle.current().hasNextPage).toBe(false)
       },
     )
@@ -181,6 +213,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
         expect(handle.current().data).toEqual([])
         expect(handle.current().pages).toEqual([[]])
+        expectPageRows(handle.current(), [], 3)
         expect(handle.current().hasNextPage).toBe(false)
       },
     )
@@ -205,6 +238,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3,
         ])
         expect(handle.current().hasNextPage).toBe(false)
+        expectPageRows(handle.current(), rows(6), 3)
       },
     )
 
@@ -238,6 +272,11 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([
           3, 3,
         ])
+        expectPageRows(
+          handle.current(),
+          [{ id: `new`, label: `new`, rank: 100 }, ...rows(8).slice(0, 5)],
+          3,
+        )
       },
     )
 
@@ -270,6 +309,13 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([
           3, 3,
         ])
+        expectPageRows(
+          handle.current(),
+          rows(8)
+            .filter((row) => row.id !== `2`)
+            .slice(0, 6),
+          3,
+        )
       },
     )
 
@@ -295,6 +341,14 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             removed.id,
           )
           expect(handle.current().pages.map((page) => page.length)).toEqual([4])
+          const remaining = rows(5, direction).filter(
+            (row) => row.id !== removed.id,
+          )
+          expectPageRows(
+            handle.current(),
+            direction === `desc` ? remaining : remaining.reverse(),
+            20,
+          )
           expect(handle.current().hasNextPage).toBe(false)
           handle.unmount()
         }
@@ -325,6 +379,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           `3`,
         ])
         expect(handle.current().hasNextPage).toBe(true)
+        expectPageRows(handle.current(), rows(3), 3)
       },
     )
 
@@ -350,18 +405,27 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         }
         const originalSetWindow = utils.setWindow.bind(utils)
         let calls = 0
-        let resolveWindow: (() => void) | undefined
+        const windows: Array<() => void> = []
+        // A faulty driver can create more than one request. Release all of
+        // them even when the coalescing assertion fails, before joining fetches.
+        let windowsReleased = false
+        const releaseWindows = () => {
+          windowsReleased = true
+          windows.splice(0).forEach((resolve) => resolve())
+        }
+        lifetime!.defer(releaseWindows)
         utils.setWindow = (window) => {
           calls++
           originalSetWindow(window)
           return new Promise<void>((resolve) => {
-            resolveWindow = resolve
+            if (windowsReleased) resolve()
+            else windows.push(resolve)
           })
         }
 
         try {
-          const first = handle.fetchNextPage()
-          const second = handle.fetchNextPage()
+          const first = trackPromise(handle.fetchNextPage())
+          const second = trackPromise(handle.fetchNextPage())
           let secondSettled = false
           void second.then(
             () => {
@@ -371,17 +435,19 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
               secondSettled = true
             },
           )
-          await waitFor(() => resolveWindow !== undefined)
+          await waitFor(() => windows.length > 0)
 
           expect(calls).toBe(1)
           expect(handle.current().isFetchingNextPage).toBe(true)
           expect(secondSettled).toBe(false)
-          resolveWindow?.()
+          releaseWindows()
           await Promise.all([first, second])
+          expect(calls).toBe(1)
           await handle.flush()
           expect(handle.current().pages.map((page) => page.length)).toEqual([
             3, 3,
           ])
+          expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
         } finally {
           utils.setWindow = originalSetWindow
         }
@@ -410,6 +476,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         }
         const originalSetWindow = utils.setWindow.bind(utils)
         let resolveWindow: (() => void) | undefined
+        lifetime!.defer(() => resolveWindow?.())
         utils.setWindow = (window) => {
           originalSetWindow(window)
           return new Promise<void>((resolve) => {
@@ -419,9 +486,10 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
         try {
           let settled = false
-          const fetch = handle.fetchNextPage().then(() => {
+          const fetch = trackPromise(handle.fetchNextPage()).then(() => {
             settled = true
           })
+          void fetch.catch(() => undefined)
           await waitFor(() => resolveWindow !== undefined)
           await Promise.resolve()
           expect(settled).toBe(false)
@@ -449,6 +517,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         await handle.flush()
 
         expect(source.calls.some((call) => call.limit === 4)).toBe(true)
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `1`,
           `2`,
@@ -463,6 +532,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3, 2,
         ])
         expect(handle.current().hasNextPage).toBe(false)
+        expectPageRows(handle.current(), rows(8), 3)
       },
     )
 
@@ -479,6 +549,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           { pageSize: 3 },
         )
         await waitForAsync(() => handle.current().data.length === 3)
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
 
         const fetch = handle.fetchNextPage()
         await waitForAsync(() => handle.current().isFetchingNextPage)
@@ -488,6 +559,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3,
         ])
         expect(handle.current().isFetchingNextPage).toBe(false)
+        expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
       },
     )
 
@@ -532,6 +604,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             3, 3,
           ])
           expect(handle.current().error).toBeUndefined()
+          expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
         } finally {
           utils.setWindow = originalSetWindow
         }
@@ -540,7 +613,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
     scenario(
       `dependency-immediate-fetch`,
-      `fetches from the replacement query before the framework settles`,
+      `fetches from the replacement query immediately after changing dependencies`,
       async () => {
         const source = driver.makeSource(rows(10))
         const handle = driver.mountControllable(
@@ -566,6 +639,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([
           3, 2,
         ])
+        expectPageRows(handle.current(), rows(10).slice(0, 5), 3)
       },
     )
 
@@ -592,6 +666,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([
           3, 3,
         ])
+        expectPageRows(handle.current(), rows(10).slice(0, 6), 3)
       },
     )
 
@@ -622,6 +697,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([
           3, 3,
         ])
+        expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
       },
     )
 
@@ -648,6 +724,50 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           4, 4, 4,
         ])
         expect(handle.current().pageParams).toEqual([8, 9, 10])
+        expectPageRows(handle.current(), rows(20).slice(0, 12), 4)
+      },
+    )
+
+    scenario(
+      `page-option-omission`,
+      `replaces omitted page options with defaults on the same handle`,
+      async () => {
+        const source = driver.makeSource(rows(21))
+        const handle = driver.mountConfigControllable(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3, initialPageParam: 4 },
+        )
+        await handle.flush()
+        expectPageRows(handle.current(), rows(21).slice(0, 3), 3)
+        expect(handle.current().pageParams).toEqual([4])
+        for (const next of [
+          {},
+          { pageSize: undefined, initialPageParam: undefined },
+        ]) {
+          handle.setConfigSync(next)
+          await handle.flush()
+          expectPageRows(handle.current(), rows(21).slice(0, 20), 20)
+          expect(handle.current().pageParams).toEqual([0])
+          expect(handle.current().hasNextPage).toBe(true)
+        }
+        handle.setConfigSync({ pageSize: 5, initialPageParam: 7 })
+        await handle.flush()
+        expectPageRows(handle.current(), rows(21).slice(0, 5), 5)
+        expect(handle.current().pageParams).toEqual([7])
+
+        const freshSource = driver.makeSource(rows(21, `fresh`))
+        const fresh = driver.mount((q) =>
+          q
+            .from({ items: freshSource.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`),
+        )
+        await fresh.flush()
+        expectPageRows(fresh.current(), rows(21, `fresh`).slice(0, 20), 20)
+        expect(fresh.current().pageParams).toEqual([0])
+        expect(fresh.current().hasNextPage).toBe(true)
       },
     )
 
@@ -673,6 +793,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           )
           await handle.flush()
           expect(handle.current().pages[0]).toHaveLength(20)
+          expectPageRows(handle.current(), rows(21).slice(0, 20), 20)
           expect(handle.current().hasNextPage).toBe(true)
           handle.unmount()
         }
@@ -681,7 +802,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
     scenario(
       `collection-immediate-fetch`,
-      `fetches from a replacement collection before the framework settles`,
+      `fetches from a replacement collection immediately after replacing input`,
       async () => {
         const first = driver.makeSource(rows(8, `a`))
         const second = driver.makeSource(rows(8, `b`))
@@ -720,6 +841,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([
           3, 3,
         ])
+        expectPageRows(handle.current(), rows(8, `b`).slice(0, 6), 3)
       },
     )
 
@@ -744,6 +866,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           { pageSize: 3 },
         )
         await handle.flush()
+        expectPageRows(handle.current(), rows(6, `a`).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `a1`,
           `a2`,
@@ -752,6 +875,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
         handle.setInputKindSync(`query`)
         await handle.flush()
+        expectPageRows(handle.current(), rows(6, `b`).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `b1`,
           `b2`,
@@ -760,6 +884,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
         handle.setInputKindSync(`collection`)
         await handle.flush()
+        expectPageRows(handle.current(), rows(6, `a`).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `a1`,
           `a2`,
@@ -792,6 +917,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         }
         const originalSetWindow = oldUtils.setWindow.bind(oldUtils)
         let resolveWindow: (() => void) | undefined
+        lifetime!.defer(() => resolveWindow?.())
         oldUtils.setWindow = (window) => {
           const result = originalSetWindow(window)
           if (resolveWindow !== undefined) return result
@@ -801,7 +927,10 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         }
 
         try {
-          const staleFetch = handle.fetchNextPage()
+          // This existing stale-operation law allows either terminal outcome.
+          const staleFetch = trackPromise(
+            handle.fetchNextPage().catch(() => undefined),
+          )
           await waitFor(() => resolveWindow !== undefined)
           handle.setParamSync(8)
           await handle.flush()
@@ -810,6 +939,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           await handle.flush()
 
           expect(handle.current().data.map((row) => row.rank)).toEqual([10, 9])
+          expectPageRows(handle.current(), rows(10).slice(0, 2), 3)
           expect(handle.current().pages.map((page) => page.length)).toEqual([2])
         } finally {
           oldUtils.setWindow = originalSetWindow
@@ -834,6 +964,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
         expect(calls).toBe(1)
         expect(handle.current().data).toHaveLength(3)
+        expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
       },
     )
 
@@ -950,6 +1081,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             .limit(2),
         ).collection
         const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+        lifetime!.defer(() => warn.mockRestore())
         const handle = driver.mountCollection(collection, { pageSize: 3 })
         await handle.flush()
 
@@ -964,6 +1096,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           `2`,
           `3`,
         ])
+        expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
         warn.mockRestore()
       },
     )
@@ -990,6 +1123,11 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           `1`,
           `2`,
         ])
+        expectPageRows(
+          handle.current(),
+          [{ id: `new`, label: `new`, rank: 100 }, ...rows(6).slice(0, 2)],
+          3,
+        )
       },
     )
 
@@ -1031,9 +1169,12 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           const getWindow = () =>
             (collection.utils as { getWindow: () => unknown }).getWindow()
           expect(getWindow()).toEqual({ offset: 0, limit: 7 })
+          expectPageRows(larger.current(), rows(12).slice(0, 6), 3)
+          expectPageRows(smaller.current(), rows(12).slice(0, 2), 1)
           larger.unmount()
           await smaller.flush()
           expect(getWindow()).toEqual({ offset: 0, limit: 3 })
+          expectPageRows(smaller.current(), rows(12).slice(0, 2), 1)
           smaller.unmount()
           expect(getWindow()).toEqual({ offset: 0, limit: 4 })
           expect(warn).not.toHaveBeenCalled()
@@ -1043,8 +1184,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       },
     )
 
-    it(`has no stale known-gap keys`, () => {
-      expect([...gaps].filter((key) => !registeredKeys.has(key))).toEqual([])
+    it(`registers every distinct scenario without whole-test waivers`, () => {
+      expect(registry.size).toBe(33)
     })
   })
 }

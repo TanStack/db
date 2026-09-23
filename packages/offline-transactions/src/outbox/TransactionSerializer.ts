@@ -6,6 +6,94 @@ import type {
 } from '../types'
 import type { Collection, PendingMutation } from '@tanstack/db'
 
+const temporalConstructorNames = [
+  `Duration`,
+  `Instant`,
+  `PlainDate`,
+  `PlainDateTime`,
+  `PlainMonthDay`,
+  `PlainTime`,
+  `PlainYearMonth`,
+  `ZonedDateTime`,
+] as const
+
+type TemporalConstructorName = (typeof temporalConstructorNames)[number]
+type TemporalConstructor = {
+  from: (value: string) => unknown
+  prototype?: { toString?: () => string }
+}
+
+function getTemporalConstructorName(
+  type: unknown,
+): TemporalConstructorName | undefined {
+  if (typeof type !== `string` || !type.startsWith(`Temporal.`)) return
+  const constructorName = type.slice(
+    `Temporal.`.length,
+  ) as TemporalConstructorName
+  return temporalConstructorNames.includes(constructorName)
+    ? constructorName
+    : undefined
+}
+
+function requireTemporalConstructor(
+  name: TemporalConstructorName,
+): TemporalConstructor {
+  const constructor = (
+    globalThis as {
+      Temporal?: Partial<Record<TemporalConstructorName, TemporalConstructor>>
+    }
+  ).Temporal?.[name]
+  if (typeof constructor?.from !== `function`)
+    throw new MissingTemporalConstructorError(
+      `Missing global Temporal.${name} constructor`,
+    )
+  return constructor
+}
+
+function serializeTemporalValue(
+  value: object,
+  name: TemporalConstructorName,
+): string | undefined {
+  const constructor = requireTemporalConstructor(name)
+  const toString = constructor.prototype?.toString
+  if (typeof toString !== `function` || toString === Object.prototype.toString)
+    return
+  try {
+    const serialized = toString.call(value)
+    return typeof serialized === `string` ? serialized : undefined
+  } catch {
+    // Temporal prototype methods brand-check their receiver. A matching
+    // Symbol.toStringTag without the corresponding internal slots is user data.
+    return
+  }
+}
+
+function mayBeNativeScalar(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value)
+  return (
+    prototype !== null &&
+    prototype !== Object.prototype &&
+    !Array.isArray(value)
+  )
+}
+
+export class MissingTemporalConstructorError extends Error {}
+
+function setDataProperty(
+  object: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (key !== `__proto__`) object[key] = value
+  else
+    Object.defineProperty(object, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+}
+
 export class TransactionSerializer {
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
@@ -24,7 +112,9 @@ export class TransactionSerializer {
   serialize(transaction: OfflineTransaction): string {
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
+      valueEncoding: 3,
       createdAt: transaction.createdAt.toISOString(),
+      metadata: this.serializeValue(transaction.metadata, `metadata`),
       mutations: transaction.mutations.map((mutation) =>
         this.serializeMutation(mutation),
       ),
@@ -33,9 +123,23 @@ export class TransactionSerializer {
   }
 
   deserialize(data: string): OfflineTransaction {
-    // Parse without a reviver - let deserializeValue handle dates in mutation data
-    // using the { __type: 'Date' } marker system
-    const parsed: SerializedOfflineTransaction = JSON.parse(data)
+    // Old records retain their Date-marker meaning. New records also escape
+    // marker-shaped user objects; the encoding tag is not application metadata.
+    const {
+      valueEncoding,
+      ...parsed
+    }: Omit<SerializedOfflineTransaction, `valueEncoding`> & {
+      valueEncoding?: unknown
+    } = JSON.parse(data)
+    if (
+      valueEncoding !== undefined &&
+      valueEncoding !== 2 &&
+      valueEncoding !== 3
+    ) {
+      throw new Error(
+        `Unsupported transaction value encoding: ${valueEncoding}`,
+      )
+    }
 
     const createdAt = new Date(parsed.createdAt)
     if (isNaN(createdAt.getTime())) {
@@ -47,8 +151,12 @@ export class TransactionSerializer {
     return {
       ...parsed,
       createdAt,
+      metadata:
+        valueEncoding === 3
+          ? this.deserializeValue(parsed.metadata, valueEncoding)
+          : parsed.metadata,
       mutations: parsed.mutations.map((mutationData) =>
-        this.deserializeMutation(mutationData),
+        this.deserializeMutation(mutationData, valueEncoding),
       ),
     }
   }
@@ -71,13 +179,16 @@ export class TransactionSerializer {
     }
   }
 
-  private deserializeMutation(data: SerializedMutation): PendingMutation {
+  private deserializeMutation(
+    data: SerializedMutation,
+    valueEncoding: 2 | 3 | undefined,
+  ): PendingMutation {
     const collection = this.collections[data.collectionId]
     if (!collection) {
       throw new Error(`Collection with id ${data.collectionId} not found`)
     }
 
-    const modified = this.deserializeValue(data.modified)
+    const modified = this.deserializeValue(data.modified, valueEncoding)
 
     // Extract the key from the modified data using the collection's getKey function
     // This is needed for optimistic state restoration to work correctly
@@ -89,8 +200,8 @@ export class TransactionSerializer {
       globalKey: data.globalKey,
       type: data.type as any,
       modified,
-      original: this.deserializeValue(data.original),
-      changes: this.deserializeValue(data.changes) ?? {},
+      original: this.deserializeValue(data.original, valueEncoding),
+      changes: this.deserializeValue(data.changes, valueEncoding) ?? {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
@@ -103,29 +214,104 @@ export class TransactionSerializer {
     } as PendingMutation
   }
 
-  private serializeValue(value: any): any {
-    if (value === null || value === undefined) {
-      return value
-    }
+  private serializeValue(
+    value: any,
+    jsonKey?: string | false,
+    ancestors = new WeakSet<object>(),
+  ): any {
+    if (value === null || typeof value !== `object`) return value
 
-    if (value instanceof Date) {
+    if (jsonKey !== false && value instanceof Date) {
       return { __type: `Date`, value: value.toISOString() }
     }
 
-    if (typeof value === `object`) {
-      const result: any = Array.isArray(value) ? [] : {}
-      for (const key in value) {
-        if (Object.prototype.hasOwnProperty.call(value, key)) {
-          result[key] = this.serializeValue(value[key])
+    const temporalConstructorName =
+      jsonKey !== false && mayBeNativeScalar(value)
+        ? getTemporalConstructorName(value[Symbol.toStringTag])
+        : undefined
+    if (temporalConstructorName) {
+      const temporalValue = serializeTemporalValue(
+        value,
+        temporalConstructorName,
+      )
+      if (temporalValue !== undefined)
+        return {
+          __type: `Temporal`,
+          type: `Temporal.${temporalConstructorName}`,
+          value: temporalValue,
         }
-      }
-      return result
     }
 
-    return value
+    if (ancestors.has(value))
+      throw new TypeError(`Converting circular structure to JSON`)
+
+    const toJSON = typeof jsonKey === `string` && value.toJSON
+    if (typeof toJSON === `function`) {
+      const replacement = toJSON.call(value, jsonKey)
+      if (replacement === value) {
+        return this.serializeValue(replacement, false, ancestors)
+      }
+
+      ancestors.add(value)
+      try {
+        return this.serializeValue(replacement, false, ancestors)
+      } finally {
+        ancestors.delete(value)
+      }
+    }
+    if (
+      jsonKey !== undefined &&
+      (value instanceof Boolean ||
+        value instanceof BigInt ||
+        value instanceof Number ||
+        value instanceof String)
+    ) {
+      return value.valueOf()
+    }
+
+    ancestors.add(value)
+
+    const isArray = Array.isArray(value)
+    const result: any = isArray ? [] : {}
+    try {
+      if (isArray) {
+        const length = value.length
+        for (let index = 0; index < length; index++) {
+          const key = String(index)
+          setDataProperty(
+            result,
+            key,
+            this.serializeValue(
+              value[index],
+              jsonKey === undefined ? undefined : key,
+              ancestors,
+            ),
+          )
+        }
+      } else {
+        for (const key of Object.keys(value)) {
+          setDataProperty(
+            result,
+            key,
+            this.serializeValue(
+              value[key],
+              jsonKey === undefined ? undefined : key,
+              ancestors,
+            ),
+          )
+        }
+      }
+    } finally {
+      ancestors.delete(value)
+    }
+    if (jsonKey === false && typeof result.toJSON === `function`)
+      delete result.toJSON
+    return !isArray && Object.prototype.hasOwnProperty.call(value, `__type`)
+      ? { __type: `Object`, value: result }
+      : result
   }
 
-  private deserializeValue(value: any): any {
+  private deserializeValue(value: any, valueEncoding: 2 | 3 | undefined): any {
     if (value === null || value === undefined) {
       return value
     }
@@ -143,11 +329,39 @@ export class TransactionSerializer {
       return date
     }
 
+    if (
+      valueEncoding === 3 &&
+      typeof value === `object` &&
+      value.__type === `Temporal`
+    ) {
+      const constructorName = getTemporalConstructorName(value.type)
+      if (!constructorName)
+        throw new Error(`Corrupted Temporal marker: invalid type field`)
+      if (typeof value.value !== `string`)
+        throw new Error(`Corrupted Temporal marker: missing value field`)
+      return requireTemporalConstructor(constructorName).from(value.value)
+    }
+
     if (typeof value === `object`) {
+      // Unwrap once, then decode only the fields: the object's own __type is data.
+      if (valueEncoding !== undefined && value.__type === `Object`) {
+        if (
+          value.value === null ||
+          typeof value.value !== `object` ||
+          Array.isArray(value.value)
+        ) {
+          throw new Error(`Corrupted Object marker: expected an object value`)
+        }
+        value = value.value
+      }
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
-          result[key] = this.deserializeValue(value[key])
+          setDataProperty(
+            result,
+            key,
+            this.deserializeValue(value[key], valueEncoding),
+          )
         }
       }
       return result

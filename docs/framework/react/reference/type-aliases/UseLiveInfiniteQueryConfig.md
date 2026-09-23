@@ -3,57 +3,29 @@ id: UseLiveInfiniteQueryConfig
 title: UseLiveInfiniteQueryConfig
 ---
 
-# Type Alias: UseLiveInfiniteQueryConfig\<TContext\>
-
 ```ts
-type UseLiveInfiniteQueryConfig<TContext> = object;
+type UseLiveInfiniteQueryConfig<_TContext> = object;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:29](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L29)
+Defined in: [useLiveInfiniteQuery.ts:45](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L45)
 
 ## Type Parameters
 
-### TContext
+### _TContext
 
-`TContext` *extends* `Context`
+`_TContext` *extends* `Context`
 
 ## Properties
 
-### ~~getNextPageParam()?~~
+### client?
 
 ```ts
-optional getNextPageParam: (lastPage, allPages, lastPageParam, allPageParams) => number | undefined;
+optional client: DbClient;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:37](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L37)
+Defined in: [useLiveInfiniteQuery.ts:53](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L53)
 
-#### Parameters
-
-##### lastPage
-
-`InferResultType`\<`TContext`\>\[`number`\][]
-
-##### allPages
-
-`InferResultType`\<`TContext`\>\[`number`\][][]
-
-##### lastPageParam
-
-`number`
-
-##### allPageParams
-
-`number`[]
-
-#### Returns
-
-`number` \| `undefined`
-
-#### Deprecated
-
-This callback is not used by the current implementation.
-Pagination is determined internally via a peek-ahead strategy.
-Provided for API compatibility with TanStack Query conventions.
+Override the nearest DbProvider for this query.
 
 ***
 
@@ -63,7 +35,9 @@ Provided for API compatibility with TanStack Query conventions.
 optional initialPageParam: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:31](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L31)
+Defined in: [useLiveInfiniteQuery.ts:56](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L56)
+
+First result-page label, not a server cursor or remote offset.
 
 ***
 
@@ -73,4 +47,18 @@ Defined in: [useLiveInfiniteQuery.ts:31](https://github.com/TanStack/db/blob/mai
 optional pageSize: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:30](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L30)
+Defined in: [useLiveInfiniteQuery.ts:54](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L54)
+
+***
+
+### queryKey?
+
+```ts
+optional queryKey: LiveQueryKey;
+```
+
+Defined in: [useLiveInfiniteQuery.ts:51](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L51)
+
+Explicit identity for queries that contain opaque functional variants or
+are hot enough that deriving identity from structured IR is too expensive.
+Structured queries should omit this so DB can derive identity directly.

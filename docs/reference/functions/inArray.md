@@ -3,8 +3,6 @@ id: inArray
 title: inArray
 ---
 
-# Function: inArray()
-
 ```ts
 function inArray(value, array): BasicExpression<boolean>;
 ```

@@ -3,51 +3,14 @@ id: LiveInfiniteQueryConfig
 title: LiveInfiniteQueryConfig
 ---
 
-# Type Alias: LiveInfiniteQueryConfig\<TRow\>
-
 ```ts
-type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & object;
+type LiveInfiniteQueryConfig<_TRow> = InfiniteQueryOptions;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:39](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L39)
-
-## Type Declaration
-
-### ~~getNextPageParam()?~~
-
-```ts
-optional getNextPageParam: (lastPage, allPages, lastPageParam, allPageParams) => number | undefined;
-```
-
-#### Parameters
-
-##### lastPage
-
-`TRow`[]
-
-##### allPages
-
-`TRow`[][]
-
-##### lastPageParam
-
-`number`
-
-##### allPageParams
-
-`number`[]
-
-#### Returns
-
-`number` \| `undefined`
-
-#### Deprecated
-
-Pagination uses the shared controller's peek-ahead strategy.
-This remains for compatibility with TanStack Query conventions.
+Defined in: [useLiveInfiniteQuery.ts:41](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L41)
 
 ## Type Parameters
 
-### TRow
+### _TRow
 
-`TRow`
+`_TRow`

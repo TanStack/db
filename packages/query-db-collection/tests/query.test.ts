@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   QueryClient,
+  QueryObserver,
   dehydrate,
   focusManager,
   hashKey,
@@ -12,15 +13,18 @@ import {
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
+  createTransaction,
   eq,
   ilike,
   inArray,
   or,
+  resetWarnings,
 } from '@tanstack/db'
 import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../../db/tests/utils'
+import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
@@ -49,28 +53,6 @@ interface CategorisedItem {
 
 const getKey = (item: TestItem) => item.id
 
-type OwnershipMaps = {
-  rowToQueries: Map<string | number, Set<string>>
-  queryToRows: Map<string, Set<string | number>>
-}
-
-function inspectOwnershipMaps(options: {
-  sync: { sync: unknown }
-}): OwnershipMaps {
-  const sync = options.sync.sync as {
-    __getOwnershipMapsForTests?: () => OwnershipMaps
-  }
-  const maps = sync.__getOwnershipMapsForTests?.()
-  if (!maps) {
-    throw new Error(`Ownership-map test inspection is unavailable`)
-  }
-  return maps
-}
-
-function expectNoEmptyRowOwnershipSets(maps: OwnershipMaps): void {
-  maps.rowToQueries.forEach((owners) => expect(owners.size).toBeGreaterThan(0))
-}
-
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -82,6 +64,19 @@ function createDeferred<T>() {
     reject = rejectPromise
   })
   return { promise, resolve, reject }
+}
+
+function observeLifecycleRows(rows: Iterable<TestItem>) {
+  return Array.from(rows, ({ id, name }) => ({ id, name })).sort((a, b) =>
+    a.id.localeCompare(b.id),
+  )
+}
+
+function expectLifecycleRows(
+  observed: Array<{ id: string; name: string }>,
+  expected: Array<{ id: string; name: string }>,
+) {
+  expect(observed).toEqual(expected)
 }
 
 function createInMemorySyncMetadataApi<
@@ -672,6 +667,182 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it(`keeps an eager result loading until its rows are applied`, async () => {
+      const queryResult = createDeferred<Array<TestItem>>()
+      const queryFn = vi.fn(() => queryResult.promise)
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `eager-applied-settlement`,
+          queryClient,
+          queryKey: [`eager-applied-settlement`],
+          queryFn,
+          getKey,
+          syncMode: `eager`,
+          startSync: true,
+        }),
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() =>
+        collection.insert({ id: `local`, name: `Local` }),
+      )
+
+      try {
+        const ready = collection.stateWhenReady()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+        queryResult.resolve([{ id: `server`, name: `Server` }])
+        await flushPromises()
+
+        expect(collection.status).toBe(`loading`)
+        expect(collection.get(`server`)).toBeUndefined()
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await ready
+
+        expect(collection.status).toBe(`ready`)
+        expect(collection.get(`server`)).toEqual(
+          expect.objectContaining({ id: `server`, name: `Server` }),
+        )
+      } finally {
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
+      }
+    })
+
+    it(`does not publish queued query results after the subset is released`, async () => {
+      const queryKey = [`released-result-application`]
+      const queryResult = createDeferred<Array<TestItem>>()
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `released-result-application`,
+          queryClient,
+          queryKey,
+          queryFn: () => queryResult.promise,
+          getKey,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      try {
+        transaction.mutate(() =>
+          collection.insert({ id: `local`, name: `Local` }),
+        )
+        collection._sync.loadSubset({})
+        queryResult.resolve([{ id: `first`, name: `First` }])
+        await flushPromises()
+
+        queryClient.setQueryData(queryKey, [{ id: `second`, name: `Second` }])
+        await flushPromises()
+        collection._sync.unloadSubset({})
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await flushPromises()
+
+        expect(collection.has(`first`)).toBe(false)
+        expect(collection.has(`second`)).toBe(false)
+      } finally {
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
+      }
+    })
+
+    it(`keeps a deferred successful result pending until its refetch applies`, async () => {
+      const barrier = createDeferred<void>()
+      const queryFn = vi
+        .fn()
+        .mockResolvedValue([{ id: `server`, name: `Server` }])
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `deferred-result-application`,
+          queryClient,
+          queryKey: [`deferred-result-application`],
+          queryFn,
+          getKey,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      collection.deferDataRefresh = barrier.promise
+
+      try {
+        const load = collection._sync.loadSubset({})
+        let settled = false
+        void Promise.resolve(load).then(() => {
+          settled = true
+        })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+        await flushPromises()
+
+        expect(settled).toBe(false)
+        expect(collection.has(`server`)).toBe(false)
+
+        collection.deferDataRefresh = null
+        barrier.resolve()
+        if (load !== true) await load
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.has(`server`)).toBe(true)
+      } finally {
+        collection.deferDataRefresh = null
+        barrier.resolve()
+        await collection.cleanup()
+      }
+    })
+
+    it(`applies successive eager results in publication order`, async () => {
+      const queryKey = [`eager-result-publication-order`]
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `eager-result-publication-order`,
+          queryClient,
+          queryKey,
+          queryFn: vi.fn().mockResolvedValue([]),
+          getKey,
+          syncMode: `eager`,
+          startSync: true,
+        }),
+      )
+
+      await collection.stateWhenReady()
+
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() =>
+        collection.insert({ id: `local`, name: `Local` }),
+      )
+
+      try {
+        queryClient.setQueryData(queryKey, [{ id: `server`, name: `Server` }])
+        await flushPromises()
+        queryClient.setQueryData(queryKey, [])
+        await flushPromises()
+
+        persistence.resolve()
+        await transaction.isPersisted.promise
+
+        await vi.waitFor(() => {
+          expect(collection.get(`server`)).toBeUndefined()
+        })
+      } finally {
+        persistence.resolve()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
+      }
+    })
+
     it(`does not materialize QueryClient placeholder defaults`, async () => {
       const placeholderQueryClient = new QueryClient({
         defaultOptions: {
@@ -920,6 +1091,85 @@ describe(`QueryCollection`, () => {
         name: `Widget`,
       })
     })
+  })
+
+  it(`reconciles a retained cached subset before an include becomes ready`, async () => {
+    type LineItem = { id: string; productId: string }
+    type Product = { id: string; name: string }
+
+    const queryKey = [`cached-includes-product`]
+    const cachedProducts: Array<Product> = [
+      { id: `product-1`, name: `Cached widget` },
+    ]
+    queryClient.setQueryData(queryKey, cachedProducts)
+    const queryHash = hashKey(queryKey)
+    const metadataHarness = createInMemorySyncMetadataApi<
+      string | number,
+      Product
+    >({
+      collectionMetadata: new Map([
+        [
+          `queryCollection:gc:${queryHash}`,
+          { queryHash, mode: `until-revalidated` },
+        ],
+      ]),
+    })
+
+    const lineItems = createCollection(
+      mockSyncCollectionOptions<LineItem>({
+        id: `cached-includes-line-items`,
+        getKey: (lineItem) => lineItem.id,
+        initialData: [{ id: `line-1`, productId: `product-1` }],
+      }),
+    )
+    const productOptions = queryCollectionOptions<Product>({
+      id: `cached-includes-products`,
+      queryClient,
+      queryKey: () => queryKey,
+      queryFn: vi.fn().mockResolvedValue(cachedProducts),
+      getKey: (product) => product.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      staleTime: Infinity,
+    })
+    const originalSync = productOptions.sync
+    const products = createCollection({
+      ...productOptions,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({ ...params, metadata: metadataHarness.api }),
+      },
+    })
+    const live = createLiveQueryCollection((q) =>
+      q.from({ lineItem: lineItems }).select(({ lineItem }) => ({
+        id: lineItem.id,
+        product: q
+          .from({ product: products })
+          .where(({ product }) => eq(product.id, lineItem.productId))
+          .select(({ product }) => ({
+            id: product.id,
+            name: product.name,
+          })),
+      })),
+    )
+
+    try {
+      await new Promise<void>((resolve) => products.onFirstReady(resolve))
+      await live.preload()
+
+      expect(live.status).toBe(`ready`)
+      expect(
+        (live.get(`line-1`) as any).product.toArray.map((product: Product) =>
+          stripVirtualProps(product),
+        ),
+      ).toEqual(cachedProducts)
+    } finally {
+      await Promise.all([
+        live.cleanup(),
+        products.cleanup(),
+        lineItems.cleanup(),
+      ])
+    }
   })
 
   it(`should update collection when query data changes`, async () => {
@@ -1862,12 +2112,16 @@ describe(`QueryCollection`, () => {
       // Create handlers with different return values
       const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch
       const onInsertFalse = vi.fn().mockResolvedValue({ refetch: false }) // No refetch
+      const onInsertPrimitive = vi.fn().mockResolvedValue(`legacy-result`) // Legacy values should still refetch
 
       // Create configs with the handlers
       const queryFnDefault = vi
         .fn()
         .mockResolvedValue([{ id: `1`, name: `Item 1` }])
       const queryFnFalse = vi
+        .fn()
+        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const queryFnPrimitive = vi
         .fn()
         .mockResolvedValue([{ id: `1`, name: `Item 1` }])
 
@@ -1888,6 +2142,16 @@ describe(`QueryCollection`, () => {
         queryFn: queryFnFalse,
         getKey,
         onInsert: onInsertFalse,
+        startSync: true,
+      }
+
+      const configPrimitive: QueryCollectionConfig<TestItem> = {
+        id: `test-primitive`,
+        queryClient,
+        queryKey: [`refetchTest`, `primitive`],
+        queryFn: queryFnPrimitive,
+        getKey,
+        onInsert: onInsertPrimitive,
         startSync: true,
       }
 
@@ -1949,10 +2213,78 @@ describe(`QueryCollection`, () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(queryFnFalse).not.toHaveBeenCalled()
 
+      // Test case 3: Legacy primitive returns should retain auto-refetch behavior
+      const optionsPrimitive = queryCollectionOptions(configPrimitive)
+      const collectionPrimitive = createCollection(optionsPrimitive)
+
+      await vi.waitFor(() => {
+        expect(collectionPrimitive.status).toBe(`ready`)
+      })
+
+      queryFnPrimitive.mockClear()
+
+      const insertParamsPrimitive = {
+        transaction: insertTransaction,
+        collection: collectionPrimitive,
+      } satisfies InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+
+      await optionsPrimitive.onInsert!(insertParamsPrimitive)
+
+      expect(onInsertPrimitive).toHaveBeenCalledWith(insertParamsPrimitive)
+      await vi.waitFor(() => {
+        expect(queryFnPrimitive).toHaveBeenCalledTimes(1)
+      })
+
       await Promise.all([
         collectionDefault.cleanup(),
         collectionFalse.cleanup(),
+        collectionPrimitive.cleanup(),
       ])
+    })
+
+    it(`supports a warning-free single-refetch migration path`, async () => {
+      resetWarnings()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const options = queryCollectionOptions<TestItem>({
+        id: `explicit-refetch-migration`,
+        queryClient,
+        queryKey: [`explicit-refetch-migration`],
+        queryFn,
+        getKey,
+        startSync: true,
+        onInsert: async ({ collection }) => {
+          await collection.utils.refetch()
+          return { refetch: false }
+        },
+      })
+      const collection = createCollection(options)
+
+      try {
+        await vi.waitFor(() => {
+          expect(collection.status).toBe(`ready`)
+        })
+        queryFn.mockClear()
+
+        await options.onInsert!({
+          transaction: {
+            id: `explicit-refetch-transaction`,
+            mutations: [],
+          } as unknown as TransactionWithMutations<TestItem, `insert`>,
+          collection,
+        })
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(warning).not.toHaveBeenCalled()
+      } finally {
+        await collection.cleanup()
+        resetWarnings()
+        warning.mockRestore()
+      }
     })
   })
 
@@ -1991,7 +2323,7 @@ describe(`QueryCollection`, () => {
       // We're mainly verifying the collection cleanup works without errors
     })
 
-    it(`should call cancelQueries and removeQueries on sync cleanup`, async () => {
+    it(`should remove its Query cache entry on sync cleanup`, async () => {
       const queryKey = [`sync-cleanup-test`]
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
@@ -2004,12 +2336,6 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
       }
-
-      // Spy on the queryClient methods that should be called during sync cleanup
-      const cancelQueriesSpy = vi
-        .spyOn(queryClient, `cancelQueries`)
-        .mockResolvedValue()
-      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
 
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
@@ -2024,6 +2350,7 @@ describe(`QueryCollection`, () => {
       // be an active subscription to the query
       expect(collection.subscriberCount).toBe(0)
       expect(collection.status).toBe(`ready`)
+      expect(queryClient.getQueryCache().find({ queryKey })).toBeDefined()
 
       // Add explicit subscribers to test cleanup with active subscribers
       const subscription1 = collection.subscribeChanges(() => {})
@@ -2033,27 +2360,13 @@ describe(`QueryCollection`, () => {
       // Cleanup the collection which should trigger sync cleanup
       await collection.cleanup()
 
-      // Wait a bit to ensure all async operations complete
-      await flushPromises()
-
-      // Verify collection status
       expect(collection.status).toBe(`cleaned-up`)
-
-      // Verify that cleanup methods are called regardless of subscriber state
-      expect(cancelQueriesSpy).toHaveBeenCalledWith({
-        queryKey,
-        exact: true,
-      })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey, exact: true })
+      expect(queryClient.getQueryCache().find({ queryKey })).toBeUndefined()
 
       // Verify subscribers can be safely cleaned up after collection cleanup
       subscription1.unsubscribe()
       subscription2.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
-
-      // Restore spies
-      cancelQueriesSpy.mockRestore()
-      removeQueriesSpy.mockRestore()
     })
 
     it(`should handle multiple cleanup calls gracefully`, async () => {
@@ -2166,12 +2479,6 @@ describe(`QueryCollection`, () => {
         startSync: true,
       }
 
-      // Spy on queryClient methods
-      const cancelQueriesSpy = vi
-        .spyOn(queryClient, `cancelQueries`)
-        .mockResolvedValue()
-      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
-
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
@@ -2180,43 +2487,24 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(1)
       })
 
-      // Cleanup which should call query cleanup methods
       await collection.cleanup()
-      await flushPromises()
       expect(collection.status).toBe(`cleaned-up`)
-
-      // Verify cleanup methods were called
-      expect(cancelQueriesSpy).toHaveBeenCalledWith({
-        queryKey,
-        exact: true,
-      })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey, exact: true })
-
-      // Clear the spies to track new calls
-      cancelQueriesSpy.mockClear()
-      removeQueriesSpy.mockClear()
+      expect(queryClient.getQueryCache().find({ queryKey })).toBeUndefined()
 
       // Restart by accessing collection
       const subscription = collection.subscribeChanges(() => {})
 
       // Should restart sync
       expect([`loading`, `ready`]).toContain(collection.status)
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(queryClient.getQueryCache().find({ queryKey })).toBeDefined()
+      })
 
       // Cleanup again to verify the new sync cleanup works
       subscription.unsubscribe()
       await collection.cleanup()
-      await flushPromises()
-
-      // Verify cleanup methods were called again for the restarted sync
-      expect(cancelQueriesSpy).toHaveBeenCalledWith({
-        queryKey,
-        exact: true,
-      })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey, exact: true })
-
-      // Restore spies
-      cancelQueriesSpy.mockRestore()
-      removeQueriesSpy.mockRestore()
+      expect(queryClient.getQueryCache().find({ queryKey })).toBeUndefined()
     })
 
     it(`should handle query invalidation and refetch properly`, async () => {
@@ -2307,9 +2595,7 @@ describe(`QueryCollection`, () => {
           await collection.cleanup()
         }
 
-        expect(
-          queryClient.getQueryCache().find({ queryKey })?.getObserversCount(),
-        ).toBe(0)
+        expect(queryClient.getQueryCache().find({ queryKey })).toBeUndefined()
       })
 
       it(`rematerializes an active eager query after prefix invalidation`, async () => {
@@ -2601,7 +2887,7 @@ describe(`QueryCollection`, () => {
       // existing unit fixtures do not exercise the full persisted retention path
       // without introducing broader persistence setup. This PR characterizes active,
       // inactive, removed, overlapping, and failed-refetch behavior first.
-      it(`does not rematerialize inactive cached query rows after invalidation`, async () => {
+      it(`does not refetch a cleaned-up query after invalidation`, async () => {
         const retainedQueryClient = new QueryClient({
           defaultOptions: {
             queries: {
@@ -2635,7 +2921,7 @@ describe(`QueryCollection`, () => {
         expect(collection.status).toBe(`cleaned-up`)
         expect(
           retainedQueryClient.getQueryCache().find({ queryKey }),
-        ).toBeDefined()
+        ).toBeUndefined()
 
         items = [{ id: `1`, name: `Updated Item 1` }]
         await retainedQueryClient.invalidateQueries({ queryKey, exact: true })
@@ -2909,7 +3195,7 @@ describe(`QueryCollection`, () => {
         ).toBe(0)
       })
 
-      it(`cleans listeners immediately and resolves the unloaded preload before its request settles`, async () => {
+      it(`cleans listeners immediately and rejects the abandoned preload before its request settles`, async () => {
         const deferred = createDeferred<Array<TestItem>>()
         const collection = createCollection(
           queryCollectionOptions<TestItem>({
@@ -2922,10 +3208,14 @@ describe(`QueryCollection`, () => {
           }),
         )
         const liveQuery = createSubset(collection)
-        let preloadResolved = false
-        void liveQuery.preload().then(() => {
-          preloadResolved = true
-        })
+        let preloadError: unknown
+        const preloadOutcome = liveQuery.preload().then(
+          () => undefined,
+          (error: unknown) => {
+            preloadError = error
+            return error
+          },
+        )
 
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(1))
         await liveQuery.cleanup()
@@ -2936,19 +3226,19 @@ describe(`QueryCollection`, () => {
         // This assertion runs while the request is unresolved and directly guards the
         // ready-listener bookkeeping bug: unload must synchronously detach its observer.
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
-        // Live-query cleanup resolves its preload even though Query Core is still fetching.
-        expect(preloadResolved).toBe(true)
+        // Cleanup cancels the caller's wait even while Query Core keeps fetching.
+        expect(preloadError).toMatchObject({ name: `AbortError` })
 
         deferred.resolve([{ id: `1`, name: `Late item` }])
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
 
         expect(collection.size).toBe(0)
-        expect(preloadResolved).toBe(true)
+        expect(await preloadOutcome).toBe(preloadError)
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
         await collection.cleanup()
       })
 
-      it(`keeps an unloaded preload resolved when its pending request later rejects`, async () => {
+      it(`keeps the cleanup error when an abandoned preload's request later rejects`, async () => {
         const deferred = createDeferred<Array<TestItem>>()
         const collection = createCollection(
           queryCollectionOptions<TestItem>({
@@ -2961,7 +3251,10 @@ describe(`QueryCollection`, () => {
           }),
         )
         const liveQuery = createSubset(collection)
-        const preloadPromise = liveQuery.preload()
+        const preloadOutcome = liveQuery.preload().then(
+          () => undefined,
+          (error: unknown) => error,
+        )
 
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(1))
         await liveQuery.cleanup()
@@ -2970,12 +3263,14 @@ describe(`QueryCollection`, () => {
           queryKey: [`late-subset-rejection-test`],
         })[0]
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
-        await expect(preloadPromise).resolves.toBeUndefined()
+        const preloadError = await preloadOutcome
+        expect(preloadError).toMatchObject({ name: `AbortError` })
 
         deferred.reject(new Error(`Late query failure`))
         await vi.waitFor(() => expect(queryClient.isFetching()).toBe(0))
 
         expect(collection.size).toBe(0)
+        expect(await preloadOutcome).toBe(preloadError)
         expect(subsetQuery?.getObserversCount() ?? 0).toBe(0)
         await collection.cleanup()
       })
@@ -4443,6 +4738,88 @@ describe(`QueryCollection`, () => {
       return createCollection(options)
     }
 
+    it.each([`select`, `getKey`, `write`] as const)(
+      `reports an error when %s throws while applying a successful result`,
+      async (failureStage) => {
+        const applicationError = new Error(`${failureStage} failed`)
+        const consoleErrorSpy = vi
+          .spyOn(console, `error`)
+          .mockImplementation(() => {})
+        let keyCalls = 0
+        const throwingGetKey = (item: TestItem) => {
+          keyCalls++
+          if (
+            failureStage === `getKey` ||
+            (failureStage === `write` && keyCalls === 2)
+          ) {
+            throw applicationError
+          }
+          return item.id
+        }
+
+        const options = queryCollectionOptions<TestItem>({
+          id: `successful-result-${failureStage}-error-test`,
+          queryClient,
+          queryKey: [`successful-result-${failureStage}-error-test`],
+          queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+          getKey: throwingGetKey,
+          select:
+            failureStage === `select`
+              ? () => {
+                  throw applicationError
+                }
+              : undefined,
+          startSync: true,
+          retry: false,
+        })
+        const collection = createCollection(options)
+
+        await expect(collection.preload()).rejects.toBe(applicationError)
+        expect(collection.status).toBe(`error`)
+        expect(collection.utils.lastError).toBe(applicationError)
+        expect(collection.utils.errorCount).toBe(1)
+        expect(collection.size).toBe(0)
+
+        await collection.cleanup()
+        consoleErrorSpy.mockRestore()
+      },
+    )
+
+    it(`does not treat a failed application as established coverage`, async () => {
+      const applicationError = new Error(`application failed`)
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const demand = { where: eq(`id`, `1`) }
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `failed-application-coverage`,
+          queryClient,
+          queryKey: [`failed-application-coverage`],
+          queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+          getKey: () => {
+            throw applicationError
+          },
+          syncMode: `on-demand`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+
+      try {
+        const firstLoad = collection._sync.loadSubset(demand)
+        await expect(Promise.resolve(firstLoad)).rejects.toBe(applicationError)
+
+        const repeatedLoad = collection._sync.loadSubset(demand)
+        await expect(Promise.resolve(repeatedLoad)).rejects.toBe(
+          applicationError,
+        )
+      } finally {
+        await collection.cleanup()
+        consoleErrorSpy.mockRestore()
+      }
+    })
+
     it(`should track error state, count, and support recovery`, async () => {
       const initialData = [{ id: `1`, name: `Item 1` }]
       const updatedData = [{ id: `1`, name: `Updated Item 1` }]
@@ -4631,9 +5008,9 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
-      // Wait for collection to be ready (even with error)
+      // No initial snapshot exists, so the collection reports an error.
       await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
+        expect(collection.status).toBe(`error`)
         expect(collection.utils.isError).toBe(true)
       })
 
@@ -4657,9 +5034,9 @@ describe(`QueryCollection`, () => {
         queryFn,
       )
 
-      // Wait for collection to be ready (even with error)
+      // No initial snapshot exists, so the collection reports an error.
       await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
+        expect(collection.status).toBe(`error`)
         expect(collection.utils.isError).toBe(true)
       })
 
@@ -4703,7 +5080,7 @@ describe(`QueryCollection`, () => {
       // Wait for all retry attempts to complete and final failure
       await vi.waitFor(
         () => {
-          expect(collection.status).toBe(`ready`) // Should be ready even with error
+          expect(collection.status).toBe(`error`)
           expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
           expect(collection.utils.isError).toBe(true)
         },
@@ -5692,24 +6069,27 @@ describe(`QueryCollection`, () => {
     it(`should handle GC correctly when queries are ordered and have a LIMIT`, async () => {
       const baseQueryKey = [`deduplication-gc-test`]
 
-      // Mock queryFn to return different data based on predicates
+      const items = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+        { id: `3`, name: `Item 3`, category: `A` },
+      ]
+      // Honor the complete pushed predicate so an exact tie request does not
+      // masquerade as another full category load.
       const queryFn = vi.fn().mockImplementation((context) => {
         const { meta } = context
         const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
-        const { where, limit } = loadSubsetOptions
+        const { where, offset = 0, limit } = loadSubsetOptions
 
-        // Query 1: all items with category A (no limit)
-        if (isCategory(`A`, where)) {
-          const items = [
-            { id: `1`, name: `Item 1`, category: `A` },
-            { id: `2`, name: `Item 2`, category: `A` },
-            { id: `3`, name: `Item 3`, category: `A` },
-          ]
-          // Slice to limit if provided
-          return Promise.resolve(limit ? items.slice(0, limit) : items)
-        }
-
-        return Promise.resolve([])
+        const matching = where
+          ? items.filter((item) => evaluateReferenceExpression(where, item))
+          : items
+        return Promise.resolve(
+          matching.slice(
+            offset,
+            limit === undefined ? undefined : offset + limit,
+          ),
+        )
       })
 
       const config: QueryCollectionConfig<CategorisedItem> = {
@@ -5779,8 +6159,8 @@ describe(`QueryCollection`, () => {
 
       await flushPromises()
 
-      // queryFn should have been called twice
-      // because we do not dedupe the 2nd query
+      // The initial complete category load already proves that no unseen row
+      // ties the ordered boundary, so the second demand needs only its prefix.
       expect(queryFn).toHaveBeenCalledTimes(2)
 
       // Collection should still have all 3 items (deduplication doesn't remove data)
@@ -5794,13 +6174,15 @@ describe(`QueryCollection`, () => {
 
       // Wait for async GC to complete
       await vi.waitFor(() => {
-        expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+        // Query 2 shares the already-complete category acquisition so it can
+        // refill locally. It may retain row 3 even though its visible window
+        // contains only rows 1 and 2.
+        expect(collection.size).toBe(3)
       })
 
-      // Verify that only row 3 is removed (it was only referenced by query 1)
-      expect(collection.has(`1`)).toBe(true) // Still present (referenced by query 2)
-      expect(collection.has(`2`)).toBe(true) // Still present (referenced by query 2)
-      expect(collection.has(`3`)).toBe(false) // Removed (only referenced by query 1)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
 
       // GC the second query (category A with limit 2)
       await query2.cleanup()
@@ -5831,7 +6213,6 @@ describe(`QueryCollection`, () => {
           getKey,
           syncMode: `on-demand`,
         })
-        const ownershipMaps = inspectOwnershipMaps(options)
         const collection = createCollection(options)
         const firstSubset = createLiveQueryCollection({
           query: (q) =>
@@ -5856,15 +6237,10 @@ describe(`QueryCollection`, () => {
           expect(collection.has(`2`)).toBe(true)
           expect(collection.has(`3`)).toBe(true)
         })
-        expectNoEmptyRowOwnershipSets(ownershipMaps)
-
         await secondSubset.cleanup()
         await vi.waitFor(() => {
           expect(collection.size).toBe(0)
         })
-        expectNoEmptyRowOwnershipSets(ownershipMaps)
-        expect(ownershipMaps.rowToQueries.size).toBe(0)
-        expect(ownershipMaps.queryToRows.size).toBe(0)
       })
 
       it(`expires the Query cache entry after unload without restoring deleted rows`, async () => {
@@ -5936,7 +6312,6 @@ describe(`QueryCollection`, () => {
           startSync: true,
         })
         const originalSync = baseOptions.sync
-        const ownershipMaps = inspectOwnershipMaps(baseOptions)
         const metadataHarness = createInMemorySyncMetadataApi<
           string | number,
           CategorisedItem
@@ -5985,9 +6360,6 @@ describe(`QueryCollection`, () => {
           expect(collection.has(retainedRow.id)).toBe(false)
         })
         expect(metadataHarness.rowMetadata.get(retainedRow.id)).toBeUndefined()
-        expectNoEmptyRowOwnershipSets(ownershipMaps)
-        expect(ownershipMaps.rowToQueries.size).toBe(0)
-        expect(ownershipMaps.queryToRows.get(queryHash)).toEqual(new Set())
         expect(
           metadataHarness.collectionMetadata.has(
             `queryCollection:gc:${queryHash}`,
@@ -6043,39 +6415,106 @@ describe(`QueryCollection`, () => {
             .select(({ item }) => ({ id: item.id, name: item.name })),
       })
 
-      // Load both queries
-      await query1.preload()
-      await query2.preload()
+      const initial = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+        { id: `3`, name: `Item 3` },
+      ]
+      const observations: Array<ReturnType<typeof observeLifecycleRows>> = []
+      try {
+        // Load both queries
+        await query1.preload()
+        await query2.preload()
 
-      // Wait for data to load
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3)
-      })
-      expect(queryFn).toHaveBeenCalledTimes(1) // Deduplicated
+        // Wait for data to load
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(3)
+        })
+        expect(queryFn).toHaveBeenCalledTimes(1) // Deduplicated
+        observations.push(observeLifecycleRows(query2.values()))
+        expectLifecycleRows(observations[0]!, initial)
 
-      // Cleanup query1
-      await query1.cleanup()
-      await flushPromises()
+        // Cleanup query1
+        await query1.cleanup()
+        await flushPromises()
 
-      // BUG: Without refcount increment on reuse, the observer is destroyed
-      // and query2 stops receiving updates. Collection data is also removed.
-      // EXPECTED: query2 should still work since it's using the same observer
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3) // Should still have data for query2
-      })
+        // BUG: Without refcount increment on reuse, the observer is destroyed
+        // and query2 stops receiving updates. Collection data is also removed.
+        // EXPECTED: query2 should still work since it's using the same observer
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(3) // Should still have data for query2
+        })
+        expectLifecycleRows(observeLifecycleRows(query2.values()), initial)
 
-      // Verify query2 still works by mutating data
-      await collection.insert({ id: `4`, name: `Item 4`, category: `A` })
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(4)
-        expect(collection.has(`4`)).toBe(true)
-      })
+        // Verify query2 still works by mutating data
+        const inserted = collection.insert({
+          id: `4`,
+          name: `Item 4`,
+          category: `A`,
+        })
+        await inserted.isPersisted.promise
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(4)
+          expect(collection.has(`4`)).toBe(true)
+        })
+        expectLifecycleRows(observeLifecycleRows(query2.values()), [
+          ...initial,
+          { id: `4`, name: `Item 4` },
+        ])
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        queryFn.mockResolvedValue([
+          { id: `1`, name: `Provider changed`, category: `A` },
+          { id: `2`, name: `Item 2`, category: `A` },
+          { id: `3`, name: `Item 3`, category: `A` },
+          { id: `4`, name: `Provider accepted`, category: `A` },
+        ])
+        await collection.utils.refetch()
+        const refreshed = [
+          { id: `1`, name: `Provider changed` },
+          { id: `2`, name: `Item 2` },
+          { id: `3`, name: `Item 3` },
+          { id: `4`, name: `Provider accepted` },
+        ]
+        await vi.waitFor(() =>
+          expectLifecycleRows(observeLifecycleRows(query2.values()), refreshed),
+        )
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(
+          Array.from(collection.values(), ({ id, name, category }) => ({
+            id,
+            name,
+            category,
+          })).sort((a, b) => a.id.localeCompare(b.id)),
+        ).toEqual(refreshed.map((row) => ({ ...row, category: `A` })))
+        const actual = observeLifecycleRows(query2.values())
+        expect(() =>
+          expectLifecycleRows(
+            actual.map((row, index) =>
+              index === 0 ? { ...row, id: `wrong-key` } : row,
+            ),
+            refreshed,
+          ),
+        ).toThrow()
+        expect(() =>
+          expectLifecycleRows(
+            actual.map((row, index) =>
+              index === 0 ? { ...row, name: `wrong-value` } : row,
+            ),
+            refreshed,
+          ),
+        ).toThrow()
+        expectLifecycleRows(observations[0]!, initial)
 
-      // Now cleanup query2
-      await query2.cleanup()
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0) // NOW it should be cleaned up
-      })
+        // Now cleanup query2
+        await query2.cleanup()
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(0) // NOW it should be cleaned up
+        })
+      } finally {
+        await query1.cleanup()
+        await query2.cleanup()
+        await collection.cleanup()
+      }
     })
 
     it(`should not let initial data satisfy persisted revalidation`, async () => {
@@ -6236,6 +6675,65 @@ describe(`QueryCollection`, () => {
           `queryCollection:gc:${ownedQueryHash}`,
         ),
       ).toBe(false)
+    })
+
+    it(`does not apply a retained-query result after its subset is released`, async () => {
+      const queryKey = [`stale-retained-reconciliation`]
+      const queryHash = hashKey(queryKey)
+      const item = { id: `1`, name: `Stale result`, category: `A` }
+      const persistedScan =
+        createDeferred<
+          Array<{ key: string; value: CategorisedItem; metadata?: unknown }>
+        >()
+      const metadataHarness = createInMemorySyncMetadataApi<string | number>({
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${queryHash}`,
+            { queryHash, mode: `until-revalidated` },
+          ],
+        ]),
+      })
+      const scanPersisted = vi.fn().mockReturnValue(persistedScan.promise)
+      const metadataApi = {
+        ...metadataHarness.api,
+        row: {
+          ...metadataHarness.api.row,
+          scanPersisted,
+        },
+      } as SyncMetadataApi<string | number>
+
+      const baseOptions = queryCollectionOptions<CategorisedItem>({
+        id: `stale-retained-reconciliation`,
+        queryClient,
+        queryKey: () => queryKey,
+        queryFn: async () => [item],
+        getKey: (value) => value.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      })
+      const originalSync = baseOptions.sync
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              metadata: metadataApi,
+            }),
+        },
+      })
+      const load = collection._sync.loadSubset({})
+      await vi.waitFor(() => {
+        expect(scanPersisted).toHaveBeenCalledOnce()
+      })
+
+      collection._sync.unloadSubset({})
+      persistedScan.resolve([])
+      await load
+      await flushPromises()
+
+      expect(collection.has(item.id)).toBe(false)
+      await collection.cleanup()
     })
 
     it(`should clean up expired persisted ttl placeholders on startup`, async () => {
@@ -6678,7 +7176,6 @@ describe(`QueryCollection`, () => {
 
         const baseOptions = queryCollectionOptions(config)
         const originalSync = baseOptions.sync
-        const ownershipMaps = inspectOwnershipMaps(baseOptions)
         const metadataHarness = createInMemorySyncMetadataApi<
           string | number,
           CategorisedItem
@@ -6711,13 +7208,6 @@ describe(`QueryCollection`, () => {
 
         await liveQuery.cleanup()
 
-        expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(true)
-        expect(ownershipMaps.queryToRows.get(retainedQueryHash)).toEqual(
-          new Set([`1`]),
-        )
-        expect(ownershipMaps.rowToQueries.get(`1`)).toEqual(
-          new Set([retainedQueryHash]),
-        )
         expect(
           metadataHarness.collectionMetadata.get(
             `queryCollection:gc:${retainedQueryHash}`,
@@ -6737,8 +7227,6 @@ describe(`QueryCollection`, () => {
           ),
         ).toBeUndefined()
         expect(collection.has(`1`)).toBe(false)
-        expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(false)
-        expect(ownershipMaps.rowToQueries.has(`1`)).toBe(false)
       } finally {
         vi.useRealTimers()
       }
@@ -6762,7 +7250,6 @@ describe(`QueryCollection`, () => {
       }
       const baseOptions = queryCollectionOptions(config)
       const originalSync = baseOptions.sync
-      const ownershipMaps = inspectOwnershipMaps(baseOptions)
       const metadataHarness = createInMemorySyncMetadataApi<
         string | number,
         CategorisedItem
@@ -6783,12 +7270,20 @@ describe(`QueryCollection`, () => {
 
       await liveQuery.preload()
       await liveQuery.cleanup()
-      expect(ownershipMaps.queryToRows.has(retainedQueryHash)).toBe(true)
+      expect(
+        metadataHarness.collectionMetadata.has(
+          `queryCollection:gc:${retainedQueryHash}`,
+        ),
+      ).toBe(true)
 
       await collection.cleanup()
 
-      expect(ownershipMaps.queryToRows.size).toBe(0)
-      expect(ownershipMaps.rowToQueries.size).toBe(0)
+      expect(collection.size).toBe(0)
+      expect(
+        metadataHarness.collectionMetadata.has(
+          `queryCollection:gc:${retainedQueryHash}`,
+        ),
+      ).toBe(false)
     })
 
     it(`should default persisted retention ttl to query gcTime when persistedGcTime is undefined`, async () => {
@@ -7044,12 +7539,16 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Force GC by calling removeQueries (simulates gcTime expiry)
+      // Release the first acquisition before its cache entry is removed.
+      // Cache events do not revoke active collection ownership.
+      await query1.cleanup()
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      // Force GC by calling removeQueries (simulates gcTime expiry).
       queryClient.removeQueries({ queryKey: baseQueryKey })
       await flushPromises()
-
-      // BUG: queryRefCounts still has stale count, wasn't cleaned up by cleanupQuery
-      // When we load again, the refcount will be wrong (starts at 1 instead of 0, or accumulates)
 
       // Reload the same query
       const query2 = createLiveQueryCollection({
@@ -7067,14 +7566,11 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      // Cleanup - this should properly decrement from 1 to 0 and clean up
+      // Cleanup should decrement the new acquisition from one to zero.
       await query2.cleanup()
       await vi.waitFor(() => {
         expect(collection.size).toBe(0) // Should be cleaned up
       })
-
-      // BUG SYMPTOM: If refcount was stale (e.g. was 2, decremented to 1),
-      // the observer won't be destroyed and data won't be cleaned up
     })
 
     it(`should handle mount/unmount/remount without breaking cache (destroyed observer bug)`, async () => {
@@ -7120,40 +7616,75 @@ describe(`QueryCollection`, () => {
         query: (q) => q.from({ item: collection }).select(({ item }) => item),
       })
 
-      await query1.preload()
+      let cleanupRemount: (() => Promise<void>) | undefined
+      try {
+        await query1.preload()
 
-      // Wait for initial data to load
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
-      expect(queryFn).toHaveBeenCalledTimes(1)
+        // Wait for initial data to load
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
-      // Unmount: cleanup the query, triggering subscriberCount -> 0
-      // This calls unsubscribeFromQueries() which destroys observers
-      await query1.cleanup()
-      await flushPromises()
+        // Unmount: cleanup the query, triggering subscriberCount -> 0
+        // This calls unsubscribeFromQueries() which destroys observers
+        await query1.cleanup()
+        await flushPromises()
 
-      // At this point, observer.destroy() was called but observer is still in state.observers
+        // At this point, observer.destroy() was called but observer is still in state.observers
 
-      // Remount quickly (before gcTime expires): cache should still be valid
-      const query2 = createLiveQueryCollection({
-        query: (q) => q.from({ item: collection }).select(({ item }) => item),
-      })
+        // Remount quickly (before gcTime expires): cache should still be valid
+        const query2 = createLiveQueryCollection({
+          query: (q) => q.from({ item: collection }).select(({ item }) => item),
+        })
+        cleanupRemount = () => query2.cleanup()
 
-      // BUG: subscribeToQueries() tries to subscribe to the destroyed observer
-      // QueryObserver.destroy() is terminal - reactivation isn't guaranteed
-      // This breaks cache processing on remount
+        // BUG: subscribeToQueries() tries to subscribe to the destroyed observer
+        // QueryObserver.destroy() is terminal - reactivation isn't guaranteed
+        // This breaks cache processing on remount
 
-      await query2.preload()
+        await query2.preload()
 
-      // EXPECTED: Should process cached data immediately without refetch
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
-      expect(queryFn).toHaveBeenCalledTimes(1) // No refetch!
+        // EXPECTED: Should process cached data immediately without refetch
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
+        expect(queryFn).toHaveBeenCalledTimes(1) // No refetch!
+        const cached = observeLifecycleRows(query2.values())
+        expectLifecycleRows(cached, [
+          { id: `1`, name: `Item 1` },
+          { id: `2`, name: `Item 2` },
+        ])
+        queryFn.mockResolvedValue([
+          { id: `1`, name: `Refetched item 1` },
+          { id: `3`, name: `Refetched item 3` },
+        ])
+        await collection.utils.refetch()
+        const refreshed = [
+          { id: `1`, name: `Refetched item 1` },
+          { id: `3`, name: `Refetched item 3` },
+        ]
+        await vi.waitFor(() =>
+          expectLifecycleRows(observeLifecycleRows(query2.values()), refreshed),
+        )
+        expectLifecycleRows(
+          observeLifecycleRows(collection.values()),
+          refreshed,
+        )
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expectLifecycleRows(cached, [
+          { id: `1`, name: `Item 1` },
+          { id: `2`, name: `Item 2` },
+        ])
 
-      // BUG SYMPTOM: If destroyed observer doesn't process cached results,
-      // collection will be empty or queryFn will be called again
+        // BUG SYMPTOM: If destroyed observer doesn't process cached results,
+        // collection will be empty or queryFn will be called again
+      } finally {
+        await query1.cleanup()
+        await cleanupRemount?.()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
     })
 
     it(`should not leak data when unsubscribing while load is in flight`, async () => {
@@ -7169,11 +7700,12 @@ describe(`QueryCollection`, () => {
       ]
 
       // Create a delayed queryFn that we can control
-      let resolveQuery: ((value: Array<TestItem>) => void) | undefined
-      const queryFnPromise = new Promise<Array<TestItem>>((resolve) => {
-        resolveQuery = resolve
+      const endpoint = createDeferred<Array<TestItem>>()
+      const entered = createDeferred<void>()
+      const queryFn = vi.fn(() => {
+        entered.resolve()
+        return endpoint.promise
       })
-      const queryFn = vi.fn().mockReturnValue(queryFnPromise)
 
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -7205,32 +7737,56 @@ describe(`QueryCollection`, () => {
 
       // Start preload but don't await - this triggers the queryFn
       const preloadPromise = query1.preload()
-
-      // Wait a bit to ensure queryFn has been called
-      await flushPromises()
-      expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(collection.size).toBe(0) // No data yet
-
-      // Unsubscribe while the query is still in flight (before queryFn resolves)
-      await query1.cleanup()
-      await flushPromises()
-
-      // Collection should be empty after cleanup
-      expect(collection.size).toBe(0)
-
-      // Now resolve the query - this is the "late-arriving data"
-      resolveQuery!(items)
-      await flushPromises()
-
-      // CRITICAL: After the late-arriving data is processed, the collection
-      // should still be empty. No rows should leak back in.
-      expect(collection.size).toBe(0)
-
-      // Clean up
+      const outcome = preloadPromise.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const events: Array<unknown> = []
+      const sourceSubscription = collection.subscribeChanges((changes) => {
+        events.push(structuredClone(changes))
+      })
       try {
-        await preloadPromise
-      } catch {
-        // Query was cancelled, this is expected
+        // The actual endpoint must have entered before retiring its caller.
+        await entered.promise
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(0) // No data yet
+
+        // Unsubscribe while the query is still in flight (before queryFn resolves)
+        await query1.cleanup()
+        await flushPromises()
+
+        // Collection should be empty after cleanup
+        expect(collection.size).toBe(0)
+        const canceled = await outcome
+        expect(canceled.status).toBe(`rejected`)
+        if (canceled.status !== `rejected`)
+          throw new Error(`Expected canceled preload`)
+        expect(canceled.reason).toBeInstanceOf(Error)
+        expect(canceled.reason).toMatchObject({
+          name: `AbortError`,
+          message: `Collection preload was abandoned during cleanup`,
+        })
+        const retiredEvents = structuredClone(events)
+
+        // Now resolve the query - this is the "late-arriving data"
+        endpoint.resolve(items)
+        await endpoint.promise
+        await flushPromises()
+
+        // CRITICAL: After the late-arriving data is processed, the collection
+        // should still be empty. No rows should leak back in.
+        expect(collection.size).toBe(0)
+        expect(events).toEqual(retiredEvents)
+        expect(events.flat()).toEqual([])
+        expect(await outcome).toBe(canceled)
+      } finally {
+        endpoint.resolve(items)
+        await query1.cleanup()
+        await outcome
+        sourceSubscription.unsubscribe()
+        await collection.cleanup()
+        customQueryClient.clear()
+        await flushPromises()
       }
     })
   })
@@ -7760,17 +8316,19 @@ describe(`QueryCollection`, () => {
     })
   })
 
-  describe(`On-demand collection directWrite cache update`, () => {
-    it(`should update query cache for all active query keys when using writeUpdate with computed queryKey`, async () => {
-      // Ensures writeUpdate on on-demand collections with computed query keys
-      // updates all active cache keys to prevent data loss on remount
+  describe(`On-demand collection directWrite cache revalidation`, () => {
+    it(`should revalidate an active computed queryKey after writeUpdate`, async () => {
+      // Ensures writeUpdate on on-demand collections revalidates the active
+      // computed query key so the authoritative result survives a remount.
 
-      const items: Array<CategorisedItem> = [
+      const serverItems: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
         { id: `2`, name: `Item 2`, category: `A` },
       ]
 
-      const queryFn = vi.fn().mockResolvedValue(items)
+      const queryFn = vi.fn(() =>
+        Promise.resolve(serverItems.map((item) => structuredClone(item))),
+      )
 
       // Use a custom queryClient with longer gcTime to prevent cache from being removed
       const customQueryClient = new QueryClient({
@@ -7810,61 +8368,67 @@ describe(`QueryCollection`, () => {
             .where(({ item }) => eq(item.category, `A`))
             .select(({ item }) => ({ id: item.id, name: item.name })),
       })
+      let query2: typeof query1 | undefined
 
-      await query1.preload()
+      try {
+        await query1.preload()
 
-      // Wait for data to load
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
+        // Wait for data to load
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
 
-      // Perform a direct write update
-      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+        serverItems[0] = { ...serverItems[0]!, name: `Updated Item 1` }
+        collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
-      // Verify the collection reflects the update
-      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        // Verify the collection reflects the update
+        expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-      // IMPORTANT: Simulate remount by cleaning up and recreating the live query
-      // This is where the bug manifests - the updated data should persist
-      await query1.cleanup()
-      await flushPromises()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
-      // Recreate the same live query (simulating component remount)
-      const query2 = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ item: collection })
-            .where(({ item }) => eq(item.category, `A`))
-            .select(({ item }) => ({ id: item.id, name: item.name })),
-      })
+        // IMPORTANT: Simulate remount by cleaning up and recreating the live query
+        // This is where the bug manifests - the updated data should persist
+        await query1.cleanup()
+        await flushPromises()
 
-      await query2.preload()
+        // Recreate the same live query (simulating component remount)
+        query2 = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`))
+              .select(({ item }) => ({ id: item.id, name: item.name })),
+        })
 
-      // Wait for data to be available
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
+        await query2.preload()
 
-      // BUG ASSERTION: After remount, the updated data should persist
-      // With the bug, this will fail because writeUpdate updated the wrong cache key
-      // and on remount, the stale cached data is loaded instead
-      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        // Wait for data to be available
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
 
-      // Cleanup
-      await query2.cleanup()
-      customQueryClient.clear()
+        // After remount, the authoritative updated data should persist.
+        expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+      } finally {
+        await query2?.cleanup()
+        await query1.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
     })
 
-    it(`should update query cache for static queryKey with where clause in on-demand mode`, async () => {
+    it(`should revalidate a scoped static queryKey after writeUpdate`, async () => {
       // Scenario: static queryKey + on-demand mode + where clause
       // The where clause causes a computed query key to be generated
 
-      const items: Array<CategorisedItem> = [
+      const serverItems: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
         { id: `2`, name: `Item 2`, category: `A` },
       ]
 
-      const queryFn = vi.fn().mockResolvedValue(items)
+      const queryFn = vi.fn(() =>
+        Promise.resolve(serverItems.map((item) => structuredClone(item))),
+      )
 
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -7897,53 +8461,62 @@ describe(`QueryCollection`, () => {
             .where(({ item }) => eq(item.category, `A`))
             .select(({ item }) => ({ id: item.id, name: item.name })),
       })
+      let query2: typeof query1 | undefined
 
-      await query1.preload()
+      try {
+        await query1.preload()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
 
-      // Perform a direct write update
-      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+        serverItems[0] = { ...serverItems[0]!, name: `Updated Item 1` }
+        collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
-      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-      // Simulate remount
-      await query1.cleanup()
-      await flushPromises()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
-      const query2 = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ item: collection })
-            .where(({ item }) => eq(item.category, `A`))
-            .select(({ item }) => ({ id: item.id, name: item.name })),
-      })
+        // Simulate remount
+        await query1.cleanup()
+        await flushPromises()
 
-      await query2.preload()
+        query2 = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`))
+              .select(({ item }) => ({ id: item.id, name: item.name })),
+        })
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
+        await query2.preload()
 
-      // After remount, the updated data should persist
-      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
 
-      await query2.cleanup()
-      customQueryClient.clear()
+        // After remount, the updated data should persist
+        expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+      } finally {
+        await query2?.cleanup()
+        await query1.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
     })
 
-    it(`should update query cache for function queryKey that returns constant value in on-demand mode`, async () => {
+    it(`should revalidate a constant function queryKey after writeUpdate`, async () => {
       // Scenario: function queryKey that returns same value
       // This creates an undefined entry in the cache
 
-      const items: Array<TestItem> = [
+      const serverItems: Array<TestItem> = [
         { id: `1`, name: `Item 1` },
         { id: `2`, name: `Item 2` },
       ]
 
-      const queryFn = vi.fn().mockResolvedValue(items)
+      const queryFn = vi.fn(() =>
+        Promise.resolve(serverItems.map((item) => structuredClone(item))),
+      )
 
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -7971,38 +8544,1497 @@ describe(`QueryCollection`, () => {
       const query1 = createLiveQueryCollection({
         query: (q) => q.from({ item: collection }).select(({ item }) => item),
       })
+      let query2: typeof query1 | undefined
 
-      await query1.preload()
+      try {
+        await query1.preload()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
 
-      // Perform a direct write update
-      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+        serverItems[0] = { ...serverItems[0]!, name: `Updated Item 1` }
+        collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
-      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-      // Simulate remount
-      await query1.cleanup()
-      await flushPromises()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
-      const query2 = createLiveQueryCollection({
-        query: (q) => q.from({ item: collection }).select(({ item }) => item),
-      })
+        // Simulate remount
+        await query1.cleanup()
+        await flushPromises()
 
-      await query2.preload()
+        query2 = createLiveQueryCollection({
+          query: (q) => q.from({ item: collection }).select(({ item }) => item),
+        })
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2)
-      })
+        await query2.preload()
 
-      // After remount, the updated data should persist
-      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(2)
+        })
 
-      await query2.cleanup()
-      customQueryClient.clear()
+        // After remount, the updated data should persist
+        expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+      } finally {
+        await query2?.cleanup()
+        await query1.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
     })
+
+    it.each([false, true])(
+      `keeps a manual update visible until an active scoped refetch settles with custom hash %s`,
+      async (customHash) => {
+        const initial = { id: `1`, name: `Initial`, category: `A` }
+        const authoritative = {
+          id: `1`,
+          name: `Authoritative`,
+          category: `A`,
+        }
+        const refetchResult = createDeferred<Array<CategorisedItem>>()
+        const customQueryClient = new QueryClient({
+          defaultOptions: {
+            queries: {
+              gcTime: Number.POSITIVE_INFINITY,
+              staleTime: Number.POSITIVE_INFINITY,
+              retry: false,
+              queryKeyHashFn: customHash
+                ? (key) => `custom:${hashKey(key)}`
+                : undefined,
+            },
+          },
+        })
+        const queryFn = vi
+          .fn<() => Promise<Array<CategorisedItem>>>()
+          .mockResolvedValueOnce([initial])
+          .mockImplementationOnce(() => refetchResult.promise)
+        const collection = createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id: `active-scoped-manual-write-${customHash}`,
+            queryClient: customQueryClient,
+            queryKey: [`active-scoped-manual-write`],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }),
+        )
+        const active = createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`)),
+        })
+
+        try {
+          await active.preload()
+          const scopedQuery = customQueryClient.getQueryCache().getAll()[0]!
+          expect(scopedQuery.state.dataUpdateCount).toBe(1)
+
+          collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+          expect(collection.get(`1`)?.name).toBe(`Manual`)
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+          expect(collection.get(`1`)?.name).toBe(`Manual`)
+          expect(scopedQuery.state.data).toEqual([initial])
+
+          refetchResult.resolve([authoritative])
+          await vi.waitFor(() => {
+            expect(collection.get(`1`)?.name).toBe(`Authoritative`)
+            expect(scopedQuery.state.dataUpdateCount).toBe(2)
+          })
+        } finally {
+          refetchResult.resolve([authoritative])
+          await active.cleanup()
+          await collection.cleanup()
+          customQueryClient.clear()
+        }
+      },
+    )
+
+    it(`keeps active scoped queries isolated across collections sharing a QueryClient base key`, async () => {
+      const baseKey = [`shared-query-client-ownership`]
+      const serverA: Array<CategorisedItem> = [
+        { id: `a1`, name: `A one`, category: `A` },
+      ]
+      let serverB: Array<CategorisedItem> = [
+        { id: `b1`, name: `B one`, category: `B` },
+      ]
+      const queryA = vi.fn(() =>
+        Promise.resolve(serverA.map((row) => structuredClone(row))),
+      )
+      const queryB = vi.fn(() =>
+        Promise.resolve(serverB.map((row) => structuredClone(row))),
+      )
+      const sharedQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const collectionA = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `shared-query-client-owner-a`,
+          queryClient: sharedQueryClient,
+          queryKey: baseKey,
+          queryFn: queryA,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const collectionB = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `shared-query-client-owner-b`,
+          queryClient: sharedQueryClient,
+          queryKey: baseKey,
+          queryFn: queryB,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const activeA = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ row: collectionA })
+            .where(({ row }) => eq(row.category, `A`)),
+      })
+      const activeB = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ row: collectionB })
+            .where(({ row }) => eq(row.category, `B`)),
+      })
+
+      try {
+        await Promise.all([activeA.preload(), activeB.preload()])
+        expect(queryA).toHaveBeenCalledTimes(1)
+        expect(queryB).toHaveBeenCalledTimes(1)
+
+        const cachedQueries = sharedQueryClient.getQueryCache().getAll()
+        const aQueryBefore = cachedQueries.find((query) =>
+          (query.state.data as Array<CategorisedItem> | undefined)?.some(
+            (row) => row.id === `a1`,
+          ),
+        )
+        const bQueryBefore = cachedQueries.find((query) =>
+          (query.state.data as Array<CategorisedItem> | undefined)?.some(
+            (row) => row.id === `b1`,
+          ),
+        )
+        expect(aQueryBefore).toBeDefined()
+        expect(bQueryBefore).toBeDefined()
+        expect(aQueryBefore!.queryKey).not.toEqual(bQueryBefore!.queryKey)
+
+        const bQueryKey = bQueryBefore!.queryKey
+        expect(activeB.toArray.map((row) => row.id)).toEqual([`b1`])
+
+        collectionA.utils.writeInsert({
+          id: `a-outside`,
+          name: `Outside A scope`,
+          category: `outside`,
+        })
+        await vi.waitFor(() => expect(queryA).toHaveBeenCalledTimes(2))
+
+        const afterAWrite = {
+          queryPresent:
+            sharedQueryClient
+              .getQueryCache()
+              .find({ queryKey: bQueryKey, exact: true }) !== undefined,
+          queryCalls: queryB.mock.calls.length,
+          materializedRows: activeB.toArray.map((row) => row.id),
+        }
+
+        serverB = [...serverB, { id: `b2`, name: `B two`, category: `B` }]
+        await sharedQueryClient.invalidateQueries({
+          queryKey: bQueryKey,
+          exact: true,
+        })
+        await flushPromises()
+
+        const afterBInvalidation = {
+          queryPresent:
+            sharedQueryClient
+              .getQueryCache()
+              .find({ queryKey: bQueryKey, exact: true }) !== undefined,
+          queryCalls: queryB.mock.calls.length,
+          materializedRows: activeB.toArray.map((row) => row.id),
+        }
+
+        expect({ afterAWrite, afterBInvalidation }).toEqual({
+          afterAWrite: {
+            queryPresent: true,
+            queryCalls: 1,
+            materializedRows: [`b1`],
+          },
+          afterBInvalidation: {
+            queryPresent: true,
+            queryCalls: 2,
+            materializedRows: [`b1`, `b2`],
+          },
+        })
+      } finally {
+        await activeA.cleanup()
+        await activeB.cleanup()
+        await collectionA.cleanup()
+        await collectionB.cleanup()
+        sharedQueryClient.clear()
+      }
+    })
+
+    it(`does not let a foreign enabled observer authorize a disabled collection refetch`, async () => {
+      const queryKey = [`disabled-collection-foreign-observer`]
+      const initial: CategorisedItem = {
+        id: `1`,
+        name: `Initial`,
+        category: `A`,
+      }
+      const collectionQueryFn = vi.fn(() =>
+        Promise.resolve([structuredClone(initial)]),
+      )
+      const foreignQueryFn = vi.fn(() =>
+        Promise.resolve([structuredClone(initial)]),
+      )
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      customQueryClient.setQueryData(queryKey, [initial])
+
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `disabled-collection-foreign-observer`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn: collectionQueryFn,
+          enabled: false,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ row: collection })
+            .where(({ row }) => eq(row.category, `A`)),
+      })
+      const foreignObserver = new QueryObserver(customQueryClient, {
+        queryKey,
+        queryFn: foreignQueryFn,
+        enabled: true,
+        staleTime: Number.POSITIVE_INFINITY,
+        retry: false,
+      })
+      let unsubscribeForeign: (() => void) | undefined
+
+      try {
+        await active.preload()
+        expect(collectionQueryFn).not.toHaveBeenCalled()
+        expect(active.toArray.map((row) => row.name)).toEqual([`Initial`])
+
+        unsubscribeForeign = foreignObserver.subscribe(() => {})
+        const sharedQuery = customQueryClient.getQueryCache().find({
+          queryKey,
+          exact: true,
+        })!
+
+        expect(sharedQuery.getObserversCount()).toBe(2)
+        expect(sharedQuery.isDisabled()).toBe(false)
+        expect(foreignQueryFn).not.toHaveBeenCalled()
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+        expect(collectionQueryFn).not.toHaveBeenCalled()
+        expect(foreignQueryFn).not.toHaveBeenCalled()
+      } finally {
+        unsubscribeForeign?.()
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`keeps a foreign-observed Query reachable after deferred owner release`, async () => {
+      const barrier = createDeferred<void>()
+      const queryKey = [`deferred-foreign-owner-release`]
+      let serverRows: Array<CategorisedItem> = [
+        { id: `1`, name: `Initial`, category: `A` },
+      ]
+      const queryFn = vi.fn(() =>
+        Promise.resolve(serverRows.map((row) => structuredClone(row))),
+      )
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `deferred-foreign-owner-release`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ row: collection })
+            .where(({ row }) => eq(row.category, `A`)),
+      })
+      const foreignObserver = new QueryObserver(customQueryClient, {
+        queryKey,
+        queryFn,
+        enabled: true,
+        staleTime: Number.POSITIVE_INFINITY,
+        retry: false,
+      })
+      let unsubscribeForeign: (() => void) | undefined
+      const barrierCompletion = barrier.promise.then(() => {
+        collection.deferDataRefresh = null
+      })
+
+      try {
+        await active.preload()
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        unsubscribeForeign = foreignObserver.subscribe(() => {})
+        const sharedQuery = customQueryClient.getQueryCache().find({
+          queryKey,
+          exact: true,
+        })!
+        expect(sharedQuery.getObserversCount()).toBe(2)
+
+        collection.deferDataRefresh = barrier.promise
+        serverRows = [{ id: `1`, name: `Authoritative`, category: `A` }]
+        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        await active.cleanup()
+        expect(sharedQuery.getObserversCount()).toBe(1)
+        expect(
+          customQueryClient.getQueryCache().find({ queryKey, exact: true }),
+        ).toBe(sharedQuery)
+
+        barrier.resolve()
+        await barrierCompletion
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+        expect(
+          customQueryClient.getQueryCache().find({ queryKey, exact: true }),
+        ).toBe(sharedQuery)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(
+          foreignObserver.getCurrentResult().data?.map((row) => row.name),
+        ).toEqual([`Authoritative`])
+      } finally {
+        barrier.resolve()
+        collection.deferDataRefresh = null
+        unsubscribeForeign?.()
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`evicts an owned custom-hash alias outside the base-key prefix`, async () => {
+      const foreignKey = [`custom-hash-foreign-retained-key`]
+      const baseKey = [`custom-hash-owned-base-key`]
+      let enabled = false
+      const initial: CategorisedItem = {
+        id: `1`,
+        name: `Stale`,
+        category: `A`,
+      }
+      const authoritative: CategorisedItem = {
+        id: `1`,
+        name: `Authoritative`,
+        category: `A`,
+      }
+      const queryFn = vi.fn(() =>
+        Promise.resolve([structuredClone(authoritative)]),
+      )
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+            queryKeyHashFn: () => `forced-custom-hash-alias`,
+          },
+        },
+      })
+      customQueryClient.setQueryData(foreignKey, [initial])
+
+      const aliasedQuery = customQueryClient.getQueryCache().getAll()[0]!
+      expect(aliasedQuery.queryKey).toEqual(foreignKey)
+
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `custom-hash-owned-alias`,
+          queryClient: customQueryClient,
+          queryKey: () => baseKey,
+          queryFn,
+          enabled: () => enabled,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const createActive = () =>
+        createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ row: collection })
+              .where(({ row }) => eq(row.category, `A`)),
+        })
+      const first = createActive()
+      let remounted: ReturnType<typeof createActive> | undefined
+
+      try {
+        await first.preload()
+        expect(queryFn).not.toHaveBeenCalled()
+        expect(first.toArray.map((row) => row.name)).toEqual([`Stale`])
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+        expect(
+          customQueryClient.getQueryCache().getAll().includes(aliasedQuery),
+        ).toBe(false)
+
+        enabled = true
+        await first.cleanup()
+
+        remounted = createActive()
+        await remounted.preload()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(remounted.toArray.map((row) => row.name)).toEqual([
+          `Authoritative`,
+        ])
+      } finally {
+        await remounted?.cleanup()
+        await first.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`keeps an exact shared Query reachable when one owning collection is cleaned up`, async () => {
+      const baseKey = [`shared-query-cleanup-ownership`]
+      let serverRows: Array<CategorisedItem> = [
+        { id: `1`, name: `First`, category: `A` },
+      ]
+      const queryFn = vi.fn(() =>
+        Promise.resolve(serverRows.map((row) => structuredClone(row))),
+      )
+      const sharedQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const createSharedCollection = (id: string) =>
+        createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id,
+            queryClient: sharedQueryClient,
+            queryKey: baseKey,
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }),
+        )
+      const collectionA = createSharedCollection(`shared-query-cleanup-a`)
+      const collectionB = createSharedCollection(`shared-query-cleanup-b`)
+      const createActive = (collection: typeof collectionA) =>
+        createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ row: collection })
+              .where(({ row }) => eq(row.category, `A`)),
+        })
+      const activeA = createActive(collectionA)
+      const activeB = createActive(collectionB)
+
+      try {
+        await Promise.all([activeA.preload(), activeB.preload()])
+        const sharedQuery = sharedQueryClient.getQueryCache().getAll()[0]!
+        const sharedQueryKey = sharedQuery.queryKey
+        expect(sharedQuery.getObserversCount()).toBe(2)
+
+        await activeA.cleanup()
+        await collectionA.cleanup()
+
+        expect(
+          sharedQueryClient
+            .getQueryCache()
+            .find({ queryKey: sharedQueryKey, exact: true }),
+        ).toBe(sharedQuery)
+        expect(sharedQuery.getObserversCount()).toBe(1)
+
+        serverRows = [...serverRows, { id: `2`, name: `Second`, category: `A` }]
+        await sharedQueryClient.invalidateQueries({
+          queryKey: sharedQueryKey,
+          exact: true,
+        })
+
+        await vi.waitFor(() => {
+          expect(activeB.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+        })
+      } finally {
+        await activeA.cleanup()
+        await activeB.cleanup()
+        await collectionA.cleanup()
+        await collectionB.cleanup()
+        sharedQueryClient.clear()
+      }
+    })
+
+    it(`does not ready a remounted co-owner from a shared pre-write result`, async () => {
+      const refetchResult = createDeferred<Array<CategorisedItem>>()
+      const refetchStarted = createDeferred<void>()
+      const queryFn = vi
+        .fn<() => Promise<Array<CategorisedItem>>>()
+        .mockResolvedValueOnce([{ id: `1`, name: `Initial`, category: `A` }])
+        .mockImplementationOnce(() => {
+          refetchStarted.resolve()
+          return refetchResult.promise
+        })
+      const sharedQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const createSharedCollection = (id: string) =>
+        createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id,
+            queryClient: sharedQueryClient,
+            queryKey: [`shared-pre-write-result`],
+            queryFn,
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }),
+        )
+      const collectionA = createSharedCollection(`shared-write-owner-a`)
+      const collectionB = createSharedCollection(`shared-write-owner-b`)
+      const createActive = (collection: typeof collectionA) =>
+        createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ row: collection })
+              .where(({ row }) => eq(row.category, `A`)),
+        })
+      const activeA = createActive(collectionA)
+      const firstB = createActive(collectionB)
+      let remountedB: ReturnType<typeof createActive> | undefined
+
+      try {
+        await Promise.all([activeA.preload(), firstB.preload()])
+
+        collectionA.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await refetchStarted.promise
+        await firstB.cleanup()
+        expect(collectionB.size).toBe(0)
+
+        remountedB = createActive(collectionB)
+        let preloadSettled = false
+        let rowsAtSettlement: Array<string> | undefined
+        const preload = remountedB.preload().then(() => {
+          rowsAtSettlement = remountedB!.toArray.map((row) => row.name)
+          preloadSettled = true
+        })
+        await flushPromises()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(sharedQueryClient.isFetching()).toBe(1)
+        expect(remountedB.toArray).toEqual([])
+        expect(preloadSettled).toBe(false)
+
+        refetchResult.resolve([
+          { id: `1`, name: `Authoritative`, category: `A` },
+        ])
+        await preload
+
+        expect(rowsAtSettlement).toEqual([`Authoritative`])
+        expect(remountedB.toArray.map((row) => row.name)).toEqual([
+          `Authoritative`,
+        ])
+      } finally {
+        refetchResult.resolve([])
+        await remountedB?.cleanup()
+        await firstB.cleanup()
+        await activeA.cleanup()
+        await collectionA.cleanup()
+        await collectionB.cleanup()
+        sharedQueryClient.clear()
+      }
+    })
+
+    it(`evicts a protected scoped Query when its owner unloads before deferred revalidation`, async () => {
+      const barrier = createDeferred<void>()
+      let serverRows: Array<CategorisedItem> = [
+        { id: `1`, name: `Initial`, category: `A` },
+      ]
+      const queryFn = vi.fn(() =>
+        Promise.resolve(serverRows.map((row) => structuredClone(row))),
+      )
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `deferred-owner-unload`,
+          queryClient: customQueryClient,
+          queryKey: [`deferred-owner-unload`],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const createActive = () =>
+        createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ row: collection })
+              .where(({ row }) => eq(row.category, `A`)),
+        })
+      const first = createActive()
+      let remounted: ReturnType<typeof createActive> | undefined
+
+      const barrierCompletion = barrier.promise.then(() => {
+        collection.deferDataRefresh = null
+      })
+
+      try {
+        await first.preload()
+        collection.deferDataRefresh = barrier.promise
+        serverRows = [{ id: `1`, name: `Authoritative`, category: `A` }]
+        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await first.cleanup()
+
+        barrier.resolve()
+        await barrierCompletion
+
+        expect(customQueryClient.getQueryCache().getAll()).toEqual([])
+
+        remounted = createActive()
+        await remounted.preload()
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(remounted.toArray.map((row) => row.name)).toEqual([
+          `Authoritative`,
+        ])
+      } finally {
+        barrier.resolve()
+        collection.deferDataRefresh = null
+        await remounted?.cleanup()
+        await first.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`requires post-write authority when an initial request is reused`, async () => {
+      const initialResult = createDeferred<Array<CategorisedItem>>()
+      const postWriteResult = createDeferred<Array<CategorisedItem>>()
+      const initialStarted = createDeferred<void>()
+      const postWriteStarted = createDeferred<void>()
+      let call = 0
+      const queryFn = vi.fn(() => {
+        call++
+        if (call === 1) {
+          initialStarted.resolve()
+          return initialResult.promise
+        }
+        postWriteStarted.resolve()
+        return postWriteResult.promise
+      })
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `pre-write-request-authority`,
+          queryClient: customQueryClient,
+          queryKey: [`pre-write-request-authority`],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ row: collection })
+            .where(({ row }) => eq(row.category, `A`)),
+      })
+
+      try {
+        collection.utils.writeInsert({
+          id: `1`,
+          name: `Existing`,
+          category: `A`,
+        })
+
+        let preloadSettled = false
+        let rowsAtSettlement: Array<string> | undefined
+        const preload = active.preload().then(() => {
+          rowsAtSettlement = active.toArray.map((row) => row.name)
+          preloadSettled = true
+        })
+        await initialStarted.promise
+
+        collection.utils.writeDelete(`1`)
+        expect(collection.has(`1`)).toBe(false)
+
+        initialResult.resolve([{ id: `1`, name: `Stale`, category: `A` }])
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+
+        expect({
+          providerCalls: queryFn.mock.calls.length,
+          preloadSettled,
+          materializedName: collection.get(`1`)?.name,
+          rowsAtSettlement,
+        }).toEqual({
+          providerCalls: 2,
+          preloadSettled: false,
+          materializedName: undefined,
+          rowsAtSettlement: undefined,
+        })
+
+        await postWriteStarted.promise
+        postWriteResult.resolve([
+          { id: `1`, name: `Authoritative`, category: `A` },
+        ])
+        await preload
+
+        expect(rowsAtSettlement).toEqual([`Authoritative`])
+      } finally {
+        initialResult.resolve([])
+        postWriteResult.resolve([])
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`accepts replacement data after shared initialData reset repeats its update count`, async () => {
+      const firstFetch = createDeferred<Array<CategorisedItem>>()
+      const writeRefetch = createDeferred<Array<CategorisedItem>>()
+      const resetFetch = createDeferred<Array<CategorisedItem>>()
+      const firstStarted = createDeferred<void>()
+      const writeRefetchStarted = createDeferred<void>()
+      const resetFetchStarted = createDeferred<void>()
+      const replacementPublished = createDeferred<void>()
+      const queryKey = [`shared-initial-data-reset`]
+      let call = 0
+      const queryFn = vi.fn((context: { signal: AbortSignal }) => {
+        void context.signal.aborted
+        call++
+        if (call === 1) {
+          firstStarted.resolve()
+          return firstFetch.promise
+        }
+        if (call === 2) {
+          writeRefetchStarted.resolve()
+          return writeRefetch.promise
+        }
+        resetFetchStarted.resolve()
+        return resetFetch.promise
+      })
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const outside = new QueryObserver<Array<CategorisedItem>>(
+        customQueryClient,
+        {
+          queryKey,
+          queryFn,
+          initialData: [{ id: `1`, name: `Seed`, category: `A` }],
+          staleTime: Number.POSITIVE_INFINITY,
+          retry: false,
+        },
+      )
+      const unsubscribeOutside = outside.subscribe((result) => {
+        if (result.data?.[0]?.name === `Replacement`) {
+          replacementPublished.resolve()
+        }
+      })
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `shared-initial-data-reset`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) => query.from({ row: collection }),
+      })
+
+      try {
+        await active.preload()
+        expect(active.toArray.map((row) => row.name)).toEqual([`Seed`])
+
+        const firstRefetch = collection.utils.refetch({ throwOnError: true })
+        await firstStarted.promise
+        firstFetch.resolve([{ id: `1`, name: `Initial`, category: `A` }])
+        await firstRefetch
+
+        expect(active.toArray.map((row) => row.name)).toEqual([`Initial`])
+        expect(
+          customQueryClient.getQueryCache().find({ queryKey, exact: true })
+            ?.state.dataUpdateCount,
+        ).toBe(1)
+
+        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await writeRefetchStarted.promise
+        expect(active.toArray.map((row) => row.name)).toEqual([`Manual`])
+
+        const reset = customQueryClient.resetQueries({
+          queryKey,
+          exact: true,
+        })
+        await resetFetchStarted.promise
+        resetFetch.resolve([{ id: `1`, name: `Replacement`, category: `A` }])
+        await reset
+        await replacementPublished.promise
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+
+        expect({
+          providerCalls: queryFn.mock.calls.length,
+          cachedName: (customQueryClient.getQueryData<Array<CategorisedItem>>(
+            queryKey,
+          ) ?? [])[0]?.name,
+          cachedUpdateCount: customQueryClient.getQueryCache().find({
+            queryKey,
+            exact: true,
+          })?.state.dataUpdateCount,
+          materializedNames: active.toArray.map((row) => row.name),
+        }).toEqual({
+          providerCalls: 3,
+          cachedName: `Replacement`,
+          cachedUpdateCount: 1,
+          materializedNames: [`Replacement`],
+        })
+      } finally {
+        firstFetch.resolve([])
+        writeRefetch.resolve([])
+        resetFetch.resolve([])
+        unsubscribeOutside()
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`revalidates a preserved shared Query after deferred owner cleanup`, async () => {
+      const barrier = createDeferred<void>()
+      const secondResult = createDeferred<Array<CategorisedItem>>()
+      const secondStarted = createDeferred<void>()
+      const outsideUpdated = createDeferred<void>()
+      const queryKey = [`deferred-cleanup-shared-query`]
+      let call = 0
+      const queryFn = vi.fn(() => {
+        call++
+        if (call === 1) {
+          return Promise.resolve([{ id: `1`, name: `Initial`, category: `A` }])
+        }
+        secondStarted.resolve()
+        return secondResult.promise
+      })
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `deferred-cleanup-shared-query`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) => query.from({ row: collection }),
+      })
+      let unsubscribeOutside: (() => void) | undefined
+      const barrierCompletion = barrier.promise.then(() => {
+        collection.deferDataRefresh = null
+      })
+
+      try {
+        await active.preload()
+        const outside = new QueryObserver<Array<CategorisedItem>>(
+          customQueryClient,
+          {
+            queryKey,
+            queryFn,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        )
+        unsubscribeOutside = outside.subscribe((result) => {
+          if (result.data?.[0]?.name === `Authoritative`) {
+            outsideUpdated.resolve()
+          }
+        })
+
+        expect(outside.getCurrentResult().data?.[0]?.name).toBe(`Initial`)
+        expect(
+          customQueryClient
+            .getQueryCache()
+            .find({ queryKey, exact: true })
+            ?.getObserversCount(),
+        ).toBe(2)
+
+        collection.deferDataRefresh = barrier.promise
+        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await active.cleanup()
+        await collection.cleanup()
+
+        const preserved = customQueryClient.getQueryCache().find({
+          queryKey,
+          exact: true,
+        })
+        expect(preserved).toBeDefined()
+        expect(preserved?.getObserversCount()).toBe(1)
+
+        barrier.resolve()
+        await barrierCompletion
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        await secondStarted.promise
+        secondResult.resolve([
+          { id: `1`, name: `Authoritative`, category: `A` },
+        ])
+        await outsideUpdated.promise
+
+        expect(outside.getCurrentResult().data?.[0]?.name).toBe(`Authoritative`)
+      } finally {
+        barrier.resolve()
+        collection.deferDataRefresh = null
+        secondResult.resolve([])
+        unsubscribeOutside?.()
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it.each([undefined, `static`] as const)(
+      `replenishes an active limited query after a manual delete with staleTime %s`,
+      async (staleTime) => {
+        let serverRows: Array<CategorisedItem> = [
+          { id: `1`, name: `First`, category: `A` },
+          { id: `2`, name: `Second`, category: `A` },
+          { id: `3`, name: `Third`, category: `A` },
+        ]
+        const customQueryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })
+        const queryFn = vi.fn((context: QueryFunctionContext) => {
+          const limit = context.meta?.loadSubsetOptions?.limit
+          return Promise.resolve(
+            serverRows.slice(0, limit).map((row) => structuredClone(row)),
+          )
+        })
+        const collection = createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id: `limited-manual-write-${String(staleTime)}`,
+            queryClient: customQueryClient,
+            queryKey: [`limited-manual-write-${String(staleTime)}`],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            staleTime,
+            autoIndex: `eager`,
+            defaultIndexType: BTreeIndex,
+          }),
+        )
+        const active = createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ item: collection })
+              .orderBy(({ item }) => item.id, `asc`)
+              .limit(2),
+        })
+
+        try {
+          await active.preload()
+          expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+
+          serverRows = serverRows.filter((row) => row.id !== `1`)
+          collection.utils.writeDelete(`1`)
+
+          await vi.waitFor(() => {
+            expect(queryFn.mock.calls.length).toBeGreaterThan(1)
+            expect(active.toArray.map((row) => row.id)).toEqual([`2`, `3`])
+          })
+        } finally {
+          await active.cleanup()
+          await collection.cleanup()
+          customQueryClient.clear()
+        }
+      },
+    )
+
+    it(`does not settle an in-flight initial scope from a manual write`, async () => {
+      const initialResult = createDeferred<Array<CategorisedItem>>()
+      const customQueryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const queryFn = vi.fn(() => initialResult.promise)
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `in-flight-manual-write`,
+          queryClient: customQueryClient,
+          queryKey: [`in-flight-manual-write`],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+      let preloadSettled = false
+
+      try {
+        const preload = active.preload().then(() => {
+          preloadSettled = true
+        })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+        await flushPromises()
+
+        expect(preloadSettled).toBe(false)
+        expect(
+          customQueryClient.getQueryCache().getAll()[0]?.state.data,
+        ).toBeUndefined()
+
+        initialResult.resolve([{ id: `1`, name: `First`, category: `A` }])
+        await preload
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`])
+      } finally {
+        initialResult.resolve([])
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`removes a disabled cache entry and permits explicit recovery`, async () => {
+      const queryKey = [`disabled-manual-write`]
+      const customQueryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      customQueryClient.setQueryData(queryKey, [
+        { id: `1`, name: `First`, category: `A` },
+      ])
+      const queryFn = vi.fn(() =>
+        Promise.resolve([{ id: `1`, name: `First`, category: `A` }]),
+      )
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `disabled-manual-write`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn,
+          enabled: false,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+
+      try {
+        await active.preload()
+        expect(queryFn).not.toHaveBeenCalled()
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+        expect(customQueryClient.getQueryCache().findAll({ queryKey })).toEqual(
+          [],
+        )
+
+        await collection.utils.refetch({ throwOnError: true })
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`])
+      } finally {
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`accepts a fresh result whose update count repeats after reset`, async () => {
+      const heldRefetch = createDeferred<Array<CategorisedItem>>()
+      const replacement = [
+        { id: `1`, name: `First`, category: `A` },
+        { id: `2`, name: `Second`, category: `A` },
+      ]
+      const queryKey = [`reset-manual-write`]
+      const customQueryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const queryFn = vi
+        .fn<() => Promise<Array<CategorisedItem>>>()
+        .mockResolvedValueOnce([replacement[0]!])
+        .mockImplementationOnce(() => heldRefetch.promise)
+        .mockResolvedValueOnce(replacement)
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `reset-manual-write`,
+          queryClient: customQueryClient,
+          queryKey: () => queryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const active = createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`)),
+      })
+
+      try {
+        await active.preload()
+        expect(
+          customQueryClient.getQueryCache().find({ queryKey, exact: true })
+            ?.state.dataUpdateCount,
+        ).toBe(1)
+
+        collection.utils.writeInsert({
+          id: `outside`,
+          name: `Outside`,
+          category: `B`,
+        })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+        await customQueryClient.resetQueries({ queryKey, exact: true })
+        expect(queryFn).toHaveBeenCalledTimes(3)
+        expect(
+          customQueryClient.getQueryCache().find({ queryKey, exact: true })
+            ?.state.dataUpdateCount,
+        ).toBe(1)
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+
+        heldRefetch.resolve([
+          { id: `obsolete`, name: `Obsolete`, category: `A` },
+        ])
+        await flushPromises()
+        expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+      } finally {
+        heldRefetch.resolve([])
+        await active.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it(`waits for recovery rows when remounting after a write-triggered refetch error`, async () => {
+      const initialResult = createDeferred<Array<CategorisedItem>>()
+      const failedRefetch = createDeferred<Array<CategorisedItem>>()
+      const recoveryResult = createDeferred<Array<CategorisedItem>>()
+      const initialStarted = createDeferred<void>()
+      const failedRefetchStarted = createDeferred<void>()
+      const recoveryStarted = createDeferred<void>()
+      const refetchErrored = createDeferred<void>()
+      const recoverySucceeded = createDeferred<void>()
+      const failure = new Error(`write-triggered refetch failed`)
+      const queryKey = [`error-remount-recovery`]
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: Number.POSITIVE_INFINITY,
+            staleTime: Number.POSITIVE_INFINITY,
+            retry: false,
+          },
+        },
+      })
+
+      let queryCall = 0
+      const queryFn = vi.fn(() => {
+        queryCall++
+
+        if (queryCall === 1) {
+          initialStarted.resolve()
+          return initialResult.promise
+        }
+        if (queryCall === 2) {
+          failedRefetchStarted.resolve()
+          return failedRefetch.promise
+        }
+
+        recoveryStarted.resolve()
+        return recoveryResult.promise
+      })
+
+      const unsubscribeCache = customQueryClient
+        .getQueryCache()
+        .subscribe((event) => {
+          if (event.query.queryKey[0] !== queryKey[0]) return
+
+          if (event.query.state.status === `error`) {
+            refetchErrored.resolve()
+          }
+          if (
+            queryCall === 3 &&
+            event.query.state.status === `success` &&
+            event.query.state.fetchStatus === `idle`
+          ) {
+            recoverySucceeded.resolve()
+          }
+        })
+
+      const collection = createCollection(
+        queryCollectionOptions<CategorisedItem>({
+          id: `error-remount-recovery`,
+          queryClient: customQueryClient,
+          queryKey,
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      const createActive = () =>
+        createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`)),
+        })
+
+      const first = createActive()
+      let remounted: ReturnType<typeof createActive> | undefined
+
+      try {
+        const initialPreload = first.preload()
+        await initialStarted.promise
+        initialResult.resolve([{ id: `1`, name: `Initial`, category: `A` }])
+        await initialPreload
+        expect(first.toArray.map((row) => row.name)).toEqual([`Initial`])
+
+        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await failedRefetchStarted.promise
+        failedRefetch.reject(failure)
+        await refetchErrored.promise
+        expect(collection.utils.lastError).toBe(failure)
+
+        await first.cleanup()
+        expect(collection.size).toBe(0)
+
+        const current = createActive()
+        remounted = current
+        let preloadSettled = false
+        let rowsAtPreloadSettlement: Array<string> | undefined
+        const remountPreload = current.preload().then(() => {
+          rowsAtPreloadSettlement = current.toArray.map((row) => row.name)
+          preloadSettled = true
+        })
+
+        await recoveryStarted.promise
+
+        // Drain deterministic promise work after the recovery-start signal.
+        // Recovery remains controlled and unresolved throughout this checkpoint.
+        for (let turn = 0; turn < 20; turn++) {
+          await Promise.resolve()
+        }
+
+        expect(queryFn).toHaveBeenCalledTimes(3)
+        expect(customQueryClient.isFetching()).toBe(1)
+        expect(current.toArray).toEqual([])
+        expect(preloadSettled).toBe(false)
+        expect(rowsAtPreloadSettlement).toBeUndefined()
+
+        recoveryResult.resolve([{ id: `1`, name: `Recovered`, category: `A` }])
+        await recoverySucceeded.promise
+        await remountPreload
+
+        // Readiness must be observed only after recovery rows are published.
+        expect(rowsAtPreloadSettlement).toEqual([`Recovered`])
+        expect(current.toArray.map((row) => row.name)).toEqual([`Recovered`])
+      } finally {
+        initialResult.resolve([])
+        failedRefetch.reject(failure)
+        recoveryResult.resolve([])
+        unsubscribeCache()
+        await remounted?.cleanup()
+        await first.cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
+    })
+
+    it.each([`resolve`, `reject`] as const)(
+      `revalidates after a deferred refresh barrier %s`,
+      async (outcome) => {
+        const barrier = createDeferred<void>()
+        const failure = new Error(`deferred refresh failed`)
+        const serverRows: Array<CategorisedItem> = [
+          { id: `1`, name: `First`, category: `A` },
+        ]
+        const customQueryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        })
+        const queryFn = vi.fn(() =>
+          Promise.resolve(serverRows.map((row) => structuredClone(row))),
+        )
+        const collection = createCollection(
+          queryCollectionOptions<CategorisedItem>({
+            id: `deferred-manual-write-${outcome}`,
+            queryClient: customQueryClient,
+            queryKey: [`deferred-manual-write-${outcome}`],
+            queryFn,
+            getKey: (item) => item.id,
+            syncMode: `on-demand`,
+            startSync: true,
+          }),
+        )
+        const active = createLiveQueryCollection({
+          query: (query) =>
+            query
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`)),
+        })
+        let observedFailure: unknown
+        const barrierSettlement = barrier.promise.then(
+          () => {
+            collection.deferDataRefresh = null
+          },
+          (error: unknown) => {
+            observedFailure = error
+            collection.deferDataRefresh = null
+          },
+        )
+
+        try {
+          await active.preload()
+          collection.deferDataRefresh = barrier.promise
+          serverRows.push({ id: `2`, name: `Second`, category: `A` })
+          collection.utils.writeInsert({
+            id: `outside`,
+            name: `Outside`,
+            category: `B`,
+          })
+          await flushPromises()
+          expect(queryFn).toHaveBeenCalledTimes(1)
+
+          if (outcome === `resolve`) barrier.resolve()
+          else barrier.reject(failure)
+          await barrierSettlement
+
+          await vi.waitFor(() => {
+            expect(queryFn).toHaveBeenCalledTimes(2)
+            expect(active.toArray.map((row) => row.id)).toEqual([`1`, `2`])
+          })
+          if (outcome === `reject`) expect(observedFailure).toBe(failure)
+        } finally {
+          barrier.resolve()
+          collection.deferDataRefresh = null
+          await active.cleanup()
+          await collection.cleanup()
+          customQueryClient.clear()
+        }
+      },
+    )
   })
 
   describe(`rows from external sync sources`, () => {
@@ -8133,9 +10165,6 @@ describe(`QueryCollection`, () => {
   })
 
   describe(`Stale cache consistency`, () => {
-    const sleep = (ms: number) =>
-      new Promise((resolve) => setTimeout(resolve, ms))
-
     it(`should not re-insert deleted item when a destroyed query is recreated with stale cache`, async () => {
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -8157,7 +10186,19 @@ describe(`QueryCollection`, () => {
         hours_per_day: number
       }
 
-      const MUTATION_DELAY = 50
+      const creates = Array.from({ length: 2 }, () => ({
+        entered: createDeferred<void>(),
+        release: createDeferred<void>(),
+      }))
+      const deletion = {
+        entered: createDeferred<void>(),
+        release: createDeferred<void>(),
+      }
+      let createCount = 0
+      const outcomes: Array<Promise<unknown>> = []
+      const loadOutcomes: Array<Promise<unknown>> = []
+      const settled: Array<string> = []
+      const cleanups: Array<() => Promise<void>> = []
 
       let serverItems: Array<Assignment> = [
         { id: 1, task_id: 10, resource_id: 1, hours_per_day: 8 },
@@ -8169,14 +10210,20 @@ describe(`QueryCollection`, () => {
       const apiCreate = async (
         item: Omit<Assignment, 'id'>,
       ): Promise<Assignment> => {
-        await sleep(MUTATION_DELAY)
+        const gate = creates[createCount++]
+        if (!gate) throw new Error(`Unexpected additional create`)
+        expect(item).toEqual({ task_id: 10, resource_id: 4, hours_per_day: 8 })
+        gate.entered.resolve()
+        await gate.release.promise
         const created = { ...item, id: nextId++ }
         serverItems.push(created)
         return created
       }
 
       const apiDelete = async (id: number): Promise<void> => {
-        await sleep(MUTATION_DELAY)
+        expect(id).toBe(100)
+        deletion.entered.resolve()
+        await deletion.release.promise
         serverItems = serverItems.filter((a) => a.id !== id)
       }
 
@@ -8206,6 +10253,45 @@ describe(`QueryCollection`, () => {
         }),
       )
 
+      // Complete server population is deliberately returned for every demand:
+      // this fixture tests cache writeback/ownership, not backend filtering.
+      const world = new Map<number, Assignment>([
+        [1, { id: 1, task_id: 10, resource_id: 1, hours_per_day: 8 }],
+        [2, { id: 2, task_id: 10, resource_id: 2, hours_per_day: 4 }],
+        [3, { id: 3, task_id: 20, resource_id: 3, hours_per_day: 8 }],
+      ])
+      const projectRows = (rows: Iterable<Assignment>) =>
+        Array.from(rows, ({ id, task_id, resource_id, hours_per_day }) => ({
+          id,
+          task_id,
+          resource_id,
+          hours_per_day,
+        })).sort((a, b) => a.id - b.id)
+      const archive: Array<{
+        observed: {
+          source: Array<Assignment>
+          task: Array<Assignment>
+          project: Array<Assignment>
+          workload: Array<Assignment>
+        }
+        expected: Array<Assignment>
+        resources: Array<number>
+      }> = []
+      const expectCut = (cut: (typeof archive)[number]) => {
+        expect(cut.observed).toEqual({
+          source: projectRows(cut.expected),
+          task: projectRows(cut.expected.filter((row) => row.task_id === 10)),
+          project: projectRows(
+            cut.expected.filter((row) => row.task_id === 10),
+          ),
+          workload: projectRows(
+            cut.expected.filter((row) =>
+              cut.resources.includes(row.resource_id),
+            ),
+          ),
+        })
+      }
+
       // Always-active queries
       const taskQuery = createLiveQueryCollection({
         query: (q) =>
@@ -8213,128 +10299,246 @@ describe(`QueryCollection`, () => {
             .from({ assignment: collection })
             .where(({ assignment }) => inArray(assignment.task_id, [10])),
       })
-      await taskQuery.preload()
+      cleanups.push(() => taskQuery.cleanup())
+      try {
+        await taskQuery.preload()
 
-      const projectQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) => eq(assignment.task_id, 10)),
-      })
-      await projectQuery.preload()
+        const projectQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) => eq(assignment.task_id, 10)),
+        })
+        cleanups.push(() => projectQuery.cleanup())
+        await projectQuery.preload()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3)
-      })
+        await vi.waitFor(() => {
+          expect(collection.size).toBe(3)
+        })
 
-      // Step 1: Toggle ON → add item → toggle OFF
-      let workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 3, 4]),
+        // Step 1: Toggle ON → add item → toggle OFF
+        let workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 3, 4]),
+              ),
+        })
+        cleanups.push(() => workloadQuery.cleanup())
+        await workloadQuery.preload()
+
+        const capture = (resources: Array<number>) => {
+          const cut = {
+            observed: {
+              source: projectRows(collection.values()),
+              task: projectRows(taskQuery.values()),
+              project: projectRows(projectQuery.values()),
+              workload: projectRows(workloadQuery.values()),
+            },
+            expected: structuredClone(Array.from(world.values())),
+            resources: [...resources],
+          }
+          expectCut(cut)
+          archive.push(cut)
+        }
+        const startHeldWorkloadLoad = () => {
+          const promise = workloadQuery.preload()
+          const outcome: { status: `pending` | `fulfilled` | `rejected` } = {
+            status: `pending`,
+          }
+          loadOutcomes.push(
+            promise.then(
+              () => {
+                outcome.status = `fulfilled`
+                return `fulfilled`
+              },
+              (reason: unknown) => {
+                outcome.status = `rejected`
+                return { reason }
+              },
             ),
-      })
-      await workloadQuery.preload()
+          )
+          return { promise, outcome }
+        }
+        capture([1, 2, 3, 4])
 
-      collection.insert({
-        id: -1,
-        task_id: 10,
-        resource_id: 4,
-        hours_per_day: 8,
-      })
+        const firstInsert = collection.insert({
+          id: -1,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        outcomes.push(
+          firstInsert.isPersisted.promise.then(
+            () => {
+              settled.push(`first insert`)
+              return `fulfilled`
+            },
+            (error: unknown) => error,
+          ),
+        )
+        await creates[0]!.entered.promise
 
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 4]),
-            ),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
-      await sleep(MUTATION_DELAY + 50)
-      await flushPromises()
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 4]),
+              ),
+        })
+        const firstLoad = startHeldWorkloadLoad()
+        await flushPromises()
+        expect(settled).toEqual([])
+        expect(firstLoad.outcome.status).toBe(`pending`)
+        creates[0]!.release.resolve()
+        await firstInsert.isPersisted.promise
+        await firstLoad.promise
+        await flushPromises()
+        world.set(100, {
+          id: 100,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        capture([1, 2, 4])
 
-      const carolId = 100
-      expect(collection.has(carolId)).toBe(true)
+        const carolId = 100
+        expect(collection.has(carolId)).toBe(true)
 
-      // Step 2: Delete
-      collection.delete(carolId)
+        // Step 2: Delete
+        const firstDelete = collection.delete(carolId)
+        outcomes.push(
+          firstDelete.isPersisted.promise.then(
+            () => {
+              settled.push(`delete`)
+              return `fulfilled`
+            },
+            (error: unknown) => error,
+          ),
+        )
+        await deletion.entered.promise
 
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) => inArray(assignment.resource_id, [1, 2])),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
-      await sleep(MUTATION_DELAY + 50)
-      await flushPromises()
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2]),
+              ),
+        })
+        const deleteLoad = startHeldWorkloadLoad()
+        await flushPromises()
+        expect(settled).toEqual([`first insert`])
+        expect(deleteLoad.outcome.status).toBe(`pending`)
+        deletion.release.resolve()
+        await firstDelete.isPersisted.promise
+        await deleteLoad.promise
+        await flushPromises()
+        world.delete(100)
+        capture([1, 2])
 
-      expect(collection.has(carolId)).toBe(false)
-      expect(collection._state.syncedData.has(carolId)).toBe(false)
+        expect(collection.has(carolId)).toBe(false)
+        expect(collection._state.syncedData.has(carolId)).toBe(false)
 
-      // Step 3: Toggle ON again (stale cache)
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 3, 4]),
-            ),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
+        // Step 3: Toggle ON again (stale cache)
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 3, 4]),
+              ),
+        })
+        await workloadQuery.preload()
+        await flushPromises()
+        capture([1, 2, 3, 4])
 
-      // Step 4: Re-add → toggle OFF
-      const t2 = collection.insert({
-        id: -2,
-        task_id: 10,
-        resource_id: 4,
-        hours_per_day: 8,
-      })
+        // Step 4: Re-add → toggle OFF
+        const t2 = collection.insert({
+          id: -2,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        outcomes.push(
+          t2.isPersisted.promise.then(
+            () => {
+              settled.push(`second insert`)
+              return `fulfilled`
+            },
+            (error: unknown) => error,
+          ),
+        )
+        await creates[1]!.entered.promise
 
-      workloadQuery.cleanup()
-      workloadQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ assignment: collection })
-            .where(({ assignment }) =>
-              inArray(assignment.resource_id, [1, 2, 4]),
-            ),
-      })
-      await workloadQuery.preload()
-      await flushPromises()
+        await workloadQuery.cleanup()
+        workloadQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ assignment: collection })
+              .where(({ assignment }) =>
+                inArray(assignment.resource_id, [1, 2, 4]),
+              ),
+        })
+        const secondLoad = startHeldWorkloadLoad()
+        await flushPromises()
 
-      await t2.isPersisted.promise
-      await flushPromises()
-      await sleep(50)
+        expect(settled).toEqual([`first insert`, `delete`])
+        expect(secondLoad.outcome.status).toBe(`pending`)
+        creates[1]!.release.resolve()
+        await t2.isPersisted.promise
+        await secondLoad.promise
+        await flushPromises()
+        world.set(101, {
+          id: 101,
+          task_id: 10,
+          resource_id: 4,
+          hours_per_day: 8,
+        })
+        capture([1, 2, 4])
 
-      // The deleted item (id=100) must NOT be in syncedData
-      expect(collection._state.syncedData.has(carolId)).toBe(false)
+        // The deleted item (id=100) must NOT be in syncedData
+        expect(collection._state.syncedData.has(carolId)).toBe(false)
 
-      // The new item (id=101) should exist
-      expect(collection.has(101)).toBe(true)
+        // The new item (id=101) should exist
+        expect(collection.has(101)).toBe(true)
 
-      // Only one assignment with resource_id=4
-      const allItems = Array.from(collection.values())
-      const carolAssignments = allItems.filter((a) => a.resource_id === 4)
-      expect(carolAssignments).toHaveLength(1)
-      expect(carolAssignments[0]?.id).toBe(101)
+        // Only one assignment with resource_id=4
+        const allItems = Array.from(collection.values())
+        const carolAssignments = allItems.filter((a) => a.resource_id === 4)
+        expect(carolAssignments).toHaveLength(1)
+        expect(carolAssignments[0]?.id).toBe(101)
 
-      expect(collection.size).toBe(4)
-
-      workloadQuery.cleanup()
-      taskQuery.cleanup()
-      projectQuery.cleanup()
-      customQueryClient.clear()
+        expect(collection.size).toBe(4)
+        expect(createCount).toBe(2)
+        for (const cut of archive) expectCut(cut)
+        const corrupted = structuredClone(archive[archive.length - 1]!)
+        corrupted.observed.source[0]!.hours_per_day = 99
+        expect(() => expectCut(corrupted)).toThrow()
+        expect(await Promise.all(outcomes)).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+          `fulfilled`,
+        ])
+        expect(await Promise.all(loadOutcomes)).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+          `fulfilled`,
+        ])
+      } finally {
+        creates.forEach((gate) => gate.release.resolve())
+        deletion.release.resolve()
+        await Promise.all(outcomes)
+        await Promise.all(loadOutcomes)
+        for (const cleanup of cleanups.reverse()) await cleanup()
+        await collection.cleanup()
+        customQueryClient.clear()
+      }
     })
   })
 })

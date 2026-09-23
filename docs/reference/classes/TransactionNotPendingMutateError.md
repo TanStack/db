@@ -3,8 +3,6 @@ id: TransactionNotPendingMutateError
 title: TransactionNotPendingMutateError
 ---
 
-# Class: TransactionNotPendingMutateError
-
 Defined in: [packages/db/src/errors.ts:320](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L320)
 
 ## Extends

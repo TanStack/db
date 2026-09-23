@@ -10,17 +10,17 @@ import {
 import type { CompareOptions } from '../src/query/builder/types'
 
 /**
- * Property-based tests for comparison functions
+ * Comparison defines the order and equality domains used by queries and
+ * indexes. The laws are reflexivity, deterministic sign, antisymmetry, and
+ * transitivity under one resolved option set. Null placement, direction, and
+ * lexical/locale string modes are independent axes.
  *
- * A valid comparator must satisfy:
- * 1. Consistency: compare(a, b) always returns the same value
- * 2. Antisymmetry: sign(compare(a, b)) === -sign(compare(b, a))
- * 3. Transitivity: if compare(a, b) <= 0 and compare(b, c) <= 0 then compare(a, c) <= 0
- * 4. Reflexivity: compare(a, a) === 0
- *
- * Note: Object comparison uses stable IDs based on creation order, which means
- * comparing two different object instances has order-dependent behavior.
- * These tests focus on primitives, dates, and arrays where comparison is deterministic.
+ * The model uses direct primitive, Date, array, and byte comparisons from the
+ * declared domain. It excludes unrelated object identities because production
+ * intentionally assigns those a creation-order ID. Equality laws separately
+ * cover the normalized value classes and changed-byte controls. Invalid
+ * non-finite comparator results are rejected before sign reduction, so NaN
+ * cannot masquerade as equality.
  */
 
 const defaultOpts: CompareOptions = {
@@ -56,8 +56,13 @@ const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, {
   maxLength: 5,
 })
 
-// Helper to get sign of a number
+function assertValidComparison(result: number): void {
+  expect(Number.isFinite(result), `comparator result must be finite`).toBe(true)
+}
+
+// Validate before reducing: NaN must not become an apparent equality.
 const sign = (n: number): -1 | 0 | 1 => {
+  assertValidComparison(n)
   if (n < 0) return -1
   if (n > 0) return 1
   return 0
@@ -112,6 +117,106 @@ const arbitrarySameTypeTriple = fc.oneof(
   ),
 )
 
+const arbitraryChangedBytes = fc
+  .tuple(
+    fc.uint8Array({ minLength: 1, maxLength: 50 }),
+    fc.integer({ min: 0, max: 49 }),
+    fc.integer({ min: 1, max: 255 }),
+  )
+  .map(([bytes, indexHint, delta]) => {
+    const index = indexHint % bytes.length
+    const changed = new Uint8Array(bytes)
+    changed[index] = (bytes[index]! + delta) % 256
+    return { bytes, changed, index }
+  })
+
+function assertChangedBytes(
+  {
+    bytes,
+    changed,
+    index,
+  }: { bytes: Uint8Array; changed: Uint8Array; index: number },
+  equal: (a: Uint8Array, b: Uint8Array) => boolean,
+): void {
+  expect(index).toBeLessThan(bytes.length)
+  expect(changed).toHaveLength(bytes.length)
+  expect(changed[index]).not.toBe(bytes[index])
+  expect(equal(bytes, new Uint8Array(bytes)), `byte copy must be equal`).toBe(
+    true,
+  )
+  expect(equal(bytes, changed), `changed byte must be unequal`).toBe(false)
+  expect(equal(changed, bytes), `changed byte must be unequal`).toBe(false)
+}
+
+describe(`comparison law controls`, () => {
+  fcTest(`rejects non-finite outputs before reducing their signs`, () => {
+    for (const invalid of [NaN, Infinity, -Infinity]) {
+      expect(() => checkAntisymmetry(invalid, -invalid)).toThrow(
+        `comparator result must be finite`,
+      )
+    }
+    expect(checkAntisymmetry(0, -0)).toBe(true)
+    expect(checkAntisymmetry(-12, 12)).toBe(true)
+    expect(checkAntisymmetry(-12, -12)).toBe(false)
+  })
+
+  fcTest(
+    `rejects and replays a comparator returning NaN only for unequal pairs`,
+    () => {
+      const mutant = (a: number, b: number): number => (a === b ? 0 : NaN)
+      const property = fc.property(fc.integer({ min: -100, max: 100 }), (a) => {
+        expect(mutant(a, a)).toBe(0)
+        expect(checkAntisymmetry(mutant(a, a + 1), mutant(a + 1, a))).toBe(true)
+      })
+      const failure = fc.check(property, { seed: 20260911, numRuns: 20 })
+      expect(failure.failed).toBe(true)
+      expect(failure.error).toContain(`comparator result must be finite`)
+      expect(failure.counterexample).toEqual([0])
+      if (failure.counterexamplePath === null) {
+        throw new Error(`mutant did not produce a replay path`)
+      }
+      const replay = fc.check(property, {
+        seed: failure.seed,
+        path: failure.counterexamplePath,
+        numRuns: 1,
+        endOnFailure: true,
+      })
+      expect(replay.failed).toBe(true)
+      expect(replay.error).toContain(`comparator result must be finite`)
+      expect(replay.counterexample).toEqual(failure.counterexample)
+    },
+  )
+
+  fcTest(
+    `changed-byte law rejects length-only equality and accepts indexed equality`,
+    () => {
+      const sample = {
+        bytes: new Uint8Array([255]),
+        changed: new Uint8Array([0]),
+        index: 0,
+      }
+      expect(() =>
+        assertChangedBytes(sample, (a, b) => a.length === b.length),
+      ).toThrow(`changed byte must be unequal`)
+      assertChangedBytes(
+        sample,
+        (a, b) =>
+          a.length === b.length && a.every((byte, index) => byte === b[index]),
+      )
+    },
+  )
+
+  fcTest(`fixed campaign reaches a changed byte in every case`, () => {
+    const result = fc.check(
+      fc.property(arbitraryChangedBytes, (sample) => {
+        assertChangedBytes(sample, areValuesEqual)
+      }),
+      { seed: 20260911, numRuns: 100 },
+    )
+    expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
+  })
+})
+
 describe(`ascComparator property-based tests`, () => {
   describe(`comparator laws`, () => {
     fcTest.prop([arbitraryComparablePrimitive])(
@@ -137,6 +242,8 @@ describe(`ascComparator property-based tests`, () => {
         const bc = ascComparator(b, c, defaultOpts)
         const ac = ascComparator(a, c, defaultOpts)
 
+        for (const result of [ab, bc, ac]) assertValidComparison(result)
+
         if (ab <= 0 && bc <= 0) {
           expect(ac).toBeLessThanOrEqual(0)
         }
@@ -148,6 +255,8 @@ describe(`ascComparator property-based tests`, () => {
       ([a, b]) => {
         const result1 = ascComparator(a, b, defaultOpts)
         const result2 = ascComparator(a, b, defaultOpts)
+        assertValidComparison(result1)
+        assertValidComparison(result2)
         expect(result1).toBe(result2)
       },
     )
@@ -375,38 +484,53 @@ describe(`normalizeValue property-based tests`, () => {
   })
 
   fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
-    `small Uint8Arrays normalize to string representation`,
+    `small Uint8Arrays normalize to a stable key`,
     (arr) => {
       const normalized = normalizeValue(arr)
       expect(typeof normalized).toBe(`string`)
-      expect(normalized).toMatch(/^__u8__/)
+      expect(normalized).toBe(normalizeValue(new Uint8Array(arr)))
     },
   )
 
   fcTest.prop([fc.uint8Array({ minLength: 129, maxLength: 200 })])(
-    `large Uint8Arrays are not normalized`,
+    `large Uint8Arrays normalize to a stable linear-size key`,
     (arr) => {
       const normalized = normalizeValue(arr)
-      expect(normalized).toBe(arr)
+      expect(typeof normalized).toBe(`string`)
+      expect(normalized).toBe(normalizeValue(new Uint8Array(arr)))
+      expect((normalized as string).length - arr.length).toBeLessThan(32)
     },
   )
 
-  fcTest.prop([fc.string()])(`strings pass through unchanged`, (str) => {
-    expect(normalizeValue(str)).toBe(str)
-  })
+  fcTest.prop([fc.string()])(
+    `strings preserve equality after normalization`,
+    (str) => {
+      expect(normalizeValue(str)).toBe(normalizeValue(`${str}`))
+    },
+  )
 
   fcTest.prop([fc.integer()])(`integers pass through unchanged`, (n) => {
     expect(normalizeValue(n)).toBe(n)
   })
 
   fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
-    `normalization is idempotent for Uint8Arrays`,
+    `binary keys cannot collide with user strings`,
     (arr) => {
-      const normalized1 = normalizeValue(arr)
-      // For strings (which small arrays become), normalizing again should be identity
-      expect(normalizeValue(normalized1)).toBe(normalized1)
+      const normalized = normalizeValue(arr)
+      expect(normalizeValue(normalized)).not.toBe(normalized)
     },
   )
+
+  fcTest(`reads binary keys from indexed bytes, not custom iteration`, () => {
+    const bytes = new Uint8Array([2])
+    Object.defineProperty(bytes, Symbol.iterator, {
+      value: function* () {
+        yield 1
+      },
+    })
+
+    expect(normalizeValue(bytes)).toBe(normalizeValue(new Uint8Array([2])))
+  })
 })
 
 describe(`areValuesEqual property-based tests`, () => {
@@ -418,18 +542,10 @@ describe(`areValuesEqual property-based tests`, () => {
     },
   )
 
-  fcTest.prop([
-    fc.uint8Array({ minLength: 1, maxLength: 50 }),
-    fc.integer({ min: 0, max: 49 }),
-    fc.integer({ min: 0, max: 255 }),
-  ])(
+  fcTest.prop([arbitraryChangedBytes])(
     `Uint8Arrays with different content are not equal`,
-    (arr, index, newValue) => {
-      if (index < arr.length && arr[index] !== newValue) {
-        const modified = new Uint8Array(arr)
-        modified[index] = newValue
-        expect(areValuesEqual(arr, modified)).toBe(false)
-      }
+    (sample) => {
+      assertChangedBytes(sample, areValuesEqual)
     },
   )
 

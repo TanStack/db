@@ -3,8 +3,6 @@ id: getIndexDevModeConfig
 title: getIndexDevModeConfig
 ---
 
-# Function: getIndexDevModeConfig()
-
 ```ts
 function getIndexDevModeConfig(): IndexDevModeConfig;
 ```

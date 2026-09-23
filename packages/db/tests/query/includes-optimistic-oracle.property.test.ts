@@ -1,20 +1,43 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import {
   createLiveQueryCollection,
   eq,
   toArray,
 } from '../../src/query/index.js'
-import {
-  flushPromises,
-  mockSyncCollectionOptions,
-  withExpectedRejection,
-} from '../utils.js'
-import { expectAssertionFailure } from '../expected-failure.js'
+import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
-import type { AssertionDifference } from '../expected-failure.js'
+import { oraclePropertyOptions } from '../oracle-config.js'
+import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
+
+/**
+ * # How should optimistic relationship writes affect a nested result?
+ *
+ * An optimistic write changes the public relationship tree before sync settles.
+ * The visible tree follows these laws:
+ *
+ * 1. A reparent moves the row to its optimistic parent route immediately.
+ * 2. A relationship-key change detaches descendants that no longer correlate.
+ * 3. Rollback removes only that overlay and reveals the latest synced base.
+ * 4. Confirmation keeps the overlay until settlement, then reveals the
+ *    authoritative row without an intermediate stale route.
+ * 5. Pending changes at different levels compose, regardless of settlement
+ *    order. The controlled sync cannot settle two changes at one level alone,
+ *    so the grammar rejects that unsupported harness state.
+ *
+ * The semantic model is small: three Maps hold synced child levels and pending
+ * rows overlay them by ID. Full recomputation filters each level by its current
+ * parent key and sorts it. Transaction promises, sync gates, and cleanup
+ * receipts belong to the production driver. They do not determine expected
+ * rows.
+ *
+ * Each property supplies a deliberate action history and randomizes disjoint
+ * route values. This keeps shrinking useful while preserving the relationship
+ * distinctions under test. Focused controls also inspect the immediate
+ * optimistic checkpoint, queued sibling delivery, and failure cleanup.
+ */
 
 type RootRow = {
   id: number
@@ -25,11 +48,6 @@ type RootRow = {
 
 type ChildRow = RootRow & {
   parentGroup: number
-}
-
-type SyncChange<T> = {
-  type: `insert` | `update` | `delete`
-  value: T
 }
 
 type ChildLevel = 1 | 2 | 3
@@ -74,20 +92,6 @@ type OracleNode = RootRow & {
   children?: Array<OracleNode>
 }
 
-type RelationshipNode = Record<string, unknown> & {
-  id: number
-  children?: unknown
-}
-
-function isRelationshipNode(value: unknown): value is RelationshipNode {
-  return (
-    typeof value === `object` &&
-    value !== null &&
-    `id` in value &&
-    typeof value.id === `number`
-  )
-}
-
 type ControlledCollection<T extends { id: number }> = ReturnType<
   typeof createControlledCollection<T>
 >
@@ -107,12 +111,22 @@ type LevelRows = readonly [
   ReadonlyArray<ChildRow>,
 ]
 
-type SettlingTransaction = {
-  isPersisted: { promise: Promise<unknown> }
+type SettlingTransaction = ReturnType<
+  ControlledCollection<ChildRow>[`collection`][`update`]
+>
+
+type PendingRuntimeMutation = {
+  transaction: SettlingTransaction
+  level: ChildLevel
+  syncReleaseAttempted: boolean
+  syncReleased: boolean
+  settled: boolean
+  receipt: Promise<void>
 }
 
 type PendingOptimisticChange = {
   transaction: SettlingTransaction
+  runtime: PendingRuntimeMutation
   level: ChildLevel
   id: number
   row: ChildRow
@@ -124,6 +138,42 @@ type OptimisticContext = {
   roots: Map<number, RootRow>
   levels: Array<Map<number, ChildRow>>
   pending: Map<string, PendingOptimisticChange>
+  runtimePending: Set<PendingRuntimeMutation>
+}
+
+function trackRuntimeMutation(
+  context: OptimisticContext,
+  level: ChildLevel,
+  transaction: SettlingTransaction,
+): PendingRuntimeMutation {
+  const entry: PendingRuntimeMutation = {
+    transaction,
+    level,
+    syncReleaseAttempted: false,
+    syncReleased: false,
+    settled: false,
+    receipt: Promise.resolve(),
+  }
+  context.runtimePending.add(entry)
+  const settled = () => {
+    entry.settled = true
+    if (entry.syncReleased) context.runtimePending.delete(entry)
+  }
+  // Attach both outcome handlers before a checkpoint or sibling source write.
+  entry.receipt = transaction.isPersisted.promise.then(settled, settled)
+  return entry
+}
+
+function releaseRuntimeMutation(
+  context: OptimisticContext,
+  entry: PendingRuntimeMutation,
+  release: () => void,
+): void {
+  // Do not retry an uncertain release that throws after consuming its gate.
+  entry.syncReleaseAttempted = true
+  release()
+  entry.syncReleased = true
+  if (entry.settled) context.runtimePending.delete(entry)
 }
 
 function assertCanStartOptimisticChange(
@@ -164,37 +214,13 @@ type RouteValues = {
   authoritative: number
 }
 
-let nextHarnessId = 0
-
 function createControlledCollection<T extends { id: number }>(
   name: string,
   initialData: ReadonlyArray<T>,
 ) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextHarnessId++}`,
-    getKey: (row) => row.id,
-    initialData: initialData.map((row) => ({ ...row })),
+  return createOracleControlledCollection(name, initialData, {
+    rowUpdateMode: `full`,
   })
-  options.sync.rowUpdateMode = `full`
-  const collection = createCollection(options)
-
-  const writeBatch = (changes: ReadonlyArray<SyncChange<T>>) => {
-    options.utils.begin()
-    for (const change of changes) {
-      options.utils.write({
-        type: change.type,
-        value: { ...change.value },
-      })
-    }
-    options.utils.commit()
-  }
-
-  return {
-    collection,
-    writeBatch,
-    resolveSync: options.utils.resolveSync,
-    rejectSync: options.utils.rejectSync,
-  }
 }
 
 function createSources(
@@ -290,6 +316,8 @@ function applyPatch(row: ChildRow, patch: ChildPatch): ChildRow {
 }
 
 function visibleLevels(context: OptimisticContext) {
+  // Model rule: pending rows replace their synced row at the same level. The
+  // recursive projection below decides their route from the overlaid values.
   const levels = context.levels.map(
     (level) => new Map([...level].map(([id, row]) => [id, { ...row }])),
   )
@@ -334,53 +362,6 @@ function stripVirtualProperties(value: unknown): unknown {
   )
 }
 
-function replaceDirectChildren(
-  value: unknown,
-  parentId: number,
-  children: ReadonlyArray<OracleNode>,
-): unknown | undefined {
-  if (!Array.isArray(value)) return undefined
-
-  let replacements = 0
-  const visit = (entries: ReadonlyArray<unknown>): Array<unknown> =>
-    entries.map((entry) => {
-      if (!isRelationshipNode(entry)) return entry
-      if (entry.id === parentId) {
-        replacements += 1
-        return { ...entry, children }
-      }
-      if (!Array.isArray(entry.children)) return entry
-      return { ...entry, children: visit(entry.children) }
-    })
-
-  const replaced = visit(value)
-  return replacements === 1 ? replaced : undefined
-}
-
-function matchesExactly(actual: unknown, expected: unknown): boolean {
-  try {
-    expect(actual).toEqual(expected)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function classifyRetainedDetachedGrandchild(
-  { actual, expected }: AssertionDifference,
-  retainedChildren: ReadonlyArray<OracleNode>,
-) {
-  const expectedWithOnlyKnownDefect = replaceDirectChildren(
-    expected,
-    11,
-    retainedChildren,
-  )
-  return (
-    expectedWithOnlyKnownDefect !== undefined &&
-    matchesExactly(actual, expectedWithOnlyKnownDefect)
-  )
-}
-
 function updateModel(
   model: Map<number, ChildRow>,
   changes: ReadonlyArray<SyncChange<ChildRow>>,
@@ -394,11 +375,15 @@ function updateModel(
 async function rollback(
   source: ControlledCollection<ChildRow>,
   transaction: SettlingTransaction,
+  context: OptimisticContext,
+  runtime: PendingRuntimeMutation,
 ) {
   const message = `optimistic relationship oracle rollback`
   const persisted = transaction.isPersisted.promise.catch(() => undefined)
   await withExpectedRejection(message, async () => {
-    source.rejectSync(new Error(message))
+    releaseRuntimeMutation(context, runtime, () =>
+      source.rejectSync(new Error(message)),
+    )
     await persisted
     await flushPromises()
   })
@@ -408,6 +393,8 @@ function createDriver(
   roots: ReadonlyArray<RootRow>,
   levelRows: LevelRows,
 ): TraceDriver<OptimisticRelationshipStep, OptimisticContext> {
+  // The driver owns transaction settlement. Model Maps change only when the
+  // corresponding logical sync or optimistic action takes effect.
   return {
     setup: () => {
       const sources = createSources(roots, levelRows)
@@ -417,6 +404,7 @@ function createDriver(
         roots: cloneMap(roots),
         levels: levelRows.map(cloneMap),
         pending: new Map(),
+        runtimePending: new Set(),
       }
     },
     start: ({ live }) => live.preload(),
@@ -427,6 +415,7 @@ function createDriver(
         const transaction = source.collection.update(step.id, (draft) => {
           Object.assign(draft, step.patch)
         })
+        const runtime = trackRuntimeMutation(context, step.level, transaction)
         if (step.beforeRollback) {
           const beforeRollbackSource = childSource(
             context.sources,
@@ -440,7 +429,9 @@ function createDriver(
         }
         // This compound action checks the settled state. The immediate state is
         // checked separately so its known mismatch cannot abort the rollback.
-        await rollback(source, transaction)
+        // Persistence queues its normal same-source sibling commit. Invoking
+        // writeBatch does not establish sibling delivery at this cut.
+        await rollback(source, transaction, context, runtime)
         return
       }
 
@@ -452,12 +443,15 @@ function createDriver(
         const transaction = source.collection.update(step.id, (draft) => {
           Object.assign(draft, step.patch)
         })
+        const runtime = trackRuntimeMutation(context, step.level, transaction)
         context.pending.set(step.handle, {
           transaction,
+          runtime,
           level: step.level,
           id: step.id,
           row: applyPatch(current, step.patch),
         })
+        checkpoint()
         return
       }
 
@@ -474,7 +468,7 @@ function createDriver(
 
       if (step.type === `rollback`) {
         context.pending.delete(step.handle)
-        await rollback(source, pending.transaction)
+        await rollback(source, pending.transaction, context, pending.runtime)
         return
       }
 
@@ -485,20 +479,60 @@ function createDriver(
       })
       // Sync delivery must not displace the pending optimistic projection.
       checkpoint()
-      source.resolveSync()
+      releaseRuntimeMutation(context, pending.runtime, source.resolveSync)
       await pending.transaction.isPersisted.promise
       context.pending.delete(step.handle)
     },
-    cleanup: async ({ live, sources, pending }) => {
-      for (const [handle, change] of pending) {
-        pending.delete(handle)
-        await rollback(childSource(sources, change.level), change.transaction)
+    cleanup: async (context) => {
+      const { live, sources, pending, runtimePending } = context
+      const entries = [...runtimePending]
+      const errors: Array<unknown> = []
+      const attempt = (work: () => void) => {
+        try {
+          work()
+        } catch (error) {
+          errors.push(error)
+        }
       }
-      await live.cleanup()
-      await Promise.all([
-        sources.roots.collection.cleanup(),
-        ...sources.levels.map(({ collection }) => collection.cleanup()),
-      ])
+      for (const entry of entries) {
+        if (
+          entry.transaction.state === `pending` ||
+          entry.transaction.state === `persisting`
+        )
+          attempt(() => {
+            entry.transaction.rollback()
+          })
+        if (!entry.syncReleaseAttempted)
+          attempt(() =>
+            releaseRuntimeMutation(
+              context,
+              entry,
+              childSource(sources, entry.level).resolveSync,
+            ),
+          )
+      }
+      // Failed rollback or release can leave a receipt pending. Receipt
+      // rejection handlers already exist, so dispose resources even then.
+      if (errors.length === 0)
+        await Promise.all(entries.map(({ receipt }) => receipt))
+      pending.clear()
+      const results = await Promise.allSettled(
+        [
+          live,
+          sources.roots.collection,
+          ...sources.levels.map((source) => source.collection),
+        ].map(async (collection) => {
+          await collection.cleanup()
+        }),
+      )
+      for (const result of results)
+        if (result.status === `rejected`) errors.push(result.reason as unknown)
+      if (errors.length === 1) throw errors[0]
+      if (errors.length > 1)
+        throw new AggregateError(
+          errors,
+          `Optimistic relationship cleanup failed`,
+        )
     },
   }
 }
@@ -556,18 +590,6 @@ function fixture(routes: RouteValues) {
   return { roots, levels }
 }
 
-function retainedDetachedChildren(routes: RouteValues): Array<OracleNode> {
-  return [
-    {
-      id: 21,
-      group: routes.original + 1000,
-      value: 210,
-      position: 0,
-      children: [],
-    },
-  ]
-}
-
 async function expectHistoryMatches(
   routes: RouteValues,
   steps: ReadonlyArray<OptimisticRelationshipStep>,
@@ -588,57 +610,332 @@ const routeValuesArbitrary: fc.Arbitrary<RouteValues> = fc.record({
 })
 
 describe(`optimistic relationship-transition oracle`, () => {
-  fcTest(`known-defect classifier rejects collateral corruption`, () => {
-    const routes: RouteValues = {
-      rootA: 10,
-      rootB: 100,
-      rootC: 200,
-      original: 300,
-      optimistic: 400,
-      authoritative: 500,
-    }
-    const expected = [
-      {
-        id: 1,
-        group: routes.rootA,
-        value: 10,
-        position: 0,
-        children: [
+  for (const pending of [false, true]) {
+    fcTest(
+      `observes queued sibling delivery with pending=${pending}`,
+      async () => {
+        const routes: RouteValues = {
+          rootA: 10,
+          rootB: 100,
+          rootC: 200,
+          original: 300,
+          optimistic: 400,
+          authoritative: 500,
+        }
+        const { roots, levels } = fixture(routes)
+        const sibling: ChildRow = {
+          id: 12,
+          parentGroup: 10,
+          group: 300,
+          value: 120,
+          position: 1,
+        }
+        const changes: Array<SyncChange<ChildRow>> = [
+          { type: `insert`, value: sibling },
+        ]
+        const driver = createDriver(roots, levels)
+        const events: Array<{ type: string; row: ChildRow }> = []
+        let unsubscribe: (() => void) | undefined
+        let siblingCuts = 0
+        let runtime: PendingRuntimeMutation | undefined
+        const descendants = [
           {
-            id: 11,
-            group: routes.optimistic,
-            value: 110,
+            id: 21,
+            group: 1300,
+            value: 210,
             position: 0,
-            children: [],
+            children: [{ id: 31, group: 2300, value: 310, position: 0 }],
           },
-        ],
-      },
-    ]
-    const actual = [
-      {
-        id: 1,
-        group: routes.rootA,
-        value: 999,
-        position: 0,
-        children: [
+        ]
+        const published = (optimistic: boolean) => [
           {
-            id: 11,
-            group: routes.optimistic,
-            value: 110,
+            id: 1,
+            group: 10,
+            value: 10,
             position: 0,
-            children: retainedDetachedChildren(routes),
+            children: optimistic
+              ? [{ id: 11, group: 400, value: 110, position: 0, children: [] }]
+              : [
+                  {
+                    id: 11,
+                    group: 300,
+                    value: 110,
+                    position: 0,
+                    children: descendants,
+                  },
+                  {
+                    id: 12,
+                    group: 300,
+                    value: 120,
+                    position: 1,
+                    children: descendants,
+                  },
+                ],
           },
-        ],
+          { id: 2, group: 100, value: 20, position: 1, children: [] },
+          { id: 3, group: 200, value: 30, position: 2, children: [] },
+        ]
+        await runTrace({
+          steps: [
+            pending
+              ? {
+                  type: `optimisticRollback`,
+                  level: 1,
+                  id: 11,
+                  patch: { group: 400 },
+                  beforeRollback: { level: 1, changes },
+                }
+              : { type: `sync`, level: 1, changes },
+            {
+              type: `sync`,
+              level: 2,
+              changes: [
+                { type: `update`, value: { ...levels[1][0]!, value: 211 } },
+              ],
+            },
+          ] satisfies Array<OptimisticRelationshipStep>,
+          driver: {
+            ...driver,
+            setup: async () => {
+              const context = await driver.setup()
+              const source = context.sources.levels[0]
+              const subscription = source.collection.subscribeChanges(
+                (batch) => {
+                  events.push(
+                    ...batch.map(({ type, value }) => ({
+                      type,
+                      row: { ...value },
+                    })),
+                  )
+                },
+                { includeInitialState: false },
+              )
+              unsubscribe = () => subscription.unsubscribe()
+              const writeBatch = source.writeBatch
+              source.writeBatch = (batch) => {
+                const eventStart = events.length
+                runtime = [...context.runtimePending][0]
+                writeBatch(batch)
+                siblingCuts += 1
+                const actual = {
+                  present: source.collection.has(12),
+                  row: source.collection.get(12),
+                  events: events.slice(eventStart),
+                  rows: stripVirtualProperties(context.live.toArray),
+                }
+                expect(actual.present).toBe(!pending)
+                if (pending) expect(actual.row).toBeUndefined()
+                else expect(actual.row).toMatchObject(sibling)
+                expect(actual.rows).toEqual(published(pending))
+                if (pending) {
+                  expect(actual.events).toEqual([])
+                  expect(runtime?.transaction.state).toBe(`persisting`)
+                  expect(runtime?.settled).toBe(false)
+                } else {
+                  expect(runtime).toBeUndefined()
+                  expect(actual.events).toContainEqual({
+                    type: `insert`,
+                    row: expect.objectContaining(sibling),
+                  })
+                }
+              }
+              return context
+            },
+            apply: async (step, context, checkpoint) => {
+              await driver.apply(step, context, checkpoint)
+              if (step.level === 1) {
+                if (pending) {
+                  await runtime!.receipt
+                  expect(runtime!.settled).toBe(true)
+                  expect(runtime!.transaction.state).toBe(`failed`)
+                }
+                expect(
+                  context.sources.levels[0].collection.get(12),
+                ).toMatchObject(sibling)
+                expect(events).toContainEqual({
+                  type: `insert`,
+                  row: expect.objectContaining(sibling),
+                })
+                expect(stripVirtualProperties(context.live.toArray)).toEqual(
+                  published(false),
+                )
+              }
+            },
+            cleanup: async (context) => {
+              const results = await Promise.allSettled([
+                Promise.resolve().then(() => unsubscribe?.()),
+                Promise.resolve().then(() => driver.cleanup(context)),
+              ])
+              const errors = results.flatMap(
+                (result): Array<unknown> =>
+                  result.status === `rejected`
+                    ? [result.reason as unknown]
+                    : [],
+              )
+              if (errors.length === 1) throw errors[0]
+              if (errors.length > 1)
+                throw new AggregateError(
+                  errors,
+                  `Sibling observation cleanup failed`,
+                )
+            },
+          },
+          projection,
+        })
+        expect(siblingCuts).toBe(1)
       },
-    ]
+    )
+  }
 
-    expect(
-      classifyRetainedDetachedGrandchild(
-        { actual, expected },
-        retainedDetachedChildren(routes),
-      ),
-    ).toBe(false)
-  })
+  for (const compound of [false, true]) {
+    for (const cleanupFails of [false, true]) {
+      fcTest(
+        `cleans failed optimistic work (compound=${compound}, cleanup failure=${cleanupFails})`,
+        async () => {
+          const routes: RouteValues = {
+            rootA: 10,
+            rootB: 100,
+            rootC: 200,
+            original: 300,
+            optimistic: 400,
+            authoritative: 500,
+          }
+          const { roots, levels } = fixture(routes)
+          const driver = createDriver(roots, levels)
+          const failure = new Error(`optimistic action failed`)
+          const cleanupFailure = new Error(`live cleanup failed after disposal`)
+          let context: OptimisticContext | undefined
+          let failedTransaction: SettlingTransaction | undefined
+          const fail = (current: OptimisticContext): never => {
+            const runtime = [...current.runtimePending][0]
+            expect(runtime).toBeDefined()
+            failedTransaction = runtime!.transaction
+            throw failure
+          }
+          const step: OptimisticRelationshipStep = compound
+            ? {
+                type: `optimisticRollback`,
+                level: 1,
+                id: 11,
+                patch: { group: routes.optimistic },
+                beforeRollback: {
+                  level: 1,
+                  changes: [
+                    {
+                      type: `insert`,
+                      value: {
+                        id: 12,
+                        parentGroup: routes.rootA,
+                        group: routes.original,
+                        value: 120,
+                        position: 1,
+                      },
+                    },
+                  ],
+                },
+              }
+            : {
+                type: `optimistic`,
+                handle: `failed`,
+                level: 1,
+                id: 11,
+                patch: { parentGroup: routes.rootB },
+              }
+          await expect(
+            runTrace({
+              steps: [step],
+              driver: {
+                ...driver,
+                setup: async () => {
+                  const current = await driver.setup()
+                  context = current
+                  if (compound) {
+                    const source = current.sources.levels[0]
+                    const writeBatch = source.writeBatch
+                    source.writeBatch = (changes) => {
+                      writeBatch(changes)
+                      fail(current)
+                    }
+                  }
+                  if (cleanupFails) {
+                    const cleanup = current.live.cleanup.bind(current.live)
+                    current.live.cleanup = async () => {
+                      await cleanup()
+                      throw cleanupFailure
+                    }
+                  }
+                  return current
+                },
+              },
+              projection: {
+                ...projection,
+                assertEqual: (actual, expected) => {
+                  projection.assertEqual(actual, expected)
+                  if (!compound && context!.pending.size > 0) fail(context!)
+                  return undefined
+                },
+              },
+            }),
+          ).rejects.toBe(failure)
+          expect(
+            (failure as Error & { suppressed?: Array<unknown> }).suppressed,
+          ).toEqual(cleanupFails ? [cleanupFailure] : undefined)
+          if (!context) throw new Error(`Expected initialized trace context`)
+          expect(failedTransaction?.state).toBe(`failed`)
+          expect(context.pending.size).toBe(0)
+          expect(context.runtimePending.size).toBe(0)
+          for (const collection of [
+            context.live,
+            context.sources.roots.collection,
+            ...context.sources.levels.map((source) => source.collection),
+          ])
+            expect(collection.status).toBe(`cleaned-up`)
+        },
+      )
+    }
+  }
+
+  fcTest(
+    `checks the optimistic overlay before yielding from apply`,
+    async () => {
+      const routes: RouteValues = {
+        rootA: 10,
+        rootB: 100,
+        rootC: 200,
+        original: 300,
+        optimistic: 400,
+        authoritative: 500,
+      }
+      const { roots, levels } = fixture(routes)
+      const driver = createDriver(roots, levels)
+      await runTrace({
+        steps: [
+          {
+            type: `optimistic` as const,
+            handle: `immediate`,
+            level: 1 as const,
+            id: 11,
+            patch: { parentGroup: routes.rootB },
+          },
+        ],
+        driver: {
+          ...driver,
+          apply: (step, context, checkpoint) => {
+            let checkpoints = 0
+            const applied = driver.apply(step, context, () => {
+              checkpoints += 1
+              return checkpoint()
+            })
+            const checkpointsBeforeYield = checkpoints
+            return Promise.resolve(applied).then(() => {
+              expect(checkpointsBeforeYield).toBe(1)
+            })
+          },
+        },
+        projection,
+      })
+    },
+  )
 
   fcTest(
     `rejects optimistic handles the sync mock cannot settle independently`,
@@ -657,34 +954,28 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
-    `known defect: an optimistic rekey detaches its old descendants immediately`,
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.rekey-detach`),
+  )(
+    `an optimistic rekey detaches its old descendants immediately`,
     async (routes) => {
-      await expectAssertionFailure(
-        async () => {
-          await expectHistoryMatches(routes, [
-            {
-              type: `optimistic`,
-              handle: `rekey`,
-              level: 1,
-              id: 11,
-              patch: { group: routes.optimistic },
-            },
-          ])
-        },
+      await expectHistoryMatches(routes, [
         {
-          checkpoint: 1,
-          classify: (difference) =>
-            classifyRetainedDetachedGrandchild(
-              difference,
-              retainedDetachedChildren(routes),
-            ),
+          type: `optimistic`,
+          handle: `rekey`,
+          level: 1,
+          id: 11,
+          patch: { group: routes.optimistic },
         },
-      )()
+      ])
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.rekey-rollback`),
+  )(
     `restores the authoritative relationship after an optimistic rekey rolls back`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -698,7 +989,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.descendant-rollback`),
+  )(
     `rolls back a descendant update made while its ancestor is reparented`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -722,7 +1016,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.ancestor-rollback`),
+  )(
     `rolls back a reparented ancestor while its descendant update remains pending`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -746,7 +1043,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.confirm-same-route`),
+  )(
     `settles a confirmed optimistic reparent on the same authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -784,7 +1084,10 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.confirm-different-route`),
+  )(
     `settles a confirmed optimistic reparent on a different authoritative route`,
     async (routes) => {
       await expectHistoryMatches(routes, [
@@ -824,100 +1127,100 @@ describe(`optimistic relationship-transition oracle`, () => {
     },
   )
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
-    `restores a rekey after a sibling enters its old route`,
-    async (routes) => {
-      await expectHistoryMatches(routes, [
-        {
-          type: `optimisticRollback`,
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.sibling-route-rollback`),
+  )(`restores a rekey after a sibling enters its old route`, async (routes) => {
+    await expectHistoryMatches(routes, [
+      {
+        type: `optimisticRollback`,
+        level: 1,
+        id: 11,
+        patch: { group: routes.optimistic },
+        beforeRollback: {
           level: 1,
-          id: 11,
-          patch: { group: routes.optimistic },
-          beforeRollback: {
-            level: 1,
-            changes: [
-              {
-                type: `insert`,
-                value: {
-                  id: 12,
-                  parentGroup: routes.rootA,
-                  group: routes.original,
-                  value: 120,
-                  position: 1,
-                },
+          changes: [
+            {
+              type: `insert`,
+              value: {
+                id: 12,
+                parentGroup: routes.rootA,
+                group: routes.original,
+                value: 120,
+                position: 1,
               },
-            ],
+            },
+          ],
+        },
+      },
+      {
+        type: `sync`,
+        level: 2,
+        changes: [
+          {
+            type: `update`,
+            value: {
+              id: 21,
+              parentGroup: routes.original,
+              group: routes.original + 1000,
+              value: 211,
+              position: 0,
+            },
           },
-        },
-        {
-          type: `sync`,
-          level: 2,
-          changes: [
-            {
-              type: `update`,
-              value: {
-                id: 21,
-                parentGroup: routes.original,
-                group: routes.original + 1000,
-                value: 211,
-                position: 0,
-              },
-            },
-          ],
-        },
-      ])
-    },
-  )
+        ],
+      },
+    ])
+  })
 
-  fcTest.prop([routeValuesArbitrary], { numRuns: 12 })(
-    `supports repeated rollback and confirmation histories`,
-    async (routes) => {
-      await expectHistoryMatches(routes, [
-        {
-          type: `optimistic`,
-          handle: `first`,
-          level: 1,
-          id: 11,
-          patch: { parentGroup: routes.rootB },
-        },
-        { type: `rollback`, handle: `first` },
-        {
-          type: `optimistic`,
-          handle: `second`,
-          level: 1,
-          id: 11,
-          patch: { parentGroup: routes.rootB },
-        },
-        {
-          type: `confirm`,
-          handle: `second`,
-          authoritative: firstChild(routes, {
-            parentGroup: routes.rootB,
-          }),
-        },
-        {
-          type: `optimisticRollback`,
-          level: 1,
-          id: 11,
-          patch: { group: routes.optimistic },
-        },
-        {
-          type: `sync`,
-          level: 2,
-          changes: [
-            {
-              type: `update`,
-              value: {
-                id: 21,
-                parentGroup: routes.original,
-                group: routes.original + 1000,
-                value: 212,
-                position: 0,
-              },
+  fcTest.prop(
+    [routeValuesArbitrary],
+    oraclePropertyOptions(12, `includes-optimistic.repeated-history`),
+  )(`supports repeated rollback and confirmation histories`, async (routes) => {
+    await expectHistoryMatches(routes, [
+      {
+        type: `optimistic`,
+        handle: `first`,
+        level: 1,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      },
+      { type: `rollback`, handle: `first` },
+      {
+        type: `optimistic`,
+        handle: `second`,
+        level: 1,
+        id: 11,
+        patch: { parentGroup: routes.rootB },
+      },
+      {
+        type: `confirm`,
+        handle: `second`,
+        authoritative: firstChild(routes, {
+          parentGroup: routes.rootB,
+        }),
+      },
+      {
+        type: `optimisticRollback`,
+        level: 1,
+        id: 11,
+        patch: { group: routes.optimistic },
+      },
+      {
+        type: `sync`,
+        level: 2,
+        changes: [
+          {
+            type: `update`,
+            value: {
+              id: 21,
+              parentGroup: routes.original,
+              group: routes.original + 1000,
+              value: 212,
+              position: 0,
             },
-          ],
-        },
-      ])
-    },
-  )
+          },
+        ],
+      },
+    ])
+  })
 })

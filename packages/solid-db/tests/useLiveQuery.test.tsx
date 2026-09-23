@@ -8,6 +8,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  toArray,
 } from '@tanstack/db'
 import {
   For,
@@ -114,6 +115,69 @@ describe(`Query Collections`, () => {
       expect(result.state.size).toBe(0)
       dispose()
     })
+  })
+
+  it(`remounts overlapping row keys when switching collection identity`, async () => {
+    type SwitchItem = { id: string; label: string }
+    const first = createCollection(
+      mockSyncCollectionOptions<SwitchItem>({
+        id: `solid-overlapping-switch-first`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `shared`, label: `First` }],
+      }),
+    )
+    const second = createCollection(
+      mockSyncCollectionOptions<SwitchItem>({
+        id: `solid-overlapping-switch-second`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `shared`, label: `Second` }],
+      }),
+    )
+    first.startSyncImmediate()
+    second.startSyncImmediate()
+
+    const [current, setCurrent] = createSignal<typeof first | typeof second>(
+      first,
+    )
+    let mount = 0
+    const rendered = render(() => {
+      const result = useLiveQuery(current)
+      return (
+        <ol data-testid="overlapping-switch-list">
+          <For each={result()}>
+            {(item) => {
+              const token = `mount-${++mount}`
+              return (
+                <li data-token={token} data-row-key={item.id}>
+                  {item.label}
+                </li>
+              )
+            }}
+          </For>
+        </ol>
+      )
+    })
+    const row = () =>
+      rendered.getByTestId(`overlapping-switch-list`).children[0] as
+        | HTMLLIElement
+        | undefined
+
+    try {
+      await waitFor(() => expect(row()?.textContent).toBe(`First`))
+      const firstNode = row()
+      const firstToken = firstNode?.dataset.token
+
+      setCurrent(second)
+
+      await waitFor(() => expect(row()?.textContent).toBe(`Second`))
+      expect(row()).not.toBe(firstNode)
+      expect(row()?.dataset.token).not.toBe(firstToken)
+      expect(mount).toBe(2)
+    } finally {
+      rendered.unmount()
+      await first.cleanup()
+      await second.cleanup()
+    }
   })
 
   it(`should work with basic collection and select`, async () => {
@@ -2013,6 +2077,50 @@ describe(`Query Collections`, () => {
         dispose()
       })
     })
+
+    /**
+     * Driver: public `useLiveQuery` with a Solid signal. Initial reads and each
+     * `waitFor` completion are observation cuts for disabled, enabled, and
+     * disabled-again public results. Collection/state behavior remains in
+     * shared conformance; this test isolates conditional `findOne` data.
+     */
+    it(`keeps conditional findOne data empty while disabled`, async () => {
+      return createRoot(async (dispose) => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-find-one-solid`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          }),
+        )
+        const [enabled, setEnabled] = createSignal(false)
+        const rendered = renderHook(() =>
+          useLiveQuery((q) =>
+            enabled()
+              ? q
+                  .from({ collection })
+                  .where(({ collection: person }) => eq(person.id, `3`))
+                  .findOne()
+              : null,
+          ),
+        )
+
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result()).toEqual([])
+
+        setEnabled(true)
+        await waitFor(() => {
+          expect(rendered.result()).toMatchObject({ id: `3` })
+        })
+
+        setEnabled(false)
+        await waitFor(() => {
+          expect(rendered.result.status).toBe(`disabled`)
+        })
+        expect(rendered.result()).toEqual([])
+        dispose()
+      })
+    })
   })
 
   describe(`Suspense Integration`, () => {
@@ -2281,6 +2389,260 @@ describe(`Query Collections`, () => {
       // Verify remaining items are in correct order
       const keys = rendered.result().map((p: any) => p.id)
       expect(keys).toEqual([`1`, `3`])
+    })
+
+    it(`keeps custom-key rows distinct when an update changes rendered order`, async () => {
+      type CustomKeyItem = {
+        _id: string
+        name: string
+      }
+
+      const initialItems: Array<CustomKeyItem> = [
+        { _id: `bob1`, name: `Bob` },
+        { _id: `kevin1`, name: `Kevin` },
+        { _id: `stuart1`, name: `Stuart` },
+      ]
+      const reference = new Map(
+        initialItems.map((item) => [item._id, { ...item }]),
+      )
+      const expectedRows = () =>
+        Array.from(reference.values())
+          .sort(
+            (left, right) =>
+              left.name.localeCompare(right.name) ||
+              left._id.localeCompare(right._id),
+          )
+          .map((item) => ({
+            key: item._id,
+            text: `${item._id}:${item.name}`,
+          }))
+      const collection = createCollection(
+        mockSyncCollectionOptions<CustomKeyItem>({
+          id: `custom-key-rendered-reorder`,
+          getKey: (item) => item._id,
+          initialData: initialItems.map((item) => ({ ...item })),
+        }),
+      )
+      const renderedKeys: Array<string | number> = []
+      const initialNodes = new Map<string, HTMLLIElement>()
+      const initialTokens = new Map<string, string>()
+      let tokenSequence = 0
+
+      function TestComponent() {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ items: collection })
+            .orderBy(({ items }) => items.name, `asc`),
+        )
+
+        return (
+          <ol
+            data-testid="custom-key-list"
+            data-ready={query.isReady ? `true` : `false`}
+          >
+            <For each={query()}>
+              {(item) => {
+                renderedKeys.push(item.$key)
+                const keyAtCreation = item._id
+                const token = `mapper-${++tokenSequence}`
+                if (!initialTokens.has(keyAtCreation)) {
+                  initialTokens.set(keyAtCreation, token)
+                }
+                return (
+                  <li
+                    ref={(node) => {
+                      if (!initialNodes.has(keyAtCreation)) {
+                        initialNodes.set(keyAtCreation, node)
+                      }
+                    }}
+                    data-row-key={item.$key}
+                    data-token={token}
+                  >
+                    {item._id}:{item.name}
+                  </li>
+                )
+              }}
+            </For>
+          </ol>
+        )
+      }
+
+      const rendered = render(() => <TestComponent />)
+      const readRenderedRows = () =>
+        Array.from(rendered.getByTestId(`custom-key-list`).children).map(
+          (element) => ({
+            key: element.getAttribute(`data-row-key`),
+            text: element.textContent,
+            token: element.getAttribute(`data-token`),
+            node: element,
+          }),
+        )
+      const readRenderedValues = () =>
+        readRenderedRows().map(({ key, text }) => ({ key, text }))
+      const expectedIdentityRows = () =>
+        expectedRows().map(({ key }) => ({
+          key,
+          token: initialTokens.get(key),
+          retainedOwnNode: true,
+        }))
+
+      await waitFor(() => {
+        expect(rendered.getByTestId(`custom-key-list`).dataset.ready).toBe(
+          `true`,
+        )
+        expect(renderedKeys).toEqual([`bob1`, `kevin1`, `stuart1`])
+        expect(readRenderedValues()).toEqual(expectedRows())
+      })
+
+      const updatedItem = { _id: `stuart1`, name: `Alvin` }
+      reference.set(updatedItem._id, { ...updatedItem })
+      collection.utils.begin()
+      collection.utils.write({ type: `update`, value: updatedItem })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(collection.get(`stuart1`)?.name).toBe(`Alvin`)
+        expect(readRenderedValues()).toEqual(expectedRows())
+        expect(
+          readRenderedRows().map(({ key, token, node }) => ({
+            key,
+            token,
+            retainedOwnNode: node === initialNodes.get(key!),
+          })),
+        ).toEqual(expectedIdentityRows())
+      })
+    })
+
+    it(`keeps union rows with colliding public keys tied to their live result identities`, async () => {
+      type UnionItem = {
+        id: string
+        label: string
+      }
+
+      const left = createCollection(
+        mockSyncCollectionOptions<UnionItem>({
+          id: `solid-colliding-union-left`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `shared`, label: `Left` }],
+        }),
+      )
+      const right = createCollection(
+        mockSyncCollectionOptions<UnionItem>({
+          id: `solid-colliding-union-right`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `shared`, label: `Right` }],
+        }),
+      )
+      const live = createLiveQueryCollection((q) =>
+        q.unionAll(q.from({ left }), q.from({ right })),
+      )
+      const initialNodes = new Map<string, HTMLLIElement>()
+      const initialTokens = new Map<string, string>()
+      let tokenSequence = 0
+
+      function TestComponent() {
+        const query = useLiveQuery(() => live)
+        return (
+          <ol
+            data-testid="colliding-union-list"
+            data-ready={query.isReady ? `true` : `false`}
+            data-hook-count={query().length}
+          >
+            <For each={query()}>
+              {(item) => {
+                const labelAtCreation = item.label
+                const token = `mapper-${++tokenSequence}`
+                if (!initialTokens.has(labelAtCreation)) {
+                  initialTokens.set(labelAtCreation, token)
+                }
+                return (
+                  <li
+                    ref={(node) => {
+                      if (!initialNodes.has(labelAtCreation)) {
+                        initialNodes.set(labelAtCreation, node)
+                      }
+                    }}
+                    data-label={item.label}
+                    data-token={token}
+                    data-upstream-key={item.$key}
+                  >
+                    {item.label}
+                  </li>
+                )
+              }}
+            </For>
+          </ol>
+        )
+      }
+
+      const rendered = render(() => <TestComponent />)
+      const list = () => rendered.getByTestId(`colliding-union-list`)
+      const renderedRows = () =>
+        Array.from(list().children).map((element) => ({
+          label: element.getAttribute(`data-label`),
+          text: element.textContent,
+          token: element.getAttribute(`data-token`),
+          upstreamKey: element.getAttribute(`data-upstream-key`),
+          node: element,
+        }))
+
+      await waitFor(() => {
+        expect(list().dataset.ready).toBe(`true`)
+        expect(list().dataset.hookCount).toBe(`2`)
+        expect(
+          renderedRows().map(({ label, text, upstreamKey }) => ({
+            label,
+            text,
+            upstreamKey,
+          })),
+        ).toEqual([
+          { label: `Left`, text: `Left`, upstreamKey: `shared` },
+          { label: `Right`, text: `Right`, upstreamKey: `shared` },
+        ])
+      })
+
+      const initialLiveRows = [...live.entries()].map(([resultKey, item]) => ({
+        resultKey,
+        label: item.label,
+        upstreamKey: item.$key,
+      }))
+      expect(
+        new Set(initialLiveRows.map(({ resultKey }) => resultKey)).size,
+      ).toBe(2)
+      expect(initialLiveRows.map(({ upstreamKey }) => upstreamKey)).toEqual([
+        `shared`,
+        `shared`,
+      ])
+
+      left.utils.begin()
+      left.utils.write({
+        type: `delete`,
+        value: { id: `shared`, label: `Left` },
+      })
+      left.utils.commit()
+
+      await waitFor(() => {
+        expect(live.toArray.map(({ label }) => label)).toEqual([`Right`])
+        expect(list().dataset.hookCount).toBe(`1`)
+        expect(
+          renderedRows().map(({ label, text, token, node }) => ({
+            label,
+            text,
+            token,
+            retainedOwnNode: node === initialNodes.get(label!),
+          })),
+        ).toEqual([
+          {
+            label: `Right`,
+            text: `Right`,
+            token: initialTokens.get(`Right`),
+            retainedOwnNode: true,
+          },
+        ])
+      })
+
+      rendered.unmount()
+      expect(rendered.container.childElementCount).toBe(0)
     })
 
     it(`should reflect optimistic inserts in the data array and reconcile after sync`, async () => {
@@ -2735,6 +3097,155 @@ describe(`Query Collections`, () => {
       })
 
       expect(rendered.result()).toBeUndefined()
+    })
+  })
+})
+
+describe(`includes subqueries`, () => {
+  type Project = {
+    id: number
+    name: string
+  }
+
+  type ProjectIssue = {
+    id: number
+    projectId: number
+    title: string
+  }
+
+  function includedIssues(value: unknown): Array<ProjectIssue> {
+    if (Array.isArray(value)) {
+      return value as Array<ProjectIssue>
+    }
+    if (
+      value !== null &&
+      typeof value === `object` &&
+      `toArray` in value &&
+      Array.isArray(value.toArray)
+    ) {
+      return value.toArray as Array<ProjectIssue>
+    }
+    return []
+  }
+
+  it(`updates a rendered array include after a child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `includes-solid-array-projects`,
+        getKey: (project) => project.id,
+        initialData: [
+          { id: 1, name: `Alpha` },
+          { id: 2, name: `Beta` },
+        ],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<ProjectIssue>({
+        id: `includes-solid-array-issues`,
+        getKey: (issue) => issue.id,
+        initialData: [
+          { id: 10, projectId: 1, title: `Bug in Alpha` },
+          { id: 20, projectId: 2, title: `Bug in Beta` },
+        ],
+      }),
+    )
+
+    function TestComponent() {
+      const query = useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          issueTitles: toArray(
+            q
+              .from({ issue: issues })
+              .where(({ issue }) => eq(issue.projectId, project.id))
+              .select(({ issue }) => ({
+                id: issue.id,
+                title: issue.title,
+              })),
+          ),
+        })),
+      )
+
+      return (
+        <For each={query()}>
+          {(project) => (
+            <p data-testid={`project-${project.id}`}>
+              {project.issueTitles.map((issue) => issue.title).join(`|`)}
+            </p>
+          )}
+        </For>
+      )
+    }
+
+    const rendered = render(() => <TestComponent />)
+    await waitFor(() => {
+      expect(rendered.getByTestId(`project-1`).textContent).toBe(`Bug in Alpha`)
+    })
+
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 11, projectId: 1, title: `Feature for Alpha` },
+    })
+    issues.utils.commit()
+
+    await waitFor(() => {
+      expect(rendered.getByTestId(`project-1`).textContent).toBe(
+        `Bug in Alpha|Feature for Alpha`,
+      )
+    })
+  })
+
+  it(`populates an initially empty collection include after its first child insert`, async () => {
+    const projects = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `includes-solid-empty-projects`,
+        getKey: (project) => project.id,
+        initialData: [{ id: 1, name: `Alpha` }],
+      }),
+    )
+    const issues = createCollection(
+      mockSyncCollectionOptions<ProjectIssue>({
+        id: `includes-solid-empty-issues`,
+        getKey: (issue) => issue.id,
+        initialData: [],
+      }),
+    )
+
+    const rendered = renderHook(() =>
+      useLiveQuery((q) =>
+        q.from({ project: projects }).select(({ project }) => ({
+          id: project.id,
+          issues: q
+            .from({ issue: issues })
+            .where(({ issue }) => eq(issue.projectId, project.id))
+            .select(({ issue }) => ({
+              id: issue.id,
+              projectId: issue.projectId,
+              title: issue.title,
+            })),
+        })),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(rendered.result.isReady).toBe(true)
+      expect(includedIssues(rendered.result()[0]?.issues)).toEqual([])
+    })
+
+    issues.utils.begin()
+    issues.utils.write({
+      type: `insert`,
+      value: { id: 10, projectId: 1, title: `Bug in Alpha` },
+    })
+    issues.utils.commit()
+
+    await waitFor(() => {
+      expect(
+        includedIssues(rendered.result()[0]?.issues).map(
+          (issue) => issue.title,
+        ),
+      ).toEqual([`Bug in Alpha`])
     })
   })
 })

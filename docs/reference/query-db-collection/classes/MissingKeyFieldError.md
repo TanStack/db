@@ -3,8 +3,6 @@ id: MissingKeyFieldError
 title: MissingKeyFieldError
 ---
 
-# Class: MissingKeyFieldError
-
 Defined in: [packages/query-db-collection/src/errors.ts:106](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L106)
 
 ## Extends

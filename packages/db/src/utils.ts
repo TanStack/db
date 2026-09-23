@@ -30,10 +30,19 @@ export function deepEquals(a: any, b: any): boolean {
   return deepEqualsInternal(a, b, new Map())
 }
 
+function enumerableOwnKeys(value: object): Array<string | symbol> {
+  const keys: Array<string | symbol> = Object.keys(value)
+  for (const key of Object.getOwnPropertySymbols(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, key)) keys.push(key)
+  }
+  return keys
+}
+
 /**
- * Internal implementation with cycle detection to prevent infinite recursion
+ * Internal implementation with cycle detection to prevent infinite recursion.
+ * Internal callers can seed already-paired roots when comparing their children.
  */
-function deepEqualsInternal(
+export function deepEqualsInternal(
   a: any,
   b: any,
   visited: Map<object, object>,
@@ -188,9 +197,10 @@ function deepEqualsInternal(
     }
     visited.set(a, b)
 
-    // Get all keys from both objects
-    const keysA = Object.keys(a)
-    const keysB = Object.keys(b)
+    // Compare enumerable symbol keys as well as string keys. Query results may
+    // use user-owned symbols, and a symbol-only update is still a value change.
+    const keysA = enumerableOwnKeys(a)
+    const keysB = enumerableOwnKeys(b)
 
     // Check if they have the same number of keys
     if (keysA.length !== keysB.length) {
@@ -200,7 +210,9 @@ function deepEqualsInternal(
 
     // Check if all keys exist in both objects and their values are equal
     const result = keysA.every(
-      (key) => key in b && deepEqualsInternal(a[key], b[key], visited),
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(b, key) &&
+        deepEqualsInternal(a[key], b[key], visited),
     )
 
     visited.delete(a)
@@ -239,4 +251,45 @@ export const DEFAULT_COMPARE_OPTIONS: CompareOptions = {
   direction: `asc`,
   nulls: `first`,
   stringSort: `locale`,
+}
+
+/**
+ * Set of warning keys that have already been shown.
+ * Used to prevent duplicate warnings from spamming the console.
+ */
+const warnedKeys = new Set<string>()
+
+/**
+ * Log a warning message only once per unique key.
+ * Subsequent calls with the same key will be silently ignored.
+ *
+ * @internal Used by first-party collection adapters.
+ *
+ * @param key - Unique identifier for this warning
+ * @param message - The warning message to display
+ *
+ * @example
+ * ```typescript
+ * // First call logs the warning
+ * warnOnce('deprecated-api', 'This API is deprecated')
+ *
+ * // Subsequent calls with same key are ignored
+ * warnOnce('deprecated-api', 'This API is deprecated') // silent
+ * ```
+ */
+export function warnOnce(key: string, message: string): void {
+  if (warnedKeys.has(key)) {
+    return
+  }
+  warnedKeys.add(key)
+  console.warn(message)
+}
+
+/**
+ * Reset all warning states. Primarily useful for testing.
+ *
+ * @internal Used by first-party collection adapter tests.
+ */
+export function resetWarnings(): void {
+  warnedKeys.clear()
 }

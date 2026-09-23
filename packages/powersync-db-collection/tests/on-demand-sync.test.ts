@@ -1,18 +1,30 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import {
+  LogLevels,
+  PowerSyncDatabase,
+  Schema,
+  Table,
+  column,
+} from '@powersync/node'
+import {
+  IR,
   and,
   createCollection,
   createLiveQueryCollection,
+  createTransaction,
   eq,
   gt,
   gte,
   lt,
   or,
 } from '@tanstack/db'
+import pDefer from 'p-defer'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
+import { withTestCleanup } from './with-test-cleanup'
+import type { LoadSubsetOptions } from '@tanstack/db'
+import type { PowerSyncLogger } from '@powersync/node'
 
 const APP_SCHEMA = new Schema({
   products: new Table({
@@ -23,7 +35,7 @@ const APP_SCHEMA = new Schema({
 })
 
 describe(`On-Demand Sync Mode`, () => {
-  async function createDatabase() {
+  async function createDatabase(logger?: PowerSyncLogger) {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test-on-demand-${randomUUID()}.sqlite`,
@@ -31,6 +43,7 @@ describe(`On-Demand Sync Mode`, () => {
         implementation: { type: `node:sqlite` },
       },
       schema: APP_SCHEMA,
+      logger,
     })
     onTestFinished(async () => {
       // Wait a moment for any pending cleanup operations to complete
@@ -41,6 +54,22 @@ describe(`On-Demand Sync Mode`, () => {
     })
     await db.disconnectAndClear()
     return db
+  }
+
+  // The sync handler catches its own errors and surfaces them only through the
+  // logger, so captured errors are how these tests assert it stayed healthy.
+  function errorCapturingLogger(): [Array<string>, PowerSyncLogger] {
+    const errors: Array<string> = []
+    return [
+      errors,
+      {
+        log({ level, message }) {
+          if (level >= LogLevels.error) {
+            errors.push(message)
+          }
+        },
+      },
+    ]
   }
 
   async function createTestProducts(db: PowerSyncDatabase) {
@@ -54,6 +83,297 @@ describe(`On-Demand Sync Mode`, () => {
         (uuid(), 'Product E', 75, 'clothing')
     `)
   }
+
+  it(`preserves complete public rows across overlapping demand ownership and release`, async () => {
+    type Demand = `electronics` | `clothing` | `expensive`
+    type Row = {
+      id: string
+      name?: string | null
+      price?: number | null
+      category?: string | null
+    }
+    type Observation = {
+      source: Array<Row>
+      sessions: Array<{ demand: Demand; rows: Array<Row> }>
+    }
+    const project = (row: Row): Row => ({
+      id: row.id,
+      name: row.name,
+      price: row.price,
+      category: row.category,
+    })
+    const ordered = (rows: Iterable<Row>) =>
+      Array.from(rows, project).sort((left, right) =>
+        left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+      )
+    // Literal scalar authority. No query IR, SQL compiler, or driver result
+    // determines model membership or values.
+    const seed: Array<Row> = [
+      { id: `e-low`, name: `Radio`, price: 50, category: `electronics` },
+      { id: `e-high`, name: `Screen`, price: 150, category: `electronics` },
+      { id: `c-low`, name: `Socks`, price: 25, category: `clothing` },
+      { id: `c-high`, name: `Coat`, price: 175, category: `clothing` },
+      { id: `outside`, name: `Book`, price: 90, category: `books` },
+    ]
+    const world = new Map(seed.map((row) => [row.id, project(row)]))
+    const active = new Set<Demand>()
+    const matches = (demand: Demand, row: Row) =>
+      demand === `expensive`
+        ? typeof row.price === `number` && row.price > 100
+        : row.category === demand
+    const expected = (): Observation => ({
+      source: ordered(
+        [...world.values()].filter((row) =>
+          [...active].some((demand) => matches(demand, row)),
+        ),
+      ),
+      sessions: [...active].map((demand) => ({
+        demand,
+        rows: ordered(
+          [...world.values()].filter((row) => matches(demand, row)),
+        ),
+      })),
+    })
+    const check = (actual: Observation, wanted: Observation) => {
+      expect(actual).toEqual(wanted)
+    }
+
+    const [loggedErrors, logger] = errorCapturingLogger()
+    const db = await createDatabase(logger)
+    const rejections: Array<unknown> = []
+    const recordRejection = (error: unknown) => {
+      rejections.push(error)
+    }
+    process.on(`unhandledRejection`, recordRejection)
+    const triggerRecords: Array<{ calls: number; settled: boolean }> = []
+    const realCreateTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+    const triggers = vi
+      .spyOn(db.triggers, `createDiffTrigger`)
+      .mockImplementation(async (options) => {
+        const dispose = await realCreateTrigger(options)
+        const record = { calls: 0, settled: false }
+        triggerRecords.push(record)
+        return async (disposeOptions) => {
+          record.calls++
+          await dispose(disposeOptions)
+          record.settled = true
+        }
+      })
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+      }),
+    )
+    const createSession = (demand: Demand) =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) =>
+              demand === `expensive`
+                ? gt(product.price, 100)
+                : eq(product.category, demand),
+            )
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+    const sessions = new Map<Demand, ReturnType<typeof createSession>>()
+    const allSessions: Array<ReturnType<typeof createSession>> = []
+    const observations: Array<{
+      cut: string
+      actual: Observation
+      wanted: Observation
+    }> = []
+    const callbacks: Array<{
+      owner: string
+      rows: Array<Row>
+      changes: Array<{
+        type: string
+        key: string | number
+        value: Row
+        previousValue?: Row
+      }>
+    }> = []
+    const sourceSubscription = collection.subscribeChanges((changes) => {
+      callbacks.push({
+        owner: `source`,
+        rows: ordered(collection.toArray),
+        changes: changes.map((change) => ({
+          type: change.type,
+          key: change.key,
+          value: project(change.value),
+          previousValue: change.previousValue
+            ? project(change.previousValue)
+            : undefined,
+        })),
+      })
+    })
+    const subscriptions = [sourceSubscription]
+    const capture = (): Observation => ({
+      source: ordered(collection.toArray),
+      sessions: [...sessions].map(([demand, session]) => ({
+        demand,
+        rows: ordered(session.toArray),
+      })),
+    })
+    const cut = async (name: string) => {
+      const wanted = expected()
+      await vi.waitFor(() => check(capture(), wanted))
+      const actual = capture()
+      observations.push({ cut: name, actual, wanted })
+      expect(loggedErrors).toEqual([])
+      expect(rejections).toEqual([])
+      return { actual, wanted }
+    }
+    const load = async (demand: Demand) => {
+      const session = createSession(demand)
+      allSessions.push(session)
+      sessions.set(demand, session)
+      subscriptions.push(
+        session.subscribeChanges((changes) => {
+          callbacks.push({
+            owner: demand,
+            rows: ordered(session.toArray),
+            changes: changes.map((change) => ({
+              type: change.type,
+              key: change.key,
+              value: project(change.value),
+              previousValue: change.previousValue
+                ? project(change.previousValue)
+                : undefined,
+            })),
+          })
+        }),
+      )
+      await session.preload()
+      active.add(demand)
+      return cut(`load ${demand}`)
+    }
+    const release = async (demand: Demand) => {
+      await sessions.get(demand)!.cleanup()
+      sessions.delete(demand)
+      active.delete(demand)
+      return cut(`release ${demand}`)
+    }
+    const update = async (row: Row) => {
+      await db.execute(
+        `UPDATE products SET name = ?, price = ?, category = ? WHERE id = ?`,
+        [row.name, row.price, row.category, row.id],
+      )
+      world.set(row.id, project(row))
+      return cut(`update ${row.id}`)
+    }
+    const trackedTableName = collection.utils.getMeta().trackedTableName
+    const expectTrackingGone = async () => {
+      await vi.waitFor(async () => {
+        const found = await db.writeLock((context) =>
+          context.get<{ count: number }>(
+            `SELECT count(*) AS count FROM sqlite_temp_master WHERE type = 'table' AND name = ?`,
+            [trackedTableName],
+          ),
+        )
+        expect(found.count).toBe(0)
+        expect(
+          triggerRecords.every(
+            (record) => record.calls === 1 && record.settled,
+          ),
+        ).toBe(true)
+      })
+    }
+
+    await withTestCleanup(async () => {
+      for (const row of seed) {
+        await db.execute(
+          `INSERT INTO products (id, name, price, category) VALUES (?, ?, ?, ?)`,
+          [row.id, row.name, row.price, row.category],
+        )
+      }
+      await collection.stateWhenReady()
+      await cut(`initially unloaded`)
+      const first = await load(`electronics`)
+      await load(`clothing`)
+      await load(`expensive`)
+      await update({
+        id: `e-high`,
+        name: `Wide screen`,
+        price: 160,
+        category: `electronics`,
+      })
+      const released = await release(`electronics`)
+      // Later native updates prove the surviving shared owners remain live.
+      await update({
+        id: `e-high`,
+        name: `Bright screen`,
+        price: 180,
+        category: `electronics`,
+      })
+      await update({
+        id: `c-high`,
+        name: `Warm coat`,
+        price: 190,
+        category: `clothing`,
+      })
+      await release(`clothing`)
+      await release(`expensive`)
+      await expectTrackingGone()
+      expect(
+        ordered(
+          await db.getAll<Row>(
+            `SELECT id, name, price, category FROM products`,
+          ),
+        ),
+      ).toEqual(ordered(world.values()))
+      await load(`electronics`)
+      await release(`electronics`)
+      await expectTrackingGone()
+
+      // Faults start from real detached observations, not manufactured output
+      // from another oracle. Equal size cannot hide identity or value loss.
+      const wrongKey = structuredClone(first.actual)
+      wrongKey.sessions[0]!.rows[0]!.id = `wrong-key`
+      expect(() => check(wrongKey, first.wanted)).toThrow()
+      const wrongValue = structuredClone(first.actual)
+      wrongValue.sessions[0]!.rows[0]!.name = `wrong-value`
+      expect(() => check(wrongValue, first.wanted)).toThrow()
+      const retainedReleasedRow = structuredClone(released.actual)
+      retainedReleasedRow.source.push(project(seed[0]!))
+      retainedReleasedRow.source = ordered(retainedReleasedRow.source)
+      expect(() => check(retainedReleasedRow, released.wanted)).toThrow()
+      for (const observation of observations)
+        check(observation.actual, observation.wanted)
+      // Callbacks are retained in full for diagnosis. This law checks settled
+      // cuts; it does not impose atomic multi-row publication on the SDK.
+      expect(callbacks.some((callback) => callback.changes.length > 0)).toBe(
+        true,
+      )
+      expect(triggerRecords.length).toBeGreaterThan(0)
+    }, [
+      // Resources are acquired during the body; enumerate them at teardown.
+      () =>
+        withTestCleanup(
+          () => {},
+          allSessions.map((session) => () => session.cleanup()),
+        ),
+      () =>
+        withTestCleanup(
+          () => {},
+          subscriptions.map((subscription) => () => subscription.unsubscribe()),
+        ),
+      () => collection.cleanup(),
+      expectTrackingGone,
+      () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+      () => expect(loggedErrors).toEqual([]),
+      () => expect(rejections).toEqual([]),
+      () => triggers.mockRestore(),
+      () => process.off(`unhandledRejection`, recordRejection),
+    ])
+  })
 
   it(`should not load any data initially in on-demand mode`, async () => {
     const db = await createDatabase()
@@ -139,6 +459,186 @@ describe(`On-Demand Sync Mode`, () => {
     const prices = loadedProducts.map((p) => p.price).sort((a, b) => a! - b!)
     expect(prices).toEqual([150, 200])
   })
+
+  it.each([`apply`, `cleanup`] as const)(
+    `settles staged subset baseline rows after %s`,
+    async (outcome) => {
+      const [errors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
+      await createTestProducts(db)
+
+      let resolvePersistence!: () => void
+      const persistence = new Promise<void>((resolve) => {
+        resolvePersistence = resolve
+      })
+      const transaction = createTransaction({
+        mutationFn: () => persistence,
+      })
+      const cleanupHook = vi.fn()
+      const triggerDisposals: Array<ReturnType<typeof vi.fn>> = []
+      const createTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+      const triggerSpy = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockImplementation(async (triggerOptions) => {
+          const dispose = await createTrigger(triggerOptions)
+          const trackedDispose = vi.fn(dispose)
+          triggerDisposals.push(trackedDispose)
+          return trackedDispose
+        })
+      const options = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: () => {
+          transaction.mutate(() =>
+            collection.insert({
+              id: `local`,
+              name: `Local product`,
+              price: 1,
+              category: `local`,
+            }),
+          )
+          return cleanupHook
+        },
+      })
+      const collection = createCollection(options)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      const electronics = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`)),
+      })
+      onTestFinished(() => electronics.cleanup())
+      const publications: Array<unknown> = []
+      const subscription = electronics.subscribeChanges((changes) => {
+        publications.push(
+          ...changes.map(({ type, key, value }) => ({
+            type,
+            key,
+            value: { ...value },
+          })),
+        )
+      })
+      let settled = false
+      const preload = electronics.preload().then(
+        () => {
+          settled = true
+          return { status: `fulfilled` as const }
+        },
+        (error: unknown) => {
+          settled = true
+          return { status: `rejected` as const, error }
+        },
+      )
+      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const unexpected: Array<unknown> = []
+      const recordUnhandled = (error: unknown) => unexpected.push(error)
+      process.on(`unhandledRejection`, recordUnhandled)
+      const { trackedTableName } = options.utils.getMeta()
+      const expectTrackingCount = async (count: number) => {
+        await vi.waitFor(
+          async () => {
+            const table = await db.writeLock((context) =>
+              context.get<{ count: number }>(
+                `SELECT COUNT(*) as count FROM sqlite_temp_master WHERE type = 'table' AND name = ?`,
+                [trackedTableName],
+              ),
+            )
+            expect(table.count).toBe(count)
+          },
+          { timeout: 2_000 },
+        )
+      }
+      const observeAbandoned = () => ({
+        source: collection.toArray.map((row) => ({ ...row })),
+        query: electronics.toArray.map((row) => ({ ...row })),
+        publications: structuredClone(publications),
+      })
+      const checkAbandoned = (
+        observed: ReturnType<typeof observeAbandoned>,
+      ) => {
+        expect(observed).toEqual({ source: [], query: [], publications: [] })
+      }
+
+      await withTestCleanup(async () => {
+        await expectTrackingCount(1)
+
+        expect(transaction.state).toBe(`persisting`)
+        expect(settled).toBe(false)
+        expect(electronics.size).toBe(0)
+        expect(cleanupHook).not.toHaveBeenCalled()
+        expect(triggerDisposals).toHaveLength(1)
+        expect(publications).toEqual([])
+
+        if (outcome === `cleanup`) {
+          await collection.cleanup()
+          const message =
+            `Source collection '${collection.id}' was manually cleaned up while live query '${electronics.id}' depends on it. ` +
+            `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+          expect(await preload).toEqual({
+            status: `rejected`,
+            error: new Error(message),
+          })
+          expect(transaction.state).toBe(`persisting`)
+          await expectTrackingCount(0)
+          expect(cleanupHook).toHaveBeenCalledOnce()
+          expect(triggerDisposals[0]).toHaveBeenCalledOnce()
+          checkAbandoned(observeAbandoned())
+          expect(reports.mock.calls).toEqual([
+            [`[Live Query Error] ${message}`],
+          ])
+        }
+
+        resolvePersistence()
+        await transaction.isPersisted.promise
+        if (outcome === `apply`) {
+          expect(await preload).toEqual({ status: `fulfilled` })
+          expect(
+            electronics.toArray.map((product) => product.name).sort(),
+          ).toEqual([`Product A`, `Product B`, `Product D`])
+          expect(reports).not.toHaveBeenCalled()
+        } else {
+          // A later native write exercises the abandoned stream after the held
+          // transaction settles; checking only before release would miss leakage.
+          await db.execute(
+            `UPDATE products SET name = 'After cleanup' WHERE category = 'electronics'`,
+          )
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          const observed = observeAbandoned()
+          checkAbandoned(observed)
+          const stale = structuredClone(observed)
+          stale.publications.push({
+            type: `insert`,
+            key: `stale`,
+            value: { name: `Product A` },
+          })
+          expect(() => checkAbandoned(stale)).toThrowError(
+            expect.objectContaining({ name: `AssertionError` }),
+          )
+          expect(collection.status).toBe(`cleaned-up`)
+          expect(electronics.status).toBe(`error`)
+        }
+      }, [
+        resolvePersistence,
+        () => transaction.isPersisted.promise,
+        () => subscription.unsubscribe(),
+        () => electronics.cleanup(),
+        () => collection.cleanup(),
+        () => preload,
+        () => expectTrackingCount(0),
+        () => expect(cleanupHook).toHaveBeenCalledOnce(),
+        () => expect(triggerDisposals[0]).toHaveBeenCalledOnce(),
+        () => expect(errors).toHaveLength(0),
+        () => expect(unexpected).toEqual([]),
+        () => process.off(`unhandledRejection`, recordUnhandled),
+        () => reports.mockRestore(),
+        () => triggerSpy.mockRestore(),
+      ])
+    },
+  )
 
   it(`should reactively update live query when new matching data is inserted into SQLite`, async () => {
     const db = await createDatabase()
@@ -2054,75 +2554,90 @@ describe(`On-Demand Sync Mode`, () => {
       )
     })
 
-    it(`should resolve isPersisted when all live queries are cleaned up during a pending mutation`, async () => {
-      const db = await createDatabase()
-      await createTestProducts(db)
+    it.each([`insert`, `update`, `delete`] as const)(
+      `persists a pending %s when its last live query is cleaned up`,
+      async (operation) => {
+        const db = await createDatabase()
+        await createTestProducts(db)
 
-      const collection = createCollection(
-        powerSyncCollectionOptions({
-          database: db,
-          table: APP_SCHEMA.props.products,
-          syncMode: `on-demand`,
-        }),
-      )
-      onTestFinished(() => collection.cleanup())
-      await collection.stateWhenReady()
+        const collection = createCollection(
+          powerSyncCollectionOptions({
+            database: db,
+            table: APP_SCHEMA.props.products,
+            syncMode: `on-demand`,
+          }),
+        )
+        onTestFinished(() => collection.cleanup())
+        await collection.stateWhenReady()
 
-      // Start with 1 live query (electronics)
-      const electronicsQuery = createLiveQueryCollection({
-        query: (q) =>
-          q
-            .from({ product: collection })
-            .where(({ product }) => eq(product.category, `electronics`))
-            .select(({ product }) => ({
-              id: product.id,
-              name: product.name,
-              price: product.price,
-              category: product.category,
-            })),
-      })
+        // Start with 1 live query (electronics)
+        const electronicsQuery = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ product: collection })
+              .where(({ product }) => eq(product.category, `electronics`))
+              .select(({ product }) => ({
+                id: product.id,
+                name: product.name,
+                price: product.price,
+                category: product.category,
+              })),
+        })
 
-      await electronicsQuery.preload()
+        await electronicsQuery.preload()
 
-      await vi.waitFor(
-        () => {
-          expect(electronicsQuery.size).toBe(3)
-        },
-        { timeout: 2000 },
-      )
+        await vi.waitFor(
+          () => {
+            expect(electronicsQuery.size).toBe(3)
+          },
+          { timeout: 2000 },
+        )
 
-      // Insert a new electronics product — creates a pending mutation
-      const insertResult = collection.insert({
-        id: randomUUID(),
-        name: `New Gadget`,
-        price: 99,
-        category: `electronics`,
-      })
+        const existing = Array.from(electronicsQuery.values())[0]!
+        const id = operation === `insert` ? randomUUID() : existing.id
+        const mutation =
+          operation === `insert`
+            ? collection.insert({
+                id,
+                name: `New Gadget`,
+                price: 99,
+                category: `electronics`,
+              })
+            : operation === `update`
+              ? collection.update(id, (draft) => {
+                  draft.name = `New Gadget`
+                })
+              : collection.delete(id)
+        let settled = false
+        const observed = mutation.isPersisted.promise.then(
+          () => {
+            settled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            settled = true
+            return { status: `rejected` as const, reason: error }
+          },
+        )
 
-      // Immediately clean up the only live query — triggers unloadSubset → loadSubset
-      // with 0 predicates (early-return path), which must still call resolveAllPendingFor
-      electronicsQuery.cleanup()
-
-      // isPersisted.promise should resolve — if the bug is present, this hangs forever
-      await vi.waitFor(
-        async () => {
-          await insertResult.isPersisted.promise
-        },
-        { timeout: 5000 },
-      )
-    })
+        // Dropping the last demand must still drain the mutation's diff record
+        // before removing the trigger that acknowledges its persistence.
+        electronicsQuery.cleanup()
+        await vi.waitFor(() => expect(settled).toBe(true), { timeout: 2000 })
+        expect(await observed).toEqual({ status: `fulfilled` })
+        expect(
+          await db.getAll(`SELECT id, name FROM products WHERE id = ?`, [id]),
+        ).toEqual(operation === `delete` ? [] : [{ id, name: `New Gadget` }])
+      },
+    )
   })
 
   describe(`Tracking lifecycle`, () => {
-    // The sync handler catches its own errors and surfaces them only through the
-    // logger, so captured errors are how these tests assert it stayed healthy.
-    function captureSyncErrors(db: PowerSyncDatabase) {
-      const errors: Array<string> = []
-      vi.spyOn(db.logger, `error`).mockImplementation((...args: Array<any>) => {
-        errors.push(args.map(String).join(` `))
-      })
-      return () => errors
-    }
+    const categoryEquals = (category: string) =>
+      new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`category`]),
+        new IR.Value(category),
+      ])
 
     function makeCollection(db: PowerSyncDatabase) {
       return createCollection(
@@ -2152,10 +2667,715 @@ describe(`On-Demand Sync Mode`, () => {
       })
     }
 
-    it(`should start tracking again when a subset is loaded after every subset was unloaded`, async () => {
+    function startOnDemandSync(
+      db: PowerSyncDatabase,
+      settings: {
+        onLoadSubset?: (
+          options: LoadSubsetOptions,
+        ) => void | (() => void) | Promise<void | (() => void)>
+        syncBatchSize?: number
+      } = {},
+      overrides: Partial<{
+        begin: ReturnType<typeof vi.fn>
+        write: ReturnType<typeof vi.fn>
+        commit: ReturnType<typeof vi.fn>
+      }> = {},
+    ) {
+      const begin = overrides.begin ?? vi.fn()
+      const write = overrides.write ?? vi.fn()
+      const commit = overrides.commit ?? vi.fn(() => true)
+      const config = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: settings.onLoadSubset,
+        syncBatchSize: settings.syncBatchSize,
+      })
+      const sync = config.sync.sync({
+        collection: { status: `ready`, has: () => false },
+        begin,
+        write,
+        commit,
+        markReady: vi.fn(),
+        markError: vi.fn(),
+        truncate: vi.fn(),
+      } as never)
+      const loadSubset =
+        sync && typeof sync !== `function` ? sync.loadSubset : undefined
+      const unloadSubset =
+        sync && typeof sync !== `function` ? sync.unloadSubset : undefined
+      if (!sync || typeof sync === `function` || !loadSubset || !unloadSubset) {
+        throw new Error(`Expected on-demand sync controls`)
+      }
+      return { sync, loadSubset, unloadSubset, begin, write, commit }
+    }
+
+    it(`does not publish a provisional or rejected subset`, async () => {
+      const db = await createDatabase(errorCapturingLogger()[1])
+      const firstHook = pDefer<void>()
+      const hookFailure = new Error(`subset hook failed`)
+      const onLoadSubset = vi
+        .fn()
+        .mockReturnValueOnce(firstHook.promise)
+        .mockRejectedValueOnce(hookFailure)
+        .mockResolvedValueOnce(undefined)
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const { sync, loadSubset } = startOnDemandSync(db, { onLoadSubset })
+
+      try {
+        const provisional = loadSubset({
+          where: categoryEquals(`electronics`),
+        })
+        await vi.waitFor(() => expect(onLoadSubset).toHaveBeenCalledOnce())
+        await expect(
+          loadSubset({ where: categoryEquals(`outdoors`) }),
+        ).rejects.toBe(hookFailure)
+        await loadSubset({ where: categoryEquals(`clothing`) })
+
+        const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
+        expect(when?.INSERT).toContain(`clothing`)
+        expect(when?.INSERT).not.toContain(`electronics`)
+        expect(when?.INSERT).not.toContain(`outdoors`)
+
+        firstHook.resolve()
+        await provisional
+      } finally {
+        firstHook.resolve()
+        sync.cleanup?.()
+      }
+    })
+
+    it(`does not acquire a subset released during startup`, async () => {
+      const db = await createDatabase()
+      const onLoadSubset = vi.fn()
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+      const { sync, loadSubset, unloadSubset } = startOnDemandSync(db, {
+        onLoadSubset,
+      })
+      const controller = new AbortController()
+      const request = {
+        where: categoryEquals(`electronics`),
+        signal: controller.signal,
+      }
+
+      const load = loadSubset(request)
+      controller.abort()
+      unloadSubset(request)
+
+      try {
+        await load
+        expect(onLoadSubset).not.toHaveBeenCalled()
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+      } finally {
+        sync.cleanup?.()
+      }
+    })
+
+    it(`settles concurrent loads only after the latest trigger is live`, async () => {
+      const db = await createDatabase()
+      const locks: Array<() => Promise<void>> = []
+      vi.spyOn(db, `writeLock`).mockImplementation(
+        (callback) =>
+          new Promise((resolve, reject) => {
+            locks.push(async () => {
+              try {
+                await callback({} as never)
+                resolve(undefined as never)
+              } catch (error) {
+                reject(error)
+              }
+            })
+          }) as never,
+      )
+      vi.spyOn(db, `getAll`).mockResolvedValue([])
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const { sync, loadSubset } = startOnDemandSync(db)
+      let firstSettled = false
+      let secondSettled = false
+
+      const first = Promise.resolve(
+        loadSubset({ where: categoryEquals(`electronics`) }),
+      ).then(() => {
+        firstSettled = true
+      })
+      await vi.waitFor(() => expect(locks).toHaveLength(1))
+      const second = Promise.resolve(
+        loadSubset({ where: categoryEquals(`clothing`) }),
+      ).then(() => {
+        secondSettled = true
+      })
+
+      try {
+        await locks[0]!()
+        expect(firstSettled).toBe(false)
+        expect(secondSettled).toBe(false)
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+
+        await vi.waitFor(() => expect(locks).toHaveLength(2))
+        await locks[1]!()
+        await Promise.all([first, second])
+
+        expect(createDiffTrigger).toHaveBeenCalledOnce()
+        const when = createDiffTrigger.mock.calls[0]?.[0].when
+        expect(when?.INSERT).toContain(`electronics`)
+        expect(when?.INSERT).toContain(`clothing`)
+      } finally {
+        sync.cleanup?.()
+        await Promise.all(locks.map((run) => run()))
+        await Promise.allSettled([first, second])
+      }
+    })
+
+    it.each(Array.from({ length: 12 }, (_, turn) => turn))(
+      `covers demand admitted %s microtasks after the final applied receipt`,
+      async (turn) => {
+        const db = await createDatabase()
+        vi.spyOn(db, `writeLock`).mockImplementation(async (callback) =>
+          callback({
+            getAll: () => Promise.resolve([]),
+            execute: () => Promise.resolve({}),
+          } as never),
+        )
+        const applied = pDefer<void>()
+        const entered = pDefer<void>()
+        const createDiffTrigger = vi
+          .spyOn(db.triggers, `createDiffTrigger`)
+          .mockImplementation(async (options) => {
+            await options.hooks?.beforeCreate?.({
+              getAll: () => Promise.resolve([]),
+            } as never)
+            return vi.fn()
+          })
+        const commit = vi.fn(() => {
+          entered.resolve()
+          return applied.promise
+        })
+        const { sync, loadSubset } = startOnDemandSync(db, {}, { commit })
+        const first = Promise.resolve(
+          loadSubset({ where: categoryEquals(`electronics`) }),
+        )
+        let second: Promise<unknown> | undefined
+        try {
+          await entered.promise
+          // Allow setup to reach the applied-receipt barrier, then vary only
+          // admission around its promise finalization, not wall-clock timing.
+          for (let i = 0; i < 20; i++) await Promise.resolve()
+          applied.resolve()
+          for (let i = 0; i < turn; i++) await Promise.resolve()
+          second = Promise.resolve(
+            loadSubset({ where: categoryEquals(`clothing`) }),
+          )
+          await second
+          const when = createDiffTrigger.mock.calls.at(-1)?.[0].when
+          expect(when?.INSERT).toContain(`electronics`)
+          expect(when?.INSERT).toContain(`clothing`)
+          // Literal names in SQL are not proof of a working column filter.
+          // Execute the exact trigger clause against matching and excluded rows.
+          for (const category of [`electronics`, `clothing`, `outdoors`]) {
+            const row = await db.get<{ matches: number }>(
+              `SELECT CASE WHEN (${when!.INSERT}) THEN 1 ELSE 0 END AS matches FROM (SELECT ? AS data) AS NEW`,
+              [JSON.stringify({ category })],
+            )
+            expect(row.matches).toBe(category === `outdoors` ? 0 : 1)
+          }
+          await first
+        } finally {
+          applied.resolve()
+          await Promise.allSettled([first, second])
+          sync.cleanup?.()
+        }
+      },
+    )
+
+    it(`disposes a trigger superseded while it is being created`, async () => {
+      const db = await createDatabase()
+      const triggerStarted = pDefer<void>()
+      const finishTrigger = pDefer<void>()
+      const staleDispose = vi.fn(async () => {})
+      const currentDispose = vi.fn(async () => {})
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockImplementationOnce(async () => {
+          triggerStarted.resolve()
+          await finishTrigger.promise
+          return staleDispose
+        })
+        .mockResolvedValueOnce(currentDispose)
+      const { sync, loadSubset } = startOnDemandSync(db)
+      const first = Promise.resolve(
+        loadSubset({ where: categoryEquals(`electronics`) }),
+      )
+
+      try {
+        await triggerStarted.promise
+        const second = Promise.resolve(
+          loadSubset({ where: categoryEquals(`clothing`) }),
+        )
+        finishTrigger.resolve()
+        await Promise.all([first, second])
+
+        expect(createDiffTrigger).toHaveBeenCalledTimes(2)
+        expect(staleDispose).toHaveBeenCalledOnce()
+        expect(currentDispose).not.toHaveBeenCalled()
+      } finally {
+        finishTrigger.resolve()
+        sync.cleanup?.()
+        await first
+      }
+    })
+
+    it(`waits for every applied batch before settling a subset`, async () => {
+      const db = await createDatabase()
+      const receipts: Array<ReturnType<typeof pDefer<void>>> = []
+      const rows = [
+        { id: `a`, name: `A`, price: 1, category: `electronics` },
+        { id: `b`, name: `B`, price: 2, category: `electronics` },
+      ]
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async (options) => {
+          let cursor = 0
+          await options.hooks?.beforeCreate?.({
+            getAll: () => Promise.resolve(rows.slice(cursor, ++cursor)),
+          } as never)
+          return vi.fn()
+        },
+      )
+      const commit = vi.fn(() => {
+        const receipt = pDefer<void>()
+        receipts.push(receipt)
+        return receipt.promise
+      })
+      const { sync, loadSubset } = startOnDemandSync(
+        db,
+        { syncBatchSize: 1 },
+        { commit },
+      )
+      let settled = false
+      const load = Promise.resolve(
+        loadSubset({ where: categoryEquals(`electronics`) }),
+      ).then(() => {
+        settled = true
+      })
+
+      try {
+        await vi.waitFor(() => expect(receipts).toHaveLength(3))
+        receipts[0]!.resolve()
+        receipts[1]!.resolve()
+        await Promise.resolve()
+        expect(settled).toBe(false)
+
+        receipts[2]!.resolve()
+        await load
+        expect(settled).toBe(true)
+      } finally {
+        receipts.forEach((receipt) => receipt.resolve())
+        sync.cleanup?.()
+        await load
+      }
+    })
+
+    it(`does not start queued tracking after cleanup`, async () => {
+      const db = await createDatabase()
+      const lockQueued = pDefer<void>()
+      let runLock!: () => Promise<void>
+      vi.spyOn(db, `writeLock`).mockImplementation(
+        (callback) =>
+          new Promise((resolve, reject) => {
+            runLock = async () => {
+              try {
+                await callback({} as never)
+                resolve(undefined as never)
+              } catch (error) {
+                reject(error)
+              }
+            }
+            lockQueued.resolve()
+          }) as never,
+      )
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(vi.fn())
+      const { sync, loadSubset } = startOnDemandSync(db)
+
+      const load = loadSubset({ where: categoryEquals(`electronics`) })
+      await lockQueued.promise
+      sync.cleanup?.()
+      await runLock()
+      await load
+
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+    })
+
+    it(`cleans each acquired subset at most once during reentrant cleanup`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const first = { where: categoryEquals(`electronics`) }
+      const second = { where: categoryEquals(`clothing`) }
+      const firstCleanup = vi.fn()
+      const secondCleanup = vi.fn(() => started.unloadSubset(first))
+      const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
+        options === first ? firstCleanup : secondCleanup,
+      )
+      const started = startOnDemandSync(db, { onLoadSubset })
+
+      await Promise.all([started.loadSubset(first), started.loadSubset(second)])
+      started.sync.cleanup?.()
+
+      expect(firstCleanup).toHaveBeenCalledOnce()
+      expect(secondCleanup).toHaveBeenCalledOnce()
+    })
+
+    it(`does not repeat release work started by a reentrant cleanup`, async () => {
+      const db = await createDatabase()
+      const getAll = vi.spyOn(db, `getAll`).mockResolvedValue([])
+      const first = { where: categoryEquals(`electronics`) }
+      const second = { where: categoryEquals(`clothing`) }
+      const onLoadSubset = vi.fn((options: LoadSubsetOptions) =>
+        options === first ? () => started.unloadSubset(second) : undefined,
+      )
+      const started = startOnDemandSync(db, { onLoadSubset })
+
+      try {
+        await Promise.all([
+          started.loadSubset(first),
+          started.loadSubset(second),
+        ])
+        started.unloadSubset(first)
+        await vi.waitFor(() =>
+          expect(
+            getAll.mock.calls.some(([sql]) =>
+              String(sql).includes(`electronics`),
+            ),
+          ).toBe(true),
+        )
+
+        expect(
+          getAll.mock.calls.filter(([sql]) => String(sql).includes(`clothing`)),
+        ).toHaveLength(1)
+      } finally {
+        started.sync.cleanup?.()
+      }
+    })
+
+    it(`does not create tracking when change observation cannot start`, async () => {
+      const db = await createDatabase(errorCapturingLogger()[1])
+      const startupError = new Error(`change observation failed`)
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => {
+        throw startupError
+      })
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+      const collection = makeCollection(db)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+      const query = categoryQuery(collection, `electronics`)
+      onTestFinished(() => query.cleanup())
+
+      await expect(query.preload()).rejects.toBe(startupError)
+      expect(createDiffTrigger).not.toHaveBeenCalled()
+    })
+
+    it(`flushes a change observed while eager tracking starts`, async () => {
       const db = await createDatabase()
       await createTestProducts(db)
-      const syncErrors = captureSyncErrors(db)
+      let flush:
+        | ((event: { changedTables: Array<string> }) => Promise<void> | void)
+        | undefined
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation((handler) => {
+        flush = handler?.onChange
+        return () => {}
+      })
+      const triggerCreated = pDefer<void>()
+      const publishTrigger = pDefer<void>()
+      const createDiffTrigger = db.triggers.createDiffTrigger.bind(db.triggers)
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async (options) => {
+          const dispose = await createDiffTrigger(options)
+          triggerCreated.resolve()
+          await publishTrigger.promise
+          return dispose
+        },
+      )
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+        }),
+      )
+      onTestFinished(() => collection.cleanup())
+
+      await triggerCreated.promise
+      await db.execute(`
+        INSERT INTO products (id, name, price, category)
+        VALUES ('during-startup', 'During startup', 300, 'electronics')
+      `)
+      const observed = Promise.resolve(
+        flush?.({
+          changedTables: [collection.utils.getMeta().trackedTableName],
+        }),
+      )
+      publishTrigger.resolve()
+      await Promise.all([observed, collection.stateWhenReady()])
+
+      expect(collection.get(`during-startup`)?.name).toBe(`During startup`)
+    })
+
+    it(`disposes eager tracking that finishes after cleanup`, async () => {
+      const db = await createDatabase()
+      vi.spyOn(db, `onChangeWithCallback`).mockImplementation(() => () => {})
+      const triggerStarted = pDefer<void>()
+      const finishTrigger = pDefer<void>()
+      const dispose = vi.fn(async () => {})
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockImplementation(
+        async () => {
+          triggerStarted.resolve()
+          await finishTrigger.promise
+          return dispose
+        },
+      )
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+        }),
+      )
+
+      await triggerStarted.promise
+      collection.cleanup()
+      finishTrigger.resolve()
+
+      await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+    })
+
+    it(`reports a source error when a rebuild removes tracking and cannot replace it`, async () => {
+      const db = await createDatabase()
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      const failure = new Error(`trigger installation failed`)
+      try {
+        await collection._sync.loadSubset({
+          where: categoryEquals(`electronics`),
+        })
+        expect(collection.status).toBe(`ready`)
+        vi.spyOn(db.triggers, `createDiffTrigger`).mockRejectedValueOnce(
+          failure,
+        )
+        await expect(
+          Promise.resolve(
+            collection._sync.loadSubset({ where: categoryEquals(`clothing`) }),
+          ),
+        ).rejects.toBe(failure)
+        expect(collection.status).toBe(`error`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it.each([`unchanged`, `delete`, `predicate exit`, `release-last`] as const)(
+      `reconciles rows after a release rebuild outage with %s`,
+      async (change) => {
+        vi.useFakeTimers()
+        const db = await createDatabase(errorCapturingLogger()[1])
+        await db.execute(
+          `INSERT INTO products (id, name, price, category) VALUES ('retained', 'Before', 10, 'clothing')`,
+        )
+        const collection = createCollection(
+          powerSyncCollectionOptions({
+            database: db,
+            table: APP_SCHEMA.props.products,
+            syncMode: `on-demand`,
+          }),
+        )
+        const first = { where: categoryEquals(`electronics`) }
+        const second = { where: categoryEquals(`clothing`) }
+        try {
+          await collection._sync.loadSubset(first)
+          await collection._sync.loadSubset(second)
+          const trigger = vi
+            .spyOn(db.triggers, `createDiffTrigger`)
+            .mockRejectedValueOnce(new Error(`release rebuild failed`))
+          collection._sync.unloadSubset(first)
+          await vi.waitFor(() => expect(collection.status).toBe(`error`))
+          if (change === `delete` || change === `release-last`) {
+            await db.execute(`DELETE FROM products WHERE id = 'retained'`)
+          } else if (change === `predicate exit`) {
+            await db.execute(
+              `UPDATE products SET category = 'outdoors' WHERE id = 'retained'`,
+            )
+          }
+          if (change === `release-last`) collection._sync.unloadSubset(second)
+          await vi.advanceTimersByTimeAsync(1_000)
+          if (change !== `release-last`)
+            await vi.waitFor(() =>
+              expect(trigger.mock.calls.length).toBeGreaterThan(1),
+            )
+          await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+          expect([...collection.keys()]).toEqual(
+            change === `unchanged` ? [`retained`] : [],
+          )
+          if (change === `release-last`)
+            await collection._sync.loadSubset({ ...second })
+          if (change !== `unchanged`) {
+            await db.execute(
+              `INSERT OR REPLACE INTO products (id, name, price, category) VALUES ('retained', 'Before', 10, 'clothing')`,
+            )
+            await vi.waitFor(() =>
+              expect(collection.get(`retained`)?.name).toBe(`Before`),
+            )
+          }
+          await db.execute(
+            `UPDATE products SET name = 'After' WHERE id = 'retained'`,
+          )
+          await vi.waitFor(() =>
+            expect(collection.get(`retained`)?.name).toBe(`After`),
+          )
+        } finally {
+          await collection.cleanup()
+          await vi.runOnlyPendingTimersAsync()
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it(`retries a failed physical release`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase(errorCapturingLogger()[1])
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockRejectedValueOnce(new Error(`transient eviction failure`))
+        .mockResolvedValueOnce([])
+      const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
+      const request = { where: categoryEquals(`electronics`) }
+
+      try {
+        await loadSubset(request)
+        expect(unloadSubset(request)).toBeUndefined()
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledOnce())
+        await vi.advanceTimersByTimeAsync(1_000)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(2))
+      } finally {
+        sync.cleanup?.()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`does not let one failed release block another`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase(errorCapturingLogger()[1])
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockImplementation((sql) =>
+          String(sql).includes(`electronics`)
+            ? Promise.reject(new Error(`persistent eviction failure`))
+            : Promise.resolve([]),
+        )
+      const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
+      const failing = { where: categoryEquals(`electronics`) }
+      const succeeding = { where: categoryEquals(`clothing`) }
+
+      try {
+        await Promise.all([loadSubset(failing), loadSubset(succeeding)])
+        unloadSubset(failing)
+        unloadSubset(succeeding)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalled())
+        await vi.advanceTimersByTimeAsync(1_000)
+
+        expect(
+          getAll.mock.calls.some(([sql]) => {
+            const query = String(sql)
+            return query.includes(`clothing`) && !query.includes(`electronics`)
+          }),
+        ).toBe(true)
+      } finally {
+        sync.cleanup?.()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`evicts a newly released demand without waiting for another demand's retry timer`, async () => {
+      vi.useFakeTimers()
+      const db = await createDatabase(errorCapturingLogger()[1])
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockImplementation((sql) =>
+          String(sql).includes(`electronics`)
+            ? Promise.reject(new Error(`eviction failed`))
+            : Promise.resolve([]),
+        )
+      const { sync, loadSubset, unloadSubset } = startOnDemandSync(db)
+      const first = { where: categoryEquals(`electronics`) }
+      const second = { where: categoryEquals(`clothing`) }
+      try {
+        await Promise.all([loadSubset(first), loadSubset(second)])
+        unloadSubset(first)
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+        const callsAfterFailure = getAll.mock.calls.length
+        expect(callsAfterFailure).toBe(1)
+        unloadSubset(second)
+        for (let turn = 0; turn < 30; turn++) await Promise.resolve()
+        expect(
+          getAll.mock.calls
+            .slice(callsAfterFailure)
+            .some(([sql]) => String(sql).includes(`clothing`)),
+        ).toBe(true)
+      } finally {
+        sync.cleanup?.()
+        await vi.runOnlyPendingTimersAsync()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`rechecks active demand before evicting released rows`, async () => {
+      const db = await createDatabase()
+      const firstEviction = pDefer<Array<{ id: string }>>()
+      const getAll = vi
+        .spyOn(db, `getAll`)
+        .mockReturnValueOnce(firstEviction.promise)
+        .mockResolvedValueOnce([])
+      const write = vi.fn()
+      const { sync, loadSubset, unloadSubset } = startOnDemandSync(
+        db,
+        {},
+        { write },
+      )
+      const departing = { where: categoryEquals(`electronics`) }
+
+      try {
+        await loadSubset(departing)
+        unloadSubset(departing)
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledOnce())
+
+        await loadSubset({ where: categoryEquals(`clothing`) })
+        firstEviction.resolve([{ id: `now-owned` }])
+
+        await vi.waitFor(() => expect(getAll).toHaveBeenCalledTimes(2))
+        expect(write).not.toHaveBeenCalledWith({
+          type: `delete`,
+          key: `now-owned`,
+        })
+      } finally {
+        firstEviction.resolve([])
+        sync.cleanup?.()
+      }
+    })
+
+    it(`should start tracking again when a subset is loaded after every subset was unloaded`, async () => {
+      const [syncErrors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
+      await createTestProducts(db)
 
       const collection = makeCollection(db)
       onTestFinished(() => collection.cleanup())
@@ -2192,13 +3412,13 @@ describe(`On-Demand Sync Mode`, () => {
         { timeout: 2000 },
       )
 
-      expect(syncErrors()).toEqual([])
+      expect(syncErrors).toEqual([])
     })
 
     it(`should stop tracking cleanly when every subset is unloaded and the collection is cleaned up`, async () => {
-      const db = await createDatabase()
+      const [syncErrors, logger] = errorCapturingLogger()
+      const db = await createDatabase(logger)
       await createTestProducts(db)
-      const syncErrors = captureSyncErrors(db)
 
       const collection = makeCollection(db)
       await collection.stateWhenReady()
@@ -2231,7 +3451,7 @@ describe(`On-Demand Sync Mode`, () => {
       collection.cleanup()
       await new Promise((resolve) => setTimeout(resolve, 200))
 
-      expect(syncErrors()).toEqual([])
+      expect(syncErrors).toEqual([])
     })
 
     it(`should dispose each diff trigger exactly once`, async () => {

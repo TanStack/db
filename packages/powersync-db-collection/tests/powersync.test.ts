@@ -1,12 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import {
-  CrudEntry,
-  PowerSyncDatabase,
-  Schema,
-  Table,
-  column,
-} from '@powersync/node'
+import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import {
   createCollection,
   createTransaction,
@@ -17,7 +11,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { powerSyncCollectionOptions } from '../src'
 import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
 import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
-import type { AbstractPowerSyncDatabase, LockContext } from '@powersync/node'
+import type { LockContext } from '@powersync/node'
 import type { PendingMutation } from '@tanstack/db'
 
 const APP_SCHEMA = new Schema({
@@ -40,6 +34,34 @@ const APP_SCHEMA = new Schema({
 const describePowerSync = TEST_DATABASE_IMPLEMENTATION
   ? describe
   : describe.skip
+
+type NativeCrudRow = {
+  id: string | number
+  data: string
+  tx_id: number | null
+}
+
+function expectTransactionCrud(
+  rows: Array<NativeCrudRow>,
+  expected: Array<{ id: string; type: string; name: string }>,
+) {
+  expect(rows).toHaveLength(expected.length)
+  const observations = rows.map((row) => JSON.parse(row.data) as unknown)
+  expect(observations).toEqual(
+    expected.map(({ id, type, name }) => ({
+      id,
+      type,
+      op: `PUT`,
+      data: { name },
+    })),
+  )
+  expect(rows[0]!.tx_id).toEqual(expect.any(Number))
+  expect(rows.every((row) => row.tx_id === rows[0]!.tx_id)).toBe(true)
+}
+
+function sortTransactionRows<T extends { id: string }>(rows: Array<T>) {
+  return [...rows].sort((a, b) => a.id.localeCompare(b.id))
+}
 
 describePowerSync(`PowerSync Integration`, () => {
   async function createDatabase() {
@@ -72,7 +94,7 @@ describePowerSync(`PowerSync Integration`, () => {
     return collection
   }
 
-  async function createTestData(db: AbstractPowerSyncDatabase) {
+  async function createTestData(db: PowerSyncDatabase) {
     await db.execute(`
         INSERT into documents (id, name)
         VALUES 
@@ -206,12 +228,8 @@ describePowerSync(`PowerSync Integration`, () => {
       await collection.delete(id).isPersisted.promise
 
       // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
-        SELECT * FROM ps_crud ORDER BY id`)
-
-      const crudEntries = _crudEntries.map((r) =>
-        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
-      )
+      const crudEntries = await db.getAll<{ op: string }>(`
+        SELECT data ->> 'op' AS op FROM ps_crud ORDER BY id`)
 
       expect(crudEntries.length).toBe(6)
       // We can only group transactions for similar operations
@@ -234,46 +252,102 @@ describePowerSync(`PowerSync Integration`, () => {
 
       expect(collection.size).toBe(3)
 
-      const addTx = createTransaction({
-        autoCommit: false,
-        mutationFn: async ({ transaction }) => {
-          await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction,
-          )
-        },
-      })
-
-      addTx.mutate(() => {
-        for (let i = 0; i < 5; i++) {
-          collection.insert({ id: randomUUID(), name: `tx-${i}` })
-        }
-      })
-
-      await addTx.commit()
-      await addTx.isPersisted.promise
-
-      expect(collection.size).toBe(8)
-
-      // fetch the ps_crud items
-      // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
-        SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) =>
-        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
+      const seed = await db.getAll<{ id: string; name: string }>(
+        `SELECT id, name FROM documents`,
       )
+      const initialCrud = await db.getAll<NativeCrudRow>(
+        `SELECT * FROM ps_crud ORDER BY id`,
+      )
+      const expected = [
+        { id: `transaction-doc-0`, type: `documents`, name: `tx-0` },
+        { id: `transaction-doc-1`, type: `documents`, name: `tx-1` },
+        { id: `transaction-doc-2`, type: `documents`, name: `tx-2` },
+        { id: `transaction-doc-3`, type: `documents`, name: `tx-3` },
+        { id: `transaction-doc-4`, type: `documents`, name: `tx-4` },
+      ]
+      try {
+        const addTx = createTransaction({
+          autoCommit: false,
+          mutationFn: async ({ transaction }) => {
+            await new PowerSyncTransactor({ database: db }).applyTransaction(
+              transaction,
+            )
+          },
+        })
 
-      const lastTransactionId =
-        crudEntries[crudEntries.length - 1]?.transactionId
-      /**
-       * The last items, created in the same transaction, should be in the same
-       * PowerSync transaction.
-       */
-      expect(
-        crudEntries
-          .reverse()
-          .slice(0, 5)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
-      ).true
+        addTx.mutate(() => {
+          for (let i = 0; i < 5; i++) {
+            collection.insert({ id: `transaction-doc-${i}`, name: `tx-${i}` })
+          }
+        })
+
+        await addTx.commit()
+        await addTx.isPersisted.promise
+
+        expect(collection.size).toBe(8)
+
+        // fetch the ps_crud items
+        // There should be a crud entries for this
+        const crudEntries = await db.getAll<NativeCrudRow>(`
+        SELECT * FROM ps_crud ORDER BY id`)
+        expect(crudEntries.slice(0, initialCrud.length)).toEqual(initialCrud)
+        const newCrud = crudEntries.slice(initialCrud.length)
+        expectTransactionCrud(newCrud, expected)
+        expect(() =>
+          expectTransactionCrud(newCrud.slice(1), expected),
+        ).toThrow()
+        expect(() =>
+          expectTransactionCrud(
+            [...newCrud.slice(0, -1), newCrud[0]!],
+            expected,
+          ),
+        ).toThrow()
+        const expectedRows = sortTransactionRows([
+          ...[`one`, `two`, `three`].map((name) => ({
+            id: seed.find((row) => row.name === name)!.id,
+            name,
+            author: null,
+            created_at: null,
+          })),
+          ...expected.map(({ id, name }) => ({
+            id,
+            name,
+            author: null,
+            created_at: null,
+          })),
+        ])
+        expect(
+          sortTransactionRows(
+            await db.getAll<{ id: string }>(
+              `SELECT id, name, author, created_at FROM documents`,
+            ),
+          ),
+        ).toEqual(expectedRows)
+        expect(
+          sortTransactionRows(
+            collection.toArray.map(({ id, name, author, created_at }) => ({
+              id,
+              name,
+              author,
+              created_at,
+            })),
+          ),
+        ).toEqual(expectedRows)
+
+        const lastTransactionId = crudEntries[crudEntries.length - 1]?.tx_id
+        /**
+         * The last items, created in the same transaction, should be in the same
+         * PowerSync transaction.
+         */
+        expect(
+          crudEntries
+            .reverse()
+            .slice(0, 5)
+            .every((crudEntry) => crudEntry.tx_id == lastTransactionId),
+        ).true
+      } finally {
+        await collection.cleanup()
+      }
     })
 
     it(`should complete transactions that delete one key and insert another (same-millisecond tie)`, async () => {
@@ -360,48 +434,137 @@ describePowerSync(`PowerSync Integration`, () => {
       expect(documentsCollection.size).toBe(3)
       expect(usersCollection.size).toBe(0)
 
-      const addTx = createTransaction({
-        autoCommit: false,
-        mutationFn: async ({ transaction }) => {
-          await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction,
-          )
-        },
-      })
-
-      addTx.mutate(() => {
-        for (let i = 0; i < 5; i++) {
-          documentsCollection.insert({ id: randomUUID(), name: `tx-${i}` })
-          usersCollection.insert({ id: randomUUID(), name: `user` })
-        }
-      })
-
-      await addTx.commit()
-      await addTx.isPersisted.promise
-
-      expect(documentsCollection.size).toBe(8)
-      expect(usersCollection.size).toBe(5)
-
-      // fetch the ps_crud items
-      // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
-        SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) =>
-        CrudEntry.fromRow(r as Parameters<typeof CrudEntry.fromRow>[0]),
+      const seed = await db.getAll<{ id: string; name: string }>(
+        `SELECT id, name FROM documents`,
       )
+      const initialCrud = await db.getAll<NativeCrudRow>(
+        `SELECT * FROM ps_crud ORDER BY id`,
+      )
+      const expected = [
+        { id: `mixed-doc-0`, type: `documents`, name: `tx-0` },
+        { id: `mixed-user-0`, type: `users`, name: `user` },
+        { id: `mixed-doc-1`, type: `documents`, name: `tx-1` },
+        { id: `mixed-user-1`, type: `users`, name: `user` },
+        { id: `mixed-doc-2`, type: `documents`, name: `tx-2` },
+        { id: `mixed-user-2`, type: `users`, name: `user` },
+        { id: `mixed-doc-3`, type: `documents`, name: `tx-3` },
+        { id: `mixed-user-3`, type: `users`, name: `user` },
+        { id: `mixed-doc-4`, type: `documents`, name: `tx-4` },
+        { id: `mixed-user-4`, type: `users`, name: `user` },
+      ]
+      try {
+        const addTx = createTransaction({
+          autoCommit: false,
+          mutationFn: async ({ transaction }) => {
+            await new PowerSyncTransactor({ database: db }).applyTransaction(
+              transaction,
+            )
+          },
+        })
 
-      const lastTransactionId =
-        crudEntries[crudEntries.length - 1]?.transactionId
-      /**
-       * The last items, created in the same transaction, should be in the same
-       * PowerSync transaction.
-       */
-      expect(
-        crudEntries
-          .reverse()
-          .slice(0, 10)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
-      ).true
+        addTx.mutate(() => {
+          for (let i = 0; i < 5; i++) {
+            documentsCollection.insert({
+              id: `mixed-doc-${i}`,
+              name: `tx-${i}`,
+            })
+            usersCollection.insert({ id: `mixed-user-${i}`, name: `user` })
+          }
+        })
+
+        await addTx.commit()
+        await addTx.isPersisted.promise
+
+        expect(documentsCollection.size).toBe(8)
+        expect(usersCollection.size).toBe(5)
+
+        // fetch the ps_crud items
+        // There should be a crud entries for this
+        const crudEntries = await db.getAll<NativeCrudRow>(`
+        SELECT * FROM ps_crud ORDER BY id`)
+        expect(crudEntries.slice(0, initialCrud.length)).toEqual(initialCrud)
+        const newCrud = crudEntries.slice(initialCrud.length)
+        expectTransactionCrud(newCrud, expected)
+        const corrupted = structuredClone(newCrud)
+        corrupted[0]!.data = JSON.stringify({
+          id: `wrong-row`,
+          type: `documents`,
+          op: `PUT`,
+          data: { name: `tx-0` },
+        })
+        expect(() => expectTransactionCrud(corrupted, expected)).toThrow()
+        const expectedDocuments = sortTransactionRows([
+          ...[`one`, `two`, `three`].map((name) => ({
+            id: seed.find((row) => row.name === name)!.id,
+            name,
+            author: null,
+            created_at: null,
+          })),
+          ...expected
+            .filter((row) => row.type === `documents`)
+            .map(({ id, name }) => ({
+              id,
+              name,
+              author: null,
+              created_at: null,
+            })),
+        ])
+        const expectedUsers = sortTransactionRows(
+          expected
+            .filter((row) => row.type === `users`)
+            .map(({ id, name }) => ({ id, name, active: null })),
+        )
+        expect(
+          sortTransactionRows(
+            await db.getAll<{ id: string }>(
+              `SELECT id, name, author, created_at FROM documents`,
+            ),
+          ),
+        ).toEqual(expectedDocuments)
+        expect(
+          sortTransactionRows(
+            documentsCollection.toArray.map(
+              ({ id, name, author, created_at }) => ({
+                id,
+                name,
+                author,
+                created_at,
+              }),
+            ),
+          ),
+        ).toEqual(expectedDocuments)
+        expect(
+          sortTransactionRows(
+            await db.getAll<{ id: string }>(
+              `SELECT id, name, active FROM users`,
+            ),
+          ),
+        ).toEqual(expectedUsers)
+        expect(
+          sortTransactionRows(
+            usersCollection.toArray.map(({ id, name, active }) => ({
+              id,
+              name,
+              active,
+            })),
+          ),
+        ).toEqual(expectedUsers)
+
+        const lastTransactionId = crudEntries[crudEntries.length - 1]?.tx_id
+        /**
+         * The last items, created in the same transaction, should be in the same
+         * PowerSync transaction.
+         */
+        expect(
+          crudEntries
+            .reverse()
+            .slice(0, 10)
+            .every((crudEntry) => crudEntry.tx_id == lastTransactionId),
+        ).true
+      } finally {
+        await documentsCollection.cleanup()
+        await usersCollection.cleanup()
+      }
     })
 
     /**

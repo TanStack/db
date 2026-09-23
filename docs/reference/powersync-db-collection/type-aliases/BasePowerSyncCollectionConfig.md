@@ -3,8 +3,6 @@ id: BasePowerSyncCollectionConfig
 title: BasePowerSyncCollectionConfig
 ---
 
-# Type Alias: BasePowerSyncCollectionConfig\<TTable, TSchema\>
-
 ```ts
 type BasePowerSyncCollectionConfig<TTable, TSchema> = Omit<BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey" | "syncMode"> & object & 
   | EagerSyncHooks

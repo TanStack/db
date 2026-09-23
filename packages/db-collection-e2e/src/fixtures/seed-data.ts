@@ -1,4 +1,16 @@
+import { reportFixtureCapture } from './fixture-artifact'
+import type { FixtureDiagnostics } from './fixture-artifact'
 import type { Comment, Post, SeedDataResult, User } from '../types'
+
+/** Capture once before driver delivery; each reader owns a detached copy. */
+export function captureSeedData(
+  seedData: SeedDataResult,
+  diagnostics?: FixtureDiagnostics,
+): () => SeedDataResult {
+  const authority = structuredClone(seedData)
+  if (diagnostics) reportFixtureCapture(authority, diagnostics)
+  return () => structuredClone(authority)
+}
 
 // Cache UUIDs for deterministic behavior across test runs
 const uuidCache = new Map<string, string>()

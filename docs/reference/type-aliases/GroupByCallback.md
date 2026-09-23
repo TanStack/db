@@ -3,13 +3,11 @@ id: GroupByCallback
 title: GroupByCallback
 ---
 
-# Type Alias: GroupByCallback()\<TContext\>
-
 ```ts
 type GroupByCallback<TContext> = (refs) => any;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:603](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L603)
+Defined in: [packages/db/src/query/builder/types.ts:612](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L612)
 
 GroupByCallback - Type for groupBy clause callback functions
 

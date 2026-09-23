@@ -3,13 +3,11 @@ id: LiveQueryCollectionUtils
 title: LiveQueryCollectionUtils
 ---
 
-# Type Alias: LiveQueryCollectionUtils
-
 ```ts
 type LiveQueryCollectionUtils = UtilsRecord & object;
 ```
 
-Defined in: [packages/db/src/query/live/collection-config-builder.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/collection-config-builder.ts#L59)
+Defined in: [packages/db/src/query/live/collection-config-builder.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/collection-config-builder.ts#L54)
 
 ## Type Declaration
 
@@ -18,16 +16,6 @@ Defined in: [packages/db/src/query/live/collection-config-builder.ts:59](https:/
 ```ts
 [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils;
 ```
-
-### getRunCount()
-
-```ts
-getRunCount: () => number;
-```
-
-#### Returns
-
-`number`
 
 ### getWindow()
 
@@ -51,6 +39,14 @@ Gets the current window (offset and limit) for an ordered query.
   \| `undefined`
 
 The current window settings, or `undefined` if the query is not windowed
+
+### lastSubsetError
+
+```ts
+readonly lastSubsetError: unknown | undefined;
+```
+
+Most recent subset-load failure observed by this live query.
 
 ### setWindow()
 

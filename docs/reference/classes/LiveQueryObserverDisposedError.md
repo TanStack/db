@@ -3,8 +3,6 @@ id: LiveQueryObserverDisposedError
 title: LiveQueryObserverDisposedError
 ---
 
-# Class: LiveQueryObserverDisposedError
-
 Defined in: [packages/db/src/errors.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L138)
 
 ## Extends

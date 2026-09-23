@@ -13,6 +13,7 @@ import {
   gt,
   lte,
   sum,
+  toArray,
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -1981,7 +1982,169 @@ describe(`Query Collections`, () => {
     })
   })
 
-  describe(`callback variants with conditional returns`, () => {
+  describe(`conditional returns`, () => {
+    it(`disables a config query that returns undefined`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `undefined-config-query-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useLiveQuery({
+            query: (q) => {
+              if (!enabled) return undefined
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, 30))
+            },
+          }),
+        { initialProps: { enabled: false } },
+      )
+
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+      expect(result.current.isReady).toBe(true)
+
+      rerender({ enabled: true })
+
+      await waitFor(() => expect(result.current.data).toHaveLength(1))
+      expect(result.current.status).toBe(`ready`)
+      expect(result.current.isEnabled).toBe(true)
+
+      rerender({ enabled: false })
+
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+      expect(result.current.isReady).toBe(true)
+    })
+
+    it(`disables a config query that returns null`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `null-config-query-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useLiveQuery({
+            query: (q) => {
+              if (!enabled) return null
+              return q.from({ persons: collection })
+            },
+          }),
+        { initialProps: { enabled: false } },
+      )
+
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+    })
+
+    it(`disables a config query with deprecated dependencies`, async () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `conditional-config-deps-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useLiveQuery(
+            {
+              query: (q) => {
+                if (!enabled) return undefined
+                return q
+                  .from({ persons: collection })
+                  .where(({ persons }) => gt(persons.age, 30))
+              },
+            },
+            [enabled],
+          ),
+        { initialProps: { enabled: false } },
+      )
+
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+
+      rerender({ enabled: true })
+
+      await waitFor(() => expect(result.current.data).toHaveLength(1))
+      expect(result.current.status).toBe(`ready`)
+      expect(result.current.isEnabled).toBe(true)
+
+      rerender({ enabled: false })
+
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.isEnabled).toBe(false)
+      warnSpy.mockRestore()
+    })
+
+    it(`stays disabled when the prior query becomes ready`, async () => {
+      let finishSync: (() => void) | undefined
+      const collection = createCollection<Person>({
+        id: `conditional-config-pending-sync-test`,
+        getKey: (person) => person.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            finishSync = () => {
+              begin()
+              write({ type: `insert`, value: initialPersons[2]! })
+              commit()
+              markReady()
+            }
+          },
+        },
+        onInsert: async () => {},
+        onUpdate: async () => {},
+        onDelete: async () => {},
+      })
+
+      const { result, rerender } = renderHook(
+        ({ enabled }: { enabled: boolean }) =>
+          useLiveQuery({
+            query: (q) => {
+              if (!enabled) return undefined
+              return q
+                .from({ persons: collection })
+                .where(({ persons }) => gt(persons.age, 30))
+            },
+          }),
+        { initialProps: { enabled: true } },
+      )
+
+      await waitFor(() => expect(finishSync).toBeDefined())
+      expect(result.current.isLoading).toBe(true)
+
+      rerender({ enabled: false })
+      expect(result.current.status).toBe(`disabled`)
+
+      await act(async () => {
+        finishSync!()
+        await Promise.resolve()
+      })
+
+      expect(collection.status).toBe(`ready`)
+      expect(collection.state.size).toBe(1)
+      expect(result.current.status).toBe(`disabled`)
+      expect(result.current.data).toBeUndefined()
+      expect(result.current.collection).toBeUndefined()
+    })
+
     it(`should handle callback returning undefined without a dependency array`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
@@ -2520,7 +2683,7 @@ describe(`Query Collections`, () => {
       { id: `i3`, title: `Bug in Beta`, projectId: `p2` },
     ]
 
-    it(`should render includes results and reactively update child collections`, async () => {
+    it(`renders only the affected child hook once when an include changes`, async () => {
       const projectsCollection = createCollection(
         mockSyncCollectionOptions<Project>({
           id: `includes-react-projects`,
@@ -2537,9 +2700,14 @@ describe(`Query Collections`, () => {
         }),
       )
 
+      let parentRenderCount = 0
+      let alphaRenderCount = 0
+      let betaRenderCount = 0
+
       // Parent hook: runs includes query that produces child Collections
-      const { result: parentResult } = renderHook(() =>
-        useLiveQuery((q) =>
+      const { result: parentResult } = renderHook(() => {
+        parentRenderCount += 1
+        return useLiveQuery((q) =>
           q.from({ p: projectsCollection }).select(({ p }) => ({
             id: p.id,
             name: p.name,
@@ -2551,8 +2719,8 @@ describe(`Query Collections`, () => {
                 title: i.title,
               })),
           })),
-        ),
-      )
+        )
+      })
 
       // Wait for parent to be ready
       await waitFor(() => {
@@ -2562,24 +2730,38 @@ describe(`Query Collections`, () => {
       const alphaProject = parentResult.current.data.find(
         (p: any) => p.id === `p1`,
       )!
+      const betaProject = parentResult.current.data.find(
+        (p: any) => p.id === `p2`,
+      )!
       expect(alphaProject.name).toBe(`Alpha`)
 
-      // Child hook: subscribes to the child Collection from the parent row,
-      // simulating a subcomponent using useLiveQuery(project.issues)
-      const { result: childResult } = renderHook(() =>
-        useLiveQuery((alphaProject as any).issues),
-      )
-
-      await waitFor(() => {
-        expect(childResult.current.data).toHaveLength(2)
+      // Child hooks simulate sibling subcomponents subscribing to the child
+      // Collections from their parent rows.
+      const { result: alphaResult } = renderHook(() => {
+        alphaRenderCount += 1
+        return useLiveQuery((alphaProject as any).issues)
+      })
+      const { result: betaResult } = renderHook(() => {
+        betaRenderCount += 1
+        return useLiveQuery((betaProject as any).issues)
       })
 
-      expect(childResult.current.data).toEqual(
+      await waitFor(() => {
+        expect(alphaResult.current.data).toHaveLength(2)
+        expect(alphaResult.current.isReady).toBe(true)
+        expect(betaResult.current.data).toHaveLength(1)
+        expect(betaResult.current.isReady).toBe(true)
+      })
+
+      expect(alphaResult.current.data).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: `i1`, title: `Bug in Alpha` }),
           expect.objectContaining({ id: `i2`, title: `Feature for Alpha` }),
         ]),
       )
+      const settledParentRenders = parentRenderCount
+      const settledAlphaRenders = alphaRenderCount
+      const settledBetaRenders = betaRenderCount
 
       // Add a new issue to Alpha — the child hook should reactively update
       act(() => {
@@ -2592,16 +2774,107 @@ describe(`Query Collections`, () => {
       })
 
       await waitFor(() => {
-        expect(childResult.current.data).toHaveLength(3)
+        expect(alphaResult.current.data).toHaveLength(3)
       })
 
-      expect(childResult.current.data).toEqual(
+      expect(alphaResult.current.data).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: `i1`, title: `Bug in Alpha` }),
           expect.objectContaining({ id: `i2`, title: `Feature for Alpha` }),
           expect.objectContaining({ id: `i4`, title: `New Alpha issue` }),
         ]),
       )
+      expect(parentRenderCount).toBe(settledParentRenders)
+      expect(alphaRenderCount).toBe(settledAlphaRenders + 1)
+      expect(betaRenderCount).toBe(settledBetaRenders)
+    })
+
+    it(`keeps nested array includes on the render after a parent update`, async () => {
+      type Document = {
+        id: string
+        name: string
+        schemaId: string
+      }
+      type Schema = {
+        id: string
+        name: string
+      }
+      type Field = {
+        id: string
+        schemaId: string
+        name: string
+      }
+
+      const documents = createCollection(
+        mockSyncCollectionOptions<Document>({
+          id: `includes-react-documents`,
+          getKey: (document) => document.id,
+          initialData: [{ id: `d1`, name: `Before`, schemaId: `s1` }],
+        }),
+      )
+      const schemas = createCollection(
+        mockSyncCollectionOptions<Schema>({
+          id: `includes-react-schemas`,
+          getKey: (schema) => schema.id,
+          initialData: [{ id: `s1`, name: `Schema` }],
+        }),
+      )
+      const fields = createCollection(
+        mockSyncCollectionOptions<Field>({
+          id: `includes-react-fields`,
+          getKey: (field) => field.id,
+          initialData: [{ id: `f1`, schemaId: `s1`, name: `Title` }],
+        }),
+      )
+
+      const { result } = renderHook(() =>
+        useLiveQuery((q) =>
+          q.from({ document: documents }).select(({ document }) => ({
+            id: document.id,
+            name: document.name,
+            schema: toArray(
+              q
+                .from({ schema: schemas })
+                .where(({ schema }) => eq(schema.id, document.schemaId))
+                .select(({ schema }) => ({
+                  id: schema.id,
+                  fields: toArray(
+                    q
+                      .from({ field: fields })
+                      .where(({ field }) => eq(field.schemaId, schema.id))
+                      .select(({ field }) => ({
+                        id: field.id,
+                        name: field.name,
+                      })),
+                  ),
+                })),
+            ),
+          })),
+        ),
+      )
+
+      await waitFor(() => {
+        expect(result.current.data[0]).toMatchObject({
+          name: `Before`,
+          schema: [{ id: `s1`, fields: [{ id: `f1`, name: `Title` }] }],
+        })
+      })
+
+      act(() => {
+        documents.utils.begin()
+        documents.utils.write({
+          type: `update`,
+          value: { id: `d1`, name: `After`, schemaId: `s1` },
+        })
+        documents.utils.commit()
+      })
+
+      await waitFor(() => {
+        expect(result.current.data[0]).toMatchObject({
+          name: `After`,
+          schema: [{ id: `s1`, fields: [{ id: `f1`, name: `Title` }] }],
+        })
+      })
     })
   })
 
@@ -2751,6 +3024,50 @@ describe(`Query Collections`, () => {
       await waitFor(() => {
         expect(result.current.data).toHaveLength(3)
       })
+    })
+
+    it(`reuses dynamically-created collection descriptors by id`, async () => {
+      const dbClient = new DbClient()
+      const materialize = vi.fn(() =>
+        mockSyncCollectionOptions<Person>({
+          id: `dynamic-descriptor-people`,
+          getKey: (person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const descriptors = new Set<object>()
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <DbProvider client={dbClient}>{children}</DbProvider>
+      )
+
+      const { result, rerender } = renderHook(
+        ({ team }) =>
+          useLiveQuery({
+            query: (q) => {
+              const descriptor = collectionOptions(
+                `dynamic-descriptor-people`,
+                materialize,
+              )
+              descriptors.add(descriptor)
+
+              return q
+                .from({ people: descriptor })
+                .where(({ people }) => eq(people.team, team))
+            },
+          }),
+        { initialProps: { team: `team1` }, wrapper },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data).toHaveLength(2)
+      })
+      const firstCollection = result.current.collection
+
+      rerender({ team: `team1` })
+
+      expect(descriptors.size).toBeGreaterThan(1)
+      expect(materialize).toHaveBeenCalledOnce()
+      expect(result.current.collection).toBe(firstCollection)
     })
 
     it(`keeps the same live query collection when derived identity is stable`, async () => {
@@ -2927,7 +3244,7 @@ describe(`Query Collections`, () => {
       warnSpy.mockRestore()
     })
 
-    it(`warns when a structured query captures an opaque runtime value without queryKey`, () => {
+    it(`uses runtime identity for opaque values in a structured query without queryKey`, () => {
       const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
@@ -2937,24 +3254,27 @@ describe(`Query Collections`, () => {
         }),
       )
 
-      expect(() =>
-        renderHook(() =>
+      const runtimeValue = () => `John Doe`
+      const { result, rerender } = renderHook(
+        ({ value }) =>
           useLiveQuery({
             query: (q) =>
               q
                 .from({ people: collection })
-                .where(({ people }) =>
-                  eq(people.name, (() => `John Doe`) as never),
-                ),
+                .where(({ people }) => eq(people.name, value as never)),
           }),
-        ),
-      ).not.toThrow()
+        { initialProps: { value: runtimeValue } },
+      )
+      const firstCollection = result.current.collection
+      rerender({ value: runtimeValue })
+      expect(result.current.collection).toBe(firstCollection)
+      rerender({ value: () => `John Doe` })
+      expect(result.current.collection).not.toBe(firstCollection)
 
       const warnings = warnSpy.mock.calls.filter(([message]) =>
         String(message).includes(`function value`),
       )
-      expect(warnings).toHaveLength(1)
-      expect(warnings[0]![0]).toContain(`queryKey`)
+      expect(warnings).toHaveLength(0)
       warnSpy.mockRestore()
     })
 

@@ -1,42 +1,40 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { expectAssertionFailure } from '../expected-failure.js'
 import { runTrace } from '../trace-runner.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
-let nextCollectionId = 0
+/**
+ * # Which distinctions determine the shape of an included result?
+ *
+ * Incremental query state can look correct while losing a semantic distinction
+ * that a later change exposes. This suite isolates three such distinctions:
+ *
+ * 1. Join multiplicity keeps a parent visible until its last contributor leaves.
+ * 2. A correlation through the joined alias differs from one through the source.
+ * 3. A null or unmatched singleton is absent, but a later valid key reactivates it.
+ *
+ * These laws form separate model nodes. Each node uses plain Maps and full
+ * recomputation. The shared trace runner applies an action to production and to
+ * the matching node, then compares the complete public result. Combining the
+ * nodes into one reference query engine would add machinery without making any
+ * law stronger.
+ *
+ * Stable campaigns preserve the histories that exposed these distinctions.
+ * Fresh random campaigns vary their value domains. Pinned examples cover route
+ * movement and repeated retirement because those laws need ordered histories,
+ * not more random scalar values.
+ */
 
 function rowsById<T extends { id: number }>(rows: Array<T>): Map<number, T> {
   return new Map(rows.map((row) => [row.id, row]))
-}
-
-function createControlledCollection<T extends { id: number }>(
-  name: string,
-  initialData: Array<T> = [],
-) {
-  const options = mockSyncCollectionOptions<T>({
-    id: `${name}-${nextCollectionId++}`,
-    getKey: (row) => row.id,
-    initialData,
-  })
-  const collection = createCollection(options)
-
-  return {
-    collection,
-    write(type: `insert` | `update` | `delete`, value: T): void {
-      options.utils.begin()
-      options.utils.write({ type, value })
-      options.utils.commit()
-    },
-  }
 }
 
 function stripVirtualProperties(value: unknown): unknown {
@@ -150,6 +148,7 @@ const multiplicityProjection: TraceProjection<
   unknown,
   Array<ParentRow>
 > = {
+  // A join projects one parent row for any positive contributor count.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
   recompute: ({ children, parents }) =>
     [...parents.values()]
@@ -165,17 +164,22 @@ type OrderRow = { id: number; partId: number }
 type ProductionRow = { id: number; orderId: number }
 type CorrelationTarget = `source` | `joined`
 
-function createCorrelationSources(correlationId: number, productionId: number) {
+function createCorrelationSources(
+  correlationId: number,
+  productionId: number,
+  orderId: number,
+) {
   const sources = {
-    parts: createControlledCollection<PartRow>(`correlation-parts`, [
-      { id: correlationId },
-    ]),
+    parts: createControlledCollection<PartRow>(
+      `correlation-parts`,
+      [...new Set([correlationId, orderId])].map((id) => ({ id })),
+    ),
     orders: createControlledCollection<OrderRow>(`correlation-orders`, [
-      { id: correlationId, partId: correlationId },
+      { id: orderId, partId: correlationId },
     ]),
     productions: createControlledCollection<ProductionRow>(
       `correlation-productions`,
-      [{ id: productionId, orderId: correlationId }],
+      [{ id: productionId, orderId }],
     ),
   }
   sources.orders.collection.createIndex((row) => row.id, {
@@ -240,24 +244,33 @@ function createCorrelationDriver(
   target: CorrelationTarget,
   correlationId: number,
   productionId: number,
-): TraceDriver<never, CorrelationContext> {
+  orderId = correlationId,
+): TraceDriver<OrderRow, CorrelationContext> {
   return {
     setup: () => {
-      const part = { id: correlationId }
-      const order = { id: correlationId, partId: correlationId }
-      const production = { id: productionId, orderId: correlationId }
-      const sources = createCorrelationSources(correlationId, productionId)
+      const parts = [...new Set([correlationId, orderId])].map((id) => ({ id }))
+      const order = { id: orderId, partId: correlationId }
+      const production = { id: productionId, orderId }
+      const sources = createCorrelationSources(
+        correlationId,
+        productionId,
+        orderId,
+      )
       return {
         target,
         sources,
         live: createCorrelationQuery(sources, target),
-        parts: rowsById([part]),
+        parts: rowsById(parts),
         orders: rowsById([order]),
         productions: rowsById([production]),
       }
     },
     start: ({ live }) => live.preload(),
-    apply: () => undefined,
+    apply: (order, { sources, orders }) => {
+      if (!orders.has(order.id)) throw new Error(`Missing order ${order.id}`)
+      sources.orders.write(`update`, { ...order })
+      orders.set(order.id, { ...order })
+    },
     cleanup: ({ live, sources }) => cleanupQuery(live, Object.values(sources)),
   }
 }
@@ -272,6 +285,7 @@ const correlationProjection: TraceProjection<
   unknown,
   CorrelationResult
 > = {
+  // Correlation chooses a route. Join identity only decides which rows meet.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
   recompute: ({ orders, parts, productions, target }) =>
     [...parts.values()]
@@ -373,6 +387,7 @@ const nullableProjection: TraceProjection<
   unknown,
   NullableResult
 > = {
+  // SQL equality never matches null. A later non-null key starts a fresh route.
   observe: ({ live }) => stripVirtualProperties(live.toArray),
   recompute: ({ authors, posts }) =>
     [...posts.values()]
@@ -384,24 +399,32 @@ const nullableProjection: TraceProjection<
   assertEqual: assertRowsEqual,
 }
 
-describe(`includes query-shape recompute oracle`, () => {
-  fcTest.prop([fc.integer({ min: 2, max: 5 })], {
-    numRuns: 12,
-    seed: 1703,
-  })(
-    `discovered trace: deleting one joined contributor preserves remaining multiplicity (#1703)`,
-    async (childCount) => {
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [1],
-            driver: createMultiplicityDriver(childCount),
-            projection: multiplicityProjection,
-          }),
-        { checkpoint: 1 },
-      )()
+function campaigns(fixedSeed: number, property: string) {
+  return [
+    {
+      name: `fixed`,
+      options: { numRuns: oracleRuns(12), seed: fixedSeed },
     },
-  )
+    {
+      name: `random or replayed`,
+      options: oraclePropertyOptions(12, property),
+    },
+  ]
+}
+
+describe(`includes query-shape recompute oracle`, () => {
+  for (const campaign of campaigns(1703, `includes-query-shape.multiplicity`)) {
+    fcTest.prop([fc.integer({ min: 2, max: 5 })], campaign.options)(
+      `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,
+      async (childCount) => {
+        await runTrace({
+          steps: [1],
+          driver: createMultiplicityDriver(childCount),
+          projection: multiplicityProjection,
+        })
+      },
+    )
+  }
 
   fcTest(
     `matches recomputation when the final joined contributor is deleted`,
@@ -413,32 +436,30 @@ describe(`includes query-shape recompute oracle`, () => {
       }),
   )
 
-  fcTest.prop(
-    [
-      fc.record({
-        correlationId: fc.integer({ min: 1, max: 100 }),
-        productionId: fc.integer({ min: 101, max: 200 }),
-      }),
-    ],
-    { numRuns: 12, seed: 1704 },
-  )(
-    `discovered trace: materialization follows correlation through a joined alias (#1704)`,
-    async ({ correlationId, productionId }) => {
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [],
-            driver: createCorrelationDriver(
-              `joined`,
-              correlationId,
-              productionId,
-            ),
-            projection: correlationProjection,
-          }),
-        { checkpoint: 0 },
-      )()
-    },
-  )
+  for (const campaign of campaigns(1704, `includes-query-shape.correlation`)) {
+    fcTest.prop(
+      [
+        fc.record({
+          correlationId: fc.integer({ min: 1, max: 100 }),
+          productionId: fc.integer({ min: 101, max: 200 }),
+        }),
+      ],
+      campaign.options,
+    )(
+      `materialization follows correlation through a joined alias (${campaign.name})`,
+      async ({ correlationId, productionId }) => {
+        await runTrace({
+          steps: [],
+          driver: createCorrelationDriver(
+            `joined`,
+            correlationId,
+            productionId,
+          ),
+          projection: correlationProjection,
+        })
+      },
+    )
+  }
 
   fcTest(
     `matches recomputation when materialization correlates through its source alias`,
@@ -450,23 +471,50 @@ describe(`includes query-shape recompute oracle`, () => {
       }),
   )
 
-  fcTest.prop([fc.integer({ min: 1, max: 100 })], {
-    numRuns: 12,
-    seed: 1706,
-  })(
-    `discovered trace: findOne maps a null correlation key to undefined (#1706)`,
-    async (postId) => {
-      await expectAssertionFailure(
-        () =>
-          runTrace({
-            steps: [],
-            driver: createNullableDriver([], [{ id: postId, authorId: null }]),
-            projection: nullableProjection,
-          }),
-        { checkpoint: 0 },
-      )()
+  fcTest.each([`source`, `joined`] as const)(
+    `keeps %s correlation distinct from join identity through route moves`,
+    (target) =>
+      runTrace({
+        // Part 1 is the joined correlation. Part 7 is the source correlation.
+        // Moving order.partId changes only the joined query, then restores it.
+        steps: [
+          { id: 7, partId: 7 },
+          { id: 7, partId: 1 },
+        ],
+        driver: createCorrelationDriver(target, 1, 101, 7),
+        projection: correlationProjection,
+      }),
+  )
+
+  fcTest(
+    `rejects the wrong correlation alias at the initial checkpoint`,
+    async () => {
+      await expect(
+        runTrace({
+          steps: [],
+          driver: createCorrelationDriver(`source`, 1, 101, 7),
+          projection: {
+            ...correlationProjection,
+            recompute: (context) =>
+              correlationProjection.recompute({ ...context, target: `joined` }),
+          },
+        }),
+      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 0 })
     },
   )
+
+  for (const campaign of campaigns(1706, `includes-query-shape.nullable`)) {
+    fcTest.prop([fc.integer({ min: 1, max: 100 })], campaign.options)(
+      `findOne maps a null correlation key to undefined (${campaign.name})`,
+      async (postId) => {
+        await runTrace({
+          steps: [],
+          driver: createNullableDriver([], [{ id: postId, authorId: null }]),
+          projection: nullableProjection,
+        })
+      },
+    )
+  }
 
   fcTest(
     `matches recomputation for an unmatched non-null correlation key`,
@@ -489,5 +537,42 @@ describe(`includes query-shape recompute oracle`, () => {
         ),
         projection: nullableProjection,
       }),
+  )
+
+  fcTest(
+    `reactivates a singleton after null and repeated route retirement`,
+    () =>
+      runTrace({
+        steps: [
+          { id: 1, authorId: 1 },
+          { id: 1, authorId: null },
+          { id: 1, authorId: 1 },
+        ],
+        driver: createNullableDriver(
+          [{ id: 1, name: `Ada` }],
+          [{ id: 1, authorId: null }],
+        ),
+        projection: nullableProjection,
+      }),
+  )
+
+  fcTest(
+    `rejects a stale empty singleton at its reactivation checkpoint`,
+    async () => {
+      await expect(
+        runTrace({
+          steps: [{ id: 1, authorId: 1 }],
+          driver: createNullableDriver(
+            [{ id: 1, name: `Ada` }],
+            [{ id: 1, authorId: null }],
+          ),
+          projection: {
+            ...nullableProjection,
+            observe: ({ live }) =>
+              live.toArray.map((row) => ({ id: row.id, author: undefined })),
+          },
+        }),
+      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 1 })
+    },
   )
 })

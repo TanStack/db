@@ -1,5 +1,7 @@
 import { createDeferred } from './deferred'
+import { deepEquals } from './utils'
 import { safeRandomUUID } from './utils/uuid'
+import { normalizeError } from './utils/error.js'
 import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
@@ -158,9 +160,11 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
  * - (update, update) → update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
+ * - (delete, insert) → insert without an authoritative row, null if restoring
+ *   the authoritative row, otherwise update
  *
- * Note: (delete, update) and (delete, insert) should never occur as the collection
- * layer prevents operations on deleted items within the same transaction.
+ * Note: (delete, update) should never occur as the collection layer prevents
+ * update operations on deleted items within the same transaction.
  *
  * @param existing - The existing mutation in the transaction
  * @param incoming - The new mutation being applied
@@ -198,7 +202,8 @@ function mergePendingMutations<T extends object>(
       return null
 
     case `update-delete`:
-      // Delete after update: delete dominates
+    case `delete-delete`:
+      // Delete dominates an update or earlier delete.
       return incoming
 
     case `update-update`: {
@@ -215,10 +220,38 @@ function mergePendingMutations<T extends object>(
       }
     }
 
-    case `delete-delete`:
     case `insert-insert`:
       // Same type: replace with latest
       return incoming
+
+    case `delete-insert`: {
+      const original = existing.collection._state.syncedData.get(existing.key)
+      if (original === undefined) return incoming
+      if (deepEquals(original, incoming.modified)) {
+        return null
+      }
+
+      const modified = incoming.modified
+      const keys = new Set([...Object.keys(original), ...Object.keys(modified)])
+      const changes: Partial<T> = {}
+      for (const key of keys) {
+        if (
+          Object.hasOwn(original, key) !== Object.hasOwn(modified, key) ||
+          !deepEquals(original[key as keyof T], modified[key as keyof T])
+        ) {
+          changes[key as keyof T] = modified[key as keyof T]
+        }
+      }
+
+      return {
+        ...incoming,
+        type: `update`,
+        original,
+        changes,
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+      }
+    }
 
     default: {
       // Exhaustiveness check
@@ -449,6 +482,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    * - **insert + delete** → removed (mutations cancel each other out)
    * - **update + delete** → delete (delete dominates)
    * - **update + update** → update (union changes, keep first original)
+   * - **delete + insert** → removed if restored, otherwise update
    * - **same type** → replace with latest
    *
    * This merging reduces over-the-wire churn and keeps the optimistic local view
@@ -535,6 +569,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
+    if (this.state === `failed`) return this
 
     this.setState(`failed`)
 
@@ -635,15 +670,11 @@ class Transaction<T extends object = Record<string, unknown>> {
       await this.mutationFn({
         transaction: this as unknown as TransactionWithMutations<T>,
       })
-
-      this.setState(`completed`)
-      this.touchCollection()
-
-      this.isPersisted.resolve(this)
     } catch (error) {
+      if ((this.state as TransactionState) !== `persisting`) return this
+
       // Preserve the original error for rethrowing
-      const originalError =
-        error instanceof Error ? error : new Error(String(error))
+      const originalError = normalizeError(error)
 
       // Update transaction with error information
       this.error = {
@@ -656,6 +687,17 @@ class Transaction<T extends object = Record<string, unknown>> {
 
       // Re-throw the original error to preserve identity and stack
       throw originalError
+    }
+
+    if ((this.state as TransactionState) !== `persisting`) return this
+
+    this.setState(`completed`)
+    // Publication errors cannot undo persistence or leave its receipt pending.
+    // Keep normal publication queued before callers resume from the receipt.
+    try {
+      this.touchCollection()
+    } finally {
+      this.isPersisted.resolve(this)
     }
 
     return this

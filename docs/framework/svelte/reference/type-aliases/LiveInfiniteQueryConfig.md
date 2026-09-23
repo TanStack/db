@@ -3,51 +3,14 @@ id: LiveInfiniteQueryConfig
 title: LiveInfiniteQueryConfig
 ---
 
-# Type Alias: LiveInfiniteQueryConfig\<TRow\>
-
 ```ts
-type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & object;
+type LiveInfiniteQueryConfig<_TRow> = InfiniteQueryOptions;
 ```
 
-Defined in: [useLiveInfiniteQuery.svelte.ts:43](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L43)
-
-## Type Declaration
-
-### ~~getNextPageParam()?~~
-
-```ts
-optional getNextPageParam: (lastPage, allPages, lastPageParam, allPageParams) => number | undefined;
-```
-
-#### Parameters
-
-##### lastPage
-
-`TRow`[]
-
-##### allPages
-
-`TRow`[][]
-
-##### lastPageParam
-
-`number`
-
-##### allPageParams
-
-`number`[]
-
-#### Returns
-
-`number` \| `undefined`
-
-#### Deprecated
-
-Pagination uses the shared controller's peek-ahead strategy.
-This remains for compatibility with TanStack Query conventions.
+Defined in: [packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts:45](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveInfiniteQuery.svelte.ts#L45)
 
 ## Type Parameters
 
-### TRow
+### _TRow
 
-`TRow`
+`_TRow`

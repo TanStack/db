@@ -3,13 +3,11 @@ id: MergeContextForJoinCallback
 title: MergeContextForJoinCallback
 ---
 
-# Type Alias: MergeContextForJoinCallback\<TContext, TNewSchema\>
-
 ```ts
 type MergeContextForJoinCallback<TContext, TNewSchema> = object & PreserveHasResultFlag<TContext["hasResult"]> & PreserveUnionFromFlag<TContext["hasUnionFrom"]> & PreserveFromSourceNames<TContext["fromSourceNames"]>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1258](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1258)
+Defined in: [packages/db/src/query/builder/types.ts:1267](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1267)
 
 MergeContextForJoinCallback - Special context for join condition callbacks
 

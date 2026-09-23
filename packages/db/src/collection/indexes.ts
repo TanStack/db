@@ -249,13 +249,13 @@ export class CollectionIndexesManager<
    * ```
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
-    indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
+    indexCallback: (row: SingleRowRefProxy<TOutput, TKey, true>) => any,
     config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     this.lifecycle.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
-    const singleRowRefProxy = createSingleRowRefProxy<TOutput>()
+    const singleRowRefProxy = createSingleRowRefProxy<TOutput, TKey>()
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 

@@ -3,12 +3,11 @@ id: QueryCollectionUtils
 title: QueryCollectionUtils
 ---
 
-# Interface: QueryCollectionUtils\<TItem, TKey, TInsertInput, TError\>
-
-Defined in: [packages/query-db-collection/src/query.ts:256](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L256)
+Defined in: [packages/query-db-collection/src/query.ts:262](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L262)
 
 Utility methods available on Query Collections for direct writes and manual operations.
-Direct writes bypass the normal query/mutation flow and write directly to the synced data store.
+Direct writes bypass optimistic mutations and write to the synced data store.
+Eager collections patch Query cache; on-demand collections revalidate scoped entries.
 
 ## Extends
 
@@ -54,7 +53,7 @@ The type of errors that can occur during queries
 clearError: () => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:301](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L301)
+Defined in: [packages/query-db-collection/src/query.ts:306](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L306)
 
 Clear the error state and trigger a refetch of the query
 
@@ -76,7 +75,7 @@ Error if the refetch fails
 dataUpdatedAt: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:292](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L292)
+Defined in: [packages/query-db-collection/src/query.ts:297](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L297)
 
 Get timestamp of last successful data update (in milliseconds)
 
@@ -88,7 +87,7 @@ Get timestamp of last successful data update (in milliseconds)
 errorCount: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:284](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L284)
+Defined in: [packages/query-db-collection/src/query.ts:289](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L289)
 
 Get the number of consecutive sync failures.
 Incremented only when query fails completely (not per retry attempt); reset on success.
@@ -101,7 +100,7 @@ Incremented only when query fails completely (not per retry attempt); reset on s
 fetchStatus: "idle" | "fetching" | "paused";
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:294](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L294)
+Defined in: [packages/query-db-collection/src/query.ts:299](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L299)
 
 Get current fetch status
 
@@ -113,7 +112,7 @@ Get current fetch status
 isError: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:279](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L279)
+Defined in: [packages/query-db-collection/src/query.ts:284](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L284)
 
 Check if the collection is in an error state
 
@@ -125,7 +124,7 @@ Check if the collection is in an error state
 isFetching: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:286](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L286)
+Defined in: [packages/query-db-collection/src/query.ts:291](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L291)
 
 Check if query is currently fetching (initial or background)
 
@@ -137,7 +136,7 @@ Check if query is currently fetching (initial or background)
 isLoading: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:290](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L290)
+Defined in: [packages/query-db-collection/src/query.ts:295](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L295)
 
 Check if query is loading for the first time (no data yet)
 
@@ -149,7 +148,7 @@ Check if query is loading for the first time (no data yet)
 isRefetching: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:288](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L288)
+Defined in: [packages/query-db-collection/src/query.ts:293](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L293)
 
 Check if query is refetching in background (not initial fetch)
 
@@ -161,7 +160,7 @@ Check if query is refetching in background (not initial fetch)
 lastError: TError | undefined;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:277](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L277)
+Defined in: [packages/query-db-collection/src/query.ts:282](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L282)
 
 Get the last error encountered by the query (if any); reset on success
 
@@ -173,7 +172,7 @@ Get the last error encountered by the query (if any); reset on success
 refetch: RefetchFn;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:263](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L263)
+Defined in: [packages/query-db-collection/src/query.ts:268](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L268)
 
 Manually trigger a refetch of the query
 
@@ -185,9 +184,9 @@ Manually trigger a refetch of the query
 writeBatch: (callback) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:273](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L273)
+Defined in: [packages/query-db-collection/src/query.ts:278](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L278)
 
-Execute multiple write operations as a single atomic batch to the synced data store
+Execute direct writes as one atomic batch, then update or revalidate the Query cache
 
 #### Parameters
 
@@ -207,9 +206,9 @@ Execute multiple write operations as a single atomic batch to the synced data st
 writeDelete: (keys) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:269](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L269)
+Defined in: [packages/query-db-collection/src/query.ts:274](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L274)
 
-Delete one or more items directly from the synced data store without triggering a query refetch or optimistic update
+Delete items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 
@@ -229,9 +228,9 @@ Delete one or more items directly from the synced data store without triggering 
 writeInsert: (data) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:265](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L265)
+Defined in: [packages/query-db-collection/src/query.ts:270](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L270)
 
-Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update
+Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 
@@ -251,9 +250,9 @@ Insert one or more items directly into the synced data store without triggering 
 writeUpdate: (updates) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:267](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L267)
+Defined in: [packages/query-db-collection/src/query.ts:272](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L272)
 
-Update one or more items directly in the synced data store without triggering a query refetch or optimistic update
+Update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 
@@ -273,9 +272,9 @@ Update one or more items directly in the synced data store without triggering a 
 writeUpsert: (data) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:271](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L271)
+Defined in: [packages/query-db-collection/src/query.ts:276](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L276)
 
-Insert or update one or more items directly in the synced data store without triggering a query refetch or optimistic update
+Insert or update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
 #### Parameters
 

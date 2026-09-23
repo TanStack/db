@@ -5,10 +5,6 @@ import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
 
-export interface AutoIndexConfig {
-  autoIndex?: `off` | `eager`
-}
-
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
   // Note: autoIndex: 'eager' without defaultIndexType is caught at construction time

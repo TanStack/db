@@ -3,8 +3,6 @@ id: MissingDeleteHandlerError
 title: MissingDeleteHandlerError
 ---
 
-# Class: MissingDeleteHandlerError
-
 Defined in: [packages/db/src/errors.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L289)
 
 ## Extends

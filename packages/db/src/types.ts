@@ -108,7 +108,9 @@ export interface PendingMutation<
   changes: ResolveTransactionChanges<T, TOperation>
   globalKey: string
 
-  key: any
+  key: TCollection extends Collection<any, infer TKey, any, any, any>
+    ? TKey
+    : never
   type: TOperation
   metadata: unknown
   syncMetadata: Record<string, unknown>
@@ -126,6 +128,12 @@ export type MutationFnParams<T extends object = Record<string, unknown>> = {
   transaction: TransactionWithMutations<T>
 }
 
+/**
+ * Persists an optimistic transaction. Do not start or await collection or
+ * live-query preloads here. Sync commits queue behind this function, so waiting
+ * for preload work that needs one of those commits can deadlock the mutation.
+ * Use the collection adapter's mutation acknowledgement helper instead.
+ */
 export type MutationFn<T extends object = Record<string, unknown>> = (
   params: MutationFnParams<T>,
 ) => Promise<any>
@@ -142,6 +150,13 @@ export type NonEmptyArray<T> = [T, ...Array<T>]
 export type TransactionWithMutations<
   T extends object = Record<string, unknown>,
   TOperation extends OperationType = OperationType,
+  TCollection extends Collection<T, any, any, any, any> = Collection<
+    T,
+    any,
+    any,
+    any,
+    any
+  >,
 > = Omit<Transaction<T>, `mutations`> & {
   /**
    * We must omit the `mutations` property from `Transaction<T>` before intersecting
@@ -162,7 +177,7 @@ export type TransactionWithMutations<
    * - TypeScript can properly narrow `TOperation` to the specific literal type
    * - This ensures `mutation.original` is correctly typed as `T` (not `{} | T`) when mapping
    */
-  mutations: NonEmptyArray<PendingMutation<T, TOperation>>
+  mutations: NonEmptyArray<PendingMutation<T, TOperation, TCollection>>
 }
 
 export interface TransactionConfig<T extends object = Record<string, unknown>> {
@@ -229,6 +244,14 @@ export interface SubscriptionStatusEvent<T extends SubscriptionStatus> {
   status: T
 }
 
+/** Event emitted when a subset requested by this subscription fails to load. */
+export interface SubscriptionLoadSubsetErrorEvent {
+  type: `loadSubset:error`
+  subscription: Subscription
+  options: LoadSubsetOptions
+  error: unknown
+}
+
 /**
  * Event emitted when subscription is unsubscribed
  */
@@ -244,6 +267,7 @@ export type SubscriptionEvents = {
   'status:change': SubscriptionStatusChangeEvent
   'status:ready': SubscriptionStatusEvent<`ready`>
   'status:loadingSubset': SubscriptionStatusEvent<`loadingSubset`>
+  'loadSubset:error': SubscriptionLoadSubsetErrorEvent
   unsubscribed: SubscriptionUnsubscribedEvent
 }
 
@@ -254,6 +278,8 @@ export type SubscriptionEvents = {
 export interface Subscription extends EventEmitter<SubscriptionEvents> {
   /** Current status of the subscription */
   readonly status: SubscriptionStatus
+  /** Most recent subset-load failure observed by this subscription. */
+  readonly lastError: unknown | undefined
 }
 
 /**
@@ -266,9 +292,8 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
 export type CursorExpressions = {
   /**
    * Expression for rows greater than (after) the cursor value.
-   * For multi-column orderBy, this is a composite cursor using OR of conditions.
-   * Example for [col1 ASC, col2 DESC] with values [v1, v2]:
-   *   or(gt(col1, v1), and(eq(col1, v1), lt(col2, v2)))
+   * Core emits cursors for a single order column. Multi-column queries use
+   * prefix-and-tie loading instead of constructing a composite cursor.
    */
   whereFrom: BasicExpression<boolean>
   /**
@@ -284,6 +309,15 @@ export type CursorExpressions = {
   lastKey?: string | number
 }
 
+/**
+ * Immutable request data. From submission onward, callers and adapters must
+ * not mutate these options, their expression trees, comparison options, or
+ * constant payloads (including Dates, byte arrays, and membership arrays).
+ * Create new request data to change a demand; core does not clone or freeze it.
+ * Use stable data properties, not stateful getters, for request data.
+ * Signal and subscription references stay fixed, but their lifecycle remains
+ * live: aborting the signal or releasing the subscription is supported.
+ */
 export type LoadSubsetOptions = {
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
@@ -303,6 +337,14 @@ export type LoadSubsetOptions = {
    */
   offset?: number
   /**
+   * Aborted when this exact subset request is no longer current. Cancellation
+   * is cooperative: async adapters should stop before installing more
+   * request-scoped rows. If an in-flight baseline cannot be canceled, the
+   * returned load promise must settle after those writes become visible so
+   * core can keep overlapping replay private until then.
+   */
+  signal?: AbortSignal
+  /**
    * The subscription that triggered the load.
    * Advanced sync implementations can use this for:
    * - LRU caching keyed by subscription
@@ -313,8 +355,35 @@ export type LoadSubsetOptions = {
   subscription?: Subscription
 }
 
+/** @internal Result returned by the collection's normalized subset boundary. */
+export type LoadSubsetRequestResult = true | Promise<void>
+
+/**
+ * Loads one subset and transfers its ongoing resource ownership only after
+ * returning `true` or a promise. An implementation that throws synchronously
+ * must release any partially acquired resource before throwing. A successful
+ * implementation must await or return every applied receipt from the sync
+ * `commit()` calls that establish the loaded subset. A result describes only
+ * the exact `options` passed to this call.
+ */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
+/**
+ * Confirms whether a committed sync transaction is visible or is waiting for
+ * its turn in the collection's causal queue. A pending receipt rejects with an
+ * error named `AbortError` if cancellation wins before application. Once the
+ * writes are visible, later cancellation has no effect.
+ */
+export type SyncAppliedReceipt = true | Promise<void>
+
+/**
+ * Releases the exact acquisition created for `options`.
+ *
+ * Implementations must be idempotent and must not throw. An adapter owns any
+ * remote unsubscribe retry needed to make release reliable. Core attempts
+ * each acquisition's release once, reports failures, and continues retiring
+ * other acquisitions. It does not retry a failed subset release.
+ */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 
 export type CleanupFn = () => void
@@ -337,8 +406,23 @@ export interface SyncConfig<
      */
     begin: (options?: { immediate?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
-    commit: () => void
+    /**
+     * Commit the active sync transaction in FIFO order.
+     * Returns `true` when the writes and events are already visible. Otherwise
+     * returns a receipt that resolves after they become visible. If collection
+     * cleanup or an optional request abort abandons the transaction first, the
+     * receipt rejects with an error named `AbortError`.
+     * Pass a signal only for request-scoped work that must not publish after
+     * cancellation. Aborting after application has no effect.
+     */
+    commit: (signal?: AbortSignal) => SyncAppliedReceipt
+    /** Signal that a usable initial or recovered snapshot is available. */
     markReady: () => void
+    /**
+     * Signal that initial sync failed before producing a usable snapshot.
+     * When supplied, `error` is preserved as the rejection reason from `preload()`.
+     */
+    markError: (error?: unknown) => void
     truncate: () => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
@@ -463,7 +547,11 @@ export type UpdateMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `update`>
+  transaction: TransactionWithMutations<
+    T,
+    `update`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 
@@ -472,7 +560,11 @@ export type InsertMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `insert`>
+  transaction: TransactionWithMutations<
+    T,
+    `insert`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 export type DeleteMutationFnParams<
@@ -480,10 +572,17 @@ export type DeleteMutationFnParams<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 > = {
-  transaction: TransactionWithMutations<T, `delete`>
+  transaction: TransactionWithMutations<
+    T,
+    `delete`,
+    Collection<T, TKey, TUtils>
+  >
   collection: Collection<T, TKey, TUtils>
 }
 
+/**
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+ */
 export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -491,6 +590,9 @@ export type InsertMutationFn<
   TReturn = any,
 > = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
+/**
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+ */
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -498,6 +600,9 @@ export type UpdateMutationFn<
   TReturn = any,
 > = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
+/**
+ * @typeParam TReturn - DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+ */
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -518,7 +623,8 @@ export type DeleteMutationFn<
  * @example
  * // Status transitions
  * // idle → loading → ready (when markReady() is called)
- * // Any status can transition to → error or cleaned-up
+ * // Any active status can transition to → error or cleaned-up
+ * // error → ready after a successful sync recovery
  */
 export type CollectionStatus =
   /** Collection is created but sync hasn't started yet (when startSync config is false) */
@@ -562,6 +668,10 @@ export interface BaseCollectionConfig<
   /**
    * Time in milliseconds after which the collection will be garbage collected
    * when it has no active subscribers. Defaults to 5 minutes (300000ms).
+   * Sync started without subscribers gets a minimum 50ms grace period.
+   * Pending preloads retain the collection until they settle. Preloading ready
+   * data refreshes the retention period. A non-positive or non-finite value
+   * disables automatic garbage collection.
    */
   gcTime?: number
   /**
@@ -621,8 +731,8 @@ export interface BaseCollectionConfig<
   syncMode?: SyncMode
   /**
    * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
+   *
    * @example
    * // Basic insert handler
    * onInsert: async ({ transaction, collection }) => {
@@ -631,10 +741,33 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
+   * // Insert handler with refetch (Query Collection)
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.createTodo(newItem)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
+   * }
+   *
+   * @example
+   * // Insert handler with sync wait (Electric Collection)
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.createTodo(newItem)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
+   * }
+   *
+   * @example
    * // Insert handler with multiple items
    * onInsert: async ({ transaction, collection }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   await api.createTodos(items)
+   *   // Refetch to get updated data from server
+   *   await collection.utils.refetch()
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -642,30 +775,22 @@ export interface BaseCollectionConfig<
    * onInsert: async ({ transaction, collection }) => {
    *   try {
    *     const newItem = transaction.mutations[0].modified
-   *     const result = await api.createTodo(newItem)
-   *     return result
+   *     await api.createTodo(newItem)
    *   } catch (error) {
    *     console.error('Insert failed:', error)
-   *     throw error // This will cause the transaction to fail
+   *     throw error // This will cause the transaction to rollback
    *   }
    * }
-   *
-   * @example
-   * // Insert handler with metadata
-   * onInsert: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.createTodo(mutation.modified, {
-   *     source: mutation.metadata?.source,
-   *     timestamp: mutation.createdAt
-   *   })
-   * }
    */
-  onInsert?: InsertMutationFn<T, TKey, TUtils, TReturn>
+  onInsert?:
+    | InsertMutationFn<T, TKey, TUtils, void>
+    // Return-value compatibility will be removed in v1.0.
+    | InsertMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
+   *
    * @example
    * // Basic update handler
    * onUpdate: async ({ transaction, collection }) => {
@@ -674,11 +799,24 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Update handler with partial updates
+   * // Update handler with refetch (Query Collection)
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const changes = mutation.changes // Only the changed fields
    *   await api.updateTodo(mutation.original.id, changes)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
+   * }
+   *
+   * @example
+   * // Update handler with sync wait (Electric Collection)
+   * onUpdate: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.updateTodo(mutation.original.id, mutation.changes)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
@@ -689,6 +827,8 @@ export interface BaseCollectionConfig<
    *     changes: m.changes
    *   }))
    *   await api.updateTodos(updates)
+   *   await collection.utils.refetch()
+   *   return { refetch: false }
    * }
    *
    * @example
@@ -704,11 +844,14 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onUpdate?: UpdateMutationFn<T, TKey, TUtils, TReturn>
+  onUpdate?:
+    | UpdateMutationFn<T, TKey, TUtils, void>
+    // Return-value compatibility will be removed in v1.0.
+    | UpdateMutationFn<T, TKey, TUtils, TReturn>
   /**
    * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * Returning a value is deprecated; coordinate synchronization through collection utilities instead.
+   *
    * @example
    * // Basic delete handler
    * onDelete: async ({ transaction, collection }) => {
@@ -717,10 +860,23 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Delete handler with multiple items
+   * // Delete handler with refetch (Query Collection)
    * onDelete: async ({ transaction, collection }) => {
    *   const keysToDelete = transaction.mutations.map(m => m.key)
    *   await api.deleteTodos(keysToDelete)
+   *   // Trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   *   // Prevent the pre-1.0 compatibility wrapper from refetching again.
+   *   return { refetch: false }
+   * }
+   *
+   * @example
+   * // Delete handler with sync wait (Electric Collection)
+   * onDelete: async ({ transaction, collection }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const result = await api.deleteTodo(mutation.original.id)
+   *   // Wait for txid to sync
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
@@ -747,7 +903,10 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+  onDelete?:
+    | DeleteMutationFn<T, TKey, TUtils, void>
+    // Return-value compatibility will be removed in v1.0.
+    | DeleteMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Specifies how to compare data in the collection.
@@ -855,7 +1014,7 @@ export interface SubscribeChangesOptions<
    * })
    * ```
    */
-  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>>) => any
+  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>, TKey, true>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
@@ -879,7 +1038,14 @@ export interface SubscribeChangesOptions<
    * Allows the caller to directly track the loading promise for isReady status.
    * @internal
    */
-  onLoadSubsetResult?: (result: Promise<void> | true) => void
+  onLoadSubsetResult?: (result: LoadSubsetRequestResult) => void
+  /** Receives subset-load failures scoped to this subscription. @internal */
+  onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  /** Lets a live-query graph retain its last publication during replay. @internal */
+  truncateReplayPublication?: {
+    readonly start: () => void
+    readonly succeed: () => void
+  }
 }
 
 export interface SubscribeChangesSnapshotOptions<

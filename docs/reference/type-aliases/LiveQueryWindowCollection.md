@@ -3,8 +3,6 @@ id: LiveQueryWindowCollection
 title: LiveQueryWindowCollection
 ---
 
-# Type Alias: LiveQueryWindowCollection
-
 ```ts
 type LiveQueryWindowCollection = Collection<any, any, any> & object;
 ```

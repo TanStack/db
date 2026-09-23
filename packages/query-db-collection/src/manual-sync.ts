@@ -5,7 +5,11 @@ import {
   UpdateOperationItemNotFoundError,
 } from './errors'
 import type { QueryClient } from '@tanstack/query-core'
-import type { ChangeMessage, Collection } from '@tanstack/db'
+import type {
+  ChangeMessage,
+  Collection,
+  SyncAppliedReceipt,
+} from '@tanstack/db'
 
 // Track active batch operations per context to prevent cross-collection contamination
 const activeBatchContexts = new WeakMap<
@@ -42,13 +46,13 @@ export interface SyncContext<
    */
   begin: (options?: { immediate?: boolean }) => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
-  commit: () => void
+  commit: () => SyncAppliedReceipt
   /**
    * Optional function to update the query cache with the latest synced data.
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (items: Array<TRow>) => void
+  updateCacheData?: (getItems: () => Array<TRow>) => void
 }
 
 interface NormalizedOperation<
@@ -217,12 +221,16 @@ export function performWriteOperations<
   ctx.commit()
 
   // Update query cache after successful commit
-  const updatedData = Array.from(ctx.collection._state.syncedData.values())
   if (ctx.updateCacheData) {
-    ctx.updateCacheData(updatedData)
+    ctx.updateCacheData(() =>
+      Array.from(ctx.collection._state.syncedData.values()),
+    )
   } else {
     // Fallback: directly set the cache with raw array (for non-Query Collection consumers)
-    ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
+    ctx.queryClient.setQueryData(
+      ctx.queryKey,
+      Array.from(ctx.collection._state.syncedData.values()),
+    )
   }
 }
 

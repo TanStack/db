@@ -2,15 +2,15 @@
 name: db-core/custom-adapter
 description: >
   Building custom collection adapters for new backends. SyncConfig interface:
-  sync function receiving begin, write, commit, markReady, truncate, metadata
+  sync function receiving begin, write, commit, markReady, markError, truncate, metadata
   primitives and returning cleanup, loadSubset, and optional unloadSubset
   handlers.
   ChangeMessage format (insert, update, delete). On-demand LoadSubsetOptions
   (where, orderBy, limit, offset, cursor). Expression parsing:
   parseWhereExpression, parseOrderByExpression,
   extractSimpleComparisons, parseLoadSubsetOptions. Collection options creator
-  pattern. rowUpdateMode (partial vs full). Subscription lifecycle and cleanup
-  functions. Persisted sync metadata API (metadata.row and metadata.collection)
+  pattern. rowUpdateMode (partial vs full). Sync run, subscription lifecycle,
+  and cleanup functions. Persisted sync metadata API (metadata.row and metadata.collection)
   for storing per-row and per-collection adapter state.
 type: sub-skill
 library: db
@@ -23,6 +23,12 @@ sources:
 This skill builds on db-core and db-core/collection-setup. Read those first.
 
 # Custom Adapter Authoring
+
+Each call to an adapter's `sync()` function starts a **sync run**. The run owns
+the callbacks and resources installed by that call until its returned cleanup
+ends them. A sync run may make several backend requests or open a longer-lived
+provider session, so do not use “request” or “session” as a synonym for the
+run.
 
 ## Setup
 
@@ -48,9 +54,10 @@ function myBackendCollectionOptions<T extends object>(config: {
   return {
     getKey: config.getKey,
     sync: {
-      sync: ({ begin, write, commit, markReady }) => {
+      sync: ({ begin, write, commit, markReady, markError, collection }) => {
         let isInitialSyncComplete = false
         const bufferedEvents: Array<BackendEvent<T>> = []
+        const initialSyncAbort = new AbortController()
 
         // 1. Subscribe to real-time events FIRST
         const unsubscribe = myWebSocket.subscribe(config.endpoint, (event) => {
@@ -64,28 +71,37 @@ function myBackendCollectionOptions<T extends object>(config: {
         })
 
         // 2. Fetch initial data
-        fetch(config.endpoint).then(async (res) => {
-          const items = await res.json()
-          begin()
-          for (const item of items) {
-            write({ type: 'insert', value: item })
-          }
-          commit()
-
-          // 3. Process buffered events
-          isInitialSyncComplete = true
-          for (const event of bufferedEvents) {
+        void fetch(config.endpoint, { signal: initialSyncAbort.signal })
+          .then(async (res) => {
+            const items = await res.json()
             begin()
-            write({ type: event.type, key: event.id, value: event.data })
+            for (const item of items) {
+              write({ type: 'insert', value: item })
+            }
             commit()
-          }
 
-          // 4. Signal readiness
-          markReady()
-        })
+            // 3. Process buffered events
+            isInitialSyncComplete = true
+            for (const event of bufferedEvents) {
+              begin()
+              write({ type: event.type, key: event.id, value: event.data })
+              commit()
+            }
+
+            // 4. Signal that a usable snapshot exists
+            markReady()
+          })
+          .catch((error) => {
+            if (initialSyncAbort.signal.aborted) return
+            console.error('Initial sync failed:', error)
+            // Only initial startup owns collection readiness. A later refetch
+            // failure must keep the last ready snapshot usable.
+            if (collection.status === 'loading') markError(error)
+          })
 
         // 5. Return cleanup function
         return () => {
+          initialSyncAbort.abort()
           unsubscribe()
         }
       },
@@ -188,6 +204,13 @@ return the fetched rows. `parseLoadSubsetOptions()` returns only `filters`,
 opaque backend cursor; translate or combine those expressions for your API.
 Return `unloadSubset` only when `loadSubset` creates an ongoing resource, such
 as a per-subset server subscription, that must be released.
+Ownership transfers to core only when `loadSubset` returns `true` or a promise.
+If it throws synchronously after partial setup, release that partial resource
+before throwing; core will not call `unloadSubset` for a request that never
+returned. A must-refetch can call `loadSubset` again with the same options. Each
+successful return is a fresh acquisition: core releases the previous
+acquisition when its replacement returns, then releases the current one when
+the demand ends.
 
 ### Managing optimistic state duration
 
@@ -210,7 +233,7 @@ Without persistence the metadata is in-memory only and does not survive
 reloads. With persistence, it is durable across sessions.
 
 ```ts
-sync: ({ begin, write, commit, markReady, metadata }) => {
+sync: ({ begin, write, commit, markReady, markError, metadata }) => {
   if (!metadata) throw new Error('Sync metadata API is unavailable')
 
   // Row metadata: store per-row state (e.g. server version, ETag)
@@ -254,6 +277,7 @@ sync: ({ begin, write, commit, markReady, metadata }) => {
   })
 
   stream.on('ready', () => markReady())
+  stream.on('initial-error', (error) => markError(error))
   return () => stream.close()
 }
 ```
@@ -321,6 +345,14 @@ sync: ({ begin, write, commit, markReady }) => {
 ```
 
 `markReady()` transitions the collection to "ready" status. Without it, live queries never resolve and `useLiveSuspenseQuery` hangs forever in Suspense.
+
+If initial sync fails before it produces a usable snapshot, call
+`markError(error)` instead. This rejects readiness waits with the supplied cause
+and moves dependent live queries to the error state. Calling `markError()`
+without a cause remains supported and rejects with a generic collection-state
+error. Later successful work in the same sync run can call `markReady()` to
+recover. Cleanup ends that run; a restart invokes `sync()` again and starts a
+new one.
 
 Source: docs/guides/collection-options-creator.md
 

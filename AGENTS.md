@@ -2,6 +2,52 @@
 
 This guide provides principles and patterns for AI agents contributing to the TanStack DB codebase. These guidelines are derived from PR review patterns and reflect the quality standards expected in this project.
 
+## Required reading: live-query materialization
+
+Before reading, analyzing, or modifying correlated live-query materialization
+code under `packages/db/src/query/live/`, read
+`packages/db/src/query/live/ARCHITECTURE.md` in full. Read it before changing
+the related includes oracle tests as well.
+
+Treat that document's component boundaries and normative laws as constraints.
+If a change intentionally revises an architectural contract, update the
+architecture document in the same pull request.
+
+## Required reading: executable subsystem models
+
+Read `docs/contributing/glossary.md` before naming or renaming a subsystem
+state, action, boundary, or observation. Production code, executable models,
+tests, and design documents must use the same term for the same concept. A
+model may stay structurally independent, but it must declare any abstraction
+that combines, splits, or does not correspond to production concepts.
+
+Some oracle files are also the shortest documentation for their subsystem.
+Before changing a covered contract or its machinery, use
+`docs/contributing/oracle-coverage.md` to find the primary executable owner and
+read its stated limits. Do not infer authority from a filename alone.
+
+Read these stable entry points before the narrower owner:
+
+- For correlated live-query materialization, read the architecture document
+  required above.
+- For Collection mutation admission, subscription ownership, replay,
+  publication, or disposal, read
+  `packages/db/tests/collection-subscription-lifecycle-grammar.ts`.
+- For optimistic snapshots and settlement, read
+  `packages/db/tests/optimistic-history-oracle.ts`.
+- For opaque cursor pagination, read
+  `packages/query-db-collection/tests/cursor-pagination/model.ts`.
+- For TrailBase lifecycle work, read
+  `packages/trailbase-db-collection/tests/ORACLE.md`.
+- For cross-framework behavior, read the shared contract under
+  `packages/db/tests/conformance/` and the receiving framework's driver. One
+  framework's scheduling cut does not prove another's.
+
+The opening prose states the contract. The small model states the expected
+behavior. The production driver proves that the implementation refines the
+model. If a change revises one of these contracts, update all three in the same
+pull request. Do not update only the assertions to match new production output.
+
 ## Table of Contents
 
 1. [Type Safety](#type-safety)
@@ -349,9 +395,23 @@ const dependentBuilders = [] // Accurately describes dependents
 
 ## Testing Requirements
 
+### Required reading: oracle tests
+
+Before designing, changing, or reviewing an oracle or generated-history test,
+read [Writing reliable oracle tests](docs/contributing/oracle-tests.md).
+Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
+owner and its limits before adding another model. The guide explains testing
+methods; it does not authorize new product behavior or retire existing laws.
+
+When an oracle has a stable subsystem model, write it as executable subsystem
+documentation. Follow the guide's section on literate oracle files. Keep the
+contract, model, generated history grammar, production driver, and observations
+close enough that a reviewer can compare them directly.
+
 ### Always Add Tests for Bugs
 
-**Key Principle:** If you're fixing a bug, add a unit test that reproduces the bug before fixing it. This ensures:
+**Key Principle:** Reproduce a bug in a test before fixing it. Prefer extending
+an oracle as described below over adding an isolated unit test. This ensures:
 
 - The bug is actually fixed
 - The bug doesn't regress in the future
@@ -367,6 +427,60 @@ test('ignores snapshot that resolves after up-to-date message', async () => {
   // Verify it's handled correctly
 })
 ```
+
+### Treat Every Review Bug as a Test Gap
+
+When a reviewer agent confirms a bug, it must also ask why the existing tests
+did not catch it. The finding should name the missing test law, state
+transition, generator dimension, adapter boundary, or assertion. If a test or
+oracle should already have caught the bug, identify the false-green model,
+classifier, fixture, or assertion that let it pass. Use that analysis to suggest
+the smallest test or oracle improvement that would catch the same class of bug,
+not only the reported example.
+
+### Keep Oracles Independent
+
+An oracle is useful only when its expected result comes from a source independent
+of the implementation under test. Do not translate production branches, state
+machines, classifiers, or helper functions into a second implementation and call
+that an oracle. Both copies can encode the same wrong assumption.
+
+- Derive expected behavior from public contracts, documented prior behavior,
+  mathematical laws, or a separately specified reference model.
+- Keep the reference model structurally different from production. Do not import
+  the production helper or reuse its classifications to compute expected results.
+- Preserve existing contract tests unless a product or design decision explicitly
+  changes the contract. Rewriting a passing expectation to match new production
+  behavior is a design review, not routine test maintenance.
+- When production work suggests an oracle change, compare the old and new
+  semantics with counterexamples before editing the oracle.
+- Use hostile mutants to prove the oracle rejects plausible wrong designs,
+  including the mistake production currently makes. A green oracle without a
+  demonstrated kill is weak evidence.
+- Use process grammar to explore lifecycle paths, and design grammar to challenge
+  the oracle's reference semantics. More generated traces cannot repair a wrong
+  reference model.
+
+### Prefer Oracle Coverage Over Isolated Regressions
+
+An oracle that checks general laws across generated states and histories is a
+stronger form of coverage than a unit test for one specific example. Prefer
+extending an existing oracle when it can cover the behavior. Add the missing
+model rule, generator dimension, state transition, or observable assertion;
+adding more pinned examples alone does not generalize the oracle.
+
+Use a focused regression to isolate and shrink a failure, then keep it as a
+replay example for the broader oracle where possible. Verify that the expanded
+oracle fails without the fix and passes with it. Keep valuable unit tests, but
+do not treat them as a substitute for applicable oracle coverage. If an oracle
+is not practical for the behavior, explain why a focused test is sufficient.
+
+### Name Tests After Behavior
+
+Test names should state the behavior they prove. Do not put issue or pull
+request numbers in test names; those references become stale and make the test
+suite harder to read. When an external report contains essential context that
+the test cannot express, link it in a nearby comment instead.
 
 ### Test Corner Cases
 

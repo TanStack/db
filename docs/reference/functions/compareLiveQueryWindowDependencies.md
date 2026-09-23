@@ -3,13 +3,11 @@ id: compareLiveQueryWindowDependencies
 title: compareLiveQueryWindowDependencies
 ---
 
-# Function: compareLiveQueryWindowDependencies()
-
 ```ts
 function compareLiveQueryWindowDependencies(previous, current): object;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:429](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L429)
+Defined in: [packages/db/src/live-query-window-controller.ts:432](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L432)
 
 **`Internal`**
 

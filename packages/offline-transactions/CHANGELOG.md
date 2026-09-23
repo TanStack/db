@@ -1,5 +1,103 @@
 # @tanstack/offline-transactions
 
+## 1.0.56
+
+### Patch Changes
+
+- Ignore repeated leadership notifications when the state has not changed to avoid restarting active replay. Settle each transaction's commit when that transaction completes, without waiting for the shared queue to drain. ([#1816](https://github.com/TanStack/db/pull/1816))
+
+  Keep a completed transaction registered until its outbox deletion settles so a leadership change during deletion does not schedule the same mutation again.
+
+- Preserve fractional top-k replacements regardless of delta order, including left-join updates, and honor B-tree lookup fallbacks after node splits. Preserve own JSON data properties such as `__proto__` during mutation detachment and offline transaction serialization. ([#1816](https://github.com/TanStack/db/pull/1816))
+
+  Compare same-key top-k values directly instead of hashing every replacement. This preserves cyclic payloads and avoids unnecessary full-payload traversal for ordinary updates.
+
+  Cancel structurally equal mapped top-k deltas before applying replacements. Escape Date-marker-shaped user objects in new offline records while retaining read support for the original record format.
+
+  Offline storage compatibility: new records use `valueEncoding: 2`. Older clients
+  cannot decode escaped marker-shaped objects correctly, so do not mix old and
+  new clients against the same pending outbox or downgrade while new records
+  remain. New clients still read the original unversioned format. Unknown
+  encodings and corrupt records are reported through warnings and left in
+  storage, not silently discarded; recovery policy is tracked in RFC #1659.
+
+  Reject malformed escaped-object markers rather than inventing empty mutation
+  data. Avoid redundant transfer work for zero-width fractional top-k windows
+  and avoid descriptor writes for ordinary keys during draft copying.
+
+- Updated dependencies [[`3c4c35d`](https://github.com/TanStack/db/commit/3c4c35d5868c908979058c4dbeae7c4ac9eab88b)]:
+  - @tanstack/db@0.9.2
+
+## 1.0.55
+
+### Patch Changes
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`ad043b7`](https://github.com/TanStack/db/commit/ad043b7455a5bdc549c36833bc72ddbe9ce8afed), [`025a079`](https://github.com/TanStack/db/commit/025a0799dd7690d892cacff5493b7270c33fdc2c), [`ddc129e`](https://github.com/TanStack/db/commit/ddc129eeab84d7eca4f2972c3dcc37506202a43d)]:
+  - @tanstack/db@0.9.1
+
+## 1.0.54
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db@0.9.0
+
+## 1.0.53
+
+### Patch Changes
+
+- Updated dependencies [[`bbc9edf`](https://github.com/TanStack/db/commit/bbc9edf28ef707c8fb3c451fe2c4724039a0037a)]:
+  - @tanstack/db@0.8.7
+
+## 1.0.52
+
+### Patch Changes
+
+- Updated dependencies [[`ae2fe74`](https://github.com/TanStack/db/commit/ae2fe74e4cb4e74500a90034e6db7987bbd90bd8)]:
+  - @tanstack/db@0.8.6
+
+## 1.0.51
+
+### Patch Changes
+
+- Updated dependencies [[`d8defd2`](https://github.com/TanStack/db/commit/d8defd2a8eb96162cbd4e24970d519eac217bb95), [`9ad882f`](https://github.com/TanStack/db/commit/9ad882f71872aa2210b93ea93d084bd08bedb6a4), [`8c5838d`](https://github.com/TanStack/db/commit/8c5838ddd5f08b3c298d4458cae1ce599af80624)]:
+  - @tanstack/db@0.8.5
+
+## 1.0.50
+
+### Patch Changes
+
+- Updated dependencies [[`3131de1`](https://github.com/TanStack/db/commit/3131de14507006f72631947a61e040b1523d417f), [`8f432ba`](https://github.com/TanStack/db/commit/8f432ba226df2a27d67498ddd1df8468f93ff776)]:
+  - @tanstack/db@0.8.4
+
+## 1.0.49
+
+### Patch Changes
+
+- Updated dependencies [[`99ba511`](https://github.com/TanStack/db/commit/99ba5113b21fd850a8f3e517e5d44ea42ac9f984), [`43cc741`](https://github.com/TanStack/db/commit/43cc741842ae3689128c308be19069b062642f12)]:
+  - @tanstack/db@0.8.3
+
+## 1.0.48
+
+### Patch Changes
+
+- Updated dependencies [[`c521b5d`](https://github.com/TanStack/db/commit/c521b5d6503d8fdf03574b9f9791143e59d34204)]:
+  - @tanstack/db@0.8.2
+
+## 1.0.47
+
+### Patch Changes
+
+- Updated dependencies [[`5d9335d`](https://github.com/TanStack/db/commit/5d9335d0d42c1cc1ec2b92be8ce40ae8abe42827), [`a20352a`](https://github.com/TanStack/db/commit/a20352a9a7b64c9708bef9a1dfb90c96426b6730)]:
+  - @tanstack/db@0.8.1
+
+## 1.0.46
+
+### Patch Changes
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/db@0.8.0
+
 ## 1.0.45
 
 ### Patch Changes

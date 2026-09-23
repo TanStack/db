@@ -33,21 +33,12 @@ type PreviousController = {
 
 type InfiniteQueryOptions = {
   pageSize?: number
+  /** First result-page label, not a server cursor or remote offset. */
   initialPageParam?: number
 }
 
-export type LiveInfiniteQueryConfig<TRow> = InfiniteQueryOptions & {
-  /**
-   * @deprecated Pagination uses the shared controller's peek-ahead strategy.
-   * This remains for compatibility with TanStack Query conventions.
-   */
-  getNextPageParam?: (
-    lastPage: Array<TRow>,
-    allPages: Array<Array<TRow>>,
-    lastPageParam: number,
-    allPageParams: Array<number>,
-  ) => number | undefined
-}
+// Keep the generic parameter for existing typed config wrappers.
+export type LiveInfiniteQueryConfig<_TRow> = InfiniteQueryOptions
 
 export type UseLiveInfiniteQueryConfig<
   TContext extends Context & NonSingleResult,
@@ -127,6 +118,11 @@ export function useLiveInfiniteQuery<
   config: InfiniteQueryOptions,
   deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
+  if (`getNextPageParam` in config) {
+    throw new Error(
+      `getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.`,
+    )
+  }
   let validatedCollection: InternalCollection | null = null
   let previousController: PreviousController | null = null
   let previousInput: ReturnType<

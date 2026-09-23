@@ -3,11 +3,9 @@ title: Live Queries
 id: live-queries
 ---
 
-# TanStack DB Live Queries
-
 TanStack DB provides a powerful, type-safe query system that allows you to fetch, filter, transform, and aggregate data from collections using a SQL-like fluent API. All queries are **live** by default, meaning they automatically update when the underlying data changes.
 
-The query system is built around an API similar to SQL query builders like Kysely or Drizzle where you chain methods together to compose your query. The query builder doesn't perform operations in the order of method calls - instead, it composes your query into an optimal incremental pipeline that gets compiled and executed efficiently. Each method returns a new query builder, allowing you to chain operations together.
+The query system is built around an API similar to SQL query builders like Kysely or Drizzle. You chain methods together to compose a query, and each method returns a new query builder. The builder doesn't generally perform operations in call order. Instead, it composes the query into an incremental pipeline that gets compiled and executed efficiently. One exception is repeated `orderBy` calls: their call order defines sort precedence.
 
 Live queries resolve to collections that automatically update when their underlying data changes. You can subscribe to changes, iterate over results, and use all the standard collection methods.
 
@@ -454,11 +452,26 @@ function TodoList({ userId }: { userId: string }) {
 }
 ```
 
-The callback form can also return `undefined` or `null` to disable a query. This still uses derived identity, so captured structured values do not need a dependency array. When the query is disabled:
+The `query` callback can return `undefined` or `null` to disable a query. This still uses derived identity, so captured structured values do not need a dependency array:
+
+```tsx
+const { data, isEnabled, status } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+
+    return q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
+```
+
+The top-level callback form supports the same behavior. When the query is disabled:
 - `status` is `'disabled'`
 - `data`, `state`, and `collection` are `undefined`
 - `isEnabled` is `false`
-- `isLoading`, `isReady`, `isIdle`, and `isError` are all `false`
+- `isReady` is `true`
+- `isLoading`, `isIdle`, `isError`, and `isCleanedUp` are all `false`
 
 ### Alternative Input Forms
 
@@ -1330,6 +1343,8 @@ The singleton vs. array result type is inferred from whether the wrapped query e
 
 Like `toArray()`, `materialize()` is only valid as a top-level value in `.select()` — it cannot be nested inside expression helpers such as `coalesce()` or `eq()`.
 
+Do not return child queries, `toArray()`, `materialize()`, or query expressions such as `eq()` and `caseWhen()` from `.fn.select()`. Functional select callbacks run after the compiler builds the query graph, so they cannot add query operations to it.
+
 ### Aggregates
 
 You can use aggregate functions in child queries. Aggregates are computed per parent:
@@ -1812,7 +1827,10 @@ const sortedUsers = createLiveQueryCollection((q) =>
 
 ### Multiple Column Ordering
 
-Order by multiple columns:
+Order by multiple columns with repeated `orderBy` calls. Call order defines
+precedence: the first orderBy call is the primary sort.
+Each later call appends a tie-breaker, so it is used only when all earlier terms
+compare equal:
 
 ```ts
 const sortedUsers = createLiveQueryCollection((q) =>
@@ -1827,6 +1845,54 @@ const sortedUsers = createLiveQueryCollection((q) =>
     }))
 )
 ```
+
+Repeated calls are additive. This lets a reusable query that already has an
+ordering be extended with another tie-breaker without replacing its earlier
+terms.
+
+### Ordering Is Explicit
+
+Without an explicit orderBy, the iteration order of query results is not
+guaranteed.
+An ordered source collection does not implicitly propagate its order through a
+derived query; add an `orderBy` to every query whose result order matters.
+
+If an API returns rows in a meaningful order but does not include an ordering
+field, store that position on each row and explicitly order by it. For example,
+a Query Collection can add a `sourcePosition` when it receives the response:
+
+```ts
+import { createCollection, createLiveQueryCollection } from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
+
+const queryClient = new QueryClient()
+
+const postsCollection = createCollection(
+  queryCollectionOptions({
+    queryClient,
+    queryKey: ['posts'],
+    queryFn: async () => {
+      const posts = await api.posts.list()
+      return posts.map((post, sourcePosition) => ({
+        ...post,
+        sourcePosition,
+      }))
+    },
+    getKey: (post) => post.id,
+  }),
+)
+
+const postsInSourceOrder = createLiveQueryCollection((q) =>
+  q
+    .from({ post: postsCollection })
+    .orderBy(({ post }) => post.sourcePosition, 'asc'),
+)
+```
+
+Include `sourcePosition` in the collection's row type or schema. If another
+derived query must preserve the same API order, give that query its own
+`orderBy` call as well.
 
 ### `unionAll` Ordering
 
@@ -2803,6 +2869,11 @@ The functional variant API provides an alternative to the standard API, offering
 > The functional variant API cannot be optimized by the query optimizer or use collection indexes. It is intended for use in rare cases where the standard API is not sufficient.
 
 ### Functional Select
+
+> [!WARNING]
+> `fn.select()` cannot consume Collection-valued includes, even when the callback ignores or passes through that field. This also applies to nested Collection-valued includes. Use `toArray()` or `materialize()` in the upstream `.select()` to provide inline child values. Keep these helpers outside the functional callback.
+
+Inline child updates rerun the functional projection. Arrays support JavaScript calculations, but do not expose Collection methods such as `get()`, `createIndex()`, or `subscribeChanges()`. To keep live child Collections, use standard `.select()`, or perform parent-only `.fn.select()` work before adding the child include.
 
 > [!WARNING]
 > `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions to compute, which is not possible with an opaque JavaScript function. Use the standard `.select()` API for grouped queries.

@@ -3,8 +3,6 @@ id: MissingHandlerError
 title: MissingHandlerError
 ---
 
-# Class: MissingHandlerError
-
 Defined in: [packages/db/src/errors.ts:266](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L266)
 
 ## Extends

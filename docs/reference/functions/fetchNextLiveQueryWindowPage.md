@@ -3,13 +3,11 @@ id: fetchNextLiveQueryWindowPage
 title: fetchNextLiveQueryWindowPage
 ---
 
-# Function: fetchNextLiveQueryWindowPage()
-
 ```ts
 function fetchNextLiveQueryWindowPage(controller): Promise<void>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:532](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L532)
+Defined in: [packages/db/src/live-query-window-controller.ts:535](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L535)
 
 **`Internal`**
 

@@ -1,10 +1,21 @@
 /**
  * Cross-adapter contract for `useLiveInfiniteQuery`.
  *
- * Drivers keep framework scheduling and package-realm details out of the shared
- * scenarios. Unlike the ordinary live-query contract, controllable handles can
- * mutate inputs without settling so the suite can exercise imperative calls in
- * the invalidation-to-subscription interval.
+ * The model is an ordered source plus a visible prefix split into pages. A
+ * fetch may extend that prefix; changing the query, collection, or page shape
+ * creates a new demand generation. The public observation includes flattened
+ * rows, page boundaries and params, continuation, in-flight state, errors, and
+ * the backing collection. Those facts must agree; final rows alone cannot show
+ * a stale page ledger or a duplicate request.
+ *
+ * Drivers preserve native framework scheduling and package-realm details.
+ * Controllable handles allow setter-to-fetch calls without an explicit driver
+ * flush; this does not prove one shared invalidation-to-subscription interval.
+ * Current React act and Vue synchronous effects attach during the setter.
+ * Svelte's public fetch can start before its queued effect attaches, then waits
+ * internally. Preserve those distinct measured cuts, not a universal timing
+ * law. This is why each driver remains separate even though the semantic model
+ * and scenario grammar are shared.
  */
 import type { Collection } from '@tanstack/db'
 import type { QueryBuild, SourceHandle } from './contract'
@@ -37,12 +48,12 @@ export interface InfiniteQueryHandle {
 export interface InfiniteQueryControllableHandle<
   P,
 > extends InfiniteQueryHandle {
-  /** Change a query dependency without waiting for the framework to settle. */
+  /** Change a query dependency without an explicit driver flush. */
   setParamSync: (param: P) => void
 }
 
 export interface InfiniteQueryCollectionHandle extends InfiniteQueryHandle {
-  /** Replace the input collection without waiting for the framework to settle. */
+  /** Replace the input collection without an explicit driver flush. */
   replaceCollectionSync: (collection: Collection<any, any, any>) => void
 }
 
@@ -97,5 +108,6 @@ export interface InfiniteQueryDriver {
     build: QueryBuild,
     config?: InfiniteQueryConfig,
   ) => InfiniteQueryInputHandle
-  knownGaps?: ReadonlyArray<string>
+  /** Whole-test waivers are not supported; future gaps need exact signatures. */
+  knownGaps?: ReadonlyArray<never>
 }

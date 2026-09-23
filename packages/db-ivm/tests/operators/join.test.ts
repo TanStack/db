@@ -163,7 +163,7 @@ function testJoin() {
       ([[key, _value], _mult]) => key === 2,
     )
     expect(key2Messages.length).toBeGreaterThan(0) // Key 2 should produce messages
-    expect(key2Messages[0][1]).toBeLessThan(0) // But with negative multiplicity
+    expect(key2Messages[0]![1]).toBeLessThan(0) // But with negative multiplicity
 
     // Assert the final materialized results (only positive multiplicities remain)
     assertKeyedResults(

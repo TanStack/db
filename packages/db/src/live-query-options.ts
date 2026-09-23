@@ -8,8 +8,10 @@ import type { CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
 import type {
+  Context,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  QueryBuilder,
 } from './query/index.js'
 
 export type LiveQueryKey = ReadonlyArray<unknown>
@@ -21,6 +23,17 @@ export type LiveQueryOptions = LiveQueryCollectionConfig<any> & {
 export type DeferredLiveQueryCollections = Set<
   CollectionImpl<any, string | number, any, any, any>
 >
+
+type PreparedLiveQueryConfigInput = Omit<
+  LiveQueryCollectionConfig<Context>,
+  `query`
+> & {
+  query:
+    | QueryBuilder<Context>
+    | ((q: InitialQueryBuilder) => QueryBuilder<Context> | undefined | null)
+  queryKey?: LiveQueryKey
+  client?: DbClient
+}
 
 function createInitialQueryBuilder(
   dbClient: DbClient | undefined,
@@ -73,17 +86,20 @@ export function prepareLiveQueryValue(
       queryKey: _queryKey,
       client: _client,
       ...config
-    } = value as LiveQueryCollectionConfig<any> & {
-      queryKey?: LiveQueryKey
-      client?: DbClient
+    } = value as PreparedLiveQueryConfigInput
+
+    const preparedQuery =
+      typeof query === `function`
+        ? query(createInitialQueryBuilder(dbClient, deferredCollections))
+        : query
+
+    if (preparedQuery === undefined || preparedQuery === null) {
+      return preparedQuery
     }
 
     return {
       ...config,
-      query:
-        typeof query === `function`
-          ? query(createInitialQueryBuilder(dbClient, deferredCollections))
-          : query,
+      query: preparedQuery,
     }
   }
 

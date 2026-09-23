@@ -3,13 +3,11 @@ id: FunctionalHavingRow
 title: FunctionalHavingRow
 ---
 
-# Type Alias: FunctionalHavingRow\<TContext\>
-
 ```ts
 type FunctionalHavingRow<TContext> = TContext["schema"] & TContext["hasResult"] extends true ? object : object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:640](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L640)
+Defined in: [packages/db/src/query/builder/types.ts:649](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L649)
 
 FunctionalHavingRow - Type for the row parameter in functional having callbacks
 

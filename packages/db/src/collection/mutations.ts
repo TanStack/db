@@ -47,11 +47,14 @@ export class CollectionMutationsManager<
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private collection!: CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
-  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private config!: CollectionConfig<TOutput, TKey, TSchema, TUtils>
   private transactionScope?: TransactionScope
   private id: string
 
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, TUtils>,
+    id: string,
+  ) {
     this.id = id
     this.config = config
   }
@@ -112,7 +115,7 @@ export class CollectionMutationsManager<
         typeof existingData === `object`
       ) {
         // Merge the update with the existing data
-        const mergedData = Object.assign({}, existingData, data)
+        const mergedData = { ...existingData, ...data }
 
         // Validate the merged data
         const result = standardSchema[`~standard`].validate(mergedData)
@@ -174,11 +177,13 @@ export class CollectionMutationsManager<
     return `KEY::${this.id}/${key}`
   }
 
-  private markPendingLocalOrigins(
+  private markPendingLocalChanges(
     mutations: Array<PendingMutation<TOutput>>,
   ): void {
     for (const mutation of mutations) {
-      this.state.pendingLocalOrigins.add(mutation.key as TKey)
+      // The handler can sync synchronously before its transaction is registered.
+      // This is provisional; only completed mutations retain a local origin.
+      this.state.pendingLocalChanges.add(mutation.key as TKey)
     }
   }
 
@@ -204,9 +209,9 @@ export class CollectionMutationsManager<
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
 
-      // Check if an item with this ID already exists in the collection or in the current batch
+      // Reject duplicate keys within this batch before starting sync.
       const key = this.config.getKey(validatedData)
-      if (this.state.has(key) || keysInCurrentBatch.has(key)) {
+      if (keysInCurrentBatch.has(key)) {
         throw new DuplicateKeyError(key)
       }
       keysInCurrentBatch.add(key)
@@ -239,6 +244,14 @@ export class CollectionMutationsManager<
       mutations.push(mutation)
     })
 
+    // Reject duplicates already visible before explicitly starting sync; startup may
+    // synchronously reveal additional keys, so check again afterward.
+    let duplicate = mutations.find(({ key }) => state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
+    this.collection._sync.startSync()
+    duplicate = mutations.find(({ key }) => state.has(key))
+    if (duplicate) throw new DuplicateKeyError(duplicate.key)
+
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
       ambientTransaction.applyMutations(mutations)
@@ -258,16 +271,21 @@ export class CollectionMutationsManager<
             transaction:
               params.transaction as unknown as TransactionWithMutations<
                 TOutput,
-                `insert`
+                `insert`,
+                Collection<TOutput, TKey, TUtils>
               >,
-            collection: this.collection as unknown as Collection<TOutput, TKey>,
+            collection: this.collection as unknown as Collection<
+              TOutput,
+              TKey,
+              TUtils
+            >,
           })
         },
       })
 
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
-      this.markPendingLocalOrigins(mutations)
+      this.markPendingLocalChanges(mutations)
       // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
       directOpTransaction.commit().catch(() => undefined)
 
@@ -284,7 +302,7 @@ export class CollectionMutationsManager<
    * Updates one or more items in the collection using a callback function
    */
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
@@ -315,9 +333,12 @@ export class CollectionMutationsManager<
     }
 
     const callback =
-      typeof configOrCallback === `function` ? configOrCallback : maybeCallback!
+      typeof configOrCallback === `function` ? configOrCallback : maybeCallback
+    if (typeof callback !== `function`) throw new TypeError()
     const config =
       typeof configOrCallback === `function` ? {} : configOrCallback
+
+    this.collection._sync.startSync()
 
     // Get the current objects or empty objects if they don't exist
     const currentObjects = keysArray.map((key) => {
@@ -369,11 +390,7 @@ export class CollectionMutationsManager<
         )
 
         // Construct the full modified item by applying the validated update payload to the original item
-        const modifiedItem = Object.assign(
-          {},
-          originalItem,
-          validatedUpdatePayload,
-        )
+        const modifiedItem = { ...originalItem, ...validatedUpdatePayload }
 
         // Check if the ID of the item is being changed
         const originalItemId = this.config.getKey(originalItem)
@@ -455,16 +472,21 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `update`
+              `update`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalOrigins(mutations)
+    this.markPendingLocalChanges(mutations)
     // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
     directOpTransaction.commit().catch(() => undefined)
 
@@ -499,6 +521,7 @@ export class CollectionMutationsManager<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
+    this.collection._sync.startSync()
     const mutations: Array<
       PendingMutation<
         TOutput,
@@ -559,16 +582,21 @@ export class CollectionMutationsManager<
           transaction:
             params.transaction as unknown as TransactionWithMutations<
               TOutput,
-              `delete`
+              `delete`,
+              Collection<TOutput, TKey, TUtils>
             >,
-          collection: this.collection as unknown as Collection<TOutput, TKey>,
+          collection: this.collection as unknown as Collection<
+            TOutput,
+            TKey,
+            TUtils
+          >,
         })
       },
     })
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalOrigins(mutations)
+    this.markPendingLocalChanges(mutations)
     // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
     directOpTransaction.commit().catch(() => undefined)
 

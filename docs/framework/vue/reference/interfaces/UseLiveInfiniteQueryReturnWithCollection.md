@@ -3,9 +3,7 @@ id: UseLiveInfiniteQueryReturnWithCollection
 title: UseLiveInfiniteQueryReturnWithCollection
 ---
 
-# Interface: UseLiveInfiniteQueryReturnWithCollection\<TResult, TKey, TUtils\>
-
-Defined in: [useLiveInfiniteQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L78)
+Defined in: [useLiveInfiniteQuery.ts:69](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L69)
 
 ## Type Parameters
 
@@ -29,7 +27,7 @@ Defined in: [useLiveInfiniteQuery.ts:78](https://github.com/TanStack/db/blob/mai
 collection: ComputedRef<Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:85](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L85)
+Defined in: [useLiveInfiniteQuery.ts:76](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L76)
 
 ***
 
@@ -39,7 +37,7 @@ Defined in: [useLiveInfiniteQuery.ts:85](https://github.com/TanStack/db/blob/mai
 data: ComputedRef<TResult[]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L84)
+Defined in: [useLiveInfiniteQuery.ts:75](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L75)
 
 ***
 
@@ -49,7 +47,7 @@ Defined in: [useLiveInfiniteQuery.ts:84](https://github.com/TanStack/db/blob/mai
 error: ComputedRef<unknown>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:97](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L97)
+Defined in: [useLiveInfiniteQuery.ts:88](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L88)
 
 ***
 
@@ -59,7 +57,7 @@ Defined in: [useLiveInfiniteQuery.ts:97](https://github.com/TanStack/db/blob/mai
 fetchNextPage: () => Promise<void>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:94](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L94)
+Defined in: [useLiveInfiniteQuery.ts:85](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L85)
 
 #### Returns
 
@@ -73,7 +71,7 @@ Defined in: [useLiveInfiniteQuery.ts:94](https://github.com/TanStack/db/blob/mai
 hasNextPage: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L95)
+Defined in: [useLiveInfiniteQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L86)
 
 ***
 
@@ -83,7 +81,7 @@ Defined in: [useLiveInfiniteQuery.ts:95](https://github.com/TanStack/db/blob/mai
 isCleanedUp: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:91](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L91)
+Defined in: [useLiveInfiniteQuery.ts:82](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L82)
 
 ***
 
@@ -93,7 +91,7 @@ Defined in: [useLiveInfiniteQuery.ts:91](https://github.com/TanStack/db/blob/mai
 isError: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:90](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L90)
+Defined in: [useLiveInfiniteQuery.ts:81](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L81)
 
 ***
 
@@ -103,7 +101,7 @@ Defined in: [useLiveInfiniteQuery.ts:90](https://github.com/TanStack/db/blob/mai
 isFetchingNextPage: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L96)
+Defined in: [useLiveInfiniteQuery.ts:87](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L87)
 
 ***
 
@@ -113,7 +111,7 @@ Defined in: [useLiveInfiniteQuery.ts:96](https://github.com/TanStack/db/blob/mai
 isIdle: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:89](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L89)
+Defined in: [useLiveInfiniteQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L80)
 
 ***
 
@@ -123,7 +121,7 @@ Defined in: [useLiveInfiniteQuery.ts:89](https://github.com/TanStack/db/blob/mai
 isLoading: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:87](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L87)
+Defined in: [useLiveInfiniteQuery.ts:78](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L78)
 
 ***
 
@@ -133,7 +131,7 @@ Defined in: [useLiveInfiniteQuery.ts:87](https://github.com/TanStack/db/blob/mai
 isReady: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:88](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L88)
+Defined in: [useLiveInfiniteQuery.ts:79](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L79)
 
 ***
 
@@ -143,7 +141,7 @@ Defined in: [useLiveInfiniteQuery.ts:88](https://github.com/TanStack/db/blob/mai
 pageParams: ComputedRef<number[]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:93](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L93)
+Defined in: [useLiveInfiniteQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L84)
 
 ***
 
@@ -153,7 +151,7 @@ Defined in: [useLiveInfiniteQuery.ts:93](https://github.com/TanStack/db/blob/mai
 pages: ComputedRef<TResult[][]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:92](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L92)
+Defined in: [useLiveInfiniteQuery.ts:83](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L83)
 
 ***
 
@@ -163,7 +161,7 @@ Defined in: [useLiveInfiniteQuery.ts:92](https://github.com/TanStack/db/blob/mai
 state: ComputedRef<Map<TKey, TResult>>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:83](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L83)
+Defined in: [useLiveInfiniteQuery.ts:74](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L74)
 
 ***
 
@@ -173,4 +171,4 @@ Defined in: [useLiveInfiniteQuery.ts:83](https://github.com/TanStack/db/blob/mai
 status: ComputedRef<CollectionStatus>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L86)
+Defined in: [useLiveInfiniteQuery.ts:77](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L77)

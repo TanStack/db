@@ -3,13 +3,11 @@ id: Source
 title: Source
 ---
 
-# Type Alias: Source
-
 ```ts
 type Source = object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L91)
+Defined in: [packages/db/src/query/builder/types.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L92)
 
 Source - Input definition for query builder `from()` and `unionAll()` clauses
 
@@ -23,7 +21,8 @@ Example: `{ users: usersCollection }`
 
 ```ts
 [alias: string]: 
+  | QueryBuilder<any>
   | CollectionImpl<any, any, {
 }, StandardSchemaV1<unknown, unknown>, any>
-| QueryBuilder<Context>
+| CollectionOptionsIdentity<any, any, any, any, any>
 ```

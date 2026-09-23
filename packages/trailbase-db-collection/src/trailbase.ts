@@ -171,7 +171,9 @@ export function trailBaseCollectionOptions<
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
   const cancelEventReader = () => {
     if (eventReader) {
-      eventReader.cancel()
+      // An already-errored stream rejects cancellation too. Cleanup still
+      // retires its reader; that rejection must not escape as detached work.
+      void eventReader.cancel().catch(() => undefined)
       eventReader.releaseLock()
       eventReader = undefined
     }
@@ -180,7 +182,7 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, commit, markReady, markError, collection } = params
       let cancelled = false
       let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
 
@@ -200,7 +202,7 @@ export function trailBaseCollectionOptions<
 
       // Load (more) data.
       async function load(opts: LoadSubsetOptions) {
-        if (cancelled) return
+        if (cancelled || opts.signal?.aborted) return
 
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
@@ -218,19 +220,26 @@ export function trailBaseCollectionOptions<
         if (remaining <= 0) {
           return
         }
+        const appliedPages: Array<Promise<void>> = []
 
         while (true) {
           const limit = Math.min(remaining, 256)
-          const response = await config.recordApi.list({
-            pagination: {
-              limit,
-              offset,
-              cursor,
-            },
-            order,
-            filters,
-          })
-          if (cancelled) return
+          let response
+          try {
+            response = await config.recordApi.list({
+              pagination: {
+                limit,
+                offset,
+                cursor,
+              },
+              order,
+              filters,
+            })
+          } catch (error) {
+            if (cancelled || opts.signal?.aborted) return
+            throw error
+          }
+          if (cancelled || opts.signal?.aborted) return
 
           const length = response.records.length
           if (length === 0) {
@@ -247,7 +256,11 @@ export function trailBaseCollectionOptions<
             })
           }
 
-          commit()
+          const applied = commit(opts.signal)
+          if (applied !== true) {
+            appliedPages.push(applied)
+          }
+          if (cancelled || opts.signal?.aborted) return
 
           remaining -= length
 
@@ -269,6 +282,8 @@ export function trailBaseCollectionOptions<
             cursor = response.cursor
           }
         }
+
+        await Promise.all(appliedPages)
       }
 
       // Afterwards subscribe.
@@ -277,8 +292,6 @@ export function trailBaseCollectionOptions<
           const { done, value: event } = await reader.read()
 
           if (done || !event) {
-            reader.releaseLock()
-            eventReader = undefined
             return
           }
 
@@ -296,7 +309,7 @@ export function trailBaseCollectionOptions<
           } else {
             console.error(`Error: ${event.Error}`)
           }
-          commit()
+          void commit()
 
           if (value) {
             seenIds.setState((curr: Map<string, number>) => {
@@ -309,18 +322,37 @@ export function trailBaseCollectionOptions<
       }
 
       async function start() {
-        const eventStream = await config.recordApi.subscribe(`*`)
-        if (cancelled) {
-          await eventStream.cancel()
-          return
-        }
-        const reader = (eventReader = eventStream.getReader())
-
-        // Start listening for subscriptions first. Otherwise, we'd risk a gap
-        // between the initial fetch and starting to listen.
-        listen(reader)
-
+        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
+          const eventStream = await config.recordApi.subscribe(`*`)
+          if (cancelled) {
+            await eventStream.cancel()
+            return
+          }
+          const subscribedReader = eventStream.getReader()
+          reader = eventReader = subscribedReader
+
+          // Start listening for subscriptions first. Otherwise, we'd risk a gap
+          // between the initial fetch and starting to listen.
+          void listen(subscribedReader)
+            .finally(() => {
+              // A closed stream can still have a final event being processed.
+              // Release only after the listener has finished draining it.
+              // A processing failure can leave the stream open; cancel it too.
+              // Preserve the original failure if the stream already errored.
+              // Error settlement must not wait for transport cleanup.
+              void subscribedReader.cancel().catch(() => undefined)
+              subscribedReader.releaseLock()
+              if (eventReader === subscribedReader) eventReader = undefined
+            })
+            .catch((error: unknown) => {
+              if (!cancelled && collection.status === `loading`) {
+                markError(error)
+              } else if (!cancelled) {
+                console.error(`TrailBase subscription failed`, error)
+              }
+            })
+
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
             // Load everything on initial load.
@@ -328,18 +360,22 @@ export function trailBaseCollectionOptions<
             if (cancelled) return
             fullSyncCompleted = true
           }
-        } catch (e) {
+          if (!cancelled && collection.status === `loading`) {
+            markReady()
+          }
+        } catch (error) {
+          // An abandoned startup must not cancel a replacement session's reader.
+          if (cancelled) return
           cancelEventReader()
-          throw e
-        } finally {
-          // Mark ready both if everything went well or if there's an error to
-          // avoid blocking apps waiting for `.preload()` to finish.
-          if (!cancelled) markReady()
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+          return
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
         // reader closes.
-        if (cancelled) return
+        if (cancelled || !reader) return
 
         periodicCleanupTask = setInterval(() => {
           seenIds.setState((curr) => {
@@ -359,15 +395,17 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => {
+        const clearCleanupTask = () => {
           if (periodicCleanupTask !== undefined) {
             clearInterval(periodicCleanupTask)
             periodicCleanupTask = undefined
           }
-        })
+        }
+        // listen() reports read errors. Observe this separate promise too.
+        void reader.closed.then(clearCleanupTask, clearCleanupTask)
       }
 
-      start()
+      void start()
 
       // Eager mode doesn't need subset loading
       if (internalSyncMode === `eager`) {

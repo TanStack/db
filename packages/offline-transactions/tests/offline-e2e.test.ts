@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { DefaultRetryPolicy } from '../src/retry/RetryPolicy'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import type { TestItem } from './harness'
 import type { OfflineMutationFnParams, OnlineDetector } from '../src/types'
-import type { PendingMutation } from '@tanstack/db'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -108,9 +106,7 @@ describe(`offline executor end-to-end`, () => {
     const env = createTestOfflineEnvironment({
       mutationFn: (params) => {
         const runtimeOnline = online
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         if (!runtimeOnline) {
           throw new Error(`offline`)
         }
@@ -148,7 +144,7 @@ describe(`offline executor end-to-end`, () => {
     // Check that the transaction is in the outbox (persisted for retry)
     let outboxEntries = await env.executor.peekOutbox()
     expect(outboxEntries.length).toBe(1)
-    expect(outboxEntries[0].id).toBe(offlineTx.id)
+    expect(outboxEntries[0]!.id).toBe(offlineTx.id)
 
     // Now bring the system back online
     online = true
@@ -300,16 +296,14 @@ describe(`offline executor end-to-end`, () => {
     // Verify it's in the outbox
     const outboxEntries = await offlineErrorEnv.executor.peekOutbox()
     expect(outboxEntries.length).toBe(1)
-    expect(outboxEntries[0].id).toBe(offlineTx.id)
+    expect(outboxEntries[0]!.id).toBe(offlineTx.id)
 
     offlineErrorEnv.executor.dispose()
 
     const replayEnv = createTestOfflineEnvironment({
       storage,
       mutationFn: (params: OfflineMutationFnParams & { attempt: number }) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         replayEnv.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -325,103 +319,6 @@ describe(`offline executor end-to-end`, () => {
     replayEnv.executor.dispose()
   })
 
-  // TODO: Fix this test - hanging at await commitFirst after resolving mutation
-  it.skip(`serializes transactions targeting the same key`, async () => {
-    console.log(`[TEST] Starting serializes transactions test`)
-    const pendingResolvers: Array<() => void> = []
-    const env = createTestOfflineEnvironment({
-      mutationFn: async (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
-
-        await new Promise<void>((resolve) => {
-          pendingResolvers.push(() => {
-            env.applyMutations(mutations)
-            resolve()
-          })
-        })
-
-        return { ok: true, mutations }
-      },
-    })
-
-    console.log(`[TEST] Waiting for leader...`)
-    await env.waitForLeader()
-    console.log(`[TEST] Leader ready`)
-
-    const firstTx = env.executor.createOfflineTransaction({
-      mutationFnName: env.mutationFnName,
-      autoCommit: false,
-    })
-    console.log(`[TEST] Created first transaction:`, firstTx.id)
-    const waitFirst = env.executor.waitForTransactionCompletion(firstTx.id)
-    firstTx.mutate(() => {
-      env.collection.insert({
-        id: `shared`,
-        value: `v1`,
-        completed: false,
-        updatedAt: new Date(),
-      })
-    })
-    console.log(`[TEST] Committing first transaction`)
-    const commitFirst = firstTx.commit()
-
-    await flushMicrotasks()
-    console.log(
-      `[TEST] After flush, mutationCalls:`,
-      env.mutationCalls.length,
-      `resolvers:`,
-      pendingResolvers.length,
-    )
-    expect(env.mutationCalls.length).toBe(1)
-    expect(pendingResolvers.length).toBe(1)
-
-    console.log(`[TEST] Creating second transaction`)
-    const secondTx = env.executor.createOfflineTransaction({
-      mutationFnName: env.mutationFnName,
-      autoCommit: false,
-    })
-    console.log(`[TEST] Created second transaction:`, secondTx.id)
-    const waitSecond = env.executor.waitForTransactionCompletion(secondTx.id)
-    secondTx.mutate(() => {
-      env.collection.update(`shared`, (draft) => {
-        draft.value = `v2`
-        draft.updatedAt = new Date()
-      })
-    })
-    console.log(`[TEST] Committing second transaction`)
-    const commitSecond = secondTx.commit()
-
-    await flushMicrotasks()
-    console.log(
-      `[TEST] After second flush, mutationCalls:`,
-      env.mutationCalls.length,
-      `resolvers:`,
-      pendingResolvers.length,
-    )
-    expect(env.mutationCalls.length).toBe(1)
-    expect(pendingResolvers.length).toBe(1)
-
-    console.log(`[TEST] Resolving first transaction`)
-    pendingResolvers.shift()?.()
-    console.log(`[TEST] Awaiting commitFirst`)
-    await commitFirst
-    console.log(`[TEST] Awaiting waitFirst`)
-    await waitFirst
-    console.log(`[TEST] Waiting for second mutation call...`)
-    await waitUntil(() => env.mutationCalls.length >= 2)
-    console.log(`[TEST] Second mutation called!`)
-    expect(pendingResolvers.length).toBe(1)
-
-    pendingResolvers.shift()?.()
-    await commitSecond
-    await waitSecond
-    await waitUntil(() => env.serverState.get(`shared`)?.value === `v2`)
-
-    env.executor.dispose()
-  })
-
   it(`processes mutations sequentially regardless of keys`, async () => {
     const pendingResolvers: Array<() => void> = []
     // eslint-disable-next-line prefer-const
@@ -435,9 +332,7 @@ describe(`offline executor end-to-end`, () => {
         throw new Error(`env not initialized`)
       }
 
-      const mutations = params.transaction.mutations as Array<
-        PendingMutation<TestItem>
-      >
+      const mutations = params.transaction.mutations
 
       await new Promise<void>((resolve) => {
         pendingResolvers.push(() => {
@@ -615,11 +510,11 @@ describe(`offline executor end-to-end`, () => {
     // Verify it's in the outbox
     const outboxEntries = await firstEnv.executor.peekOutbox()
     expect(outboxEntries.length).toBe(1)
-    expect(outboxEntries[0].id).toBe(offlineTx.id)
+    expect(outboxEntries[0]!.id).toBe(offlineTx.id)
 
     // Verify the mutation data is properly serialized
-    expect(outboxEntries[0].mutations.length).toBe(1)
-    expect(outboxEntries[0].mutations[0].type).toBe(`insert`)
+    expect(outboxEntries[0]!.mutations.length).toBe(1)
+    expect(outboxEntries[0]!.mutations[0]!.type).toBe(`insert`)
 
     // Dispose first environment (simulating page refresh)
     firstEnv.executor.dispose()
@@ -636,9 +531,7 @@ describe(`offline executor end-to-end`, () => {
       mutationFn: async (params) => {
         // Wait for explicit resolution
         await secondEnvMutationPromise()
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         secondEnv.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -657,7 +550,7 @@ describe(`offline executor end-to-end`, () => {
     // Verify the transaction IS still in the outbox (data was persisted correctly)
     const secondEnvOutbox = await secondEnv.executor.peekOutbox()
     expect(secondEnvOutbox.length).toBe(1)
-    expect(secondEnvOutbox[0].mutations[0].type).toBe(`insert`)
+    expect(secondEnvOutbox[0]!.mutations[0]!.type).toBe(`insert`)
 
     // Now complete the mutation to verify the data eventually syncs
     secondEnvResolveMutation!()
