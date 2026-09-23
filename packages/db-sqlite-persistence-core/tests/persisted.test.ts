@@ -2462,6 +2462,8 @@ describe(`persistedCollectionOptions`, () => {
     const pullSince = async () => ({
       latestRowVersion: 0,
       requiresFullReload: false as const,
+      changedKeys: [],
+      deletedKeys: [],
       deltas: [],
     })
     const publicAdapter = adapter as RecordingAdapter & {
@@ -2495,6 +2497,8 @@ describe(`persistedCollectionOptions`, () => {
         latestSeq: 2,
         latestRowVersion: result.latestRowVersion,
         requiresFullReload: result.requiresFullReload,
+        changedKeys: result.changedKeys,
+        deletedKeys: result.deletedKeys,
         deltas: result.deltas,
       }
     }
