@@ -59,19 +59,21 @@ describe(`SingleRowRefProxy type algebra`, () => {
   test(`optional and nullable objects remain traversable with schema guards`, () => {
     collection.createIndex((row) => {
       expectTypeOf(row.optionalTimestamp).toEqualTypeOf<
-        SingleRowRefProxy<Timestamp> | undefined
+        SingleRowRefProxy<Timestamp, string | number, false> | undefined
       >()
       expectTypeOf(row.optionalTimestamp?.seconds).toEqualTypeOf<
         RefLeaf<number> | undefined
       >()
-      expectTypeOf(
-        row.nullableTimestamp,
-      ).toEqualTypeOf<SingleRowRefProxy<Timestamp> | null>()
+      expectTypeOf(row.nullableTimestamp).toEqualTypeOf<SingleRowRefProxy<
+        Timestamp,
+        string | number,
+        false
+      > | null>()
       expectTypeOf(row.nullableTimestamp?.seconds).toEqualTypeOf<
         RefLeaf<number> | undefined
       >()
       expectTypeOf(row.nullishTimestamp).toEqualTypeOf<
-        SingleRowRefProxy<Timestamp> | null | undefined
+        SingleRowRefProxy<Timestamp, string | number, false> | null | undefined
       >()
       expectTypeOf(row.nested.timestamp?.nanoseconds).toEqualTypeOf<
         RefLeaf<number> | undefined

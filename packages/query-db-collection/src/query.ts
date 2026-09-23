@@ -562,16 +562,20 @@ export function queryCollectionOptions<
   TKey extends string | number = string | number,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
 >(
-  config: QueryCollectionConfig<
-    InferSchemaOutput<T>,
-    TQueryFn,
-    TError,
-    TQueryKey,
-    TKey,
-    T
+  config: Omit<
+    QueryCollectionConfig<
+      InferSchemaOutput<T>,
+      TQueryFn,
+      TError,
+      TQueryKey,
+      TKey,
+      T,
+      TQueryData
+    >,
+    `select`
   > & {
     schema: T
-    select: (data: TQueryData) => Array<InferSchemaInput<T>>
+    select: (data: TQueryData) => Array<InferSchemaOutput<T>>
   },
 ): CollectionConfig<
   InferSchemaOutput<T>,
