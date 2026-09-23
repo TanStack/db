@@ -11,8 +11,12 @@
  * that already-running persist when any persist exists, and then permutes
  * complete hydrate and persist requests. Hydrates contain nonempty unique
  * seeded rows; persists contain one or more mutations. The generated campaign
- * varies 2..7 hydrates, 2..7 persists, 1..3 mutations per persist, and sampled
- * tail permutations. Neutral histories contain only hydrates.
+ * varies 2..7 hydrates, 3..7 persists, 1..3 mutations per persist, and sampled
+ * tail permutations. The minimum grammar still has two hydrate checkpoints and
+ * a persist backlog beyond K=1. Hydrate count supplies repeated checkpoints;
+ * persist count varies the backlog; mutation width proves K counts logical
+ * persists rather than their rows; tail order creates overlapping lane work.
+ * Neutral histories contain only hydrates.
  *
  * Independent model and production boundary: `createFairnessReference`
  * computes permitted completed persist IDs from the ordered history and K; it
@@ -29,11 +33,15 @@
  * eventuality, multi-process coordination, or a browser matrix; the Chromium
  * OPFS fixture separately refines the provider boundary.
  *
- * Challenge and replay: the executable persist-first FIFO driver must violate
- * the same K=1 checker while using the public/core/driver path. Re-run a
- * generated failure with TANSTACK_DB_DRIVER_FAIRNESS_SEED and
- * TANSTACK_DB_DRIVER_FAIRNESS_PATH. Cleanup preserves the primary failure and
- * reports secondary resource-release diagnostics separately.
+ * Challenge and replay: the named persist-first FIFO wrong answer must violate
+ * the same K=1 checker while using the public/core/driver path. The generated
+ * property has fixed-seed and seedless-random lanes. Supplying both
+ * TANSTACK_DB_DRIVER_FAIRNESS_SEED and TANSTACK_DB_DRIVER_FAIRNESS_PATH runs
+ * only their checked oracle replay. Tail-order ablation must lose the legal
+ * hydrate-before-later-persist cell. The grammar also reconstructs that known
+ * wrong-answer witness, covers its bounded marginals, and rejects a storm that
+ * omits the already-running persist boundary. Cleanup preserves the primary
+ * failure and reports secondary resource-release diagnostics separately.
  */
 import { createCollection } from '../../db/src/index'
 import { persistedCollectionOptions } from '../src/index'
