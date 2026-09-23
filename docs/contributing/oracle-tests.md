@@ -14,6 +14,187 @@ The payoff is broader bug detection and a stable check during refactoring. The c
 
 Start with [one small oracle](#build-one-small-oracle). Follow the later sections when your contract needs [richer state](#keep-only-state-that-can-matter), [controlled timing](#generate-histories-that-reach-the-problem), or [more observations](#observe-what-the-contract-promises). The [review card](#a-review-card) is a short way to apply the guide to an existing test. Historical cases and research are collected in the [companion notes](oracle-test-notes.md). Use the [project glossary](glossary.md) for terms shared with production code.
 
+## How to interpret this guide
+
+The numbered requirements in this section are the complete checklist for an
+`oracle-tests.md` conformance audit. Repository policies such as `AGENTS.md` and
+the coverage map apply separately. Later sections explain the requirements and
+give techniques and examples. They do not create additional requirements unless
+they cite one of these IDs.
+
+`MUST`, `SHOULD`, and `MAY` have their usual specification meanings:
+
+- `MUST` is required when the stated trigger applies.
+- `SHOULD` is expected when the trigger applies. A review may accept an
+  explicit, technically grounded reason for doing something else.
+- `MAY` is optional.
+
+Advice outside this section is explanatory. Words such as “useful,” “ask,” and
+“consider” do not create conformance requirements.
+
+An **important generated property** is a generated property used to protect a
+reusable product law, claim coverage beyond named examples, or demonstrate a
+bug-class repair. A fixed regression, bounded enumeration, or diagnostic stress
+probe is not an important generated property merely because it uses test data.
+
+Unless a requirement says otherwise, its evidence MAY live in the executable
+test, an oracle-file comment, the pull-request description, or a durable review
+ledger linked from the change. Reviewers MUST score the stated obligation, not
+the presence of a preferred heading, class, comment template, or helper.
+
+### ORC-001: Contract authority and limits
+
+- **Trigger:** A test computes or constrains an expected product result.
+- **Obligation:** The oracle MUST identify the promised law, its authority, and
+  the limits of the claimed result.
+- **Acceptance evidence:** A reviewer can trace the expected result to an
+  approved API, architecture document, established contract, or design
+  decision, and can identify what the oracle does not establish.
+- **Not required:** One particular comment format or a complete list of every
+  behavior outside the subsystem.
+
+### ORC-002: Independent judgment
+
+- **Trigger:** An oracle compares production with an expected result.
+- **Obligation:** The expected result MUST be derived independently of the
+  production semantic machinery whose behavior it judges.
+- **Acceptance evidence:** The model, alternate implementation, or relation
+  does not import or reproduce the relevant production classifier, transition,
+  comparator, or state machine without a separately justified trusted base.
+- **Not required:** Independence of the production driver. Exercising the real
+  production entry point is expected and does not violate this requirement.
+
+### ORC-003: Distinguishable oracle responsibilities
+
+- **Trigger:** A file owns a reusable law, state machine, lifecycle boundary,
+  or reference model.
+- **Obligation:** The contract, model, history grammar, production driver, and
+  refinement check MUST remain distinguishable to a reviewer.
+- **Acceptance evidence:** A reviewer can point to the answer supplied by each
+  responsibility and follow the tested law from authority to observation.
+- **Not required:** Five headings, five classes, five files, one fixture per
+  law, or a review card embedded in every oracle.
+
+### ORC-004: Generated-history grammar controls
+
+- **Trigger:** A generated property claims coverage of a legal history or input
+  grammar.
+- **Obligation:** The change MUST account for reconstruction, ablation, range,
+  and exclusion for that grammar.
+- **Acceptance evidence:** The evidence names a known valid witness that can be
+  reconstructed; accounts for the semantic contribution of each declared axis,
+  rule, or overlap under ablation; states the bounded domains and marginal
+  cases; and names a nearby invalid history or state the grammar rejects.
+- **Evidence location:** These controls MAY be executable calibration checks,
+  comments, pull-request evidence, or a durable review ledger. Stable executable
+  checks are preferred when the claim is cheap to preserve.
+- **Not required:** One test per control, a Cartesian product of unrelated axes,
+  or a permanent source mutant.
+
+### ORC-005: Production path and observation
+
+- **Trigger:** Any oracle used as product evidence.
+- **Obligation:** The test MUST exercise the named production entry point and
+  MUST compare the promised public observation at the named checkpoint.
+- **Acceptance evidence:** A positive execution witness shows that the intended
+  path and comparison ran. The recorder can represent the violations relevant
+  to the law, including duplicates, omissions, order, or partial output when
+  those are contractual.
+- **Not required:** Observation of internal facts that the contract does not
+  expose.
+
+### ORC-006: Checker calibration
+
+- **Trigger:** An important generated property or a claimed oracle repair.
+- **Obligation:** The evidence MUST name at least one plausible wrong answer or
+  design and demonstrate that the relevant comparison rejects it.
+- **Acceptance evidence:** A wrong-result control, hostile fixture, fault
+  injection, or production mutant reaches the intended checkpoint and preserves
+  the distinguishing failure.
+- **Not required:** Modifying production, checking in a mutant, or running a
+  production mutation campaign for every oracle. When a mutant is run, its
+  outcome MUST distinguish assertion failure, timeout, setup failure, an
+  unreached path, survival, and equivalence within the tested domain.
+
+### ORC-007: Fixed, random, and replay lanes
+
+- **Trigger:** An important generated property.
+- **Obligation:** The package's oracle campaign MUST execute the same property,
+  generators, observations, and run budget twice: once with a documented fixed
+  seed and once without a seed. A replay interface MUST accept both the seed and
+  shrink path and MUST run the requested replay directly.
+- **Acceptance evidence:** The normal test command reaches both lanes, each lane
+  records its execution, and a checked replay command reproduces a captured
+  seed-and-path failure.
+- **Not required:** Treating fixed examples as the fixed-seed lane, giving the
+  two lanes different generators or budgets, or running the fixed and random
+  campaigns before an explicit replay.
+
+### ORC-008: Stateful-model minimality
+
+- **Trigger:** A change introduces, removes, combines, or splits state in a
+  stateful reference model.
+- **Obligation:** The change MUST explain whether a legal next action can
+  distinguish states the model proposes to treat as equal.
+- **Acceptance evidence:** A distinguishing history justifies retained state,
+  or a reasoned argument shows why removed state cannot change a promised
+  observation or action's legality.
+- **Not required:** An executable mutant for every model field or application of
+  this requirement to a stateless recomputation.
+
+### ORC-009: Vocabulary mapping
+
+- **Trigger:** A model combines or splits production concepts, or introduces a
+  model-only term that could be mistaken for a production concept.
+- **Obligation:** The oracle MUST map the differing concepts explicitly and MUST
+  use the project glossary's term for a shared concept.
+- **Acceptance evidence:** A reviewer can translate model actions, states, and
+  checkpoints to production boundaries without guessing.
+- **Not required:** A mapping entry for plainly local data holders whose meaning
+  and observation are already unambiguous.
+
+### ORC-010: Failure fidelity and cleanup
+
+- **Trigger:** Shrinking, capture, or cleanup can replace or erase an oracle
+  failure.
+- **Obligation:** The harness MUST preserve the original violated law and
+  checkpoint, retain distinguishable secondary cleanup diagnostics, and release
+  its resources.
+- **Acceptance evidence:** The failure report separates the primary mismatch
+  from each cleanup failure and says whether a reduction reproduced the same
+  violation.
+- **Not required:** Throwing cleanup failures as separate top-level exceptions.
+  An `AggregateError` satisfies this requirement when its `cause` and `errors`
+  preserve those distinctions.
+
+### ORC-011: Independent second formulation
+
+- **Trigger:** A reviewer names a plausible semantic fault that production and
+  the primary model could share, and a meaningfully different formulation could
+  distinguish it.
+- **Obligation:** The change SHOULD add that formulation. If it does not, the
+  evidence MUST state why it is impractical or out of scope and track the
+  remaining risk.
+- **Acceptance evidence:** The alternate path states its equivalence or
+  metamorphic relation, including relevant differences in ordering, projection,
+  duplicates, and empty results.
+- **Not required:** A second formulation without a named shared-fault hypothesis,
+  or treating agreement between two structurally identical paths as independent
+  evidence.
+
+### ORC-012: Review evidence
+
+- **Trigger:** A change claims that an oracle is new, repaired, or comprehensively
+  audited against this guide.
+- **Obligation:** The review evidence MUST answer the substance of the layer
+  comparison and review-card questions in this guide.
+- **Acceptance evidence:** The evidence accounts for authority, model
+  distinctions, grammar reach, real driver path, observations, calibration,
+  failure fidelity, and known limits using ORC-001 through ORC-011 as applicable.
+- **Not required:** Copying the nine questions or review card into every test,
+  answering them in their printed order, or placing the audit in the oracle
+  file.
+
 ## A quick start
 
 One way to supply that judgment is a small reference model. For a simple stateful test, choose a legal action, apply it to production and the reference, and compare the promised result at the agreed point. “After the action returns” may be the right point for one API; a callback during that action may matter for another.
@@ -35,7 +216,8 @@ Before writing the loop, answer six questions:
 
 These are responsibilities, not six required classes. A small property may answer them in a comment and twenty lines of code. A lifecycle suite may need a separate model and driver. Do not build a framework just to fill the table.
 
-A useful test card is equally small:
+The review card is an optional way to collect this evidence; it is not a
+required file format:
 
 ```text
 Law and source:
@@ -69,9 +251,10 @@ Two small examples show the form:
 - [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
   explains why a ready transaction waits behind a delayed FIFO head.
 
-### Use five visible layers
+### Keep five responsibilities distinguishable
 
-Keep these layers distinct even when they share one file:
+ORC-003 requires these responsibilities to remain distinguishable even when
+they share one file:
 
 | Layer | What it must answer |
 | --- | --- |
@@ -168,7 +351,8 @@ document and which rules the test author inferred. Then map containment,
 overlap, and dependency. Do not force overlapping concerns into a tree merely
 to make the generator neat.
 
-Use four controls before trusting the grammar:
+ORC-004 requires four controls before a generated property claims grammar
+coverage:
 
 1. **Reconstruction:** Can the grammar rebuild every known valid witness?
 2. **Ablation:** Does removing each axis, rule, or overlap lose a promised case
@@ -243,7 +427,10 @@ Treat the layers as separate claims. Compare each pair during review:
 9. Does every model-only term declare how it maps to production, or that it has
    no production counterpart?
 
-This comparison is a useful audit instrument. If the prose cannot explain an
+This comparison is a useful audit instrument. ORC-012 requires its substance in
+the review evidence for a new, repaired, or comprehensively audited oracle; it
+does not require these questions or their answers to appear in the test file.
+If the prose cannot explain an
 assertion through the model, the model may be incomplete. If the model predicts
 a fact that the test never observes, the test may be false green. If the driver
 cannot create a named phase, the prose claims more reach than the test has.
@@ -346,22 +533,22 @@ A fixed fast-check seed always generates the same cases. This makes a useful
 history stable, but it does not explore new histories on later runs. Do not
 describe a fixed-seed property as random coverage.
 
-Run important properties in two lanes:
+Under ORC-007, every important generated property runs in two lanes:
 
 1. Run a fixed seed that preserves a known useful campaign.
 2. Run without a seed so fast-check chooses a new seed.
 
 When the random lane fails, retain the reported seed and shrink path. Give the
-suite environment variables or another checked replay interface when practical.
-The replay input must select both the seed and the path. A seed alone reruns the
+suite environment variables or another checked replay interface. The replay
+input must select both the seed and the path. A seed alone reruns the
 campaign but might not stop at the same reduced counterexample.
 
 When replay inputs are present, run only the requested replay lane. Do not spend
 time on the fixed campaign before reaching the failure the developer asked to
 reproduce.
 
-The fixed and random lanes should use the same property, generators,
-observations, and run budget. Only their seed source should differ. This keeps a
+The fixed and random lanes must use the same property, generators,
+observations, and run budget. Only their seed source may differ. This keeps a
 random failure eligible for promotion into a pinned example or fixed campaign.
 
 [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
@@ -423,7 +610,11 @@ Consider this **illustrative support model**. An acquisition handle supports a r
 
 The rows and count look identical. Now release `a`. The first history loses support for `x`; the second retains it through `b`. A model containing only rows and counts cannot answer both correctly.
 
-This gives a practical simplification test: **find two states the model treats as equal, then try a legal next action that could distinguish them.** If their promised observations diverge—or an action is legal in only one—the model erased something relevant.
+This gives the reasoning required by ORC-008: **find two states the model treats
+as equal, then try a legal next action that could distinguish them.** If their
+promised observations diverge—or an action is legal in only one—the model erased
+something relevant. The evidence may be an argument or a preserved witness; a
+separate executable test for every state field is not required.
 
 The witness tells us to retain the ownership distinction here. It does not prove the revised model handles every retry, pending completion or replacement race. Nor does it require every real API to accept retired handles: if the actual contract rejects them, model that rule instead.
 
@@ -531,6 +722,10 @@ When scheduling legitimately allows several results, check for **one permitted e
 
 Even a plain reference can copy an incorrect semantic assumption. A second formulation gives another way to disagree.
 
+This is the conditional requirement in ORC-011, not a universal requirement for
+every oracle. It applies after a plausible shared semantic fault and a
+meaningfully different formulation have been identified.
+
 For a suitably scoped includes query, compare nested results with per-parent standalone queries or a flat join regrouped by parent. First state how empty parents, duplicates, ordering and projection match. A transformation that changes the answer is not an oracle for equivalence.
 
 SQLancer names ternary logic partitioning, or TLP, as one such strategy: compare a query with recomposed predicate partitions. Here is a simple illustration of the partition relation, not a verified TanStack recipe: give every occurrence in an input exactly one label—true, false or unknown—according to the same predicate. Recombining all three groups, retaining every occurrence once, recovers that input. NULL behavior, aggregation and ordering need explicit treatment before turning this into a library recipe. It is not a license to split an arbitrary limited query into independently limited pieces. [SQLancer's oracle inventory](https://github.com/sqlancer/sqlancer).
@@ -563,7 +758,12 @@ Keep the original trace beside the reduction. Record which property ran and whic
 
 Capture evidence before cleanup can change it. The historical publication fix copied the batch list before rollback; that preserved the needed local evidence, not universal deep immutability. An outer copy may still hold mutable values. A serializer may lose object identity or reorder arrays. Choose capture rules for the law and retain an original representation when normalization would erase the disputed distinction.
 
-Cleanup also has three separate jobs: preserve the primary failure, retain secondary cleanup diagnostics, and release resources. Reporting the first error does not prove the other two happened. Avoid letting a cleanup exception replace the mismatch that started the investigation.
+Cleanup also has three separate jobs: preserve the primary failure, retain
+secondary cleanup diagnostics, and release resources. Reporting the first error
+does not prove the other two happened. Avoid letting a cleanup exception replace
+the mismatch that started the investigation. “Separate” means distinguishable
+in the report; an `AggregateError` may preserve the primary error as its cause
+and each cleanup diagnostic in its errors.
 
 A useful failure report contains:
 
@@ -614,7 +814,8 @@ A weak observer, a missing protocol signal, and a measurement not yet taken are 
 
 ### A review card
 
-For a new oracle or a claimed repair, ask:
+This card is an optional presentation for the ORC-012 evidence. For a new oracle
+or a claimed repair, ask:
 
 1. What exact promise authorizes this expected result?
 2. Which legal history distinguishes the proposed model from a weaker one?
