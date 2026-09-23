@@ -11,6 +11,11 @@ import {
   createTransaction,
 } from '@tanstack/db'
 import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
+import {
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
@@ -90,6 +95,10 @@ type Todo = {
 }
 
 type TodoSyncParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
+
+const requestedOracleReplayProperty = readOracleRunConfig().replayProperty
+const describeUnlessOracleReplay =
+  requestedOracleReplayProperty === undefined ? describe : describe.skip
 
 type RecordingAdapter = PersistenceAdapter & {
   applyCommittedTxCalls: Array<{
@@ -677,6 +686,98 @@ function sortedTodoRows(rows: Iterable<Todo>): Array<Todo> {
   return Array.from(rows).sort((left, right) => left.id.localeCompare(right.id))
 }
 
+type ImmediateOrderingObservation = {
+  publicRows: Array<Todo>
+  durableRows: Array<Todo>
+  status: string
+  pendingMarkers: number
+}
+
+function expectImmediateOrderingObservation(
+  actual: ImmediateOrderingObservation,
+  expectedRows: ReadonlyArray<Todo>,
+): void {
+  expect(actual).toEqual({
+    publicRows: expectedRows,
+    durableRows: expectedRows,
+    status: `ready`,
+    pendingMarkers: 0,
+  })
+}
+
+type AbortGraphObservation = {
+  predecessorStatus: `fulfilled` | `rejected`
+  predecessorName: string | undefined
+  successorStatus: `fulfilled` | `rejected`
+  sameFailure: boolean
+  status: string
+  publicSuccessor: Todo | undefined
+  durableSuccessor: Todo | undefined
+  pendingMarkers: number
+}
+
+function expectAbortGraphObservation(
+  actual: AbortGraphObservation,
+  relationship: `independent` | `same-key`,
+  successorKey: string,
+  successorTitle: string,
+): void {
+  expect(actual).toEqual(
+    relationship === `same-key`
+      ? {
+          predecessorStatus: `rejected`,
+          predecessorName: `AbortError`,
+          successorStatus: `rejected`,
+          sameFailure: true,
+          status: `error`,
+          publicSuccessor: undefined,
+          durableSuccessor: undefined,
+          pendingMarkers: 0,
+        }
+      : {
+          predecessorStatus: `rejected`,
+          predecessorName: `AbortError`,
+          successorStatus: `fulfilled`,
+          sameFailure: false,
+          status: `ready`,
+          publicSuccessor: { id: successorKey, title: successorTitle },
+          durableSuccessor: { id: successorKey, title: successorTitle },
+          pendingMarkers: 0,
+        },
+  )
+}
+
+type OwnerIsolationAdmissionObservation = {
+  exactError: boolean
+  strayVisible: boolean
+}
+
+function expectOwnerIsolationAdmission(
+  actual: OwnerIsolationAdmissionObservation,
+): void {
+  expect(actual).toEqual({ exactError: true, strayVisible: false })
+}
+
+type ReservationBoundaryObservation = {
+  status: string
+  pendingMarkers: number
+}
+
+function expectReservationBoundaryObservation(
+  actual: ReservationBoundaryObservation,
+  boundary: `abort` | `cleanup` | `terminal-failure`,
+): void {
+  expect(actual).toEqual({
+    status:
+      boundary === `cleanup`
+        ? `cleaned-up`
+        : boundary === `abort`
+          ? `ready`
+          : `error`,
+    pendingMarkers: 0,
+  })
+}
+
 async function runImmediateOrderingLaw(
   relation: `same-key` | `disjoint`,
   olderTitle: string,
@@ -771,19 +872,17 @@ async function runImmediateOrderingLaw(
         `generated immediate receipt ${index}`,
       )
     }
-    expect({
-      publicRows: sortedTodoRows(
-        Array.from(collection.values()).map(stripVirtualProps),
-      ),
-      durableRows: sortedTodoRows(adapter.rows.values()),
-      status: collection.status,
-      pendingMarkers: collection._state.pendingSyncedTransactions.length,
-    }).toEqual({
-      publicRows: sortedTodoRows(expected.values()),
-      durableRows: sortedTodoRows(expected.values()),
-      status: `ready`,
-      pendingMarkers: 0,
-    })
+    expectImmediateOrderingObservation(
+      {
+        publicRows: sortedTodoRows(
+          Array.from(collection.values()).map(stripVirtualProps),
+        ),
+        durableRows: sortedTodoRows(adapter.rows.values()),
+        status: collection.status,
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      },
+      sortedTodoRows(expected.values()),
+    )
   } catch (error) {
     hasPrimaryFailure = true
     throw error
@@ -905,39 +1004,22 @@ async function runAbortRelationshipLaw(
     const abortError =
       predecessor.status === `rejected` ? predecessor.reason : undefined
 
-    expect({
-      predecessorStatus: predecessor.status,
-      predecessorName:
-        abortError instanceof Error ? abortError.name : undefined,
-      successorStatus: successor.status,
-      sameFailure:
-        successor.status === `rejected` && successor.reason === abortError,
-      status: collection.status,
-      publicSuccessor: stripVirtualProps(collection.get(successorKey)),
-      durableSuccessor: adapter.rows.get(successorKey),
-      pendingMarkers: collection._state.pendingSyncedTransactions.length,
-    }).toEqual(
-      relationship === `same-key`
-        ? {
-            predecessorStatus: `rejected`,
-            predecessorName: `AbortError`,
-            successorStatus: `rejected`,
-            sameFailure: true,
-            status: `error`,
-            publicSuccessor: undefined,
-            durableSuccessor: undefined,
-            pendingMarkers: 0,
-          }
-        : {
-            predecessorStatus: `rejected`,
-            predecessorName: `AbortError`,
-            successorStatus: `fulfilled`,
-            sameFailure: false,
-            status: `ready`,
-            publicSuccessor: { id: successorKey, title: successorTitle },
-            durableSuccessor: { id: successorKey, title: successorTitle },
-            pendingMarkers: 0,
-          },
+    expectAbortGraphObservation(
+      {
+        predecessorStatus: predecessor.status,
+        predecessorName:
+          abortError instanceof Error ? abortError.name : undefined,
+        successorStatus: successor.status,
+        sameFailure:
+          successor.status === `rejected` && successor.reason === abortError,
+        status: collection.status,
+        publicSuccessor: stripVirtualProps(collection.get(successorKey)),
+        durableSuccessor: adapter.rows.get(successorKey),
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      },
+      relationship,
+      successorKey,
+      successorTitle,
     )
   } catch (error) {
     hasPrimaryFailure = true
@@ -1040,13 +1122,13 @@ async function runBareOwnerOperationLaw(
     } catch (error) {
       observedError = error
     }
-    expect({
+    expectOwnerIsolationAdmission({
       exactError:
         operation === `commit`
           ? observedError instanceof NoPendingSyncTransactionCommitError
           : observedError instanceof NoPendingSyncTransactionWriteError,
       strayVisible: collection.has(`stray`),
-    }).toEqual({ exactError: true, strayVisible: false })
+    })
 
     releaseFirstPersistence.resolve()
     await atPersistedOracleCheckpoint(firstReceipt, `generated first owner`)
@@ -1145,10 +1227,13 @@ async function runInternalReservationBoundaryLaw(
         `generated internal cleanup`,
       )
       cleanedUp = true
-      expect({
-        status: collection.status,
-        pendingMarkers: collection._state.pendingSyncedTransactions.length,
-      }).toEqual({ status: `cleaned-up`, pendingMarkers: 0 })
+      expectReservationBoundaryObservation(
+        {
+          status: collection.status,
+          pendingMarkers: collection._state.pendingSyncedTransactions.length,
+        },
+        boundary,
+      )
       return
     }
 
@@ -1163,10 +1248,13 @@ async function runInternalReservationBoundaryLaw(
       await expect(
         atPersistedOracleCheckpoint(receipt, `generated internal abort`),
       ).rejects.toMatchObject({ name: `AbortError` })
-      expect({
-        status: collection.status,
-        pendingMarkers: collection._state.pendingSyncedTransactions.length,
-      }).toEqual({ status: `ready`, pendingMarkers: 0 })
+      expectReservationBoundaryObservation(
+        {
+          status: collection.status,
+          pendingMarkers: collection._state.pendingSyncedTransactions.length,
+        },
+        boundary,
+      )
       return
     }
 
@@ -1203,10 +1291,13 @@ async function runInternalReservationBoundaryLaw(
         `generated terminal internal settlement`,
       ),
     ).rejects.toMatchObject({ name: `PersistenceDurabilityError` })
-    expect({
-      status: collection.status,
-      pendingMarkers: collection._state.pendingSyncedTransactions.length,
-    }).toEqual({ status: `error`, pendingMarkers: 0 })
+    expectReservationBoundaryObservation(
+      {
+        status: collection.status,
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      },
+      boundary,
+    )
   } catch (error) {
     hasPrimaryFailure = true
     throw error
@@ -1222,6 +1313,465 @@ async function runInternalReservationBoundaryLaw(
     )
   }
 }
+
+type GeneratedPersistenceHistory = {
+  axes: Array<string>
+  titles: Array<string>
+}
+
+type GeneratedPersistenceGrammar = {
+  property: string
+  axes: ReadonlyArray<string>
+  axisContribution: Readonly<Record<string, string>>
+  titleCount: number
+  witness: GeneratedPersistenceHistory
+}
+
+const immediateOrderingAxes = [`same-key`, `disjoint`] as const
+const abortGraphAxes = [`independent`, `same-key`] as const
+const ownerIsolationAxes = [`write`, `commit`, `truncate`] as const
+const reservationBoundaryAxes = [
+  `abort`,
+  `cleanup`,
+  `terminal-failure`,
+] as const
+const generatedTitleMaxLength = 12
+const generatedPersistenceFixedSeeds = {
+  immediateOrdering: 18_530_101,
+  abortGraph: 18_530_102,
+  ownerIsolation: 18_530_103,
+  reservationBoundary: 18_530_104,
+} as const
+
+const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGrammar> =
+  [
+    {
+      property: `sqlite-persistence.immediate-order`,
+      axes: immediateOrderingAxes,
+      axisContribution: {
+        [`same-key`]: `the later source value wins in source order`,
+        disjoint: `both unrelated values and receipts survive`,
+      },
+      titleCount: 2,
+      witness: {
+        axes: [`same-key`, `disjoint`],
+        titles: [`older`, `newer`],
+      },
+    },
+    {
+      property: `sqlite-persistence.abort-graph`,
+      axes: abortGraphAxes,
+      axisContribution: {
+        independent: `an unrelated sibling survives the abort`,
+        [`same-key`]: `a dependent suffix shares the predecessor failure`,
+      },
+      titleCount: 2,
+      witness: {
+        axes: [`independent`, `same-key`],
+        titles: [`predecessor`, `successor`],
+      },
+    },
+    {
+      property: `sqlite-persistence.owner-isolation`,
+      axes: ownerIsolationAxes,
+      axisContribution: {
+        write: `bare write rejects without publishing a stray row`,
+        commit: `bare commit rejects without settling another owner`,
+        truncate: `bare truncate rejects without clearing another owner`,
+      },
+      titleCount: 1,
+      witness: {
+        axes: [`write`, `commit`, `truncate`],
+        titles: [`queued`],
+      },
+    },
+    {
+      property: `sqlite-persistence.reservation-boundary`,
+      axes: reservationBoundaryAxes,
+      axisContribution: {
+        abort: `explicit abort releases its reservation`,
+        cleanup: `cleanup releases its reservation`,
+        [`terminal-failure`]: `fail-stop releases its reservation`,
+      },
+      titleCount: 1,
+      witness: {
+        axes: [`abort`, `cleanup`, `terminal-failure`],
+        titles: [`hydrated`],
+      },
+    },
+  ]
+
+function reconstructGeneratedPersistenceHistory(
+  grammar: GeneratedPersistenceGrammar,
+  history: GeneratedPersistenceHistory,
+): GeneratedPersistenceHistory {
+  const requiredAxes = new Set(grammar.axes)
+  const axesAreExact =
+    history.axes.length === grammar.axes.length &&
+    new Set(history.axes).size === grammar.axes.length &&
+    history.axes.every((axis) => requiredAxes.has(axis))
+  const titlesAreInRange =
+    history.titles.length === grammar.titleCount &&
+    history.titles.every(
+      (title) => [...title].length <= generatedTitleMaxLength,
+    )
+  if (!axesAreExact || !titlesAreInRange) {
+    throw new Error(
+      `invalid generated persistence history: ${grammar.property}`,
+    )
+  }
+  return {
+    axes: [...history.axes],
+    titles: [...history.titles],
+  }
+}
+
+function fullAxisOrder<Axis extends string>(
+  axes: ReadonlyArray<Axis>,
+): fc.Arbitrary<Array<Axis>> {
+  return fc.shuffledSubarray([...axes], {
+    minLength: axes.length,
+    maxLength: axes.length,
+  })
+}
+
+const generatedTitle = fc.string({ maxLength: generatedTitleMaxLength })
+
+type ImmediateOrderingHistory = {
+  relations: Array<`same-key` | `disjoint`>
+  titles: [string, string]
+}
+
+type AbortGraphHistory = {
+  relationships: Array<`independent` | `same-key`>
+  titles: [string, string]
+}
+
+type OwnerIsolationHistory = {
+  operations: Array<`write` | `commit` | `truncate`>
+  queuedTitle: string
+}
+
+type ReservationBoundaryHistory = {
+  boundaries: Array<`abort` | `cleanup` | `terminal-failure`>
+  hydratedTitle: string
+}
+
+const immediateOrderingHistory: fc.Arbitrary<ImmediateOrderingHistory> =
+  fc.record({
+    relations: fullAxisOrder(immediateOrderingAxes),
+    titles: fc.tuple(generatedTitle, generatedTitle),
+  })
+
+const abortGraphHistory: fc.Arbitrary<AbortGraphHistory> = fc.record({
+  relationships: fullAxisOrder(abortGraphAxes),
+  titles: fc.tuple(generatedTitle, generatedTitle),
+})
+
+const ownerIsolationHistory: fc.Arbitrary<OwnerIsolationHistory> = fc.record({
+  operations: fullAxisOrder(ownerIsolationAxes),
+  queuedTitle: generatedTitle,
+})
+
+const reservationBoundaryHistory: fc.Arbitrary<ReservationBoundaryHistory> =
+  fc.record({
+    boundaries: fullAxisOrder(reservationBoundaryAxes),
+    hydratedTitle: generatedTitle,
+  })
+
+function generatedPersistenceGrammarSamples(): ReadonlyArray<{
+  grammar: GeneratedPersistenceGrammar
+  histories: Array<GeneratedPersistenceHistory>
+}> {
+  const grammar = (property: string): GeneratedPersistenceGrammar => {
+    const match = generatedPersistenceGrammars.find(
+      (candidate) => candidate.property === property,
+    )
+    if (match === undefined) throw new Error(`missing grammar: ${property}`)
+    return match
+  }
+  const sampleOptions = (seed: number) => ({ seed, numRuns: 4 })
+  return [
+    {
+      grammar: grammar(`sqlite-persistence.immediate-order`),
+      histories: fc
+        .sample(
+          immediateOrderingHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.immediateOrdering),
+        )
+        .map((history) => ({
+          axes: history.relations,
+          titles: [...history.titles],
+        })),
+    },
+    {
+      grammar: grammar(`sqlite-persistence.abort-graph`),
+      histories: fc
+        .sample(
+          abortGraphHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.abortGraph),
+        )
+        .map((history) => ({
+          axes: history.relationships,
+          titles: [...history.titles],
+        })),
+    },
+    {
+      grammar: grammar(`sqlite-persistence.owner-isolation`),
+      histories: fc
+        .sample(
+          ownerIsolationHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.ownerIsolation),
+        )
+        .map((history) => ({
+          axes: history.operations,
+          titles: [history.queuedTitle],
+        })),
+    },
+    {
+      grammar: grammar(`sqlite-persistence.reservation-boundary`),
+      histories: fc
+        .sample(
+          reservationBoundaryHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.reservationBoundary),
+        )
+        .map((history) => ({
+          axes: history.boundaries,
+          titles: [history.hydratedTitle],
+        })),
+    },
+  ]
+}
+
+async function runGeneratedImmediateOrderingHistory(
+  history: ImmediateOrderingHistory,
+): Promise<void> {
+  for (const relation of history.relations) {
+    await runImmediateOrderingLaw(
+      relation,
+      history.titles[0],
+      history.titles[1],
+    )
+  }
+}
+
+async function runGeneratedAbortGraphHistory(
+  history: AbortGraphHistory,
+): Promise<void> {
+  for (const relationship of history.relationships) {
+    await runAbortRelationshipLaw(
+      relationship,
+      history.titles[0],
+      history.titles[1],
+    )
+  }
+}
+
+async function runGeneratedOwnerIsolationHistory(
+  history: OwnerIsolationHistory,
+): Promise<void> {
+  for (const operation of history.operations) {
+    await runBareOwnerOperationLaw(operation, history.queuedTitle)
+  }
+}
+
+async function runGeneratedReservationBoundaryHistory(
+  history: ReservationBoundaryHistory,
+): Promise<void> {
+  for (const boundary of history.boundaries) {
+    await runInternalReservationBoundaryLaw(boundary, history.hydratedTitle)
+  }
+}
+
+function registerGeneratedPersistenceProperty<Value>(options: {
+  property: string
+  title: string
+  arbitrary: fc.Arbitrary<Value>
+  fixedSeed: number
+  run: (value: Value) => Promise<void>
+}): void {
+  const { property, title, arbitrary, fixedSeed, run } = options
+  if (requestedOracleReplayProperty === undefined) {
+    fcTest.prop([arbitrary], { seed: fixedSeed, numRuns: oracleRuns(4) })(
+      `${title} (fixed)`,
+      run,
+    )
+    fcTest.prop([arbitrary], oraclePropertyOptions(4, property))(
+      `${title} (random)`,
+      run,
+    )
+  } else if (requestedOracleReplayProperty === property) {
+    fcTest.prop([arbitrary], oraclePropertyOptions(4, property))(
+      `${title} (replay)`,
+      run,
+    )
+  }
+}
+
+describe(`generated persistence durability oracles`, () => {
+  if (requestedOracleReplayProperty === undefined) {
+    it(`reconstructs the full grammar and rejects ablated, out-of-range, and foreign histories`, () => {
+      for (const {
+        grammar,
+        histories,
+      } of generatedPersistenceGrammarSamples()) {
+        for (const history of histories) {
+          expect(
+            reconstructGeneratedPersistenceHistory(grammar, history),
+          ).toEqual(history)
+        }
+      }
+
+      for (const grammar of generatedPersistenceGrammars) {
+        expect(Object.keys(grammar.axisContribution).sort()).toEqual(
+          [...grammar.axes].sort(),
+        )
+        for (const contribution of Object.values(grammar.axisContribution)) {
+          expect(contribution).not.toBe(``)
+        }
+        expect(
+          reconstructGeneratedPersistenceHistory(grammar, grammar.witness),
+        ).toEqual(grammar.witness)
+
+        for (const omittedAxis of grammar.axes) {
+          expect(() =>
+            reconstructGeneratedPersistenceHistory(grammar, {
+              ...grammar.witness,
+              axes: grammar.witness.axes.filter((axis) => axis !== omittedAxis),
+            }),
+          ).toThrow(`invalid generated persistence history`)
+        }
+
+        expect(
+          reconstructGeneratedPersistenceHistory(grammar, {
+            axes: [...grammar.axes],
+            titles: Array.from({ length: grammar.titleCount }, () =>
+              `x`.repeat(generatedTitleMaxLength),
+            ),
+          }).titles,
+        ).toEqual(
+          Array.from({ length: grammar.titleCount }, () =>
+            `x`.repeat(generatedTitleMaxLength),
+          ),
+        )
+        expect(
+          reconstructGeneratedPersistenceHistory(grammar, {
+            axes: [...grammar.axes],
+            titles: Array.from({ length: grammar.titleCount }, () => ``),
+          }).titles,
+        ).toEqual(Array.from({ length: grammar.titleCount }, () => ``))
+        expect(() =>
+          reconstructGeneratedPersistenceHistory(grammar, {
+            axes: [...grammar.axes],
+            titles: [
+              `x`.repeat(generatedTitleMaxLength + 1),
+              ...Array.from(
+                { length: Math.max(0, grammar.titleCount - 1) },
+                () => ``,
+              ),
+            ],
+          }),
+        ).toThrow(`invalid generated persistence history`)
+        expect(() =>
+          reconstructGeneratedPersistenceHistory(grammar, {
+            ...grammar.witness,
+            axes: grammar.axes.map((axis, index) =>
+              index === grammar.axes.length - 1 ? grammar.axes[0]! : axis,
+            ),
+          }),
+        ).toThrow(`invalid generated persistence history`)
+        expect(() =>
+          reconstructGeneratedPersistenceHistory(grammar, {
+            ...grammar.witness,
+            axes: [...grammar.axes.slice(0, -1), `foreign-axis`],
+          }),
+        ).toThrow(`invalid generated persistence history`)
+      }
+    })
+
+    it.each([
+      {
+        name: `immediate-order older same-key value wins`,
+        reject: () =>
+          expectImmediateOrderingObservation(
+            {
+              publicRows: [{ id: `shared`, title: `older` }],
+              durableRows: [{ id: `shared`, title: `older` }],
+              status: `ready`,
+              pendingMarkers: 0,
+            },
+            [{ id: `shared`, title: `newer` }],
+          ),
+      },
+      {
+        name: `abort-graph independent sibling inherits the abort`,
+        reject: () =>
+          expectAbortGraphObservation(
+            {
+              predecessorStatus: `rejected`,
+              predecessorName: `AbortError`,
+              successorStatus: `rejected`,
+              sameFailure: true,
+              status: `error`,
+              publicSuccessor: undefined,
+              durableSuccessor: undefined,
+              pendingMarkers: 0,
+            },
+            `independent`,
+            `survivor`,
+            `must survive`,
+          ),
+      },
+      {
+        name: `owner-isolation bare write steals and publishes a queued marker`,
+        reject: () =>
+          expectOwnerIsolationAdmission({
+            exactError: false,
+            strayVisible: true,
+          }),
+      },
+      {
+        name: `reservation-boundary terminal failure leaks one marker`,
+        reject: () =>
+          expectReservationBoundaryObservation(
+            { status: `error`, pendingMarkers: 1 },
+            `terminal-failure`,
+          ),
+      },
+    ])(`rejects named wrong answer: $name`, ({ reject }) => {
+      expect(reject).toThrow()
+    })
+  }
+
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.immediate-order`,
+    title: `immediate histories preserve source order and settle every receipt`,
+    arbitrary: immediateOrderingHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.immediateOrdering,
+    run: runGeneratedImmediateOrderingHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.abort-graph`,
+    title: `abort graphs preserve independent siblings and reject dependent suffixes`,
+    arbitrary: abortGraphHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.abortGraph,
+    run: runGeneratedAbortGraphHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.owner-isolation`,
+    title: `bare operations cannot capture another owner's reservation`,
+    arbitrary: ownerIsolationHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.ownerIsolation,
+    run: runGeneratedOwnerIsolationHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.reservation-boundary`,
+    title: `reservation boundaries release every internally owned marker`,
+    arbitrary: reservationBoundaryHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.reservationBoundary,
+    run: runGeneratedReservationBoundaryHistory,
+  })
+})
 
 async function createTerminalFailureHarness(
   kind: `hydration` | `durability`,
@@ -1324,7 +1874,7 @@ async function createTerminalFailureHarness(
   }
 }
 
-describe(`persistedCollectionOptions`, () => {
+describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   it(`provides a sync-absent loopback configuration with persisted utils`, async () => {
     const adapter = createRecordingAdapter()
     const collection = createCollection(
@@ -4482,7 +5032,10 @@ describe(`persistedCollectionOptions`, () => {
         changedRows: [
           {
             key: `queued`,
-            value: { id: `queued`, title: `belongs after replacement hydrate` },
+            value: {
+              id: `queued`,
+              title: `belongs after replacement hydrate`,
+            },
           },
         ],
         deletedKeys: [],
@@ -4965,7 +5518,10 @@ describe(`persistedCollectionOptions`, () => {
         secondStatus: `rejected`,
         secondExact: true,
         applyCalls: 1,
-        firstVisible: { id: `a`, title: `first publishes before persistence` },
+        firstVisible: {
+          id: `a`,
+          title: `first publishes before persistence`,
+        },
         firstDurable: undefined,
         secondVisible: undefined,
         secondDurable: undefined,
@@ -6585,7 +7141,10 @@ describe(`persistedCollectionOptions`, () => {
       sourceParams.begin()
       sourceParams.write({
         type: `insert`,
-        value: { id: `remote-applied`, title: `applies after local rollback` },
+        value: {
+          id: `remote-applied`,
+          title: `applies after local rollback`,
+        },
       })
       remoteReceipt = sourceParams.commit()
       expect(remoteReceipt).toBeInstanceOf(Promise)
@@ -7481,86 +8040,6 @@ describe(`persistedCollectionOptions`, () => {
       )
     }
   })
-
-  fcTest.prop(
-    [
-      fc.uniqueArray(
-        fc.constantFrom<`same-key` | `disjoint`>(`same-key`, `disjoint`),
-        { minLength: 2, maxLength: 2 },
-      ),
-      fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
-    ],
-    { numRuns: 4 },
-  )(
-    `generated immediate histories preserve source order and settle every receipt`,
-    async (relations, titles) => {
-      for (const relation of relations) {
-        await runImmediateOrderingLaw(relation, titles[0], titles[1])
-      }
-    },
-  )
-
-  fcTest.prop(
-    [
-      fc.uniqueArray(
-        fc.constantFrom<`independent` | `same-key`>(`independent`, `same-key`),
-        { minLength: 2, maxLength: 2 },
-      ),
-      fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
-    ],
-    { numRuns: 4 },
-  )(
-    `generated abort graphs preserve independent siblings and reject dependent suffixes`,
-    async (relationships, titles) => {
-      for (const relationship of relationships) {
-        await runAbortRelationshipLaw(relationship, titles[0], titles[1])
-      }
-    },
-  )
-
-  fcTest.prop(
-    [
-      fc.uniqueArray(
-        fc.constantFrom<`write` | `commit` | `truncate`>(
-          `write`,
-          `commit`,
-          `truncate`,
-        ),
-        { minLength: 3, maxLength: 3 },
-      ),
-      fc.string({ maxLength: 12 }),
-    ],
-    { numRuns: 4 },
-  )(
-    `generated bare operations cannot capture another owner's reservation`,
-    async (operations, queuedTitle) => {
-      for (const operation of operations) {
-        await runBareOwnerOperationLaw(operation, queuedTitle)
-      }
-    },
-  )
-
-  fcTest.prop(
-    [
-      fc.uniqueArray(
-        fc.constantFrom<`abort` | `cleanup` | `terminal-failure`>(
-          `abort`,
-          `cleanup`,
-          `terminal-failure`,
-        ),
-        { minLength: 3, maxLength: 3 },
-      ),
-      fc.string({ maxLength: 12 }),
-    ],
-    { numRuns: 4 },
-  )(
-    `generated reservation boundaries release every internally owned marker`,
-    async (boundaries, hydratedTitle) => {
-      for (const boundary of boundaries) {
-        await runInternalReservationBoundaryLaw(boundary, hydratedTitle)
-      }
-    },
-  )
 
   it(`marks the collection errored with the exact persisted startup hydration failure`, async () => {
     const adapter = createRecordingAdapter()
@@ -9762,7 +10241,7 @@ describe(`persistedCollectionOptions`, () => {
   })
 })
 
-describe(`persisted key and identifier helpers`, () => {
+describeUnlessOracleReplay(`persisted key and identifier helpers`, () => {
   it(`encodes and decodes persisted storage keys without collisions`, () => {
     expect(encodePersistedStorageKey(1)).toBe(`n:1`)
     expect(encodePersistedStorageKey(`1`)).toBe(`s:1`)

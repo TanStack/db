@@ -12,6 +12,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [`db/tests/SortedMap.test.ts`, `sorted-map`, `key ascending descending`],
   [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
   [
+    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `sqlite-persistence`,
+    `immediate-order abort-graph owner-isolation reservation-boundary`,
+  ],
+  [
     `db/tests/optimistic-transaction-oracle.property.test.ts`,
     `collection-state`,
     `mixed-transaction same-key`,
