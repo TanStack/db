@@ -13,7 +13,9 @@
  * admitted; after release, both operations must finish. The three legal driver
  * forms are direct, transparently wrapped, and direct with a function-valued
  * key. This relation records admissions without copying the production
- * scheduler or invoking the opaque key.
+ * scheduler or invoking the opaque key. Promise-only discovery is a fourth
+ * form: the first operation reveals the shared identity and its complete
+ * hydration scope becomes the scheduler's already-running unit.
  *
  * Production boundary and checkpoint: both operations use
  * `createSQLiteCorePersistenceAdapter`; the hydration operation enters through
@@ -22,12 +24,15 @@
  * wrapper identity or treating a function key as a getter synchronously admits
  * the second query and fails the exact admission assertion.
  *
- * Known omissions: this focused contract test does not establish K=1 lane
- * fairness, SQL result correctness, eventual progress under arbitrary I/O, or
- * cross-process coordination. Those belong to the shared-driver oracle and
- * provider refinements.
+ * Known omissions: promise-only discovery coordinates adapters over the same
+ * wrapper identity. Distinct unbranded wrappers must forward the shared key
+ * before adapter construction. This focused contract test does not establish
+ * K=1 lane fairness, SQL result correctness, eventual progress under arbitrary
+ * I/O, or cross-process coordination. Those belong to the shared-driver oracle
+ * and provider refinements.
  */
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   createSQLiteCorePersistenceAdapter,
@@ -92,6 +97,95 @@ class FirstQueryGatedDriver implements SQLiteDriver {
   }
 }
 
+class PromiseBrandedFirstQueryGatedDriver implements SQLiteDriver {
+  readonly admissions: Array<string> = []
+  readonly firstQueryEntered = createDeferred()
+  private readonly firstQueryGate = createDeferred()
+  private holdFirstQuery = true
+
+  constructor(private readonly schedulingKey: object = {}) {}
+
+  exec(): Promise<void> {
+    this.admissions.push(`exec`)
+    return this.brand(Promise.resolve())
+  }
+
+  query<T>(): Promise<ReadonlyArray<T>> {
+    this.admissions.push(`query`)
+    const result = (async () => {
+      if (this.holdFirstQuery) {
+        this.holdFirstQuery = false
+        this.firstQueryEntered.resolve()
+        await this.firstQueryGate.promise
+      }
+      return [] as ReadonlyArray<T>
+    })()
+    return this.brand(result)
+  }
+
+  run(): Promise<void> {
+    this.admissions.push(`run`)
+    return this.brand(Promise.resolve())
+  }
+
+  transaction<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
+    this.admissions.push(`transaction`)
+    return this.brand(fn(this))
+  }
+
+  releaseFirstQuery(): void {
+    this.firstQueryGate.resolve()
+  }
+
+  private brand<T>(promise: Promise<T>): Promise<T> {
+    Object.defineProperty(
+      promise,
+      SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
+      { value: this.schedulingKey },
+    )
+    return promise
+  }
+}
+
+class UnbrandedPromiseLookupDriver implements SQLiteDriver {
+  schedulingKeyLookups = 0
+
+  exec(): Promise<void> {
+    return this.unbranded(Promise.resolve())
+  }
+
+  query<T>(): Promise<ReadonlyArray<T>> {
+    return this.unbranded(Promise.resolve([] as ReadonlyArray<T>))
+  }
+
+  run(): Promise<void> {
+    return this.unbranded(Promise.resolve())
+  }
+
+  transaction<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
+    return this.unbranded(fn(this))
+  }
+
+  private unbranded<T>(promise: Promise<T>): Promise<T> {
+    Object.defineProperty(
+      promise,
+      SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
+      {
+        configurable: true,
+        get: () => {
+          this.schedulingKeyLookups++
+          return undefined
+        },
+      },
+    )
+    return promise
+  }
+}
+
 function createTransparentWrapper(driver: SQLiteDriver): SQLiteDriver {
   return forwardSQLiteDriverSharedLogicalScheduling(driver, {
     exec: (sql) => driver.exec(sql),
@@ -148,4 +242,72 @@ describe(`shared logical scheduling`, () => {
       expect(underlying.admissions.length).toBeGreaterThan(1)
     },
   )
+
+  it(`adopts a late-discovered promise identity before admitting peer work`, async () => {
+    const driver = new PromiseBrandedFirstQueryGatedDriver()
+    const hydrateAdapter = createSQLiteCorePersistenceAdapter({ driver })
+    const regularAdapter = createSQLiteCorePersistenceAdapter({ driver })
+
+    const hydrate = hydrateAdapter.runInHydrationScope!(async (scoped) => {
+      await scoped.loadCollectionMetadata!(`hydrate`)
+    })
+    await driver.firstQueryEntered.promise
+
+    const regular = regularAdapter.loadCollectionMetadata!(`regular`)
+
+    expect(driver.admissions).toEqual([`query`])
+
+    driver.releaseFirstQuery()
+    await Promise.all([hydrate, regular])
+    expect(driver.admissions).toEqual([`query`, `query`])
+  })
+
+  it(`keeps generated promise-discovered hydrate units non-preemptible`, async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          hydrateQueries: fc.integer({ min: 1, max: 4 }),
+          peerQueries: fc.integer({ min: 1, max: 3 }),
+        }),
+        async ({ hydrateQueries, peerQueries }) => {
+          const driver = new PromiseBrandedFirstQueryGatedDriver()
+          const hydrateAdapter = createSQLiteCorePersistenceAdapter({ driver })
+          const peerAdapters = Array.from({ length: peerQueries }, () =>
+            createSQLiteCorePersistenceAdapter({ driver }),
+          )
+
+          const hydrate = hydrateAdapter.runInHydrationScope!(
+            async (scoped) => {
+              for (let index = 0; index < hydrateQueries; index++) {
+                await scoped.loadCollectionMetadata!(`hydrate-${index}`)
+              }
+            },
+          )
+          await driver.firstQueryEntered.promise
+
+          const peers = peerAdapters.map((adapter, index) =>
+            adapter.loadCollectionMetadata!(`peer-${index}`),
+          )
+          expect(driver.admissions).toEqual([`query`])
+
+          driver.releaseFirstQuery()
+          await Promise.all([hydrate, ...peers])
+          expect(driver.admissions).toEqual(
+            Array.from({ length: hydrateQueries + peerQueries }, () => `query`),
+          )
+        },
+      ),
+      { seed: 1868, numRuns: 12, endOnFailure: true },
+    )
+  })
+
+  it(`stops probing after the first returned promise lacks scheduling support`, async () => {
+    const driver = new UnbrandedPromiseLookupDriver()
+    const adapter = createSQLiteCorePersistenceAdapter({ driver })
+
+    await adapter.loadCollectionMetadata!(`first`)
+    await adapter.loadCollectionMetadata!(`second`)
+
+    expect(driver.schedulingKeyLookups).toBe(1)
+  })
 })

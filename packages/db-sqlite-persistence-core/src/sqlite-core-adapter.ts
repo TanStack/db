@@ -96,6 +96,17 @@ class SharedPersistenceScheduler {
     return this.enqueue(`hydrate`, task)
   }
 
+  adoptRunningHydrate(completion: Promise<unknown>): void {
+    if (this.running) return
+    this.running = true
+    const finish = () => {
+      this.lastCompletedKind = `hydrate`
+      this.running = false
+      this.drain()
+    }
+    void completion.then(finish, finish)
+  }
+
   private enqueue<T>(
     kind: ScheduledOperationKind,
     task: () => Promise<T>,
@@ -157,6 +168,7 @@ const sharedPersistenceSchedulers = new WeakMap<
   object,
   SharedPersistenceScheduler
 >()
+const observedDriverSchedulingKeys = new WeakMap<object, object>()
 
 function getSharedPersistenceScheduler(
   key: object,
@@ -187,7 +199,10 @@ function observeSharedLogicalSchedulingSupport(
   driver: SQLiteDriver,
   onSupport: (key: object) => void,
 ): SQLiteDriver {
+  let observationPending = true
   const observe = <T>(promise: Promise<T>): Promise<T> => {
+    if (!observationPending) return promise
+    observationPending = false
     const key = getSharedLogicalSchedulingKey(promise)
     if (key) onSupport(key)
     return promise
@@ -1163,7 +1178,9 @@ function buildIndexName(collectionId: string, signature: string): string {
 
 export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly driver: SQLiteDriver
+  private readonly schedulingIdentitySource: SQLiteDriver
   private scheduler: SharedPersistenceScheduler | undefined
+  private activeUnscheduledHydration: Promise<unknown> | undefined
   private readonly hydrationAdapter: HydrationPersistenceAdapter
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
@@ -1220,14 +1237,22 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )
     }
 
-    const schedulingKey = getSharedLogicalSchedulingKey(options.driver)
+    this.schedulingIdentitySource = options.driver
+    const schedulingKey =
+      getSharedLogicalSchedulingKey(options.driver) ??
+      observedDriverSchedulingKeys.get(options.driver)
     this.scheduler = schedulingKey
       ? getSharedPersistenceScheduler(schedulingKey)
       : undefined
     this.driver = schedulingKey
       ? options.driver
       : observeSharedLogicalSchedulingSupport(options.driver, (key) => {
-          this.scheduler ??= getSharedPersistenceScheduler(key)
+          observedDriverSchedulingKeys.set(options.driver, key)
+          const scheduler = getSharedPersistenceScheduler(key)
+          this.scheduler ??= scheduler
+          if (this.activeUnscheduledHydration) {
+            scheduler.adoptRunningHydrate(this.activeUnscheduledHydration)
+          }
         })
     this.schemaVersion = schemaVersion
     this.schemaMismatchPolicy =
@@ -1259,13 +1284,38 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   runInHydrationScope<T>(
     task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
   ): Promise<T> {
-    return this.scheduler
-      ? this.scheduler.runHydrate(() => task(this.hydrationAdapter))
-      : Promise.resolve().then(() => task(this.hydrationAdapter))
+    const scheduler = this.resolveScheduler()
+    if (scheduler) {
+      return scheduler.runHydrate(() => task(this.hydrationAdapter))
+    }
+
+    const hydration = Promise.resolve().then(() => task(this.hydrationAdapter))
+    this.activeUnscheduledHydration = hydration
+    const clear = () => {
+      if (this.activeUnscheduledHydration === hydration) {
+        this.activeUnscheduledHydration = undefined
+      }
+    }
+    void hydration.then(clear, clear)
+    return hydration
+  }
+
+  isHydrationScopeScheduled(): boolean {
+    return this.resolveScheduler() !== undefined
   }
 
   private runRegular<T>(task: () => Promise<T>): Promise<T> {
-    return this.scheduler ? this.scheduler.runRegular(task) : task()
+    const scheduler = this.resolveScheduler()
+    return scheduler ? scheduler.runRegular(task) : task()
+  }
+
+  private resolveScheduler(): SharedPersistenceScheduler | undefined {
+    if (this.scheduler) return this.scheduler
+    const key = observedDriverSchedulingKeys.get(this.schedulingIdentitySource)
+    if (key) {
+      this.scheduler = getSharedPersistenceScheduler(key)
+    }
+    return this.scheduler
   }
 
   private runInTransaction<TResult>(

@@ -82,6 +82,11 @@ type CollectionState = {
   subscribers: Set<(message: ProtocolEnvelope<unknown>) => void>
 }
 
+type AppliedEnvelope = {
+  appliedAt: number
+  response: ApplyLocalMutationsResponse
+}
+
 // Adapter with pullSince support
 type AdapterWithPullSince = PersistenceAdapter & {
   pullSince?: (
@@ -123,10 +128,13 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private readonly nodeId = safeRandomUUID()
   private readonly dbName: string
   private adapter: AdapterWithPullSince | null
+  private readonly collectionAdapters = new Map<string, AdapterWithPullSince>()
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
-  private readonly appliedEnvelopeIds = new Map<string, number>()
+  private readonly appliedEnvelopeIds = new Map<string, AppliedEnvelope>()
+  private readonly disposedPromise: Promise<never>
+  private rejectDisposed: ((error: Error) => void) | null = null
   private disposed = false
 
   /** Method indirection to prevent TypeScript from narrowing `disposed` across awaits */
@@ -134,18 +142,27 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     return this.disposed
   }
 
-  private requireAdapter(): AdapterWithPullSince {
-    if (!this.adapter) {
+  private requireAdapter(collectionId: string): AdapterWithPullSince {
+    let adapter = this.collectionAdapters.get(collectionId)
+    if (!adapter && this.adapter) {
+      adapter = this.adapter
+      this.collectionAdapters.set(collectionId, adapter)
+    }
+    if (!adapter) {
       throw new Error(
         `BrowserCollectionCoordinator: adapter not set. Call setAdapter() before using leader-side operations.`,
       )
     }
-    return this.adapter
+    return adapter
   }
 
   constructor(options: BrowserCollectionCoordinatorOptions) {
     this.dbName = options.dbName
     this.adapter = options.adapter ?? null
+    this.disposedPromise = new Promise<never>((_resolve, reject) => {
+      this.rejectDisposed = reject
+    })
+    void this.disposedPromise.catch(() => undefined)
     this.channel = new BroadcastChannel(`tsdb:coord:${this.dbName}`)
     this.channel.onmessage = (event: MessageEvent) => {
       this.onChannelMessage(event.data)
@@ -159,6 +176,14 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
    */
   setAdapter(adapter: AdapterWithPullSince): void {
     this.adapter = adapter
+  }
+
+  /** Register the adapter that owns leader-side work for one collection. */
+  setAdapterForCollection(
+    collectionId: string,
+    adapter: AdapterWithPullSince,
+  ): void {
+    this.collectionAdapters.set(collectionId, adapter)
   }
 
   // -----------------------------------------------------------------------
@@ -223,10 +248,11 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     signature: string,
     spec: PersistedIndexSpec,
     scopedAdapter?: HydrationPersistenceAdapter,
+    localEnsureCompleted = false,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
-      // A scoped adapter is a leader-local capability and never crosses RPC.
-      await (scopedAdapter ?? this.requireAdapter()).ensureIndex(
+      if (localEnsureCompleted) return
+      await (scopedAdapter ?? this.requireAdapter(collectionId)).ensureIndex(
         collectionId,
         signature,
         spec,
@@ -304,7 +330,11 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   // -----------------------------------------------------------------------
 
   dispose(): void {
+    if (this.disposed) return
     this.disposed = true
+    const disposedError = new Error(`coordinator disposed`)
+    this.rejectDisposed?.(disposedError)
+    this.rejectDisposed = null
 
     for (const [collectionId, state] of this.collections) {
       this.releaseLeadership(collectionId, state)
@@ -312,12 +342,13 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
     for (const [, pending] of this.pendingRPCs) {
       clearTimeout(pending.timer)
-      pending.reject(new Error(`coordinator disposed`))
+      pending.reject(disposedError)
     }
     this.pendingRPCs.clear()
 
     this.channel.close()
     this.collections.clear()
+    this.collectionAdapters.clear()
   }
 
   // -----------------------------------------------------------------------
@@ -361,7 +392,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
           try {
             // Restore stream position from DB before claiming leadership
-            const adapter = this.requireAdapter()
+            const adapter = this.requireAdapter(collectionId)
             if (adapter.getStreamPosition) {
               const pos = await adapter.getStreamPosition(collectionId)
               state.latestTerm = pos.latestTerm
@@ -499,16 +530,22 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     collectionId: string,
     request: RPCRequest,
   ): Promise<T> {
+    if (this.isDisposed()) throw new Error(`coordinator disposed`)
     let lastError: Error | undefined
 
     for (let attempt = 0; attempt <= RPC_RETRY_ATTEMPTS; attempt++) {
       if (attempt > 0) {
-        await sleep(RPC_RETRY_DELAY_MS * attempt)
+        await Promise.race([
+          sleep(RPC_RETRY_DELAY_MS * attempt),
+          this.disposedPromise,
+        ])
       }
+      if (this.isDisposed()) throw new Error(`coordinator disposed`)
 
       try {
         return await this.sendRPCOnce<T>(collectionId, request)
       } catch (error) {
+        if (this.isDisposed()) throw error
         lastError = error instanceof Error ? error : new Error(String(error))
       }
     }
@@ -623,7 +660,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     },
   ): Promise<RPCResponse> {
     await this.withWriterLock(() =>
-      this.requireAdapter().ensureIndex(
+      this.requireAdapter(collectionId).ensureIndex(
         collectionId,
         request.signature,
         request.spec,
@@ -646,14 +683,9 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     },
   ): Promise<ApplyLocalMutationsResponse> {
     // Dedupe by envelopeId
-    if (this.appliedEnvelopeIds.has(request.envelopeId)) {
-      return {
-        type: `rpc:applyLocalMutations:res`,
-        rpcId: request.rpcId,
-        ok: false,
-        code: `CONFLICT`,
-        error: `envelope ${request.envelopeId} already applied`,
-      }
+    const appliedEnvelope = this.appliedEnvelopeIds.get(request.envelopeId)
+    if (appliedEnvelope) {
+      return { ...appliedEnvelope.response, rpcId: request.rpcId }
     }
 
     const state = this.collections.get(collectionId)
@@ -689,11 +721,25 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     }
 
     await this.withWriterLock(() =>
-      this.requireAdapter().applyCommittedTx(collectionId, tx),
+      this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx),
     )
 
-    // Track envelope for dedup
-    this.appliedEnvelopeIds.set(request.envelopeId, Date.now())
+    const response: ApplyLocalMutationsResponse = {
+      type: `rpc:applyLocalMutations:res`,
+      rpcId: request.rpcId,
+      ok: true,
+      term,
+      seq,
+      latestRowVersion: rowVersion,
+      acceptedMutationIds: request.mutations.map((m) => m.mutationId),
+    }
+
+    // Retain the completed result so transport retries observe the same
+    // durable outcome without applying the envelope again.
+    this.appliedEnvelopeIds.set(request.envelopeId, {
+      appliedAt: Date.now(),
+      response,
+    })
     this.pruneAppliedEnvelopeIds()
 
     // Broadcast tx:committed to all tabs
@@ -728,15 +774,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       subscriber(txCommitted)
     }
 
-    return {
-      type: `rpc:applyLocalMutations:res`,
-      rpcId: request.rpcId,
-      ok: true,
-      term,
-      seq,
-      latestRowVersion: rowVersion,
-      acceptedMutationIds: request.mutations.map((m) => m.mutationId),
-    }
+    return response
   }
 
   private async handlePullSince(
@@ -750,7 +788,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   ): Promise<PullSinceResponse> {
     const state = this.collections.get(collectionId)
 
-    const adapter = scopedAdapter ?? this.requireAdapter()
+    const adapter = scopedAdapter ?? this.requireAdapter(collectionId)
     if (!adapter.pullSince) {
       return {
         type: `rpc:pullSince:res`,
@@ -825,8 +863,8 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private pruneAppliedEnvelopeIds(): void {
     // Keep envelopes for 60 seconds for dedup
     const cutoff = Date.now() - 60_000
-    for (const [id, ts] of this.appliedEnvelopeIds) {
-      if (ts < cutoff) {
+    for (const [id, applied] of this.appliedEnvelopeIds) {
+      if (applied.appliedAt < cutoff) {
         this.appliedEnvelopeIds.delete(id)
       }
     }

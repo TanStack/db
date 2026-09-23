@@ -360,32 +360,36 @@ export function createElectronSQLitePersistence(
     })
     adapterCache.set(cacheKey, adapter)
 
-    // Wire the adapter into the coordinator so it can handle
-    // leader-side RPCs (applyCommittedTx, pullSince, getStreamPosition, etc.)
-    if (coordinator instanceof ElectronCollectionCoordinator) {
-      coordinator.setAdapter(adapter)
-    }
-
     return adapter
   }
 
   const createCollectionPersistence = (
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence => ({
-    adapter: getAdapterForCollection(mode, schemaVersion),
-    coordinator,
-  })
+    collectionId?: string,
+  ): PersistedCollectionPersistence => {
+    const adapter = getAdapterForCollection(mode, schemaVersion)
+    if (
+      collectionId !== undefined &&
+      coordinator instanceof ElectronCollectionCoordinator
+    ) {
+      coordinator.setAdapterForCollection(collectionId, adapter)
+    }
+    return { adapter, coordinator }
+  }
 
   const defaultPersistence = createCollectionPersistence(
     `sync-absent`,
     undefined,
   )
+  if (coordinator instanceof ElectronCollectionCoordinator) {
+    coordinator.setAdapter(defaultPersistence.adapter)
+  }
 
   return {
     ...defaultPersistence,
-    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
-      createCollectionPersistence(mode, schemaVersion),
+    resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
+      createCollectionPersistence(mode, schemaVersion, collectionId),
     // Backward compatible fallback for older callers.
     resolvePersistenceForMode: (mode) =>
       createCollectionPersistence(mode, undefined),

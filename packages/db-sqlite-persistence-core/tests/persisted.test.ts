@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import {
   BasicIndex,
   DbClient,
@@ -1483,6 +1484,339 @@ describe(`persistedCollectionOptions`, () => {
     ).toBe(true)
   })
 
+  it(`only signals completed leader-local index work after local success`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const localFailure = new Error(`local index creation failed`)
+    const completedLocalMarkers: Array<boolean> = []
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    adapter.ensureIndex = async (collectionId, signature) => {
+      adapter.ensureIndexCalls.push({ collectionId, signature })
+      throw localFailure
+    }
+    coordinator.requestEnsurePersistedIndex = async (
+      _collectionId,
+      _signature,
+      _spec,
+      completedLocalAdapter,
+      localEnsureCompleted,
+    ) => {
+      completedLocalMarkers.push(
+        completedLocalAdapter !== undefined && localEnsureCompleted === true,
+      )
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `failed-local-index-bootstrap`,
+        getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.createIndex((row) => row.title, { name: `startup-title` })
+
+    try {
+      await collection.preload()
+      expect(completedLocalMarkers).toEqual([false])
+    } finally {
+      await collection.cleanup()
+      warn.mockRestore()
+    }
+  })
+
+  it(`releases the hydration scope before invoking a coordinator that uses its own adapter`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinatorEntered = createDeferred()
+    const breakSchedulerCycle = createDeferred()
+    let hydrationScopeActive = false
+    let coordinatorEnteredDuringHydration: boolean | undefined
+
+    const publicEnsureIndex = adapter.ensureIndex.bind(adapter)
+    const scopedAdapter: PersistenceAdapter = {
+      ...adapter,
+      ensureIndex: publicEnsureIndex,
+    }
+    adapter.runInHydrationScope = async (task) => {
+      hydrationScopeActive = true
+      try {
+        return await task(scopedAdapter)
+      } finally {
+        hydrationScopeActive = false
+      }
+    }
+    adapter.ensureIndex = async (...args) => {
+      if (hydrationScopeActive) {
+        // A public core-adapter call queues behind the active hydrate. The
+        // hydrate cannot release until this coordinator call returns.
+        await breakSchedulerCycle.promise
+      }
+      await publicEnsureIndex(...args)
+    }
+
+    const coordinator = createCoordinatorHarness()
+    coordinator.requestEnsurePersistedIndex = async (
+      collectionId,
+      signature,
+      spec,
+    ) => {
+      coordinatorEnteredDuringHydration = hydrationScopeActive
+      coordinatorEntered.resolve()
+      // Deliberately ignore the optional scoped adapter, as existing public
+      // coordinator implementations are allowed to do.
+      await adapter.ensureIndex(collectionId, signature, spec)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `custom-coordinator-hydration-scope`,
+        getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.createIndex((row) => row.title, {
+      name: `startup-title`,
+    })
+    const preload = Promise.resolve(collection.preload())
+    void preload.catch(() => undefined)
+
+    try {
+      await coordinatorEntered.promise
+      expect(coordinatorEnteredDuringHydration).toBe(false)
+    } finally {
+      breakSchedulerCycle.resolve()
+      await preload.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`releases crossed follower hydration scopes before leader index RPC work`, async () => {
+    const bothLocalIndexesEntered = createDeferred()
+    const bothCoordinatorRequestsEntered = createDeferred()
+    let localIndexEntries = 0
+    let coordinatorEntries = 0
+
+    const createTabAdapter = () => {
+      const adapter = createRecordingAdapter()
+      const breakSchedulerCycle = createDeferred()
+      let hydrationScopeActive = false
+      const remoteScopeObservations: Array<boolean> = []
+      const publicEnsureIndex = adapter.ensureIndex.bind(adapter)
+      const scopedAdapter: PersistenceAdapter = {
+        ...adapter,
+        ensureIndex: async (...args) => {
+          localIndexEntries++
+          if (localIndexEntries === 2) bothLocalIndexesEntered.resolve()
+          await bothLocalIndexesEntered.promise
+          await publicEnsureIndex(...args)
+        },
+      }
+      adapter.runInHydrationScope = async (task) => {
+        hydrationScopeActive = true
+        try {
+          return await task(scopedAdapter)
+        } finally {
+          hydrationScopeActive = false
+        }
+      }
+      adapter.ensureIndex = async (...args) => {
+        remoteScopeObservations.push(hydrationScopeActive)
+        coordinatorEntries++
+        if (coordinatorEntries === 2) bothCoordinatorRequestsEntered.resolve()
+        if (hydrationScopeActive) await breakSchedulerCycle.promise
+        await publicEnsureIndex(...args)
+      }
+      return {
+        adapter,
+        breakSchedulerCycle,
+        remoteScopeObservations,
+      }
+    }
+
+    const tab1 = createTabAdapter()
+    const tab2 = createTabAdapter()
+    const coordinator1 = createCoordinatorHarness()
+    const coordinator2 = createCoordinatorHarness()
+    coordinator1.isLeader = () => false
+    coordinator2.isLeader = () => false
+    coordinator1.requestEnsurePersistedIndex = (
+      collectionId,
+      signature,
+      spec,
+    ) => tab2.adapter.ensureIndex(collectionId, signature, spec)
+    coordinator2.requestEnsurePersistedIndex = (
+      collectionId,
+      signature,
+      spec,
+    ) => tab1.adapter.ensureIndex(collectionId, signature, spec)
+
+    const createFollowerCollection = (
+      id: string,
+      persistence: PersistedCollectionPersistence,
+    ) => {
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          getKey: (item) => item.id,
+          defaultIndexType: BasicIndex,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+            },
+          },
+          persistence,
+        }),
+      )
+      collection.createIndex((row) => row.title, { name: `${id}-title` })
+      return collection
+    }
+    const followerA = createFollowerCollection(`follower-a`, {
+      adapter: tab1.adapter,
+      coordinator: coordinator1,
+    })
+    const followerB = createFollowerCollection(`follower-b`, {
+      adapter: tab2.adapter,
+      coordinator: coordinator2,
+    })
+    const preloadA = Promise.resolve(followerA.preload())
+    const preloadB = Promise.resolve(followerB.preload())
+    void preloadA.catch(() => undefined)
+    void preloadB.catch(() => undefined)
+
+    try {
+      await bothCoordinatorRequestsEntered.promise
+      expect({
+        tab1: tab1.remoteScopeObservations,
+        tab2: tab2.remoteScopeObservations,
+      }).toEqual({ tab1: [false], tab2: [false] })
+    } finally {
+      tab1.breakSchedulerCycle.resolve()
+      tab2.breakSchedulerCycle.resolve()
+      await Promise.all([preloadA, preloadB]).catch(() => undefined)
+      await Promise.all([followerA.cleanup(), followerB.cleanup()])
+    }
+  })
+
+  it(`keeps generated crossed-leadership index RPC histories outside local hydration scopes`, async () => {
+    let run = 0
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          tabCount: fc.integer({ min: 2, max: 4 }),
+          indexCount: fc.integer({ min: 1, max: 2 }),
+          direction: fc.constantFrom(-1, 1),
+        }),
+        async ({ tabCount, indexCount, direction }) => {
+          run++
+          const allTabsAtLocalIndex = createDeferred()
+          let tabsAtLocalIndex = 0
+          const tabs = Array.from({ length: tabCount }, () => {
+            const adapter = createRecordingAdapter()
+            let hydrationScopeActive = false
+            let localIndexCalls = 0
+            const remoteScopeObservations: Array<boolean> = []
+            const publicEnsureIndex = adapter.ensureIndex.bind(adapter)
+            const scopedAdapter: PersistenceAdapter = {
+              ...adapter,
+              ensureIndex: async (...args) => {
+                localIndexCalls++
+                if (localIndexCalls === 1) {
+                  tabsAtLocalIndex++
+                  if (tabsAtLocalIndex === tabCount) {
+                    allTabsAtLocalIndex.resolve()
+                  }
+                  await allTabsAtLocalIndex.promise
+                }
+                await publicEnsureIndex(...args)
+              },
+            }
+            adapter.runInHydrationScope = async (task) => {
+              hydrationScopeActive = true
+              try {
+                return await task(scopedAdapter)
+              } finally {
+                hydrationScopeActive = false
+              }
+            }
+            adapter.ensureIndex = async (...args) => {
+              remoteScopeObservations.push(hydrationScopeActive)
+              await publicEnsureIndex(...args)
+            }
+            return { adapter, remoteScopeObservations }
+          })
+
+          const collections = tabs.map((tab, index) => {
+            const remoteIndex = (index + direction + tabCount) % tabCount
+            const coordinator = createCoordinatorHarness()
+            coordinator.isLeader = () => false
+            coordinator.requestEnsurePersistedIndex = (
+              collectionId,
+              signature,
+              spec,
+            ) =>
+              tabs[remoteIndex]!.adapter.ensureIndex(
+                collectionId,
+                signature,
+                spec,
+              )
+            const collection = createCollection(
+              persistedCollectionOptions<Todo, string>({
+                id: `generated-crossed-${run}-${index}`,
+                getKey: (item) => item.id,
+                defaultIndexType: BasicIndex,
+                sync: {
+                  sync: ({ markReady }) => {
+                    markReady()
+                  },
+                },
+                persistence: { adapter: tab.adapter, coordinator },
+              }),
+            )
+            for (
+              let indexOrdinal = 0;
+              indexOrdinal < indexCount;
+              indexOrdinal++
+            ) {
+              collection.createIndex(
+                indexOrdinal % 2 === 0 ? (row) => row.title : (row) => row.id,
+                { name: `idx-${indexOrdinal}` },
+              )
+            }
+            return collection
+          })
+
+          try {
+            await Promise.all(
+              collections.map((collection) => collection.preload()),
+            )
+            for (const tab of tabs) {
+              expect(tab.remoteScopeObservations).toEqual(
+                Array.from({ length: indexCount }, () => false),
+              )
+            }
+          } finally {
+            await Promise.all(
+              collections.map((collection) => collection.cleanup()),
+            )
+          }
+        },
+      ),
+      { seed: 1868, numRuns: 8, endOnFailure: true },
+    )
+  })
+
   it(`queues remote sync writes that arrive during hydration`, async () => {
     const adapter = createRecordingAdapter([
       {
@@ -2115,6 +2449,89 @@ describe(`persistedCollectionOptions`, () => {
       id: `2`,
       title: `Recovered`,
     })
+  })
+
+  it(`releases the hydration scope before a gap coordinator uses its own adapter`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const coordinatorEntered = createDeferred()
+    const breakSchedulerCycle = createDeferred()
+    let hydrationScopeActive = false
+    let coordinatorEnteredDuringHydration: boolean | undefined
+
+    const pullSince = async () => ({
+      latestRowVersion: 0,
+      requiresFullReload: false as const,
+      deltas: [],
+    })
+    const publicAdapter = adapter as RecordingAdapter & {
+      pullSince: typeof pullSince
+    }
+    const scopedAdapter = {
+      ...adapter,
+      pullSince,
+    }
+    publicAdapter.pullSince = async () => {
+      if (hydrationScopeActive) await breakSchedulerCycle.promise
+      return pullSince()
+    }
+    adapter.runInHydrationScope = async (task) => {
+      hydrationScopeActive = true
+      try {
+        return await task(scopedAdapter)
+      } finally {
+        hydrationScopeActive = false
+      }
+    }
+    coordinator.pullSince = async (_collectionId, _fromRowVersion) => {
+      coordinatorEnteredDuringHydration = hydrationScopeActive
+      coordinatorEntered.resolve()
+      const result = await publicAdapter.pullSince()
+      return {
+        type: `rpc:pullSince:res`,
+        rpcId: `legacy-gap-coordinator`,
+        ok: true,
+        latestTerm: 1,
+        latestSeq: 2,
+        latestRowVersion: result.latestRowVersion,
+        requiresFullReload: result.requiresFullReload,
+        deltas: result.deltas,
+      }
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    await collection.preload()
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 2,
+      txId: `tx-gap-legacy-coordinator`,
+      latestRowVersion: 2,
+      requiresFullReload: false,
+      changedRows: [],
+      deletedKeys: [],
+    })
+
+    try {
+      await coordinatorEntered.promise
+      expect(coordinatorEnteredDuringHydration).toBe(false)
+    } finally {
+      breakSchedulerCycle.resolve()
+      await flushAsyncWork()
+      await collection.cleanup()
+    }
   })
 
   // Focused invalidation-reload refinements. Whether recovery follows a

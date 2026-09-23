@@ -1,4 +1,27 @@
+/**
+ * # Which cross-window coordinator facts survive retries and disposal?
+ *
+ * Contract: leader work uses the adapter registered for that Collection. A
+ * retry after response loss observes the first durable mutation result without
+ * applying it again. Disposal is terminal for current and future RPC attempts.
+ *
+ * Model and history grammar: an independent collection-to-adapter map selects
+ * one call recorder; a completed envelope retains one result; a disposed flag
+ * permits no request posts. Generated histories vary Collection registration
+ * order, RPC kind, mutation count, response delivery, and disposal phase.
+ *
+ * Production path and observations: paired real coordinators communicate
+ * through controlled BroadcastChannel and Web Locks fixtures. The laws record
+ * exact adapter calls, durable transaction count, returned result, promise
+ * settlement, and request posts.
+ *
+ * Known omissions: these laws do not establish native browser scheduling,
+ * concurrent delivery of one in-flight envelope, or behavior after the dedup
+ * retention window. Electron keeps focused parity witnesses for the same
+ * protocol boundaries.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordinator'
 import type { PersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
@@ -12,6 +35,8 @@ const channels: Map<
   string,
   Set<{ onmessage: MessageHandler | null }>
 > = new Map()
+let dropNextMessageWhen: ((data: unknown) => boolean) | undefined
+let observePostedMessage: ((data: unknown) => void) | undefined
 
 class MockBroadcastChannel {
   readonly name: string
@@ -26,6 +51,11 @@ class MockBroadcastChannel {
   }
 
   postMessage(data: unknown): void {
+    observePostedMessage?.(data)
+    if (dropNextMessageWhen?.(data)) {
+      dropNextMessageWhen = undefined
+      return
+    }
     const peers = channels.get(this.name)
     if (!peers) return
     // Deliver to all other instances on same channel (simulating cross-tab)
@@ -162,6 +192,8 @@ function installGlobals(): void {
 }
 
 function cleanupGlobals(): void {
+  dropNextMessageWhen = undefined
+  observePostedMessage = undefined
   channels.clear()
   heldLocks.clear()
   lockQueues.clear()
@@ -460,6 +492,167 @@ describe(`BrowserCollectionCoordinator`, () => {
 
       coord.dispose()
     })
+
+    it(`replays the successful mutation result when its first response is lost`, async () => {
+      vi.useFakeTimers()
+      const adapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      let firstSuccessDropped!: () => void
+      const firstSuccessDroppedPromise = new Promise<void>((resolve) => {
+        firstSuccessDropped = resolve
+      })
+      adapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+
+      const leader = createCoordinator(adapter)
+      const follower = createCoordinator(adapter)
+
+      try {
+        leader.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+        follower.subscribe(`todos`, () => {})
+
+        dropNextMessageWhen = (data) => {
+          const payload = (
+            data as { payload?: { type?: string; ok?: boolean } }
+          ).payload
+          if (
+            payload?.type === `rpc:applyLocalMutations:res` &&
+            payload.ok === true
+          ) {
+            firstSuccessDropped()
+            return true
+          }
+          return false
+        }
+
+        const responsePromise = follower.requestApplyLocalMutations(`todos`, [
+          {
+            mutationId: `mut-lost-response`,
+            type: `insert`,
+            key: `lost-response`,
+            value: { id: `lost-response`, title: `Persisted once` },
+          },
+        ])
+
+        await firstSuccessDroppedPromise
+        expect(adapter.appliedTxs).toHaveLength(1)
+
+        await vi.advanceTimersByTimeAsync(10_200)
+        const response = await responsePromise
+        expect(response).toMatchObject({
+          ok: true,
+          acceptedMutationIds: [`mut-lost-response`],
+        })
+        expect(adapter.appliedTxs).toHaveLength(1)
+      } finally {
+        follower.dispose()
+        leader.dispose()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`preserves one durable mutation result across generated response-delivery histories`, async () => {
+      vi.useFakeTimers()
+      let run = 0
+      try {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.record({
+              mutationCount: fc.integer({ min: 1, max: 4 }),
+              dropFirstSuccess: fc.boolean(),
+            }),
+            async ({ mutationCount, dropFirstSuccess }) => {
+              run++
+              const collectionId = `delivery-history-${run}`
+              const adapter = createStubAdapter()
+              let leadershipRead!: () => void
+              const leadershipReadPromise = new Promise<void>((resolve) => {
+                leadershipRead = resolve
+              })
+              let firstSuccessDropped!: () => void
+              const firstSuccessDroppedPromise = new Promise<void>(
+                (resolve) => {
+                  firstSuccessDropped = resolve
+                },
+              )
+              adapter.getStreamPosition = async () => {
+                leadershipRead()
+                return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+              }
+
+              const leader = createCoordinator(adapter)
+              const follower = createCoordinator(adapter)
+              try {
+                leader.subscribe(collectionId, () => {})
+                await leadershipReadPromise
+                await Promise.resolve()
+                follower.subscribe(collectionId, () => {})
+
+                if (dropFirstSuccess) {
+                  dropNextMessageWhen = (data) => {
+                    const payload = (
+                      data as { payload?: { type?: string; ok?: boolean } }
+                    ).payload
+                    if (
+                      payload?.type === `rpc:applyLocalMutations:res` &&
+                      payload.ok === true
+                    ) {
+                      firstSuccessDropped()
+                      return true
+                    }
+                    return false
+                  }
+                }
+
+                const mutations = Array.from(
+                  { length: mutationCount },
+                  (_, index) => ({
+                    mutationId: `mut-${run}-${index}`,
+                    type: `insert` as const,
+                    key: `${index}`,
+                    value: { id: `${index}`, title: `row ${index}` },
+                  }),
+                )
+                const responsePromise = follower.requestApplyLocalMutations(
+                  collectionId,
+                  mutations,
+                )
+                if (dropFirstSuccess) {
+                  await firstSuccessDroppedPromise
+                  await vi.advanceTimersByTimeAsync(10_200)
+                }
+
+                const response = await responsePromise
+                expect(response).toMatchObject({
+                  ok: true,
+                  acceptedMutationIds: mutations.map(
+                    (mutation) => mutation.mutationId,
+                  ),
+                })
+                expect(adapter.appliedTxs).toHaveLength(1)
+              } finally {
+                dropNextMessageWhen = undefined
+                follower.dispose()
+                leader.dispose()
+                for (let microtask = 0; microtask < 4; microtask++) {
+                  await Promise.resolve()
+                }
+              }
+            },
+          ),
+          { seed: 1868, numRuns: 12, endOnFailure: true },
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe(`RPC - pullSince`, () => {
@@ -528,6 +721,74 @@ describe(`BrowserCollectionCoordinator`, () => {
       coord.dispose()
     })
 
+    it(`does not repeat successful leader-local index creation`, async () => {
+      const adapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      adapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+      adapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+
+      const coord = createCoordinator(adapter)
+      try {
+        coord.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+
+        const spec = { expressionSql: [`title`] }
+        await adapter.ensureIndex(`todos`, `idx-once`, spec)
+        await coord.requestEnsurePersistedIndex(
+          `todos`,
+          `idx-once`,
+          spec,
+          adapter,
+          true,
+        )
+
+        expect(adapter.ensureIndex).toHaveBeenCalledOnce()
+      } finally {
+        coord.dispose()
+      }
+    })
+
+    it(`uses a supplied leader-local adapter when local work is not complete`, async () => {
+      const registeredAdapter = createStubAdapter()
+      const scopedAdapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      registeredAdapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+      registeredAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      scopedAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+
+      const coord = createCoordinator(registeredAdapter)
+      try {
+        coord.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+
+        await coord.requestEnsurePersistedIndex(
+          `todos`,
+          `idx-scoped`,
+          { expressionSql: [`title`] },
+          scopedAdapter,
+        )
+
+        expect(scopedAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(registeredAdapter.ensureIndex).not.toHaveBeenCalled()
+      } finally {
+        coord.dispose()
+      }
+    })
+
     it(`follower routes ensurePersistedIndex to leader`, async () => {
       const adapter = createStubAdapter()
       adapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
@@ -548,6 +809,154 @@ describe(`BrowserCollectionCoordinator`, () => {
       leader.dispose()
       follower.dispose()
     })
+
+    it(`keeps leader RPC work on the adapter registered for its collection`, async () => {
+      const todosAdapter = createStubAdapter()
+      const notesAdapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      todosAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      notesAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      todosAdapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+
+      const leader = createCoordinator(todosAdapter)
+      const follower = createCoordinator(notesAdapter)
+
+      try {
+        leader.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+        expect(leader.isLeader(`todos`)).toBe(true)
+        follower.subscribe(`todos`, () => {})
+
+        // Resolving a later collection variant must not replace the adapter
+        // already owning leader-side work for `todos`.
+        leader.setAdapter(notesAdapter)
+        await follower.requestEnsurePersistedIndex(`todos`, `idx-todos`, {
+          expressionSql: [`title`],
+        })
+
+        expect(todosAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(notesAdapter.ensureIndex).not.toHaveBeenCalled()
+      } finally {
+        follower.dispose()
+        leader.dispose()
+      }
+    })
+
+    it(`routes generated collection and RPC histories through their owning adapter`, async () => {
+      let run = 0
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 2, max: 4 }).chain((collectionCount) =>
+            fc.record({
+              collectionCount: fc.constant(collectionCount),
+              registrationOrder: fc.shuffledSubarray(
+                Array.from({ length: collectionCount }, (_, index) => index),
+                { minLength: collectionCount, maxLength: collectionCount },
+              ),
+              targetIndex: fc.integer({ min: 0, max: collectionCount - 1 }),
+              rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
+            }),
+          ),
+          async ({
+            collectionCount,
+            registrationOrder,
+            targetIndex,
+            rpcKind,
+          }) => {
+            run++
+            const collectionIds = Array.from(
+              { length: collectionCount },
+              (_, index) => `routing-${run}-${index}`,
+            )
+            const adapters = collectionIds.map(() => createStubAdapter())
+            const ensureCalls = adapters.map(() => vi.fn())
+            const pullCalls = adapters.map(() => vi.fn())
+            adapters.forEach((adapter, index) => {
+              adapter.ensureIndex =
+                ensureCalls[index]!.mockResolvedValue(undefined)
+              adapter.pullSince = pullCalls[index]!.mockResolvedValue({
+                latestRowVersion: index,
+                requiresFullReload: false,
+                changedKeys: [],
+                deletedKeys: [],
+              })
+            })
+
+            let leadershipRead!: () => void
+            const leadershipReadPromise = new Promise<void>((resolve) => {
+              leadershipRead = resolve
+            })
+            adapters[targetIndex]!.getStreamPosition = async () => {
+              leadershipRead()
+              return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+            }
+
+            const leader = createCoordinator(adapters[0])
+            const follower = createCoordinator(adapters.at(-1))
+            const targetCollectionId = collectionIds[targetIndex]!
+            try {
+              for (const index of registrationOrder) {
+                leader.setAdapterForCollection(
+                  collectionIds[index]!,
+                  adapters[index]!,
+                )
+              }
+              leader.subscribe(targetCollectionId, () => {})
+              await leadershipReadPromise
+              await Promise.resolve()
+              follower.subscribe(targetCollectionId, () => {})
+
+              if (rpcKind === `index`) {
+                await follower.requestEnsurePersistedIndex(
+                  targetCollectionId,
+                  `idx-${run}`,
+                  { expressionSql: [`title`] },
+                )
+              } else if (rpcKind === `pull`) {
+                await follower.pullSince(targetCollectionId, 0)
+              } else {
+                const response = await follower.requestApplyLocalMutations(
+                  targetCollectionId,
+                  [
+                    {
+                      mutationId: `mut-${run}`,
+                      type: `insert`,
+                      key: `${run}`,
+                      value: { id: `${run}`, title: `row ${run}` },
+                    },
+                  ],
+                )
+                expect(response.ok).toBe(true)
+              }
+
+              adapters.forEach((adapter, index) => {
+                const callCount =
+                  rpcKind === `index`
+                    ? ensureCalls[index]!.mock.calls.length
+                    : rpcKind === `pull`
+                      ? pullCalls[index]!.mock.calls.length
+                      : adapter.appliedTxs.length
+                expect(callCount).toBe(index === targetIndex ? 1 : 0)
+              })
+            } finally {
+              follower.dispose()
+              leader.dispose()
+              for (let microtask = 0; microtask < 4; microtask++) {
+                await Promise.resolve()
+              }
+            }
+          },
+        ),
+        { seed: 1868, numRuns: 18, endOnFailure: true },
+      )
+    })
   })
 
   describe(`dispose`, () => {
@@ -560,6 +969,193 @@ describe(`BrowserCollectionCoordinator`, () => {
 
       // Should not throw after disposal
       expect(coord.isLeader(`todos`)).toBe(false)
+    })
+
+    it(`settles an in-flight RPC at dispose without posting retries`, async () => {
+      vi.useFakeTimers()
+      const adapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      let firstRequestPosted!: () => void
+      const firstRequestPostedPromise = new Promise<void>((resolve) => {
+        firstRequestPosted = resolve
+      })
+      adapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+
+      const leader = createCoordinator(adapter)
+      const follower = createCoordinator(adapter)
+      let requestPosts = 0
+      let settled = false
+
+      try {
+        leader.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+        follower.subscribe(`todos`, () => {})
+
+        observePostedMessage = (data) => {
+          const type = (data as { payload?: { type?: string } }).payload?.type
+          if (type === `rpc:ensurePersistedIndex:req`) {
+            requestPosts++
+            if (requestPosts === 1) firstRequestPosted()
+          }
+        }
+        dropNextMessageWhen = (data) =>
+          (data as { payload?: { type?: string } }).payload?.type ===
+          `rpc:ensurePersistedIndex:req`
+
+        const request = follower
+          .requestEnsurePersistedIndex(`todos`, `idx-dispose`, {
+            expressionSql: [`title`],
+          })
+          .then(
+            () => {
+              settled = true
+            },
+            () => {
+              settled = true
+            },
+          )
+
+        await firstRequestPostedPromise
+        follower.dispose()
+        for (let microtask = 0; microtask < 8; microtask++) {
+          await Promise.resolve()
+        }
+        const settledAtDispose = settled
+
+        await vi.advanceTimersByTimeAsync(21_000)
+        await request
+
+        expect({ settledAtDispose, requestPosts }).toEqual({
+          settledAtDispose: true,
+          requestPosts: 1,
+        })
+      } finally {
+        follower.dispose()
+        leader.dispose()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`makes disposal terminal across generated RPC kinds and lifecycle phases`, async () => {
+      vi.useFakeTimers()
+      let run = 0
+      try {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.record({
+              rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
+              disposePhase: fc.constantFrom(
+                `before-request`,
+                `pending`,
+                `retry-delay`,
+              ),
+            }),
+            async ({ rpcKind, disposePhase }) => {
+              run++
+              const collectionId = `dispose-history-${run}`
+              const adapter = createStubAdapter()
+              let leadershipRead!: () => void
+              const leadershipReadPromise = new Promise<void>((resolve) => {
+                leadershipRead = resolve
+              })
+              let firstRequestPosted!: () => void
+              const firstRequestPostedPromise = new Promise<void>((resolve) => {
+                firstRequestPosted = resolve
+              })
+              adapter.getStreamPosition = async () => {
+                leadershipRead()
+                return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+              }
+
+              const leader = createCoordinator(adapter)
+              const follower = createCoordinator(adapter)
+              let requestPosts = 0
+              const requestType =
+                rpcKind === `index`
+                  ? `rpc:ensurePersistedIndex:req`
+                  : rpcKind === `pull`
+                    ? `rpc:pullSince:req`
+                    : `rpc:applyLocalMutations:req`
+
+              try {
+                leader.subscribe(collectionId, () => {})
+                await leadershipReadPromise
+                await Promise.resolve()
+                follower.subscribe(collectionId, () => {})
+
+                observePostedMessage = (data) => {
+                  if (
+                    (data as { payload?: { type?: string } }).payload?.type ===
+                    requestType
+                  ) {
+                    requestPosts++
+                    if (requestPosts === 1) firstRequestPosted()
+                  }
+                }
+                dropNextMessageWhen = (data) =>
+                  (data as { payload?: { type?: string } }).payload?.type ===
+                  requestType
+
+                if (disposePhase === `before-request`) {
+                  follower.dispose()
+                }
+                const request =
+                  rpcKind === `index`
+                    ? follower.requestEnsurePersistedIndex(
+                        collectionId,
+                        `idx-${run}`,
+                        { expressionSql: [`title`] },
+                      )
+                    : rpcKind === `pull`
+                      ? follower.pullSince(collectionId, 0)
+                      : follower.requestApplyLocalMutations(collectionId, [
+                          {
+                            mutationId: `mut-${run}`,
+                            type: `insert`,
+                            key: `${run}`,
+                            value: { id: `${run}`, title: `row ${run}` },
+                          },
+                        ])
+                const settled = request.then(
+                  () => `resolved` as const,
+                  () => `rejected` as const,
+                )
+
+                if (disposePhase !== `before-request`) {
+                  await firstRequestPostedPromise
+                  if (disposePhase === `retry-delay`) {
+                    await vi.advanceTimersByTimeAsync(10_000)
+                  }
+                  follower.dispose()
+                }
+
+                await expect(settled).resolves.toBe(`rejected`)
+                expect(requestPosts).toBe(
+                  disposePhase === `before-request` ? 0 : 1,
+                )
+              } finally {
+                observePostedMessage = undefined
+                dropNextMessageWhen = undefined
+                follower.dispose()
+                leader.dispose()
+                for (let microtask = 0; microtask < 4; microtask++) {
+                  await Promise.resolve()
+                }
+              }
+            },
+          ),
+          { seed: 1868, numRuns: 18, endOnFailure: true },
+        )
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

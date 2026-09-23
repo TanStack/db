@@ -61,7 +61,7 @@ function interpolateSql(sql: string, params: ReadonlyArray<unknown>): string {
   return renderedSql
 }
 
-class SqliteCliDriver implements SQLiteDriver {
+export class SqliteCliDriver implements SQLiteDriver {
   private readonly transactionDbPath = new AsyncLocalStorage<string>()
   private queue: Promise<void> = Promise.resolve()
 

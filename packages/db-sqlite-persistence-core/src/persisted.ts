@@ -318,6 +318,8 @@ export interface PersistenceAdapter {
   runInHydrationScope?: <T>(
     task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
   ) => Promise<T>
+  /** Whether hydration scopes currently enter a shared driver scheduler. */
+  isHydrationScopeScheduled?: () => boolean
 }
 
 export type HydrationPersistenceAdapter = PersistenceAdapter & {
@@ -374,12 +376,17 @@ export interface PersistedCollectionCoordinator {
     collectionId: string,
     options: LoadSubsetOptions,
   ) => Promise<void>
-  /** The scoped adapter is leader-local and is never serialized to a follower. */
+  /**
+   * Requests leader-side index creation. The scoped adapter is leader-local
+   * and is never serialized to a follower. `localEnsureCompleted` lets the
+   * built-in leader avoid repeating successful local work.
+   */
   requestEnsurePersistedIndex: (
     collectionId: string,
     signature: string,
     spec: PersistedIndexSpec,
     scopedAdapter?: HydrationPersistenceAdapter,
+    localEnsureCompleted?: boolean,
   ) => Promise<void>
   requestApplyLocalMutations?: (
     collectionId: string,
@@ -872,6 +879,7 @@ class PersistedCollectionRuntime<
   }
   private startupMetadataPromise: Promise<void> | null = null
   private startPromise: Promise<void> | null = null
+  private hasAttemptedStartup = false
   private resumeBaselinePromise: Promise<void> | null = null
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
@@ -968,11 +976,12 @@ class PersistedCollectionRuntime<
 
   private runInHydrationScope<TResult>(
     task: (adapter: HydrationPersistenceAdapter) => Promise<TResult>,
+    adapter: HydrationPersistenceAdapter = this.persistence.adapter,
   ): Promise<TResult> {
-    if (this.persistence.adapter.runInHydrationScope) {
-      return this.persistence.adapter.runInHydrationScope(task)
+    if (adapter.runInHydrationScope) {
+      return adapter.runInHydrationScope(task)
     }
-    return Promise.resolve().then(() => task(this.persistence.adapter))
+    return Promise.resolve().then(() => task(adapter))
   }
 
   async ensureStarted(): Promise<void> {
@@ -981,6 +990,8 @@ class PersistedCollectionRuntime<
     }
 
     const lifecycleGeneration = this.lifecycleGeneration
+    const isRestart = this.hasAttemptedStartup
+    this.hasAttemptedStartup = true
     let resolveStartupMetadata!: () => void
     let rejectStartupMetadata!: (error: unknown) => void
     this.startupMetadataPromise = new Promise<void>((resolve, reject) => {
@@ -1008,28 +1019,59 @@ class PersistedCollectionRuntime<
         }
       }
 
-      let appliedCursor: number | undefined
-      if (this.persistence.adapter.runInHydrationScope) {
-        appliedCursor = await this.applyMutex.run(() =>
-          this.runInHydrationScope(async (adapter) => {
+      let startup:
+        | {
+            appliedCursor: number | undefined
+            indexBootstrapSnapshot: Array<CollectionIndexMetadata>
+            completedLocalIndexSignatures: Set<string>
+          }
+        | undefined
+      const scheduleStartupAsOneHydrate =
+        this.persistence.adapter.runInHydrationScope !== undefined &&
+        (!isRestart ||
+          (this.persistence.adapter.isHydrationScopeScheduled?.() ?? true))
+      if (scheduleStartupAsOneHydrate) {
+        startup = await this.applyMutex.run(async () => {
+          const result = await this.runInHydrationScope(async (adapter) => {
             if (!(await loadStartupMetadata(adapter))) return undefined
             return this.startInternal(lifecycleGeneration, adapter)
-          }),
-        )
+          })
+          await this.flushQueuedTxCommittedUnsafe()
+          return result
+        })
       } else {
         // Preserve the existing unscheduled-adapter lifecycle contract: a
         // replacement upstream may start while stale hydration is settling.
         if (await loadStartupMetadata(this.persistence.adapter)) {
-          appliedCursor = await this.applyMutex.run(() =>
-            this.startInternal(lifecycleGeneration, this.persistence.adapter),
-          )
+          startup = await this.applyMutex.run(async () => {
+            const result =
+              this.persistence.adapter.isHydrationScopeScheduled?.()
+                ? await this.runInHydrationScope((adapter) =>
+                    this.startInternal(lifecycleGeneration, adapter),
+                  )
+                : await this.startInternal(
+                    lifecycleGeneration,
+                    this.persistence.adapter,
+                  )
+            await this.flushQueuedTxCommittedUnsafe()
+            return result
+          })
         }
       }
       if (
-        appliedCursor !== undefined &&
+        startup !== undefined &&
         lifecycleGeneration === this.lifecycleGeneration
       ) {
-        await this.waitForAppliedReceiptsAfter(appliedCursor)
+        await this.requestCoordinatorPersistedIndexes(
+          startup.indexBootstrapSnapshot,
+          startup.completedLocalIndexSignatures,
+        )
+        if (
+          startup.appliedCursor !== undefined &&
+          lifecycleGeneration === this.lifecycleGeneration
+        ) {
+          await this.waitForAppliedReceiptsAfter(startup.appliedCursor)
+        }
       }
     })()
     return this.startPromise
@@ -1046,11 +1088,13 @@ class PersistedCollectionRuntime<
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       if (this.syncMode !== `on-demand`) return
 
-      const appliedCursor = await this.applyMutex.run(() =>
-        this.runInHydrationScope((adapter) =>
+      const appliedCursor = await this.applyMutex.run(async () => {
+        const result = await this.runInHydrationScope((adapter) =>
           this.hydrateBaseline(lifecycleGeneration, adapter),
-        ),
-      )
+        )
+        await this.flushQueuedTxCommittedUnsafe()
+        return result
+      })
       if (
         appliedCursor !== undefined &&
         lifecycleGeneration === this.lifecycleGeneration
@@ -1095,18 +1139,35 @@ class PersistedCollectionRuntime<
   private async startInternal(
     lifecycleGeneration: number,
     adapter: HydrationPersistenceAdapter,
-  ): Promise<number | undefined> {
+  ): Promise<
+    | {
+        appliedCursor: number | undefined
+        indexBootstrapSnapshot: Array<CollectionIndexMetadata>
+        completedLocalIndexSignatures: Set<string>
+      }
+    | undefined
+  > {
     if (lifecycleGeneration !== this.lifecycleGeneration) return undefined
 
     const indexBootstrapSnapshot = this.collection?.getIndexMetadata() ?? []
     this.attachIndexLifecycleListeners()
-    await this.bootstrapPersistedIndexes(indexBootstrapSnapshot, adapter)
+    const completedLocalIndexSignatures = await this.bootstrapPersistedIndexes(
+      indexBootstrapSnapshot,
+      adapter,
+    )
     if (lifecycleGeneration !== this.lifecycleGeneration) return undefined
 
-    if (this.syncMode !== `on-demand`) {
-      return this.hydrateBaseline(lifecycleGeneration, adapter)
-    }
-    return undefined
+    const appliedCursor =
+      this.syncMode !== `on-demand`
+        ? await this.hydrateBaseline(lifecycleGeneration, adapter)
+        : undefined
+    return lifecycleGeneration === this.lifecycleGeneration
+      ? {
+          appliedCursor,
+          indexBootstrapSnapshot,
+          completedLocalIndexSignatures,
+        }
+      : undefined
   }
 
   private async loadStartupMetadataInternal(
@@ -1184,8 +1245,8 @@ class PersistedCollectionRuntime<
     this.activeSubsets.set(this.getSubsetKey(options), options)
     const appliedCursor = this.appliedReceiptSequence
 
-    await this.applyMutex.run(() =>
-      this.runInHydrationScope((adapter) =>
+    await this.applyMutex.run(async () => {
+      await this.runInHydrationScope((adapter) =>
         this.hydrateSubsetUnsafe(
           options,
           {
@@ -1194,8 +1255,9 @@ class PersistedCollectionRuntime<
           },
           adapter,
         ),
-      ),
-    )
+      )
+      await this.flushQueuedTxCommittedUnsafe()
+    })
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.waitForAppliedReceiptsAfter(appliedCursor)
 
@@ -1233,8 +1295,8 @@ class PersistedCollectionRuntime<
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     // A one-shot refresh does not acquire an enduring subscription lease.
-    await this.applyMutex.run(() =>
-      this.runInHydrationScope((adapter) =>
+    await this.applyMutex.run(async () => {
+      await this.runInHydrationScope((adapter) =>
         this.hydrateSubsetUnsafe(
           options,
           {
@@ -1243,8 +1305,9 @@ class PersistedCollectionRuntime<
           },
           adapter,
         ),
-      ),
-    )
+      )
+      await this.flushQueuedTxCommittedUnsafe()
+    })
   }
 
   queueHydrationBufferedTransaction(
@@ -1464,7 +1527,6 @@ class PersistedCollectionRuntime<
     }
 
     await this.flushQueuedHydrationTransactionsUnsafe(adapter)
-    await this.flushQueuedTxCommittedUnsafe(adapter)
 
     if (config.requestRemoteEnsure) {
       this.queueRemoteSubsetEnsure(options)
@@ -2120,9 +2182,7 @@ class PersistedCollectionRuntime<
       }
 
       void this.applyMutex
-        .run(() =>
-          this.processCommittedTxUnsafe(payload, this.persistence.adapter),
-        )
+        .run(() => this.processCommittedTxUnsafe(payload))
         .catch((error) => {
           console.warn(`Failed to process tx:committed message:`, error)
         })
@@ -2136,33 +2196,30 @@ class PersistedCollectionRuntime<
 
     if (isCollectionResetPayload(payload)) {
       void this.applyMutex
-        .run(() =>
-          this.runInHydrationScope((adapter) =>
+        .run(async () => {
+          await this.runInHydrationScope((adapter) =>
             this.truncateAndReloadUnsafe(adapter),
-          ),
-        )
+          )
+          await this.flushQueuedTxCommittedUnsafe()
+        })
         .catch((error) => {
           console.warn(`Failed to process collection reset message:`, error)
         })
     }
   }
 
-  private async flushQueuedTxCommittedUnsafe(
-    adapter: HydrationPersistenceAdapter,
-  ): Promise<void> {
+  private async flushQueuedTxCommittedUnsafe(): Promise<void> {
     while (this.queuedTxCommitted.length > 0) {
       const queued = this.queuedTxCommitted.shift()
       if (!queued) {
         continue
       }
-      await this.processCommittedTxUnsafe(queued, adapter, true)
+      await this.processCommittedTxUnsafe(queued)
     }
   }
 
   private async processCommittedTxUnsafe(
     txCommitted: TxCommitted,
-    adapter: HydrationPersistenceAdapter,
-    hydrationScopeAlreadyActive = false,
   ): Promise<void> {
     if (txCommitted.term < this.latestTerm) {
       return
@@ -2183,13 +2240,7 @@ class PersistedCollectionRuntime<
     const hasGap = hasGapInCurrentTerm || hasGapAcrossTerms
 
     if (hasGap) {
-      if (hydrationScopeAlreadyActive) {
-        await this.recoverFromSeqGapUnsafe(adapter)
-      } else {
-        await this.runInHydrationScope((scopedAdapter) =>
-          this.recoverFromSeqGapUnsafe(scopedAdapter),
-        )
-      }
+      await this.recoverFromSeqGapUnsafe()
       if (
         txCommitted.term < this.latestTerm ||
         (txCommitted.term === this.latestTerm &&
@@ -2207,20 +2258,17 @@ class PersistedCollectionRuntime<
 
     await this.invalidateFromCommittedTxUnsafe(
       txCommitted,
-      adapter,
-      hydrationScopeAlreadyActive,
+      this.persistence.adapter,
     )
+    await this.flushQueuedTxCommittedUnsafe()
   }
 
-  private async recoverFromSeqGapUnsafe(
-    adapter: HydrationPersistenceAdapter,
-  ): Promise<void> {
+  private async recoverFromSeqGapUnsafe(): Promise<void> {
     if (this.persistence.coordinator.pullSince && this.latestRowVersion >= 0) {
       try {
         const pullResponse = await this.persistence.coordinator.pullSince(
           this.collectionId,
           this.latestRowVersion,
-          adapter,
         )
 
         if (pullResponse.ok) {
@@ -2229,29 +2277,40 @@ class PersistedCollectionRuntime<
             pullResponse.latestSeq,
             pullResponse.latestRowVersion,
           )
-          if (pullResponse.requiresFullReload || !pullResponse.deltas) {
-            await this.reloadActiveSubsetsUnsafe(adapter)
+          if (pullResponse.requiresFullReload) {
+            await this.runInHydrationScope((adapter) =>
+              this.reloadActiveSubsetsUnsafe(adapter),
+            )
+            return
+          }
+          const deltas = pullResponse.deltas
+          if (!deltas) {
+            await this.runInHydrationScope((adapter) =>
+              this.reloadActiveSubsetsUnsafe(adapter),
+            )
             return
           }
 
-          for (const delta of pullResponse.deltas) {
-            await this.invalidateFromCommittedTxUnsafe(
-              {
-                type: `tx:committed`,
-                term: pullResponse.latestTerm,
-                seq: pullResponse.latestSeq,
-                txId: delta.txId,
-                latestRowVersion: delta.latestRowVersion,
-                requiresFullReload: false,
-                changedRows: delta.changedRows,
-                deletedKeys: delta.deletedKeys,
-                rowMetadataMutations: delta.rowMetadataMutations,
-                collectionMetadataMutations: delta.collectionMetadataMutations,
-              },
-              adapter,
-              true,
-            )
-          }
+          await this.runInHydrationScope(async (adapter) => {
+            for (const delta of deltas) {
+              await this.invalidateFromCommittedTxUnsafe(
+                {
+                  type: `tx:committed`,
+                  term: pullResponse.latestTerm,
+                  seq: pullResponse.latestSeq,
+                  txId: delta.txId,
+                  latestRowVersion: delta.latestRowVersion,
+                  requiresFullReload: false,
+                  changedRows: delta.changedRows,
+                  deletedKeys: delta.deletedKeys,
+                  rowMetadataMutations: delta.rowMetadataMutations,
+                  collectionMetadataMutations:
+                    delta.collectionMetadataMutations,
+                },
+                adapter,
+              )
+            }
+          })
           return
         }
       } catch (error) {
@@ -2259,7 +2318,9 @@ class PersistedCollectionRuntime<
       }
     }
 
-    await this.truncateAndReloadUnsafe(adapter)
+    await this.runInHydrationScope((adapter) =>
+      this.truncateAndReloadUnsafe(adapter),
+    )
 
     if (this.mode === `sync-present`) {
       for (const options of this.activeSubsets.values()) {
@@ -2285,14 +2346,12 @@ class PersistedCollectionRuntime<
   private async invalidateFromCommittedTxUnsafe(
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
-    hydrationScopeAlreadyActive = false,
   ): Promise<void> {
     const reloadActiveSubsets = () =>
-      hydrationScopeAlreadyActive
-        ? this.reloadActiveSubsetsUnsafe(adapter)
-        : this.runInHydrationScope((scopedAdapter) =>
-            this.reloadActiveSubsetsUnsafe(scopedAdapter),
-          )
+      this.runInHydrationScope(
+        (scopedAdapter) => this.reloadActiveSubsetsUnsafe(scopedAdapter),
+        adapter,
+      )
 
     if (txCommitted.requiresFullReload) {
       await reloadActiveSubsets()
@@ -2417,7 +2476,6 @@ class PersistedCollectionRuntime<
     }
 
     await this.flushQueuedHydrationTransactionsUnsafe(adapter)
-    await this.flushQueuedTxCommittedUnsafe(adapter)
   }
 
   private attachIndexLifecycleListeners(): void {
@@ -2443,16 +2501,32 @@ class PersistedCollectionRuntime<
   private async bootstrapPersistedIndexes(
     indexMetadataSnapshot?: Array<CollectionIndexMetadata>,
     adapter: HydrationPersistenceAdapter = this.persistence.adapter,
-  ): Promise<void> {
+  ): Promise<Set<string>> {
     const collection = this.collection
     if (!collection && !indexMetadataSnapshot) {
-      return
+      return new Set()
     }
 
     const indexMetadata =
       indexMetadataSnapshot ?? collection?.getIndexMetadata() ?? []
+    const completedLocalIndexSignatures = new Set<string>()
     for (const metadata of indexMetadata) {
-      await this.ensurePersistedIndex(metadata, adapter)
+      if (await this.ensureLocalPersistedIndex(metadata, adapter)) {
+        completedLocalIndexSignatures.add(metadata.signature)
+      }
+    }
+    return completedLocalIndexSignatures
+  }
+
+  private async requestCoordinatorPersistedIndexes(
+    indexMetadata: Array<CollectionIndexMetadata>,
+    completedLocalIndexSignatures: ReadonlySet<string>,
+  ): Promise<void> {
+    for (const metadata of indexMetadata) {
+      await this.requestCoordinatorPersistedIndex(
+        metadata,
+        completedLocalIndexSignatures.has(metadata.signature),
+      )
     }
   }
 
@@ -2473,6 +2547,17 @@ class PersistedCollectionRuntime<
     indexMetadata: CollectionIndexMetadata,
     adapter: HydrationPersistenceAdapter = this.persistence.adapter,
   ): Promise<void> {
+    const completedLocally = await this.ensureLocalPersistedIndex(
+      indexMetadata,
+      adapter,
+    )
+    await this.requestCoordinatorPersistedIndex(indexMetadata, completedLocally)
+  }
+
+  private async ensureLocalPersistedIndex(
+    indexMetadata: CollectionIndexMetadata,
+    adapter: HydrationPersistenceAdapter,
+  ): Promise<boolean> {
     const spec = this.buildPersistedIndexSpec(indexMetadata)
 
     try {
@@ -2481,16 +2566,26 @@ class PersistedCollectionRuntime<
         indexMetadata.signature,
         spec,
       )
+      return true
     } catch (error) {
       console.warn(`Failed to ensure persisted index in adapter:`, error)
+      return false
     }
+  }
+
+  private async requestCoordinatorPersistedIndex(
+    indexMetadata: CollectionIndexMetadata,
+    completedLocally: boolean,
+  ): Promise<void> {
+    const spec = this.buildPersistedIndexSpec(indexMetadata)
 
     try {
       await this.persistence.coordinator.requestEnsurePersistedIndex(
         this.collectionId,
         indexMetadata.signature,
         spec,
-        adapter,
+        completedLocally ? this.persistence.adapter : undefined,
+        completedLocally,
       )
     } catch (error) {
       console.warn(

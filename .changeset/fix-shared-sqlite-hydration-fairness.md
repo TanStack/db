@@ -4,4 +4,4 @@
 '@tanstack/electron-db-sqlite-persistence': patch
 ---
 
-Prevent cold SQLite hydrations from being starved by unrelated queued writes when collections share a browser driver. Schedule each complete hydrate fairly while preserving transaction atomicity and leader-local persistence coordination.
+Schedule complete SQLite hydration units fairly without holding coordinator work inside the local hydration scope. Preserve per-Collection leader adapter routing, mutation results across transport retries, terminal coordinator disposal, real-adapter restart order, and promise-discovered shared scheduling.
