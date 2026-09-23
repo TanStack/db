@@ -39,10 +39,15 @@ reusable product law, claim coverage beyond named examples, or demonstrate a
 bug-class repair. A fixed regression, bounded enumeration, or diagnostic stress
 probe is not an important generated property merely because it uses test data.
 
-Unless a requirement says otherwise, its evidence MAY live in the executable
-test, an oracle-file comment, the pull-request description, or a durable review
-ledger linked from the change. Reviewers MUST score the stated obligation, not
-the presence of a preferred heading, class, comment template, or helper.
+The executable oracle MUST keep its contract, model, history grammar,
+production driver, and refinement check visible in the oracle file or in
+companion modules that the file names directly. Pull-request evidence and a
+durable review ledger may supplement those five responsibilities, but cannot
+replace them. Unless a requirement says otherwise, other conformance evidence
+MAY live in the executable test, an oracle-file comment, the pull-request
+description, or a durable review ledger linked from the change. Reviewers MUST
+score the stated obligation, not the presence of a preferred heading, class,
+comment template, or helper.
 
 ### ORC-001: Contract authority and limits
 
@@ -70,14 +75,12 @@ the presence of a preferred heading, class, comment template, or helper.
 
 - **Trigger:** A file owns a reusable law, state machine, lifecycle boundary,
   or reference model.
-- **Obligation:** The applicable contract, expected-result authority, input or
-  history grammar, production driver, and refinement check MUST remain
-  distinguishable to a reviewer. When a responsibility does not apply and its
-  absence could be ambiguous, the evidence MUST identify it as not applicable
-  and explain why.
-- **Acceptance evidence:** A reviewer can point to the answer supplied by each
-  applicable responsibility and follow the tested law from authority to
-  observation.
+- **Obligation:** The contract, model, history grammar, production driver, and
+  refinement check MUST be visible in the executable oracle or directly named
+  companion modules and remain distinguishable to a reviewer.
+- **Acceptance evidence:** Starting from the oracle file, a reviewer can point
+  to the answer supplied by each responsibility and follow the tested law from
+  authority to observation.
 - **Not required:** Five headings, five classes, five files, one fixture per
   law, or a review card embedded in every oracle.
 
