@@ -287,8 +287,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       return this._clone({
         ...this.query,
         from: new UnionAll(
-          [sourceOrBranch, ...branches].map(
-            (branch) => (branch as unknown as BaseQueryBuilder)._getQuery(),
+          [sourceOrBranch, ...branches].map((branch) =>
+            (branch as unknown as BaseQueryBuilder)._getQuery(),
           ),
         ),
       }) as any

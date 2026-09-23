@@ -7,12 +7,7 @@ import {
   UnionFrom,
   isExpressionLike,
 } from '../ir.js'
-import type {
-  From,
-  QueryIR,
-  Select,
-  SelectValueExpression,
-} from '../ir.js'
+import type { From, QueryIR, Select, SelectValueExpression } from '../ir.js'
 
 /**
  * Gives every query-source placement its own runtime source identities.
