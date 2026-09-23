@@ -1811,6 +1811,42 @@ describe(`persistedCollectionOptions`, () => {
     await collection.cleanup()
   })
 
+  it(`signals ready once under synchronous upstream-ready reentry`, async () => {
+    let signalUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `on-demand-reentrant-readiness`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            signalUpstreamReady = markReady
+            return {}
+          },
+        },
+        persistence: { adapter: createRecordingAdapter() },
+      }),
+    )
+    const lifecycle = collection._lifecycle as unknown as {
+      markReady: () => void
+    }
+    const originalMarkReady = lifecycle.markReady.bind(lifecycle)
+    let underlyingReadySignals = 0
+    lifecycle.markReady = () => {
+      underlyingReadySignals++
+      signalUpstreamReady?.()
+      originalMarkReady()
+    }
+
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(signalUpstreamReady).toBeTypeOf(`function`))
+    signalUpstreamReady!()
+
+    expect(underlyingReadySignals).toBe(1)
+    expect(collection.status).toBe(`ready`)
+    await collection.cleanup()
+  })
+
   it(`preserves upstream ready-error-ready transitions for on-demand sync`, async () => {
     const upstreamError = new Error(`rebuild failed`)
     const upstreamStarted = deferred()
