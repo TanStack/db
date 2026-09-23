@@ -1545,16 +1545,53 @@ export function runSQLiteCoreAdapterContractSuite(
       })
 
       // `meta-field` makes SQL pushdown unsupported, so filter correctness comes
-      // from the in-memory evaluator. The leading `todos` segment simulates
-      // alias-qualified refs emitted by higher-level query builders.
+      // from the in-memory evaluator. The explicit source alias is the only
+      // signal that the leading `todos` segment is qualification.
       const rows = await adapter.loadSubset(collectionId, {
         where: new IR.Func(`eq`, [
-          new IR.PropRef([`todos`, `meta-field`]),
+          new IR.PropRef([`todos`, `meta-field`], `todos`),
           new IR.Value(`alpha`),
         ]),
       })
 
       expect(rows.map((row) => row.key)).toEqual([`1`])
+    })
+
+    it(`does not guess that a legacy fallback path is an alias`, async () => {
+      const { driver } = registerContractHarness()
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+      const collectionId = `fallback-legacy-nested-ref`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-legacy-nested-fallback`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `nested-match`,
+            value: {
+              profile: { [`meta-field`]: `alpha` },
+              [`meta-field`]: `flat-other`,
+            },
+          },
+          {
+            type: `insert`,
+            key: `flat-only`,
+            value: { [`meta-field`]: `alpha` },
+          },
+        ],
+      })
+
+      const rows = await adapter.loadSubset(collectionId, {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`profile`, `meta-field`]),
+          new IR.Value(`alpha`),
+        ]),
+      })
+
+      expect(rows.map((row) => row.key)).toEqual([`nested-match`])
     })
 
     it(`compiles serialized expression index specs used by phase-2 metadata`, async () => {

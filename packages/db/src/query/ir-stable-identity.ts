@@ -3,6 +3,7 @@ import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
 import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
+import { getPropRefPropertyPath, getPropRefSourceAlias } from './ir.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -578,6 +579,38 @@ function canonicalizeExpression(
   scope?: AliasScope,
 ): StableIdentityValue {
   if (expression.type === `ref`) {
+    const explicitAlias = getPropRefSourceAlias(expression)
+    if (explicitAlias !== undefined) {
+      const binding = resolveAliasBinding(scope, explicitAlias)
+      if (binding !== undefined) {
+        return {
+          type: `ref`,
+          path: [
+            [`binding`, ...binding],
+            ...getPropRefPropertyPath(expression).map((segment, index) =>
+              canonicalizeRuntimeValue(
+                segment,
+                `${path}.path[${index + 1}]`,
+                seen,
+              ),
+            ),
+          ],
+        }
+      }
+
+      return {
+        type: `ref`,
+        path: expression.path.map((segment, index) =>
+          canonicalizeRuntimeValue(segment, `${path}.path[${index}]`, seen),
+        ),
+        sourceAlias: canonicalizeRuntimeValue(
+          explicitAlias,
+          `${path}.sourceAlias`,
+          seen,
+        ),
+      }
+    }
+
     const binding = resolveAliasBinding(scope, expression.path[0] ?? ``)
     return {
       type: `ref`,

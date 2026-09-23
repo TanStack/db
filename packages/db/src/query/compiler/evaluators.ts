@@ -10,6 +10,7 @@ import {
   isUnorderable,
   normalizeValue,
 } from '../../utils/comparison.js'
+import { getPropRefPropertyPath, getPropRefSourceAlias } from '../ir.js'
 import type { BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
@@ -144,7 +145,13 @@ function compileExpressionInternal(
  * Compiles a reference expression into an optimized evaluator
  */
 function compileRef(ref: PropRef): CompiledExpression {
-  const [namespace, ...propertyPath] = ref.path
+  const explicitAlias = getPropRefSourceAlias(ref)
+  const [legacyNamespace, ...legacyPropertyPath] = ref.path
+  const namespace = explicitAlias ?? legacyNamespace
+  const propertyPath =
+    explicitAlias === undefined
+      ? legacyPropertyPath
+      : getPropRefPropertyPath(ref)
 
   if (!namespace) {
     throw new EmptyReferencePathError()
@@ -221,7 +228,7 @@ function compileRef(ref: PropRef): CompiledExpression {
  * Compiles a reference expression for single-row evaluation
  */
 function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
-  const propertyPath = ref.path
+  const propertyPath = getPropRefPropertyPath(ref)
 
   // This function works for all path lengths including empty path
   return (item) => {

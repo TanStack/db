@@ -627,6 +627,21 @@ describe(`semantic expression identity`, () => {
 })
 
 describe(`loadSubset demand identity`, () => {
+  it(`preserves legacy nested-ref identity and distinguishes explicit qualification`, () => {
+    const nested = new PropRef([`profile`, `score`])
+    const qualified = new PropRef([`profile`, `score`], `profile`)
+
+    expect(getLoadSubsetDemandKey({ where: nested })).toBe(
+      `{"type":"loadSubsetDemand","query":{"type":"loadSubsetQuery","where":{"type":"ref","path":[["string","profile"],["string","score"]]}}}`,
+    )
+    expect(getLoadSubsetDemandKey({ where: qualified })).not.toBe(
+      getLoadSubsetDemandKey({ where: nested }),
+    )
+    expect(JSON.stringify(nested)).toBe(
+      `{"path":["profile","score"],"type":"ref"}`,
+    )
+  })
+
   const id = new PropRef<string>([`id`])
   const group = new PropRef<string>([`group`])
   const first = new Func<boolean>(`eq`, [id, new Value(`a`)])

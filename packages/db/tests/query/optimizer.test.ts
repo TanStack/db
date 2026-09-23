@@ -50,6 +50,28 @@ function createAgg(name: string, ...args: Array<any>) {
 
 describe(`Query Optimizer`, () => {
   describe(`Basic Optimization`, () => {
+    test(`retains explicit ref qualification while combining predicates`, () => {
+      const department = new PropRef([`u`, `department_id`], `u`)
+      const salary = new PropRef([`u`, `salary`], `u`)
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        where: [
+          createEq(department, createValue(1)),
+          createGt(salary, createValue(50_000)),
+        ],
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+      const combined = optimizedQuery.where?.[0] as Func
+
+      expect((combined.args[0] as Func).args[0]).toMatchObject({
+        sourceAlias: `u`,
+      })
+      expect((combined.args[1] as Func).args[0]).toMatchObject({
+        sourceAlias: `u`,
+      })
+    })
+
     test(`should pass through queries without where clauses`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),

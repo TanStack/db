@@ -1,5 +1,6 @@
 ---
+'@tanstack/db': patch
 '@tanstack/db-sqlite-persistence-core': patch
 ---
 
-Use canonical SQL literals for serialized ref JSON paths so runtime predicates match persisted expression indexes and SQLite can use them.
+Preserve explicit source aliases without changing legacy property paths. Compile SQLite expression-index queries consistently and reject BigInts outside SQLite's signed 64-bit range.

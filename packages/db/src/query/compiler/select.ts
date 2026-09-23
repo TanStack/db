@@ -302,9 +302,10 @@ function addFromObject(
       if (pathStr.includes(`.`) || isRefExpr) {
         // Merge into the current destination (prefixPath) from the referenced source path
         const targetPath = [...prefixPath]
+        const path = pathStr.split(`.`)
         const expr = isRefExpr
           ? (value as BasicExpression)
-          : (new PropRef(pathStr.split(`.`)) as BasicExpression)
+          : (new PropRef(path, path[0]) as BasicExpression)
         const compiled = compileExpression(expr)
         ops.push({ kind: `merge`, targetPath, source: compiled })
       } else {

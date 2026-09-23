@@ -13,6 +13,7 @@ import {
   InvalidPersistenceAdapterError,
   InvalidSyncConfigError,
 } from './errors'
+import { serializeSQLiteBigInt } from './sqlite-value'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -640,7 +641,7 @@ function toStableSerializable(value: unknown): unknown {
     case `boolean`:
       return value
     case `bigint`:
-      return value.toString()
+      return serializeSQLiteBigInt(value)
     case `function`:
     case `symbol`:
     case `undefined`:

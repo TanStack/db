@@ -140,11 +140,31 @@ export class UnionAll extends BaseExpression {
 
 export class PropRef<T = any> extends BaseExpression<T> {
   public type = `ref` as const
+  declare public readonly sourceAlias?: string
   constructor(
     public path: Array<string>, // path to the property in the collection, with the alias as the first element
+    sourceAlias?: string,
   ) {
     super()
+    if (sourceAlias !== undefined) {
+      Object.defineProperty(this, `sourceAlias`, {
+        value: sourceAlias,
+        enumerable: true,
+      })
+    }
   }
+}
+
+/** Returns an explicitly declared source alias without inferring from the path. */
+export function getPropRefSourceAlias(ref: PropRef): string | undefined {
+  return ref.sourceAlias !== undefined && ref.path[0] === ref.sourceAlias
+    ? ref.sourceAlias
+    : undefined
+}
+
+/** Returns the property path after removing only explicit source qualification. */
+export function getPropRefPropertyPath(ref: PropRef): Array<string> {
+  return getPropRefSourceAlias(ref) === undefined ? ref.path : ref.path.slice(1)
 }
 
 export class Value<T = any> extends BaseExpression<T> {
@@ -399,6 +419,24 @@ export function followRef(
   alias?: string
   sourceId?: string
 } | void {
+  const explicitAlias = getPropRefSourceAlias(ref)
+  if (explicitAlias !== undefined) {
+    const aliasRef = getRefFromAlias(query, explicitAlias)
+    if (!aliasRef) return
+
+    const propertyPath = getPropRefPropertyPath(ref)
+    if (aliasRef.type === `queryRef`) {
+      return followRef(aliasRef.query, new PropRef(propertyPath), collection)
+    }
+
+    return {
+      collection: aliasRef.collection,
+      path: propertyPath,
+      alias: explicitAlias,
+      sourceId: aliasRef.sourceId,
+    }
+  }
+
   if (ref.path.length === 0) {
     return
   }

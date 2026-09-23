@@ -12,6 +12,12 @@ import {
   decodePersistedStorageKey,
   encodePersistedStorageKey,
 } from './persisted'
+import {
+  PERSISTED_TYPE_TAG,
+  PERSISTED_VALUE_TAG,
+  assertSQLiteBigIntInRange,
+  serializeSQLiteBigInt,
+} from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   PersistedIndexSpec,
@@ -36,6 +42,11 @@ type CompiledSqlFragment = {
   params: Array<SqliteSupportedValue>
   valueKind?: CompiledValueKind
 }
+
+type SqlExpressionCompilationContext =
+  | `predicate`
+  | `index-expression`
+  | `comparison-target`
 
 type StoredSqliteRow = {
   key: string
@@ -91,9 +102,6 @@ export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
 const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
-const PERSISTED_TYPE_TAG = `__tanstack_db_persisted_type__`
-const PERSISTED_VALUE_TAG = `value`
-
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
 type PersistedTaggedValueType =
   | `bigint`
@@ -171,10 +179,7 @@ function encodePersistedJsonValue(value: unknown): unknown {
   }
 
   if (typeof value === `bigint`) {
-    return {
-      [PERSISTED_TYPE_TAG]: `bigint`,
-      [PERSISTED_VALUE_TAG]: value.toString(),
-    } satisfies PersistedTaggedValue
+    return serializeSQLiteBigInt(value) satisfies PersistedTaggedValue
   }
 
   if (value instanceof Date) {
@@ -233,7 +238,7 @@ function decodePersistedJsonValue(value: unknown): unknown {
   if (isPersistedTaggedValue(value)) {
     switch (value[PERSISTED_TYPE_TAG]) {
       case `bigint`:
-        return BigInt(value[PERSISTED_VALUE_TAG])
+        return assertSQLiteBigIntInRange(BigInt(value[PERSISTED_VALUE_TAG]))
       case `date`: {
         const parsedDate = new Date(value[PERSISTED_VALUE_TAG])
         return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
@@ -287,6 +292,7 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
   }
 
   if (typeof value === `bigint`) {
+    assertSQLiteBigIntInRange(value)
     return value.toString()
   }
 
@@ -317,10 +323,20 @@ function toSqliteLiteral(value: SqliteSupportedValue): string {
   return `'${value.replace(/'/g, `''`)}'`
 }
 
+function toSqliteExpressionLiteral(value: unknown): string {
+  if (typeof value === `bigint`) {
+    return assertSQLiteBigIntInRange(value).toString()
+  }
+  return toSqliteLiteral(toSqliteParameterValue(value))
+}
+
 function inlineSqlParams(
   sql: string,
   params: ReadonlyArray<SqliteSupportedValue>,
 ): string {
+  // Every question mark in this compiler-owned SQL is a placeholder. Ref-path
+  // literals cannot contain one because createJsonPath rejects such segments.
+  // Callers must bypass this helper when SQL already contains other literals.
   let index = 0
   const inlinedSql = sql.replace(/\?/g, () => {
     const paramValue = params[index]
@@ -339,57 +355,6 @@ function inlineSqlParams(
 
 type CompiledRowExpressionEvaluator = (row: Record<string, unknown>) => unknown
 
-function collectAliasQualifiedRefSegments(
-  expression: IR.BasicExpression,
-  segments: Set<string> = new Set<string>(),
-): Set<string> {
-  if (expression.type === `ref`) {
-    if (expression.path.length > 1) {
-      const rootSegment = String(expression.path[0])
-      if (rootSegment.length > 0) {
-        segments.add(rootSegment)
-      }
-    }
-    return segments
-  }
-
-  if (expression.type === `func`) {
-    for (const arg of expression.args) {
-      collectAliasQualifiedRefSegments(arg, segments)
-    }
-  }
-
-  return segments
-}
-
-function createAliasAwareRowProxy(
-  row: Record<string, unknown>,
-  aliasSegments: ReadonlySet<string>,
-): Record<string, unknown> {
-  return new Proxy(row, {
-    get(target, prop, receiver) {
-      if (typeof prop !== `string`) {
-        return Reflect.get(target, prop, receiver)
-      }
-
-      if (Object.prototype.hasOwnProperty.call(target, prop)) {
-        const value = Reflect.get(target, prop, receiver)
-        if (value !== undefined || !aliasSegments.has(prop)) {
-          return value
-        }
-
-        return target
-      }
-
-      if (aliasSegments.has(prop)) {
-        return target
-      }
-
-      return undefined
-    },
-  })
-}
-
 function compileRowExpressionEvaluator(
   expression: IR.BasicExpression,
 ): CompiledRowExpressionEvaluator {
@@ -401,24 +366,7 @@ function compileRowExpressionEvaluator(
       `Unsupported expression for SQLite adapter fallback evaluator: ${(error as Error).message}`,
     )
   }
-
-  const aliasSegments = collectAliasQualifiedRefSegments(expression)
-  if (aliasSegments.size === 0) {
-    return (row) => baseEvaluator(row)
-  }
-
-  const proxyCache = new WeakMap<
-    Record<string, unknown>,
-    Record<string, unknown>
-  >()
-  return (row) => {
-    let proxy = proxyCache.get(row)
-    if (!proxy) {
-      proxy = createAliasAwareRowProxy(row, aliasSegments)
-      proxyCache.set(row, proxy)
-    }
-    return baseEvaluator(proxy)
-  }
+  return (row) => baseEvaluator(row)
 }
 
 function getOrderByObjectId(value: object): number {
@@ -575,20 +523,28 @@ function resolveComparisonValueKind(
 
 function compileComparisonSql(
   operator: `=` | `>` | `>=` | `<` | `<=`,
+  leftExpression: IR.BasicExpression,
+  rightExpression: IR.BasicExpression,
   leftSql: string,
   rightSql: string,
   valueKind: CompiledValueKind,
+  leftKind: CompiledValueKind,
+  rightKind: CompiledValueKind,
 ): string {
-  if (valueKind === `bigint`) {
-    return `(CAST(${leftSql} AS NUMERIC) ${operator} CAST(${rightSql} AS NUMERIC))`
+  const compileOperand = (
+    expression: IR.BasicExpression,
+    sql: string,
+    otherKind: CompiledValueKind,
+  ): string => {
+    if (expression.type !== `val`) return sql
+    if (valueKind === `date` && otherKind === `date`) return `date(${sql})`
+    if (valueKind === `datetime` && otherKind === `datetime`) {
+      return `datetime(${sql})`
+    }
+    return sql
   }
-  if (valueKind === `date`) {
-    return `(date(${leftSql}) ${operator} date(${rightSql}))`
-  }
-  if (valueKind === `datetime`) {
-    return `(datetime(${leftSql}) ${operator} datetime(${rightSql}))`
-  }
-  return `(${leftSql} ${operator} ${rightSql})`
+
+  return `(${compileOperand(leftExpression, leftSql, rightKind)} ${operator} ${compileOperand(rightExpression, rightSql, leftKind)})`
 }
 
 function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
@@ -661,21 +617,64 @@ function stableStringify(value: unknown): string {
   return serializePersistedRowValue(value)
 }
 
+function argumentCompilationContext(
+  parentName: string,
+  argumentIndex: number,
+  argument: IR.BasicExpression,
+  parentContext: SqlExpressionCompilationContext,
+): SqlExpressionCompilationContext {
+  if (parentContext === `index-expression`) return `index-expression`
+
+  switch (parentName) {
+    case `and`:
+    case `or`:
+    case `not`:
+      return `predicate`
+    case `eq`:
+    case `gt`:
+    case `gte`:
+    case `lt`:
+    case `lte`:
+    case `like`:
+    case `ilike`:
+      if (argument.type !== `val`) return `index-expression`
+      return typeof argument.value === `bigint`
+        ? `comparison-target`
+        : `predicate`
+    case `in`:
+      return argumentIndex === 0 ? `index-expression` : `predicate`
+    case `isNull`:
+    case `isUndefined`:
+      return `index-expression`
+    default:
+      return `index-expression`
+  }
+}
+
 function compileSqlExpression(
   expression: IR.BasicExpression,
+  context: SqlExpressionCompilationContext = `predicate`,
 ): CompiledSqlFragment {
   if (expression.type === `val`) {
     const valueKind = getLiteralValueKind(expression.value)
+    const value = toSqliteParameterValue(expression.value)
     return {
       supported: true,
-      sql: `?`,
-      params: [toSqliteParameterValue(expression.value)],
+      sql:
+        context === `index-expression`
+          ? toSqliteExpressionLiteral(expression.value)
+          : context === `comparison-target`
+            ? expression.value.toString()
+            : `?`,
+      params: context === `predicate` ? [value] : [],
       valueKind,
     }
   }
 
   if (expression.type === `ref`) {
-    const jsonPath = createJsonPath(expression.path.map(String))
+    const jsonPath = createJsonPath(
+      IR.getPropRefPropertyPath(expression).map(String),
+    )
     if (!jsonPath) {
       return {
         supported: false,
@@ -687,7 +686,12 @@ function compileSqlExpression(
     return compileRefExpressionSql(jsonPath)
   }
 
-  const compiledArgs = expression.args.map((arg) => compileSqlExpression(arg))
+  const compiledArgs = expression.args.map((arg, index) =>
+    compileSqlExpression(
+      arg,
+      argumentCompilationContext(expression.name, index, arg, context),
+    ),
+  )
   if (compiledArgs.some((arg) => !arg.supported)) {
     return {
       supported: false,
@@ -736,9 +740,13 @@ function compileSqlExpression(
         supported: true,
         sql: compileComparisonSql(
           operatorByName[expression.name],
+          expression.args[0]!,
+          expression.args[1]!,
           argSql[0],
           argSql[1],
           valueKind,
+          getCompiledValueKind(compiledArgs[0]),
+          getCompiledValueKind(compiledArgs[1]),
         ),
         params,
       }
@@ -793,13 +801,17 @@ function compileSqlExpression(
         return { supported: false, sql: ``, params: [] }
       }
 
+      if (context === `index-expression`) {
+        return {
+          supported: true,
+          sql: `(${leftSql} IN (${listValue
+            .map((value) => toSqliteExpressionLiteral(value))
+            .join(`, `)}))`,
+          params: leftParams,
+        }
+      }
+
       if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
-        const hasBigIntValues = listValue.some(
-          (value) => typeof value === `bigint`,
-        )
-        const inLeftSql = hasBigIntValues
-          ? `CAST(${leftSql} AS NUMERIC)`
-          : leftSql
         const chunkClauses: Array<string> = []
         const batchedParams: Array<SqliteSupportedValue> = []
 
@@ -812,13 +824,13 @@ function compileSqlExpression(
             startIndex,
             startIndex + SQLITE_MAX_IN_BATCH_SIZE,
           )
-          chunkClauses.push(
-            `(${inLeftSql} IN (${chunkValues.map(() => `?`).join(`, `)}))`,
-          )
-          batchedParams.push(...leftParams)
-          batchedParams.push(
-            ...chunkValues.map((value) => toSqliteParameterValue(value)),
-          )
+          const chunkParams: Array<SqliteSupportedValue> = []
+          const chunkValueSql = chunkValues.map((value) => {
+            chunkParams.push(toSqliteParameterValue(value))
+            return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
+          })
+          chunkClauses.push(`(${leftSql} IN (${chunkValueSql.join(`, `)}))`)
+          batchedParams.push(...leftParams, ...chunkParams)
         }
 
         return {
@@ -828,20 +840,15 @@ function compileSqlExpression(
         }
       }
 
-      const hasBigIntValues = listValue.some(
-        (value) => typeof value === `bigint`,
-      )
-      const inLeftSql = hasBigIntValues
-        ? `CAST(${leftSql} AS NUMERIC)`
-        : leftSql
-      const listPlaceholders = listValue.map(() => `?`).join(`, `)
+      const listParams: Array<SqliteSupportedValue> = []
+      const listValueSql = listValue.map((value) => {
+        listParams.push(toSqliteParameterValue(value))
+        return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
+      })
       return {
         supported: true,
-        sql: `(${inLeftSql} IN (${listPlaceholders}))`,
-        params: [
-          ...leftParams,
-          ...listValue.map((value) => toSqliteParameterValue(value)),
-        ],
+        sql: `(${leftSql} IN (${listValueSql.join(`, `)}))`,
+        params: [...leftParams, ...listParams],
       }
     }
     case `like`:
@@ -921,7 +928,10 @@ function compileOrderByClauses(
   const params: Array<SqliteSupportedValue> = []
 
   for (const clause of orderBy) {
-    const compiledExpression = compileSqlExpression(clause.expression)
+    const compiledExpression = compileSqlExpression(
+      clause.expression,
+      `index-expression`,
+    )
     if (!compiledExpression.supported) {
       return {
         supported: false,
@@ -957,6 +967,7 @@ function isExpressionLikeShape(value: unknown): value is IR.BasicExpression {
     path?: unknown
     name?: unknown
     args?: unknown
+    sourceAlias?: unknown
   }
 
   if (candidate.type === `val`) {
@@ -964,7 +975,12 @@ function isExpressionLikeShape(value: unknown): value is IR.BasicExpression {
   }
 
   if (candidate.type === `ref`) {
-    return Array.isArray(candidate.path)
+    return (
+      Array.isArray(candidate.path) &&
+      (candidate.sourceAlias === undefined ||
+        (typeof candidate.sourceAlias === `string` &&
+          candidate.path[0] === candidate.sourceAlias))
+    )
   }
 
   if (candidate.type === `func`) {
@@ -994,14 +1010,19 @@ function normalizeIndexSqlFragment(fragment: string): string {
     // Non-JSON strings are treated as raw SQL fragments below.
   }
 
-  if (hasParsedJson && isExpressionLikeShape(parsedJson)) {
-    const compiled = compileSqlExpression(parsedJson)
+  const decodedJson = hasParsedJson
+    ? decodePersistedJsonValue(parsedJson)
+    : undefined
+  if (hasParsedJson && isExpressionLikeShape(decodedJson)) {
+    const compiled = compileSqlExpression(decodedJson, `index-expression`)
     if (!compiled.supported) {
       throw new InvalidPersistedCollectionConfigError(
         `Persisted index expression is not supported by the SQLite compiler`,
       )
     }
-    return inlineSqlParams(compiled.sql, compiled.params)
+    return compiled.params.length === 0
+      ? compiled.sql
+      : inlineSqlParams(compiled.sql, compiled.params)
   }
 
   return sanitizeExpressionSqlFragment(fragment)
