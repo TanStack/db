@@ -171,7 +171,9 @@ export function trailBaseCollectionOptions<
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
   const cancelEventReader = () => {
     if (eventReader) {
-      eventReader.cancel()
+      // An already-errored stream rejects cancellation too. Cleanup still
+      // retires its reader; that rejection must not escape as detached work.
+      void eventReader.cancel().catch(() => undefined)
       eventReader.releaseLock()
       eventReader = undefined
     }
@@ -290,8 +292,6 @@ export function trailBaseCollectionOptions<
           const { done, value: event } = await reader.read()
 
           if (done || !event) {
-            reader.releaseLock()
-            eventReader = undefined
             return
           }
 
@@ -329,17 +329,29 @@ export function trailBaseCollectionOptions<
             await eventStream.cancel()
             return
           }
-          reader = eventReader = eventStream.getReader()
+          const subscribedReader = eventStream.getReader()
+          reader = eventReader = subscribedReader
 
           // Start listening for subscriptions first. Otherwise, we'd risk a gap
           // between the initial fetch and starting to listen.
-          void listen(reader).catch((error: unknown) => {
-            if (!cancelled && collection.status === `loading`) {
-              markError(error)
-            } else if (!cancelled) {
-              console.error(`TrailBase subscription failed`, error)
-            }
-          })
+          void listen(subscribedReader)
+            .finally(() => {
+              // A closed stream can still have a final event being processed.
+              // Release only after the listener has finished draining it.
+              // A processing failure can leave the stream open; cancel it too.
+              // Preserve the original failure if the stream already errored.
+              // Error settlement must not wait for transport cleanup.
+              void subscribedReader.cancel().catch(() => undefined)
+              subscribedReader.releaseLock()
+              if (eventReader === subscribedReader) eventReader = undefined
+            })
+            .catch((error: unknown) => {
+              if (!cancelled && collection.status === `loading`) {
+                markError(error)
+              } else if (!cancelled) {
+                console.error(`TrailBase subscription failed`, error)
+              }
+            })
 
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
@@ -352,8 +364,10 @@ export function trailBaseCollectionOptions<
             markReady()
           }
         } catch (error) {
+          // An abandoned startup must not cancel a replacement session's reader.
+          if (cancelled) return
           cancelEventReader()
-          if (!cancelled && collection.status === `loading`) {
+          if (collection.status === `loading`) {
             markError(error)
           }
           return
@@ -381,12 +395,14 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => {
+        const clearCleanupTask = () => {
           if (periodicCleanupTask !== undefined) {
             clearInterval(periodicCleanupTask)
             periodicCleanupTask = undefined
           }
-        })
+        }
+        // listen() reports read errors. Observe this separate promise too.
+        void reader.closed.then(clearCleanupTask, clearCleanupTask)
       }
 
       void start()

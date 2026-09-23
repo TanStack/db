@@ -1,5 +1,8 @@
 import { withSpan } from '../telemetry/tracer'
-import { TransactionSerializer } from './TransactionSerializer'
+import {
+  MissingTemporalConstructorError,
+  TransactionSerializer,
+} from './TransactionSerializer'
 import type { OfflineTransaction, StorageAdapter } from '../types'
 import type { Collection } from '@tanstack/db'
 
@@ -7,6 +10,9 @@ export class OutboxManager {
   private storage: StorageAdapter
   private serializer: TransactionSerializer
   private keyPrefix = `tx:`
+  private removalRevision = 0
+  private activeReads = new Set<{ revision: number }>()
+  private removedAtRevision = new Map<string, number>()
 
   constructor(
     storage: StorageAdapter,
@@ -19,6 +25,25 @@ export class OutboxManager {
 
   private getStorageKey(id: string): string {
     return `${this.keyPrefix}${id}`
+  }
+
+  private recordRemovals(ids: Iterable<string>): void {
+    this.removalRevision++
+    if (this.activeReads.size === 0) return
+    for (const id of ids) this.removedAtRevision.set(id, this.removalRevision)
+    this.pruneRemovalHistory()
+  }
+
+  private pruneRemovalHistory(): void {
+    if (this.activeReads.size === 0) {
+      this.removedAtRevision.clear()
+      return
+    }
+    let oldestRead = Number.POSITIVE_INFINITY
+    for (const read of this.activeReads)
+      oldestRead = Math.min(oldestRead, read.revision)
+    for (const [id, revision] of this.removedAtRevision)
+      if (revision <= oldestRead) this.removedAtRevision.delete(id)
   }
 
   async add(transaction: OfflineTransaction): Promise<void> {
@@ -52,6 +77,10 @@ export class OutboxManager {
         span.setAttribute(`result`, `found`)
         return transaction
       } catch (error) {
+        if (error instanceof MissingTemporalConstructorError) {
+          error.message = `transaction ${id}: ${error.message}`
+          throw error
+        }
         console.warn(`Failed to deserialize transaction ${id}:`, error)
         span.setAttribute(`result`, `deserialize_error`)
         return null
@@ -60,35 +89,57 @@ export class OutboxManager {
   }
 
   async getAll(): Promise<Array<OfflineTransaction>> {
-    return withSpan(`outbox.getAll`, {}, async (span) => {
-      const keys = await this.storage.keys()
-      const transactionKeys = keys.filter((key) =>
-        key.startsWith(this.keyPrefix),
-      )
+    return this.withAll((transactions) => transactions)
+  }
 
-      span.setAttribute(`transactionCount`, transactionKeys.length)
+  async withAll<T>(
+    consume: (transactions: Array<OfflineTransaction>) => T,
+  ): Promise<T> {
+    const read = { revision: this.removalRevision }
+    this.activeReads.add(read)
+    try {
+      return await withSpan(`outbox.getAll`, {}, async (span) => {
+        const keys = await this.storage.keys()
+        const transactionKeys = keys.filter((key) =>
+          key.startsWith(this.keyPrefix),
+        )
 
-      const transactions: Array<OfflineTransaction> = []
+        span.setAttribute(`transactionCount`, transactionKeys.length)
 
-      for (const key of transactionKeys) {
-        const data = await this.storage.get(key)
-        if (data) {
-          try {
-            const transaction = this.serializer.deserialize(data)
-            transactions.push(transaction)
-          } catch (error) {
-            console.warn(
-              `Failed to deserialize transaction from key ${key}:`,
-              error,
-            )
+        const transactions: Array<OfflineTransaction> = []
+
+        for (const key of transactionKeys) {
+          const data = await this.storage.get(key)
+          if (data) {
+            try {
+              const transaction = this.serializer.deserialize(data)
+              transactions.push(transaction)
+            } catch (error) {
+              if (error instanceof MissingTemporalConstructorError) {
+                error.message = `transaction ${key.slice(this.keyPrefix.length)}: ${error.message}`
+                throw error
+              }
+              console.warn(
+                `Failed to deserialize transaction from key ${key}:`,
+                error,
+              )
+            }
           }
         }
-      }
 
-      return transactions.sort(
-        (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-      )
-    })
+        const currentTransactions = transactions
+          .filter(
+            ({ id }) => (this.removedAtRevision.get(id) ?? 0) <= read.revision,
+          )
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        // Keep the read registered until replay admission completes. A durable
+        // removal cannot land between filtering and this synchronous consumer.
+        return consume(currentTransactions)
+      })
+    } finally {
+      this.activeReads.delete(read)
+      this.pruneRemovalHistory()
+    }
   }
 
   async getByKeys(keys: Array<string>): Promise<Array<OfflineTransaction>> {
@@ -119,6 +170,7 @@ export class OutboxManager {
     return withSpan(`outbox.remove`, { 'transaction.id': id }, async () => {
       const key = this.getStorageKey(id)
       await this.storage.delete(key)
+      this.recordRemovals([id])
     })
   }
 
@@ -132,7 +184,9 @@ export class OutboxManager {
     const keys = await this.storage.keys()
     const transactionKeys = keys.filter((key) => key.startsWith(this.keyPrefix))
 
-    await Promise.all(transactionKeys.map((key) => this.storage.delete(key)))
+    await this.removeMany(
+      transactionKeys.map((key) => key.slice(this.keyPrefix.length)),
+    )
   }
 
   async count(): Promise<number> {

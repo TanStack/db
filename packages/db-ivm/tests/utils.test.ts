@@ -404,7 +404,7 @@ describe(`hash`, () => {
     ])(
       `treats a large %s as an opaque leaf before structural work`,
       (_name, createLeaf) => {
-        const leaves = Array.from({ length: 700 }, createLeaf)
+        const leaves = Array.from({ length: 700 }, () => createLeaf())
         for (const leaf of leaves) Object.assign(leaf, { self: leaf })
         const createChain = () => {
           const ring = leaves.map((leaf, value) => ({
@@ -429,7 +429,7 @@ describe(`hash`, () => {
         }
         expect(() => hash(atDepthBoundary)).not.toThrow()
 
-        const adoptionLeaves = Array.from({ length: 20 }, createLeaf)
+        const adoptionLeaves = Array.from({ length: 20 }, () => createLeaf())
         const createAdoptionGraph = () => {
           const nodes = adoptionLeaves.map((leaf, value) => ({
             value,
@@ -599,15 +599,24 @@ describe(`hash`, () => {
       const regex1 = /test/g
       const regex2 = /test/g
       const regex3 = /different/i
+      const regex4 = /test/g
+      regex4.lastIndex = 1
 
       const hash1 = hash(regex1)
       const hash2 = hash(regex2)
       const hash3 = hash(regex3)
+      const hash4 = hash(regex4)
 
       expect(typeof hash1).toBe(hashType)
       expect(hash1).toBe(hash2) // Same regex should have same hash
-      // Note: RegExp don't have enumerable properties so they all produce the same hash
-      expect(hash1).toBe(hash3) // All RegExp objects have the same hash
+      expect(hash1).not.toBe(hash3)
+      expect(hash1).not.toBe(hash4)
+    })
+
+    it(`should include sparse array length in its hash`, () => {
+      expect(hash([])).not.toBe(hash(Array(1)))
+      expect(hash(Array(1))).not.toBe(hash(Array(2)))
+      expect(hash(Array(2))).toBe(hash(Array(2)))
     })
 
     it(`should hash nested objects`, () => {

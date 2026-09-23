@@ -3,8 +3,6 @@ id: QueryCollectionConfig
 title: QueryCollectionConfig
 ---
 
-# Interface: QueryCollectionConfig\<T, TQueryFn, TError, TQueryKey, TKey, TSchema, TQueryData\>
-
 Defined in: [packages/query-db-collection/src/query.ts:101](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L101)
 
 Configuration options for creating a Query Collection
@@ -79,6 +77,10 @@ Defined in: [packages/query-db-collection/src/query.ts:165](https://github.com/T
 
 Time in milliseconds after which the collection will be garbage collected
 when it has no active subscribers. Defaults to 5 minutes (300000ms).
+Sync started without subscribers gets a minimum 50ms grace period.
+Pending preloads retain the collection until they settle. Preloading ready
+data refreshes the retention period. A non-positive or non-finite value
+disables automatic garbage collection.
 
 #### Overrides
 

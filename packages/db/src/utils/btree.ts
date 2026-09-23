@@ -534,7 +534,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       children = this.children
     return i < children.length
       ? children[i]!.get(key, defaultValue, tree)
-      : undefined
+      : defaultValue
   }
 
   getPairOrNextLower(

@@ -1,6 +1,6 @@
 import { PropRef, Value } from '../ir.js'
 import type { BasicExpression } from '../ir.js'
-import type { RefLeaf } from './types.js'
+import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
 
 export interface RefProxy<T = any> {
@@ -22,25 +22,41 @@ export type VirtualPropsRefProxy<
   readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
 }
 
+// Strip nullish members before deciding whether a schema field is traversable,
+// then restore them outside the proxy so the schema still requires a guard.
+// The tuple guard keeps exact null/undefined fields as leaves: `never` would
+// otherwise satisfy the plain-object check.
+type SingleRowField<V, TKey extends string | number> = [
+  NonNullable<V>,
+] extends [never]
+  ? RefLeaf<V>
+  : IsPlainObject<NonNullable<V>> extends true
+    ?
+        | SingleRowRefProxy<NonNullable<V>, TKey, false>
+        | Extract<V, null | undefined>
+    : RefLeaf<V>
+
 /**
  * Type for creating a RefProxy for a single row/type without namespacing
  * Used in collection indexes and where clauses
  *
- * Includes virtual properties ($synced, $origin, $key, $collectionId) for
- * querying on sync status and row metadata.
+ * Inferred row roots include virtual properties ($synced, $origin, $key,
+ * $collectionId). The default exported shape is suitable for reusable helpers
+ * that can accept either roots or recursively traversed user objects. Use the
+ * third parameter as `true` when a helper specifically requires a row root.
  */
 export type SingleRowRefProxy<
   T,
   TKey extends string | number = string | number,
+  IncludeVirtualProps extends boolean = false,
 > =
   T extends Record<string, any>
     ? {
-        [K in keyof T]: T[K] extends Record<string, any>
-          ? SingleRowRefProxy<T[K], TKey> & RefProxy<T[K]>
-          : RefLeaf<T[K]>
+        [K in keyof T]: SingleRowField<T[K], TKey>
       } & RefProxy<T> &
-        VirtualPropsRefProxy<TKey>
-    : RefProxy<T> & VirtualPropsRefProxy<TKey>
+        (IncludeVirtualProps extends true ? VirtualPropsRefProxy<TKey> : {})
+    : RefProxy<T> &
+        (IncludeVirtualProps extends true ? VirtualPropsRefProxy<TKey> : {})
 
 /**
  * Creates a proxy object that records property access paths for a single row
@@ -48,7 +64,8 @@ export type SingleRowRefProxy<
  */
 export function createSingleRowRefProxy<
   T extends Record<string, any>,
->(): SingleRowRefProxy<T> {
+  TKey extends string | number = string | number,
+>(): SingleRowRefProxy<T, TKey, true> {
   const cache = new Map<string, any>()
 
   function createProxy(path: Array<string>): any {
@@ -91,7 +108,7 @@ export function createSingleRowRefProxy<
   }
 
   // Return the root proxy that starts with an empty path
-  return createProxy([]) as SingleRowRefProxy<T>
+  return createProxy([]) as SingleRowRefProxy<T, TKey, true>
 }
 
 /**
@@ -205,7 +222,8 @@ export function createRefProxy<T extends Record<string, any>>(
  */
 export function createRefProxyWithSelected<T extends Record<string, any>>(
   aliases: Array<string>,
-): RefProxy<T> & T & { $selected: SingleRowRefProxy<any> } {
+): RefProxy<T> &
+  T & { $selected: SingleRowRefProxy<any, string | number, true> } {
   const baseProxy = createRefProxy(aliases)
 
   // Create a proxy for $selected that prefixes all paths with '$selected'
@@ -280,7 +298,10 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
       }
       return Reflect.getOwnPropertyDescriptor(target, prop)
     },
-  }) as RefProxy<T> & T & { $selected: SingleRowRefProxy<any> }
+  }) as RefProxy<T> &
+    T & {
+      $selected: SingleRowRefProxy<any, string | number, true>
+    }
 }
 
 /**

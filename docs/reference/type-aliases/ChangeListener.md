@@ -3,13 +3,11 @@ id: ChangeListener
 title: ChangeListener
 ---
 
-# Type Alias: ChangeListener()\<T, TKey\>
-
 ```ts
 type ChangeListener<T, TKey> = (changes) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:1018](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1018)
+Defined in: [packages/db/src/types.ts:1022](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1022)
 
 Function type for listening to collection changes
 

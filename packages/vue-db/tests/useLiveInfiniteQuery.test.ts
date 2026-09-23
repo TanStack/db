@@ -36,6 +36,22 @@ async function flushVue(): Promise<void> {
 }
 
 describe(`useLiveInfiniteQuery`, () => {
+  it(`rejects a server-page callback before constructing a query`, () => {
+    const queryFn = vi.fn(() => {
+      throw new Error(`query must not be constructed`)
+    })
+    const config = { pageSize: 2, getNextPageParam: () => 1 }
+    const scope = effectScope()
+    try {
+      expect(() =>
+        scope.run(() => useLiveInfiniteQuery(queryFn, config)),
+      ).toThrow(`getNextPageParam is not supported`)
+      expect(queryFn).not.toHaveBeenCalled()
+    } finally {
+      scope.stop()
+    }
+  })
+
   let cleanup: (() => void) | undefined
 
   afterEach(() => {
@@ -61,7 +77,6 @@ describe(`useLiveInfiniteQuery`, () => {
     const query = scope.run(() =>
       useLiveInfiniteQuery(collection, {
         pageSize: 3,
-        getNextPageParam: (lastPage) => lastPage[0]?.createdAt,
       }),
     )
     cleanup = () => scope.stop()

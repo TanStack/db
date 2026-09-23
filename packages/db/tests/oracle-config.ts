@@ -1,8 +1,38 @@
+import { oracleReplayReporter } from './oracle-replay-witness.js'
+
 type OracleEnvironment = Record<string, string | undefined>
 
 const staticOracleProperties = [
+  `cursor-pagination.no-peek`,
+  `cursor-pagination.history`,
+  `cursor-pagination.cache`,
+  `cursor-pagination.nested-cancellation`,
+  `cursor-pagination.reader-abort`,
+  `cursor-pagination.manual-write`,
+  `cursor-pagination.backend-ownership`,
+  `cursor-pagination.refresh-publication`,
+  `cursor-pagination.protocol-publication`,
+  `cursor-pagination.slice-work`,
+  `cursor-pagination.defaults`,
+  `cursor-pagination.cancellation`,
+  `cursor-pagination.partition`,
+  `cursor-pagination.reset`,
+  `cursor-pagination.failure`,
+  `oracle-replay.calibration`,
+  `trailbase.lifecycle`,
+  `electric.bound-descriptor-history`,
+  `electric.persisted-tag-history`,
+  `electric.match-reentry`,
+  `electric.sdk-snapshot-delivery`,
+  `electric.sdk-dnf-membership`,
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
+  `collection-state.optimistic-history`,
+  `collection-state.mixed-transaction`,
+  `collection-state.optimistic-outcomes`,
+  `collection-state.same-key`,
+  `query-identity.compiled-output`,
+  `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
   `collection-publication.metadata-rollback`,
@@ -10,6 +40,8 @@ const staticOracleProperties = [
   `coverage-registry.state-machine`,
   `d2-source.exact-retractions`,
   `d2-source.disjoint-commutation`,
+  `live-query-observer.granular-history`,
+  `live-query-observer.wholesale-history`,
   `includes-collection.layout-swap`,
   `includes-collection.optimistic-child-history`,
   `includes-collection.public-key-order`,
@@ -27,11 +59,18 @@ const staticOracleProperties = [
   `includes-optimistic.rekey-rollback`,
   `includes-optimistic.repeated-history`,
   `includes-optimistic.sibling-route-rollback`,
+  `includes-query-shape.correlation`,
+  `includes-query-shape.multiplicity`,
+  `includes-query-shape.nullable`,
+  `includes-work.correlated-links`,
+  `includes-work.join-free`,
+  `includes-work.join-targets`,
   `includes-publication.atomic-parent-replacement`,
   `includes-publication.child-scalar`,
   `includes-publication.optimistic-rollback`,
   `includes-publication.parent-route`,
   `includes-temporal.release-reentry`,
+  `includes-temporal.partial-values`,
   `includes-temporal.demand-scheduling`,
   `includes.alpha-renaming`,
   `includes.incremental-history`,
@@ -66,6 +105,7 @@ const staticOracleProperties = [
   `ordered-work.snapshot-reuse`,
   `ordered-work.consumer-parity`,
   `ordered-work.lifecycle`,
+  `ordered-work.nullable-lifecycle`,
   `pagination.async-cursor`,
   `pagination.multi-order`,
   `pagination.nullable-cursor`,
@@ -89,13 +129,16 @@ const staticOracleProperties = [
   `subscription-lifecycle.async-history`,
   `subscription-lifecycle.async-restart`,
   `subscription-lifecycle.async-statistics`,
+  `sorted-map.key`,
+  `cleanup-queue.history`,
+  `sorted-map.ascending`,
+  `sorted-map.descending`,
 ] as const
 
 const publicationProperties = [
   `parent-scalar`,
   `parent-then-child`,
   `optimistic-before-confirm`,
-  `optimistic-after-confirm`,
 ].flatMap((law) =>
   [`direct`, `joined`].flatMap((q1Shape) =>
     [`passThrough`, `where`, `orderBy`, `select`].map(
@@ -122,7 +165,7 @@ export function validateOraclePropertyRegistry(
   return registry
 }
 
-const registeredOracleProperties = validateOraclePropertyRegistry([
+export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
   ...publicationProperties,
   ...refinementProperties,
@@ -215,7 +258,9 @@ export function oracleRandomParameters(
   numRuns: number,
   replay: OracleReplayConfig | number | undefined,
   property?: string,
-): { numRuns: number; seed?: number; path?: string } {
+): { numRuns: number; seed?: number; path?: string } & ReturnType<
+  typeof oracleReplayReporter
+> {
   if (property !== undefined) assertRegisteredOracleProperty(property)
   const { replaySeed, replayPath, replayProperty } =
     typeof replay === `object`
@@ -232,7 +277,10 @@ export function oracleRandomParameters(
     ...(property !== undefined &&
     replayPath !== undefined &&
     replayProperty === property
-      ? { path: replayPath }
+      ? {
+          path: replayPath,
+          ...oracleReplayReporter(property, replaySeed, replayPath),
+        }
       : {}),
   }
 }
@@ -248,10 +296,6 @@ export function oracleRuns(baseRuns: number): number {
 export function oraclePropertyOptions(
   baseRuns: number,
   property?: string,
-): {
-  numRuns: number
-  seed?: number
-  path?: string
-} {
+): ReturnType<typeof oracleRandomParameters> {
   return oracleRandomParameters(oracleRuns(baseRuns), replay, property)
 }

@@ -1,6 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { oracleRuns } from '../oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { localOnlyCollectionOptions } from '../../src/local-only.js'
@@ -10,6 +10,29 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import type { Collection } from '../../src/collection/index.js'
+
+/**
+ * # Does unrelated source size increase correlated include work?
+ *
+ * Correct rows are not enough for a pushed-down include. An implementation can
+ * return the right tree after scanning or delivering every unrelated source
+ * row. This oracle protects a bounded work law for indexed correlations:
+ *
+ * 1. The query returns the complete expected nested result.
+ * 2. Adding unmatched link rows does not increase source delivery or reads.
+ * 3. Adding indexed join targets does not increase source delivery or reads.
+ * 4. Without the target join, unrelated rows at every level still add no work.
+ *
+ * The reference is relational. It compares each scaled fixture with the same
+ * query on a minimal baseline. Exact baseline counts prove that the intended
+ * source path ran. The scaled relation, not elapsed time, states the work law.
+ * Counters observe both delivered changes and collection reads so filtering
+ * cannot hide a scan.
+ *
+ * The boundary conditions matter. Collections preload before they receive
+ * B-tree indexes. Filler rows never match a selected route. This suite does not
+ * promise a general runtime bound or cover providers that ignore local indexes.
+ */
 
 let nextCollectionId = 0
 
@@ -99,9 +122,9 @@ function createSourceCollection<T extends { id: string }>(
   )
 }
 
-// Count both sides of the source boundary named in #1709's profile. Delivered
-// rows show what enters the dataflow graph. entries() visits capture scans and
-// get() calls capture keyed reads, so examined work cannot hide behind a filter.
+// Count both sides of the source boundary. Delivered rows show what enters the
+// dataflow graph. entries() visits capture scans and get() calls capture keyed
+// reads, so examined work cannot hide behind a filter.
 function countSourceWork<T extends object>(collection: Collection<T>) {
   let deliveredRows = 0
   let examinedRows = 0
@@ -169,7 +192,7 @@ function createFixtureRows(filler: FillerCounts): SourceRows {
     ],
     links: [
       // Keep filler links on one existing target key. Only the left-side input
-      // grows; the term-filler control probes right-side input growth separately.
+      // grows. The term-filler control probes right-side input growth separately.
       { id: `link-0`, groupId: `group-0`, targetId: `term-1` },
       {
         id: `link-1`,
@@ -193,6 +216,21 @@ function observeLink(link: LinkObservation): LinkObservation {
   return exhaustive
 }
 
+function observeResult(
+  roots: ReadonlyArray<WorkObservation[`result`][number]>,
+): WorkObservation[`result`] {
+  return roots.map((root) => ({
+    id: root.id,
+    meanings: root.meanings.map((meaning) => ({
+      id: meaning.id,
+      groups: meaning.groups.map((group) => ({
+        id: group.id,
+        links: group.links.map(observeLink),
+      })),
+    })),
+  }))
+}
+
 async function observeWork({
   filler,
   joinTargets,
@@ -209,7 +247,7 @@ async function observeWork({
   try {
     await Promise.all(Object.values(sources).map((source) => source.preload()))
 
-    // Match #1709's reproduction: load first, then add a B-tree index on each
+    // Match the reported boundary: load first, then add a B-tree index on each
     // correlation and join column before constructing the live query.
     sources.terms.createIndex((row) => row.id, { indexType: BTreeIndex })
     sources.meanings.createIndex((row) => row.termId, {
@@ -282,20 +320,8 @@ async function observeWork({
     cleanupLive = () => live.cleanup()
 
     await live.preload()
-    const root = live.toArray[0]!
     return {
-      result: [
-        {
-          id: root.id,
-          meanings: root.meanings.map((meaning) => ({
-            id: meaning.id,
-            groups: meaning.groups.map((group) => ({
-              id: group.id,
-              links: group.links.map(observeLink),
-            })),
-          })),
-        },
-      ],
+      result: observeResult(live.toArray),
       sourceWork: {
         terms: counters.terms(),
         meanings: counters.meanings(),
@@ -382,7 +408,37 @@ async function expectCorrelatedJoinWorkBound(
   expect(scaled.sourceWork).toEqual(baseline.sourceWork)
 }
 
+function campaigns(fixedSeed: number, property: string) {
+  return [
+    {
+      name: `fixed`,
+      options: { numRuns: oracleRuns(6), seed: fixedSeed },
+    },
+    {
+      name: `random or replayed`,
+      options: oraclePropertyOptions(6, property),
+    },
+  ]
+}
+
 describe(`includes deterministic work-counter oracle`, () => {
+  it.each([true, false])(
+    `retains and rejects extra roots with joinTargets=%s`,
+    (joinTargets) => {
+      const expected = expectedResult({ joinTargets })
+      expect(observeResult(expected)).toEqual(expected)
+      const extra = { id: `term-extra`, meanings: [] }
+      const faulty = [...expected, extra]
+      // The old first-root capture erases this violation.
+      expect(observeResult(faulty.slice(0, 1))).toEqual(expected)
+      const observed = observeResult(faulty)
+      expect(observed).toEqual(faulty)
+      expect(() => expect(observed).toEqual(expected)).toThrow()
+      expect(observeResult([])).toEqual([])
+      expect(() => expect(observeResult([])).toEqual(expected)).toThrow()
+    },
+  )
+
   beforeAll(async () => {
     const [joinedBaseline, joinFreeBaseline] = await Promise.all([
       observeWork({ filler: noFillers, joinTargets: true }),
@@ -393,63 +449,60 @@ describe(`includes deterministic work-counter oracle`, () => {
   })
 
   it.each([1, 2, 3])(
-    `pins the #1709 work bound at the small filler boundary (%i)`,
+    `pins the work bound at the small filler boundary (%i)`,
     expectCorrelatedJoinWorkBound,
   )
 
-  fcTest.prop([fc.integer({ min: 1, max: 24 })], {
-    numRuns: oracleRuns(6),
-    seed: 1709,
-  })(
-    `a join preserves correlated source pushdown (#1709)`,
-    expectCorrelatedJoinWorkBound,
-  )
+  for (const campaign of campaigns(1709, `includes-work.correlated-links`)) {
+    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
+      `a join preserves correlated source pushdown (${campaign.name})`,
+      expectCorrelatedJoinWorkBound,
+    )
+  }
 
-  fcTest.prop([fc.integer({ min: 1, max: 24 })], {
-    numRuns: oracleRuns(6),
-    seed: 170_900,
-  })(
-    `indexed join-target growth keeps source work flat (#1709 direction control)`,
-    async (fillerCount) => {
-      const baseline = joinedBaselineObservation
-      const scaled = await observeWork({
-        filler: {
-          terms: fillerCount,
-          meanings: 0,
-          groups: 0,
-          links: 0,
-        },
-        joinTargets: true,
-      })
+  for (const campaign of campaigns(170_900, `includes-work.join-targets`)) {
+    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
+      `indexed join-target growth keeps source work flat (${campaign.name})`,
+      async (fillerCount) => {
+        const baseline = joinedBaselineObservation
+        const scaled = await observeWork({
+          filler: {
+            terms: fillerCount,
+            meanings: 0,
+            groups: 0,
+            links: 0,
+          },
+          joinTargets: true,
+        })
 
-      expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-      expect(scaled.result).toEqual(baseline.result)
-      expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-      expect(scaled.sourceWork).toEqual(baseline.sourceWork)
-    },
-  )
+        expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
+        expect(scaled.result).toEqual(baseline.result)
+        expect(baseline.sourceWork).toEqual(joinedBaselineWork)
+        expect(scaled.sourceWork).toEqual(baseline.sourceWork)
+      },
+    )
+  }
 
-  fcTest.prop([fc.integer({ min: 1, max: 24 })], {
-    numRuns: oracleRuns(6),
-    seed: 17_090,
-  })(
-    `join-free correlated includes keep source work flat (#1709 control)`,
-    async (fillerCount) => {
-      const baseline = joinFreeBaselineObservation
-      const scaled = await observeWork({
-        filler: {
-          terms: fillerCount,
-          meanings: fillerCount,
-          groups: fillerCount,
-          links: fillerCount,
-        },
-        joinTargets: false,
-      })
+  for (const campaign of campaigns(17_090, `includes-work.join-free`)) {
+    fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
+      `join-free correlated includes keep source work flat (${campaign.name})`,
+      async (fillerCount) => {
+        const baseline = joinFreeBaselineObservation
+        const scaled = await observeWork({
+          filler: {
+            terms: fillerCount,
+            meanings: fillerCount,
+            groups: fillerCount,
+            links: fillerCount,
+          },
+          joinTargets: false,
+        })
 
-      expect(baseline.result).toEqual(expectedResult({ joinTargets: false }))
-      expect(scaled.result).toEqual(baseline.result)
-      expect(baseline.sourceWork).toEqual(joinFreeBaselineWork)
-      expect(scaled.sourceWork).toEqual(baseline.sourceWork)
-    },
-  )
+        expect(baseline.result).toEqual(expectedResult({ joinTargets: false }))
+        expect(scaled.result).toEqual(baseline.result)
+        expect(baseline.sourceWork).toEqual(joinFreeBaselineWork)
+        expect(scaled.sourceWork).toEqual(baseline.sourceWork)
+      },
+    )
+  }
 })

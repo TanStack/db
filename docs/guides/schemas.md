@@ -3,8 +3,6 @@ title: Schemas
 id: schemas
 ---
 
-# Schema Validation and Type Transformations
-
 TanStack DB uses schemas to ensure your data is valid and type-safe throughout your application.
 
 ## What You'll Learn

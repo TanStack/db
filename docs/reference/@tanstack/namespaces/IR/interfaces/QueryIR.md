@@ -3,8 +3,6 @@ id: QueryIR
 title: QueryIR
 ---
 
-# Interface: QueryIR
-
 Defined in: [packages/db/src/query/ir.ts:9](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L9)
 
 ## Properties

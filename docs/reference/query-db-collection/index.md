@@ -3,8 +3,6 @@ id: "@tanstack/query-db-collection"
 title: "@tanstack/query-db-collection"
 ---
 
-# @tanstack/query-db-collection
-
 ## Classes
 
 - [DeleteOperationItemNotFoundError](classes/DeleteOperationItemNotFoundError.md)

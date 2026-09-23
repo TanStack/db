@@ -1,5 +1,6 @@
+import { setImmediate as yieldToRunner } from 'node:timers/promises'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
 import {
   createLiveQueryCollection,
@@ -11,6 +12,31 @@ import { oraclePropertyOptions } from '../oracle-config.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+
+/**
+ * # What makes a layered publication coherent?
+ *
+ * A source write can update a parent, its materialized children, and a query
+ * that reads the first query. The public contract does not permit a torn row at
+ * any one layer. When that layer invokes a listener, its installed reads,
+ * callback rows, and change payloads must describe the same complete result.
+ *
+ * A plain Map model recomputes both child arrays from current parent and child
+ * rows. The production driver builds two live-query layers. Q1 covers direct
+ * and joined source forms. Q2 covers pass-through, filter, order, and projection.
+ * After each synchronous source checkpoint, the oracle compares both layers
+ * with the model and checks each callback since the prior checkpoint.
+ *
+ * The action grammar covers parent-only changes, child-only changes, route
+ * moves, atomic replacement, optimistic confirmation and rollback, and two
+ * consecutive source writes. Fault controls corrupt transient reads, callback
+ * snapshots, optimistic state, and source-settled state. This proves that a
+ * final settled read alone is not the oracle.
+ *
+ * Q1 and Q2 can notify at different moments. Coherence applies within each
+ * callback and its own layer. The test does not require Q2 to advance while a
+ * Q1 callback is still running.
+ */
 
 type ParentRow = {
   id: number
@@ -165,6 +191,19 @@ function stripVirtualProperties(value: unknown): unknown {
 type PublicationObservation = {
   q1: Array<PublishedRow>
   q2: Array<PublishedRow>
+  callbacks: Array<CallbackObservation>
+}
+
+type CallbackObservation = {
+  layer: `q1` | `q2`
+  rows: Array<PublishedRow>
+  expected: Array<PublishedRow>
+  changes: Array<{
+    type: `insert` | `update` | `delete`
+    key: number
+    value: PublishedRow
+    previousValue?: PublishedRow
+  }>
 }
 
 type PublicationContext = {
@@ -175,6 +214,8 @@ type PublicationContext = {
     metadata: ReturnType<typeof createControlledCollection<MetadataRow>>
   }
   queries: ReturnType<typeof createLayeredQuery>
+  callbacks: Array<CallbackObservation>
+  unsubscribe: Array<() => void>
   model: {
     parents: Map<number, ParentRow>
     children: Map<number, ChildRow>
@@ -182,6 +223,8 @@ type PublicationContext = {
   }
 }
 
+// This model uses only source Maps, equality, and the declared child order. It
+// does not read either live query or any materialization state.
 function recomputeRows(context: PublicationContext): Array<PublishedRow> {
   return [...context.model.parents.values()]
     .sort((left, right) => left.id - right.id)
@@ -202,19 +245,37 @@ const publicationProjection: TraceProjection<
   PublicationContext,
   PublicationObservation
 > = {
-  observe: ({ queries }) => ({
+  // Observe both final reads and rows captured inside each listener. A later
+  // repair cannot hide a callback-time tear.
+  observe: ({ queries, callbacks }) => ({
     q1: stripVirtualProperties(queries.q1.toArray) as Array<PublishedRow>,
     q2: stripVirtualProperties(queries.q2.toArray) as Array<PublishedRow>,
+    callbacks,
   }),
   recompute: (context) => {
     const expected = recomputeRows(context)
     return {
       q1: expected.map((row) => structuredClone(row)),
       q2: expected.map((row) => structuredClone(row)),
+      callbacks: [],
     }
   },
   assertEqual: (observed, expected) => {
-    expect(observed).toEqual(expected)
+    expect(observed.q1).toEqual(expected.q1)
+    expect(observed.q2).toEqual(expected.q2)
+    // Each layer's own callback must be coherent. This makes no claim that
+    // Q2 has already advanced while Q1's earlier callback is running.
+    for (const callback of observed.callbacks) {
+      expect(callback.rows).toEqual(callback.expected)
+      for (const change of callback.changes) {
+        expect(change.key).toBe(change.value.item.id)
+        if (change.type !== `delete`) {
+          expect(change.value).toEqual(
+            callback.expected.find((row) => row.item.id === change.key),
+          )
+        }
+      }
+    }
     return undefined
   },
 }
@@ -237,6 +298,9 @@ function createPublicationDriver(
   q2Shape: Q2Shape,
   checkpointOptimistic = false,
 ): TraceDriver<PublicationAction, PublicationContext> {
+  // The driver sends each action through real source, optimistic, graph, and
+  // Collection publication boundaries. The checkpoint marks each synchronous
+  // state that a caller can observe before the returned Promise settles.
   return {
     setup: () => {
       const parents = createControlledCollection(`publication-parents`, [
@@ -268,6 +332,8 @@ function createPublicationDriver(
           q1Shape,
           q2Shape,
         ),
+        callbacks: [],
+        unsubscribe: [],
         model: {
           parents: new Map([[initialParent.id, { ...initialParent }]]),
           children: new Map(
@@ -279,9 +345,25 @@ function createPublicationDriver(
         },
       }
     },
-    start: async ({ queries }) => {
+    start: async (context) => {
+      const { queries } = context
       await queries.q1.preload()
       await queries.q2.preload()
+      for (const layer of [`q1`, `q2`] as const) {
+        const subscription = queries[layer].subscribeChanges((changes) => {
+          context.callbacks.push({
+            layer,
+            rows: stripVirtualProperties(
+              queries[layer].toArray,
+            ) as Array<PublishedRow>,
+            expected: recomputeRows(context),
+            changes: stripVirtualProperties(
+              changes,
+            ) as CallbackObservation[`changes`],
+          })
+        })
+        context.unsubscribe.push(() => subscription.unsubscribe())
+      }
     },
     apply: async (action, context, checkpoint) => {
       if (action.type === `parentThenChild`) {
@@ -290,14 +372,15 @@ function createPublicationDriver(
         if (!parent || !child) throw new Error(`Missing publication fixture`)
 
         const nextParent = { ...parent, value: action.parentValue }
-        context.sources.parents.write(`update`, nextParent)
         context.model.parents.set(nextParent.id, { ...nextParent })
+        context.sources.parents.write(`update`, nextParent)
 
         checkpoint()
 
         const nextChild = { ...child, value: action.childValue }
-        context.sources.children.write(`update`, nextChild)
         context.model.children.set(nextChild.id, { ...nextChild })
+        context.sources.children.write(`update`, nextChild)
+        checkpoint()
         return
       }
 
@@ -305,8 +388,9 @@ function createPublicationDriver(
         const currentChild = context.model.children.get(initialChild.id)
         if (!currentChild) throw new Error(`Missing publication child`)
         const nextChild = { ...currentChild, value: action.value }
-        context.sources.children.write(`update`, nextChild)
         context.model.children.set(nextChild.id, { ...nextChild })
+        context.sources.children.write(`update`, nextChild)
+        checkpoint()
         return
       }
 
@@ -323,11 +407,12 @@ function createPublicationDriver(
       }
 
       if (action.type === `atomicReplace`) {
+        context.model.parents.set(next.id, { ...next })
         context.sources.parents.writeBatch([
           { type: `delete`, value: { ...current } },
           { type: `insert`, value: { ...next } },
         ])
-        context.model.parents.set(next.id, { ...next })
+        checkpoint()
         return
       }
 
@@ -335,14 +420,14 @@ function createPublicationDriver(
         action.type === `optimisticConfirm` ||
         action.type === `optimisticRollback`
       ) {
+        const previous = { ...current }
+        context.model.parents.set(next.id, { ...next })
         const transaction = context.sources.parents.collection.update(
           next.id,
           (draft) => {
             draft.value = next.value
           },
         )
-        const previous = { ...current }
-        context.model.parents.set(next.id, { ...next })
 
         let optimisticFailure: unknown
         if (checkpointOptimistic) {
@@ -358,21 +443,23 @@ function createPublicationDriver(
           context.sources.parents.resolveSync()
           await transaction.isPersisted.promise
         } else {
+          context.model.parents.set(previous.id, previous)
           await settleRollback(
             context.sources.parents.rejectSync,
             transaction.isPersisted.promise,
           )
-          context.model.parents.set(previous.id, previous)
         }
 
         if (optimisticFailure) throw optimisticFailure
         return
       }
 
-      context.sources.parents.write(`update`, next)
       context.model.parents.set(next.id, { ...next })
+      context.sources.parents.write(`update`, next)
+      checkpoint()
     },
-    cleanup: async ({ queries, sources }) => {
+    cleanup: async ({ queries, sources, unsubscribe }) => {
+      for (const stop of unsubscribe) stop()
       await queries.q2.cleanup()
       await queries.q1.cleanup()
       await Promise.all([
@@ -402,6 +489,10 @@ const q2Shapes = [`passThrough`, `where`, `orderBy`, `select`] as const
 const q1Shapes = [`direct`, `joined`] as const
 
 describe(`layered-query publication oracle`, () => {
+  // Completed-promise histories can starve worker RPC replies at high run counts.
+  // Yield between whole tests, never inside a publication trace or checkpoint.
+  afterEach(() => yieldToRunner())
+
   const changedValueArbitrary = fc.oneof(
     fc.integer({ min: -100, max: -1 }),
     fc.integer({ min: 1, max: 100 }),
@@ -413,6 +504,158 @@ describe(`layered-query publication oracle`, () => {
 
   for (const q1Shape of q1Shapes) {
     for (const q2Shape of q2Shapes) {
+      it(`observes every plain write before yielding through ${q1Shape}/${q2Shape}`, async () => {
+        const actions: Array<PublicationAction> = [
+          { type: `parentScalar`, value: 7 },
+          { type: `childScalar`, value: 8 },
+          { type: `parentRoute`, group: 20 },
+          { type: `atomicReplace`, group: 30, value: 9 },
+          { type: `parentThenChild`, parentValue: 10, childValue: 11 },
+        ]
+        const driver = createPublicationDriver(q1Shape, q2Shape)
+        await runTrace({
+          steps: actions,
+          driver: {
+            ...driver,
+            apply: (action, context, checkpoint) => {
+              const beforeCallbacks = context.callbacks.length
+              let reached = 0
+              const result = driver.apply(action, context, () => {
+                reached++
+                return checkpoint()
+              })
+              // Capture before awaiting the async action's returned Promise.
+              const synchronousCount = reached
+              return Promise.resolve(result).then(() => {
+                for (const layer of [`q1`, `q2`] as const) {
+                  expect(
+                    context.callbacks
+                      .slice(beforeCallbacks)
+                      .some((callback) => callback.layer === layer),
+                  ).toBe(true)
+                }
+                expect(synchronousCount).toBe(
+                  action.type === `parentThenChild` ? 2 : 1,
+                )
+              })
+            },
+          },
+          projection: publicationProjection,
+        })
+      })
+
+      it(`rejects a transient layered tear through ${q1Shape}/${q2Shape}`, async () => {
+        const run = (observeInsideAction: boolean) => {
+          let transient = false
+          const driver = createPublicationDriver(q1Shape, q2Shape)
+          return runTrace({
+            steps: [{ type: `parentScalar` as const, value: 7 }],
+            driver: {
+              ...driver,
+              apply: (action, context, checkpoint) => {
+                transient = true
+                queueMicrotask(() => {
+                  transient = false
+                })
+                return driver.apply(
+                  action,
+                  context,
+                  observeInsideAction ? checkpoint : () => undefined,
+                )
+              },
+            },
+            projection: {
+              ...publicationProjection,
+              observe: (context) => {
+                const observed = publicationProjection.observe(context)
+                if (transient) observed.q2[0]!.item.value = -999
+                return observed
+              },
+            },
+          })
+        }
+        // The old settled-only observation misses this test-owned fault.
+        await expect(run(false)).resolves.toBeUndefined()
+        await expect(run(true)).rejects.toMatchObject({
+          name: `TraceAssertionError`,
+          checkpoint: 1,
+        })
+      })
+
+      it(`rejects a callback-only tear before reads recover through ${q1Shape}/${q2Shape}`, async () => {
+        const driver = createPublicationDriver(q1Shape, q2Shape)
+        let reached = 0
+        const context = await driver.setup()
+        try {
+          await driver.start?.(context)
+          await driver.apply(
+            { type: `parentScalar`, value: 7 },
+            context,
+            () => undefined,
+          )
+          const callback = context.callbacks.find(
+            (entry) => entry.layer === `q2`,
+          )
+          expect(callback).toBeDefined()
+          callback!.rows[0]!.item.value = -999
+          reached++
+          // The installed final reads still agree. This fault corrupts only the
+          // captured callback and repairs it before the write returns.
+          const observed = publicationProjection.observe(context)
+          const expected = publicationProjection.recompute(context)
+          expect(observed.q1).toEqual(expected.q1)
+          expect(observed.q2).toEqual(expected.q2)
+          expect(() =>
+            publicationProjection.assertEqual(observed, expected),
+          ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+          expect(reached).toBe(1)
+        } finally {
+          await driver.cleanup(context)
+        }
+      })
+
+      it(`checks both sides of confirmation through ${q1Shape}/${q2Shape}`, async () => {
+        for (const fault of [`none`, `optimistic`, `confirmed`] as const) {
+          const driver = createPublicationDriver(q1Shape, q2Shape, true)
+          let phase: `initial` | `optimistic` | `confirmed` = `initial`
+          const seen: Array<string> = []
+          let hits = 0
+          const run = runTrace({
+            steps: [{ type: `optimisticConfirm` as const, value: 7 }],
+            driver: {
+              ...driver,
+              apply: async (action, context, checkpoint) => {
+                phase = `optimistic`
+                await driver.apply(action, context, checkpoint)
+                phase = `confirmed`
+              },
+            },
+            projection: {
+              ...publicationProjection,
+              observe: (context) => {
+                seen.push(phase)
+                const observed = publicationProjection.observe(context)
+                if (phase === fault) {
+                  observed.q2[0]!.item.value = -999
+                  hits++
+                }
+                return observed
+              },
+            },
+          })
+          if (fault === `none`) {
+            await run
+            expect(seen).toEqual([`initial`, `optimistic`, `confirmed`])
+            expect(hits).toBe(0)
+          } else {
+            await expect(run).rejects.toMatchObject({
+              name: `TraceAssertionError`,
+            })
+            expect(hits).toBe(1)
+          }
+        }
+      })
+
       fcTest.prop(
         [changedValueArbitrary],
         oraclePropertyOptions(
@@ -452,33 +695,15 @@ describe(`layered-query publication oracle`, () => {
       fcTest.prop(
         [changedValueArbitrary],
         oraclePropertyOptions(
-          8,
+          16,
           `includes-publication.optimistic-before-confirm.${q1Shape}.${q2Shape}`,
         ),
       )(
-        `publishes optimistic state before confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
+        `publishes optimistic state before and after confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
         async (value) => {
           await expectPublicationMatches(
             { type: `optimisticConfirm`, value },
             true,
-            q1Shape,
-            q2Shape,
-          )
-        },
-      )
-
-      fcTest.prop(
-        [changedValueArbitrary],
-        oraclePropertyOptions(
-          8,
-          `includes-publication.optimistic-after-confirm.${q1Shape}.${q2Shape}`,
-        ),
-      )(
-        `publishes state after optimistic confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
-        async (value) => {
-          await expectPublicationMatches(
-            { type: `optimisticConfirm`, value },
-            false,
             q1Shape,
             q2Shape,
           )

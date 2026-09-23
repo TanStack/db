@@ -3,8 +3,6 @@ id: MergeContextWithJoinType
 title: MergeContextWithJoinType
 ---
 
-# Type Alias: MergeContextWithJoinType\<TContext, TNewSchema, TJoinType\>
-
 ```ts
 type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = object & PreserveSingleResultFlag<TContext["singleResult"]> & PreserveHasResultFlag<TContext["hasResult"]> & PreserveUnionFromFlag<TContext["hasUnionFrom"]> & PreserveFromSourceNames<TContext["fromSourceNames"]>;
 ```

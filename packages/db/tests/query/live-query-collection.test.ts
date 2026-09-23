@@ -19,7 +19,10 @@ import {
 import { createDeferred } from '../../src/deferred'
 import { BTreeIndex } from '../../src/indexes/btree-index'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events'
-import { Func, Value } from '../../src/query/ir.js'
+import { Func, PropRef, Value } from '../../src/query/ir.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import { evaluateReferenceExpression } from '../reference-expression.js'
+import type { BasicExpression } from '../../src/query/ir.js'
 import type {
   ChangeMessage,
   LoadSubsetOptions,
@@ -40,6 +43,206 @@ const sampleUsers: Array<User> = [
   { id: 3, name: `Charlie`, active: false },
 ]
 
+type RetiredQueryObservation = {
+  status: string
+  window: unknown
+  rows: Array<unknown>
+  publications: Array<unknown>
+  loads: number
+}
+
+function expectRetiredQueryUnchanged(
+  before: RetiredQueryObservation,
+  after: RetiredQueryObservation,
+) {
+  expect(before.status, `retired query antecedent`).toBe(`cleaned-up`)
+  for (const field of [
+    `status`,
+    `window`,
+    `rows`,
+    `publications`,
+    `loads`,
+  ] as const) {
+    expect(after[field], `no late retired query ${field}`).toStrictEqual(
+      before[field],
+    )
+  }
+}
+
+type LiveDemandSnapshot = Pick<
+  LoadSubsetOptions,
+  'where' | 'orderBy' | 'limit' | 'offset' | 'cursor'
+>
+
+function captureLiveDemand(options: LoadSubsetOptions): LiveDemandSnapshot {
+  // Native subscription/signal handles remain in the separate raw-call ledger.
+  return structuredClone({
+    where: options.where,
+    orderBy: options.orderBy,
+    limit: options.limit,
+    offset: options.offset,
+    cursor: options.cursor,
+  })
+}
+
+function evaluateLivePredicate(
+  expression: BasicExpression,
+  row: Record<string, unknown>,
+): unknown {
+  if (expression.type === 'func') {
+    if (expression.name === 'and')
+      return expression.args.every((arg) =>
+        Boolean(evaluateLivePredicate(arg, row)),
+      )
+    if (expression.name === 'or')
+      return expression.args.some((arg) =>
+        Boolean(evaluateLivePredicate(arg, row)),
+      )
+    if (expression.name === 'ilike') {
+      const value = evaluateLivePredicate(expression.args[0]!, row)
+      const pattern = evaluateLivePredicate(expression.args[1]!, row)
+      // The only LIKE pattern admitted by these unchanged query constructors.
+      expect(pattern, 'literal ilike pattern').toBe('%test%')
+      return typeof value === 'string' && value.toLowerCase().includes('test')
+    }
+  }
+  return evaluateReferenceExpression(expression, row)
+}
+
+function expectLivePredicateDemands(
+  calls: ReadonlyArray<LiveDemandSnapshot>,
+  mode: 'eq' | 'ilike' | 'join',
+) {
+  expect(calls.length, 'predicate request reached').toBeGreaterThan(0)
+  const field = mode === 'ilike' ? 'name' : 'id'
+  const accepts = (value: unknown) =>
+    mode === 'ilike'
+      ? typeof value === 'string' && value.toLowerCase().includes('test')
+      : mode === 'eq'
+        ? value === 2
+        : value === 10 || value === 20
+
+  for (const call of calls) {
+    expect(call.orderBy, 'unrequested predicate ordering').toBeUndefined()
+    expect(call.limit, 'unrequested predicate limit').toBeUndefined()
+    expect(call.offset, 'unrequested predicate offset').toBeUndefined()
+    expect(call.cursor, 'unrequested predicate cursor').toBeUndefined()
+    expect(call.where, 'every request retains its predicate').toBeDefined()
+    const probes: Array<unknown> = [
+      undefined,
+      null,
+      -1,
+      0,
+      1,
+      2,
+      3,
+      10,
+      20,
+      21,
+      '',
+      'TEST',
+      'preTestSuffix',
+      'toast',
+    ]
+    const inspect = (expression: BasicExpression) => {
+      if (expression.type === 'ref') {
+        expect(expression.path, 'lowered predicate field').toStrictEqual([
+          field,
+        ])
+      } else if (expression.type === 'val') {
+        // Probe every actual literal too: an extra OR arm outside the fixed
+        // fixture domain must not hide. Expected membership stays independent.
+        probes.push(
+          ...(Array.isArray(expression.value)
+            ? expression.value
+            : [expression.value]),
+        )
+      } else {
+        expect(['and', 'or', 'eq', 'in', 'ilike']).toContain(expression.name)
+        if (expression.name !== 'and' && expression.name !== 'or')
+          expect(expression.args, 'binary predicate arity').toHaveLength(2)
+        if (mode === 'join' && expression.name === 'in') {
+          const candidates = expression.args[1]
+          expect(candidates?.type, 'join candidates are literal').toBe('val')
+          if (candidates?.type === 'val') {
+            expect(
+              Array.isArray(candidates.value),
+              'join candidate array',
+            ).toBe(true)
+            if (Array.isArray(candidates.value))
+              expect(
+                new Set(candidates.value).size,
+                'deduplicated join candidates',
+              ).toBe(candidates.value.length)
+          }
+        }
+        expression.args.forEach(inspect)
+      }
+    }
+    inspect(call.where!)
+    for (const value of probes) {
+      expect(
+        Boolean(evaluateLivePredicate(call.where!, { [field]: value })),
+        'complete predicate meaning',
+      ).toBe(accepts(value))
+    }
+  }
+}
+
+function expectLiveOrderedDemands(
+  calls: ReadonlyArray<LiveDemandSnapshot>,
+  fields: ReadonlyArray<readonly [string, 'asc' | 'desc']>,
+) {
+  expect(calls.length, 'ordered request reached').toBeGreaterThan(0)
+  let limited = 0
+  for (const call of calls) {
+    expect(call.where, 'unrequested ordered predicate').toBeUndefined()
+    expect(call.cursor, 'initial ordered cursor').toBeUndefined()
+    if (call.orderBy === undefined) {
+      // The unchanged no-index fixture legitimately requests the full source.
+      expect(call.limit, 'full-source fallback limit').toBeUndefined()
+      expect(call.offset, 'full-source fallback offset').toBeUndefined()
+      continue
+    }
+    limited++
+    expect(call.limit, 'complete requested limit').toBe(10)
+    expect([undefined, 0], 'initial requested offset').toContain(call.offset)
+    expect(call.orderBy, 'complete ordering columns').toHaveLength(
+      fields.length,
+    )
+    call.orderBy.forEach((clause, index) => {
+      expect(clause.expression.type, 'ordering field expression').toBe('ref')
+      if (clause.expression.type === 'ref')
+        expect(clause.expression.path, 'lowered ordering field').toStrictEqual([
+          fields[index]![0],
+        ])
+      expect(clause.compareOptions.direction, 'ordering direction').toBe(
+        fields[index]![1],
+      )
+      expect(clause.compareOptions.nulls, 'ordering null placement').toBe(
+        'first',
+      )
+      expect(
+        clause.compareOptions.stringSort ?? 'locale',
+        'ordering string mode',
+      ).toBe('locale')
+      expect(
+        'locale' in clause.compareOptions
+          ? clause.compareOptions.locale
+          : undefined,
+        'unrequested ordering locale',
+      ).toBeUndefined()
+      expect(
+        'localeOptions' in clause.compareOptions
+          ? clause.compareOptions.localeOptions
+          : undefined,
+        'unrequested locale options',
+      ).toBeUndefined()
+    })
+  }
+  expect(limited, 'limited request reached').toBeGreaterThan(0)
+}
+
 function createUsersCollection() {
   return createCollection(
     mockSyncCollectionOptions<User>({
@@ -49,6 +252,176 @@ function createUsersCollection() {
     }),
   )
 }
+
+describe(`retired live-query observation controls`, () => {
+  it.each([
+    [
+      `status`,
+      (cut: RetiredQueryObservation) => {
+        cut.status = `ready`
+      },
+    ],
+    [
+      `window`,
+      (cut: RetiredQueryObservation) => {
+        cut.window = { offset: 0, limit: 2 }
+      },
+    ],
+    [
+      `rows`,
+      (cut: RetiredQueryObservation) => {
+        cut.rows.push({ id: 2, rank: 2 })
+      },
+    ],
+    [
+      `publications`,
+      (cut: RetiredQueryObservation) => {
+        cut.publications.push([2])
+      },
+    ],
+    [
+      `loads`,
+      (cut: RetiredQueryObservation) => {
+        cut.loads++
+      },
+    ],
+  ] as const)(`rejects late %s drift`, (field, corrupt) => {
+    const before: RetiredQueryObservation = {
+      status: `cleaned-up`,
+      window: { offset: 0, limit: 1 },
+      rows: [],
+      publications: [[1]],
+      loads: 3,
+    }
+    const after = structuredClone(before)
+    expectRetiredQueryUnchanged(before, after)
+    corrupt(after)
+    expect(() => expectRetiredQueryUnchanged(before, after)).toThrow(
+      `no late retired query ${field}`,
+    )
+  })
+})
+
+describe('live demand meaning controls', () => {
+  it('checks an earlier wrong predicate even when the last call is correct', () => {
+    const make = (value: number) =>
+      captureLiveDemand({
+        where: new Func('eq', [new PropRef(['id']), new Value(value)]),
+      })
+    expectLivePredicateDemands([make(2), make(2)], 'eq')
+    expect(() => expectLivePredicateDemands([make(99), make(2)], 'eq')).toThrow(
+      'complete predicate meaning',
+    )
+    const extraArm = captureLiveDemand({
+      where: new Func('or', [
+        new Func('eq', [new PropRef(['id']), new Value(2)]),
+        new Func('eq', [new PropRef(['id']), new Value(99)]),
+      ]),
+    })
+    expect(() => expectLivePredicateDemands([extraArm], 'eq')).toThrow(
+      'complete predicate meaning',
+    )
+  })
+
+  it('checks the field and pattern of every ilike request', () => {
+    const make = (field: string, pattern: string) =>
+      captureLiveDemand({
+        where: new Func('ilike', [new PropRef([field]), new Value(pattern)]),
+      })
+    expectLivePredicateDemands([make('name', '%test%')], 'ilike')
+    expect(() =>
+      expectLivePredicateDemands([make('id', '%test%')], 'ilike'),
+    ).toThrow('lowered predicate field')
+    expect(() =>
+      expectLivePredicateDemands([make('name', '%other%')], 'ilike'),
+    ).toThrow('literal ilike pattern')
+  })
+
+  it('detaches join candidates and checks duplicate candidates in every call', () => {
+    const candidates = [10, 20]
+    const original = {
+      where: new Func('in', [new PropRef(['id']), new Value(candidates)]),
+    }
+    const saved = captureLiveDemand(original)
+    candidates.push(20)
+    expectLivePredicateDemands([saved], 'join')
+    expect(() =>
+      expectLivePredicateDemands([saved, captureLiveDemand(original)], 'join'),
+    ).toThrow('deduplicated join candidates')
+    expectLivePredicateDemands([saved], 'join')
+  })
+
+  it.each([
+    [
+      'direction',
+      (call: LiveDemandSnapshot) => {
+        call.orderBy![0]!.compareOptions.direction = 'desc'
+      },
+    ],
+    [
+      'null placement',
+      (call: LiveDemandSnapshot) => {
+        call.orderBy![0]!.compareOptions.nulls = 'last'
+      },
+    ],
+    [
+      'string mode',
+      (call: LiveDemandSnapshot) => {
+        call.orderBy![0]!.compareOptions.stringSort = 'lexical'
+      },
+    ],
+    [
+      'locale',
+      (call: LiveDemandSnapshot) => {
+        call.orderBy![0]!.compareOptions = {
+          ...call.orderBy![0]!.compareOptions,
+          stringSort: 'locale',
+          locale: 'sv',
+        }
+      },
+    ],
+    [
+      'locale options',
+      (call: LiveDemandSnapshot) => {
+        call.orderBy![0]!.compareOptions = {
+          ...call.orderBy![0]!.compareOptions,
+          stringSort: 'locale',
+          localeOptions: { numeric: true },
+        }
+      },
+    ],
+    [
+      'field',
+      (call: LiveDemandSnapshot) => {
+        call.orderBy![0]!.expression = new PropRef(['wrong'])
+      },
+    ],
+    [
+      'limit',
+      (call: LiveDemandSnapshot) => {
+        call.limit = 9
+      },
+    ],
+  ] as const)('checks complete ordered request %s', (label, corrupt) => {
+    const healthy = captureLiveDemand({
+      orderBy: [
+        {
+          expression: new PropRef(['age']),
+          compareOptions: { direction: 'asc', nulls: 'first' },
+        },
+      ],
+      limit: 10,
+    })
+    const fallback = captureLiveDemand({})
+    expectLiveOrderedDemands([fallback, healthy], [['age', 'asc']])
+    const changed = structuredClone(healthy)
+    corrupt(changed)
+    expect(() =>
+      expectLiveOrderedDemands([changed, healthy], [['age', 'asc']]),
+    ).toThrow(label)
+    expectLiveOrderedDemands([fallback, healthy], [['age', 'asc']])
+  })
+})
 
 describe(`createLiveQueryCollection`, () => {
   let usersCollection: ReturnType<typeof createUsersCollection>
@@ -981,6 +1354,8 @@ describe(`createLiveQueryCollection`, () => {
       it(`keeps live query results aligned while persist is delayed`, async () => {
         const pendingPersists: Array<ReturnType<typeof createDeferred<void>>> =
           []
+        // The scheduling queue is consumed by splice; cleanup owns every gate.
+        const persistGates: Array<ReturnType<typeof createDeferred<void>>> = []
 
         let syncBegin: (() => void) | undefined
         let syncWrite: ((change: ChangeMessage<any>) => void) | undefined
@@ -1019,6 +1394,7 @@ describe(`createLiveQueryCollection`, () => {
           onUpdate: async ({ transaction }) => {
             const deferred = createDeferred<void>()
             pendingPersists.push(deferred)
+            persistGates.push(deferred)
             await deferred.promise
 
             syncBegin?.()
@@ -1037,54 +1413,105 @@ describe(`createLiveQueryCollection`, () => {
           },
         })
 
-        await todos.preload()
+        const expected = new Map(
+          [1, 2, 3, 4, 5].map((createdAt) => [
+            String(createdAt),
+            { id: String(createdAt), createdAt, completed: false },
+          ]),
+        )
+        const receipts: Array<Promise<unknown>> = []
+        let cleanupLive: (() => Promise<void>) | undefined
 
-        const live = createLiveQueryCollection({
-          query: (q) =>
-            q
-              .from({ todo: todos })
-              .orderBy(({ todo }) => todo.createdAt, `desc`),
-          startSync: true,
-        })
+        await withHistoryCleanup(
+          async () => {
+            await todos.preload()
 
-        await live.preload()
+            const live = createLiveQueryCollection({
+              query: (q) =>
+                q
+                  .from({ todo: todos })
+                  .orderBy(({ todo }) => todo.createdAt, `desc`),
+              startSync: true,
+            })
+            cleanupLive = () => live.cleanup()
 
-        const ensureConsistency = (id: string) => {
-          const baseTodo = todos.get(id)
-          const liveTodo = Array.from(live.values())
-            .map((row: any) => (`todo` in row ? row.todo : row))
-            .find((todo: any) => todo?.id === id)
-          expect(liveTodo?.completed).toBe(baseTodo?.completed)
-        }
+            await live.preload()
 
-        const firstBatch = [`1`, `2`, `3`, `4`, `5`, `1`, `3`, `5`]
-        const secondBatch = [`2`, `4`, `1`, `2`, `3`, `4`, `5`]
+            const expectWorld = () => {
+              const rows = Array.from(expected.values())
+              expect(
+                Array.from(todos.values(), stripVirtualProps).sort(
+                  (a, b) => a.createdAt - b.createdAt,
+                ),
+                `complete optimistic base rows`,
+              ).toStrictEqual(rows)
+              expect(
+                Array.from(live.values(), stripVirtualProps),
+                `complete ordered optimistic live rows`,
+              ).toStrictEqual([...rows].reverse())
+            }
+            const ensureConsistency = (id: string) => {
+              const baseTodo = todos.get(id)
+              const liveTodo = Array.from(live.values()).find(
+                (todo) => todo.id === id,
+              )
+              expect(baseTodo, `addressed base row exists`).toBeDefined()
+              expect(liveTodo, `addressed live row exists`).toBeDefined()
+              expect(liveTodo?.completed).toBe(baseTodo?.completed)
+              expectWorld()
+            }
+            const toggle = (id: string) => {
+              const tx = todos.update(id, (draft) => {
+                draft.completed = !draft.completed
+              })
+              // Observe each real receipt before any assertion can abandon it.
+              void tx.isPersisted.promise.catch(() => {})
+              receipts.push(tx.isPersisted.promise)
+              const previous = expected.get(id)!
+              expected.set(id, {
+                ...previous,
+                completed: !previous.completed,
+              })
+            }
 
-        for (const id of firstBatch) {
-          todos.update(id, (draft) => {
-            draft.completed = !draft.completed
-          })
+            expectWorld()
+            const firstBatch = [`1`, `2`, `3`, `4`, `5`, `1`, `3`, `5`]
+            const secondBatch = [`2`, `4`, `1`, `2`, `3`, `4`, `5`]
 
-          await Promise.resolve()
-          ensureConsistency(id)
-        }
+            for (const id of firstBatch) {
+              toggle(id)
+              await Promise.resolve()
+              ensureConsistency(id)
+            }
 
-        const toResolveNow = pendingPersists.splice(0, 4)
-        for (const deferred of toResolveNow) {
-          deferred.resolve()
-          await Promise.resolve()
-        }
+            const toResolveNow = pendingPersists.splice(0, 4)
+            for (const deferred of toResolveNow) {
+              deferred.resolve()
+              await Promise.resolve()
+              expectWorld()
+            }
 
-        for (const id of secondBatch) {
-          todos.update(id, (draft) => {
-            draft.completed = !draft.completed
-          })
+            for (const id of secondBatch) {
+              toggle(id)
+              await Promise.resolve()
+              ensureConsistency(id)
+            }
 
-          await Promise.resolve()
-          ensureConsistency(id)
-        }
-
-        pendingPersists.forEach((deferred) => deferred.resolve())
+            pendingPersists.forEach((deferred) => deferred.resolve())
+            expect(
+              receipts,
+              `every submitted mutation is observed`,
+            ).toHaveLength(firstBatch.length + secondBatch.length)
+            await Promise.all(receipts)
+            expectWorld()
+          },
+          () => [
+            () => cleanupLive?.(),
+            ...persistGates.map((deferred) => () => deferred.resolve()),
+            ...receipts.map((receipt) => () => receipt),
+            () => todos.cleanup(),
+          ],
+        )
       })
 
       it(`still emits optimistic changes during long sync commit`, async () => {
@@ -1988,6 +2415,7 @@ describe(`createLiveQueryCollection`, () => {
       type Row = { id: number; rank: number }
       const replayGate = createDeferred<void>()
       let recovering = false
+      let loadCount = 0
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       const publications: Array<Array<number>> = []
       const source = createCollection<Row, number>({
@@ -2005,7 +2433,10 @@ describe(`createLiveQueryCollection`, () => {
             operations.commit()
             operations.markReady()
             return {
-              loadSubset: () => (recovering ? replayGate.promise : true),
+              loadSubset: () => {
+                loadCount++
+                return recovering ? replayGate.promise : true
+              },
             }
           },
         },
@@ -2019,48 +2450,67 @@ describe(`createLiveQueryCollection`, () => {
       const subscription = live.subscribeChanges(() => {
         publications.push(Array.from(live.values(), ({ id }) => id))
       })
+      const capture = (): RetiredQueryObservation => ({
+        status: live.status,
+        window: { ...live.utils.getWindow() },
+        rows: Array.from(live.values(), stripVirtualProps),
+        publications: publications.map((rows) => [...rows]),
+        loads: loadCount,
+      })
+      let observedMove: Promise<void> | undefined
 
-      try {
-        await live.preload()
-        publications.length = 0
-        recovering = true
-        syncOps.begin()
-        syncOps.truncate()
-        const replayReceipt = syncOps.commit()
-        if (replayReceipt !== true) await replayReceipt
-        await flushPromises()
+      return withHistoryCleanup(
+        async () => {
+          await live.preload()
+          publications.length = 0
+          recovering = true
+          syncOps.begin()
+          syncOps.truncate()
+          const replayReceipt = syncOps.commit()
+          if (replayReceipt !== true) await replayReceipt
+          await flushPromises()
 
-        const move = live.utils.setWindow({ offset: 0, limit: 3 })
-        expect(move).toBeInstanceOf(Promise)
-        let moveError: unknown
-        let settled = false
-        void Promise.resolve(move).then(
-          () => {
-            settled = true
-          },
-          (error) => {
-            moveError = error
-            settled = true
-          },
-        )
-        await flushPromises()
-        expect(settled).toBe(false)
-        expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
-        expect(publications).toEqual([])
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+          const move = live.utils.setWindow({ offset: 0, limit: 3 })
+          let moveError: unknown
+          let settled = false
+          observedMove = Promise.resolve(move).then(
+            () => {
+              settled = true
+            },
+            (error) => {
+              moveError = error
+              settled = true
+            },
+          )
+          expect(move).toBeInstanceOf(Promise)
+          await flushPromises()
+          expect(settled).toBe(false)
+          expect(Array.from(live.values(), ({ id }) => id)).toEqual([1, 2])
+          expect(publications).toEqual([])
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
 
-        await live.cleanup()
-        await flushPromises()
-        expect(settled).toBe(true)
-        expect(moveError).toMatchObject({ name: `AbortError` })
-        expect(publications).toEqual([])
-        expect(live.status).toBe(`cleaned-up`)
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-      } finally {
-        subscription.unsubscribe()
-        replayGate.resolve()
-        await Promise.all([live.cleanup(), source.cleanup()])
-      }
+          await live.cleanup()
+          await flushPromises()
+          expect(settled).toBe(true)
+          expect(moveError).toMatchObject({ name: `AbortError` })
+          expect(publications).toEqual([])
+          expect(live.status).toBe(`cleaned-up`)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+          expect(loadCount, `replay provider reached`).toBeGreaterThan(0)
+          const retired = capture()
+          replayGate.resolve()
+          await flushPromises()
+          await observedMove
+          expectRetiredQueryUnchanged(retired, capture())
+        },
+        () => [
+          () => subscription.unsubscribe(),
+          () => live.cleanup(),
+          () => replayGate.resolve(),
+          () => source.cleanup(),
+          () => observedMove,
+        ],
+      )
     })
 
     it(`rejects a window move while source recovery is failed`, async () => {
@@ -2229,6 +2679,8 @@ describe(`createLiveQueryCollection`, () => {
 
     it(`ignores queued replay setup after cleanup`, async () => {
       type Row = { id: number; rank: number }
+      let loadCount = 0
+      const publications: Array<Array<number>> = []
       let syncOps!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
       const source = createCollection<Row, number>({
         id: `ordered-replay-success-after-cleanup-source`,
@@ -2243,7 +2695,12 @@ describe(`createLiveQueryCollection`, () => {
             operations.write({ type: `insert`, value: { id: 1, rank: 1 } })
             operations.commit()
             operations.markReady()
-            return { loadSubset: () => true }
+            return {
+              loadSubset: () => {
+                loadCount++
+                return true
+              },
+            }
           },
         },
       })
@@ -2254,28 +2711,60 @@ describe(`createLiveQueryCollection`, () => {
           .limit(1),
       )
       const queued: Array<() => void> = []
+      const subscription = live.subscribeChanges(() => {
+        publications.push(Array.from(live.values(), ({ id }) => id))
+      })
+      const capture = (): RetiredQueryObservation => ({
+        status: live.status,
+        window: { ...live.utils.getWindow() },
+        rows: Array.from(live.values(), stripVirtualProps),
+        publications: publications.map((rows) => [...rows]),
+        loads: loadCount,
+      })
 
-      try {
-        await live.preload()
-        const queueSpy = vi
-          .spyOn(globalThis, `queueMicrotask`)
-          .mockImplementation((callback) => queued.push(callback))
+      return withHistoryCleanup(
+        async () => {
+          await live.preload()
+          const queueSpy = vi
+            .spyOn(globalThis, `queueMicrotask`)
+            .mockImplementation((callback) => queued.push(callback))
 
-        syncOps.begin()
-        syncOps.truncate()
-        const replayReceipt = syncOps.commit()
-        if (replayReceipt !== true) await replayReceipt
-        const replaySetup = queued.splice(0)
-        expect(replaySetup.length).toBeGreaterThan(0)
+          syncOps.begin()
+          syncOps.truncate()
+          const replayReceipt = syncOps.commit()
+          if (replayReceipt !== true) await replayReceipt
+          const replaySetup = queued.splice(0)
+          expect(replaySetup.length).toBeGreaterThan(0)
 
-        await live.cleanup()
-        for (const callback of replaySetup) expect(callback).not.toThrow()
-        for (const callback of queued.splice(0)) expect(callback).not.toThrow()
-        queueSpy.mockRestore()
-      } finally {
-        vi.restoreAllMocks()
-        await Promise.all([live.cleanup(), source.cleanup()])
-      }
+          await live.cleanup()
+          expect(loadCount, `queued replay provider reached`).toBeGreaterThan(0)
+          const retired = capture()
+          for (const callback of replaySetup) expect(callback).not.toThrow()
+          for (const callback of queued.splice(0))
+            expect(callback).not.toThrow()
+          let drained = replaySetup.length
+          while (queued.length > 0) {
+            expect(
+              drained,
+              `finite retired replay callback drain`,
+            ).toBeLessThan(32)
+            const callbacks = queued.splice(0)
+            drained += callbacks.length
+            for (const callback of callbacks) expect(callback).not.toThrow()
+          }
+          expect(queued, `retired replay queue empty`).toEqual([])
+          expectRetiredQueryUnchanged(retired, capture())
+          queueSpy.mockRestore()
+          await flushPromises()
+          expectRetiredQueryUnchanged(retired, capture())
+        },
+        () => [
+          () => vi.restoreAllMocks(),
+          () => subscription.unsubscribe(),
+          () => live.cleanup(),
+          () => source.cleanup(),
+        ],
+      )
     })
 
     it(`resolves omitted window fields from the last requested window`, async () => {
@@ -2349,23 +2838,57 @@ describe(`createLiveQueryCollection`, () => {
           .orderBy(({ row }) => row.rank)
           .limit(1),
       )
+      const publications: Array<Array<number>> = []
+      const subscription = live.subscribeChanges(() => {
+        publications.push(Array.from(live.values(), ({ id }) => id))
+      })
+      const capture = (): RetiredQueryObservation => ({
+        status: live.status,
+        window: { ...live.utils.getWindow() },
+        rows: Array.from(live.values(), stripVirtualProps),
+        publications: publications.map((rows) => [...rows]),
+        loads: loadCount,
+      })
+      let observedMove: Promise<void> | undefined
+      let expectedRejection: Promise<unknown> | undefined
 
-      try {
-        await live.preload()
-        const move = live.utils.setWindow({ offset: 0, limit: 2 })
-        expect(move).toBeInstanceOf(Promise)
-        const rejection = expect(move).rejects.toMatchObject({
-          name: `AbortError`,
-        })
+      return withHistoryCleanup(
+        async () => {
+          await live.preload()
+          const move = live.utils.setWindow({ offset: 0, limit: 2 })
+          observedMove = Promise.resolve(move).then(
+            () => {},
+            () => {},
+          )
+          expectedRejection = expect(move).rejects.toMatchObject({
+            name: `AbortError`,
+          })
+          void expectedRejection.catch(() => {})
+          expect(move).toBeInstanceOf(Promise)
 
-        await live.cleanup()
-        await rejection
-        expect(live.status).toBe(`cleaned-up`)
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-      } finally {
-        gate.resolve()
-        await source.cleanup()
-      }
+          await live.cleanup()
+          await expectedRejection
+          expect(live.status).toBe(`cleaned-up`)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+          expect(
+            loadCount,
+            `pending move provider reached`,
+          ).toBeGreaterThanOrEqual(3)
+          const retired = capture()
+          gate.resolve()
+          await flushPromises()
+          await observedMove
+          expectRetiredQueryUnchanged(retired, capture())
+        },
+        () => [
+          () => subscription.unsubscribe(),
+          () => live.cleanup(),
+          () => gate.resolve(),
+          () => source.cleanup(),
+          () => observedMove,
+          () => expectedRejection,
+        ],
+      )
     })
 
     it(`keeps window generations distinct across immediate cleanup and restart`, async () => {
@@ -3947,6 +4470,7 @@ describe(`createLiveQueryCollection`, () => {
   describe(`where clauses passed to loadSubset`, () => {
     it(`passes eq where clause to loadSubset`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
+      const snapshots: Array<LiveDemandSnapshot> = []
 
       const baseCollection = createCollection<{ id: number; name: string }>({
         id: `test-base`,
@@ -3958,6 +4482,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
+                snapshots.push(captureLiveDemand(options))
                 // Return true to indicate sync is complete (no async loading)
                 return true
               },
@@ -3972,22 +4497,35 @@ describe(`createLiveQueryCollection`, () => {
         q.from({ item: baseCollection }).where(({ item }) => eq(item.id, 2)),
       )
 
-      // Trigger sync which will call loadSubset
-      await liveQueryCollection.preload()
-      await flushPromises()
+      const preloadPromise = liveQueryCollection.preload()
+      void preloadPromise.catch(() => {})
+      await withHistoryCleanup(
+        async () => {
+          // Trigger sync which will call loadSubset
+          await preloadPromise
+          await flushPromises()
 
-      expect(capturedOptions.length).toBeGreaterThan(0)
-      const lastCall = capturedOptions[capturedOptions.length - 1]
-      expect(lastCall?.where).toBeDefined()
-      // The where clause should be normalized (alias removed), so it should be eq(ref(['id']), 2)
-      expect(lastCall?.where?.type).toBe(`func`)
-      if (lastCall?.where?.type === `func`) {
-        expect(lastCall.where.name).toBe(`eq`)
-      }
+          expect(capturedOptions.length).toBeGreaterThan(0)
+          const lastCall = capturedOptions[capturedOptions.length - 1]
+          expect(lastCall?.where).toBeDefined()
+          // The where clause should be normalized (alias removed), so it should be eq(ref(['id']), 2)
+          expect(lastCall?.where?.type).toBe(`func`)
+          if (lastCall?.where?.type === `func`) {
+            expect(lastCall.where.name).toBe(`eq`)
+          }
+          expectLivePredicateDemands(snapshots, `eq`)
+        },
+        () => [
+          () => liveQueryCollection.cleanup(),
+          () => preloadPromise,
+          () => baseCollection.cleanup(),
+        ],
+      )
     })
 
     it(`passes ilike where clause to loadSubset`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
+      const snapshots: Array<LiveDemandSnapshot> = []
 
       const baseCollection = createCollection<{ id: number; name: string }>({
         id: `test-base`,
@@ -3999,6 +4537,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
+                snapshots.push(captureLiveDemand(options))
                 // Return true to indicate sync is complete (no async loading)
                 return true
               },
@@ -4015,25 +4554,38 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ item }) => ilike(item.name, `%test%`)),
       )
 
-      // Trigger sync which will call loadSubset
-      await liveQueryCollection.preload()
-      await flushPromises()
+      const preloadPromise = liveQueryCollection.preload()
+      void preloadPromise.catch(() => {})
+      await withHistoryCleanup(
+        async () => {
+          // Trigger sync which will call loadSubset
+          await preloadPromise
+          await flushPromises()
 
-      expect(capturedOptions.length).toBeGreaterThan(0)
-      const lastCall = capturedOptions[capturedOptions.length - 1]
-      // Without the fix: where would be undefined/null
-      // With the fix: where should be defined with the ilike expression
-      expect(lastCall?.where).toBeDefined()
-      expect(lastCall?.where).not.toBeNull()
-      // The where clause should be normalized (alias removed), so it should be ilike(ref(['name']), '%test%')
-      expect(lastCall?.where?.type).toBe(`func`)
-      if (lastCall?.where?.type === `func`) {
-        expect(lastCall.where.name).toBe(`ilike`)
-      }
+          expect(capturedOptions.length).toBeGreaterThan(0)
+          const lastCall = capturedOptions[capturedOptions.length - 1]
+          // Without the fix: where would be undefined/null
+          // With the fix: where should be defined with the ilike expression
+          expect(lastCall?.where).toBeDefined()
+          expect(lastCall?.where).not.toBeNull()
+          // The where clause should be normalized (alias removed), so it should be ilike(ref(['name']), '%test%')
+          expect(lastCall?.where?.type).toBe(`func`)
+          if (lastCall?.where?.type === `func`) {
+            expect(lastCall.where.name).toBe(`ilike`)
+          }
+          expectLivePredicateDemands(snapshots, `ilike`)
+        },
+        () => [
+          () => liveQueryCollection.cleanup(),
+          () => preloadPromise,
+          () => baseCollection.cleanup(),
+        ],
+      )
     })
 
     it(`passes single orderBy clause to loadSubset when using limit`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
+      const snapshots: Array<LiveDemandSnapshot> = []
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
         resolveLoadSubset = resolve
@@ -4053,6 +4605,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
+                snapshots.push(captureLiveDemand(options))
                 return loadSubsetPromise
               },
             }
@@ -4068,30 +4621,44 @@ describe(`createLiveQueryCollection`, () => {
           .limit(10),
       )
 
-      // Start preload (don't await yet - it won't resolve until loadSubset completes)
       const preloadPromise = liveQueryCollection.preload()
-      await flushPromises()
+      void preloadPromise.catch(() => {})
+      await withHistoryCleanup(
+        async () => {
+          // Start preload (don't await yet - it won't resolve until loadSubset completes)
+          // The preload caller is already observed by the owned history.
+          await flushPromises()
 
-      // Verify loadSubset was called with the correct options
-      expect(capturedOptions.length).toBeGreaterThan(0)
+          // Verify loadSubset was called with the correct options
+          expect(capturedOptions.length).toBeGreaterThan(0)
 
-      // Find the call that has orderBy (the limited snapshot request)
-      const callWithOrderBy = capturedOptions.find(
-        (opt) => opt.orderBy !== undefined,
+          // Find the call that has orderBy (the limited snapshot request)
+          const callWithOrderBy = capturedOptions.find(
+            (opt) => opt.orderBy !== undefined,
+          )
+          expect(callWithOrderBy).toBeDefined()
+          expect(callWithOrderBy?.orderBy).toHaveLength(1)
+          expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
+          expect(callWithOrderBy?.limit).toBe(10)
+
+          // Resolve the loadSubset promise so preload can complete
+          resolveLoadSubset!()
+          await flushPromises()
+          await preloadPromise
+          expectLiveOrderedDemands(snapshots, [[`age`, `asc`]])
+        },
+        () => [
+          () => liveQueryCollection.cleanup(),
+          () => resolveLoadSubset!(),
+          () => preloadPromise,
+          () => baseCollection.cleanup(),
+        ],
       )
-      expect(callWithOrderBy).toBeDefined()
-      expect(callWithOrderBy?.orderBy).toHaveLength(1)
-      expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
-      expect(callWithOrderBy?.limit).toBe(10)
-
-      // Resolve the loadSubset promise so preload can complete
-      resolveLoadSubset!()
-      await flushPromises()
-      await preloadPromise
     })
 
     it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
+      const snapshots: Array<LiveDemandSnapshot> = []
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
         resolveLoadSubset = resolve
@@ -4112,6 +4679,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
+                snapshots.push(captureLiveDemand(options))
                 return loadSubsetPromise
               },
             }
@@ -4128,30 +4696,50 @@ describe(`createLiveQueryCollection`, () => {
           .limit(10),
       )
 
-      // Start preload (don't await yet - it won't resolve until loadSubset completes)
       const preloadPromise = liveQueryCollection.preload()
-      await flushPromises()
+      void preloadPromise.catch(() => {})
+      await withHistoryCleanup(
+        async () => {
+          // Start preload (don't await yet - it won't resolve until loadSubset completes)
+          // The preload caller is already observed by the owned history.
+          await flushPromises()
 
-      // Verify loadSubset was called with the correct options
-      expect(capturedOptions.length).toBeGreaterThan(0)
+          // Verify loadSubset was called with the correct options
+          expect(capturedOptions.length).toBeGreaterThan(0)
 
-      // Find the call that has orderBy with multiple columns
-      const callWithMultiOrderBy = capturedOptions.find(
-        (opt) => opt.orderBy !== undefined && opt.orderBy.length > 1,
+          // Find the call that has orderBy with multiple columns
+          const callWithMultiOrderBy = capturedOptions.find(
+            (opt) => opt.orderBy !== undefined && opt.orderBy.length > 1,
+          )
+
+          // Multi-column orderBy should be passed to loadSubset so the sync layer
+          // can optimize the query if the backend supports composite ordering
+          expect(callWithMultiOrderBy).toBeDefined()
+          expect(callWithMultiOrderBy?.orderBy).toHaveLength(2)
+          expect(callWithMultiOrderBy?.orderBy?.[0]?.expression.type).toBe(
+            `ref`,
+          )
+          expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(
+            `ref`,
+          )
+          expect(callWithMultiOrderBy?.limit).toBe(10)
+
+          // Resolve the loadSubset promise so preload can complete
+          resolveLoadSubset!()
+          await flushPromises()
+          await preloadPromise
+          expectLiveOrderedDemands(snapshots, [
+            [`department`, `asc`],
+            [`age`, `desc`],
+          ])
+        },
+        () => [
+          () => liveQueryCollection.cleanup(),
+          () => resolveLoadSubset!(),
+          () => preloadPromise,
+          () => baseCollection.cleanup(),
+        ],
       )
-
-      // Multi-column orderBy should be passed to loadSubset so the sync layer
-      // can optimize the query if the backend supports composite ordering
-      expect(callWithMultiOrderBy).toBeDefined()
-      expect(callWithMultiOrderBy?.orderBy).toHaveLength(2)
-      expect(callWithMultiOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
-      expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
-      expect(callWithMultiOrderBy?.limit).toBe(10)
-
-      // Resolve the loadSubset promise so preload can complete
-      resolveLoadSubset!()
-      await flushPromises()
-      await preloadPromise
     })
   })
 
@@ -4213,6 +4801,7 @@ describe(`createLiveQueryCollection`, () => {
 
       // Lazy joined collection that tracks loadSubset calls
       const capturedOptions: Array<LoadSubsetOptions> = []
+      const snapshots: Array<LiveDemandSnapshot> = []
 
       const projectCollection = createCollection<Project>({
         id: `projects-dedup`,
@@ -4228,6 +4817,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
+                snapshots.push(captureLiveDemand(options))
                 return true
               },
             }
@@ -4243,39 +4833,52 @@ describe(`createLiveQueryCollection`, () => {
           ),
       )
 
-      await liveQuery.preload()
-      await flushPromises()
+      const preloadPromise = liveQuery.preload()
+      void preloadPromise.catch(() => {})
+      await withHistoryCleanup(
+        async () => {
+          await preloadPromise
+          await flushPromises()
 
-      // Find the inArray expression in loadSubset calls
-      // It may be wrapped in `and` since requestSnapshot combines expressions
-      const findInArrayExpr = (
-        expr: LoadSubsetOptions[`where`],
-      ): Func | undefined => {
-        if (!(expr instanceof Func)) return undefined
-        if (expr.name === `in`) return expr
-        if (expr.name === `and` || expr.name === `or`) {
-          for (const arg of expr.args) {
-            const found = findInArrayExpr(arg)
-            if (found) return found
+          // Find the inArray expression in loadSubset calls
+          // It may be wrapped in `and` since requestSnapshot combines expressions
+          const findInArrayExpr = (
+            expr: LoadSubsetOptions[`where`],
+          ): Func | undefined => {
+            if (!(expr instanceof Func)) return undefined
+            if (expr.name === `in`) return expr
+            if (expr.name === `and` || expr.name === `or`) {
+              for (const arg of expr.args) {
+                const found = findInArrayExpr(arg)
+                if (found) return found
+              }
+            }
+            return undefined
           }
-        }
-        return undefined
-      }
 
-      const inExpr = capturedOptions
-        .map((opt) => findInArrayExpr(opt.where))
-        .find((expr) => expr !== undefined)
+          const inExpr = capturedOptions
+            .map((opt) => findInArrayExpr(opt.where))
+            .find((expr) => expr !== undefined)
 
-      expect(inExpr).toBeDefined()
+          expect(inExpr).toBeDefined()
 
-      // The second arg of inArray is the array of values
-      const arrayArg = inExpr!.args[1]
-      expect(arrayArg).toBeInstanceOf(Value)
-      const valuesArg = arrayArg as Value<Array<number>>
-      const values = valuesArg.value.slice().sort()
+          // The second arg of inArray is the array of values
+          const arrayArg = inExpr!.args[1]
+          expect(arrayArg).toBeInstanceOf(Value)
+          const valuesArg = arrayArg as Value<Array<number>>
+          const values = valuesArg.value.slice().sort()
 
-      // Should contain only the 2 unique project IDs -- no nulls, no duplicates
-      expect(values).toEqual([10, 20])
+          // Should contain only the 2 unique project IDs -- no nulls, no duplicates
+          expect(values).toEqual([10, 20])
+          expectLivePredicateDemands(snapshots, `join`)
+        },
+        () => [
+          () => liveQuery.cleanup(),
+          () => preloadPromise,
+          () => projectCollection.cleanup(),
+          () => taskCollection.cleanup(),
+        ],
+      )
     })
 
     it(`should skip loadSubset when all join keys are null`, async () => {
@@ -4315,6 +4918,7 @@ describe(`createLiveQueryCollection`, () => {
       })
 
       const capturedOptions: Array<LoadSubsetOptions> = []
+      const snapshots: Array<LiveDemandSnapshot> = []
 
       const projectCollection = createCollection<Project>({
         id: `projects-all-null`,
@@ -4329,6 +4933,7 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
+                snapshots.push(captureLiveDemand(options))
                 return true
               },
             }
@@ -4344,18 +4949,31 @@ describe(`createLiveQueryCollection`, () => {
           ),
       )
 
-      await liveQuery.preload()
-      await flushPromises()
+      const preloadPromise = liveQuery.preload()
+      void preloadPromise.catch(() => {})
+      await withHistoryCleanup(
+        async () => {
+          await preloadPromise
+          await flushPromises()
 
-      // No loadSubset call should have been made for the lazy join
-      // since all keys were null and filtered out
-      expect(capturedOptions).toHaveLength(0)
+          // No loadSubset call should have been made for the lazy join
+          // since all keys were null and filtered out
+          expect(capturedOptions).toHaveLength(0)
 
-      // All tasks should still appear in results with null project
-      expect(liveQuery.toArray).toHaveLength(3)
-      for (const row of liveQuery.toArray) {
-        expect(row.project).toBeUndefined()
-      }
+          // All tasks should still appear in results with null project
+          expect(liveQuery.toArray).toHaveLength(3)
+          for (const row of liveQuery.toArray) {
+            expect(row.project).toBeUndefined()
+          }
+          expect(snapshots).toHaveLength(0)
+        },
+        () => [
+          () => liveQuery.cleanup(),
+          () => preloadPromise,
+          () => projectCollection.cleanup(),
+          () => taskCollection.cleanup(),
+        ],
+      )
     })
   })
 

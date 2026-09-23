@@ -3,8 +3,6 @@ id: DbProvider
 title: DbProvider
 ---
 
-# Type Alias: DbProvider
-
 ```ts
 type DbProvider = SvelteComponent;
 ```

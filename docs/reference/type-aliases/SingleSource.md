@@ -3,8 +3,6 @@ id: SingleSource
 title: SingleSource
 ---
 
-# Type Alias: SingleSource\<TSource\>
-
 ```ts
 type SingleSource<TSource> = IsUnion<keyof TSource & string> extends true ? never : TSource;
 ```

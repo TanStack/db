@@ -469,7 +469,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         expect(results).toHaveLength(1)
         expect(results[0]!.product.id).toBe(1)
         expect(results[0]!.tried).toBeDefined()
-        expect(results[0]!.tried.userId).toBe(1)
+        expect(results[0]!.tried!.userId).toBe(1)
         expect(results[0]).toEqual({
           product: { id: 1, a: `8` },
           tried: sampleTrials[0],

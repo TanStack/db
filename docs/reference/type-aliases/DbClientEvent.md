@@ -3,8 +3,6 @@ id: DbClientEvent
 title: DbClientEvent
 ---
 
-# Type Alias: DbClientEvent
-
 ```ts
 type DbClientEvent = 
   | {

@@ -3,8 +3,6 @@ id: HydrationBoundaryProps
 title: HydrationBoundaryProps
 ---
 
-# Type Alias: HydrationBoundaryProps
-
 ```ts
 type HydrationBoundaryProps = object;
 ```

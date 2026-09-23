@@ -3,8 +3,6 @@ id: StandardSchemaAlias
 title: StandardSchemaAlias
 ---
 
-# Type Alias: StandardSchemaAlias\<T\>
-
 ```ts
 type StandardSchemaAlias<T> = StandardSchema<T>;
 ```

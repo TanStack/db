@@ -2,8 +2,6 @@
 title: TrailBase Collection
 ---
 
-# TrailBase Collection
-
 TrailBase collections provide seamless integration between TanStack DB and [TrailBase](https://trailbase.io), enabling real-time data synchronization with TrailBase's self-hosted application backend.
 
 ## Overview

@@ -127,6 +127,149 @@ const outputExpressionPairArbitrary: fc.Arbitrary<{
   }),
 )
 
+type OutputLiteralPair =
+  | { kind: `integer`; value: number; same: boolean }
+  | { kind: `string`; value: string; same: boolean }
+  | { kind: `signed-zero` }
+  | { kind: `binary`; bytes: Array<number>; same: boolean }
+type OutputWrapper =
+  | { kind: `concat`; suffix: string }
+  | { kind: `coalesce` }
+  | { kind: `caseWhen`; condition: boolean }
+type OutputProgram = {
+  literals: OutputLiteralPair
+  wrappers: Array<OutputWrapper>
+}
+
+function outputLiterals(pair: OutputLiteralPair): [unknown, unknown] {
+  switch (pair.kind) {
+    case `integer`:
+      return [pair.value, pair.value + (pair.same ? 0 : 1)]
+    case `string`:
+      return [pair.value, pair.same ? pair.value : `${pair.value}!`]
+    case `signed-zero`:
+      return [-0, 0]
+    case `binary`: {
+      const value = Buffer.from(pair.bytes)
+      // Shared reference is intentional: literal projection preserves it.
+      return [value, pair.same ? value : new Uint8Array(pair.bytes)]
+    }
+  }
+}
+
+function buildOutputProgram(
+  value: unknown,
+  wrappers: Array<OutputWrapper>,
+): BasicExpression {
+  let expression: BasicExpression = new Value(value)
+  for (const wrapper of wrappers) {
+    if (wrapper.kind === `concat`)
+      expression = new Func(`concat`, [expression, new Value(wrapper.suffix)])
+    else if (wrapper.kind === `coalesce`)
+      expression = new Func(`coalesce`, [
+        new Value(null),
+        expression,
+        new Value(`fallback`),
+      ])
+    else
+      expression = new Func(`caseWhen`, [
+        new Value(wrapper.condition),
+        expression,
+        new Value(`fallback`),
+      ])
+  }
+  return expression
+}
+
+// Direct denotation of this finite grammar, independent of IR/evaluator/hash
+// code. These literals never need concat's exceptional-object fallback.
+function interpretOutputProgram(
+  value: unknown,
+  wrappers: Array<OutputWrapper>,
+): unknown {
+  return wrappers.reduce((current, wrapper) => {
+    switch (wrapper.kind) {
+      case `concat`:
+        return String(current ?? ``) + wrapper.suffix
+      case `coalesce`:
+        return current ?? `fallback`
+      case `caseWhen`:
+        return wrapper.condition ? current : `fallback`
+    }
+  }, value)
+}
+
+function observeOutputProgram(program: OutputProgram) {
+  return outputLiterals(program.literals).map((literal) => {
+    const expression = buildOutputProgram(literal, program.wrappers)
+    return {
+      expected: interpretOutputProgram(literal, program.wrappers),
+      actual: compileExpression(expression)({}),
+      identity: getProjectedExpressionIdentity(expression),
+    }
+  })
+}
+
+function assertOutputProgram(
+  observations: ReturnType<typeof observeOutputProgram>,
+) {
+  for (const { actual, expected } of observations) {
+    expect(
+      Object.is(actual, expected),
+      `compiled output must match its own denotation`,
+    ).toBe(true)
+  }
+  const [first, second] = observations
+  expect(observations).toHaveLength(2)
+  if (first!.identity === second!.identity) {
+    expect(
+      Object.is(first!.expected, second!.expected),
+      `equal identities must preserve output`,
+    ).toBe(true)
+  }
+  if (!Object.is(first!.expected, second!.expected)) {
+    expect(first!.identity).not.toBe(second!.identity)
+  }
+}
+
+const outputProgramArbitrary: fc.Arbitrary<OutputProgram> = fc.record({
+  literals: fc.oneof(
+    fc.record({
+      kind: fc.constant(`integer` as const),
+      value: fc.integer({ min: -100, max: 100 }),
+      same: fc.boolean(),
+    }),
+    fc.record({
+      kind: fc.constant(`string` as const),
+      value: fc.string({ maxLength: 8 }),
+      same: fc.boolean(),
+    }),
+    fc.constant({ kind: `signed-zero` as const }),
+    fc.record({
+      kind: fc.constant(`binary` as const),
+      bytes: fc.array(fc.integer({ min: 0, max: 255 }), {
+        minLength: 1,
+        maxLength: 6,
+      }),
+      same: fc.boolean(),
+    }),
+  ),
+  wrappers: fc.array(
+    fc.oneof(
+      fc.record({
+        kind: fc.constant(`concat` as const),
+        suffix: fc.string({ maxLength: 4 }),
+      }),
+      fc.constant({ kind: `coalesce` as const }),
+      fc.record({
+        kind: fc.constant(`caseWhen` as const),
+        condition: fc.boolean(),
+      }),
+    ),
+    { minLength: 1, maxLength: 3 },
+  ),
+})
+
 interface Post {
   id: number
   userId: number
@@ -458,11 +601,21 @@ describe(`semantic expression identity`, () => {
       new Value([...candidates].reverse().concat(candidates[0]!)),
     ])
 
-    for (const candidate of candidates) {
+    let nonmember = `not a candidate`
+    while (candidates.includes(nonmember)) nonmember += `!`
+
+    // Mutual agreement alone would also accept two always-true evaluators.
+    // These finite, non-null candidates give us independent literal answers.
+    const cases: Array<readonly [unknown, boolean | null]> = [
+      ...candidates.map((candidate) => [candidate, true] as const),
+      [nonmember, false],
+      [null, null],
+      [undefined, null],
+    ]
+    for (const [candidate, expected] of cases) {
       const row = { row: { value: candidate } }
-      expect(compileExpression(ordered)(row)).toBe(
-        compileExpression(reordered)(row),
-      )
+      expect(compileExpression(ordered)(row)).toBe(expected)
+      expect(compileExpression(reordered)(row)).toBe(expected)
     }
     expect(getProjectedExpressionIdentity(ordered)).toBe(
       getProjectedExpressionIdentity(reordered),
@@ -1287,6 +1440,53 @@ describe(`stable QueryIR identity smoke test`, () => {
           ),
         ).toBe(true)
       }
+    },
+  )
+
+  it(`preserves signed zero through coalesce and binary conversion through conditional output`, () => {
+    assertOutputProgram(
+      observeOutputProgram({
+        literals: { kind: `signed-zero` },
+        wrappers: [{ kind: `coalesce` }],
+      }),
+    )
+    for (const condition of [false, true]) {
+      assertOutputProgram(
+        observeOutputProgram({
+          literals: { kind: `binary`, bytes: [65], same: false },
+          wrappers: [
+            { kind: `concat`, suffix: `` },
+            { kind: `caseWhen`, condition },
+          ],
+        }),
+      )
+    }
+  })
+
+  fcTest.prop([outputProgramArbitrary], { numRuns: 200, seed: 715031 })(
+    `matches output denotation through composed contexts with a fixed seed`,
+    (program) => assertOutputProgram(observeOutputProgram(program)),
+  )
+  fcTest.prop([outputProgramArbitrary], { numRuns: 200 })(
+    `matches output denotation through random composed contexts`,
+    (program) => assertOutputProgram(observeOutputProgram(program)),
+  )
+
+  it.each([`shared-wrong-output`, `constant-identity`] as const)(
+    `rejects ${`%s`} despite mutual agreement`,
+    (fault) => {
+      const observations = observeOutputProgram({
+        literals: { kind: `signed-zero` },
+        wrappers: [{ kind: `coalesce` }],
+      })
+      assertOutputProgram(observations)
+      if (fault === `shared-wrong-output`) {
+        for (const observation of observations) observation.actual = 99
+      } else {
+        for (const observation of observations)
+          observation.identity = `constant`
+      }
+      expect(() => assertOutputProgram(observations)).toThrowError(/expected/)
     },
   )
 

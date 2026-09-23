@@ -3,8 +3,6 @@ id: ConfigWithSQLiteTypes
 title: ConfigWithSQLiteTypes
 ---
 
-# Type Alias: ConfigWithSQLiteTypes
-
 ```ts
 type ConfigWithSQLiteTypes = object;
 ```

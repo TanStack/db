@@ -3,8 +3,6 @@ id: min
 title: min
 ---
 
-# Function: min()
-
 ```ts
 function min<T>(arg): AggregateReturnType<T>;
 ```

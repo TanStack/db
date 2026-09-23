@@ -3,8 +3,6 @@ title: Overview
 id: overview
 ---
 
-# TanStack DB - Documentation
-
 Welcome to the TanStack DB documentation.
 
 TanStack DB is the reactive client store for your API. It solves the problems of building fast, modern apps, helping you:
@@ -34,11 +32,11 @@ It extends TanStack Query with collections, live queries and optimistic mutation
 
 ## Contents
 
-- [How it works](#how-it-works) &mdash; understand the TanStack DB development model and how the pieces fit together
-- [SSR and hydration](./guides/ssr.md) &mdash; use `DbClient` to transport explicit collection rows or live-query result snapshots
-- [API reference](#api-reference) &mdash; for the primitives and function interfaces
-- [Usage examples](#usage-examples) &mdash; examples of common usage patterns
-- [More info](#more-info) &mdash; where to find support and more information
+- [How it works](#how-it-works) — understand the TanStack DB development model and how the pieces fit together
+- [SSR and hydration](./guides/ssr.md) — use `DbClient` to transport explicit collection rows or live-query result snapshots
+- [API reference](#api-reference) — for the primitives and function interfaces
+- [Usage examples](#usage-examples) — examples of common usage patterns
+- [More info](#more-info) — where to find support and more information
 
 ## How it works
 
@@ -216,23 +214,23 @@ TanStack DB provides several built-in collection types for different data source
 
 **Fetch Collections**
 
-- **[QueryCollection](./collections/query-collection.md)** &mdash; Load data into collections using TanStack Query for REST APIs and data fetching.
+- **[QueryCollection](./collections/query-collection.md)** — Load data into collections using TanStack Query for REST APIs and data fetching.
 
 **Sync Collections**
 
-- **[ElectricCollection](./collections/electric-collection.md)** &mdash; Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
+- **[ElectricCollection](./collections/electric-collection.md)** — Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
 
-- **[TrailBaseCollection](./collections/trailbase-collection.md)** &mdash; Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
+- **[TrailBaseCollection](./collections/trailbase-collection.md)** — Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
 
-- **[RxDBCollection](./collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
+- **[RxDBCollection](./collections/rxdb-collection.md)** — Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
 
-- **[PowerSyncCollection](./collections/powersync-collection.md)** &mdash; Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
+- **[PowerSyncCollection](./collections/powersync-collection.md)** — Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
 
 **Local Collections**
 
-- **[LocalStorageCollection](./collections/local-storage-collection.md)** &mdash; Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
+- **[LocalStorageCollection](./collections/local-storage-collection.md)** — Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
 
-- **[LocalOnlyCollection](./collections/local-only-collection.md)** &mdash; Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
+- **[LocalOnlyCollection](./collections/local-only-collection.md)** — Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
 
 #### Collection Schemas
 
@@ -454,11 +452,14 @@ const todoCollection = collectionOptions("todos", (client) =>
     queryFn: async () => fetch("/api/todos").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { changes: newTodo } = transaction.mutations[0]
 
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
+      await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
@@ -472,11 +473,14 @@ const listCollection = collectionOptions("todo-lists", (client) =>
       fetch("/api/todo-lists").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoListSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { changes: newTodo } = transaction.mutations[0]
 
       // Handle the local write by sending it to your API.
       await api.todoLists.create(newTodo)
+      await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
@@ -552,10 +556,11 @@ export const todoCollection = collectionOptions(
       },
     },
     getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const response = await api.todos.create(transaction.mutations[0].modified)
 
-      return { txid: response.txid }
+      // Wait for txid to sync
+      await collection.utils.awaitTxId(response.txid)
     },
     // You can also implement onUpdate, onDelete as needed.
   })

@@ -42,6 +42,15 @@ export class CleanupQueue {
 
   public cancel(key: unknown): void {
     this.tasks.delete(key)
+
+    // Retire the root timer with the last task. A non-empty queue keeps its
+    // timer even when the cancelled task was the earliest: it wakes early,
+    // finds nothing due and reschedules, which costs less than rescanning
+    // every task on each cancellation.
+    if (this.tasks.size === 0 && this.timeoutId !== null) {
+      clearTimeout(this.timeoutId)
+      this.timeoutId = null
+    }
   }
 
   /**
@@ -66,6 +75,9 @@ export class CleanupQueue {
 
     const delay = Math.max(0, earliestTime - Date.now())
     this.timeoutId = setTimeout(() => this.process(), delay)
+    // Background collection GC must not keep an otherwise finished Node
+    // process alive. Browsers return a numeric timer handle.
+    if (typeof this.timeoutId === `object`) this.timeoutId.unref()
   }
 
   /**

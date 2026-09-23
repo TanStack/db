@@ -3,8 +3,6 @@ id: InjectLiveQueryResult
 title: InjectLiveQueryResult
 ---
 
-# Interface: InjectLiveQueryResult\<TContext\>
-
 Defined in: [index.ts:36](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L36)
 
 The result of calling `injectLiveQuery`.

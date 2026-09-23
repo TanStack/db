@@ -3,8 +3,6 @@ id: IndexReader
 title: IndexReader
 ---
 
-# Type Alias: IndexReader\<TKey\>
-
 ```ts
 type IndexReader<TKey> = Pick<IndexInterface<TKey>, 
   | "lookup"

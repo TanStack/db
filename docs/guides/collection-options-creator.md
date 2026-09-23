@@ -2,8 +2,6 @@
 title: Creating a Collection Options Creator
 id: guide/collection-options-creator
 ---
-# Creating a Collection Options Creator
-
 A collection options creator is a factory function that generates configuration options for TanStack DB collections. It provides a standardized way to integrate different sync engines and data sources with TanStack DB's reactive sync-first architecture.
 
 ## Overview
@@ -67,9 +65,13 @@ interface MyCollectionConfig<TItem extends object>
 
 ### 2. Sync Implementation
 
-The sync function is the heart of your collection. It must:
+Each call to the sync function starts a **sync run**. The run owns the callbacks
+and resources installed by that call until its returned cleanup ends them. A
+sync run may make several backend requests or open a longer-lived provider
+session, so it is not itself a request or provider session.
 
-The sync function must return a cleanup function for proper garbage collection:
+The sync function is the heart of your collection. It must return a cleanup
+function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
@@ -170,6 +172,25 @@ The sync process follows this lifecycle:
 3. **commit()** - Apply all changes atomically to the collection state
 4. **markReady()** - Signal that a usable initial or recovered snapshot exists
 5. **markError(error?)** - Signal that initial sync failed before producing a usable snapshot; pass the cause so readiness waits reject with it
+
+`commit()` returns `true` if its writes and events are already visible, or a
+promise that resolves when they become visible. A commit can wait behind a
+pending optimistic transaction; receiving a server response is not the same as
+applying its rows. A successful `loadSubset` must await or return every commit
+receipt that establishes its result. Do not use `begin({ immediate: true })` to
+bypass that ordering just to settle a load.
+
+For request-scoped writes, pass the request's abort signal to `commit(signal)`.
+Cancellation before application rejects the receipt with `AbortError`; aborting
+after application does not undo published rows. Do not attach one request's
+signal to a shared stream transaction.
+
+If an adapter supplies `unloadSubset`, release only the acquisition belonging to
+the supplied options. Release must be idempotent and non-throwing; the adapter
+owns any remote unsubscribe retry. A synchronous `loadSubset` throw must clean
+up resources acquired before it throws. Returning a promise transfers ownership
+even if that promise later rejects, so failed acquisitions must remain safe to
+release without affecting peers.
 
 **Race Condition Prevention:**
 Many sync engines start real-time subscriptions before the initial sync completes. Your implementation MUST deduplicate events that arrive via subscription that represent the same data as the initial sync. Consider:
@@ -346,14 +367,16 @@ For more on schemas from a user perspective, see the [Schemas guide](./schemas.m
 
 There are two distinct patterns for handling mutations in collection options creators:
 
-#### Pattern A: User-Provided Handlers (ElectricSQL, Query)
+#### Pattern A: User-Provided Handlers (Query, Standard)
 
-The user provides mutation handlers in the config. Your collection creator passes them through:
+The user provides mutation handlers in the config. Your collection creator passes them through.
+
+**Note:** Handler return values are deprecated. Users should trigger refetch/sync within their handlers.
 
 ```typescript
 interface MyCollectionConfig<TItem extends object> {
   // ... other config
-  
+
   // User provides these handlers
   onInsert?: InsertMutationFn<TItem>
   onUpdate?: UpdateMutationFn<TItem>
@@ -366,23 +389,23 @@ export function myCollectionOptions<TItem extends object>(
   return {
     // ... other options
     rowUpdateMode: config.rowUpdateMode || 'partial',
-    
-    // Pass through user-provided handlers (possibly with additional logic)
-    onInsert: config.onInsert ? async (params) => {
-      const result = await config.onInsert!(params)
-      // Additional sync coordination logic
-      return result
-    } : undefined
+
+    // Pass through user-provided handlers
+    // Users handle sync coordination in their own handlers
+    onInsert: config.onInsert,
+    onUpdate: config.onUpdate,
+    onDelete: config.onDelete
   }
 }
 ```
+
 
 #### Pattern B: Built-in Handlers (Trailbase, WebSocket, Firebase)
 
 Your collection creator implements the handlers directly using the sync engine's APIs:
 
 ```typescript
-interface MyCollectionConfig<TItem extends object> 
+interface MyCollectionConfig<TItem extends object>
   extends Omit<CollectionConfig<TItem>, 'onInsert' | 'onUpdate' | 'onDelete'> {
   // ... sync engine specific config
   // Note: onInsert/onUpdate/onDelete are NOT in the config
@@ -394,33 +417,34 @@ export function myCollectionOptions<TItem extends object>(
   return {
     // ... other options
     rowUpdateMode: config.rowUpdateMode || 'partial',
-    
+
     // Implement handlers using sync engine APIs
     onInsert: async ({ transaction }) => {
       // Handle provider-specific batch limits (e.g., Firestore's 500 limit)
       const chunks = chunkArray(transaction.mutations, PROVIDER_BATCH_LIMIT)
-      
+
       for (const chunk of chunks) {
         const ids = await config.recordApi.createBulk(
           chunk.map(m => serialize(m.modified))
         )
+        // Wait for these IDs to sync back before completing
         await awaitIds(ids)
       }
-      
-      return transaction.mutations.map(m => m.key)
+      // Handler completes after sync coordination
     },
-    
+
     onUpdate: async ({ transaction }) => {
       const chunks = chunkArray(transaction.mutations, PROVIDER_BATCH_LIMIT)
-      
+
       for (const chunk of chunks) {
         await Promise.all(
-          chunk.map(m => 
+          chunk.map(m =>
             config.recordApi.update(m.key, serialize(m.changes))
           )
         )
       }
-      
+
+      // Wait for mutations to sync back
       await awaitIds(transaction.mutations.map(m => String(m.key)))
     }
   }
@@ -428,6 +452,8 @@ export function myCollectionOptions<TItem extends object>(
 ```
 
 Many providers have batch size limits (Firestore: 500, DynamoDB: 25, etc.) so chunk large transactions accordingly.
+
+**Key Principle:** Built-in handlers should coordinate sync internally (using `awaitIds`, `awaitTxId`, or similar) and not rely on return values. The handler completes only after sync coordination is done.
 
 Choose Pattern A when users need to provide their own APIs, and Pattern B when your sync engine handles writes directly.
 
@@ -451,10 +477,10 @@ sync: {
 
 For complete, production-ready examples, see the collection packages in the TanStack DB repository:
 
-- **[@tanstack/query-collection](https://github.com/TanStack/db/tree/main/packages/query-collection)** - Pattern A: User-provided handlers with full refetch strategy
-- **[@tanstack/trailbase-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-collection)** - Pattern B: Built-in handlers with ID-based tracking  
-- **[@tanstack/electric-collection](https://github.com/TanStack/db/tree/main/packages/electric-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
-- **[@tanstack/rxdb-collection](https://github.com/TanStack/db/tree/main/packages/rxdb-collection)** - Pattern B: Built-in handlers that bridge [RxDB](https://rxdb.info) change streams into TanStack DB's sync lifecycle
+- **[@tanstack/query-db-collection](https://github.com/TanStack/db/tree/main/packages/query-db-collection)** - Pattern A: User-provided handlers with full refetch strategy
+- **[@tanstack/trailbase-db-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection)** - Pattern B: Built-in handlers with ID-based tracking  
+- **[@tanstack/electric-db-collection](https://github.com/TanStack/db/tree/main/packages/electric-db-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
+- **[@tanstack/rxdb-db-collection](https://github.com/TanStack/db/tree/main/packages/rxdb-db-collection)** - Pattern B: Built-in handlers that bridge [RxDB](https://rxdb.info) change streams into TanStack DB's sync lifecycle
 
 ### Key Lessons from Production Collections
 
@@ -681,15 +707,17 @@ export function webSocketCollectionOptions<TItem extends object>(
   }
   
   // All mutation handlers use the same transaction sender
-  const onInsert = async (params: InsertMutationFnParams<TItem>) => {
+  // Handlers wait for server acknowledgment before completing
+  const onInsert = async (params: InsertMutationFnParams<TItem>): Promise<void> => {
+    await sendTransaction(params)
+    // Handler completes after server confirms the transaction
+  }
+
+  const onUpdate = async (params: UpdateMutationFnParams<TItem>): Promise<void> => {
     await sendTransaction(params)
   }
-  
-  const onUpdate = async (params: UpdateMutationFnParams<TItem>) => {
-    await sendTransaction(params)
-  }
-  
-  const onDelete = async (params: DeleteMutationFnParams<TItem>) => {
+
+  const onDelete = async (params: DeleteMutationFnParams<TItem>): Promise<void> => {
     await sendTransaction(params)
   }
   
@@ -779,16 +807,12 @@ if (message.headers.txids) {
   })
 }
 
-// Mutation handlers return txids and wait for them
+// Electric-specific: expose awaitTxId through collection.utils so handlers
+// can coordinate txid-based sync before they complete
 const wrappedOnInsert = async (params) => {
-  const result = await config.onInsert!(params)
-  
-  // Wait for the txid to appear in synced data
-  if (result.txid) {
-    await awaitTxId(result.txid)
-  }
-  
-  return result
+  // The user handler persists the mutation, then calls
+  // await params.collection.utils.awaitTxId(txid) internally.
+  await config.onInsert!(params)
 }
 
 // Utility function to wait for a txid
@@ -821,8 +845,8 @@ seenIds.setState(prev => new Map(prev).set(item.id, Date.now()))
 // Wait for specific IDs after mutations
 const wrappedOnInsert = async (params) => {
   const ids = await config.recordApi.createBulk(items)
-  
-  // Wait for all IDs to be synced back
+
+  // Wait for all IDs to be synced back before handler completes
   await awaitIds(ids)
 }
 
@@ -853,8 +877,8 @@ let lastSyncTime = 0
 const wrappedOnUpdate = async (params) => {
   const mutationTime = Date.now()
   await config.onUpdate(params)
-  
-  // Wait for sync to catch up
+
+  // Wait for sync to catch up before handler completes
   await waitForSync(mutationTime)
 }
 
@@ -872,21 +896,42 @@ const waitForSync = (afterTime: number): Promise<void> => {
 }
 ```
 
-### Strategy 5: Full Refetch (Query Collection)
+### Strategy 5: Refetch (Query Collection)
 
-The query collection simply refetches all data after mutations:
+The query collection pattern has users refetch after mutations:
 
 ```typescript
-const wrappedOnInsert = async (params) => {
-  // Perform the mutation
-  await config.onInsert(params)
-  
-  // Refetch the entire collection
-  await refetch()
-  
-  // The refetch will trigger sync with fresh data,
-  // automatically dropping optimistic state
+// Pattern A: User provides handlers and manages refetch
+export function queryCollectionOptions<TItem>(config) {
+  return {
+    // ... other options
+
+    // User provides handlers and they handle refetch themselves
+    onInsert: config.onInsert,  // User calls collection.utils.refetch() in their handler
+    onUpdate: config.onUpdate,
+    onDelete: config.onDelete,
+
+    utils: {
+      refetch: () => {
+        // Refetch implementation that syncs fresh data
+        // automatically dropping optimistic state
+      }
+    }
+  }
 }
+
+// Usage: User refetches in their handler
+const collection = createCollection(
+  queryCollectionOptions({
+    onInsert: async ({ transaction, collection }) => {
+      await api.createTodos(transaction.mutations.map(m => m.modified))
+      // User explicitly triggers refetch
+      await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
+    }
+  })
+)
 ```
 
 ### Choosing a Strategy
@@ -913,6 +958,7 @@ const wrappedOnInsert = async (params) => {
 5. **Race Conditions** - Start listeners before initial fetch and buffer events
 6. **Type safety** - Use TypeScript generics to maintain type safety throughout
 7. **Provide utilities** - Export sync-engine-specific utilities for advanced use cases
+8. **Handler return values are deprecated** - Mutation handlers should coordinate sync internally (via `await`) rather than returning values. For Electric collections, use `await collection.utils.awaitTxId(txid)` instead of returning the txid
 
 ## Testing Your Collection
 

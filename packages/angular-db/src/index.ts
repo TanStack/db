@@ -58,6 +58,18 @@ export interface InjectLiveQueryResult<TContext extends Context> {
   isCleanedUp: Signal<boolean>
 }
 
+type InferConditionalResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? InferResultType<TContext> | []
+    : InferResultType<TContext>
+
+export type InjectConditionalLiveQueryResult<TContext extends Context> = Omit<
+  InjectLiveQueryResult<TContext>,
+  `data`
+> & {
+  data: Signal<InferConditionalResultType<TContext>>
+}
+
 export interface InjectLiveQueryResultWithCollection<
   TResult extends object = any,
   TKey extends string | number = string | number,
@@ -109,7 +121,7 @@ export function injectLiveQuery<
     params: TParams
     q: InitialQueryBuilder
   }) => QueryBuilder<TContext> | undefined | null
-}): InjectLiveQueryResult<TContext>
+}): InjectConditionalLiveQueryResult<TContext>
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): InjectLiveQueryResult<TContext>
@@ -117,7 +129,7 @@ export function injectLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): InjectLiveQueryResult<TContext>
+): InjectConditionalLiveQueryResult<TContext>
 export function injectLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
 ): InjectLiveQueryResult<TContext>

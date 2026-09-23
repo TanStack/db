@@ -148,10 +148,10 @@ importers:
         specifier: ^20.3.16
         version: 20.3.16(@angular/common@20.3.16(@angular/core@20.3.17(@angular/compiler@20.3.16)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.17(@angular/compiler@20.3.16)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.16(@angular/common@20.3.16(@angular/core@20.3.17(@angular/compiler@20.3.16)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.17(@angular/compiler@20.3.16)(rxjs@7.8.2)(zone.js@0.15.1)))(rxjs@7.8.2)
       '@tanstack/angular-db':
-        specifier: ^0.1.89
+        specifier: ^0.1.91
         version: link:../../../packages/angular-db
       '@tanstack/db':
-        specifier: ^0.9.0
+        specifier: ^0.9.2
         version: link:../../../packages/db
       rxjs:
         specifier: ^7.8.2
@@ -209,19 +209,19 @@ importers:
   examples/electron/offline-first:
     dependencies:
       '@tanstack/electron-db-sqlite-persistence':
-        specifier: ^0.1.33
+        specifier: ^0.1.35
         version: link:../../../packages/electron-db-sqlite-persistence
       '@tanstack/node-db-sqlite-persistence':
-        specifier: ^0.2.21
+        specifier: ^0.2.23
         version: link:../../../packages/node-db-sqlite-persistence
       '@tanstack/offline-transactions':
-        specifier: ^1.0.54
+        specifier: ^1.0.56
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.2.13
+        specifier: ^1.2.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -300,19 +300,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.13)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^0.9.0
+        specifier: ^0.9.2
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
-        specifier: ^1.0.54
+        specifier: ^1.0.56
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.2.13
+        specifier: ^1.2.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^0.2.21
+        specifier: ^0.2.23
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -397,19 +397,19 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.13)(react@19.0.0))
       '@tanstack/db':
-        specifier: ^0.9.0
+        specifier: ^0.9.2
         version: link:../../../packages/db
       '@tanstack/electric-db-collection':
-        specifier: ^0.4.8
+        specifier: ^0.4.10
         version: link:../../../packages/electric-db-collection
       '@tanstack/offline-transactions':
-        specifier: ^1.0.54
+        specifier: ^1.0.56
         version: link:../../../packages/offline-transactions
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       '@tanstack/react-native-db-sqlite-persistence':
-        specifier: ^0.2.21
+        specifier: ^0.2.23
         version: link:../../../packages/react-native-db-sqlite-persistence
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -482,10 +482,10 @@ importers:
   examples/react/next-ssr-e2e:
     dependencies:
       '@tanstack/db':
-        specifier: ^0.9.0
+        specifier: ^0.9.2
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       next:
         specifier: ^16.3.1
@@ -516,19 +516,19 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/browser-db-sqlite-persistence':
-        specifier: ^0.2.21
+        specifier: ^0.2.23
         version: link:../../../packages/browser-db-sqlite-persistence
       '@tanstack/db':
-        specifier: ^0.9.0
+        specifier: ^0.9.2
         version: link:../../../packages/db
       '@tanstack/offline-transactions':
-        specifier: ^1.0.54
+        specifier: ^1.0.56
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.2.13
+        specifier: ^1.2.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -586,10 +586,10 @@ importers:
   examples/react/paced-mutations-demo:
     dependencies:
       '@tanstack/db':
-        specifier: ^0.9.0
+        specifier: ^0.9.2
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -626,10 +626,10 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.2.13
+        specifier: ^1.2.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.159.5
@@ -759,7 +759,7 @@ importers:
   examples/react/start-ssr-e2e:
     dependencies:
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.159.5
@@ -805,16 +805,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.4.8
+        specifier: ^0.4.10
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.2.13
+        specifier: ^1.2.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.3.8
+        specifier: ^0.4.1
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.159.5
@@ -823,7 +823,7 @@ importers:
         specifier: ^1.159.5
         version: 1.159.5(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.2(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.2(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.1.107
+        specifier: ^0.1.109
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
@@ -926,16 +926,16 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.4.8
+        specifier: ^0.4.10
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.2.13
+        specifier: ^1.2.15
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
-        specifier: ^0.2.43
+        specifier: ^0.2.45
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.159.5
@@ -944,7 +944,7 @@ importers:
         specifier: ^1.159.5
         version: 1.159.5(@tanstack/react-router@1.159.5(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(solid-js@1.9.11)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.2(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.2(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.1.107
+        specifier: ^0.1.109
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
@@ -1276,13 +1276,13 @@ importers:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../db
-      '@tanstack/store':
-        specifier: ^0.9.2
-        version: 0.9.2
       debug:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@tanstack/query-core':
+        specifier: ^5.90.20
+        version: 5.90.20
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -1418,11 +1418,11 @@ importers:
         version: 4.0.1
     devDependencies:
       '@powersync/common':
-        specifier: 1.49.0
-        version: 1.49.0
+        specifier: 2.0.0
+        version: 2.0.0
       '@powersync/node':
-        specifier: 0.18.1
-        version: 0.18.1(@powersync/common@1.49.0)(better-sqlite3@12.8.0)
+        specifier: 0.20.0
+        version: 0.20.0(@powersync/common@2.0.0)(better-sqlite3@12.8.0)
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -5156,17 +5156,20 @@ packages:
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
 
-  '@powersync/common@1.49.0':
-    resolution: {integrity: sha512-g6uonubvtmtyx8hS/G5trg9LsBvzHY3tAKHiV7SIQV3Xyz9ONM6NNnjDMP2vcLZVmsOSi8x/QJZmy/ig1YtBMg==}
+  '@powersync/common@2.0.0':
+    resolution: {integrity: sha512-GuWmk0w0Y6I1HDwX4uGFzzw1e4E4bkvDSSCpVikdTEIk1xcW5NNnqTX8xfDheZdoQZunm/XushrR/LsIp1Yc/g==}
 
-  '@powersync/node@0.18.1':
-    resolution: {integrity: sha512-fcTICgs61CAEb39xiC7pedYsPgbjUInJ/47dr7RIdnEHpAgjWH8bW95/b70qK1fQUANy9lKBBF3PcmfswVgfCw==}
+  '@powersync/node@0.20.0':
+    resolution: {integrity: sha512-jAfCMPnXiS9EeoebkDkAoE8iM8t8pvza7RTVgKgSQ1ks32rzIE2lTIcflh9tzuiA8F6uDvAHg94gJEet1zbORg==}
     peerDependencies:
-      '@powersync/common': ^1.49.0
+      '@powersync/common': ^2.0.0
       better-sqlite3: 12.x
     peerDependenciesMeta:
       better-sqlite3:
         optional: true
+
+  '@powersync/shared-internals@1.0.1':
+    resolution: {integrity: sha512-0IIuZbDwLEIaSAzvp8z8+CrjKnjja6BPv9WMtF1eExQVTBVOx1TXK4E3iLrEdLceByRcSFlQ0TmPNkPRe5BDow==}
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -7127,9 +7130,6 @@ packages:
   async-limiter@1.0.1:
     resolution: {integrity: sha512-csOlWGAcRFJaI6m+F2WKdnMKr4HhdhFVBk0H/QbJFMCr+uO2kwohwXQPxw/9OCxp05r5ghVBFSyioixx3gfkNQ==}
 
-  async-mutex@0.5.0:
-    resolution: {integrity: sha512-1A94B18jkJ3DYq284ohPxoXbfTA5HsQ7/Mf4DEhcyLx3Bz27Rh59iScbB6EPiP+B+joue6YCxcMXSbFC1tZKwA==}
-
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
 
@@ -8500,9 +8500,6 @@ packages:
   etag@1.8.1:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
-
-  event-iterator@2.0.0:
-    resolution: {integrity: sha512-KGft0ldl31BZVV//jj+IAIGCxkvvUkkON+ScH6zfoX+l+omX6001ggyRSpI0Io2Hlro0ThXotswCtfzS8UkIiQ==}
 
   event-reduce-js@5.2.7:
     resolution: {integrity: sha512-Vi6aIiAmakzx81JAwhw8L988aSX5a3ZqqVjHyZa9xFU6P4oT1IotoDreWtjNlS+fvEnASvyIQT565nmkOtns/Q==}
@@ -17019,20 +17016,18 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
-  '@powersync/common@1.49.0':
-    dependencies:
-      async-mutex: 0.5.0
-      event-iterator: 2.0.0
+  '@powersync/common@2.0.0': {}
 
-  '@powersync/node@0.18.1(@powersync/common@1.49.0)(better-sqlite3@12.8.0)':
+  '@powersync/node@0.20.0(@powersync/common@2.0.0)(better-sqlite3@12.8.0)':
     dependencies:
-      '@powersync/common': 1.49.0
-      async-mutex: 0.5.0
-      bson: 6.10.4
+      '@powersync/common': 2.0.0
+      '@powersync/shared-internals': 1.0.1
       comlink: 4.4.2
       undici: 7.24.4
     optionalDependencies:
       better-sqlite3: 12.8.0
+
+  '@powersync/shared-internals@1.0.1': {}
 
   '@protobufjs/aspromise@1.1.2': {}
 
@@ -19500,10 +19495,6 @@ snapshots:
 
   async-limiter@1.0.1: {}
 
-  async-mutex@0.5.0:
-    dependencies:
-      tslib: 2.8.1
-
   asynckit@0.4.0: {}
 
   at-least-node@1.0.0: {}
@@ -21120,8 +21111,6 @@ snapshots:
   esutils@2.0.3: {}
 
   etag@1.8.1: {}
-
-  event-iterator@2.0.0: {}
 
   event-reduce-js@5.2.7:
     dependencies:

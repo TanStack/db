@@ -8,6 +8,178 @@ type Context = {
 }
 
 describe(`runTrace`, () => {
+  it.each([`truncate`, `reverse`] as const)(
+    `does not invoke a setter that would %s cleanup evidence`,
+    async (mode) => {
+      const primary = new Error(`primary`)
+      const earlier = new Error(`earlier`)
+      const secondary = new Error(`cleanup`)
+      let stored = [earlier]
+      const setter = vi.fn((values: Array<Error>) => {
+        stored = values
+        if (mode === `truncate`) stored.pop()
+        else stored.reverse()
+      })
+      Object.defineProperty(primary, `suppressed`, {
+        configurable: true,
+        get: () => stored,
+        set: setter,
+      })
+      await expect(
+        runTrace({
+          steps: [],
+          driver: {
+            setup: () => undefined,
+            start: () => {
+              throw primary
+            },
+            apply: () => undefined,
+            cleanup: () => {
+              throw secondary
+            },
+          },
+          projection: {
+            observe: () => undefined,
+            recompute: () => undefined,
+            assertEqual: () => undefined,
+          },
+        }),
+      ).rejects.toBe(primary)
+      expect(setter).not.toHaveBeenCalled()
+      expect(
+        Object.getOwnPropertyDescriptor(primary, `suppressed`)?.value,
+      ).toEqual([earlier, secondary])
+    },
+  )
+
+  it(`retains cleanup when an error silently refuses suppressed evidence`, async () => {
+    const primary = new Error(`primary`)
+    Object.defineProperty(primary, `suppressed`, {
+      get: () => [],
+      set: () => undefined,
+    })
+    const secondary = new Error(`cleanup`)
+    const error = await runTrace({
+      steps: [],
+      driver: {
+        setup: () => undefined,
+        start: () => {
+          throw primary
+        },
+        apply: () => undefined,
+        cleanup: () => {
+          throw secondary
+        },
+      },
+      projection: {
+        observe: () => undefined,
+        recompute: () => undefined,
+        assertEqual: () => undefined,
+      },
+    }).catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(AggregateError)
+    expect((error as AggregateError).errors).toEqual([primary, secondary])
+    expect((error as AggregateError).cause).toBe(primary)
+  })
+
+  const primaryCases = [
+    { kind: `mutable`, create: () => new Error(`primary`) },
+    { kind: `frozen`, create: () => Object.freeze(new Error(`primary`)) },
+    { kind: `string`, create: () => `primary` },
+    { kind: `undefined`, create: () => undefined },
+  ]
+  const failureCases = primaryCases.flatMap((primary) =>
+    ([`start`, `apply`, `observe`, `recompute`] as const).flatMap((stage) =>
+      [false, true].flatMap((asyncCleanup) =>
+        [false, true].map((cleanupFails) => ({
+          ...primary,
+          stage,
+          asyncCleanup,
+          cleanupFails,
+        })),
+      ),
+    ),
+  )
+
+  it.each(failureCases)(
+    `retains $kind primary at $stage with async=$asyncCleanup failing-cleanup=$cleanupFails`,
+    async ({ kind, create, stage, asyncCleanup, cleanupFails }) => {
+      const primary = create()
+      const secondary = new Error(`cleanup`)
+      const cleanup = vi.fn(() => {
+        if (asyncCleanup) {
+          return cleanupFails ? Promise.reject(secondary) : Promise.resolve()
+        }
+        if (cleanupFails) throw secondary
+        return undefined
+      })
+      const throwAt = (point: typeof stage) => {
+        if (stage === point) throw primary
+      }
+      let caught = false
+      const error = await runTrace({
+        steps: [0],
+        driver: {
+          setup: () => undefined,
+          start: () => throwAt(`start`),
+          apply: () => throwAt(`apply`),
+          cleanup,
+        },
+        projection: {
+          observe: () => throwAt(`observe`),
+          recompute: () => throwAt(`recompute`),
+          assertEqual: () => undefined,
+        },
+      }).catch((failure: unknown) => {
+        caught = true
+        return failure
+      })
+      expect(caught).toBe(true)
+      expect(cleanup).toHaveBeenCalledOnce()
+      if (!cleanupFails || kind === `mutable`) {
+        expect(error).toBe(primary)
+        if (cleanupFails) {
+          expect(
+            (error as Error & { suppressed: Array<unknown> }).suppressed,
+          ).toEqual([secondary])
+        }
+      } else {
+        expect(error).toBeInstanceOf(AggregateError)
+        const compound = error as AggregateError
+        expect(compound.cause).toBe(primary)
+        expect(compound.errors).toEqual([primary, secondary])
+      }
+    },
+  )
+
+  it(`appends cleanup evidence without losing earlier suppressed failures`, async () => {
+    const earlier = new Error(`earlier`)
+    const primary = Object.assign(new Error(`primary`), {
+      suppressed: [earlier],
+    })
+    const secondary = new Error(`later`)
+    await expect(
+      runTrace({
+        steps: [],
+        driver: {
+          setup: () => undefined,
+          start: () => {
+            throw primary
+          },
+          apply: () => undefined,
+          cleanup: () => {
+            throw secondary
+          },
+        },
+        projection: {
+          observe: () => undefined,
+          recompute: () => undefined,
+          assertEqual: () => undefined,
+        },
+      }),
+    ).rejects.toBe(primary)
+    expect(primary.suppressed).toEqual([earlier, secondary])
+  })
   it(`checks after startup, explicit checkpoints, and every step`, async () => {
     const checkpoints: Array<number> = []
     const cleanup = vi.fn()

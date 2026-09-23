@@ -3,8 +3,6 @@ id: createTransaction
 title: createTransaction
 ---
 
-# Function: createTransaction()
-
 ```ts
 function createTransaction<T>(config): Transaction<T>;
 ```

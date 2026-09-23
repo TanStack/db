@@ -3,8 +3,6 @@ id: EffectConfig
 title: EffectConfig
 ---
 
-# Interface: EffectConfig\<TRow, TKey\>
-
 Defined in: [packages/db/src/query/effect.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L100)
 
 Effect configuration

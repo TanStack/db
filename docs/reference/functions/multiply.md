@@ -3,8 +3,6 @@ id: multiply
 title: multiply
 ---
 
-# Function: multiply()
-
 ```ts
 function multiply<T1, T2>(left, right): BinaryNumericReturnType;
 ```

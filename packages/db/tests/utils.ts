@@ -462,7 +462,9 @@ export function withExpectedRejection<T>(
   expectedMessage: string,
   testFn: () => T | Promise<T>,
 ): Promise<T> {
-  return new Promise((resolve, reject) => {
+  // The returned promise owns cleanup even if testFn throws before its chain exists.
+  let restoreListeners: () => void = () => undefined
+  return new Promise<T>((resolve, reject) => {
     // Find and temporarily remove the vitest unhandled rejection handler
     const originalUnhandledRejection = process
       .listeners(`unhandledRejection`)
@@ -476,6 +478,13 @@ export function withExpectedRejection<T>(
       }
       // Re-throw other rejections
       reject(reason)
+    }
+
+    restoreListeners = () => {
+      process.removeListener(`unhandledRejection`, handleRejection)
+      if (originalUnhandledRejection) {
+        process.addListener(`unhandledRejection`, originalUnhandledRejection)
+      }
     }
 
     if (originalUnhandledRejection) {
@@ -503,14 +512,7 @@ export function withExpectedRejection<T>(
       .catch((error) => {
         reject(error)
       })
-      .finally(() => {
-        // Clean up the error handler
-        process.removeListener(`unhandledRejection`, handleRejection)
-        if (originalUnhandledRejection) {
-          process.addListener(`unhandledRejection`, originalUnhandledRejection)
-        }
-      })
-  })
+  }).finally(() => restoreListeners())
 }
 
 type IndexInternals<TKey> = { indexedKeys: Set<TKey> } & (

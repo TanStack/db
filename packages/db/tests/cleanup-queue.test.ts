@@ -9,8 +9,9 @@ describe('CleanupQueue', () => {
   })
 
   afterEach(() => {
-    vi.useRealTimers()
     resetCleanupQueue()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   it('batches setTimeout creations across multiple synchronous schedules', async () => {
@@ -58,6 +59,8 @@ describe('CleanupQueue', () => {
     await Promise.resolve()
 
     queue.cancel('key1')
+
+    expect(vi.getTimerCount()).toBe(0)
 
     vi.advanceTimersByTime(1000)
     expect(cb1).not.toHaveBeenCalled()

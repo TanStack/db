@@ -3,8 +3,6 @@ id: max
 title: max
 ---
 
-# Function: max()
-
 ```ts
 function max<T>(arg): AggregateReturnType<T>;
 ```

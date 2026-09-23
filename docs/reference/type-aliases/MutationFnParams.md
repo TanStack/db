@@ -3,8 +3,6 @@ id: MutationFnParams
 title: MutationFnParams
 ---
 
-# Type Alias: MutationFnParams\<T\>
-
 ```ts
 type MutationFnParams<T> = object;
 ```

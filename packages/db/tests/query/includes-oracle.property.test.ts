@@ -19,6 +19,38 @@ import type {
 } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 
+/**
+ * # Does the incremental include graph equal full relationship recomputation?
+ *
+ * This is the central structural oracle for inline includes. Production updates
+ * nested results incrementally. The reference stores source rows in plain Maps
+ * and rebuilds the whole tree after every meaningful checkpoint.
+ *
+ * The suite protects five groups of laws:
+ *
+ * 1. Inserts, updates, deletes, and optimistic settlement match recomputation
+ *    at one to four include levels.
+ * 2. Rekey and reparent histories preserve route ownership through fresh,
+ *    shared, retired, restored, merged, and split routes.
+ * 3. Atomic and split full-row batches produce the same tree when they encode
+ *    the same logical source state.
+ * 4. Nested scalar materialization follows reference changes and shared paths.
+ * 5. Alpha-renaming, sibling order, and unrelated siblings do not change the
+ *    relevant result.
+ *
+ * These laws use a model graph, not one universal controller. The structural
+ * node recomputes relationship trees. A separate scalar-reference node follows
+ * explicit foreign keys. Metamorphic checks compare equivalent query forms.
+ * Scenario builders describe legal route histories, but they do not compute
+ * the expected result.
+ *
+ * The trace runner checks each intermediate cut that the contract exposes.
+ * Focused pinned histories preserve small boundary cases. Random or replayed
+ * campaigns explore longer action sequences and wider route values. Other
+ * include suites own Collection facades, demand lifetime, functional callbacks,
+ * and publication coherence.
+ */
+
 type IncludeDepth = 1 | 2 | 3 | 4
 
 type RootRow = {
@@ -223,6 +255,8 @@ function ensureActionsTargetRows(
   })
 }
 
+// This grammar constructs legal row histories. The Map model below, not the
+// grammar, decides their expected nested result.
 const scenarioArbitrary: fc.Arbitrary<Scenario> = depthArbitrary.chain(
   (depth) =>
     fc
@@ -233,7 +267,9 @@ const scenarioArbitrary: fc.Arbitrary<Scenario> = depthArbitrary.chain(
       })),
 )
 
-function classifyScenarioCoverage({ depth, history }: Scenario): Array<string> {
+// This is syntax distribution, not delivered transition coverage. Route
+// assignments below do not restore rollbacks or skip absent/no-op actions.
+function classifyScenarioSyntax({ depth, history }: Scenario): Array<string> {
   const routesByLevel = Array.from(
     { length: depth + 1 },
     () => new Map<number, { parentGroup: number; group: number }>(),
@@ -263,24 +299,24 @@ function classifyScenarioCoverage({ depth, history }: Scenario): Array<string> {
 
   return [
     `depth=${depth}`,
-    `relationship-changes=${
+    `syntactic-route-changes=${
       relationshipChanges === 0
         ? `none`
         : relationshipChanges === 1
           ? `one`
           : `many`
     }`,
-    `optimistic=${history.some((action) =>
+    `has-optimistic-syntax=${history.some((action) =>
       action.type.startsWith(`optimistic`),
     )}`,
-    `delete=${history.some((action) => action.type === `delete`)}`,
+    `has-delete-syntax=${history.some((action) => action.type === `delete`)}`,
   ]
 }
 
 if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
   fc.statistics(
     scenarioArbitrary,
-    classifyScenarioCoverage,
+    classifyScenarioSyntax,
     oraclePropertyOptions(1_000, `includes.scenario-statistics`),
   )
 }
@@ -675,14 +711,122 @@ function sameChild(left: ChildRow, right: ChildRow): boolean {
   return left.parentGroup === right.parentGroup && sameRoot(left, right)
 }
 
+type PendingTransaction = ReturnType<Sources[`roots`][`collection`][`update`]>
+
+type PendingWork = {
+  transaction: PendingTransaction
+  release: () => void
+  releaseAttempted: boolean
+  released: boolean
+  settled: boolean
+  receipt: Promise<void>
+}
+
+function trackPendingWork(
+  pending: Set<PendingWork>,
+  transaction: PendingTransaction,
+  release: () => void,
+): PendingWork {
+  const entry: PendingWork = {
+    transaction,
+    release,
+    releaseAttempted: false,
+    released: false,
+    settled: false,
+    receipt: Promise.resolve(),
+  }
+  pending.add(entry)
+  const settled = () => {
+    entry.settled = true
+    if (entry.released) pending.delete(entry)
+  }
+  entry.receipt = transaction.isPersisted.promise.then(settled, settled)
+  return entry
+}
+
+function releasePendingWork(
+  pending: Set<PendingWork>,
+  entry: PendingWork,
+  release: () => void,
+): void {
+  entry.releaseAttempted = true
+  release()
+  entry.released = true
+  if (entry.settled) pending.delete(entry)
+}
+
+async function cleanupPendingWork(
+  pending: Set<PendingWork>,
+  collections: ReadonlyArray<{ cleanup: () => Promise<void> }>,
+): Promise<void> {
+  const errors: Array<unknown> = []
+  const entries = [...pending]
+  const attempt = (work: () => void) => {
+    try {
+      work()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  for (const entry of entries) {
+    if (
+      entry.transaction.state === `pending` ||
+      entry.transaction.state === `persisting`
+    )
+      attempt(() => {
+        entry.transaction.rollback()
+      })
+    if (!entry.releaseAttempted)
+      attempt(() => releasePendingWork(pending, entry, entry.release))
+  }
+  if (errors.length === 0)
+    await Promise.all(entries.map(({ receipt }) => receipt))
+  const results = await Promise.allSettled(
+    collections.map(async (collection) => collection.cleanup()),
+  )
+  for (const result of results)
+    if (result.status === `rejected`) errors.push(result.reason as unknown)
+  if (errors.length === 1) throw errors[0]
+  if (errors.length > 1)
+    throw new AggregateError(errors, `Core oracle cleanup failed`)
+}
+
+async function withPendingWorkCleanup(
+  pending: Set<PendingWork>,
+  collections: ReadonlyArray<{ cleanup: () => Promise<void> }>,
+  work: () => Promise<void>,
+): Promise<void> {
+  let primary: { error: unknown } | undefined
+  try {
+    await work()
+  } catch (error) {
+    primary = { error }
+  }
+  try {
+    await cleanupPendingWork(pending, collections)
+  } catch (error) {
+    if (!primary) throw error
+    throw new AggregateError(
+      [primary.error, error],
+      `Core oracle work and cleanup failed`,
+      {
+        cause: primary.error,
+      },
+    )
+  }
+  if (primary) throw primary.error
+}
+
 async function settleOptimisticAction(
   action: HistoryAction,
   resolveSync: () => void,
   rejectSync: (error: Error) => void,
   persistedPromise: Promise<unknown>,
+  pending: Set<PendingWork>,
+  entry: PendingWork,
 ): Promise<void> {
   if (action.type === `optimisticConfirm`) {
-    resolveSync()
+    releasePendingWork(pending, entry, resolveSync)
     await persistedPromise
     return
   }
@@ -690,7 +834,7 @@ async function settleOptimisticAction(
   const message = `oracle optimistic rollback`
   const persisted = persistedPromise.catch(() => undefined)
   await withExpectedRejection(message, async () => {
-    rejectSync(new Error(message))
+    releasePendingWork(pending, entry, () => rejectSync(new Error(message)))
     await persisted
     await flushPromises()
   })
@@ -702,6 +846,7 @@ async function applyAction(
   roots: Map<number, RootRow>,
   levels: Array<Map<number, ChildRow>>,
   assertMatches: TraceCheckpoint,
+  pending: Set<PendingWork>,
 ): Promise<void> {
   if (action.level === 0) {
     const current = roots.get(action.id)
@@ -709,6 +854,7 @@ async function applyAction(
       if (current) {
         sources.roots.write(`delete`, current)
         roots.delete(action.id)
+        assertMatches()
       }
       return
     }
@@ -735,6 +881,11 @@ async function applyAction(
           draft.value = next.value
         },
       )
+      const entry = trackPendingWork(
+        pending,
+        transaction,
+        sources.roots.resolveSync,
+      )
       roots.set(action.id, next)
       assertMatches()
 
@@ -746,6 +897,8 @@ async function applyAction(
         sources.roots.resolveSync,
         sources.roots.rejectSync,
         transaction.isPersisted.promise,
+        pending,
+        entry,
       )
       if (action.type === `optimisticRollback`) {
         roots.set(action.id, current!)
@@ -756,6 +909,7 @@ async function applyAction(
 
     sources.roots.write(current ? `update` : `insert`, next)
     roots.set(action.id, next)
+    assertMatches()
     return
   }
 
@@ -767,6 +921,7 @@ async function applyAction(
     if (current) {
       source.write(`delete`, current)
       model.delete(action.id)
+      assertMatches()
     }
     return
   }
@@ -792,6 +947,7 @@ async function applyAction(
       draft.group = next.group
       draft.value = next.value
     })
+    const entry = trackPendingWork(pending, transaction, source.resolveSync)
     model.set(action.id, next)
     assertMatches()
 
@@ -803,6 +959,8 @@ async function applyAction(
       source.resolveSync,
       source.rejectSync,
       transaction.isPersisted.promise,
+      pending,
+      entry,
     )
     if (action.type === `optimisticRollback`) {
       model.set(action.id, current!)
@@ -813,14 +971,7 @@ async function applyAction(
 
   source.write(current ? `update` : `insert`, next)
   model.set(action.id, next)
-}
-
-async function cleanupSources(sources: Sources) {
-  await Promise.all(
-    [sources.roots, ...sources.levels].map(({ collection }) =>
-      collection.cleanup(),
-    ),
-  )
+  assertMatches()
 }
 
 type StructuralTraceContext = {
@@ -829,6 +980,7 @@ type StructuralTraceContext = {
   incremental: ReturnType<typeof createIncrementalQuery>
   roots: Map<number, RootRow>
   levels: Array<Map<number, ChildRow>>
+  pendingWork: Set<PendingWork>
 }
 
 function createStructuralTraceContext(
@@ -842,17 +994,22 @@ function createStructuralTraceContext(
     incremental: createIncrementalQuery(depth, sources),
     roots: new Map<number, RootRow>(),
     levels: Array.from({ length: 4 }, () => new Map<number, ChildRow>()),
+    pendingWork: new Set(),
   }
 }
 
 async function cleanupStructuralTrace({
   incremental,
   sources,
-}: Pick<StructuralTraceContext, `sources`> & {
+  pendingWork,
+}: Pick<StructuralTraceContext, `sources` | `pendingWork`> & {
   incremental: { cleanup: () => Promise<void> }
 }): Promise<void> {
-  await incremental.cleanup()
-  await cleanupSources(sources)
+  await cleanupPendingWork(pendingWork, [
+    incremental,
+    sources.roots.collection,
+    ...sources.levels.map(({ collection }) => collection),
+  ])
 }
 
 function createStructuralTraceDriver(
@@ -868,6 +1025,7 @@ function createStructuralTraceDriver(
         context.roots,
         context.levels,
         checkpoint,
+        context.pendingWork,
       ),
     cleanup: cleanupStructuralTrace,
   }
@@ -1769,6 +1927,8 @@ type RouteDestination = {
   route: number
 }
 
+// Route lifecycle descriptors form a constrained design grammar. Their
+// constructors reject combinations that do not name a real lifecycle state.
 type RouteTransitionDescriptor = {
   row: 0 | 1
   stepsBefore?: ReadonlyArray<FullRowBatchStep>
@@ -2932,7 +3092,7 @@ function createRelationshipBatchShapeMatrix(
 
   for (const delivery of [`split`, `atomic`] as const) {
     for (const order of [`delete-insert`, `insert-delete`] as const) {
-      // Inserting the same public id before its existing row is retired is a
+      // Inserting the same public id before the batch retires its existing row is a
       // duplicate-key error, not a valid alternate delivery of the same final
       // state. The new-id cells exercise insert-before-delete in both forms.
       if (publicId === `same` && order === `insert-delete`) continue
@@ -3136,6 +3296,7 @@ function createFlatMaterializationDriver(
         incremental: createFlatMaterializationQuery(materialization, sources),
         roots: new Map<number, RootRow>(),
         levels: Array.from({ length: 4 }, () => new Map<number, ChildRow>()),
+        pendingWork: new Set(),
       }
     },
     start: ({ incremental }) => incremental.preload(),
@@ -3581,6 +3742,186 @@ const {
 })
 
 describe(`includes recompute oracle`, () => {
+  fcTest(
+    `distinguishes optimistic syntax from delivered rollback and no-op cuts`,
+    async () => {
+      const driver = createStructuralTraceDriver(1)
+      const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
+      const history: Array<HistoryAction> = [
+        { ...row, type: `put`, level: 0 },
+        { ...row, type: `put`, level: 1 },
+        { ...row, type: `optimisticRollback`, level: 0, id: 999 },
+        { ...row, type: `optimisticRollback`, level: 0 },
+        { ...row, type: `optimisticRollback`, level: 0, group: 2 },
+        { ...row, type: `optimisticRollback`, level: 0 },
+      ]
+      expect(classifyScenarioSyntax({ depth: 1, history })).toEqual([
+        `depth=1`,
+        `syntactic-route-changes=many`,
+        `has-optimistic-syntax=true`,
+        `has-delete-syntax=false`,
+      ])
+      const observations: Array<{
+        cuts: Array<{ group: number | undefined; childIds: Array<number> }>
+        settledGroup: number | undefined
+        settledChildIds: Array<number>
+        absentRoot: boolean
+      }> = []
+      await runTrace({
+        steps: history,
+        driver: {
+          ...driver,
+          apply: async (action, context, checkpoint) => {
+            const observe = () => ({
+              group: context.sources.roots.collection.get(1)?.group,
+              childIds:
+                [...context.incremental.values()][0]?.children.map(
+                  (child) => child.id,
+                ) ?? [],
+            })
+            const cuts: Array<ReturnType<typeof observe>> = []
+            await driver.apply(action, context, () => {
+              checkpoint()
+              cuts.push(observe())
+            })
+            const settled = observe()
+            observations.push({
+              cuts,
+              settledGroup: settled.group,
+              settledChildIds: settled.childIds,
+              absentRoot: !context.sources.roots.collection.has(999),
+            })
+          },
+        },
+        projection: structuralProjection,
+      })
+      const restored = {
+        settledGroup: 1,
+        settledChildIds: [1],
+        absentRoot: true,
+      }
+      expect(observations.slice(2)).toEqual([
+        { ...restored, cuts: [] },
+        { ...restored, cuts: [] },
+        {
+          ...restored,
+          cuts: [
+            { group: 2, childIds: [] },
+            { group: 1, childIds: [1] },
+          ],
+        },
+        { ...restored, cuts: [] },
+      ])
+    },
+  )
+
+  fcTest(
+    `checks ordinary root and child changes before yielding from apply`,
+    async () => {
+      const driver = createStructuralTraceDriver(1)
+      const row = { id: 1, parentGroup: 1, group: 1, value: 1, position: 0 }
+      const history: Array<HistoryAction> = [
+        { ...row, type: `put`, level: 0 },
+        { ...row, type: `put`, level: 1 },
+        { ...row, type: `delete`, level: 1 },
+        { ...row, type: `delete`, level: 0 },
+      ]
+      const beforeAwait: Array<number> = []
+      await runTrace({
+        steps: history,
+        driver: {
+          ...driver,
+          apply: (action, context, checkpoint) => {
+            let checkpoints = 0
+            const result = driver.apply(action, context, () => {
+              checkpoints++
+              return checkpoint()
+            })
+            beforeAwait.push(checkpoints)
+            return result
+          },
+        },
+        projection: structuralProjection,
+      })
+      expect(beforeAwait).toEqual([1, 1, 1, 1])
+    },
+  )
+
+  for (const level of [0, 1] as const) {
+    for (const cleanupFails of [false, true]) {
+      fcTest(
+        `cleans failed optimistic checkpoint at level ${level} with cleanup failure=${cleanupFails}`,
+        async () => {
+          const driver = createStructuralTraceDriver(1)
+          const failure = new Error(`Core checkpoint failed`)
+          const cleanupFailure = new Error(
+            `Core live cleanup failed after disposal`,
+          )
+          let context: StructuralTraceContext | undefined
+          let transaction: PendingTransaction | undefined
+          const put = (target: 0 | 1): HistoryAction => ({
+            type: `put`,
+            level: target,
+            id: 1,
+            parentGroup: 1,
+            group: 1,
+            value: 1,
+            position: 0,
+          })
+          await expect(
+            runTrace({
+              steps: [
+                put(0),
+                put(1),
+                { ...put(level), type: `optimisticConfirm`, value: 2 },
+              ],
+              driver: {
+                ...driver,
+                setup: () => {
+                  const current = createStructuralTraceContext(1)
+                  context = current
+                  if (cleanupFails) {
+                    const cleanup = current.incremental.cleanup.bind(
+                      current.incremental,
+                    )
+                    current.incremental.cleanup = async () => {
+                      await cleanup()
+                      throw cleanupFailure
+                    }
+                  }
+                  return current
+                },
+              },
+              projection: {
+                ...structuralProjection,
+                assertEqual: (actual, expected) => {
+                  structuralProjection.assertEqual(actual, expected)
+                  const entry = [...context!.pendingWork][0]
+                  if (entry) {
+                    transaction = entry.transaction
+                    throw failure
+                  }
+                },
+              },
+            }),
+          ).rejects.toBe(failure)
+          expect(
+            (failure as Error & { suppressed?: Array<unknown> }).suppressed,
+          ).toEqual(cleanupFails ? [cleanupFailure] : undefined)
+          if (!context) throw new Error(`Expected core trace context`)
+          expect(transaction?.state).toBe(`failed`)
+          expect(context.pendingWork.size).toBe(0)
+          for (const collection of [
+            context.incremental,
+            context.sources.roots.collection,
+            ...context.sources.levels.map((source) => source.collection),
+          ])
+            expect(collection.status).toBe(`cleaned-up`)
+        },
+      )
+    }
+  }
+
   fcTest(`rejects subscriber lifecycle labels on reparent transitions`, () => {
     expect(() =>
       createRouteLifecycleScenario({
@@ -4094,7 +4435,7 @@ describe(`includes recompute oracle`, () => {
               recomputeFullRowBatchScenario(candidate, candidate.steps.length),
             )
 
-            // Delivery boundaries and change order must not alter the final
+            // Delivery boundaries and change order must not affect the final
             // recompute semantics for one generated fixture.
             expect(finalStates.length).toBeGreaterThan(1)
             for (const finalState of finalStates.slice(1)) {
@@ -4221,6 +4562,40 @@ describe(`includes recompute oracle`, () => {
             },
           )
         }
+      }
+    }
+  }
+
+  for (const [depth, targetLevel] of [
+    [3, 1],
+    [4, 2],
+  ] as const) {
+    for (const sourceBranch of [0, 1] as const) {
+      for (const [firstTransition, secondTransition] of [
+        [`rekey`, `rekey`],
+        [`rekey`, `reparent`],
+        [`reparent`, `rekey`],
+      ] as const) {
+        fcTest(
+          `matches composed ${firstTransition} → ${secondTransition} with two descendant levels at depth ${depth}, branch ${sourceBranch}`,
+          async () => {
+            const childLevel = (targetLevel + 1) as IncludeDepth
+            const scenario = createTransitionHistoryScenario({
+              depth,
+              targetLevel,
+              firstTransition,
+              secondTransition,
+              sourceBranch,
+              branches: transitionHistoryBranches,
+              rekeyGroups: [2_100, 2_400],
+              insertedLevels: [childLevel, childLevel],
+              insertedValues: [31, 47],
+              insertedPositions: [1, -1],
+            })
+            expectEveryHistoryStepVisible(scenario)
+            await expectFullRowBatchScenarioMatches(scenario)
+          },
+        )
       }
     }
   }
@@ -4424,6 +4799,9 @@ describe(`includes recompute oracle`, () => {
           })),
         )
 
+        // The outer queries have no orderBy: this retains their traversal
+        // equivalence witness, not a general root-order contract. Child order
+        // remains explicit and must not be normalized away.
         expect(stripVirtualProperties(renamed)).toEqual(
           stripVirtualProperties(baseline),
         )
@@ -4483,58 +4861,51 @@ describe(`includes recompute oracle`, () => {
         })),
       )
 
-      try {
-        await live.preload()
-        const transaction = children.collection.update(1, (draft) => {
-          draft.value = confirmedValue
-        })
-        expect(stripVirtualProperties(live.toArray)).toEqual([
-          { id: 1, children: [{ id: 1, value: confirmedValue }] },
-        ])
+      const pending = new Set<PendingWork>()
+      await withPendingWorkCleanup(
+        pending,
+        [live, roots.collection, children.collection],
+        async () => {
+          await live.preload()
+          const transaction = children.collection.update(1, (draft) => {
+            draft.value = confirmedValue
+          })
+          const entry = trackPendingWork(
+            pending,
+            transaction,
+            children.resolveSync,
+          )
+          expect(stripVirtualProperties(live.toArray)).toEqual([
+            { id: 1, children: [{ id: 1, value: confirmedValue }] },
+          ])
 
-        children.write(`update`, {
-          id: 1,
-          parentGroup: 1,
-          group: 1,
-          value: confirmedValue,
-          position: 0,
-        })
-        children.resolveSync()
-        await transaction.isPersisted.promise
+          children.write(`update`, {
+            id: 1,
+            parentGroup: 1,
+            group: 1,
+            value: confirmedValue,
+            position: 0,
+          })
+          releasePendingWork(pending, entry, children.resolveSync)
+          await transaction.isPersisted.promise
 
-        expect(stripVirtualProperties(live.toArray)).toEqual([
-          { id: 1, children: [{ id: 1, value: confirmedValue }] },
-        ])
-      } finally {
-        await live.cleanup()
-        await Promise.all([
-          roots.collection.cleanup(),
-          children.collection.cleanup(),
-        ])
-      }
+          expect(stripVirtualProperties(live.toArray)).toEqual([
+            { id: 1, children: [{ id: 1, value: confirmedValue }] },
+          ])
+        },
+      )
     },
   )
 
-  fcTest.prop([fc.constant(confirmedChildReorderSeed)], {
-    numRuns: 1,
-    seed: 2051245230,
-  })(
-    `regression seed: confirmed child reorder matches recomputation`,
-    expectScenarioMatches,
+  fcTest(`confirmed child reorder matches recomputation`, () =>
+    expectScenarioMatches(confirmedChildReorderSeed),
   )
 
-  fcTest.prop([fc.constant(sharedMaterializeSeed)], {
-    numRuns: 1,
-    seed: 1685,
-  })(
-    `shared scalar materialization preserves the deepest row`,
-    expectMaterializeScenarioMatches,
+  fcTest(`shared scalar materialization preserves the deepest row`, () =>
+    expectMaterializeScenarioMatches(sharedMaterializeSeed),
   )
 
-  fcTest.prop([fc.constant(`correlation-key-update`)], {
-    numRuns: 1,
-    seed: 1658,
-  })(`parent correlation-key update rematerializes children`, async () => {
+  fcTest(`parent correlation-key update rematerializes children`, async () => {
     const roots = createControlledCollection<RootRow>(`correlation-seed-roots`)
     const children = createControlledCollection<ChildRow>(
       `correlation-seed-children`,
@@ -4583,7 +4954,7 @@ describe(`includes recompute oracle`, () => {
     }
   })
 
-  fcTest.prop([fc.constant(`#1454`)], { numRuns: 1, seed: 1454 })(
+  fcTest(
     `alpha-renaming a duplicate sibling alias preserves results`,
     async () => {
       const roots = createControlledCollection<RootRow>(`alias-seed-roots`, [
@@ -4675,53 +5046,56 @@ describe(`includes recompute oracle`, () => {
     },
   )
 
-  fcTest.prop([fc.constant(`#1444`)], { numRuns: 1, seed: 1444 })(
-    `regression seed: optimistic child reorder matches recomputation`,
-    async () => {
-      const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
-        { id: 1, group: 1, value: 0, position: 0 },
-      ])
-      const children = createControlledCollection<ChildRow>(
-        `order-seed-children`,
-        [
-          {
-            id: 1,
-            parentGroup: 1,
-            group: 1,
-            value: 1,
-            position: 0,
-          },
-          {
-            id: 2,
-            parentGroup: 1,
-            group: 1,
-            value: 2,
-            position: 1,
-          },
-        ],
-      )
-      const live = createLiveQueryCollection((q) =>
-        q.from({ root: roots.collection }).select(({ root }) => ({
-          id: root.id,
-          children: toArray(
-            q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentGroup, root.group))
-              .orderBy(({ child }) => child.position)
-              .select(({ child }) => ({
-                id: child.id,
-                position: child.position,
-              })),
-          ),
-        })),
-      )
+  fcTest(`optimistic child reorder matches recomputation`, async () => {
+    const roots = createControlledCollection<RootRow>(`order-seed-roots`, [
+      { id: 1, group: 1, value: 0, position: 0 },
+    ])
+    const children = createControlledCollection<ChildRow>(
+      `order-seed-children`,
+      [
+        {
+          id: 1,
+          parentGroup: 1,
+          group: 1,
+          value: 1,
+          position: 0,
+        },
+        {
+          id: 2,
+          parentGroup: 1,
+          group: 1,
+          value: 2,
+          position: 1,
+        },
+      ],
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ root: roots.collection }).select(({ root }) => ({
+        id: root.id,
+        children: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, root.group))
+            .orderBy(({ child }) => child.position)
+            .select(({ child }) => ({
+              id: child.id,
+              position: child.position,
+            })),
+        ),
+      })),
+    )
 
-      try {
+    const pending = new Set<PendingWork>()
+    await withPendingWorkCleanup(
+      pending,
+      [live, roots.collection, children.collection],
+      async () => {
         await live.preload()
-        children.collection.update([1, 2], (drafts) => {
+        const transaction = children.collection.update([1, 2], (drafts) => {
           drafts[0]!.position = 1
           drafts[1]!.position = 0
         })
+        trackPendingWork(pending, transaction, children.resolveSync)
 
         expect(stripVirtualProperties(live.toArray)).toEqual([
           {
@@ -4732,13 +5106,7 @@ describe(`includes recompute oracle`, () => {
             ],
           },
         ])
-      } finally {
-        await live.cleanup()
-        await Promise.all([
-          roots.collection.cleanup(),
-          children.collection.cleanup(),
-        ])
-      }
-    },
-  )
+      },
+    )
+  })
 })

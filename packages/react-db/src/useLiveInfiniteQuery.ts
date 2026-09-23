@@ -28,6 +28,7 @@ import type {
 import type {
   Collection,
   CollectionImpl as CollectionImplType,
+  CollectionStatus,
   Context,
   DbClient,
   InferResultType,
@@ -41,7 +42,8 @@ import type {
 const DEFAULT_GC_TIME_MS = 1
 const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
 
-export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
+// Keep the generic parameter for existing typed config wrappers.
+export type UseLiveInfiniteQueryConfig<_TContext extends Context> = {
   /**
    * Explicit identity for queries that contain opaque functional variants or
    * are hot enough that deriving identity from structured IR is too expensive.
@@ -51,18 +53,8 @@ export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   /** Override the nearest DbProvider for this query. */
   client?: DbClient
   pageSize?: number
+  /** First result-page label, not a server cursor or remote offset. */
   initialPageParam?: number
-  /**
-   * @deprecated This callback is not used by the current implementation.
-   * Pagination is determined internally via a peek-ahead strategy.
-   * Provided for API compatibility with TanStack Query conventions.
-   */
-  getNextPageParam?: (
-    lastPage: Array<InferResultType<TContext>[number]>,
-    allPages: Array<Array<InferResultType<TContext>[number]>>,
-    lastPageParam: number,
-    allPageParams: Array<number>,
-  ) => number | undefined
 }
 
 export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
@@ -71,6 +63,29 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
 > & {
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
+  pageParams: Array<number>
+  fetchNextPage: () => Promise<void>
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  error: unknown
+}
+
+export type UseLiveInfiniteQueryReturnWithCollection<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+> = {
+  data: Array<TResult>
+  state: Map<TKey, TResult>
+  collection: Collection<TResult, TKey, TUtils> & NonSingleResult
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: true
+  pages: Array<Array<TResult>>
   pageParams: Array<number>
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
@@ -107,7 +122,7 @@ type InfiniteQueryRenderState = {
  * without recreating the live query collection on each page change.
  *
  * @param queryFn - Query function that defines what data to fetch. Must include `.orderBy()` for setWindow to work.
- * @param config - Configuration including pageSize and getNextPageParam
+ * @param config - Configuration including pageSize and an optional initial page label
  * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with pages, data, and pagination controls
  */
@@ -120,7 +135,7 @@ export function useLiveInfiniteQuery<
 >(
   liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
   config: UseLiveInfiniteQueryConfig<any>,
-): UseLiveInfiniteQueryReturn<any>
+): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
 // Overload for query function
 export function useLiveInfiniteQuery<TContext extends Context>(
@@ -135,6 +150,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   config: UseLiveInfiniteQueryConfig<TContext>,
   deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext> {
+  if (`getNextPageParam` in config) {
+    throw new Error(
+      `getNextPageParam is not supported by useLiveInfiniteQuery. Use an on-demand collection and fulfill meta.loadSubsetOptions in queryFn for server pagination.`,
+    )
+  }
   const pageSize = normalizeLiveQueryWindowPageSize(config.pageSize)
   const initialPageParam = config.initialPageParam ?? 0
   const contextDbClient = useOptionalDbClient()

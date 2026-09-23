@@ -28,6 +28,33 @@ export type RuntimeBridgeE2EContractHarness = {
 export type RuntimeBridgeE2EContractHarnessFactory =
   () => RuntimeBridgeE2EContractHarness
 
+export async function assertRuntimeRestartHistory(
+  harness: RuntimeBridgeE2EContractHarness,
+): Promise<void> {
+  const before = {
+    id: `restart-1`,
+    title: `Persisted across restart`,
+    score: 42,
+  }
+  const after = { id: `restart-2`, title: `Written after restart`, score: 73 }
+  const observe = async () =>
+    (await harness.loadTodosFromClient())
+      .map(({ key, value }) => ({
+        key,
+        value: { id: value.id, title: value.title, score: value.score },
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key))
+
+  await harness.writeTodoFromClient(before)
+  await harness.restartHost()
+  expect(await observe()).toEqual([{ key: before.id, value: before }])
+  await harness.writeTodoFromClient(after)
+  expect(await observe()).toEqual([
+    { key: before.id, value: before },
+    { key: after.id, value: after },
+  ])
+}
+
 async function withRuntimeBridgeHarness<T>(
   createHarness: RuntimeBridgeE2EContractHarnessFactory,
   run: (harness: RuntimeBridgeE2EContractHarness) => Promise<T>,
@@ -80,21 +107,10 @@ export function runRuntimeBridgeE2EContractSuite(
     it(
       `survives host restart while keeping persisted data`,
       async () => {
-        await withRuntimeBridgeHarness(createHarness, async (harness) => {
-          await harness.writeTodoFromClient({
-            id: `restart-1`,
-            title: `Persisted across restart`,
-            score: 42,
-          })
-
-          await harness.restartHost()
-
-          const rows = await harness.loadTodosFromClient()
-          expect(rows.map((row) => row.key)).toContain(`restart-1`)
-          expect(
-            rows.find((row) => row.key === `restart-1`)?.value.title,
-          ).toEqual(`Persisted across restart`)
-        })
+        await withRuntimeBridgeHarness(
+          createHarness,
+          assertRuntimeRestartHistory,
+        )
       },
       testTimeoutMs,
     )

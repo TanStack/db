@@ -48,7 +48,7 @@ export class CollectionChangesManager<
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
-   * committed batch of changes — including while nothing is subscribed.
+   * committed batch of changes and cleanup — including while nothing is subscribed.
    * Lets consumers (the live-query observer) cheaply detect "did the data
    * change" without subscribing, and stays untouched by subscription
    * bootstrap replays, which do not go through emitEvents.
@@ -108,6 +108,32 @@ export class CollectionChangesManager<
     return this.state.enrichChangeMessage(change)
   }
 
+  // Reduce unpublished same-key changes relative to the subscriber's last
+  // visible row: keep the earliest previous row and latest value, and cancel
+  // an insert followed by a delete.
+  private composeBatchedChange(
+    pending: ChangeMessage<TOutput, TKey> | undefined,
+    change: ChangeMessage<TOutput, TKey>,
+  ): ChangeMessage<TOutput, TKey> | undefined {
+    if (!pending) return change
+
+    if (pending.type === `insert`) {
+      if (change.type === `delete`) return undefined
+      return { ...change, type: `insert`, previousValue: undefined }
+    }
+
+    const previousValue =
+      pending.type === `update`
+        ? (pending.previousValue ?? pending.value)
+        : pending.value
+
+    if (change.type === `delete`) {
+      return { ...change, value: previousValue, previousValue: undefined }
+    }
+
+    return { ...change, type: `update`, previousValue }
+  }
+
   /**
    * Emit events either immediately or batch them for later emission
    */
@@ -123,8 +149,10 @@ export class CollectionChangesManager<
 
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
-      // Add events to the batch
-      this.batchedEvents.push(...changes)
+      // Snapshot virtual properties before later state changes can replace them.
+      this.batchedEvents.push(
+        ...changes.map((change) => this.enrichChangeWithVirtualProps(change)),
+      )
       return
     }
 
@@ -136,21 +164,21 @@ export class CollectionChangesManager<
       // buffered optimistic events with the final changes so subscribers see the
       // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
-        const combined = new Map(
-          this.batchedEvents.map((change) => [change.key, change]),
-        )
-        for (const change of changes) {
-          const pending = combined.get(change.key)
-          // A buffered removal was never delivered. Re-insertion replaces the
-          // subscriber's old row rather than inserting an already-sent key.
+        // Undefined tombstones retain each key's first-seen publication order
+        // when an insert/delete pair cancels before a later change revives it.
+        const combined = new Map<
+          TKey,
+          ChangeMessage<TOutput, TKey> | undefined
+        >()
+        for (const change of [...this.batchedEvents, ...changes]) {
           combined.set(
             change.key,
-            pending?.type === `delete` && change.type === `insert`
-              ? { ...change, type: `update`, previousValue: pending.value }
-              : change,
+            this.composeBatchedChange(combined.get(change.key), change),
           )
         }
-        rawEvents = [...combined.values()]
+        rawEvents = [...combined.values()].flatMap((change) => {
+          return change ? [change] : []
+        })
       }
       this.batchedEvents = []
       this.shouldBatchEvents = false
@@ -250,7 +278,7 @@ export class CollectionChangesManager<
    */
   public subscribeChanges(
     callback: (
-      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
     ) => void,
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
@@ -264,7 +292,10 @@ export class CollectionChangesManager<
     const { where, ...opts } = options
     let whereExpression = opts.whereExpression
     if (where) {
-      const proxy = createSingleRowRefProxy<WithVirtualProps<TOutput, TKey>>()
+      const proxy = createSingleRowRefProxy<
+        WithVirtualProps<TOutput, TKey>,
+        TKey
+      >()
       const result = where(proxy)
       whereExpression = toExpression(result)
     }
@@ -379,6 +410,9 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    // Cleanup clears visible state without publishing row changes. Detached
+    // consumers may miss every status transition before an empty restart.
+    this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false
     this.deferredPublications = []

@@ -1,6 +1,9 @@
 import mitt from 'mitt'
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../src/collection/index.js'
+import {
+  createCollection,
+  withCollectionSyncConfigFactory,
+} from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
@@ -44,6 +47,45 @@ const getStateEntries = <
   ])
 
 describe(`Collection`, () => {
+  it.each([false, true])(
+    `owns binding utilities only when a sync factory exists: %s`,
+    async (bind) => {
+      let value = 1
+      const read = vi.fn(() => value)
+      const utilities = Object.create(
+        { inherited: () => `prototype` },
+        {
+          current: { get: read, enumerable: true },
+        },
+      ) as { readonly current: number; inherited: () => string }
+      const source: SyncConfig<{ id: number }> = { sync: () => {} }
+      const factory = vi.fn((sync: typeof source) => sync)
+      const sync = bind
+        ? withCollectionSyncConfigFactory(source, factory)
+        : source
+      const options = {
+        getKey: (row: { id: number }) => row.id,
+        sync,
+        utils: utilities,
+      }
+      const a = createCollection(options)
+      const b = createCollection(options)
+      try {
+        expect(read).not.toHaveBeenCalled()
+        expect(a.utils === utilities).toBe(!bind)
+        expect(a.utils === b.utils).toBe(!bind)
+        expect(a.utils.inherited()).toBe(`prototype`)
+        value = 2
+        expect(a.utils.current).toBe(2)
+        expect(b.utils.current).toBe(2)
+        expect(factory).toHaveBeenCalledTimes(bind ? 2 : 0)
+      } finally {
+        await a.cleanup()
+        await b.cleanup()
+      }
+    },
+  )
+
   it(`should throw if there's no sync config`, () => {
     // @ts-expect-error we're testing for throwing when there's no config passed in
     expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
@@ -527,7 +569,7 @@ describe(`Collection`, () => {
     // Test bulk update
     tx6.mutate(() =>
       collection.update(
-        [keys[2], keys[3]],
+        [keys[2]!, keys[3]!],
         { metadata: { bulkUpdate: true } },
         (drafts) => {
           drafts.forEach((draft) => {
@@ -2183,7 +2225,7 @@ describe(`Collection isLoadingSubset property`, () => {
     expect(collection.isLoadingSubset).toBe(false)
   })
 
-  it(`cleanup isolates subset loading state from a later sync session`, async () => {
+  it(`cleanup isolates subset loading state from a later sync run`, async () => {
     const resolveLoads: Array<() => void> = []
     const collection = createCollection<{ id: string; value: string }>({
       id: `cleanup-isolates-subset-loading`,

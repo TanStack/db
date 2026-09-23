@@ -3,8 +3,6 @@ id: GroupByCallback
 title: GroupByCallback
 ---
 
-# Type Alias: GroupByCallback()\<TContext\>
-
 ```ts
 type GroupByCallback<TContext> = (refs) => any;
 ```

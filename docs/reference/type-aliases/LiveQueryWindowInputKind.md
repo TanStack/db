@@ -3,8 +3,6 @@ id: LiveQueryWindowInputKind
 title: LiveQueryWindowInputKind
 ---
 
-# Type Alias: LiveQueryWindowInputKind
-
 ```ts
 type LiveQueryWindowInputKind = "collection" | "query";
 ```

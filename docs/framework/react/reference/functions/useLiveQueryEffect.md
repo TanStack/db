@@ -3,8 +3,6 @@ id: useLiveQueryEffect
 title: useLiveQueryEffect
 ---
 
-# Function: useLiveQueryEffect()
-
 ```ts
 function useLiveQueryEffect<TRow, TKey>(config, deps): void;
 ```

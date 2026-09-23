@@ -56,7 +56,7 @@ export class CollectionSyncManager<
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private _events!: CollectionEventsManager
-  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private config!: CollectionConfig<TOutput, TKey, TSchema, any>
   private id: string
   private syncMode: `eager` | `on-demand`
 
@@ -73,13 +73,18 @@ export class CollectionSyncManager<
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
-  private syncEpoch = 0
-  private loadSubsetSession = 0
+  // Fences callbacks retained across reentrant sync entry and cleanup. This
+  // changes at both boundaries; syncRunGeneration changes only at cleanup.
+  private syncCallbackEpoch = 0
+  private syncRunGeneration = 0
 
   /**
    * Creates a new CollectionSyncManager instance
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, any>,
+    id: string,
+  ) {
     this.config = config
     this.id = id
     this.syncMode = config.syncMode ?? `eager`
@@ -120,8 +125,8 @@ export class CollectionSyncManager<
       return
     }
 
-    const syncEpoch = ++this.syncEpoch
-    const isCurrentSync = () => syncEpoch === this.syncEpoch
+    const syncCallbackEpoch = ++this.syncCallbackEpoch
+    const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
     this.lifecycle.setStatus(`loading`)
     if (!isCurrentSync()) return
     let syncEntryActive = true
@@ -173,10 +178,6 @@ export class CollectionSyncManager<
               key = messageWithOptionalKey.key
             } else {
               key = this.config.getKey(messageWithOptionalKey.value)
-            }
-
-            if (this.state.pendingLocalChanges.has(key)) {
-              this.state.pendingLocalOrigins.add(key)
             }
 
             let messageType = messageWithOptionalKey.type
@@ -359,6 +360,12 @@ export class CollectionSyncManager<
             `Either provide a loadSubset handler or use syncMode "eager".`,
         )
       }
+
+      // Every route into sync passes through here, so it is the one place
+      // that sees sync start ahead of the subscriber that would justify it.
+      // `addSubscriber` counts itself in before calling us, so a subscription
+      // starting sync leaves the timer alone.
+      this.lifecycle.startGCTimerIfUnsubscribed()
     } catch (error) {
       syncEntryActive = false
       if (isCurrentSync()) this.lifecycle.markError(error)
@@ -390,7 +397,7 @@ export class CollectionSyncManager<
     this.syncStartRequested = false
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
-    const loadSubsetSession = this.loadSubsetSession
+    const syncRunGeneration = this.syncRunGeneration
 
     try {
       if (shouldStart) {
@@ -407,7 +414,7 @@ export class CollectionSyncManager<
       const loadSubset = this.syncLoadSubsetFn
       try {
         if (
-          loadSubsetSession !== this.loadSubsetSession ||
+          syncRunGeneration !== this.syncRunGeneration ||
           options.signal?.aborted
         ) {
           throw new LoadSubsetOperationAbortedError()
@@ -543,6 +550,11 @@ export class CollectionSyncManager<
     }
   }
 
+  /** Whether a caller is still waiting for the initial sync to finish. */
+  public get hasPendingPreload(): boolean {
+    return this.rejectPreload !== undefined
+  }
+
   /**
    * Preload the collection data by starting sync if not already started
    * Multiple concurrent calls will share the same promise
@@ -552,6 +564,12 @@ export class CollectionSyncManager<
       this.lifecycle.assertCanStartSync()
     } catch (error) {
       return Promise.reject(error)
+    }
+    // Warm preloads need the same handoff time as a load that just finished,
+    // including when the previous GC deadline already queued idle cleanup.
+    if (this.lifecycle.status === `ready`) {
+      this.lifecycle.cancelGCTimer()
+      this.lifecycle.startGCTimerIfUnsubscribed()
     }
     if (this.preloadPromise) {
       return this.preloadPromise
@@ -582,29 +600,33 @@ export class CollectionSyncManager<
       const syncStartState = { active: false, ready: false }
       let unsubscribeError = () => {}
       let unsubscribeReady = () => {}
+      const finishPreload = () => {
+        settled = true
+        unsubscribeError()
+        unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        this.lifecycle.startGCTimerIfUnsubscribed()
+      }
       const resolveReady = () => {
         if (syncStartState.active) {
           syncStartState.ready = true
           return
         }
         if (settled) return
-        settled = true
-        unsubscribeError()
-        unsubscribeReady()
-        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        finishPreload()
         resolve()
       }
       const rejectError = (error: unknown) => {
         if (settled) return
-        settled = true
-        unsubscribeError()
-        unsubscribeReady()
-        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        finishPreload()
         reject(error)
       }
 
       // Register callback BEFORE starting sync to avoid race condition
       this.rejectPreload = rejectError
+      // An awaited preload owns this sync run until it settles, including
+      // when GC has already queued the destructive idle callback.
+      this.lifecycle.cancelGCTimer()
       unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
       unsubscribeError = this.collection.on(`status:error`, () => {
         if (syncStartState.active) {
@@ -762,7 +784,7 @@ export class CollectionSyncManager<
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
   public trackLoadPromise(promise: Promise<unknown>): void {
-    const loadSubsetSession = this.loadSubsetSession
+    const syncRunGeneration = this.syncRunGeneration
     const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
     this.trackLoadSubsetOperationPromise(promise)
@@ -778,7 +800,7 @@ export class CollectionSyncManager<
     }
 
     const finish = () => {
-      if (loadSubsetSession !== this.loadSubsetSession) return
+      if (syncRunGeneration !== this.syncRunGeneration) return
 
       const loadingEnding =
         this.pendingLoadSubsetPromises.size === 1 &&
@@ -799,8 +821,8 @@ export class CollectionSyncManager<
   }
 
   /** @internal Generation fence for subscription-owned async work. */
-  public getLoadSubsetSession(): number {
-    return this.loadSubsetSession
+  public getSyncRunGeneration(): number {
+    return this.syncRunGeneration
   }
 
   /**
@@ -865,10 +887,10 @@ export class CollectionSyncManager<
   }
 
   public cleanup(): void {
-    // Invalidate callbacks retained by asynchronous work from this session
-    // before invoking adapter cleanup or allowing a new session to start.
-    const cleanupEpoch = ++this.syncEpoch
-    this.loadSubsetSession++
+    // Invalidate callbacks retained by asynchronous work from this sync run
+    // before invoking adapter cleanup or allowing a new sync run to start.
+    const cleanupCallbackEpoch = ++this.syncCallbackEpoch
+    this.syncRunGeneration++
     this.rejectPreload?.(new CollectionPreloadAbortedError())
     const cleanup = this.syncCleanupFn
     this.syncCleanupFn = null
@@ -878,8 +900,10 @@ export class CollectionSyncManager<
       cleanup?.()
     } catch (error) {
       // Keep failed cleanup retryable, but never overwrite a replacement
-      // session installed by reentrant adapter code.
-      if (this.syncEpoch === cleanupEpoch) this.syncCleanupFn = cleanup
+      // sync run installed by reentrant adapter code.
+      if (this.syncCallbackEpoch === cleanupCallbackEpoch) {
+        this.syncCleanupFn = cleanup
+      }
       // Re-throw in a microtask to surface the error after cleanup completes
       queueMicrotask(() => {
         if (error instanceof Error) {

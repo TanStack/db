@@ -3,8 +3,6 @@ id: TransactionState
 title: TransactionState
 ---
 
-# Type Alias: TransactionState
-
 ```ts
 type TransactionState = "pending" | "persisting" | "completed" | "failed";
 ```

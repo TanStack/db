@@ -20,6 +20,25 @@ import type {
   LifecycleModel,
 } from './collection-subscription-lifecycle-grammar.js'
 
+/**
+ * # Which lifecycle work may become public rows?
+ *
+ * The lifecycle grammar decides which acquisition attempt is current. This
+ * file adds the row-publication node. A truncate opens a private replacement;
+ * source writes accumulate there until every gating attempt succeeds. Failure
+ * retires that replacement. Independent live source work remains public.
+ *
+ * The reference state uses plain Maps and batches. It does not copy the
+ * subscription implementation. After every command, the driver compares exact
+ * insert, update, and delete batches, visible rows, status, syncRuns, and
+ * unloads. It also records the phase before each observation so a final-state
+ * match cannot hide an early or duplicate publication.
+ *
+ * Ownership and caller-promise outcomes stay in the lifecycle-history driver.
+ * This separation keeps the row model small while the shared command grammar
+ * still exercises their real dependency edge.
+ */
+
 type RowKey = DemandName | `c` | `d`
 type Row = { id: RowKey; value: number }
 type PublicationChange = {
@@ -43,7 +62,7 @@ type RuntimeAttempt = {
   id: number
   ownerId: number
   demand: DemandName
-  session: number
+  syncRunGeneration: number
   operations: SyncOperations
   deferred: ReturnType<typeof createDeferred<void>>
   signal: AbortSignal | undefined
@@ -58,8 +77,8 @@ type RuntimeOwner = {
   attemptId?: number
 }
 type Replacement = {
-  session: number
-  replay: number
+  syncRunGeneration: number
+  replayGeneration: number
   rows: Map<RowKey, Row>
   failed: boolean
 }
@@ -88,7 +107,7 @@ type PublicationObservation = {
   settlement?: `resolve` | `reject`
   publications: number
   unloads: number
-  sessions: number
+  syncRuns: number
   collectionStatus: string
 }
 type PublicationMismatch = {
@@ -103,6 +122,35 @@ type PublicationRunOptions = {
   continueAfterMismatch?: boolean
   historyName?: string
   mismatches?: Array<PublicationMismatch>
+  terminal?: {
+    order: `oldest-first` | `newest-first`
+    outcome: `resolve` | `reject`
+    expectedPending: number
+    reached: Array<number>
+  }
+}
+
+type TerminalPublicationSnapshot = {
+  batches: Array<Array<PublicationChange>>
+  visible: Array<Row>
+  statusEvents: Array<{ previousStatus: string; status: string }>
+  errors: Array<unknown>
+  status: string
+  subscriberCount: number
+  attempts: number
+  unloads: Array<number>
+  syncRuns: number
+}
+
+function assertTerminalPublication(
+  actual: TerminalPublicationSnapshot,
+  retired: TerminalPublicationSnapshot,
+): void {
+  expect(actual).toEqual(retired)
+  expect(actual.subscriberCount).toBe(0)
+  actual.errors.forEach((error, index) =>
+    expect(error).toBe(retired.errors[index]),
+  )
 }
 
 function recordSourceWrite(publication: PublicationModel, row: Row): void {
@@ -175,7 +223,7 @@ function publicationPhase(
     ),
   )
   return lifecycle.attempts.some(
-    ({ id, settled }) => currentAttemptIds.has(id) && settled,
+    ({ id, outcome }) => currentAttemptIds.has(id) && outcome !== undefined,
   )
     ? `private-settling`
     : `private-pending`
@@ -278,8 +326,8 @@ function projectPublication(
     }
     if (lifecycle.publicationBarrierOpen) {
       publication.replacement = {
-        session: lifecycle.session,
-        replay: lifecycle.replay,
+        syncRunGeneration: lifecycle.syncRunGeneration,
+        replayGeneration: lifecycle.replayGeneration,
         rows: new Map(publication.source),
         failed: false,
       }
@@ -319,8 +367,8 @@ function projectPublication(
     lifecycle.publicationBarrierOpen
   ) {
     publication.replacement = {
-      session: lifecycle.session,
-      replay: lifecycle.replay,
+      syncRunGeneration: lifecycle.syncRunGeneration,
+      replayGeneration: lifecycle.replayGeneration,
       rows: new Map(),
       failed: false,
     }
@@ -378,8 +426,8 @@ function projectPublication(
       const replacement = publication.replacement
       if (
         replacement &&
-        replacement.session === attempt.session &&
-        replacement.replay === attempt.replay
+        replacement.syncRunGeneration === attempt.syncRunGeneration &&
+        replacement.replayGeneration === attempt.replayGeneration
       ) {
         publication.source.set(row.id, row)
         replacement.rows.set(row.id, row)
@@ -491,10 +539,15 @@ async function runPublicationHistory(
   const unloads: Array<number> = []
   const owners: Array<RuntimeOwner> = []
   const sourceRows = new Map<number, Map<RowKey, Row>>()
-  const operationsBySession = new Map<number, SyncOperations>()
+  const operationsBySyncRun = new Map<number, SyncOperations>()
+  const outcomes = new Map<
+    number,
+    { state: `resolved` } | { state: `rejected`; error: unknown }
+  >()
+  const outcomeObservers = new Map<number, Promise<void>>()
   let nextAttemptId = 0
   let nextOwnerId = 0
-  let session = -1
+  let syncRun = -1
   let active = true
   let unsubscribed = false
 
@@ -504,9 +557,9 @@ async function runPublicationHistory(
     syncMode: runOptions.withoutLoader ? `eager` : `on-demand`,
     sync: {
       sync: (operations) => {
-        const ownSession = ++session
-        operationsBySession.set(ownSession, operations)
-        sourceRows.set(ownSession, new Map())
+        const ownSyncRun = ++syncRun
+        operationsBySyncRun.set(ownSyncRun, operations)
+        sourceRows.set(ownSyncRun, new Map())
         operations.markReady()
         if (runOptions.withoutLoader) return
         return {
@@ -523,11 +576,24 @@ async function runPublicationHistory(
             const id = nextAttemptId++
             const deferred = createDeferred<void>()
             void deferred.promise.catch(() => undefined)
+            if (runOptions.terminal) {
+              outcomeObservers.set(
+                id,
+                deferred.promise.then(
+                  () => {
+                    outcomes.set(id, { state: `resolved` })
+                  },
+                  (error: unknown) => {
+                    outcomes.set(id, { state: `rejected`, error })
+                  },
+                ),
+              )
+            }
             attempts.set(id, {
               id,
               ownerId: owner.id,
               demand,
-              session: ownSession,
+              syncRunGeneration: ownSyncRun,
               operations,
               deferred,
               signal: options.signal,
@@ -552,6 +618,8 @@ async function runPublicationHistory(
 
   const visible = new Map<RowKey, Row>()
   const observedBatches: Array<Array<PublicationChange>> = []
+  const statusEvents: TerminalPublicationSnapshot[`statusEvents`] = []
+  const errorEvents: Array<unknown> = []
   const subscription = collection.subscribeChanges(
     (changes) => {
       const batch = changes.map((change): PublicationChange => {
@@ -577,12 +645,29 @@ async function runPublicationHistory(
     },
     { includeInitialState: false },
   )
+  if (runOptions.terminal) {
+    subscription.on(`status:change`, ({ previousStatus, status }) => {
+      statusEvents.push({ previousStatus, status })
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => errorEvents.push(error))
+  }
+  const captureTerminal = (): TerminalPublicationSnapshot => ({
+    batches: clonePublicationBatches(observedBatches),
+    visible: [...visible.values()].map(cloneRow),
+    statusEvents: statusEvents.map((event) => ({ ...event })),
+    errors: [...errorEvents],
+    status: subscription.status,
+    subscriberCount: collection.subscriberCount,
+    attempts: attempts.size,
+    unloads: [...unloads],
+    syncRuns: operationsBySyncRun.size,
+  })
 
   const writeAttempt = async (attempt: RuntimeAttempt): Promise<void> => {
     // Cancellation fences request-scoped writes at the adapter boundary.
     // Transport may settle later; it must not publish canceled snapshot rows.
     if (attempt.signal?.aborted) return
-    const rows = sourceRows.get(attempt.session)
+    const rows = sourceRows.get(attempt.syncRunGeneration)
     const previous = rows?.get(attempt.demand)
     const value = { id: attempt.demand, value: attempt.id }
     attempt.operations.begin()
@@ -643,6 +728,7 @@ async function runPublicationHistory(
     return command.age === `oldest` ? candidates[0] : candidates.at(-1)
   }
 
+  const failures: Array<unknown> = []
   try {
     for (const [index, command] of history.entries()) {
       const priorPublicationCount = lifecycle.publications
@@ -653,7 +739,7 @@ async function runPublicationHistory(
       const observedPublicationCount = observedBatches.length
       const expectedPublicationCount = publication.batches.length
       const unloadCount = unloads.length
-      const sessionCount = operationsBySession.size
+      const syncRunCount = operationsBySyncRun.size
       let executed = false
       let sourceEffect: SourceEffect | undefined
       let settlement: `resolve` | `reject` | undefined
@@ -682,8 +768,8 @@ async function runPublicationHistory(
           : reduceLifecycle(lifecycle, command)
 
       if (command.type === `source` && active) {
-        const operations = operationsBySession.get(session)
-        const rows = sourceRows.get(session)
+        const operations = operationsBySyncRun.get(syncRun)
+        const rows = sourceRows.get(syncRun)
         const previous = rows?.get(command.key)
         executed = operations !== undefined && rows !== undefined
         sourceEffect =
@@ -757,7 +843,7 @@ async function runPublicationHistory(
           }
           owner.attemptId = undefined
         }
-        const operations = operationsBySession.get(session)
+        const operations = operationsBySyncRun.get(syncRun)
         operations?.begin()
         operations?.truncate()
         if (command.replacement) {
@@ -768,10 +854,10 @@ async function runPublicationHistory(
         }
         const receipt = operations?.commit()
         if (receipt !== true) await receipt
-        sourceRows.get(session)?.clear()
+        sourceRows.get(syncRun)?.clear()
         if (command.replacement) {
           sourceRows
-            .get(session)
+            .get(syncRun)
             ?.set(command.replacement.id, cloneRow(command.replacement))
         }
       } else if (command.type === `cleanup` && active) {
@@ -845,16 +931,67 @@ async function runPublicationHistory(
         ...(settlement ? { settlement } : {}),
         publications: observedBatches.length - observedPublicationCount,
         unloads: unloads.length - unloadCount,
-        sessions: operationsBySession.size - sessionCount,
+        syncRuns: operationsBySyncRun.size - syncRunCount,
         collectionStatus: collection.status,
       })
     }
+    if (runOptions.terminal) {
+      const terminal = runOptions.terminal
+      const pending = [...attempts.values()].filter(({ settled }) => !settled)
+      expect(pending).toHaveLength(terminal.expectedPending)
+      expect(pending.length).toBeGreaterThan(0)
+      if (terminal.order === `newest-first`) pending.reverse()
+      subscription.unsubscribe()
+      unsubscribed = true
+      const retired = captureTerminal()
+      expect(retired.subscriberCount).toBe(0)
+      for (const attempt of pending) {
+        expect(outcomes.has(attempt.id)).toBe(false)
+        const failure = new Error(`retired publication transport ${attempt.id}`)
+        attempt.settled = true
+        if (terminal.outcome === `resolve`) {
+          await writeAttempt(attempt)
+          attempt.deferred.resolve()
+        } else {
+          attempt.deferred.reject(failure)
+        }
+        await outcomeObservers.get(attempt.id)
+        await flushPromises()
+        terminal.reached.push(attempt.id)
+        const outcome = outcomes.get(attempt.id)
+        if (terminal.outcome === `resolve`)
+          expect(outcome).toEqual({ state: `resolved` })
+        else {
+          expect(outcome?.state).toBe(`rejected`)
+          if (outcome?.state === `rejected`) expect(outcome.error).toBe(failure)
+        }
+        assertTerminalPublication(captureTerminal(), retired)
+      }
+      expect(terminal.reached).toEqual(pending.map(({ id }) => id))
+    }
+  } catch (error) {
+    failures.push(error)
   } finally {
     for (const attempt of attempts.values()) attempt.deferred.resolve()
-    await flushPromises()
-    subscription.unsubscribe()
-    await collection.cleanup()
+    try {
+      await flushPromises()
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      subscription.unsubscribe()
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
   }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1)
+    throw new AggregateError(failures, `Publication history and cleanup failed`)
   return observations
 }
 
@@ -1028,6 +1165,14 @@ const publicationControlCases = publicationProductCases.filter(
     !replacementOrderingCases.includes(scenario) &&
     !replacementRetirementCases.includes(scenario),
 )
+// Keep each semantic cell intact while giving the aggregate campaign several
+// scheduler cuts. One 204-history test can exceed Vitest's per-test deadline
+// when the full oracle portfolio runs concurrently, even though no history is
+// slow or stuck.
+const publicationControlSlices = Array.from({ length: 4 }, (_, index) => ({
+  name: `${index * 51 + 1}-${(index + 1) * 51}`,
+  scenarios: publicationControlCases.slice(index * 51, (index + 1) * 51),
+}))
 
 async function runPublicationProduct(
   scenarios: ReadonlyArray<PublicationProductCase>,
@@ -1075,7 +1220,7 @@ async function runPublicationProduct(
     } else if (scenario.suffix === `cleanup`) {
       expect(suffix.collectionStatus, scenario.name).toBe(`cleaned-up`)
     } else if (scenario.suffix === `restart`) {
-      expect(suffix.sessions, scenario.name).toBe(1)
+      expect(suffix.syncRuns, scenario.name).toBe(1)
     } else {
       const ownerCount =
         scenario.phase === `private-settling` ||
@@ -1116,6 +1261,89 @@ function expectNoPublicationMismatches(
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it.each(
+    ([`initial`, `replay`, `restart`] as const).flatMap((phase) =>
+      [1, 2].flatMap((demandCount) =>
+        ([`resolve`, `reject`] as const).flatMap((outcome) =>
+          ([`oldest-first`, `newest-first`] as const).map((order) => ({
+            phase,
+            demandCount,
+            outcome,
+            order,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `observes retired transports without subscriber activity: %j`,
+    async ({ phase, demandCount, outcome, order }) => {
+      const history: Array<PublicationCommand> = [
+        { type: `source`, key: `c`, action: `upsert`, value: 42 },
+        { type: `request`, demand: `a` },
+        ...(demandCount === 2
+          ? [{ type: `request` as const, demand: `b` as const }]
+          : []),
+        ...(phase === `replay`
+          ? [{ type: `truncate` as const }]
+          : phase === `restart`
+            ? [{ type: `cleanup` as const }, { type: `restart` as const }]
+            : []),
+      ]
+      const reached: Array<number> = []
+      await runPublicationHistory(history, {
+        terminal: {
+          order,
+          outcome,
+          expectedPending: demandCount * (phase === `initial` ? 1 : 2),
+          reached,
+        },
+      })
+      expect(new Set(reached).size).toBe(
+        demandCount * (phase === `initial` ? 1 : 2),
+      )
+    },
+  )
+
+  it.each([`row`, `status`, `error`, `acquisition`] as const)(
+    `rejects a terminal %s observation with an unchanged-retired neighbor`,
+    (fault) => {
+      const retired: TerminalPublicationSnapshot = {
+        batches: [],
+        visible: [{ id: `c`, value: 42 }],
+        statusEvents: [],
+        errors: [],
+        status: `ready`,
+        subscriberCount: 0,
+        attempts: 2,
+        unloads: [0, 1],
+        syncRuns: 1,
+      }
+      const actual: TerminalPublicationSnapshot = {
+        ...retired,
+        batches: [],
+        visible: retired.visible.map(cloneRow),
+        statusEvents: [],
+        errors: [],
+        unloads: [...retired.unloads],
+      }
+      assertTerminalPublication(actual, retired)
+      if (fault === `row`)
+        actual.batches.push([
+          { type: `insert`, key: `a`, value: { id: `a`, value: 9 } },
+        ])
+      if (fault === `status`)
+        actual.statusEvents.push({
+          previousStatus: `ready`,
+          status: `loadingSubset`,
+        })
+      if (fault === `error`) actual.errors.push(new Error(`late transport`))
+      if (fault === `acquisition`) actual.attempts++
+      expect(() => assertTerminalPublication(actual, retired)).toThrowError(
+        /expected/,
+      )
+    },
+  )
+
   it.each(
     ([undefined, false] as const).flatMap((includeInitialState) =>
       ([`update`, `delete`, `truncate`] as const).map((operation) => ({
@@ -1422,11 +1650,12 @@ describe(`CollectionSubscription lifecycle publication oracle`, () => {
     expect(publicationControlCases).toHaveLength(204)
   })
 
-  it(`matches row publications for lifecycle control cells`, async () => {
-    expectNoPublicationMismatches(
-      await runPublicationProduct(publicationControlCases),
-    )
-  })
+  it.each(publicationControlSlices)(
+    `matches row publications for lifecycle control cells $name`,
+    async ({ scenarios }) => {
+      expectNoPublicationMismatches(await runPublicationProduct(scenarios))
+    },
+  )
 
   it(`preserves independent source work when a successful replay publishes`, async () => {
     expectNoPublicationMismatches(

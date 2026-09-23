@@ -3,8 +3,6 @@ id: getLoadSubsetDemandKey
 title: getLoadSubsetDemandKey
 ---
 
-# Function: getLoadSubsetDemandKey()
-
 ```ts
 function getLoadSubsetDemandKey(options): DemandKey | undefined;
 ```

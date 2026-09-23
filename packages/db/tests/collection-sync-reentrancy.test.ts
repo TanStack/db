@@ -700,7 +700,14 @@ describe(`sync publication reentrancy`, () => {
         `one`,
       ])
       expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
-      expect(callbacks).toEqual([
+      // Deltas form one batch; their order is not the collection's row order.
+      // Assert exact membership while retaining ordered public-read assertions.
+      expect(
+        callbacks.map((callback) => ({
+          ...callback,
+          changes: [...callback.changes].sort((a, b) => a - b),
+        })),
+      ).toEqual([
         {
           changes: [1, 2],
           keys: [2, 1],
@@ -932,7 +939,9 @@ describe(`sync publication reentrancy`, () => {
       expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
       expect(callbacks).toEqual([
         {
-          changes: [2, 1, 3, 1, 3, 1, 2],
+          // Delete the prior public layout [1, 2, 3], not the unpublished
+          // rank update's intermediate [2, 1, 3], then replay whole snapshots.
+          changes: [1, 2, 3, 1, 3, 1, 2],
           keys: [2, 1, 3],
           values: [`two`, `optimistic-one`, `optimistic-three`],
           markedReceiptSettled: false,

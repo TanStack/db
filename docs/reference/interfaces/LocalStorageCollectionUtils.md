@@ -3,8 +3,6 @@ id: LocalStorageCollectionUtils
 title: LocalStorageCollectionUtils
 ---
 
-# Interface: LocalStorageCollectionUtils
-
 Defined in: [packages/db/src/local-storage.ts:102](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L102)
 
 LocalStorage collection utilities type

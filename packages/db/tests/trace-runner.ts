@@ -48,18 +48,25 @@ function isPromiseLike<T>(value: MaybePromise<T>): value is PromiseLike<T> {
   )
 }
 
-function attachSuppressedError(error: unknown, suppressed: unknown): void {
-  if (!(error instanceof Error)) return
-
-  try {
-    const errorWithSuppressed = error as ErrorWithSuppressed
-    errorWithSuppressed.suppressed = [
-      ...(errorWithSuppressed.suppressed ?? []),
-      suppressed,
-    ]
-  } catch {
-    // A frozen or otherwise immutable error must still remain the primary one.
+function attachSuppressedError(error: unknown, suppressed: unknown): unknown {
+  if (error instanceof Error) {
+    try {
+      const errorWithSuppressed = error as ErrorWithSuppressed
+      const failures = [...(errorWithSuppressed.suppressed ?? []), suppressed]
+      Object.defineProperty(error, `suppressed`, {
+        value: failures,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      })
+      return error
+    } catch {
+      // Immutable primary errors still need both pieces of failure evidence.
+    }
   }
+  return new AggregateError([error, suppressed], `Trace and cleanup failed`, {
+    cause: error,
+  })
 }
 
 /**
@@ -113,7 +120,7 @@ export async function runTrace<TStep, TContext, TObserved, TExpected>({
     if (isPromiseLike(cleanupResult)) await cleanupResult
   } catch (cleanupError) {
     if (!traceFailed) throw cleanupError
-    attachSuppressedError(traceError, cleanupError)
+    traceError = attachSuppressedError(traceError, cleanupError)
   }
 
   if (traceFailed) throw traceError

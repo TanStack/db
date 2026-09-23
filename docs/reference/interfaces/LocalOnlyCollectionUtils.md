@@ -3,8 +3,6 @@ id: LocalOnlyCollectionUtils
 title: LocalOnlyCollectionUtils
 ---
 
-# Interface: LocalOnlyCollectionUtils
-
 Defined in: [packages/db/src/local-only.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L42)
 
 Local-only collection utilities type

@@ -3,8 +3,6 @@ id: getStableValueHash
 title: getStableValueHash
 ---
 
-# Function: getStableValueHash()
-
 ```ts
 function getStableValueHash(value, path): string;
 ```

@@ -3,8 +3,6 @@ title: Error Handling
 id: error-handling
 ---
 
-# Error Handling
-
 TanStack DB provides comprehensive error handling capabilities to ensure robust data synchronization and state management. This guide covers the built-in error handling mechanisms and how to work with them effectively.
 
 ## Error Types
@@ -578,14 +576,16 @@ await collection.cleanup() // Resolves successfully
 
 ### Collection Cleanup and Restart
 
-Clean up collections in error states:
+Cleanup ends the current sync run and releases the resources installed by its
+`sync()` call. A later access can start a new sync run. Clean up collections in
+error states like this:
 
 ```ts
 if (todoCollection.status === "error") {
-  // Cleanup will stop sync and reset the collection
+  // Cleanup ends the current sync run and resets the collection
   await todoCollection.cleanup()
   
-  // Collection will automatically restart on next access
+  // The next access starts a new sync run
   todoCollection.preload() // Or any other operation
 }
 ```

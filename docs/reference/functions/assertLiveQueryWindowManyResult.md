@@ -3,8 +3,6 @@ id: assertLiveQueryWindowManyResult
 title: assertLiveQueryWindowManyResult
 ---
 
-# Function: assertLiveQueryWindowManyResult()
-
 ```ts
 function assertLiveQueryWindowManyResult(collection): void;
 ```
