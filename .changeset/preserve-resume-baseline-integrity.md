@@ -1,6 +1,7 @@
 ---
 '@tanstack/db-sqlite-persistence-core': minor
 '@tanstack/db': minor
+'@tanstack/browser-db-sqlite-persistence': patch
 '@tanstack/electron-db-sqlite-persistence': minor
 '@tanstack/electric-db-collection': patch
 '@tanstack/query-db-collection': patch

@@ -1,11 +1,15 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persistence-core'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  InvalidPersistedCollectionConfigError,
+  persistedCollectionOptions,
+} from '@tanstack/db-sqlite-persistence-core'
 import { createNodeSQLitePersistence } from '@tanstack/node-db-sqlite-persistence'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import {
+  ElectronCollectionCoordinator,
   createElectronSQLitePersistence,
   exposeElectronSQLitePersistence,
 } from '../src'
@@ -262,6 +266,118 @@ describe(`electron sqlite persistence bridge`, () => {
       rows: [],
     })
   })
+
+  it.each([
+    { schemaV1: 1, schemaV2: 2 },
+    { schemaV1: 2, schemaV2: 4 },
+  ])(
+    `routes coordinator writes through each collection's renderer adapter: $schemaV1/$schemaV2`,
+    async ({ schemaV1, schemaV2 }) => {
+      const dbPath = createTempDbPath()
+      const invokeHarness = createInvokeHarness(dbPath, `unused`)
+      activeCleanupFns.push(() => invokeHarness.close())
+      const originalNavigator = globalThis.navigator
+      Object.defineProperty(globalThis, `navigator`, {
+        configurable: true,
+        value: {
+          ...originalNavigator,
+          locks: {
+            request: (
+              _name: string,
+              optionsOrCallback:
+                | { signal?: AbortSignal }
+                | ((lock: { name: string }) => Promise<unknown>),
+              maybeCallback?: (lock: { name: string }) => Promise<unknown>,
+            ) => {
+              const callback =
+                typeof optionsOrCallback === `function`
+                  ? optionsOrCallback
+                  : maybeCallback!
+              return callback({ name: _name })
+            },
+          },
+        },
+      })
+
+      const coordinator = new ElectronCollectionCoordinator({
+        dbName: `electron-schema-routing`,
+      })
+      const persistence = createElectronSQLitePersistence({
+        invoke: invokeHarness.invoke,
+        coordinator,
+      })
+      const collectionV1 = `electron-schema-v1`
+      const collectionV2 = `electron-schema-v2`
+
+      try {
+        const optionsV1 = persistedCollectionOptions<
+          { id: string; title: string },
+          string
+        >({
+          id: collectionV1,
+          schemaVersion: schemaV1,
+          getKey: (row) => row.id,
+          persistence,
+        })
+        const optionsV2 = persistedCollectionOptions<
+          { id: string; title: string },
+          string
+        >({
+          id: collectionV2,
+          schemaVersion: schemaV2,
+          getKey: (row) => row.id,
+          persistence,
+        })
+        await optionsV1.persistence.adapter.loadResumeSnapshot(collectionV1)
+        await optionsV2.persistence.adapter.loadResumeSnapshot(collectionV2)
+
+        coordinator.subscribe(collectionV1, () => {})
+        coordinator.subscribe(collectionV2, () => {})
+        await vi.waitFor(() => {
+          expect(coordinator.isLeader(collectionV1)).toBe(true)
+          expect(coordinator.isLeader(collectionV2)).toBe(true)
+        })
+
+        const [resultV1, resultV2] = await Promise.all([
+          coordinator.requestApplyLocalMutations(collectionV1, [
+            {
+              mutationId: `mutation-v1`,
+              type: `insert`,
+              key: `v1`,
+              value: { id: `v1`, title: `schema one` },
+            },
+          ]),
+          coordinator.requestApplyLocalMutations(collectionV2, [
+            {
+              mutationId: `mutation-v2`,
+              type: `insert`,
+              key: `v2`,
+              value: { id: `v2`, title: `schema two` },
+            },
+          ]),
+        ])
+
+        expect(resultV1.ok).toBe(true)
+        expect(resultV2.ok).toBe(true)
+        expect(
+          await optionsV1.persistence.adapter.loadSubset(collectionV1, {}),
+        ).toMatchObject([
+          { key: `v1`, value: { id: `v1`, title: `schema one` } },
+        ])
+        expect(
+          await optionsV2.persistence.adapter.loadSubset(collectionV2, {}),
+        ).toMatchObject([
+          { key: `v2`, value: { id: `v2`, title: `schema two` } },
+        ])
+      } finally {
+        coordinator.dispose()
+        Object.defineProperty(globalThis, `navigator`, {
+          configurable: true,
+          value: originalNavigator,
+        })
+      }
+    },
+  )
 
   it(`persists data across main process restarts`, async () => {
     const dbPath = createTempDbPath()

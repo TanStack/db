@@ -936,13 +936,14 @@ class PersistedCollectionRuntime<
     }
   }
 
-  async ensureStarted(): Promise<void> {
+  ensureStarted(): Promise<void> {
     if (this.startPromise) {
       return this.startPromise
     }
 
     const lifecycleGeneration = this.lifecycleGeneration
     this.startPromise = this.startInternal(lifecycleGeneration)
+    void this.startPromise.catch(() => undefined)
     return this.startPromise
   }
 
@@ -1247,6 +1248,10 @@ class PersistedCollectionRuntime<
     }
 
     await this.applyMutex.run(async () => {
+      // Startup metadata establishes the durable term/sequence boundary. A
+      // mutation admitted before it resolves must wait rather than allocate a
+      // default position that can collide with an already-applied transaction.
+      await this.ensureStartupMetadataLoaded()
       const acceptedMutationIds =
         await this.persistCollectionMutationsUnsafe(mutations)
       const acceptedMutationIdSet = new Set(acceptedMutationIds)
@@ -1479,18 +1484,27 @@ class PersistedCollectionRuntime<
     resetEpoch: number
   }): void {
     const generation = this.getResumeSnapshotGeneration(snapshot)
-    // Moving between equally uncertified snapshots cannot make either
-    // trustworthy; preserve that status so sync performs a fresh replacement.
-    const remainsUncertified =
-      this.persistedKeySetEvidence?.status === snapshot.keySet?.status &&
-      snapshot.keySet?.status !== `consistent`
+    const previousEvidenceStatus = this.persistedKeySetEvidence?.status
+    // An uncertified sync baseline never authorized a persisted resume cursor,
+    // so a later atomic snapshot may replace its evidence while the source
+    // performs the already-required fresh snapshot. Local-only collections
+    // have no remote cursor to fence; a managed write may advance a still-
+    // consistent SQLite baseline during startup. Incompatible evidence remains
+    // fail-closed in both modes.
+    const mayAcceptUnownedGeneration =
+      (this.mode === `sync-present` &&
+        previousEvidenceStatus !== `consistent` &&
+        previousEvidenceStatus !== `incompatible`) ||
+      (this.mode === `sync-absent` &&
+        previousEvidenceStatus === `consistent` &&
+        snapshot.keySet?.status === `consistent`)
     this.observeStreamPosition(
       snapshot.latestTerm,
       snapshot.latestSeq,
       snapshot.latestRowVersion,
     )
     this.persistedKeySetEvidence =
-      this.isExpectedResumeGeneration(generation) || remainsUncertified
+      this.isExpectedResumeGeneration(generation) || mayAcceptUnownedGeneration
         ? snapshot.keySet
         : { status: `incompatible` }
   }

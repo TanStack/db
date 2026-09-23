@@ -392,6 +392,66 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection.utils.getLeadershipState?.().isLeader).toBe(true)
   })
 
+  it(`hydrates a local-only baseline after a managed write advances startup evidence`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `baseline`, title: `Persisted before startup` },
+    ])
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    let releaseInitialSnapshot!: () => void
+    const initialSnapshotRelease = new Promise<void>((resolve) => {
+      releaseInitialSnapshot = resolve
+    })
+    let reportInitialSnapshot!: () => void
+    const initialSnapshotCaptured = new Promise<void>((resolve) => {
+      reportInitialSnapshot = resolve
+    })
+    let snapshotCalls = 0
+    adapter.loadResumeSnapshot = async (...args) => {
+      const snapshot = await loadResumeSnapshot(...args)
+      snapshotCalls++
+      if (snapshotCalls === 1) {
+        reportInitialSnapshot()
+        await initialSnapshotRelease
+      }
+      return snapshot
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-only-startup-write`,
+        startSync: false,
+        getKey: (item) => item.id,
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await initialSnapshotCaptured
+
+      const insert = collection.insert({
+        id: `concurrent`,
+        title: `Managed during startup`,
+      })
+      releaseInitialSnapshot()
+      await insert.isPersisted.promise
+      await collection.stateWhenReady()
+      await vi.waitFor(() => expect(snapshotCalls).toBeGreaterThanOrEqual(2))
+
+      expect(
+        Array.from(collection.values(), (row) => stripVirtualProps(row)).sort(
+          (left, right) => left.id.localeCompare(right.id),
+        ),
+      ).toEqual([
+        { id: `baseline`, title: `Persisted before startup` },
+        { id: `concurrent`, title: `Managed during startup` },
+      ])
+    } finally {
+      releaseInitialSnapshot()
+      await collection.cleanup()
+    }
+  })
+
   it(`supports acceptMutations for manual transactions`, async () => {
     const adapter = createRecordingAdapter()
     const collection = createCollection(
@@ -549,6 +609,10 @@ describe(`persistedCollectionOptions`, () => {
       mode: `until-revalidated`,
     })
   })
+
+  it.todo(
+    `loads active subsets and collection metadata from one atomic full-reload generation`,
+  )
 
   it(`persists metadata-only wrapped sync transactions`, async () => {
     const adapter = createRecordingAdapter()

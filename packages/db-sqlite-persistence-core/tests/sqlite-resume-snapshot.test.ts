@@ -1,11 +1,15 @@
 import { DatabaseSync } from 'node:sqlite'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
+import { createCollection } from '@tanstack/db'
 import {
   SQLiteCorePersistenceAdapter,
   createPersistedTableName,
   encodePersistedStorageKey,
+  persistedCollectionOptions,
 } from '../src'
 import type { SQLiteDriver } from '../src'
+import type { Collection } from '@tanstack/db'
 
 type CachedSchemaState = {
   schemaVersion: number
@@ -225,6 +229,10 @@ async function observeCachedSchemaState(
  * compares the entire projected schema state; the held boundary and reset epoch
  * are reach witnesses, while compatible reopen and recertifying truncate cases
  * prevent an oracle that merely rejects every resume.
+ * A separate generated startup lane holds the runtime between its metadata and
+ * hydration snapshots, then crosses no write, a managed public insert, and a
+ * hostile raw deletion over one-to-three baseline rows. Its independent model
+ * preserves every managed row but fails closed for unsupported raw loss.
  * The focused work law first executes one controlled expected-key table read to
  * prove its SQL observer can detect the forbidden membership work, then resets
  * the counters before measuring the public position and snapshot operations.
@@ -236,6 +244,165 @@ async function observeCachedSchemaState(
  * and Electric recovery owners.
  */
 describe(`SQLite resume snapshots`, () => {
+  it(`preserves local-only startup histories across managed generation advancement`, async () => {
+    const historyArbitrary = fc.record({
+      baselineSize: fc.integer({ min: 1, max: 3 }),
+      transition: fc.constantFrom(
+        `none` as const,
+        `managed-insert` as const,
+        `raw-delete` as const,
+      ),
+    })
+
+    await fc.assert(
+      fc.asyncProperty(historyArbitrary, async (history) => {
+        const database = new DatabaseSync(`:memory:`)
+        let primaryFailure: unknown
+        let releaseInitialSnapshot = () => {}
+        let collection:
+          | Collection<{ id: string; title: string }, string>
+          | undefined
+        try {
+          const driver = createDriver(database)
+          const collectionId = `generated-local-startup`
+          const adapter = new SQLiteCorePersistenceAdapter({ driver })
+          const baselineRows = Array.from(
+            { length: history.baselineSize },
+            (_, index) => ({
+              id: `baseline-${index}`,
+              title: `baseline-${index}`,
+            }),
+          )
+          await adapter.applyCommittedTx(collectionId, {
+            txId: `seed`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            truncate: true,
+            mutations: baselineRows.map((row) => ({
+              type: `insert` as const,
+              key: row.id,
+              value: row,
+            })),
+          })
+
+          const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+          const reachedInitialSnapshot = deferred()
+          const reachedHydrationSnapshot = deferred()
+          const initialSnapshotRelease = deferred()
+          releaseInitialSnapshot = initialSnapshotRelease.resolve
+          let snapshotCalls = 0
+          adapter.loadResumeSnapshot = async (...args) => {
+            const snapshot = await loadResumeSnapshot(...args)
+            snapshotCalls++
+            if (snapshotCalls === 1) {
+              reachedInitialSnapshot.resolve()
+              await initialSnapshotRelease.promise
+            } else if (snapshotCalls === 2) {
+              reachedHydrationSnapshot.resolve()
+            }
+            return snapshot
+          }
+
+          collection = createCollection(
+            persistedCollectionOptions<{ id: string; title: string }, string>({
+              id: collectionId,
+              startSync: false,
+              getKey: (row) => row.id,
+              persistence: { adapter },
+            }),
+          )
+          collection.startSyncImmediate()
+          await reachCheckpoint(
+            reachedInitialSnapshot.promise,
+            `generated local startup metadata snapshot`,
+          )
+
+          const managedRow = {
+            id: `managed`,
+            title: `managed-during-startup`,
+          }
+          let managedPersistence: Promise<unknown> | undefined
+          let managedPersistenceSettled = false
+          if (history.transition === `managed-insert`) {
+            managedPersistence =
+              collection.insert(managedRow).isPersisted.promise
+            void managedPersistence.then(
+              () => {
+                managedPersistenceSettled = true
+              },
+              () => {
+                managedPersistenceSettled = true
+              },
+            )
+            for (let attempt = 0; attempt < 20; attempt++) {
+              await Promise.resolve()
+            }
+            expect(managedPersistenceSettled).toBe(false)
+          } else if (history.transition === `raw-delete`) {
+            const tableName = createPersistedTableName(collectionId, `c`)
+            await driver.run(`DELETE FROM "${tableName}" WHERE key = ?`, [
+              encodePersistedStorageKey(baselineRows[0]!.id),
+            ])
+          }
+
+          releaseInitialSnapshot()
+          await managedPersistence
+          await collection.stateWhenReady()
+          await reachCheckpoint(
+            reachedHydrationSnapshot.promise,
+            `generated local startup hydration snapshot`,
+          )
+          const visibleRows = Array.from(
+            collection.values(),
+            ({ id, title }) => ({
+              id,
+              title,
+            }),
+          ).sort((left, right) => left.id.localeCompare(right.id))
+          const expectedRows =
+            history.transition === `raw-delete`
+              ? []
+              : [
+                  ...baselineRows,
+                  ...(history.transition === `managed-insert`
+                    ? [managedRow]
+                    : []),
+                ].sort((left, right) => left.id.localeCompare(right.id))
+
+          expect(visibleRows).toEqual(expectedRows)
+          if (history.transition === `managed-insert`) {
+            const durableRows = (await loadResumeSnapshot(collectionId)).rows
+              .map(({ value }) => value)
+              .sort((left, right) =>
+                String(left.id).localeCompare(String(right.id)),
+              )
+            expect(durableRows).toEqual(expectedRows)
+          }
+          if (history.transition === `raw-delete`) {
+            expect((await loadResumeSnapshot(collectionId)).keySet).toEqual({
+              status: `incompatible`,
+            })
+          }
+        } catch (error) {
+          primaryFailure = error
+        } finally {
+          releaseInitialSnapshot()
+          try {
+            await collection?.cleanup()
+          } catch (cleanupError) {
+            if (primaryFailure === undefined) primaryFailure = cleanupError
+          }
+          closeDatabasePreservingPrimary(database, primaryFailure)
+        }
+      }),
+      {
+        seed: 1659,
+        numRuns: 12,
+      },
+    )
+  })
+
   it(`reads key-set evidence without rescanning key membership`, async () => {
     const database = new DatabaseSync(`:memory:`)
     let primaryFailure: unknown
@@ -948,6 +1115,208 @@ describe(`SQLite resume snapshots`, () => {
         before,
         after: before,
       })
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  it(`rejects a resume snapshot from a cached adapter after another adapter resets the schema`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const driver = createDriver(database)
+      const collectionId = `cached-schema-snapshot`
+      const staleV1 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 1,
+      })
+      await staleV1.applyCommittedTx(collectionId, {
+        txId: `seed-v1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+      })
+      await staleV1.loadResumeSnapshot(collectionId)
+
+      const currentV2 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 2,
+      })
+      await currentV2.loadSubset(collectionId, {})
+      await currentV2.applyCommittedTx(collectionId, {
+        txId: `seed-v2`,
+        term: 2,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
+        collectionMetadataMutations: [
+          { type: `set`, key: `cursor`, value: `v2` },
+        ],
+      })
+
+      await expect(staleV1.loadResumeSnapshot(collectionId)).rejects.toThrow(
+        `Schema version mismatch`,
+      )
+      expect(await currentV2.loadResumeSnapshot(collectionId)).toMatchObject({
+        rows: [{ key: 2, value: { id: 2 } }],
+        collectionMetadata: [{ key: `cursor`, value: `v2` }],
+      })
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  it(`rejects cached row readers after another adapter resets the schema`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const driver = createDriver(database)
+      const collectionId = `cached-schema-row-readers`
+      const staleV1 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 1,
+      })
+      await staleV1.applyCommittedTx(collectionId, {
+        txId: `seed-v1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: 1, value: { id: 1 } }],
+      })
+      await staleV1.loadSubset(collectionId, {})
+
+      const currentV2 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 2,
+      })
+      await currentV2.loadSubset(collectionId, {})
+      await currentV2.applyCommittedTx(collectionId, {
+        txId: `seed-v2`,
+        term: 2,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: 2, value: { id: 2 } }],
+      })
+
+      const staleReads = await Promise.allSettled([
+        staleV1.loadSubset(collectionId, {}),
+        staleV1.scanRows(collectionId),
+        staleV1.pullSince(collectionId, 0),
+      ])
+      expect(staleReads.map(({ status }) => status)).toEqual([
+        `rejected`,
+        `rejected`,
+        `rejected`,
+      ])
+      expect(await currentV2.loadSubset(collectionId, {})).toMatchObject([
+        { key: 2, value: { id: 2 } },
+      ])
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  it(`rejects cached collection-metadata reads after another adapter resets the schema`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const driver = createDriver(database)
+      const collectionId = `cached-schema-metadata-reader`
+      const staleV1 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 1,
+      })
+      await staleV1.applyCommittedTx(collectionId, {
+        txId: `seed-v1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [],
+        collectionMetadataMutations: [
+          { type: `set`, key: `cursor`, value: `v1` },
+        ],
+      })
+      await staleV1.loadSubset(collectionId, {})
+
+      const currentV2 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 2,
+      })
+      await currentV2.loadSubset(collectionId, {})
+      await currentV2.applyCommittedTx(collectionId, {
+        txId: `seed-v2`,
+        term: 2,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [],
+        collectionMetadataMutations: [
+          { type: `set`, key: `cursor`, value: `v2` },
+        ],
+      })
+
+      await expect(
+        staleV1.loadCollectionMetadata(collectionId),
+      ).rejects.toThrow(`Schema version mismatch`)
+      expect(await currentV2.loadCollectionMetadata(collectionId)).toEqual([
+        { key: `cursor`, value: `v2` },
+      ])
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  it(`rejects cached index lifecycle writes after another adapter resets the schema`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const driver = createDriver(database)
+      const collectionId = `cached-schema-index-writers`
+      const staleV1 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 1,
+      })
+      await staleV1.loadSubset(collectionId, {})
+
+      const currentV2 = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 2,
+      })
+      await currentV2.loadSubset(collectionId, {})
+      await currentV2.ensureIndex(collectionId, `v2-index`, {
+        expressionSql: [`json_extract(value, '$.id')`],
+      })
+
+      const staleWrites = await Promise.allSettled([
+        staleV1.ensureIndex(collectionId, `stale-v1-index`, {
+          expressionSql: [`json_extract(value, '$.legacy')`],
+        }),
+        staleV1.markIndexRemoved(collectionId, `v2-index`),
+      ])
+      expect(staleWrites.map(({ status }) => status)).toEqual([
+        `rejected`,
+        `rejected`,
+      ])
+
+      const currentIndexes = await driver.query<{
+        signature: string
+        removed: number
+      }>(
+        `SELECT signature, removed
+         FROM persisted_index_registry
+         WHERE collection_id = ?
+         ORDER BY signature`,
+        [collectionId],
+      )
+      expect(currentIndexes).toEqual([{ signature: `v2-index`, removed: 0 }])
     } catch (error) {
       primaryFailure = error
     } finally {

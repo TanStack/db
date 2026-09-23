@@ -1098,6 +1098,28 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     return this.driver.transaction(fn)
   }
 
+  private async assertCurrentSchemaVersion(
+    collectionId: string,
+    driver: SQLiteDriver,
+    operation: string,
+  ): Promise<void> {
+    const schemaRows = await driver.query<{ schema_version: number }>(
+      `SELECT schema_version
+       FROM collection_registry
+       WHERE collection_id = ?
+       LIMIT 1`,
+      [collectionId],
+    )
+    const persistedSchemaVersion = schemaRows[0]?.schema_version
+    if (persistedSchemaVersion !== this.schemaVersion) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Schema version mismatch for collection "${collectionId}": ` +
+          `found ${persistedSchemaVersion ?? `missing`}, expected ${this.schemaVersion}. ` +
+          `Refusing to ${operation} through a stale cached adapter.`,
+      )
+    }
+  }
+
   async loadSubset(
     collectionId: string,
     options: LoadSubsetOptions,
@@ -1110,54 +1132,77 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }>
   > {
     const tableMapping = await this.ensureCollectionReady(collectionId)
-    await this.touchRequiredIndexes(collectionId, ctx?.requiredIndexSignatures)
-
-    if (options.cursor) {
-      const whereCurrentOptions: LoadSubsetOptions = {
-        where: options.where
-          ? new IR.Func(`and`, [options.where, options.cursor.whereCurrent])
-          : options.cursor.whereCurrent,
-        orderBy: options.orderBy,
-      }
-      const whereFromOptions: LoadSubsetOptions = {
-        where: options.where
-          ? new IR.Func(`and`, [options.where, options.cursor.whereFrom])
-          : options.cursor.whereFrom,
-        orderBy: options.orderBy,
-        limit: options.limit,
-      }
-
-      const [whereCurrentRows, whereFromRows] = await Promise.all([
-        this.loadSubsetInternal(tableMapping, whereCurrentOptions),
-        this.loadSubsetInternal(tableMapping, whereFromOptions),
-      ])
-
-      const mergedRows = new Map<
-        string,
-        InMemoryRow<string | number, Record<string, unknown>>
-      >()
-      for (const row of [...whereCurrentRows, ...whereFromRows]) {
-        mergedRows.set(encodePersistedStorageKey(row.key), row)
-      }
-
-      const orderedRows = this.applyInMemoryOrderBy(
-        Array.from(mergedRows.values()),
-        options.orderBy,
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `load persisted rows`,
+      )
+      await this.touchRequiredIndexes(
+        collectionId,
+        ctx?.requiredIndexSignatures,
+        transactionDriver,
       )
 
-      return orderedRows.map((row) => ({
+      if (options.cursor) {
+        const whereCurrentOptions: LoadSubsetOptions = {
+          where: options.where
+            ? new IR.Func(`and`, [options.where, options.cursor.whereCurrent])
+            : options.cursor.whereCurrent,
+          orderBy: options.orderBy,
+        }
+        const whereFromOptions: LoadSubsetOptions = {
+          where: options.where
+            ? new IR.Func(`and`, [options.where, options.cursor.whereFrom])
+            : options.cursor.whereFrom,
+          orderBy: options.orderBy,
+          limit: options.limit,
+        }
+
+        const [whereCurrentRows, whereFromRows] = await Promise.all([
+          this.loadSubsetInternal(
+            tableMapping,
+            whereCurrentOptions,
+            transactionDriver,
+          ),
+          this.loadSubsetInternal(
+            tableMapping,
+            whereFromOptions,
+            transactionDriver,
+          ),
+        ])
+
+        const mergedRows = new Map<
+          string,
+          InMemoryRow<string | number, Record<string, unknown>>
+        >()
+        for (const row of [...whereCurrentRows, ...whereFromRows]) {
+          mergedRows.set(encodePersistedStorageKey(row.key), row)
+        }
+
+        const orderedRows = this.applyInMemoryOrderBy(
+          Array.from(mergedRows.values()),
+          options.orderBy,
+        )
+
+        return orderedRows.map((row) => ({
+          key: row.key,
+          value: row.value,
+          metadata: row.metadata,
+        }))
+      }
+
+      const rows = await this.loadSubsetInternal(
+        tableMapping,
+        options,
+        transactionDriver,
+      )
+      return rows.map((row) => ({
         key: row.key,
         value: row.value,
         metadata: row.metadata,
       }))
-    }
-
-    const rows = await this.loadSubsetInternal(tableMapping, options)
-    return rows.map((row) => ({
-      key: row.key,
-      value: row.value,
-      metadata: row.metadata,
-    }))
+    })
   }
 
   async loadResumeSnapshot(
@@ -1181,14 +1226,21 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   }> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const includeRows = ctx?.includeRows !== false
-    if (includeRows) {
-      await this.touchRequiredIndexes(
-        collectionId,
-        ctx?.requiredIndexSignatures,
-      )
-    }
 
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `load a resume snapshot`,
+      )
+      if (includeRows) {
+        await this.touchRequiredIndexes(
+          collectionId,
+          ctx?.requiredIndexSignatures,
+          transactionDriver,
+        )
+      }
+
       const rows = includeRows
         ? await this.loadSubsetInternal(tableMapping, {}, transactionDriver)
         : []
@@ -1517,17 +1569,28 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   async loadCollectionMetadata(
     collectionId: string,
   ): Promise<Array<{ key: string; value: unknown }>> {
-    const rows = await this.driver.query<{ key: string; value: string }>(
-      `SELECT key, value
-       FROM collection_metadata
-       WHERE collection_id = ?`,
-      [collectionId],
-    )
+    await this.ensureCollectionReady(collectionId)
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `load collection metadata`,
+      )
+      const rows = await transactionDriver.query<{
+        key: string
+        value: string
+      }>(
+        `SELECT key, value
+         FROM collection_metadata
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
 
-    return rows.map((row) => ({
-      key: row.key,
-      value: deserializePersistedRowValue(row.value),
-    }))
+      return rows.map((row) => ({
+        key: row.key,
+        value: deserializePersistedRowValue(row.value),
+      }))
+    })
   }
 
   async scanRows(
@@ -1536,21 +1599,27 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   ): Promise<Array<PersistedScannedRow>> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `scan persisted rows`,
+      )
+      const storedRows = await transactionDriver.query<StoredSqliteRow>(
+        options?.metadataOnly
+          ? `SELECT key, value, metadata, row_version
+             FROM ${collectionTableSql}
+             WHERE metadata IS NOT NULL`
+          : `SELECT key, value, metadata, row_version
+             FROM ${collectionTableSql}`,
+      )
 
-    const storedRows = await this.driver.query<StoredSqliteRow>(
-      options?.metadataOnly
-        ? `SELECT key, value, metadata, row_version
-           FROM ${collectionTableSql}
-           WHERE metadata IS NOT NULL`
-        : `SELECT key, value, metadata, row_version
-           FROM ${collectionTableSql}`,
-    )
-
-    return decodeStoredSqliteRows(storedRows).map((row) => ({
-      key: row.key,
-      value: row.value,
-      metadata: row.metadata,
-    }))
+      return decodeStoredSqliteRows(storedRows).map((row) => ({
+        key: row.key,
+        value: row.value,
+        metadata: row.metadata,
+      }))
+    })
   }
 
   async ensureIndex(
@@ -1571,6 +1640,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       : undefined
 
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `create a persisted index`,
+      )
       await transactionDriver.run(
         `INSERT INTO persisted_index_registry (
            collection_id,
@@ -1618,29 +1692,36 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     signature: string,
   ): Promise<void> {
     await this.ensureCollectionReady(collectionId)
-    const rows = await this.driver.query<{ index_name: string }>(
-      `SELECT index_name
-       FROM persisted_index_registry
-       WHERE collection_id = ? AND signature = ?
-       LIMIT 1`,
-      [collectionId, signature],
-    )
-    const indexName = rows[0]?.index_name
-
-    await this.driver.run(
-      `UPDATE persisted_index_registry
-       SET removed = 1,
-           updated_at = CAST(strftime('%s', 'now') AS INTEGER),
-           last_used_at = CAST(strftime('%s', 'now') AS INTEGER)
-       WHERE collection_id = ? AND signature = ?`,
-      [collectionId, signature],
-    )
-
-    if (indexName) {
-      await this.driver.exec(
-        `DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`,
+    await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `remove a persisted index`,
       )
-    }
+      const rows = await transactionDriver.query<{ index_name: string }>(
+        `SELECT index_name
+         FROM persisted_index_registry
+         WHERE collection_id = ? AND signature = ?
+         LIMIT 1`,
+        [collectionId, signature],
+      )
+      const indexName = rows[0]?.index_name
+
+      await transactionDriver.run(
+        `UPDATE persisted_index_registry
+         SET removed = 1,
+             updated_at = CAST(strftime('%s', 'now') AS INTEGER),
+             last_used_at = CAST(strftime('%s', 'now') AS INTEGER)
+         WHERE collection_id = ? AND signature = ?`,
+        [collectionId, signature],
+      )
+
+      if (indexName) {
+        await transactionDriver.exec(
+          `DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`,
+        )
+      }
+    })
   }
 
   async getStreamPosition(collectionId: string): Promise<{
@@ -1649,15 +1730,22 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestRowVersion: number
   }> {
     await this.ensureCollectionReady(collectionId)
-    const [position, latestRowVersion] = await Promise.all([
-      this.readStreamPosition(collectionId, this.driver),
-      this.readLatestRowVersion(collectionId, this.driver),
-    ])
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `read the stream position`,
+      )
+      const [position, latestRowVersion] = await Promise.all([
+        this.readStreamPosition(collectionId, transactionDriver),
+        this.readLatestRowVersion(collectionId, transactionDriver),
+      ])
 
-    return {
-      ...position,
-      latestRowVersion,
-    }
+      return {
+        ...position,
+        latestRowVersion,
+      }
+    })
   }
 
   private async readLatestRowVersion(
@@ -1746,131 +1834,138 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    const [
-      changedRows,
-      deletedRows,
-      latestVersionRows,
-      replayRows,
-      replayAvailabilityRows,
-    ] = await Promise.all([
-      this.driver.query<{ key: string }>(
-        `SELECT key
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `read persisted transaction deltas`,
+      )
+      const [
+        changedRows,
+        deletedRows,
+        latestVersionRows,
+        replayRows,
+        replayAvailabilityRows,
+      ] = await Promise.all([
+        transactionDriver.query<{ key: string }>(
+          `SELECT key
          FROM ${collectionTableSql}
          WHERE row_version > ?`,
-        [fromRowVersion],
-      ),
-      this.driver.query<{ key: string }>(
-        `SELECT key
+          [fromRowVersion],
+        ),
+        transactionDriver.query<{ key: string }>(
+          `SELECT key
          FROM ${tombstoneTableSql}
          WHERE row_version > ?`,
-        [fromRowVersion],
-      ),
-      this.driver.query<{ latest_row_version: number }>(
-        `SELECT latest_row_version
+          [fromRowVersion],
+        ),
+        transactionDriver.query<{ latest_row_version: number }>(
+          `SELECT latest_row_version
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-        [collectionId],
-      ),
-      this.driver.query<{
-        tx_id: string
-        row_version: number
-        replay_json: string | null
-        replay_requires_full_reload: number
-      }>(
-        `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
+          [collectionId],
+        ),
+        transactionDriver.query<{
+          tx_id: string
+          row_version: number
+          replay_json: string | null
+          replay_requires_full_reload: number
+        }>(
+          `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
          FROM applied_tx
          WHERE collection_id = ? AND row_version > ?
          ORDER BY term ASC, seq ASC`,
-        [collectionId, fromRowVersion],
-      ),
-      this.driver.query<{ min_row_version: number | null }>(
-        `SELECT MIN(row_version) AS min_row_version
+          [collectionId, fromRowVersion],
+        ),
+        transactionDriver.query<{ min_row_version: number | null }>(
+          `SELECT MIN(row_version) AS min_row_version
          FROM applied_tx
          WHERE collection_id = ?`,
-        [collectionId],
-      ),
-    ])
+          [collectionId],
+        ),
+      ])
 
-    const latestRowVersion = latestVersionRows[0]?.latest_row_version ?? 0
-    const replayFloor = replayAvailabilityRows[0]?.min_row_version
-    if (
-      latestRowVersion > fromRowVersion &&
-      (replayFloor == null || replayFloor > fromRowVersion + 1)
-    ) {
-      return {
-        latestRowVersion,
-        requiresFullReload: true,
+      const latestRowVersion = latestVersionRows[0]?.latest_row_version ?? 0
+      const replayFloor = replayAvailabilityRows[0]?.min_row_version
+      if (
+        latestRowVersion > fromRowVersion &&
+        (replayFloor == null || replayFloor > fromRowVersion + 1)
+      ) {
+        return {
+          latestRowVersion,
+          requiresFullReload: true,
+        }
       }
-    }
 
-    const changedKeyCount = changedRows.length + deletedRows.length
+      const changedKeyCount = changedRows.length + deletedRows.length
 
-    if (changedKeyCount > this.pullSinceReloadThreshold) {
-      return {
-        latestRowVersion,
-        requiresFullReload: true,
+      if (changedKeyCount > this.pullSinceReloadThreshold) {
+        return {
+          latestRowVersion,
+          requiresFullReload: true,
+        }
       }
-    }
 
-    if (
-      replayRows.some(
-        (row) =>
-          row.replay_requires_full_reload !== 0 || row.replay_json == null,
-      )
-    ) {
-      return {
-        latestRowVersion,
-        requiresFullReload: true,
-      }
-    }
-
-    const decodeKey = (encodedKey: string): string | number => {
-      try {
-        return decodePersistedStorageKey(encodedKey)
-      } catch (error) {
-        throw new InvalidPersistedStorageKeyEncodingError(
-          `${encodedKey}: ${(error as Error).message}`,
+      if (
+        replayRows.some(
+          (row) =>
+            row.replay_requires_full_reload !== 0 || row.replay_json == null,
         )
+      ) {
+        return {
+          latestRowVersion,
+          requiresFullReload: true,
+        }
       }
-    }
 
-    const deltas = replayRows.map((row) => {
-      const parsed = deserializePersistedRowValue<ReplayableTxDelta | null>(
-        row.replay_json ?? `null`,
-      )
-      if (!parsed) {
-        throw new InvalidPersistedCollectionConfigError(
-          `missing replay payload for applied_tx row`,
-        )
+      const decodeKey = (encodedKey: string): string | number => {
+        try {
+          return decodePersistedStorageKey(encodedKey)
+        } catch (error) {
+          throw new InvalidPersistedStorageKeyEncodingError(
+            `${encodedKey}: ${(error as Error).message}`,
+          )
+        }
       }
-      return parsed
+
+      const deltas = replayRows.map((row) => {
+        const parsed = deserializePersistedRowValue<ReplayableTxDelta | null>(
+          row.replay_json ?? `null`,
+        )
+        if (!parsed) {
+          throw new InvalidPersistedCollectionConfigError(
+            `missing replay payload for applied_tx row`,
+          )
+        }
+        return parsed
+      })
+
+      const replayChangeCount = deltas.reduce(
+        (count, delta) =>
+          count +
+          delta.changedRows.length +
+          delta.deletedKeys.length +
+          delta.rowMetadataMutations.length +
+          delta.collectionMetadataMutations.length,
+        0,
+      )
+
+      if (replayChangeCount > this.pullSinceReloadThreshold) {
+        return {
+          latestRowVersion,
+          requiresFullReload: true,
+        }
+      }
+
+      return {
+        latestRowVersion,
+        requiresFullReload: false,
+        changedKeys: changedRows.map((row) => decodeKey(row.key)),
+        deletedKeys: deletedRows.map((row) => decodeKey(row.key)),
+        deltas,
+      }
     })
-
-    const replayChangeCount = deltas.reduce(
-      (count, delta) =>
-        count +
-        delta.changedRows.length +
-        delta.deletedKeys.length +
-        delta.rowMetadataMutations.length +
-        delta.collectionMetadataMutations.length,
-      0,
-    )
-
-    if (replayChangeCount > this.pullSinceReloadThreshold) {
-      return {
-        latestRowVersion,
-        requiresFullReload: true,
-      }
-    }
-
-    return {
-      latestRowVersion,
-      requiresFullReload: false,
-      changedKeys: changedRows.map((row) => decodeKey(row.key)),
-      deletedKeys: deletedRows.map((row) => decodeKey(row.key)),
-      deltas,
-    }
   }
 
   private async loadSubsetInternal(
@@ -1984,13 +2079,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private async touchRequiredIndexes(
     collectionId: string,
     requiredIndexSignatures: ReadonlyArray<string> | undefined,
+    driver: SQLiteDriver = this.driver,
   ): Promise<void> {
     if (!requiredIndexSignatures || requiredIndexSignatures.length === 0) {
       return
     }
 
     for (const signature of requiredIndexSignatures) {
-      await this.driver.run(
+      await driver.run(
         `UPDATE persisted_index_registry
          SET last_used_at = CAST(strftime('%s', 'now') AS INTEGER),
              updated_at = CAST(strftime('%s', 'now') AS INTEGER)

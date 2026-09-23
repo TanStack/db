@@ -121,13 +121,22 @@ function change(
 }
 
 async function runRace(
-  transition: `none` | `external-row-loss` | `schema-reset` | `committed-write`,
+  transition:
+    | `none`
+    | `external-row-loss`
+    | `schema-reset`
+    | `committed-write`
+    | `committed-replacement`,
   syncMode: `eager` | `on-demand` = `eager`,
   legacyUnknown = false,
   missingKeySetEvidence = false,
   startupReset: `none` | `tag-state` | `shape-identity` = `none`,
   metadataWrapper: `none` | `shallow-persistence` = `none`,
-  laterKeySetEvidence: `unchanged` | `unknown` | `missing` = `unchanged`,
+  laterKeySetEvidence:
+    | `unchanged`
+    | `unknown`
+    | `missing`
+    | `incompatible` = `unchanged`,
 ): Promise<void> {
   const database = new DatabaseSync(`:memory:`)
   const driver = createDriver(database)
@@ -202,6 +211,7 @@ async function runRace(
       driver,
       schemaVersion: 1,
     })
+    let durableObserverAdapter = restartedAdapter
     let snapshotCalls = 0
     let laterSnapshotIncludedRows: boolean | undefined
     let resumeStateAtLaterSnapshot: unknown
@@ -242,7 +252,9 @@ async function runRace(
                 keySet:
                   laterKeySetEvidence === `unknown`
                     ? { status: `unknown` as const }
-                    : undefined,
+                    : laterKeySetEvidence === `incompatible`
+                      ? { status: `incompatible` as const }
+                      : undefined,
               }
             }
             return missingKeySetEvidence
@@ -319,6 +331,8 @@ async function runRace(
       ]
     }
     collection.startSyncImmediate()
+    const readiness = collection.stateWhenReady()
+    void readiness.catch(() => undefined)
     const subscription = collection.subscribeChanges(
       () => {
         publications++
@@ -379,6 +393,7 @@ async function runRace(
         schemaVersion: 2,
       })
       await resettingAdapter.loadSubset(collectionId, {})
+      durableObserverAdapter = resettingAdapter
     } else if (transition === `committed-write`) {
       await seedAdapter.applyCommittedTx(collectionId, {
         txId: `concurrent-writer`,
@@ -389,10 +404,22 @@ async function runRace(
           { type: `insert`, key: 3, value: { id: 3, name: `three` } },
         ],
       })
+    } else if (transition === `committed-replacement`) {
+      await seedAdapter.applyCommittedTx(collectionId, {
+        txId: `concurrent-replacement`,
+        term: 2,
+        seq: 1,
+        rowVersion: 2,
+        truncate: true,
+        mutations: [
+          { type: `insert`, key: 1, value: { id: 1, name: `one` } },
+          { type: `insert`, key: 2, value: { id: 2, name: `two` } },
+        ],
+      })
     }
     releaseLaterSnapshot.resolve()
 
-    if (transition === `none`) {
+    if (transition === `none` || replacesUncertifiedBaseline) {
       await vi.waitFor(() => expect(collection!.status).toBe(`ready`))
       expect(
         Array.from(collection.values(), ({ id, name }) => ({ id, name })),
@@ -405,7 +432,7 @@ async function runRace(
           : [],
       )
       expect(
-        (await restartedAdapter.loadSubset(collectionId, {})).map(
+        (await durableObserverAdapter.loadSubset(collectionId, {})).map(
           ({ value }) => value,
         ),
       ).toEqual([
@@ -415,7 +442,7 @@ async function runRace(
       if (startupReset !== `none`) {
         await vi.waitFor(async () => {
           const resumeState = (
-            await restartedAdapter.loadCollectionMetadata(collectionId)
+            await durableObserverAdapter.loadCollectionMetadata(collectionId)
           ).find(({ key }) => key === `electric:resume`)?.value
           expect(resumeState).toMatchObject({
             kind: `resume`,
@@ -426,6 +453,7 @@ async function runRace(
       }
     } else {
       await vi.waitFor(() => expect(collection!.status).toBe(`error`))
+      await expect(readiness).rejects.toBe(collection._lifecycle.getSyncError())
       if (laterKeySetEvidence !== `unchanged`) {
         expect(collection._lifecycle.getSyncError()).toEqual(
           expect.objectContaining({
@@ -438,7 +466,7 @@ async function runRace(
       }
       await vi.waitFor(async () => {
         const metadata =
-          await restartedAdapter.loadCollectionMetadata(collectionId)
+          await durableObserverAdapter.loadCollectionMetadata(collectionId)
         const resumeState = metadata.find(
           ({ key }) => key === `electric:resume`,
         )?.value
@@ -467,10 +495,8 @@ async function runRace(
       if (laterKeySetEvidence === `unchanged`) {
         expect(publicationsBeforeLateDelivery).toBe(0)
       }
-      const durableRowsBeforeLateDelivery = await restartedAdapter.loadSubset(
-        collectionId,
-        {},
-      )
+      const durableRowsBeforeLateDelivery =
+        await durableObserverAdapter.loadSubset(collectionId, {})
       expect(durableRowsBeforeLateDelivery.map(({ value }) => value)).toEqual(
         transition === `external-row-loss`
           ? [{ id: 2, name: `two` }]
@@ -480,7 +506,12 @@ async function runRace(
                 { id: 2, name: `two` },
                 { id: 3, name: `three` },
               ]
-            : [],
+            : transition === `committed-replacement`
+              ? [
+                  { id: 1, name: `one` },
+                  { id: 2, name: `two` },
+                ]
+              : [],
       )
       subscriber([
         change(`insert`, { id: 9, name: `late` }),
@@ -490,7 +521,7 @@ async function runRace(
       expect(
         Array.from(collection.values(), ({ id, name }) => ({ id, name })),
       ).toEqual(expectedErroredRows)
-      expect(await restartedAdapter.loadSubset(collectionId, {})).toEqual(
+      expect(await durableObserverAdapter.loadSubset(collectionId, {})).toEqual(
         durableRowsBeforeLateDelivery,
       )
       expect(publications).toBe(publicationsBeforeLateDelivery)
@@ -855,9 +886,28 @@ describe(`Electric resume snapshot races`, () => {
     await runRace(`external-row-loss`, `on-demand`)
   })
 
-  it(`rejects a schema reset for an unknown on-demand resume`, async () => {
-    await runRace(`schema-reset`, `on-demand`, true)
-  })
+  it.each(
+    ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+      ([`unknown`, `missing`] as const).flatMap((initialEvidence) =>
+        ([`external-row-loss`, `committed-replacement`] as const).map(
+          (transition) => ({ syncMode, initialEvidence, transition }),
+        ),
+      ),
+    ),
+  )(
+    `freshly replaces a $initialEvidence $syncMode baseline across $transition`,
+    async ({ syncMode, initialEvidence, transition }) => {
+      await runRace(
+        transition,
+        syncMode,
+        initialEvidence === `unknown`,
+        initialEvidence === `missing`,
+        `none`,
+        `none`,
+        transition === `external-row-loss` ? `incompatible` : `unchanged`,
+      )
+    },
+  )
 
   it(`freshly replaces an unverifiable pre-ledger resume baseline`, async () => {
     const observation = await observeLegacyUnknownResume()

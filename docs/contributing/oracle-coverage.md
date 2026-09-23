@@ -240,10 +240,26 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
   statement, scan, trigger, or queue-cardinality observations where the
   subsystem promises bounded work. Owners: SQLite resume snapshots, Electric
   acquisition work, and shared-driver scheduling suites.
+- [x] **Startup generation interleavings.** Hold persisted startup between its
+  metadata and hydration snapshots, then cross no write, a managed mutation,
+  and hostile raw loss. Compare public rows with the atomic durable snapshot,
+  and require mutation persistence to wait until the prior stream position is
+  known. Owners: SQLite resume snapshots and Electric resume snapshot races.
+- [x] **Schema-generation fences on cached adapters.** Cross a newer-schema
+  reset with snapshot, row, metadata, delta, position, and index-lifecycle
+  operations from the cached older adapter. Every stale operation rejects;
+  the current adapter remains readable and its index registry remains intact.
+  Owners: SQLite resume snapshots plus browser/electron coordinator routing.
 - [x] **Explicit omission records.** Add a short `Known omissions` section to
   each primary executable owner touched above and keep this map synchronized as
   laws land. An omission record narrows evidence; it does not waive a product
   obligation.
+- [ ] **Atomic active-subset full reload.** Load collection metadata and every
+  active subset from one adapter generation, including filtered and paginated
+  on-demand subsets. A sound implementation needs an atomic multi-subset API;
+  loading all rows or accepting a metadata/row torn pair is not equivalent.
+  RED evidence and the deferred executable placeholder live in
+  `packages/db-sqlite-persistence-core/tests/persisted.test.ts` under R5-007.
 
 ## Deferred contracts and evidence
 

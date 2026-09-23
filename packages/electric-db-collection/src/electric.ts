@@ -2067,11 +2067,8 @@ function createElectricSync<T extends Row<unknown>>(
                 await hydrateBaseline()
                 const currentKeySetEvidence = getKeySetEvidence?.()
                 if (
-                  (canUsePersistedResume &&
-                    currentKeySetEvidence?.status !== `consistent`) ||
-                  (!canUsePersistedResume &&
-                    persistedKeySetEvidence?.status !== `incompatible` &&
-                    currentKeySetEvidence?.status === `incompatible`)
+                  canUsePersistedResume &&
+                  currentKeySetEvidence?.status !== `consistent`
                 ) {
                   throw new Error(
                     `Electric persisted resume baseline could not be certified during hydration`,
