@@ -1208,5 +1208,47 @@ describe(`injectLiveQuery`, () => {
         expect(result.data()).toEqual([])
       })
     })
+
+    /**
+     * Driver: public `injectLiveQuery` with an Angular signal. Each
+     * `waitForAngularUpdate` is an observation cut after disabled, enabled, and
+     * disabled-again updates. This test observes status and public result data;
+     * array-query Collection/state behavior remains in shared conformance.
+     */
+    it(`keeps conditional findOne data empty while disabled`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-find-one-angular`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          }),
+        )
+        const enabled = signal(false)
+        const result = injectLiveQuery({
+          params: () => ({ enabled: enabled() }),
+          query: ({ params, q }) =>
+            params.enabled
+              ? q
+                  .from({ collection })
+                  .where(({ collection: person }) => eq(person.id, `3`))
+                  .findOne()
+              : null,
+        })
+
+        await waitForAngularUpdate()
+        expect(result.status()).toBe(`disabled`)
+        expect(result.data()).toEqual([])
+
+        enabled.set(true)
+        await waitForAngularUpdate()
+        expect(result.data()).toMatchObject({ id: `3` })
+
+        enabled.set(false)
+        await waitForAngularUpdate()
+        expect(result.status()).toBe(`disabled`)
+        expect(result.data()).toEqual([])
+      })
+    })
   })
 })
