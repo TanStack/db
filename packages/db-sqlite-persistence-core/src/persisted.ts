@@ -662,6 +662,12 @@ type OpenSyncTransaction<
   supersededHydration: boolean
 }
 
+type HydrationFence<TKey extends string | number> = {
+  lifecycleGeneration: number
+  discardAllRows: boolean
+  staleKeys: Set<TKey>
+}
+
 class PersistedHydrationSupersededError extends Error {
   constructor() {
     super(`Persisted hydration was superseded by an upstream snapshot`)
@@ -860,6 +866,7 @@ class PersistedCollectionRuntime<
   > = []
   private readonly queuedTxCommitted: Array<TxCommitted> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
+  private readonly hydrationFences = new Set<HydrationFence<TKey>>()
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
     null
@@ -950,6 +957,26 @@ class PersistedCollectionRuntime<
     return this.lifecycleGeneration
   }
 
+  markExternalSyncApplied(transaction: BufferedSyncTransaction<T, TKey>): void {
+    if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
+
+    for (const fence of this.hydrationFences) {
+      if (fence.lifecycleGeneration !== transaction.lifecycleGeneration) {
+        continue
+      }
+      if (transaction.truncate) {
+        fence.discardAllRows = true
+        continue
+      }
+      for (const operation of transaction.operations) {
+        fence.staleKeys.add(operation.key)
+      }
+      for (const key of transaction.rowMetadataWrites.keys()) {
+        fence.staleKeys.add(key)
+      }
+    }
+  }
+
   supersedeHydration(): boolean {
     if (!this.isHydratingNow()) return false
     this.hydrationSupersessionGeneration = this.lifecycleGeneration
@@ -1033,12 +1060,9 @@ class PersistedCollectionRuntime<
     const baseline = {}
     this.activeSubsets.set(this.getSubsetKey(baseline), baseline)
     const appliedCursor = this.appliedReceiptSequence
-    await this.applyMutex.run(async () => {
-      if (lifecycleGeneration !== this.lifecycleGeneration) return
-      await this.hydrateSubsetUnsafe(baseline, {
-        requestRemoteEnsure: false,
-        lifecycleGeneration,
-      })
+    await this.hydrateSubset(baseline, {
+      requestRemoteEnsure: false,
+      lifecycleGeneration,
     })
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.waitForAppliedReceiptsAfter(appliedCursor)
@@ -1153,12 +1177,10 @@ class PersistedCollectionRuntime<
     let localFailure: unknown
     let localFailed = false
     try {
-      await this.applyMutex.run(() =>
-        this.hydrateSubsetUnsafe(options, {
-          requestRemoteEnsure: this.mode === `sync-present`,
-          lifecycleGeneration,
-        }),
-      )
+      await this.hydrateSubset(options, {
+        requestRemoteEnsure: this.mode === `sync-present`,
+        lifecycleGeneration,
+      })
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       await this.waitForAppliedReceiptsAfter(appliedCursor)
     } catch (error) {
@@ -1210,18 +1232,21 @@ class PersistedCollectionRuntime<
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     // A one-shot refresh does not acquire an enduring subscription lease.
-    await this.applyMutex.run(() =>
-      this.hydrateSubsetUnsafe(options, {
-        requestRemoteEnsure: false,
-        lifecycleGeneration,
-      }),
-    )
+    await this.hydrateSubset(options, {
+      requestRemoteEnsure: false,
+      lifecycleGeneration,
+    })
   }
 
   queueHydrationBufferedTransaction(
     transaction: BufferedSyncTransaction<T, TKey>,
   ): void {
     this.queuedHydrationTransactions.push(transaction)
+    if (!this.isHydratingNow()) {
+      void this.applyMutex
+        .run(() => this.flushQueuedHydrationTransactionsUnsafe())
+        .catch(() => undefined)
+    }
   }
 
   async persistAndBroadcastExternalSyncTransaction(
@@ -1363,6 +1388,7 @@ class PersistedCollectionRuntime<
 
   private advanceLifecycle(): void {
     this.lifecycleGeneration++
+    this.hydrationFences.clear()
     this.hydrationSupersessionGeneration = null
     this.started = false
     this.startupMetadataPromise = null
@@ -1421,6 +1447,7 @@ class PersistedCollectionRuntime<
     config: {
       requestRemoteEnsure: boolean
       lifecycleGeneration: number
+      fence: HydrationFence<TKey>
     },
   ): Promise<void> {
     this.hydratingGeneration = config.lifecycleGeneration
@@ -1429,11 +1456,16 @@ class PersistedCollectionRuntime<
     try {
       const rows = await this.loadSubsetRowsUnsafe(options)
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
+      if (config.fence.discardAllRows) {
+        throw new PersistedHydrationSupersededError()
+      }
       if (this.hydratingGeneration !== config.lifecycleGeneration) {
         throw new PersistedHydrationSupersededError()
       }
 
-      this.applyRowsToCollection(rows)
+      this.applyRowsToCollection(
+        rows.filter((row) => !config.fence.staleKeys.has(row.key)),
+      )
     } catch (error) {
       hydrationFailed = true
       hydrationFailure = error
@@ -1455,6 +1487,29 @@ class PersistedCollectionRuntime<
 
     if (hydrationFailed) {
       throw hydrationFailure
+    }
+  }
+
+  private async hydrateSubset(
+    options: LoadSubsetOptions,
+    config: {
+      requestRemoteEnsure: boolean
+      lifecycleGeneration: number
+    },
+  ): Promise<void> {
+    const fence: HydrationFence<TKey> = {
+      lifecycleGeneration: config.lifecycleGeneration,
+      discardAllRows: false,
+      staleKeys: new Set(),
+    }
+    this.hydrationFences.add(fence)
+    try {
+      await this.applyMutex.run(async () => {
+        if (config.lifecycleGeneration !== this.lifecycleGeneration) return
+        await this.hydrateSubsetUnsafe(options, { ...config, fence })
+      })
+    } finally {
+      this.hydrationFences.delete(fence)
     }
   }
 
@@ -1619,6 +1674,7 @@ class PersistedCollectionRuntime<
         !transaction.internal &&
         transaction.lifecycleGeneration === this.lifecycleGeneration
       ) {
+        this.markExternalSyncApplied(transaction)
         await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
       }
       transaction.resolveApplied?.()
@@ -2974,6 +3030,14 @@ function createWrappedSyncConfig<
             throw error
           }
           if (!openTransaction.internal) {
+            if (applied === true) {
+              runtime.markExternalSyncApplied(openTransaction)
+            } else {
+              void applied.then(
+                () => runtime.markExternalSyncApplied(openTransaction),
+                () => undefined,
+              )
+            }
             const persist = async () => {
               try {
                 await runtime.persistAndBroadcastExternalSyncTransaction(
@@ -3001,7 +3065,9 @@ function createWrappedSyncConfig<
               void persisted.catch(signalPersistenceFailure)
               return persisted
             }
-            return persistAfterApplication()
+            const persisted = persistAfterApplication()
+            void persisted.catch(() => undefined)
+            return persisted
           }
           return applied
         },

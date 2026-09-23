@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 
+/**
+ * Structural hash follows the reachable value graph, not object identity.
+ *
+ * A small adjacency list is the model. Kahn's algorithm independently decides
+ * whether the root-reachable graph is acyclic. Acyclic sharing is unfolded into
+ * equal fresh trees and must hash the same; a reachable cycle must reject on
+ * every attempt, while an unreachable cycle is irrelevant. Named witnesses
+ * keep rare topology classes present even when random generation misses them.
+ */
+
 // Kahn's algorithm checks the reachable graph without using the hasher's
 // recursive active-path algorithm. Unreachable cycles do not affect the root.
 function isAcyclic(edges: Array<Array<number>>): boolean {

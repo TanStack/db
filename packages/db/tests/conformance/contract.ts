@@ -1,15 +1,23 @@
 /**
  * Cross-adapter live-query conformance harness — shared contract.
  *
- * ONE behavioral spec for `useLiveQuery`, run against every framework adapter.
- * Each adapter provides a thin `LiveQueryDriver` and the shared suite in
- * `suite.ts` does the rest.
+ * A framework hook is a scheduler-specific view of one live-query contract.
+ * The shared suite owns the semantic laws: rows, order, keyed state, readiness,
+ * errors, enablement, recompilation, and teardown. Each adapter owns only the
+ * bridge from its native scheduler into the small `LiveQueryDriver` language.
+ * Running one shared scenario through every bridge separates engine semantics
+ * from React, Vue, Solid, Angular, and Svelte timing.
  *
  * Realm safety: the driver — not the scenarios — creates source collections and
  * supplies query operators, both imported from the *adapter's* copy of
  * `@tanstack/db`. This keeps collection instances and expression nodes in the
  * same module realm as the adapter's hook, avoiding the dual-package
  * `instanceof CollectionImpl` mismatch. Scenarios never import `@tanstack/db`.
+ *
+ * The model is observational rather than a second hook implementation. Each
+ * scenario states a source history and the exact normalized result that must be
+ * visible after the driver's documented flush cut. Result helpers read raw
+ * fields and selected rows; they do not repair malformed adapter output.
  *
  * All current scenarios must pass. A future known bug needs an independently
  * approved exact failure signature; a whole-test waiver could hide another bug.

@@ -20,18 +20,19 @@ The same interpreter runs a fixed corpus and generated histories.
 - A startup processing error rejects readiness before asynchronous cancellation
   settles. Two fixed controls hold cancellation through later list completion,
   then resolve or reject it; cleanup cannot turn failed startup into readiness.
-- Cleanup clears the collection. Late work from an old session cannot publish
-  into, cancel, or report errors against a replacement session.
+- Cleanup clears the collection. Late work from an old provider session cannot
+  publish into, cancel, or report errors against a replacement provider session.
 - A late acquired old stream is canceled once and stays unlocked, including when
   its native cancellation rejects. An unfinished old preload rejects with
   AbortError before late work settles; an already-ready on-demand preload stays
   fulfilled. Its direct subset promise settles as a canceled no-op after I/O.
 - Error and detached-rejection observations are append-only through final gate
   release and cleanup. Epoch tags record when an observation arrives, not the
-  hidden session that caused it. Exact console output checks pin the adapter's
+  hidden provider session that caused it. Exact console output checks pin the
+  adapter's
   current compatibility policy, not a general service reporting contract.
 
-Histories contain one to three sessions, eager/on-demand modes, delayed startup
+Histories contain one to three provider sessions, eager/on-demand modes, delayed startup
 and list resolve/reject, zero to eight row edits, five stream endings, and
 immediate versus settled cleanup. Thirty-two fixed cases pin the boundaries;
 ordinary runs add 30 fixed-seed and 50 fresh-seed histories with shrinking.

@@ -71,7 +71,7 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
 }
 
 type PendingGraphRun = {
-  syncSession: number
+  syncRunGeneration: number
   loadCallbacks: Set<() => void>
 }
 
@@ -105,7 +105,7 @@ export class CollectionConfigBuilder<
 
   private isGraphRunning = false
 
-  // Current sync session state (set when sync starts, cleared when it stops)
+  // Current sync run state (set when sync starts, cleared when it stops)
   // Public for testing purposes (CollectionConfigBuilder is internal, not public API)
   public currentSyncConfig:
     | Parameters<SyncConfig<TResult>[`sync`]>[0]
@@ -175,7 +175,7 @@ export class CollectionConfigBuilder<
   private orderedLoadFailed = false
   // Source replay cannot settle a failed imperative window operation.
   private windowFailed = false
-  private syncSession = 0
+  private syncRunGeneration = 0
   private windowOperationGeneration = 0
   // Map of lexical source IDs to optimizable ORDER BY state
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
@@ -449,9 +449,9 @@ export class CollectionConfigBuilder<
     return this.activeWindowOperation?.generation
   }
 
-  scheduleGraphRunForSession(syncSession: number): void {
+  scheduleGraphRunIfSyncRunCurrent(syncRunGeneration: number): void {
     if (
-      syncSession !== this.syncSession ||
+      syncRunGeneration !== this.syncRunGeneration ||
       !this.currentSyncConfig ||
       !this.currentSyncState
     ) {
@@ -475,13 +475,13 @@ export class CollectionConfigBuilder<
     ) {
       return
     }
-    const syncSession = this.syncSession
+    const syncRunGeneration = this.syncRunGeneration
     if (this.pendingOrderedLoads.size === 0) this.orderedLoadFailed = false
     this.pendingOrderedLoads.add(promise)
     const finish = (succeeded: boolean) => {
-      // Admission precedes mutation: cleanup retires this session's participants.
+      // Admission precedes mutation: cleanup retires this sync run's participants.
       if (
-        syncSession !== this.syncSession ||
+        syncRunGeneration !== this.syncRunGeneration ||
         !this.pendingOrderedLoads.delete(promise)
       ) {
         return
@@ -526,8 +526,8 @@ export class CollectionConfigBuilder<
     )
   }
 
-  getSyncSession(): number {
-    return this.syncSession
+  getSyncRunGeneration(): number {
+    return this.syncRunGeneration
   }
 
   // The callback function is called after the graph has run.
@@ -549,19 +549,19 @@ export class CollectionConfigBuilder<
     // Should only be called when sync is active
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `maybeRunGraph called without active sync session. This should not happen.`,
+        `maybeRunGraph called without active sync run. This should not happen.`,
       )
     }
 
     this.isGraphRunning = true
 
     try {
-      const syncSession = this.syncSession
+      const syncRunGeneration = this.syncRunGeneration
       const config = this.currentSyncConfig
       const { begin, commit } = config
       const syncState = this.currentSyncState
-      const isCurrentSession = () =>
-        syncSession === this.syncSession &&
+      const isCurrentSyncRun = () =>
+        syncRunGeneration === this.syncRunGeneration &&
         this.currentSyncConfig === config &&
         this.currentSyncState === syncState
 
@@ -578,14 +578,14 @@ export class CollectionConfigBuilder<
             try {
               syncState.graph.run()
             } catch (error) {
-              if (isCurrentSession()) {
+              if (isCurrentSyncRun()) {
                 this.transitionToError(`Live query graph failed`, error)
               }
               throw error
             }
-            if (!isCurrentSession()) return false
+            if (!isCurrentSyncRun()) return false
             callback?.()
-            if (!isCurrentSession()) return false
+            if (!isCurrentSyncRun()) return false
             callbackCalled = true
           }
           return true
@@ -600,7 +600,7 @@ export class CollectionConfigBuilder<
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (!callbackCalled) {
           callback?.()
-          if (!isCurrentSession()) return
+          if (!isCurrentSyncRun()) return
         }
 
         // A synchronous loader can write while this graph run is active. Its
@@ -612,7 +612,7 @@ export class CollectionConfigBuilder<
         // change can reach sibling materializations in different graph steps;
         // flushing between those steps would expose a mixed root snapshot.
         syncState.flushPendingChanges?.()
-        if (!isCurrentSession()) return
+        if (!isCurrentSyncRun()) return
 
         // On the initial run, we may need to do an empty commit to ensure that
         // the collection is initialized
@@ -642,7 +642,7 @@ export class CollectionConfigBuilder<
    * Dependencies are auto-discovered from subscribed live queries, or can be overridden.
    * Load callbacks are combined when entries merge.
    *
-   * Uses the current sync session's config and syncState from instance properties.
+   * Uses the current sync run's config and syncState from instance properties.
    *
    * @param callback - Optional callback to load more data if needed
    * @param options - Optional scheduling configuration
@@ -686,15 +686,15 @@ export class CollectionConfigBuilder<
 
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `scheduleGraphRun called without active sync session. This should not happen.`,
+        `scheduleGraphRun called without active sync run. This should not happen.`,
       )
     }
 
     // Manage our own state - get or create pending callbacks for this context
     let pending = contextId ? this.pendingGraphRuns.get(contextId) : undefined
-    if (!pending || pending.syncSession !== this.syncSession) {
+    if (!pending || pending.syncRunGeneration !== this.syncRunGeneration) {
       pending = {
-        syncSession: this.syncSession,
+        syncRunGeneration: this.syncRunGeneration,
         loadCallbacks: new Set(),
       }
       if (contextId) {
@@ -761,9 +761,9 @@ export class CollectionConfigBuilder<
       return
     }
 
-    // If sync session has ended, don't execute (graph is finalized, subscriptions cleared)
+    // If sync run has ended, don't execute (graph is finalized, subscriptions cleared)
     if (
-      pending.syncSession !== this.syncSession ||
+      pending.syncRunGeneration !== this.syncRunGeneration ||
       !this.currentSyncConfig ||
       !this.currentSyncState
     ) {
@@ -781,15 +781,15 @@ export class CollectionConfigBuilder<
   }
 
   private syncFn(config: SyncMethods<TResult>) {
-    const syncSession = ++this.syncSession
+    const syncRunGeneration = ++this.syncRunGeneration
     // Store reference to the live query collection for error state transitions
     this.liveQueryCollection = config.collection
-    // Reset error state from any previous sync session so a restarted sync can become ready again.
+    // Reset error state from any previous sync run so a restarted sync can become ready again.
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
     this.lastSubsetError = undefined
-    // Store config and syncState as instance properties for the duration of this sync session
+    // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
 
     const syncState: SyncState = {
@@ -802,7 +802,9 @@ export class CollectionConfigBuilder<
     const teardown = () => {
       if (tornDown) return
       tornDown = true
-      if (this.syncSession === syncSession) this.syncSession++
+      if (this.syncRunGeneration === syncRunGeneration) {
+        this.syncRunGeneration++
+      }
 
       // Release every source in one attempt; the first failure wins after the
       // peers finish. Each subscription release is itself one-shot, so the
@@ -811,7 +813,7 @@ export class CollectionConfigBuilder<
         runAllCallbacks(syncState.unsubscribeCallbacks)
       } finally {
         syncState.unsubscribeCallbacks.clear()
-        this.clearSyncSessionState()
+        this.clearSyncRunState()
       }
     }
 
@@ -824,7 +826,7 @@ export class CollectionConfigBuilder<
       this.currentSyncState = fullSyncState
 
       // Listen for scheduler context clears to clean up our pending state
-      // Re-register on each sync start so the listener is active for the sync session's lifetime
+      // Re-register on each sync start so the listener is active for the sync run's lifetime
       this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
         (contextId) => {
           this.clearPendingGraphRun(contextId)
@@ -869,10 +871,10 @@ export class CollectionConfigBuilder<
     return teardown
   }
 
-  private clearSyncSessionState(): void {
+  private clearSyncRunState(): void {
     // Late window settlement belongs to the discarded graph, not its restart.
     this.windowOperationGeneration++
-    // Clear current sync session state
+    // Clear current sync run state
     this.currentSyncConfig = undefined
     this.currentSyncState = undefined
     this.maybeRunGraphFn = undefined
@@ -883,7 +885,7 @@ export class CollectionConfigBuilder<
     this.erroredSourceIds.clear()
 
     // Clear all pending graph runs to prevent memory leaks from in-flight transactions
-    // that may flush after the sync session ends
+    // that may flush after the sync run ends
     this.pendingGraphRuns.clear()
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
