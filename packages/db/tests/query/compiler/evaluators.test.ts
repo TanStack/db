@@ -4,6 +4,81 @@ import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import type { NamespacedRow } from '../../../src/types.js'
 
+/**
+ * Reference law: `%` consumes zero or more UTF-16 code units, `_` consumes
+ * exactly one, and every other pattern code unit is literal. The dynamic
+ * program is structurally independent of the production two-pointer walk.
+ */
+function referenceLike(
+  value: string,
+  pattern: string,
+  caseInsensitive: boolean,
+): boolean {
+  const searchValue = caseInsensitive ? value.toLowerCase() : value
+  const searchPattern = caseInsensitive ? pattern.toLowerCase() : pattern
+  let previous = new Array<boolean>(searchPattern.length + 1).fill(false)
+  previous[0] = true
+
+  for (
+    let patternIndex = 1;
+    patternIndex <= searchPattern.length;
+    patternIndex++
+  ) {
+    previous[patternIndex] =
+      searchPattern[patternIndex - 1] === `%` && previous[patternIndex - 1]!
+  }
+
+  for (let valueIndex = 1; valueIndex <= searchValue.length; valueIndex++) {
+    const current = new Array<boolean>(searchPattern.length + 1).fill(false)
+    for (
+      let patternIndex = 1;
+      patternIndex <= searchPattern.length;
+      patternIndex++
+    ) {
+      const patternCharacter = searchPattern[patternIndex - 1]
+      current[patternIndex] =
+        patternCharacter === `%`
+          ? current[patternIndex - 1]! || previous[patternIndex]!
+          : (patternCharacter === `_` ||
+              patternCharacter === searchValue[valueIndex - 1]) &&
+            previous[patternIndex - 1]!
+    }
+    previous = current
+  }
+
+  return previous[searchPattern.length]!
+}
+
+function* deterministicLikeCases(count: number): Generator<{
+  value: string
+  pattern: string
+  caseInsensitive: boolean
+}> {
+  // Repeated wildcard entries keep the bounded campaign concentrated on the
+  // precedence boundary while retaining literals, case folds, and newlines.
+  const alphabet = [`a`, `b`, `A`, `B`, `%`, `%`, `%`, `_`, `_`, `.`, `\n`, `é`]
+  let state = 0x1745
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return state
+  }
+  const pick = (exclusiveUpperBound: number) =>
+    Math.floor((next() / 0x1_0000_0000) * exclusiveUpperBound)
+  const build = (length: number) => {
+    let result = ``
+    for (let index = 0; index < length; index++) {
+      result += alphabet[pick(alphabet.length)]
+    }
+    return result
+  }
+
+  for (let index = 0; index < count; index++) {
+    const value = build(pick(8))
+    const pattern = build(pick(8))
+    yield { value, pattern, caseInsensitive: pick(2) === 1 }
+  }
+}
+
 describe(`evaluators`, () => {
   describe(`compileExpression`, () => {
     it(`handles unknown expression type`, () => {
@@ -324,6 +399,60 @@ describe(`evaluators`, () => {
           const compiled = compileExpression(func)
 
           expect(compiled({})).toBe(true)
+        })
+
+        it(`treats % as a wildcard when the value also contains %`, () => {
+          const likeFunc = compileExpression(
+            new Func(`like`, [new Value(`100% done`), new Value(`100%done`)]),
+          )
+          const ilikeFunc = compileExpression(
+            new Func(`ilike`, [
+              new Value(`A% LONG VALUE`),
+              new Value(`a%value`),
+            ]),
+          )
+
+          expect(likeFunc({})).toBe(true)
+          expect(ilikeFunc({})).toBe(true)
+        })
+
+        it(`matches a bounded deterministic campaign against the LIKE law`, () => {
+          let mismatchCount = 0
+          const mismatchSamples: Array<{
+            value: string
+            pattern: string
+            caseInsensitive: boolean
+            expected: boolean
+            actual: boolean
+          }> = []
+
+          for (const testCase of deterministicLikeCases(20_000)) {
+            const functionName = testCase.caseInsensitive ? `ilike` : `like`
+            const compiled = compileExpression(
+              new Func(functionName, [
+                new Value(testCase.value),
+                new Value(testCase.pattern),
+              ]),
+            )
+            const actual = compiled({})
+            const expected = referenceLike(
+              testCase.value,
+              testCase.pattern,
+              testCase.caseInsensitive,
+            )
+
+            if (actual !== expected) {
+              mismatchCount++
+              if (mismatchSamples.length < 5) {
+                mismatchSamples.push({ ...testCase, expected, actual })
+              }
+            }
+          }
+
+          expect({ mismatchCount, mismatchSamples }).toEqual({
+            mismatchCount: 0,
+            mismatchSamples: [],
+          })
         })
 
         it(`handles like where _ must match exactly one character`, () => {

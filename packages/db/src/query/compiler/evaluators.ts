@@ -666,12 +666,12 @@ function evaluateLike(
       patternIndex < searchPattern.length
         ? searchPattern[patternIndex]
         : undefined
-    if (patternChar === `_` || patternChar === searchValue[valueIndex]) {
-      valueIndex++
-      patternIndex++
-    } else if (patternChar === `%`) {
+    if (patternChar === `%`) {
       starPatternIndex = patternIndex
       starValueIndex = valueIndex
+      patternIndex++
+    } else if (patternChar === `_` || patternChar === searchValue[valueIndex]) {
+      valueIndex++
       patternIndex++
     } else if (starPatternIndex !== -1) {
       // Mismatch after a `%`: let it consume one more character and retry
