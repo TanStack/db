@@ -348,6 +348,41 @@ describe(`QueryCollection`, () => {
     await collection.cleanup()
   })
 
+  it(`treats omitted optional sync metadata as no persistence`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `omitted-sync-metadata-test`,
+      queryClient,
+      queryKey: [`omitted-sync-metadata-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const querySync = options.sync
+    const collectionWithoutMetadata = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof querySync.sync>[0]) => {
+          const { metadata: _omitted, ...paramsWithoutMetadata } = params
+          return querySync.sync(paramsWithoutMetadata)
+        },
+      },
+    })
+
+    let startError: unknown
+    try {
+      collectionWithoutMetadata.startSyncImmediate()
+      await collectionWithoutMetadata.stateWhenReady()
+    } catch (error) {
+      startError = error
+    } finally {
+      await collectionWithoutMetadata.cleanup()
+    }
+
+    expect(startError).toBeUndefined()
+    expect(queryFn).toHaveBeenCalledOnce()
+  })
+
   it(`rejects a sync wrapper that drops the entire persistence field before querying`, async () => {
     const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
     const options = queryCollectionOptions<TestItem>({

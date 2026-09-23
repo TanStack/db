@@ -982,7 +982,10 @@ export function queryCollectionOptions(
     )
     const { begin, write, commit, markReady, markError, collection, metadata } =
       params
-    const persistence = validateSyncPersistenceCapability(metadata?.persistence)
+    const persistence =
+      metadata === undefined
+        ? null
+        : validateSyncPersistenceCapability(metadata.persistence)
 
     // Track whether sync has been started
     let syncStarted = false

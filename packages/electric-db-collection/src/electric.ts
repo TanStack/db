@@ -1748,9 +1748,10 @@ function createElectricSync<T extends Row<unknown>>(
         return parseElectricResumeState(persistedResumeState)
       }
 
-      const persistence = validateSyncPersistenceCapability(
-        metadata?.persistence,
-      )
+      const persistence =
+        metadata === undefined
+          ? null
+          : validateSyncPersistenceCapability(metadata.persistence)
       const hydrateBaseline = persistence?.hydrateBaseline
       const resumeSnapshot = persistence?.resumeSnapshot
       const certifyResumeSnapshot = resumeSnapshot?.certify

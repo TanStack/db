@@ -4022,6 +4022,45 @@ describe(`Electric Integration`, () => {
       )
     })
 
+    it(`treats omitted optional sync metadata as no persistence`, async () => {
+      vi.clearAllMocks()
+      const options = electricCollectionOptions<Row>({
+        id: `omitted-sync-metadata-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item) => item.id as number,
+        startSync: false,
+      })
+      const electricSync = options.sync
+      const collectionWithoutMetadata = createCollection({
+        ...options,
+        sync: {
+          sync: (params: Parameters<typeof electricSync.sync>[0]) => {
+            const { metadata: _omitted, ...paramsWithoutMetadata } = params
+            return electricSync.sync(paramsWithoutMetadata)
+          },
+        },
+      })
+
+      let startError: unknown
+      try {
+        collectionWithoutMetadata.startSyncImmediate()
+      } catch (error) {
+        startError = error
+      } finally {
+        await collectionWithoutMetadata.cleanup()
+      }
+
+      expect(startError).toBeUndefined()
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `http://test-url`,
+        }),
+      )
+    })
+
     it(`rejects a sync wrapper that drops the entire persistence field before opening ShapeStream`, async () => {
       vi.clearAllMocks()
       const { ShapeStream } = await import(`@electric-sql/client`)
