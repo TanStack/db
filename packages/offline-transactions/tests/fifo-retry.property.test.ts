@@ -36,6 +36,9 @@ const {
   defaultRuns: 30,
 })
 
+const campaignSeeds =
+  replayPath === undefined ? [20260916, undefined] : [undefined]
+
 function expectedStateAt(
   elapsed: number,
   delay: number,
@@ -48,7 +51,7 @@ function expectedStateAt(
   }
 }
 
-it.each([20260916, undefined])(
+it.each(campaignSeeds)(
   `wakes at the FIFO head deadline rather than polling ready tails (seed %s)`,
   async (fixedSeed) => {
     const seed = fixedSeed ?? replaySeed

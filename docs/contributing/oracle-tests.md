@@ -135,10 +135,13 @@ presence of a preferred heading, class, comment template, or helper.
   generators, observation recorder, refinement check, and run budget twice:
   once with a documented fixed seed and once without a seed. A replay interface
   MUST accept both the seed and shrink path and MUST run the requested replay
-  directly.
+  directly. When the property uses `fc.commands`, the interface MUST also accept
+  the commands arbitrary's reported `replayPath` and pass it back to
+  `fc.commands`.
 - **Acceptance evidence:** The normal test command reaches both campaigns, each
   campaign records its execution, and a checked replay command reproduces a
-  captured seed-and-path failure.
+  captured seed-and-path failure, including the command replay path when the
+  property uses `fc.commands`.
 - **Does not satisfy:** Fixed examples do not replace the fixed-seed campaign.
   Different generators, observation recorders, refinement checks, or budgets do
   not establish campaign parity.
@@ -570,6 +573,12 @@ When the random campaign fails, retain the reported seed and shrink path. Give t
 suite environment variables or another checked replay interface. The replay
 input must select both the seed and the path. A seed alone reruns the
 campaign but might not stop at the same reduced counterexample.
+
+`fc.commands` reports another value named `replayPath`. It records which
+generated commands were eligible as the model changed. Capture that command
+replay path separately from `fc.assert`'s shrink path and pass it back through
+the `replayPath` option of `fc.commands`; the assert seed and path alone do not
+fully specify a command-model replay.
 
 When replay inputs are present, run only the requested replay. Do not spend
 time on the fixed campaign before reaching the failure the developer asked to
