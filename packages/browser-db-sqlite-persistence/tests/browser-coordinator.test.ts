@@ -1093,6 +1093,62 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
+    it(`accepts a delivered mutation success after the observed route changes`, async () => {
+      const coordinator = createCoordinator()
+      const internals = coordinator as unknown as {
+        collections: Map<
+          string,
+          { isLeader: boolean; leaderId: string | null; latestTerm: number }
+        >
+      }
+      internals.collections.set(`todos`, {
+        isLeader: false,
+        leaderId: `leader-before`,
+        latestTerm: 1,
+      })
+      const deliveredSuccess = vi.fn(
+        (_collectionId: string, request: ApplyLocalMutationsRequest) => {
+          const state = internals.collections.get(`todos`)!
+          state.leaderId = `leader-after`
+          state.latestTerm = 2
+          return Promise.resolve({
+            type: `rpc:applyLocalMutations:res` as const,
+            rpcId: request.rpcId,
+            ok: true as const,
+            term: 1,
+            seq: 7,
+            latestRowVersion: 7,
+            acceptedMutationIds: request.mutations.map(
+              (mutation) => mutation.mutationId,
+            ),
+          })
+        },
+      )
+      Object.defineProperty(coordinator, `sendRPCOnce`, {
+        value: deliveredSuccess,
+        configurable: true,
+      })
+
+      try {
+        await expect(
+          coordinator.requestApplyLocalMutations(`todos`, [
+            {
+              mutationId: `delivered-before-route-change`,
+              type: `insert`,
+              key: `delivered-before-route-change`,
+              value: { id: `delivered-before-route-change` },
+            },
+          ]),
+        ).resolves.toMatchObject({
+          ok: true,
+          acceptedMutationIds: [`delivered-before-route-change`],
+        })
+        expect(deliveredSuccess).toHaveBeenCalledOnce()
+      } finally {
+        coordinator.dispose()
+      }
+    })
+
     it(`fails indeterminate when a local-mutation success is lost across leader change`, async () => {
       const retiredLeaderAdapter = createStubAdapter()
       const requesterAdapter = createStubAdapter()
