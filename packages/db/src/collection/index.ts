@@ -1045,7 +1045,7 @@ export class CollectionImpl<
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions = {},
-  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>> | void {
+  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>> | void {
     return currentStateAsChanges(this, options)
   }
 
@@ -1093,11 +1093,36 @@ export class CollectionImpl<
    */
   public subscribeChanges(
     callback: (
-      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
     ) => void,
+    options?: SubscribeChangesOptions<TOutput, TKey>,
+  ): CollectionSubscription
+  // Keep the pre-existing wider callback in the callable surface so Collection
+  // utility specializations remain structurally assignable to Collection.
+  public subscribeChanges(
+    callback:
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+        ) => void)
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+        ) => void),
+    options?: SubscribeChangesOptions<TOutput, TKey>,
+  ): CollectionSubscription
+  public subscribeChanges(
+    callback:
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+        ) => void)
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+        ) => void),
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
-    return this._changes.subscribeChanges(callback, options)
+    return this._changes.subscribeChanges(
+      (changes) => callback(changes),
+      options,
+    )
   }
 
   /**
