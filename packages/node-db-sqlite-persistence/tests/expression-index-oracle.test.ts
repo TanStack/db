@@ -27,15 +27,19 @@
  * re-filtering, then replayed through EXPLAIN QUERY PLAN. Result keys, ordering
  * when promised, and named-index use are separate observations.
  *
- * Reach, challenge, replay, and cleanup: the property records and asserts every
- * declared regime. An overbroad indexed-predicate mutant proves adapter
- * re-filtering cannot hide wrong SQL. A production-driver-boundary mutant
- * restores the old four path bindings and must lose the named-index search.
- * Replay with TANSTACK_DB_WS5A_SEED and TANSTACK_DB_WS5A_PATH. In-memory SQLite
- * teardown retains the semantic failure if cleanup also fails.
+ * Reach, challenge, replay, and cleanup: one property, generator matrix, and
+ * observation path run in retained fixed-seed and seedless-random campaigns.
+ * Supplying both TANSTACK_DB_WS5A_SEED and TANSTACK_DB_WS5A_PATH selects only
+ * the exact replay campaign; either value alone rejects. Per-axis grammar
+ * ablations and same-path SQL/compiler faults must fail that property. The
+ * retained fixed campaign reconstructs the known valid matrix. The bounds
+ * above state its range; exact grammar checks reject missing, duplicate, and
+ * unexpected axes as nearby invalid matrices. The focused overbroad and former
+ * four-path-binding controls remain independent. In-memory SQLite teardown
+ * retains the semantic failure if cleanup also fails.
  */
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
 import { IR } from '@tanstack/db'
 import {
   createPersistedTableName,
@@ -120,19 +124,28 @@ const expressionIndexCaseArbitrary = fc
   .tuple(legalPathArbitrary, independentValuesArbitrary)
   .map(([path, values]): OracleCase => ({ path, ...values }))
 
-function oracleRunConfiguration(): {
+type OracleReplayConfiguration = {
   seed: number
+  path: string
+  numRuns: 1
+}
+
+type GeneratedScenarioCampaign = {
+  name: `fixed` | `random` | `replay`
+  seed?: number
   path?: string
   numRuns: number
-} {
-  const seedText = process.env.TANSTACK_DB_WS5A_SEED
-  const path = process.env.TANSTACK_DB_WS5A_PATH
+}
+
+function oracleReplayConfiguration(
+  environment: NodeJS.ProcessEnv = process.env,
+): OracleReplayConfiguration | undefined {
+  const seedText = environment.TANSTACK_DB_WS5A_SEED
+  const path = environment.TANSTACK_DB_WS5A_PATH
   if (seedText !== undefined && !/^-?\d+$/.test(seedText)) {
     throw new Error(`TANSTACK_DB_WS5A_SEED must be an integer`)
   }
-  const seed = seedText === undefined ? DEFAULT_ORACLE_SEED : Number(seedText)
-
-  if (!Number.isSafeInteger(seed)) {
+  if (seedText !== undefined && !Number.isSafeInteger(Number(seedText))) {
     throw new Error(`TANSTACK_DB_WS5A_SEED must be an integer`)
   }
   if (path !== undefined && !/^\d+(?::\d+)*$/.test(path)) {
@@ -140,11 +153,52 @@ function oracleRunConfiguration(): {
       `TANSTACK_DB_WS5A_PATH must contain colon-separated nonnegative integers`,
     )
   }
+  if (seedText === undefined && path === undefined) return undefined
+  if (seedText === undefined) {
+    throw new Error(
+      `TANSTACK_DB_WS5A_PATH requires TANSTACK_DB_WS5A_SEED for exact replay`,
+    )
+  }
+  if (path === undefined) {
+    throw new Error(
+      `TANSTACK_DB_WS5A_SEED requires TANSTACK_DB_WS5A_PATH for exact replay`,
+    )
+  }
 
   return {
-    seed,
-    ...(path === undefined ? {} : { path }),
-    numRuns: path === undefined ? DEFAULT_ORACLE_RUNS : 1,
+    seed: Number(seedText),
+    path,
+    numRuns: 1,
+  }
+}
+
+const requestedReplay = oracleReplayConfiguration()
+
+const generatedScenarioCampaigns: Array<GeneratedScenarioCampaign> =
+  requestedReplay === undefined
+    ? [
+        {
+          name: `fixed`,
+          seed: DEFAULT_ORACLE_SEED,
+          numRuns: DEFAULT_ORACLE_RUNS,
+        },
+        { name: `random`, numRuns: DEFAULT_ORACLE_RUNS },
+      ]
+    : [{ name: `replay`, ...requestedReplay }]
+
+function generatedCampaignParameters(campaign: GeneratedScenarioCampaign) {
+  return {
+    numRuns: campaign.numRuns,
+    verbose: 2 as const,
+    ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+    ...(campaign.path === undefined ? {} : { path: campaign.path }),
+  }
+}
+
+function fixedOracleRunConfiguration() {
+  return {
+    seed: DEFAULT_ORACLE_SEED,
+    numRuns: DEFAULT_ORACLE_RUNS,
   }
 }
 
@@ -361,6 +415,19 @@ const GENERATED_SCENARIO_KINDS = [
 ] as const
 
 type GeneratedScenarioKind = (typeof GENERATED_SCENARIO_KINDS)[number]
+
+const GENERATED_SCENARIO_FAULTS = [
+  { kind: `eq`, wrongAnswer: `inverted equality operator` },
+  { kind: `in`, wrongAnswer: `shifted first IN binding` },
+  { kind: `batched-in`, wrongAnswer: `replaced final batch member` },
+  { kind: `range`, wrongAnswer: `exclusive lower boundary` },
+  { kind: `and`, wrongAnswer: `wrong conjunct binding` },
+  { kind: `order-by`, wrongAnswer: `reversed ordering direction` },
+  { kind: `wrapped-lower`, wrongAnswer: `wrong expression wrapper` },
+] as const satisfies ReadonlyArray<{
+  kind: GeneratedScenarioKind
+  wrongAnswer: string
+}>
 
 type GeneratedExpressionIndexScenario = ExpressionIndexScenario & {
   kind: GeneratedScenarioKind
@@ -765,6 +832,198 @@ const generatedScenarioMatrixArbitrary = fc
     },
   )
 
+function assertGeneratedScenarioGrammar(
+  scenarios: ReadonlyArray<GeneratedExpressionIndexScenario>,
+): void {
+  const actualKinds = scenarios.map(({ kind }) => kind)
+  const missingKinds = GENERATED_SCENARIO_KINDS.filter(
+    (kind) => !actualKinds.includes(kind),
+  )
+  const unexpectedKinds = actualKinds.filter(
+    (kind) => !GENERATED_SCENARIO_KINDS.includes(kind),
+  )
+  const duplicateKinds = actualKinds.filter(
+    (kind, index) => actualKinds.indexOf(kind) !== index,
+  )
+
+  if (
+    missingKinds.length > 0 ||
+    unexpectedKinds.length > 0 ||
+    duplicateKinds.length > 0
+  ) {
+    throw new Error(
+      `generated scenario grammar mismatch: missing=${missingKinds.join(`,`) || `none`}; unexpected=${unexpectedKinds.join(`,`) || `none`}; duplicate=${duplicateKinds.join(`,`) || `none`}`,
+    )
+  }
+}
+
+function mutateGeneratedScenarioQuery(
+  kind: GeneratedScenarioKind,
+): QueryTransform {
+  const unreached = (detail: string): never => {
+    throw new Error(`${kind} SQL/compiler fault did not reach ${detail}`)
+  }
+
+  switch (kind) {
+    case `eq`:
+      return (query) => {
+        const sql = query.sql.replace(/ = \?(\)?)$/, ` != ?$1`)
+        if (sql === query.sql) return unreached(`the equality operator`)
+        return { sql, params: query.params }
+      }
+    case `in`:
+      return (query) => {
+        if (!query.sql.includes(` IN (`) || query.params.length !== 2) {
+          return unreached(`the ordinary IN bindings`)
+        }
+        const first = query.params[0]
+        if (typeof first !== `number`) {
+          return unreached(`a numeric ordinary IN binding`)
+        }
+        const params = [...query.params]
+        params[0] = first + 2
+        return { sql: query.sql, params }
+      }
+    case `batched-in`:
+      return (query) => {
+        if (!query.sql.includes(` IN (`) || query.params.length !== 901) {
+          return unreached(`the 901 batched IN bindings`)
+        }
+        const first = query.params[0]
+        if (typeof first !== `number`) {
+          return unreached(`a numeric batched IN binding`)
+        }
+        const params = [...query.params]
+        params[params.length - 1] = first - 1
+        return { sql: query.sql, params }
+      }
+    case `range`:
+      return (query) => {
+        const sql = query.sql.replace(/ >= \?/, ` > ?`)
+        if (sql === query.sql) return unreached(`the inclusive range operator`)
+        return { sql, params: query.params }
+      }
+    case `and`:
+      return (query) => {
+        const activeIndex = query.params.indexOf(`active`)
+        if (activeIndex === -1) return unreached(`the conjunction binding`)
+        const params = [...query.params]
+        params[activeIndex] = `inactive`
+        return { sql: query.sql, params }
+      }
+    case `order-by`:
+      return (query) => {
+        const sql = query.sql.replace(/\sASC\b/, ` DESC`)
+        if (sql === query.sql) return unreached(`the ascending order clause`)
+        return { sql, params: query.params }
+      }
+    case `wrapped-lower`:
+      return (query) => {
+        const sql = query.sql.replace(/\blower\(/gi, `upper(`)
+        if (sql === query.sql) return unreached(`the lower wrapper`)
+        return { sql, params: query.params }
+      }
+  }
+}
+
+function assertGeneratedScenarioObservation(
+  scenario: GeneratedExpressionIndexScenario,
+  observation: ExpressionIndexObservation,
+): void {
+  const diagnostic = JSON.stringify(
+    {
+      kind: scenario.kind,
+      sql: observation.predicateQuery.sql,
+      params: observation.predicateQuery.params,
+      plan: observation.plan.map((row) => row.detail),
+      adapterKeys: observation.adapterKeys,
+      directSqlKeys: observation.directSqlKeys,
+    },
+    null,
+    2,
+  )
+
+  expect(observation.adapterKeys, diagnostic).toEqual(scenario.expectedKeys)
+  expect(observation.directSqlKeys, diagnostic).toEqual(scenario.expectedKeys)
+  if (scenario.expectedPlan === `ordered-scan`) {
+    expect(
+      planUsesNamedIndexForOrdering(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+      diagnostic,
+    ).toBe(true)
+  } else {
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+      diagnostic,
+    ).toBe(true)
+    expect(
+      planScansTable(observation.plan, observation.tableName),
+      diagnostic,
+    ).toBe(false)
+  }
+}
+
+type GeneratedScenarioPropertyOptions = {
+  ablateKind?: GeneratedScenarioKind
+  faultKind?: GeneratedScenarioKind
+  onScenario?: (kind: GeneratedScenarioKind) => void
+}
+
+function generatedScenarioProperty({
+  ablateKind,
+  faultKind,
+  onScenario,
+}: GeneratedScenarioPropertyOptions = {}) {
+  return fc.asyncProperty(generatedScenarioMatrixArbitrary, async (matrix) => {
+    const scenarios =
+      ablateKind === undefined
+        ? matrix
+        : matrix.filter(({ kind }) => kind !== ablateKind)
+    assertGeneratedScenarioGrammar(scenarios)
+
+    for (const scenario of scenarios) {
+      onScenario?.(scenario.kind)
+      const observation = await observeExpressionIndexScenario({
+        ...scenario,
+        ...(faultKind === scenario.kind
+          ? { transformQuery: mutateGeneratedScenarioQuery(scenario.kind) }
+          : {}),
+      })
+      assertGeneratedScenarioObservation(scenario, observation)
+    }
+  })
+}
+
+async function runGeneratedScenarioProperty(
+  campaign: GeneratedScenarioCampaign,
+) {
+  const reachedScenarios = new Set<GeneratedScenarioKind>()
+  const details = await fc.check(
+    generatedScenarioProperty({
+      onScenario: (kind) => reachedScenarios.add(kind),
+    }),
+    generatedCampaignParameters(campaign),
+  )
+
+  if (details.failed) {
+    throw new Error(
+      fc.defaultReportMessage(details) ??
+        `generated expression-index property failed without a report`,
+    )
+  }
+  expect([...reachedScenarios].sort()).toEqual(
+    [...GENERATED_SCENARIO_KINDS].sort(),
+  )
+  return details
+}
+
 async function assertExpressionIndexHistory(
   testCase: OracleCase,
   label: string,
@@ -921,20 +1180,44 @@ async function assertExpressionIndexHistory(
 }
 
 describe(`SQLite expression-index oracle`, () => {
-  it(`rejects an explicitly empty replay seed`, () => {
-    const previousSeed = process.env.TANSTACK_DB_WS5A_SEED
-    try {
-      process.env.TANSTACK_DB_WS5A_SEED = ``
-      expect(() => oracleRunConfiguration()).toThrow(
-        `TANSTACK_DB_WS5A_SEED must be an integer`,
-      )
-    } finally {
-      if (previousSeed === undefined) {
-        delete process.env.TANSTACK_DB_WS5A_SEED
-      } else {
-        process.env.TANSTACK_DB_WS5A_SEED = previousSeed
-      }
-    }
+  const it = requestedReplay === undefined ? vitestIt : vitestIt.skip
+
+  it.each([
+    {
+      label: `empty seed`,
+      environment: { TANSTACK_DB_WS5A_SEED: `` },
+      message: `TANSTACK_DB_WS5A_SEED must be an integer`,
+    },
+    {
+      label: `seed without path`,
+      environment: { TANSTACK_DB_WS5A_SEED: `1659005` },
+      message: `TANSTACK_DB_WS5A_SEED requires TANSTACK_DB_WS5A_PATH for exact replay`,
+    },
+    {
+      label: `path without seed`,
+      environment: { TANSTACK_DB_WS5A_PATH: `0` },
+      message: `TANSTACK_DB_WS5A_PATH requires TANSTACK_DB_WS5A_SEED for exact replay`,
+    },
+    {
+      label: `invalid shrink path`,
+      environment: {
+        TANSTACK_DB_WS5A_SEED: `1659005`,
+        TANSTACK_DB_WS5A_PATH: `0:`,
+      },
+      message: `TANSTACK_DB_WS5A_PATH must contain colon-separated nonnegative integers`,
+    },
+  ])(`rejects a $label replay configuration`, ({ environment, message }) => {
+    expect(() => oracleReplayConfiguration(environment)).toThrow(message)
+  })
+
+  it(`accepts only a checked seed and shrink-path replay pair`, () => {
+    expect(
+      oracleReplayConfiguration({
+        TANSTACK_DB_WS5A_SEED: `-1659005`,
+        TANSTACK_DB_WS5A_PATH: `0:1:2`,
+      }),
+    ).toEqual({ seed: -1659005, path: `0:1:2`, numRuns: 1 })
+    expect(oracleReplayConfiguration({})).toBeUndefined()
   })
 
   it.each([
@@ -1417,7 +1700,7 @@ describe(`SQLite expression-index oracle`, () => {
           }, [() => driver.close()])
         },
       ),
-      oracleRunConfiguration(),
+      fixedOracleRunConfiguration(),
     )
   })
 
@@ -1454,7 +1737,7 @@ describe(`SQLite expression-index oracle`, () => {
           ).rejects.toThrow(bigintRangeError(value))
         }, [() => driver.close()])
       }),
-      oracleRunConfiguration(),
+      fixedOracleRunConfiguration(),
     )
   })
 
@@ -1684,67 +1967,119 @@ describe(`SQLite expression-index oracle`, () => {
     )
   })
 
-  it(`reaches every declared generated expression-index scenario`, async () => {
-    const reachedScenarios = new Set<GeneratedScenarioKind>()
+  vitestIt.each(generatedScenarioCampaigns)(
+    `reaches every declared generated expression-index scenario in the $name campaign`,
+    async (campaign) => {
+      const details = await runGeneratedScenarioProperty(campaign)
+      const parameters = generatedCampaignParameters(campaign)
 
-    await fc.assert(
-      fc.asyncProperty(generatedScenarioMatrixArbitrary, async (scenarios) => {
-        for (const {
-          kind,
-          expectedKeys,
-          expectedPlan,
-          ...scenario
-        } of scenarios) {
-          reachedScenarios.add(kind)
-          const observation = await observeExpressionIndexScenario(scenario)
-          const diagnostic = JSON.stringify(
-            {
-              kind,
-              sql: observation.predicateQuery.sql,
-              params: observation.predicateQuery.params,
-              plan: observation.plan.map((row) => row.detail),
-              adapterKeys: observation.adapterKeys,
-              directSqlKeys: observation.directSqlKeys,
-            },
-            null,
-            2,
-          )
+      expect(details.numRuns).toBe(campaign.numRuns)
+      expect(`seed` in parameters).toBe(campaign.seed !== undefined)
+      expect(`path` in parameters).toBe(campaign.path !== undefined)
+      if (campaign.seed !== undefined) {
+        expect(details.seed).toBe(campaign.seed)
+      }
+      if (campaign.path !== undefined) {
+        expect(details.runConfiguration.path).toBe(campaign.path)
+      }
+      expect(details.seed).toEqual(expect.any(Number))
+    },
+  )
 
-          expect(observation.adapterKeys, diagnostic).toEqual(expectedKeys)
-          expect(observation.directSqlKeys, diagnostic).toEqual(expectedKeys)
-          if (expectedPlan === `ordered-scan`) {
-            expect(
-              planUsesNamedIndexForOrdering(
-                observation.plan,
-                observation.tableName,
-                observation.indexName,
-              ),
-              diagnostic,
-            ).toBe(true)
-          } else {
-            expect(
-              planUsesNamedIndex(
-                observation.plan,
-                observation.tableName,
-                observation.indexName,
-              ),
-              diagnostic,
-            ).toBe(true)
-            expect(
-              planScansTable(observation.plan, observation.tableName),
-              diagnostic,
-            ).toBe(false)
-          }
-        }
-      }),
-      {
-        ...oracleRunConfiguration(),
-        verbose: 2,
-      },
-    )
+  const generatedControlTest =
+    requestedReplay === undefined ? vitestIt : vitestIt.skip
 
-    expect([...reachedScenarios].sort()).toEqual(
-      [...GENERATED_SCENARIO_KINDS].sort(),
-    )
-  })
+  generatedControlTest.each(GENERATED_SCENARIO_KINDS)(
+    `rejects the generated grammar when the %s axis is ablated`,
+    async (kind) => {
+      const details = await fc.check(
+        generatedScenarioProperty({ ablateKind: kind }),
+        {
+          seed: DEFAULT_ORACLE_SEED,
+          numRuns: 1,
+          verbose: 2,
+        },
+      )
+      const evidence = JSON.stringify({
+        seed: details.seed,
+        path: details.counterexamplePath,
+        error: details.error,
+      })
+
+      expect(details.failed, evidence).toBe(true)
+      expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED)
+      expect(details.counterexamplePath, evidence).not.toBeNull()
+      expect(details.error, evidence).toContain(`missing=${kind}`)
+    },
+  )
+
+  generatedControlTest(
+    `reconstructs the retained generated grammar and rejects a nearby duplicate axis`,
+    () => {
+      const [matrix] = fc.sample(generatedScenarioMatrixArbitrary, {
+        seed: DEFAULT_ORACLE_SEED,
+        numRuns: 1,
+      })
+      if (!matrix) throw new Error(`fixed grammar witness was not generated`)
+      assertGeneratedScenarioGrammar(matrix)
+      expect(GENERATED_SCENARIO_FAULTS.map(({ kind }) => kind)).toEqual(
+        GENERATED_SCENARIO_KINDS,
+      )
+      const equalityScenario = matrix[0]
+      if (!equalityScenario) {
+        throw new Error(`fixed grammar witness omitted equality`)
+      }
+      expect(() =>
+        assertGeneratedScenarioGrammar([...matrix, equalityScenario]),
+      ).toThrow(`duplicate=eq`)
+    },
+  )
+
+  generatedControlTest.each(GENERATED_SCENARIO_FAULTS)(
+    `rejects the plausible $wrongAnswer for the $kind axis`,
+    async ({ kind }) => {
+      const details = await fc.check(
+        generatedScenarioProperty({ faultKind: kind }),
+        {
+          seed: DEFAULT_ORACLE_SEED,
+          numRuns: 1,
+          verbose: 2,
+        },
+      )
+      const evidence = JSON.stringify({
+        seed: details.seed,
+        path: details.counterexamplePath,
+        error: details.error,
+      })
+
+      expect(details.failed, evidence).toBe(true)
+      expect(details.seed, evidence).toBe(DEFAULT_ORACLE_SEED)
+      expect(details.counterexamplePath, evidence).not.toBeNull()
+      expect(details.error ?? ``, evidence).not.toContain(`did not reach`)
+      expect(details.error, evidence).toContain(`"kind": "${kind}"`)
+
+      const replayPath = details.counterexamplePath
+      if (replayPath === null) {
+        throw new Error(`${kind} wrong-answer control did not shrink to a path`)
+      }
+      const replay = await fc.check(
+        generatedScenarioProperty({ faultKind: kind }),
+        {
+          seed: details.seed,
+          path: replayPath,
+          numRuns: 1,
+          verbose: 2,
+        },
+      )
+      const replayEvidence = JSON.stringify({
+        seed: replay.seed,
+        requestedPath: replayPath,
+        replayPath: replay.counterexamplePath,
+        error: replay.error,
+      })
+      expect(replay.failed, replayEvidence).toBe(true)
+      expect(replay.error ?? ``, replayEvidence).not.toContain(`did not reach`)
+      expect(replay.error, replayEvidence).toContain(`"kind": "${kind}"`)
+    },
+  )
 })

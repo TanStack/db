@@ -183,6 +183,15 @@ target execution, not reproduction of a particular bug. Local IVM and offline
 properties have separate environment variables; inspect their test headers.
 Do not assume the core multiplier reaches them.
 
+The Node expression-index oracle runs matching fixed-seed and seedless-random
+campaigns by default. Supplying both replay values selects only the requested
+seed and shrink path:
+
+```sh
+TANSTACK_DB_WS5A_SEED=1659005 TANSTACK_DB_WS5A_PATH=0 \
+pnpm --filter @tanstack/node-db-sqlite-persistence test:oracles
+```
+
 Stress runs need an explicit file list, run budget, seed policy, runtime, exit
 status and cost. For long synchronous campaigns, yield **between complete
 histories**, never between an action and its synchronous observation. In this
