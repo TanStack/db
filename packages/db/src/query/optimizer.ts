@@ -1211,6 +1211,9 @@ function referencesAliasWithRemappedSelect(
   if (!select) {
     return false
   }
+  const hasSpreadProjection = Object.keys(select).some((key) =>
+    key.startsWith(`__SPREAD_SENTINEL__`),
+  )
 
   for (const ref of refs) {
     const path = ref.path
@@ -1219,8 +1222,12 @@ function referencesAliasWithRemappedSelect(
     if (path[0] !== outerAlias) continue
 
     const projected = select[path[1]!]
-    // Unselected fields can't be remapped, so skip - only care about fields in the SELECT.
-    if (!projected) continue
+    // A spread-selected field has no direct projection entry to remap.
+    // Keep its predicate outside rather than guessing its input source.
+    if (!projected) {
+      if (hasSpreadProjection) return true
+      continue
+    }
 
     // Non-PropRef projections are computed values; cannot push down.
     if (!(projected instanceof PropRef)) {

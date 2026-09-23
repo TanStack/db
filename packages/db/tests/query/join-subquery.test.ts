@@ -504,6 +504,30 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
       })
 
+      test(`preserves a predicate on a spread-selected join result`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .innerJoin({ profile: profilesCollection }, ({ user, profile }) =>
+                eq(user.id, profile.userId),
+              )
+              .select(({ user }) => user)
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: usersWithProfiles }, ({ issue, member }) =>
+                eq(issue.userId, member.id),
+              )
+              .where(({ member }) => eq(member.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+      })
+
       test(`should use subquery in JOIN clause - left join`, () => {
         const joinQuery = createLiveQueryCollection({
           startSync: true,
