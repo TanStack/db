@@ -403,10 +403,12 @@ Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
 owner and its limits before adding another model. The guide explains testing
 methods; it does not authorize new product behavior or retire existing laws.
 
-When an oracle has a stable subsystem model, write it as executable subsystem
+Write every oracle and generated-history test as executable subsystem
 documentation. Follow the guide's section on literate oracle files. Keep the
 contract, model, generated history grammar, production driver, and observations
-close enough that a reviewer can compare them directly.
+visible and close enough that a reviewer can compare them directly. A focused
+regression may remain short, but it does not waive this structure for an oracle
+and cannot replace applicable oracle coverage.
 
 ### Always Add Tests for Bugs
 
