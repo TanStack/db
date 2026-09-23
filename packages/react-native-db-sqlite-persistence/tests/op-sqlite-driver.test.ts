@@ -130,9 +130,10 @@ async function withColumnarDriver<T>(
  * when each query Promise settles. Exact row values, keys, order, and count are
  * compared.
  * Refinement evidence: query execution counts prove the SELECT reached the
- * adapter. Empty, reordered, duplicated, missing-key, and swapped-value mutants
- * challenge the checker; the alias property records a seed and shrink path and
- * verifies replay of the same exact-row violation.
+ * adapter. Named empty, reordered, duplicated, missing-key, and swapped-value
+ * wrong answers challenge the checker. Normal execution runs the same alias
+ * properties and budgets in retained fixed-seed and seedless-random lanes.
+ * Seed, numeric shrink path, and property coordinates select one exact replay.
  * Real-provider refinement: frozen receipts from the published 15.2.7 Native
  * and Node sources, plus forward receipts from 18.2.1 Native, Node, and browser
  * sources, prove the shim's accepted envelopes match provider output.
@@ -502,56 +503,332 @@ const writeResultFieldNames = [
   `lastInsertRowId`,
 ] as const
 
-const aliasOracleSeed = Number(
-  process.env.TANSTACK_DB_OP_SQLITE_ORACLE_SEED ?? 165903,
-)
-const aliasOracleRuns = Number(
-  process.env.TANSTACK_DB_OP_SQLITE_ORACLE_RUNS ?? 50,
-)
-const aliasOraclePath = process.env.TANSTACK_DB_OP_SQLITE_ORACLE_PATH
-if (!Number.isSafeInteger(aliasOracleSeed)) {
-  throw new Error(`Invalid TANSTACK_DB_OP_SQLITE_ORACLE_SEED`)
+const aliasOracleProperties = [
+  `write-marker-aliases`,
+  `result-carrier-equivalence`,
+  `columnar-sql-aliases`,
+] as const
+
+type AliasOracleProperty = (typeof aliasOracleProperties)[number]
+type AliasOracleEnvironment = Record<string, string | undefined>
+type AliasOracleConfig = {
+  runs: number
+  replaySeed: number | undefined
+  replayPath: string | undefined
+  replayProperty: AliasOracleProperty | undefined
 }
-if (!Number.isSafeInteger(aliasOracleRuns) || aliasOracleRuns < 1) {
-  throw new Error(`Invalid TANSTACK_DB_OP_SQLITE_ORACLE_RUNS`)
+type AliasOracleCampaign = {
+  name: `fixed` | `random` | `replay`
+  numRuns: number
+  seed: number | undefined
+  path: string | undefined
 }
-if (aliasOraclePath !== undefined && !/^\d+(?::\d+)*$/.test(aliasOraclePath)) {
-  throw new Error(
-    `TANSTACK_DB_OP_SQLITE_ORACLE_PATH requires a numeric shrink path`,
+
+const FIXED_ALIAS_ORACLE_SEED = 165903
+
+function isAliasOracleProperty(value: string): value is AliasOracleProperty {
+  return aliasOracleProperties.some((property) => property === value)
+}
+
+function readAliasOracleConfig(
+  environment: AliasOracleEnvironment = process.env,
+): AliasOracleConfig {
+  const runsText = environment.TANSTACK_DB_OP_SQLITE_ORACLE_RUNS ?? `50`
+  const runs = Number(runsText)
+  if (runsText.trim() === `` || !Number.isSafeInteger(runs) || runs < 1) {
+    throw new Error(
+      `TANSTACK_DB_OP_SQLITE_ORACLE_RUNS must be a positive integer`,
+    )
+  }
+
+  const seedText = environment.TANSTACK_DB_OP_SQLITE_ORACLE_SEED
+  const path = environment.TANSTACK_DB_OP_SQLITE_ORACLE_PATH
+  const propertyText = environment.TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY
+  if (
+    seedText === undefined &&
+    path === undefined &&
+    propertyText === undefined
+  ) {
+    return {
+      runs,
+      replaySeed: undefined,
+      replayPath: undefined,
+      replayProperty: undefined,
+    }
+  }
+
+  if (seedText === undefined) {
+    throw new Error(
+      `TANSTACK_DB_OP_SQLITE_ORACLE_PATH and PROPERTY require SEED`,
+    )
+  }
+  const replaySeed = Number(seedText)
+  if (seedText.trim() === `` || !Number.isSafeInteger(replaySeed)) {
+    throw new Error(`TANSTACK_DB_OP_SQLITE_ORACLE_SEED must be an integer`)
+  }
+  if (path === undefined || !/^\d+(?::\d+)*$/.test(path)) {
+    throw new Error(
+      `TANSTACK_DB_OP_SQLITE_ORACLE_PATH must be a numeric shrink path`,
+    )
+  }
+  if (propertyText === undefined || !isAliasOracleProperty(propertyText)) {
+    throw new Error(
+      `TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY must name a generated property`,
+    )
+  }
+
+  return {
+    runs,
+    replaySeed,
+    replayPath: path,
+    replayProperty: propertyText,
+  }
+}
+
+function aliasOracleCampaigns(
+  property: AliasOracleProperty,
+  config: AliasOracleConfig,
+): ReadonlyArray<AliasOracleCampaign> {
+  if (config.replayProperty !== undefined) {
+    if (config.replayProperty !== property) return []
+    return [
+      {
+        name: `replay`,
+        numRuns: 1,
+        seed: config.replaySeed,
+        path: config.replayPath,
+      },
+    ]
+  }
+
+  return [
+    {
+      name: `fixed`,
+      numRuns: config.runs,
+      seed: FIXED_ALIAS_ORACLE_SEED,
+      path: undefined,
+    },
+    {
+      name: `random`,
+      numRuns: config.runs,
+      seed: undefined,
+      path: undefined,
+    },
+  ]
+}
+
+function aliasOracleParameters(campaign: AliasOracleCampaign) {
+  return {
+    numRuns: campaign.numRuns,
+    ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+    ...(campaign.path === undefined ? {} : { path: campaign.path }),
+    ...(campaign.name === `replay` ? { endOnFailure: true } : {}),
+  }
+}
+
+const writeResultAliasesArbitrary = fc.uniqueArray(
+  fc.constantFrom(...writeResultFieldNames),
+  {
+    minLength: 1,
+    maxLength: writeResultFieldNames.length,
+  },
+)
+const statementResultAliasesArbitrary = fc.uniqueArray(
+  fc.constantFrom(...statementResultAliasNames),
+  {
+    minLength: 1,
+    maxLength: statementResultAliasNames.length,
+  },
+)
+
+function isLegalAliasSequence(
+  aliases: ReadonlyArray<string>,
+  allowedAliases: ReadonlyArray<string>,
+): boolean {
+  const allowed = new Set(allowedAliases)
+  return (
+    aliases.length >= 1 &&
+    aliases.length <= allowedAliases.length &&
+    new Set(aliases).size === aliases.length &&
+    aliases.every((alias) => allowed.has(alias))
   )
 }
 
-it(`preserves generated single-row write-marker aliases in direct row arrays`, async () => {
-  await fc.assert(
-    fc.asyncProperty(
-      fc.uniqueArray(fc.constantFrom(...writeResultFieldNames), {
-        minLength: 1,
-        maxLength: writeResultFieldNames.length,
-      }),
-      async (aliases) => {
+function expectAliasGrammar<TAlias extends string>(
+  arbitrary: fc.Arbitrary<Array<TAlias>>,
+  allowedAliases: ReadonlyArray<TAlias>,
+): void {
+  // Singletons ablate every other alias. Full and reversed witnesses exercise
+  // both length boundaries and order without changing the legal domain.
+  const witnesses = [
+    ...allowedAliases.map((alias) => [alias]),
+    [...allowedAliases],
+    [...allowedAliases].reverse(),
+  ]
+  const observed = new Set<string>()
+
+  fc.assert(
+    fc.property(arbitrary, (aliases) => {
+      expect(isLegalAliasSequence(aliases, allowedAliases)).toBe(true)
+      observed.add(JSON.stringify(aliases))
+    }),
+    {
+      seed: FIXED_ALIAS_ORACLE_SEED,
+      numRuns: 50,
+      examples: witnesses.map((aliases) => [aliases]),
+    },
+  )
+
+  witnesses.forEach((aliases) => {
+    expect(observed).toContain(JSON.stringify(aliases))
+  })
+  expect(isLegalAliasSequence([], allowedAliases)).toBe(false)
+  expect(
+    isLegalAliasSequence(
+      [allowedAliases[0]!, allowedAliases[0]!],
+      allowedAliases,
+    ),
+  ).toBe(false)
+  expect(isLegalAliasSequence([`not-an-op-sqlite-alias`], allowedAliases)).toBe(
+    false,
+  )
+}
+
+it(`configures identical fixed and seedless-random alias campaigns`, () => {
+  const config = readAliasOracleConfig({})
+  expect(aliasOracleCampaigns(`write-marker-aliases`, config)).toEqual([
+    {
+      name: `fixed`,
+      numRuns: 50,
+      seed: FIXED_ALIAS_ORACLE_SEED,
+      path: undefined,
+    },
+    {
+      name: `random`,
+      numRuns: 50,
+      seed: undefined,
+      path: undefined,
+    },
+  ])
+})
+
+it(`selects exactly one alias property and shrink path for replay`, () => {
+  const config = readAliasOracleConfig({
+    TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `271828`,
+    TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0:1`,
+    TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `columnar-sql-aliases`,
+  })
+
+  expect(aliasOracleCampaigns(`write-marker-aliases`, config)).toEqual([])
+  expect(aliasOracleCampaigns(`result-carrier-equivalence`, config)).toEqual([])
+  const [replay] = aliasOracleCampaigns(`columnar-sql-aliases`, config)
+  expect(replay).toEqual({
+    name: `replay`,
+    numRuns: 1,
+    seed: 271828,
+    path: `0:1`,
+  })
+  expect(aliasOracleParameters(replay!)).toEqual({
+    numRuns: 1,
+    seed: 271828,
+    path: `0:1`,
+    endOnFailure: true,
+  })
+})
+
+it.each([
+  {
+    name: `path without seed`,
+    environment: { TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0` },
+  },
+  {
+    name: `property without seed`,
+    environment: {
+      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `write-marker-aliases`,
+    },
+  },
+  {
+    name: `seed without path`,
+    environment: { TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1` },
+  },
+  {
+    name: `seed and path without property`,
+    environment: {
+      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1`,
+      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0`,
+    },
+  },
+  {
+    name: `non-integer seed`,
+    environment: {
+      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1.5`,
+      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0`,
+      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `write-marker-aliases`,
+    },
+  },
+  {
+    name: `non-integer run budget`,
+    environment: { TANSTACK_DB_OP_SQLITE_ORACLE_RUNS: `1.5` },
+  },
+  {
+    name: `invalid shrink path`,
+    environment: {
+      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1`,
+      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `first`,
+      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `write-marker-aliases`,
+    },
+  },
+  {
+    name: `unknown property`,
+    environment: {
+      TANSTACK_DB_OP_SQLITE_ORACLE_SEED: `1`,
+      TANSTACK_DB_OP_SQLITE_ORACLE_PATH: `0`,
+      TANSTACK_DB_OP_SQLITE_ORACLE_PROPERTY: `unknown`,
+    },
+  },
+])(`rejects incomplete alias replay coordinates: $name`, ({ environment }) => {
+  expect(() => readAliasOracleConfig(environment)).toThrow()
+})
+
+it(`controls alias grammar reconstruction, ablation, range, and exclusion`, () => {
+  expectAliasGrammar(writeResultAliasesArbitrary, writeResultFieldNames)
+  expectAliasGrammar(statementResultAliasesArbitrary, statementResultAliasNames)
+})
+
+const aliasOracleConfig = readAliasOracleConfig()
+
+for (const campaign of aliasOracleCampaigns(
+  `write-marker-aliases`,
+  aliasOracleConfig,
+)) {
+  it(`preserves generated single-row write-marker aliases in direct row arrays [${campaign.name}]`, async () => {
+    await fc.assert(
+      fc.asyncProperty(writeResultAliasesArbitrary, async (aliases) => {
         const row = Object.fromEntries(
           aliases.map((alias, index) => [alias, `${index}:${alias}`]),
         )
         const actual = await queryInjectedResult<Record<string, unknown>>([row])
         expectExactAliasRows(actual, [row])
-      },
-    ),
-    {
-      seed: aliasOracleSeed,
-      numRuns: aliasOracleRuns,
-      examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]],
-    },
-  )
-})
-
-it(`returns the same rows across equivalent documented result carriers`, async () => {
-  await fc.assert(
-    fc.asyncProperty(
-      fc.uniqueArray(fc.constantFrom(...statementResultAliasNames), {
-        minLength: 1,
-        maxLength: statementResultAliasNames.length,
       }),
-      async (aliases) => {
+      {
+        ...aliasOracleParameters(campaign),
+        ...(campaign.name === `replay`
+          ? {}
+          : {
+              examples: [[[`rowsAffected`]], [[...writeResultFieldNames]]],
+            }),
+      },
+    )
+  })
+}
+
+for (const campaign of aliasOracleCampaigns(
+  `result-carrier-equivalence`,
+  aliasOracleConfig,
+)) {
+  it(`returns the same rows across equivalent documented result carriers [${campaign.name}]`, async () => {
+    await fc.assert(
+      fc.asyncProperty(statementResultAliasesArbitrary, async (aliases) => {
         const { expected } = aliasQueryCase(aliases)
         const rawRows = expected.map((row) =>
           aliases.map((alias) => row[alias]),
@@ -593,18 +870,21 @@ it(`returns the same rows across equivalent documented result carriers`, async (
           )
           expectExactAliasRows(actual, expected)
         }
+      }),
+      {
+        ...aliasOracleParameters(campaign),
+        ...(campaign.name === `replay`
+          ? {}
+          : {
+              examples: [
+                [[`rowsAffected`]],
+                [[`rows`, `rawRows`, `columnNames`, `ordinary_name`]],
+              ],
+            }),
       },
-    ),
-    {
-      seed: aliasOracleSeed,
-      numRuns: aliasOracleRuns,
-      examples: [
-        [[`rowsAffected`]],
-        [[`rows`, `rawRows`, `columnNames`, `ordinary_name`]],
-      ],
-    },
-  )
-})
+    )
+  })
+}
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replaceAll(`"`, `""`)}"`
@@ -685,15 +965,14 @@ it(`preserves statement-result field names in direct row arrays`, async () => {
   )
 })
 
-it(`preserves generated legal SQL aliases through v14 columnar rows`, async () => {
-  await withColumnarDriver(async ({ driver, queryExecutions }) => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.uniqueArray(fc.constantFrom(...statementResultAliasNames), {
-          minLength: 1,
-          maxLength: statementResultAliasNames.length,
-        }),
-        async (aliases) => {
+for (const campaign of aliasOracleCampaigns(
+  `columnar-sql-aliases`,
+  aliasOracleConfig,
+)) {
+  it(`preserves generated legal SQL aliases through v14 columnar rows [${campaign.name}]`, async () => {
+    await withColumnarDriver(async ({ driver, queryExecutions }) => {
+      await fc.assert(
+        fc.asyncProperty(statementResultAliasesArbitrary, async (aliases) => {
           const executionsBefore = queryExecutions()
           const { sql, params, expected } = aliasQueryCase(aliases)
           let actual: ReadonlyArray<Record<string, unknown>>
@@ -705,17 +984,17 @@ it(`preserves generated legal SQL aliases through v14 columnar rows`, async () =
           }
           expect(queryExecutions()).toBe(executionsBefore + 1)
           expectExactAliasRows(actual, expected)
+        }),
+        {
+          ...aliasOracleParameters(campaign),
+          ...(campaign.name === `replay`
+            ? {}
+            : { examples: [[[...statementResultFieldNames]]] }),
         },
-      ),
-      {
-        seed: aliasOracleSeed,
-        numRuns: aliasOracleRuns,
-        ...(aliasOraclePath ? { path: aliasOraclePath } : {}),
-        examples: [[[...statementResultFieldNames]]],
-      },
-    )
+      )
+    })
   })
-})
+}
 
 it(`returns an exact empty row set for an empty columnar SELECT`, async () => {
   await withColumnarDriver(async ({ driver, queryExecutions }) => {
@@ -961,28 +1240,49 @@ it.each([
   expectMalformedQueryRejected(outcome)
 })
 
-it(`reserved-alias checker rejects exact-row mutants`, () => {
+const reservedAliasWrongAnswers = (() => {
   const aliases = [`rows`, `rowsAffected`, `ordinary_name`]
   const { expected } = aliasQueryCase(aliases)
   const first = expected[0]!
   const second = expected[1]!
-  const mutants: Array<Array<Record<string, unknown>>> = [
-    [],
-    [
-      Object.fromEntries(
-        Object.entries(first).filter(([alias]) => alias !== `rowsAffected`),
-      ),
-      second,
-    ],
-    [{ ...first, rows: first.rowsAffected, rowsAffected: first.rows }, second],
-    [first, first],
+  return [
+    { name: `silently empty result`, actual: [] },
+    {
+      name: `missing reserved alias`,
+      actual: [
+        Object.fromEntries(
+          Object.entries(first).filter(([alias]) => alias !== `rowsAffected`),
+        ),
+        second,
+      ],
+    },
+    {
+      name: `swapped reserved values`,
+      actual: [
+        { ...first, rows: first.rowsAffected, rowsAffected: first.rows },
+        second,
+      ],
+    },
+    { name: `duplicated first row`, actual: [first, first] },
   ]
+})()
 
-  mutants.forEach((mutant) => {
-    expect(() => expectExactAliasRows(mutant, expected)).toThrow(
+it.each(reservedAliasWrongAnswers)(
+  `reserved-alias checker rejects wrong answer: $name`,
+  ({ actual }) => {
+    const { expected } = aliasQueryCase([
+      `rows`,
+      `rowsAffected`,
+      `ordinary_name`,
+    ])
+    expect(() => expectExactAliasRows(actual, expected)).toThrow(
       `op-sqlite reserved-alias exact-row law violated`,
     )
-  })
+  },
+)
+
+it(`reserved-alias checker accepts the independent reference rows`, () => {
+  const { expected } = aliasQueryCase([`rows`, `rowsAffected`, `ordinary_name`])
   expectExactAliasRows(expected, expected)
 })
 
