@@ -135,6 +135,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
   private readonly appliedEnvelopeIds = new Map<string, AppliedEnvelope>()
+  private readonly applyingEnvelopeIds = new Map<
+    string,
+    Promise<ApplyLocalMutationsResponse>
+  >()
   private appliedEnvelopePruneTimer: ReturnType<typeof setTimeout> | null = null
   private readonly disposedPromise: Promise<never>
   private rejectDisposed: ((error: Error) => void) | null = null
@@ -355,6 +359,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       this.appliedEnvelopePruneTimer = null
     }
     this.appliedEnvelopeIds.clear()
+    this.applyingEnvelopeIds.clear()
 
     this.channel.close()
     this.collections.clear()
@@ -721,13 +726,43 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       mutations: Array<PersistedMutationEnvelope>
     },
   ): Promise<ApplyLocalMutationsResponse> {
-    // Dedupe by envelopeId
+    const envelopeKey = JSON.stringify([collectionId, request.envelopeId])
     this.pruneAppliedEnvelopeIds()
-    const appliedEnvelope = this.appliedEnvelopeIds.get(request.envelopeId)
+    const appliedEnvelope = this.appliedEnvelopeIds.get(envelopeKey)
     if (appliedEnvelope) {
       return { ...appliedEnvelope.response, rpcId: request.rpcId }
     }
 
+    const applyingEnvelope = this.applyingEnvelopeIds.get(envelopeKey)
+    if (applyingEnvelope) {
+      return { ...(await applyingEnvelope), rpcId: request.rpcId }
+    }
+
+    const application = this.applyLocalMutationsOnce(
+      collectionId,
+      request,
+      envelopeKey,
+    )
+    this.applyingEnvelopeIds.set(envelopeKey, application)
+    try {
+      return await application
+    } finally {
+      if (this.applyingEnvelopeIds.get(envelopeKey) === application) {
+        this.applyingEnvelopeIds.delete(envelopeKey)
+      }
+    }
+  }
+
+  private async applyLocalMutationsOnce(
+    collectionId: string,
+    request: {
+      type: `rpc:applyLocalMutations:req`
+      rpcId: string
+      envelopeId: string
+      mutations: Array<PersistedMutationEnvelope>
+    },
+    envelopeKey: string,
+  ): Promise<ApplyLocalMutationsResponse> {
     const state = this.collections.get(collectionId)
     if (!state || !state.isLeader) {
       return {
@@ -776,7 +811,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
 
     // Retain the completed result so transport retries observe the same
     // durable outcome without applying the envelope again.
-    this.appliedEnvelopeIds.set(request.envelopeId, {
+    this.appliedEnvelopeIds.set(envelopeKey, {
       collectionId,
       appliedAt: Date.now(),
       response,

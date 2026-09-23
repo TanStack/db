@@ -519,6 +519,158 @@ describe(`BrowserCollectionCoordinator`, () => {
       coord.dispose()
     })
 
+    it(`scopes envelope deduplication by collection`, async () => {
+      const alphaAdapter = createStubAdapter()
+      const betaAdapter = createStubAdapter()
+      const coordinator = createCoordinator(alphaAdapter)
+      coordinator.setAdapterForCollection(`alpha`, alphaAdapter)
+      coordinator.setAdapterForCollection(`beta`, betaAdapter)
+      coordinator.subscribe(`alpha`, () => {})
+      coordinator.subscribe(`beta`, () => {})
+      await flush(50)
+
+      const internals = coordinator as unknown as {
+        handleApplyLocalMutations: (
+          collectionId: string,
+          request: {
+            type: `rpc:applyLocalMutations:req`
+            rpcId: string
+            envelopeId: string
+            mutations: Array<{
+              mutationId: string
+              type: `insert`
+              key: string
+              value: { id: string }
+            }>
+          },
+        ) => Promise<{ ok: boolean; rpcId: string }>
+      }
+
+      try {
+        const alpha = await internals.handleApplyLocalMutations(`alpha`, {
+          type: `rpc:applyLocalMutations:req`,
+          rpcId: `alpha-rpc`,
+          envelopeId: `shared-envelope`,
+          mutations: [
+            {
+              mutationId: `alpha-mutation`,
+              type: `insert`,
+              key: `alpha`,
+              value: { id: `alpha` },
+            },
+          ],
+        })
+        const beta = await internals.handleApplyLocalMutations(`beta`, {
+          type: `rpc:applyLocalMutations:req`,
+          rpcId: `beta-rpc`,
+          envelopeId: `shared-envelope`,
+          mutations: [
+            {
+              mutationId: `beta-mutation`,
+              type: `insert`,
+              key: `beta`,
+              value: { id: `beta` },
+            },
+          ],
+        })
+
+        expect({
+          alpha,
+          alphaApplies: alphaAdapter.appliedTxs,
+          beta,
+          betaApplies: betaAdapter.appliedTxs,
+        }).toMatchObject({
+          alpha: { ok: true, rpcId: `alpha-rpc` },
+          alphaApplies: [{ collectionId: `alpha` }],
+          beta: { ok: true, rpcId: `beta-rpc` },
+          betaApplies: [{ collectionId: `beta` }],
+        })
+      } finally {
+        coordinator.dispose()
+      }
+    })
+
+    it(`coalesces an envelope retry while its first write is in flight`, async () => {
+      const adapter = createStubAdapter()
+      const firstApplyEntered = createDeferred()
+      const releaseFirstApply = createDeferred()
+      let applyCalls = 0
+      adapter.applyCommittedTx = async (collectionId, tx) => {
+        applyCalls++
+        if (applyCalls === 1) {
+          firstApplyEntered.resolve()
+          await releaseFirstApply.promise
+        }
+        adapter.appliedTxs.push({ collectionId, txId: tx.txId })
+      }
+      const coordinator = createCoordinator(adapter)
+      coordinator.subscribe(`todos`, () => {})
+      await flush(50)
+
+      const internals = coordinator as unknown as {
+        handleApplyLocalMutations: (
+          collectionId: string,
+          request: {
+            type: `rpc:applyLocalMutations:req`
+            rpcId: string
+            envelopeId: string
+            mutations: Array<{
+              mutationId: string
+              type: `insert`
+              key: string
+              value: { id: string }
+            }>
+          },
+        ) => Promise<{
+          ok: boolean
+          rpcId: string
+          term?: number
+          seq?: number
+          latestRowVersion?: number
+        }>
+      }
+      const request = {
+        type: `rpc:applyLocalMutations:req` as const,
+        envelopeId: `in-flight-envelope`,
+        mutations: [
+          {
+            mutationId: `mutation`,
+            type: `insert` as const,
+            key: `row`,
+            value: { id: `row` },
+          },
+        ],
+      }
+
+      try {
+        const first = internals.handleApplyLocalMutations(`todos`, {
+          ...request,
+          rpcId: `first-rpc`,
+        })
+        await firstApplyEntered.promise
+        const retry = internals.handleApplyLocalMutations(`todos`, {
+          ...request,
+          rpcId: `retry-rpc`,
+        })
+        await Promise.resolve()
+        releaseFirstApply.resolve()
+
+        const [firstResponse, retryResponse] = await Promise.all([first, retry])
+        expect({
+          applyCalls,
+          first: { ...firstResponse, rpcId: undefined },
+          retry: { ...retryResponse, rpcId: undefined },
+        }).toEqual({
+          applyCalls: 1,
+          first: { ...retryResponse, rpcId: undefined },
+          retry: { ...firstResponse, rpcId: undefined },
+        })
+      } finally {
+        releaseFirstApply.resolve()
+        coordinator.dispose()
+      }
+    })
+
     it(`replays the successful mutation result when its first response is lost`, async () => {
       vi.useFakeTimers()
       const adapter = createStubAdapter()
@@ -1041,6 +1193,48 @@ describe(`BrowserCollectionCoordinator`, () => {
       } finally {
         follower.dispose()
         leader.dispose()
+      }
+    })
+
+    it(`replaces a cached default adapter with its collection registration`, async () => {
+      const defaultAdapter = createStubAdapter()
+      const replacementAdapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      defaultAdapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+      defaultAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      replacementAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+
+      const coordinator = createCoordinator(defaultAdapter)
+      try {
+        coordinator.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+
+        await coordinator.requestEnsurePersistedIndex(`todos`, `idx-default`, {
+          expressionSql: [`title`],
+        })
+        coordinator.setAdapterForCollection(`todos`, replacementAdapter)
+        await coordinator.requestEnsurePersistedIndex(
+          `todos`,
+          `idx-replacement`,
+          { expressionSql: [`title`] },
+        )
+
+        expect(defaultAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(replacementAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(replacementAdapter.ensureIndex).toHaveBeenCalledWith(
+          `todos`,
+          `idx-replacement`,
+          { expressionSql: [`title`] },
+        )
+      } finally {
+        coordinator.dispose()
       }
     })
 

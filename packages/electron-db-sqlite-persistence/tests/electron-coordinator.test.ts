@@ -334,6 +334,167 @@ describe(`ElectronCollectionCoordinator parity`, () => {
     }
   })
 
+  it(`scopes envelope deduplication by collection`, async () => {
+    const alphaAdapter = createStubAdapter()
+    const betaAdapter = createStubAdapter()
+    const coordinator = createCoordinator(alphaAdapter)
+    coordinator.setAdapterForCollection(`alpha`, alphaAdapter)
+    coordinator.setAdapterForCollection(`beta`, betaAdapter)
+    coordinator.subscribe(`alpha`, () => {})
+    coordinator.subscribe(`beta`, () => {})
+
+    const internals = coordinator as unknown as {
+      handleApplyLocalMutations: (
+        collectionId: string,
+        request: {
+          type: `rpc:applyLocalMutations:req`
+          rpcId: string
+          envelopeId: string
+          mutations: Array<{
+            mutationId: string
+            type: `insert`
+            key: string
+            value: { id: string }
+          }>
+        },
+      ) => Promise<{ ok: boolean; rpcId: string }>
+    }
+
+    try {
+      await Promise.all([
+        waitForLeadership(coordinator, `alpha`),
+        waitForLeadership(coordinator, `beta`),
+      ])
+      const alpha = await internals.handleApplyLocalMutations(`alpha`, {
+        type: `rpc:applyLocalMutations:req`,
+        rpcId: `alpha-rpc`,
+        envelopeId: `shared-envelope`,
+        mutations: [
+          {
+            mutationId: `alpha-mutation`,
+            type: `insert`,
+            key: `alpha`,
+            value: { id: `alpha` },
+          },
+        ],
+      })
+      const beta = await internals.handleApplyLocalMutations(`beta`, {
+        type: `rpc:applyLocalMutations:req`,
+        rpcId: `beta-rpc`,
+        envelopeId: `shared-envelope`,
+        mutations: [
+          {
+            mutationId: `beta-mutation`,
+            type: `insert`,
+            key: `beta`,
+            value: { id: `beta` },
+          },
+        ],
+      })
+
+      expect({
+        alpha,
+        alphaApplies: alphaAdapter.appliedTxs.length,
+        beta,
+        betaApplies: betaAdapter.appliedTxs.length,
+      }).toMatchObject({
+        alpha: { ok: true, rpcId: `alpha-rpc` },
+        alphaApplies: 1,
+        beta: { ok: true, rpcId: `beta-rpc` },
+        betaApplies: 1,
+      })
+    } finally {
+      coordinator.dispose()
+    }
+  })
+
+  it(`coalesces an envelope retry while its first write is in flight`, async () => {
+    const adapter = createStubAdapter()
+    let enterFirstApply!: () => void
+    const firstApplyEntered = new Promise<void>((resolve) => {
+      enterFirstApply = resolve
+    })
+    let releaseFirstApply!: () => void
+    const firstApplyRelease = new Promise<void>((resolve) => {
+      releaseFirstApply = resolve
+    })
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (_collectionId, tx) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        enterFirstApply()
+        await firstApplyRelease
+      }
+      adapter.appliedTxs.push(tx.txId)
+    }
+    const coordinator = createCoordinator(adapter)
+    coordinator.subscribe(`todos`, () => {})
+
+    const internals = coordinator as unknown as {
+      handleApplyLocalMutations: (
+        collectionId: string,
+        request: {
+          type: `rpc:applyLocalMutations:req`
+          rpcId: string
+          envelopeId: string
+          mutations: Array<{
+            mutationId: string
+            type: `insert`
+            key: string
+            value: { id: string }
+          }>
+        },
+      ) => Promise<{
+        ok: boolean
+        rpcId: string
+        term?: number
+        seq?: number
+        latestRowVersion?: number
+      }>
+    }
+    const request = {
+      type: `rpc:applyLocalMutations:req` as const,
+      envelopeId: `in-flight-envelope`,
+      mutations: [
+        {
+          mutationId: `mutation`,
+          type: `insert` as const,
+          key: `row`,
+          value: { id: `row` },
+        },
+      ],
+    }
+
+    try {
+      await waitForLeadership(coordinator, `todos`)
+      const first = internals.handleApplyLocalMutations(`todos`, {
+        ...request,
+        rpcId: `first-rpc`,
+      })
+      await firstApplyEntered
+      const retry = internals.handleApplyLocalMutations(`todos`, {
+        ...request,
+        rpcId: `retry-rpc`,
+      })
+      await Promise.resolve()
+      releaseFirstApply()
+
+      const [firstResponse, retryResponse] = await Promise.all([first, retry])
+      expect({
+        applyCalls,
+        first: { ...firstResponse, rpcId: undefined },
+        retry: { ...retryResponse, rpcId: undefined },
+      }).toEqual({
+        applyCalls: 1,
+        first: { ...retryResponse, rpcId: undefined },
+        retry: { ...firstResponse, rpcId: undefined },
+      })
+    } finally {
+      releaseFirstApply()
+      coordinator.dispose()
+    }
+  })
+
   it(`releases collection-owned state and retry results with the last subscriber`, async () => {
     const adapter = createStubAdapter()
     const coordinator = createCoordinator(adapter)

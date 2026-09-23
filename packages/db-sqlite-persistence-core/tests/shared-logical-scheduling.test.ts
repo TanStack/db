@@ -57,6 +57,7 @@ class FirstQueryGatedDriver implements SQLiteDriver {
   readonly [SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY]: object
   readonly admissions: Array<string> = []
   readonly firstQueryEntered = createDeferred()
+  onQuery: (() => void) | undefined
   private readonly firstQueryGate = createDeferred()
   private holdFirstQuery = true
 
@@ -72,6 +73,7 @@ class FirstQueryGatedDriver implements SQLiteDriver {
 
   async query<T>(): Promise<ReadonlyArray<T>> {
     this.admissions.push(`query`)
+    this.onQuery?.()
     if (this.holdFirstQuery) {
       this.holdFirstQuery = false
       this.firstQueryEntered.resolve()
@@ -216,6 +218,12 @@ describe(`shared logical scheduling`, () => {
       wrap: createTransparentWrapper,
     },
     {
+      name: `twice-transparent delegating driver`,
+      key: {},
+      wrap: (driver: SQLiteDriver) =>
+        createTransparentWrapper(createTransparentWrapper(driver)),
+    },
+    {
       name: `function-valued key`,
       key: () => undefined,
       wrap: (driver: SQLiteDriver) => driver,
@@ -299,6 +307,40 @@ describe(`shared logical scheduling`, () => {
       ),
       { seed: 1868, numRuns: 12, endOnFailure: true },
     )
+  })
+
+  it(`counts a rejected hydrate as a completed K=1 lane unit`, async () => {
+    const driver = new FirstQueryGatedDriver()
+    const hydrateAdapter = createSQLiteCorePersistenceAdapter({ driver })
+    const regularAdapter = createSQLiteCorePersistenceAdapter({ driver })
+    const events: Array<string> = []
+
+    const initialRegular = regularAdapter.loadCollectionMetadata!(`initial`)
+    await driver.firstQueryEntered.promise
+    driver.onQuery = () => events.push(`query`)
+
+    const failedHydrate = hydrateAdapter.runInHydrationScope!(() => {
+      events.push(`failed-hydrate`)
+      throw new Error(`expected hydrate failure`)
+    })
+    const failedHydrateExpectation = expect(failedHydrate).rejects.toThrow(
+      `expected hydrate failure`,
+    )
+    const regular = regularAdapter.loadCollectionMetadata!(`regular`)
+    const nextHydrate = hydrateAdapter.runInHydrationScope!(async (scoped) => {
+      events.push(`next-hydrate`)
+      await scoped.loadCollectionMetadata!(`hydrate`)
+    })
+
+    driver.releaseFirstQuery()
+    await Promise.all([
+      initialRegular,
+      failedHydrateExpectation,
+      regular,
+      nextHydrate,
+    ])
+
+    expect(events).toEqual([`failed-hydrate`, `query`, `next-hydrate`, `query`])
   })
 
   it(`stops probing after the first returned promise lacks scheduling support`, async () => {
