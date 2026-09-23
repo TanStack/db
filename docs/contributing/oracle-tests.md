@@ -29,8 +29,10 @@ they cite one of these IDs.
   explicit, technically grounded reason for doing something else.
 - `MAY` is optional.
 
-Advice outside this section is explanatory. Words such as “useful,” “ask,” and
-“consider” do not create conformance requirements.
+Only these uppercase keywords inside numbered requirement blocks define guide
+conformance. Later prose may use lowercase contract terms such as `must` and
+`may`, but it does not create a new guide requirement unless it cites an ORC
+ID. Words such as “useful,” “ask,” and “consider” remain explanatory.
 
 An **important generated property** is a generated property used to protect a
 reusable product law, claim coverage beyond named examples, or demonstrate a
@@ -68,10 +70,14 @@ the presence of a preferred heading, class, comment template, or helper.
 
 - **Trigger:** A file owns a reusable law, state machine, lifecycle boundary,
   or reference model.
-- **Obligation:** The contract, model, history grammar, production driver, and
-  refinement check MUST remain distinguishable to a reviewer.
+- **Obligation:** The applicable contract, expected-result authority, input or
+  history grammar, production driver, and refinement check MUST remain
+  distinguishable to a reviewer. When a responsibility does not apply and its
+  absence could be ambiguous, the evidence MUST identify it as not applicable
+  and explain why.
 - **Acceptance evidence:** A reviewer can point to the answer supplied by each
-  responsibility and follow the tested law from authority to observation.
+  applicable responsibility and follow the tested law from authority to
+  observation.
 - **Not required:** Five headings, five classes, five files, one fixture per
   law, or a review card embedded in every oracle.
 
@@ -81,10 +87,11 @@ the presence of a preferred heading, class, comment template, or helper.
   grammar.
 - **Obligation:** The change MUST account for reconstruction, ablation, range,
   and exclusion for that grammar.
-- **Acceptance evidence:** The evidence names a known valid witness that can be
-  reconstructed; accounts for the semantic contribution of each declared axis,
-  rule, or overlap under ablation; states the bounded domains and marginal
-  cases; and names a nearby invalid history or state the grammar rejects.
+- **Acceptance evidence:** The evidence names every known valid witness within
+  the claimed scope and shows that each can be reconstructed; accounts for the
+  semantic contribution of each declared axis, rule, or overlap under ablation;
+  states the bounded domains and marginal cases; and names a nearby invalid
+  history or state the grammar rejects.
 - **Evidence location:** These controls MAY be executable calibration checks,
   comments, pull-request evidence, or a durable review ledger. Stable executable
   checks are preferred when the claim is cheap to preserve.
@@ -112,23 +119,25 @@ the presence of a preferred heading, class, comment template, or helper.
   injection, or production mutant reaches the intended checkpoint and preserves
   the distinguishing failure.
 - **Not required:** Modifying production, checking in a mutant, or running a
-  production mutation campaign for every oracle. When a mutant is run, its
-  outcome MUST distinguish assertion failure, timeout, setup failure, an
-  unreached path, survival, and equivalence within the tested domain.
+  production mutation campaign for every oracle.
+- **Conditional obligation:** When a mutant is run, the evidence MUST classify
+  its outcome as assertion failure, timeout, setup failure, an unreached path,
+  survival, or equivalence within the tested domain.
 
-### ORC-007: Fixed, random, and replay lanes
+### ORC-007: Fixed and random campaigns with direct replay
 
 - **Trigger:** An important generated property.
 - **Obligation:** The package's oracle campaign MUST execute the same property,
   generators, observations, and run budget twice: once with a documented fixed
   seed and once without a seed. A replay interface MUST accept both the seed and
   shrink path and MUST run the requested replay directly.
-- **Acceptance evidence:** The normal test command reaches both lanes, each lane
-  records its execution, and a checked replay command reproduces a captured
-  seed-and-path failure.
-- **Not required:** Treating fixed examples as the fixed-seed lane, giving the
-  two lanes different generators or budgets, or running the fixed and random
-  campaigns before an explicit replay.
+- **Acceptance evidence:** The normal test command reaches both campaigns, each
+  campaign records its execution, and a checked replay command reproduces a
+  captured seed-and-path failure.
+- **Does not satisfy:** Fixed examples do not replace the fixed-seed campaign.
+  Different generators, observations, or budgets do not establish campaign
+  parity.
+- **Not required:** Running either normal campaign before an explicit replay.
 
 ### ORC-008: Stateful-model minimality
 
@@ -178,22 +187,24 @@ the presence of a preferred heading, class, comment template, or helper.
 - **Acceptance evidence:** The alternate path states its equivalence or
   metamorphic relation, including relevant differences in ordering, projection,
   duplicates, and empty results.
-- **Not required:** A second formulation without a named shared-fault hypothesis,
-  or treating agreement between two structurally identical paths as independent
-  evidence.
+- **Not required:** A second formulation without a named shared-fault
+  hypothesis.
+- **Does not satisfy:** Agreement between two structurally identical paths does
+  not establish independent evidence.
 
 ### ORC-012: Review evidence
 
 - **Trigger:** A change claims that an oracle is new, repaired, or comprehensively
   audited against this guide.
-- **Obligation:** The review evidence MUST answer the substance of the layer
-  comparison and review-card questions in this guide.
-- **Acceptance evidence:** The evidence accounts for authority, model
-  distinctions, grammar reach, real driver path, observations, calibration,
-  failure fidelity, and known limits using ORC-001 through ORC-011 as applicable.
-- **Not required:** Copying the nine questions or review card into every test,
-  answering them in their printed order, or placing the audit in the oracle
-  file.
+- **Obligation:** The review evidence MUST record the outcome of every applicable
+  requirement from ORC-001 through ORC-011 and MUST identify the requirements
+  that do not apply.
+- **Acceptance evidence:** Each applicable requirement has concrete evidence or
+  an explicit unresolved gap. Each non-applicable requirement has a reason tied
+  to its trigger.
+- **Not required:** Copying the layer-comparison questions or review card into
+  every test, answering them in their printed order, or placing the audit in the
+  oracle file.
 
 ## A quick start
 
@@ -216,7 +227,7 @@ Before writing the loop, answer six questions:
 
 These are responsibilities, not six required classes. A small property may answer them in a comment and twenty lines of code. A lifecycle suite may need a separate model and driver. Do not build a framework just to fill the table.
 
-The review card is an optional way to collect this evidence; it is not a
+An evidence card is an optional way to collect this information; it is not a
 required file format:
 
 ```text
@@ -377,7 +388,9 @@ Write prose that another agent can parse without asking what a term means:
 - Use active voice and short sentences.
 - Give one state or event one name. Do not rotate synonyms.
 - Define necessary domain terms when they first appear.
-- Keep `must`, `may`, and `does not` exact. They state different contracts.
+- Keep lowercase `must`, `may`, and `does not` exact when they describe a
+  product contract. Only the uppercase keywords in the numbered ORC blocks
+  define guide conformance.
 - Use a list for three or more phases, actions, or conditions.
 - Avoid metaphors when a boundary or transition has a precise name.
 - Explain laws, causes, omissions, and checkpoints. Do not narrate clear code.
@@ -427,13 +440,12 @@ Treat the layers as separate claims. Compare each pair during review:
 9. Does every model-only term declare how it maps to production, or that it has
    no production counterpart?
 
-This comparison is a useful audit instrument. ORC-012 requires its substance in
-the review evidence for a new, repaired, or comprehensively audited oracle; it
-does not require these questions or their answers to appear in the test file.
-If the prose cannot explain an
-assertion through the model, the model may be incomplete. If the model predicts
-a fact that the test never observes, the test may be false green. If the driver
-cannot create a named phase, the prose claims more reach than the test has.
+This comparison is a useful audit instrument. ORC-012 requires outcomes for the
+applicable numbered requirements, not these questions or their answers in the
+test file. If the prose cannot explain an assertion through the model, the model
+may be incomplete. If the model predicts a fact that the test never observes,
+the test may be false green. If the driver cannot create a named phase, the
+prose claims more reach than the test has.
 
 ### Keep the prose proportional
 
@@ -527,33 +539,33 @@ Shrinking means reducing a failing input or action list while keeping its failur
 
 Pin the structural cases that matter: no rows, width zero, a boundary tie, and repeated changes to one key. Exhaust a small domain where that is cheap. Then randomize values and longer legal histories. Fixed cases, bounded enumeration and random exploration do different jobs; overlap between them is not a defect.
 
-### Run fixed and random seed lanes
+### Run fixed and random campaigns with direct replay
 
 A fixed fast-check seed always generates the same cases. This makes a useful
 history stable, but it does not explore new histories on later runs. Do not
 describe a fixed-seed property as random coverage.
 
-Under ORC-007, every important generated property runs in two lanes:
+Under ORC-007, every important generated property runs in two campaigns:
 
 1. Run a fixed seed that preserves a known useful campaign.
 2. Run without a seed so fast-check chooses a new seed.
 
-When the random lane fails, retain the reported seed and shrink path. Give the
+When the random campaign fails, retain the reported seed and shrink path. Give the
 suite environment variables or another checked replay interface. The replay
 input must select both the seed and the path. A seed alone reruns the
 campaign but might not stop at the same reduced counterexample.
 
-When replay inputs are present, run only the requested replay lane. Do not spend
+When replay inputs are present, run only the requested replay. Do not spend
 time on the fixed campaign before reaching the failure the developer asked to
 reproduce.
 
-The fixed and random lanes must use the same property, generators,
+The fixed and random campaigns must use the same property, generators,
 observations, and run budget. Only their seed source may differ. This keeps a
 random failure eligible for promotion into a pinned example or fixed campaign.
 
 [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
-shows this shape. Its fixed lane preserves one scheduler campaign. Its second
-lane uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
+shows this shape. Its fixed run preserves one scheduler campaign. Its second
+campaign uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
 `OFFLINE_ORACLE_PATH` for replay.
 
 Do not use a larger random run count as a substitute for structural reach.
