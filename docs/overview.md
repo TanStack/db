@@ -32,11 +32,11 @@ It extends TanStack Query with collections, live queries and optimistic mutation
 
 ## Contents
 
-- [How it works](#how-it-works) &mdash; understand the TanStack DB development model and how the pieces fit together
-- [SSR and hydration](./guides/ssr.md) &mdash; use `DbClient` to transport explicit collection rows or live-query result snapshots
-- [API reference](#api-reference) &mdash; for the primitives and function interfaces
-- [Usage examples](#usage-examples) &mdash; examples of common usage patterns
-- [More info](#more-info) &mdash; where to find support and more information
+- [How it works](#how-it-works) — understand the TanStack DB development model and how the pieces fit together
+- [SSR and hydration](./guides/ssr.md) — use `DbClient` to transport explicit collection rows or live-query result snapshots
+- [API reference](#api-reference) — for the primitives and function interfaces
+- [Usage examples](#usage-examples) — examples of common usage patterns
+- [More info](#more-info) — where to find support and more information
 
 ## How it works
 
@@ -214,23 +214,23 @@ TanStack DB provides several built-in collection types for different data source
 
 **Fetch Collections**
 
-- **[QueryCollection](./collections/query-collection.md)** &mdash; Load data into collections using TanStack Query for REST APIs and data fetching.
+- **[QueryCollection](./collections/query-collection.md)** — Load data into collections using TanStack Query for REST APIs and data fetching.
 
 **Sync Collections**
 
-- **[ElectricCollection](./collections/electric-collection.md)** &mdash; Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
+- **[ElectricCollection](./collections/electric-collection.md)** — Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
 
-- **[TrailBaseCollection](./collections/trailbase-collection.md)** &mdash; Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
+- **[TrailBaseCollection](./collections/trailbase-collection.md)** — Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
 
-- **[RxDBCollection](./collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
+- **[RxDBCollection](./collections/rxdb-collection.md)** — Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
 
-- **[PowerSyncCollection](./collections/powersync-collection.md)** &mdash; Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
+- **[PowerSyncCollection](./collections/powersync-collection.md)** — Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
 
 **Local Collections**
 
-- **[LocalStorageCollection](./collections/local-storage-collection.md)** &mdash; Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
+- **[LocalStorageCollection](./collections/local-storage-collection.md)** — Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
 
-- **[LocalOnlyCollection](./collections/local-only-collection.md)** &mdash; Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
+- **[LocalOnlyCollection](./collections/local-only-collection.md)** — Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
 
 #### Collection Schemas
 
