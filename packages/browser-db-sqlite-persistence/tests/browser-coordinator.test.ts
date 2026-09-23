@@ -49,6 +49,7 @@ const channels: Map<
   string,
   Set<{ onmessage: MessageHandler | null }>
 > = new Map()
+let shouldDropBroadcastMessage: ((data: unknown) => boolean) | null = null
 
 class MockBroadcastChannel {
   readonly name: string
@@ -63,6 +64,8 @@ class MockBroadcastChannel {
   }
 
   postMessage(data: unknown): void {
+    if (shouldDropBroadcastMessage?.(data)) return
+
     const peers = channels.get(this.name)
     if (!peers) return
     // Deliver to all other instances on same channel (simulating cross-tab)
@@ -87,6 +90,7 @@ class MockBroadcastChannel {
 type LockGrantedCallback = (lock: { name: string }) => Promise<unknown>
 
 const heldLocks = new Map<string, { release: () => void }>()
+let onLockGranted: ((name: string) => void) | null = null
 const lockQueues = new Map<
   string,
   Array<{
@@ -115,6 +119,7 @@ function tryGrantNextLock(name: string): void {
   })
 
   heldLocks.set(name, { release: releaseCallback })
+  onLockGranted?.(name)
 
   const result = next.callback({ name })
   // When the callback resolves/rejects, release the lock
@@ -199,6 +204,8 @@ function installGlobals(): void {
 }
 
 function cleanupGlobals(): void {
+  shouldDropBroadcastMessage = null
+  onLockGranted = null
   channels.clear()
   heldLocks.clear()
   lockQueues.clear()
@@ -890,9 +897,320 @@ describe(`BrowserCollectionCoordinator`, () => {
 
       coord.dispose()
     })
+
+    it(`returns canonical success when a local-mutation response is retried on the same leader`, async () => {
+      const adapter = createStubAdapter()
+      const applications: Array<PersistedTx> = []
+      const appliedByTxId = new Map<
+        string,
+        { term: number; seq: number; rowVersion: number }
+      >()
+      adapter.applyCommittedTx = (_collectionId, tx) => {
+        const prior = appliedByTxId.get(tx.txId)
+        if (prior) return Promise.resolve({ applied: false, ...prior })
+
+        applications.push(tx)
+        const applied = {
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: tx.rowVersion,
+        }
+        appliedByTxId.set(tx.txId, applied)
+        return Promise.resolve({ applied: true, ...applied })
+      }
+
+      const leader = createCoordinator(adapter)
+      const requester = createCoordinator(adapter)
+      leader.subscribe(`todos`, () => {})
+      requester.subscribe(`todos`, () => {})
+      await vi.waitFor(() => expect(leader.isLeader(`todos`)).toBe(true))
+
+      const responseDropped = deferred()
+      shouldDropBroadcastMessage = (data) => {
+        const payload =
+          typeof data === `object` && data !== null && `payload` in data
+            ? (data as { payload?: { type?: unknown } }).payload
+            : undefined
+        if (payload?.type !== `rpc:applyLocalMutations:res`) return false
+
+        shouldDropBroadcastMessage = null
+        responseDropped.resolve()
+        return true
+      }
+
+      vi.useFakeTimers()
+      try {
+        const response = requester.requestApplyLocalMutations(`todos`, [
+          {
+            mutationId: `same-leader-retry`,
+            type: `insert`,
+            key: `same-leader-retry`,
+            value: { id: `same-leader-retry`, title: `Applied once` },
+          },
+        ])
+        await responseDropped.promise
+        await vi.advanceTimersByTimeAsync(10_200)
+
+        await expect(response).resolves.toMatchObject({
+          ok: true,
+          term: 1,
+          seq: 1,
+          latestRowVersion: 1,
+          acceptedMutationIds: [`same-leader-retry`],
+        })
+        expect(applications).toHaveLength(1)
+      } finally {
+        vi.useRealTimers()
+        leader.dispose()
+        requester.dispose()
+      }
+    })
+
+    it(`scopes canonical local-mutation retries by collection`, async () => {
+      const adapter = createStubAdapter()
+      const leader = createCoordinator(adapter)
+      leader.subscribe(`alpha`, () => {})
+      leader.subscribe(`beta`, () => {})
+      await vi.waitFor(() => {
+        expect(leader.isLeader(`alpha`)).toBe(true)
+        expect(leader.isLeader(`beta`)).toBe(true)
+      })
+
+      const handleApplyLocalMutations = (
+        leader as unknown as {
+          handleApplyLocalMutations: (
+            collectionId: string,
+            request: {
+              type: `rpc:applyLocalMutations:req`
+              rpcId: string
+              envelopeId: string
+              mutations: Array<{
+                mutationId: string
+                type: `insert`
+                key: string
+                value: { id: string }
+              }>
+            },
+          ) => Promise<{ ok: boolean }>
+        }
+      ).handleApplyLocalMutations.bind(leader)
+
+      const envelopeId = `shared-envelope-id`
+      const alpha = await handleApplyLocalMutations(`alpha`, {
+        type: `rpc:applyLocalMutations:req`,
+        rpcId: `alpha-rpc`,
+        envelopeId,
+        mutations: [
+          {
+            mutationId: `alpha-mutation`,
+            type: `insert`,
+            key: `alpha`,
+            value: { id: `alpha` },
+          },
+        ],
+      })
+      const beta = await handleApplyLocalMutations(`beta`, {
+        type: `rpc:applyLocalMutations:req`,
+        rpcId: `beta-rpc`,
+        envelopeId,
+        mutations: [
+          {
+            mutationId: `beta-mutation`,
+            type: `insert`,
+            key: `beta`,
+            value: { id: `beta` },
+          },
+        ],
+      })
+
+      expect({ alpha, beta, appliedTxs: adapter.appliedTxs }).toEqual({
+        alpha: expect.objectContaining({ ok: true }),
+        beta: expect.objectContaining({ ok: true }),
+        appliedTxs: [
+          { collectionId: `alpha`, txId: envelopeId },
+          { collectionId: `beta`, txId: envelopeId },
+        ],
+      })
+
+      leader.dispose()
+    })
+
+    it(`preserves local-mutation identity when a lost response crosses a leader handoff`, async () => {
+      const adapter = createStubAdapter()
+      let durablePosition = {
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+      }
+      const applications: Array<PersistedTx> = []
+      const appliedByTxId = new Map<
+        string,
+        { term: number; seq: number; rowVersion: number }
+      >()
+      adapter.getStreamPosition = () => Promise.resolve(durablePosition)
+      adapter.applyCommittedTx = (_collectionId, tx) => {
+        const prior = appliedByTxId.get(tx.txId)
+        if (prior) return Promise.resolve({ applied: false, ...prior })
+
+        applications.push(tx)
+        const applied = {
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: tx.rowVersion,
+        }
+        appliedByTxId.set(tx.txId, applied)
+        durablePosition = {
+          latestTerm: tx.term,
+          latestSeq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }
+        return Promise.resolve({ applied: true, ...applied })
+      }
+
+      const firstLeader = createCoordinator(adapter)
+      const nextLeader = createCoordinator(adapter)
+      const requester = createCoordinator(adapter)
+      firstLeader.subscribe(`todos`, () => {})
+      nextLeader.subscribe(`todos`, () => {})
+      requester.subscribe(`todos`, () => {})
+      await vi.waitFor(() => expect(firstLeader.isLeader(`todos`)).toBe(true))
+
+      const responseDropped = deferred()
+      shouldDropBroadcastMessage = (data) => {
+        const payload =
+          typeof data === `object` && data !== null && `payload` in data
+            ? (data as { payload?: { type?: unknown } }).payload
+            : undefined
+        if (payload?.type !== `rpc:applyLocalMutations:res`) return false
+
+        shouldDropBroadcastMessage = null
+        firstLeader.dispose()
+        responseDropped.resolve()
+        return true
+      }
+
+      vi.useFakeTimers()
+      try {
+        const response = requester.requestApplyLocalMutations(`todos`, [
+          {
+            mutationId: `handoff-local-mutation`,
+            type: `insert`,
+            key: `handoff-local-mutation`,
+            value: { id: `handoff-local-mutation`, title: `Applied once` },
+          },
+        ])
+        await responseDropped.promise
+
+        for (let attempt = 0; attempt < 20; attempt++) {
+          if (nextLeader.isLeader(`todos`)) break
+          await Promise.resolve()
+        }
+        expect(nextLeader.isLeader(`todos`)).toBe(true)
+
+        await vi.advanceTimersByTimeAsync(10_200)
+        await expect(response).resolves.toMatchObject({
+          ok: true,
+          acceptedMutationIds: [`handoff-local-mutation`],
+        })
+        expect(applications).toHaveLength(1)
+      } finally {
+        vi.useRealTimers()
+        firstLeader.dispose()
+        nextLeader.dispose()
+        requester.dispose()
+      }
+    })
   })
 
   describe(`persisted transaction retry and handoff`, () => {
+    it(`serializes successor position recovery with an outgoing leader commit`, async () => {
+      const adapter = createStubAdapter()
+      const applyStarted = deferred()
+      const releaseApply = deferred()
+      let durablePosition = {
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+      }
+      const positionReads: Array<typeof durablePosition> = []
+      const appliedPositions: Array<typeof durablePosition> = []
+      adapter.getStreamPosition = () => {
+        positionReads.push({ ...durablePosition })
+        return Promise.resolve({ ...durablePosition })
+      }
+      adapter.applyCommittedTx = async (_collectionId, tx) => {
+        if (tx.txId === `outgoing-leader-commit`) {
+          applyStarted.resolve()
+          await releaseApply.promise
+        }
+        durablePosition = {
+          latestTerm: tx.term,
+          latestSeq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }
+        appliedPositions.push({ ...durablePosition })
+        return {
+          applied: true,
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: tx.rowVersion,
+        }
+      }
+
+      const firstLeader = createCoordinator(adapter)
+      const nextLeader = createCoordinator(adapter)
+      firstLeader.subscribe(`todos`, () => {})
+      nextLeader.subscribe(`todos`, () => {})
+      await vi.waitFor(() => expect(firstLeader.isLeader(`todos`)).toBe(true))
+
+      const successorLeadershipLockGranted = deferred()
+      onLockGranted = (name) => {
+        if (name === `tsdb:leader:test-db:todos`) {
+          successorLeadershipLockGranted.resolve()
+        }
+      }
+      const outgoingCommit = firstLeader.requestApplyPersistedTransaction(
+        `todos`,
+        { txId: `outgoing-leader-commit`, mutations: [] },
+      )
+
+      try {
+        await applyStarted.promise
+        firstLeader.dispose()
+        await successorLeadershipLockGranted.promise
+        await Promise.resolve()
+        await Promise.resolve()
+
+        expect(positionReads).toEqual([
+          { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 },
+        ])
+
+        releaseApply.resolve()
+        await expect(outgoingCommit).resolves.toMatchObject({ ok: true })
+        await vi.waitFor(() => expect(nextLeader.isLeader(`todos`)).toBe(true))
+
+        await expect(
+          nextLeader.requestApplyPersistedTransaction(`todos`, {
+            txId: `successor-commit`,
+            mutations: [],
+          }),
+        ).resolves.toMatchObject({ ok: true, seq: 2, latestRowVersion: 2 })
+        expect(positionReads).toEqual([
+          { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 },
+          { latestTerm: 1, latestSeq: 1, latestRowVersion: 1 },
+        ])
+        expect(appliedPositions).toEqual([
+          { latestTerm: 1, latestSeq: 1, latestRowVersion: 1 },
+          { latestTerm: 2, latestSeq: 2, latestRowVersion: 2 },
+        ])
+      } finally {
+        releaseApply.resolve()
+        await outgoingCommit.catch(() => undefined)
+        firstLeader.dispose()
+        nextLeader.dispose()
+      }
+    })
+
     it(`retries a transient NOT_LEADER response through the next leader`, async () => {
       const adapter = createStubAdapter()
       const indexStarted = deferred()

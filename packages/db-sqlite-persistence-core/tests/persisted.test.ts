@@ -374,6 +374,36 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection.utils.getLeadershipState?.().isLeader).toBe(true)
   })
 
+  it(`rejects a local fallback mutation when SQLite reports a position collision`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.applyCommittedTx = (_collectionId, tx) =>
+      Promise.resolve({
+        applied: false,
+        term: tx.term,
+        seq: tx.seq,
+        rowVersion: tx.rowVersion,
+      })
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-fallback-position-collision`,
+        getKey: (item) => item.id,
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      const tx = collection.insert({
+        id: `not-durable`,
+        title: `Must not be acknowledged`,
+      })
+
+      await expect(tx.isPersisted.promise).rejects.toThrow(/position collision/)
+      expect(collection.get(`not-durable`)).toBeUndefined()
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`supports acceptMutations for manual transactions`, async () => {
     const adapter = createRecordingAdapter()
     const collection = createCollection(
@@ -1150,6 +1180,55 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`rejects a wrapped sync receipt when SQLite reports a position collision`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.applyCommittedTx = (_collectionId, tx) =>
+      Promise.resolve({
+        applied: false,
+        term: tx.term,
+        seq: tx.seq,
+        rowVersion: tx.rowVersion,
+      })
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-fallback-position-collision`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.stateWhenReady()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `not-durable`, title: `Must not be acknowledged` },
+      })
+
+      await expect(Promise.resolve(remoteCommit?.())).rejects.toThrow(
+        /position collision/,
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`handles a dropped sync receipt when persistence fails`, async () => {
     const adapter = createRecordingAdapter()
     const persistenceError = new Error(`durable write failed`)
@@ -1565,6 +1644,82 @@ describe(`persistedCollectionOptions`, () => {
       })
     } finally {
       resolveLoadSubset?.()
+      await collection.cleanup()
+    }
+  })
+
+  it(`keeps on-demand readiness upstream-gated when a non-truncate transaction spans hydration`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrationStarted = deferred()
+    const hydration = deferred<Array<{ key: string; value: Todo }>>()
+    adapter.loadSubset = () => {
+      hydrationStarted.resolve()
+      return hydration.promise
+    }
+    const upstreamStarted = deferred()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => SyncAppliedReceipt) | undefined
+    let markUpstreamReady: (() => void) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `on-demand-commit-after-hydration`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markUpstreamReady = markReady
+            upstreamStarted.resolve()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await upstreamStarted.promise
+
+      const subsetLoad = collection._sync.loadSubset({})
+      await hydrationStarted.promise
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `late-commit`, title: `Committed after hydration` },
+      })
+
+      hydration.resolve([])
+      await subsetLoad
+      expect(collection.status).toBe(`loading`)
+
+      const applied = remoteCommit?.()
+      if (applied !== true) await applied
+      await flushAsyncWork()
+
+      expect(stripVirtualProps(collection.get(`late-commit`))).toEqual({
+        id: `late-commit`,
+        title: `Committed after hydration`,
+      })
+      expect(adapter.rows.get(`late-commit`)).toEqual({
+        id: `late-commit`,
+        title: `Committed after hydration`,
+      })
+      expect(collection.status).toBe(`loading`)
+
+      markUpstreamReady?.()
+      await collection.stateWhenReady()
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      hydration.resolve([])
       await collection.cleanup()
     }
   })

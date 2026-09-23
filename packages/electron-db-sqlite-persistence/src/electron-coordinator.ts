@@ -660,7 +660,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
         throw new Error(`not the leader for ${collectionId}`)
       }
 
-      const proposedTx = {
+      let proposedTx = {
         txId: safeRandomUUID(),
         term: currentState.latestTerm,
         seq: currentState.latestSeq + 1,
@@ -672,28 +672,50 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
         })),
       }
 
-      const application = await this.requireAdapter().applyCommittedTx(
-        collectionId,
-        proposedTx,
-      )
-      const appliedTx = application
-        ? {
-            ...proposedTx,
-            term: application.term,
-            seq: application.seq,
-            rowVersion: application.rowVersion,
-          }
-        : proposedTx
-      currentState.latestTerm = Math.max(
-        currentState.latestTerm,
-        appliedTx.term,
-      )
-      currentState.latestSeq = Math.max(currentState.latestSeq, appliedTx.seq)
-      currentState.latestRowVersion = Math.max(
-        currentState.latestRowVersion,
-        appliedTx.rowVersion,
-      )
-      return appliedTx
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const application = await this.requireAdapter().applyCommittedTx(
+          collectionId,
+          proposedTx,
+        )
+        const canonicalTx = application
+          ? {
+              ...proposedTx,
+              term: application.term,
+              seq: application.seq,
+              rowVersion: application.rowVersion,
+            }
+          : proposedTx
+        currentState.latestTerm = Math.max(
+          currentState.latestTerm,
+          canonicalTx.term,
+        )
+        currentState.latestSeq = Math.max(
+          currentState.latestSeq,
+          canonicalTx.seq,
+        )
+        currentState.latestRowVersion = Math.max(
+          currentState.latestRowVersion,
+          canonicalTx.rowVersion,
+        )
+
+        if (!application || application.applied) {
+          return canonicalTx
+        }
+        if (attempt === 1) {
+          throw new Error(
+            `persistence position collision: transaction ${proposedTx.term}:${proposedTx.seq} was not applied after retry`,
+          )
+        }
+
+        proposedTx = {
+          ...proposedTx,
+          term: currentState.latestTerm,
+          seq: currentState.latestSeq + 1,
+          rowVersion: currentState.latestRowVersion + 1,
+        }
+      }
+
+      throw new Error(`persistence position collision retry was not completed`)
     })
 
     const { term, seq, rowVersion } = tx

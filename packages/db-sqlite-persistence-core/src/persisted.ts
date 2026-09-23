@@ -1738,7 +1738,15 @@ class PersistedCollectionRuntime<
 
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
 
-    await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
+    const application = await this.persistence.adapter.applyCommittedTx(
+      this.collectionId,
+      tx,
+    )
+    if (application?.applied === false) {
+      throw new Error(
+        `persistence position collision: transaction ${tx.term}:${tx.seq} was not applied; canonical position is ${application.term}:${application.seq}`,
+      )
+    }
     this.publishTxCommittedEvent(
       this.createTxCommittedPayload({
         term: tx.term,
@@ -1950,7 +1958,15 @@ class PersistedCollectionRuntime<
     // SingleProcessCoordinator). Apply directly and broadcast.
     const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromMutations(mutations, streamPosition)
-    await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
+    const application = await this.persistence.adapter.applyCommittedTx(
+      this.collectionId,
+      tx,
+    )
+    if (application?.applied === false) {
+      throw new Error(
+        `persistence position collision: transaction ${tx.term}:${tx.seq} was not applied; canonical position is ${application.term}:${application.seq}`,
+      )
+    }
 
     this.publishTxCommittedEvent(
       this.createTxCommittedPayload({
@@ -2978,14 +2994,18 @@ function createWrappedSyncConfig<
             }
           }
 
-          if (
-            openTransaction.queuedBecauseHydrating &&
-            (!runtime.isHydratingNow() ||
-              (openTransaction.truncate && runtime.supersedeHydration()))
-          ) {
-            openTransaction.queuedBecauseHydrating = false
-            openTransaction.supersededHydration = true
-            forwardBufferedTransaction()
+          if (openTransaction.queuedBecauseHydrating) {
+            if (!runtime.isHydratingNow()) {
+              openTransaction.queuedBecauseHydrating = false
+              forwardBufferedTransaction()
+            } else if (
+              openTransaction.truncate &&
+              runtime.supersedeHydration()
+            ) {
+              openTransaction.queuedBecauseHydrating = false
+              openTransaction.supersededHydration = true
+              forwardBufferedTransaction()
+            }
           }
 
           if (openTransaction.queuedBecauseHydrating) {

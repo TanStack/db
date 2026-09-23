@@ -113,6 +113,100 @@ describe(`ElectronCollectionCoordinator`, () => {
     coordinator.dispose()
   })
 
+  it(`retries one position collision and acknowledges only the durable retry`, async () => {
+    const adapter = createAdapter()
+    const attemptedPositions: Array<{
+      term: number
+      seq: number
+      rowVersion: number
+    }> = []
+    adapter.applyCommittedTx = (_collectionId, tx) => {
+      attemptedPositions.push({
+        term: tx.term,
+        seq: tx.seq,
+        rowVersion: tx.rowVersion,
+      })
+      if (attemptedPositions.length === 1) {
+        return Promise.resolve({
+          applied: false,
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: tx.rowVersion,
+        })
+      }
+      return Promise.resolve({
+        applied: true,
+        term: tx.term,
+        seq: tx.seq,
+        rowVersion: tx.rowVersion,
+      })
+    }
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `position-collision-law`,
+      adapter,
+    })
+    const committed: Array<unknown> = []
+    coordinator.subscribe(`todos`, (envelope) => committed.push(envelope))
+    await vi.waitFor(() => expect(coordinator.isLeader(`todos`)).toBe(true))
+
+    const response = await coordinator.requestApplyLocalMutations(`todos`, [
+      {
+        mutationId: `collision-retry`,
+        type: `insert`,
+        key: `1`,
+        value: { id: `1`, title: `Apply after collision` },
+      },
+    ])
+
+    expect(attemptedPositions).toEqual([
+      { term: 1, seq: 1, rowVersion: 1 },
+      { term: 1, seq: 2, rowVersion: 2 },
+    ])
+    expect(response).toMatchObject({
+      ok: true,
+      term: 1,
+      seq: 2,
+      latestRowVersion: 2,
+    })
+    expect(committed).toHaveLength(1)
+    coordinator.dispose()
+  })
+
+  it(`rejects a second position collision without publishing success`, async () => {
+    const adapter = createAdapter()
+    let applyCalls = 0
+    adapter.applyCommittedTx = (_collectionId, tx) => {
+      applyCalls++
+      return Promise.resolve({
+        applied: false,
+        term: tx.term,
+        seq: tx.seq,
+        rowVersion: tx.rowVersion,
+      })
+    }
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `persistent-position-collision-law`,
+      adapter,
+    })
+    const committed: Array<unknown> = []
+    coordinator.subscribe(`todos`, (envelope) => committed.push(envelope))
+    await vi.waitFor(() => expect(coordinator.isLeader(`todos`)).toBe(true))
+
+    await expect(
+      coordinator.requestApplyLocalMutations(`todos`, [
+        {
+          mutationId: `persistent-collision`,
+          type: `insert`,
+          key: `1`,
+          value: { id: `1`, title: `Never applied` },
+        },
+      ]),
+    ).rejects.toThrow(/position collision/)
+    expect(applyCalls).toBe(2)
+    expect(committed).toEqual([])
+    coordinator.dispose()
+  })
+
   it(`obeys protected-work failure across generated callback boundaries`, async () => {
     await fc.assert(
       fc.asyncProperty(

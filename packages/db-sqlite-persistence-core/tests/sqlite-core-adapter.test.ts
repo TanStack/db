@@ -98,6 +98,9 @@ class SqliteCliDriver implements SQLiteDriver {
       if (!trimmedOutput) {
         return []
       }
+      if (/^EXPLAIN\s+QUERY\s+PLAN\b/i.test(renderedSql.trim())) {
+        return [{ detail: trimmedOutput }] as Array<T>
+      }
       return JSON.parse(trimmedOutput) as Array<T>
     }
 
@@ -410,6 +413,65 @@ export function runSQLiteCoreAdapterContractSuite(
         [collectionId],
       )
       expect(txRows[0]?.count).toBe(1)
+    })
+
+    it(`migrates a composite transaction-id lookup index for unbounded histories`, async () => {
+      const { adapter, driver } = registerContractHarness({
+        appliedTxPruneMaxRows: 0,
+        appliedTxPruneMaxAgeSeconds: 0,
+      })
+      const collectionId = `transaction-id-query-plan`
+
+      // Simulate a database created before replay columns and the transaction-id
+      // lookup index existed. Initialization must migrate this table in place.
+      await driver.exec(
+        `CREATE TABLE applied_tx (
+           collection_id TEXT NOT NULL,
+           term INTEGER NOT NULL,
+           seq INTEGER NOT NULL,
+           tx_id TEXT NOT NULL,
+           row_version INTEGER NOT NULL,
+           applied_at INTEGER NOT NULL,
+           PRIMARY KEY (collection_id, term, seq)
+         )`,
+      )
+
+      for (let seq = 1; seq <= 64; seq++) {
+        await adapter.applyCommittedTx(collectionId, {
+          txId: `history-${seq}`,
+          term: 1,
+          seq,
+          rowVersion: seq,
+          mutations: [],
+        })
+      }
+
+      const retained = await driver.query<{ count: number }>(
+        `SELECT COUNT(*) AS count
+         FROM applied_tx
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      expect(retained[0]?.count).toBe(64)
+
+      const indexes = await driver.query<{ name: string }>(
+        `PRAGMA index_list('applied_tx')`,
+      )
+      expect(indexes.map((index) => index.name)).toContain(
+        `applied_tx_collection_tx_id_idx`,
+      )
+
+      const queryPlan = await driver.query<{ detail: string }>(
+        `EXPLAIN QUERY PLAN
+         SELECT term, seq, row_version
+         FROM applied_tx
+         WHERE collection_id = ? AND tx_id = ?
+         LIMIT 1`,
+        [collectionId, `history-64`],
+      )
+      expect(queryPlan.map((row) => row.detail).join(`\n`)).toContain(
+        `applied_tx_collection_tx_id_idx (collection_id=? AND tx_id=?)`,
+      )
     })
 
     it(`obeys stable transaction identity across generated leader positions`, async () => {

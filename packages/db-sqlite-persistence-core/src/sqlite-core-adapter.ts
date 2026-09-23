@@ -2151,6 +2151,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       }
     }
     await this.driver.exec(
+      `CREATE INDEX IF NOT EXISTS applied_tx_collection_tx_id_idx
+       ON applied_tx (collection_id, tx_id)`,
+    )
+    await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_version (
          collection_id TEXT PRIMARY KEY,
          latest_row_version INTEGER NOT NULL

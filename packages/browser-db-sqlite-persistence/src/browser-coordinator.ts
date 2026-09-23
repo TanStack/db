@@ -83,6 +83,7 @@ type PendingRPC = {
 
 type CollectionState = {
   isLeader: boolean
+  isPositionReady: boolean
   lockAbortController: AbortController | null
   heartbeatTimer: ReturnType<typeof setInterval> | null
   latestTerm: number
@@ -137,7 +138,16 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
-  private readonly appliedEnvelopeIds = new Map<string, number>()
+  private readonly appliedEnvelopeResults = new Map<
+    string,
+    {
+      timestamp: number
+      term: number
+      seq: number
+      latestRowVersion: number
+      acceptedMutationIds: Array<string>
+    }
+  >()
   private readonly appliedPersistedTransactions = new Map<
     string,
     {
@@ -152,6 +162,17 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   /** Method indirection to prevent TypeScript from narrowing `disposed` across awaits */
   private isDisposed(): boolean {
     return this.disposed
+  }
+
+  private hasRecoveredLeadership(
+    state: CollectionState,
+    abortController: AbortController,
+  ): boolean {
+    return (
+      state.isLeader &&
+      state.isPositionReady &&
+      state.lockAbortController === abortController
+    )
   }
 
   private requireAdapter(): AdapterWithPullSince {
@@ -374,6 +395,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     if (!state) {
       state = {
         isLeader: false,
+        isPositionReady: false,
         lockAbortController: null,
         heartbeatTimer: null,
         latestTerm: 0,
@@ -405,17 +427,34 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
           if (this.isDisposed()) return
 
           try {
-            // Restore stream position from DB before claiming leadership
-            const adapter = this.requireAdapter()
-            if (adapter.getStreamPosition) {
-              const pos = await adapter.getStreamPosition(collectionId)
-              state.latestTerm = pos.latestTerm
-              state.latestSeq = pos.latestSeq
-              state.latestRowVersion = pos.latestRowVersion
-            }
-
-            state.latestTerm++
             state.isLeader = true
+            state.isPositionReady = false
+
+            // Serialize position recovery with outgoing leader writes so a new
+            // leader cannot cache a position from before their final commit.
+            await this.withWriterLock(async () => {
+              if (
+                this.isDisposed() ||
+                abortController.signal.aborted ||
+                state.lockAbortController !== abortController
+              ) {
+                return
+              }
+
+              const adapter = this.requireAdapter()
+              if (adapter.getStreamPosition) {
+                const pos = await adapter.getStreamPosition(collectionId)
+                state.latestTerm = pos.latestTerm
+                state.latestSeq = pos.latestSeq
+                state.latestRowVersion = pos.latestRowVersion
+              }
+
+              state.latestTerm++
+              state.isPositionReady = true
+            })
+            if (!this.hasRecoveredLeadership(state, abortController)) {
+              return
+            }
 
             this.emitHeartbeat(collectionId, state)
             state.heartbeatTimer = setInterval(() => {
@@ -436,6 +475,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
             })
           } finally {
             state.isLeader = false
+            state.isPositionReady = false
             if (state.heartbeatTimer) {
               clearInterval(state.heartbeatTimer)
               state.heartbeatTimer = null
@@ -469,6 +509,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       state.heartbeatTimer = null
     }
     state.isLeader = false
+    state.isPositionReady = false
   }
 
   private emitHeartbeat(collectionId: string, state: CollectionState): void {
@@ -699,19 +740,23 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   ): Promise<ApplyLocalMutationsResponse> {
     try {
       return await this.withWriterLock(async () => {
-        if (this.appliedEnvelopeIds.has(request.envelopeId)) {
+        const envelopeKey = JSON.stringify([collectionId, request.envelopeId])
+        const prior = this.appliedEnvelopeResults.get(envelopeKey)
+        if (prior) {
           return {
             type: `rpc:applyLocalMutations:res` as const,
             rpcId: request.rpcId,
-            ok: false as const,
-            code: `CONFLICT` as const,
-            error: `envelope ${request.envelopeId} already applied`,
+            ok: true as const,
+            term: prior.term,
+            seq: prior.seq,
+            latestRowVersion: prior.latestRowVersion,
+            acceptedMutationIds: prior.acceptedMutationIds,
           }
         }
 
         const appliedTransaction =
           await this.applyPositionlessTransactionWithWriterLock(collectionId, {
-            txId: safeRandomUUID(),
+            txId: request.envelopeId,
             mutations: request.mutations.map((mutation) => ({
               type: mutation.type,
               key: mutation.key,
@@ -719,8 +764,17 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
             })),
           })
         const tx = appliedTransaction.tx
+        const acceptedMutationIds = request.mutations.map(
+          (mutation) => mutation.mutationId,
+        )
 
-        this.appliedEnvelopeIds.set(request.envelopeId, Date.now())
+        this.appliedEnvelopeResults.set(envelopeKey, {
+          timestamp: Date.now(),
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+          acceptedMutationIds,
+        })
         this.pruneAppliedEnvelopeIds()
         if (appliedTransaction.applied) {
           this.publishCommittedTransaction(collectionId, tx)
@@ -733,9 +787,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
           term: tx.term,
           seq: tx.seq,
           latestRowVersion: tx.rowVersion,
-          acceptedMutationIds: request.mutations.map(
-            (mutation) => mutation.mutationId,
-          ),
+          acceptedMutationIds,
         }
       })
     } catch (error) {
@@ -818,7 +870,9 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     transaction: PositionlessPersistedTx,
   ): Promise<{ tx: PersistedTx; applied: boolean }> {
     const state = this.collections.get(collectionId)
-    if (!state?.isLeader) throw new LostLeadershipError()
+    if (!state?.isLeader || !state.isPositionReady) {
+      throw new LostLeadershipError()
+    }
 
     const adapter = this.requireAdapter()
     const proposedTx: PersistedTx = {
@@ -1038,9 +1092,9 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   private pruneAppliedEnvelopeIds(): void {
     // Keep envelopes for 60 seconds for dedup
     const cutoff = Date.now() - 60_000
-    for (const [id, ts] of this.appliedEnvelopeIds) {
-      if (ts < cutoff) {
-        this.appliedEnvelopeIds.delete(id)
+    for (const [id, result] of this.appliedEnvelopeResults) {
+      if (result.timestamp < cutoff) {
+        this.appliedEnvelopeResults.delete(id)
       }
     }
     for (const [txId, applied] of this.appliedPersistedTransactions) {
