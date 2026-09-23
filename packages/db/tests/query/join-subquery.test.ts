@@ -348,12 +348,14 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
     describe(`subqueries in JOIN clause`, () => {
       let issuesCollection: ReturnType<typeof createIssuesCollection>
       let usersCollection: ReturnType<typeof createUsersCollection>
+      let profilesCollection: ReturnType<typeof createProfilesCollection>
       let productsCollection: ReturnType<typeof createProductsCollection>
       let trialsCollection: ReturnType<typeof createTrialsCollection>
 
       beforeEach(() => {
         issuesCollection = createIssuesCollection(autoIndex)
         usersCollection = createUsersCollection(autoIndex)
+        profilesCollection = createProfilesCollection(autoIndex)
         productsCollection = createProductsCollection(autoIndex)
         trialsCollection = createTrialsCollection(autoIndex)
       })
@@ -472,6 +474,29 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
                 eq(issue.userId, member.id),
               )
               .where(({ member }) => eq(member.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+      })
+
+      test(`remaps a pushed predicate through a joined subquery result`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .innerJoin({ profile: profilesCollection }, ({ user, profile }) =>
+                eq(user.id, profile.userId),
+              )
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: usersWithProfiles }, ({ issue, member }) =>
+                eq(issue.userId, member.user.id),
+              )
+              .where(({ member }) => eq(member.user.name, `Bob`))
               .select(({ issue }) => ({ id: issue.id }))
           },
         })

@@ -1008,12 +1008,18 @@ function remapWhereForSubquery(
 
       const field = expression.path[1]
       const projected = field ? subquery.select?.[field] : undefined
+      const hasNamespacedResult =
+        subquery.join !== undefined ||
+        subquery.groupBy !== undefined ||
+        subquery.from.type === `unionFrom`
       const innerPath =
         projected instanceof PropRef
-          ? projected.path
-          : [firstFromAlias, ...expression.path.slice(1)]
+          ? [...projected.path, ...expression.path.slice(2)]
+          : hasNamespacedResult
+            ? expression.path.slice(1)
+            : [firstFromAlias, ...expression.path.slice(1)]
 
-      return new PropRef([...innerPath, ...expression.path.slice(2)])
+      return new PropRef(innerPath)
     }
 
     if (expression instanceof Func) {
