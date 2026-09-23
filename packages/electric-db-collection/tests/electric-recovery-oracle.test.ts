@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
@@ -39,17 +39,158 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * Observation cuts include coordinator metadata publication, `up-to-date`,
  * restart, resume metadata, and exact public and durable rows.
  *
- * Replay matrices by exact Vitest title; replay the generated property with the
- * fast-check seed and path printed on failure. The trace fault control rejects a
- * missing intermediate publication, while exact row checks reject stale cached
- * rows with fresh metadata and incomplete replacement. This is a fixed matrix
- * plus a bounded generated property over a mocked ShapeStream, not a live
- * Electric service or PowerSync authority.
+ * Normal runs retain one fixed campaign and add one seedless campaign over the
+ * same property. Set both TANSTACK_DB_ELECTRIC_RECOVERY_ORACLE_SEED and
+ * TANSTACK_DB_ELECTRIC_RECOVERY_ORACLE_PATH to run only that replay. The named
+ * trace fault control rejects the plausible wrong answer that omits an observed
+ * stale publication. This is a fixed matrix plus a bounded generated property
+ * over a mocked ShapeStream, not a live Electric service or PowerSync authority.
  */
 
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }
+type RecoveryCommand = {
+  id: number
+  name: string
+  deleted: boolean
+  fullReload: boolean
+  splitCommitControl: boolean
+}
+type RecoveryHistory = {
+  startupOrder: `hydrate-before-ready` | `ready-before-hydrate`
+  commands: Array<RecoveryCommand>
+}
+type RecoveryCampaign = {
+  name: `fixed` | `random` | `replay`
+  seed: number | undefined
+  path: string | undefined
+}
+
+const FIXED_RECOVERY_SEED = 1_869_1659
+const RECOVERY_SEED_ENV = `TANSTACK_DB_ELECTRIC_RECOVERY_ORACLE_SEED`
+const RECOVERY_PATH_ENV = `TANSTACK_DB_ELECTRIC_RECOVERY_ORACLE_PATH`
+const RECOVERY_RUNS_ENV = `TANSTACK_DB_ELECTRIC_RECOVERY_ORACLE_RUNS`
+
+function readRecoveryCampaigns(
+  environment: Record<string, string | undefined>,
+): { campaigns: Array<RecoveryCampaign>; numRuns: number } {
+  const seedText = environment[RECOVERY_SEED_ENV]
+  const path = environment[RECOVERY_PATH_ENV]
+  const runsText = environment[RECOVERY_RUNS_ENV] ?? `20`
+  const numRuns = Number(runsText)
+  if (
+    runsText.trim() === `` ||
+    !Number.isSafeInteger(numRuns) ||
+    numRuns <= 0
+  ) {
+    throw new Error(`${RECOVERY_RUNS_ENV} must be a positive integer`)
+  }
+  if (seedText === undefined && path === undefined) {
+    return {
+      campaigns: [
+        { name: `fixed`, seed: FIXED_RECOVERY_SEED, path: undefined },
+        { name: `random`, seed: undefined, path: undefined },
+      ],
+      numRuns,
+    }
+  }
+  if (seedText === undefined) {
+    throw new Error(`${RECOVERY_PATH_ENV} requires ${RECOVERY_SEED_ENV}`)
+  }
+  if (path === undefined) {
+    throw new Error(`${RECOVERY_SEED_ENV} requires ${RECOVERY_PATH_ENV}`)
+  }
+  const seed = Number(seedText)
+  if (seedText.trim() === `` || !Number.isSafeInteger(seed)) {
+    throw new Error(`${RECOVERY_SEED_ENV} must be an integer`)
+  }
+  if (path.trim() === `` || !/^\d+(?::\d+)*$/.test(path)) {
+    throw new Error(
+      `${RECOVERY_PATH_ENV} must contain colon-separated nonnegative integers`,
+    )
+  }
+  return {
+    campaigns: [{ name: `replay`, seed, path }],
+    numRuns,
+  }
+}
+
+/**
+ * The pinned examples reconstruct the retained insert/delete/full-reload
+ * witness and both startup orders. Removing startupOrder loses the independent
+ * ready/hydrate boundary; removing delete or fullReload loses membership or
+ * peer-reload transitions; removing splitCommitControl loses legal callback
+ * partitioning. IDs 2..4 permit same-key and disjoint histories, names include
+ * empty/bounded strings, and 1..8 commands include the one-step marginal case.
+ * A change batch without up-to-date/subset-end is intentionally excluded: it is
+ * open protocol state, not a completed Electric publication.
+ */
+const recoveryHistoryArbitrary = fc.record({
+  startupOrder: fc.constantFrom(
+    `hydrate-before-ready` as const,
+    `ready-before-hydrate` as const,
+  ),
+  commands: fc.array(
+    fc.record({
+      id: fc.integer({ min: 2, max: 4 }),
+      name: fc.string({ maxLength: 8 }),
+      deleted: fc.boolean(),
+      fullReload: fc.boolean(),
+      splitCommitControl: fc.boolean(),
+    }),
+    { minLength: 1, maxLength: 8 },
+  ),
+})
+
+const recoveryExamples: Array<[RecoveryHistory]> = [
+  [
+    {
+      startupOrder: `hydrate-before-ready`,
+      commands: [
+        {
+          id: 2,
+          name: `external`,
+          deleted: false,
+          fullReload: false,
+          splitCommitControl: false,
+        },
+        {
+          id: 2,
+          name: `removed`,
+          deleted: true,
+          fullReload: true,
+          splitCommitControl: true,
+        },
+      ],
+    },
+  ],
+  [
+    {
+      startupOrder: `ready-before-hydrate`,
+      commands: [
+        {
+          id: 3,
+          name: `ready-first`,
+          deleted: false,
+          fullReload: true,
+          splitCommitControl: false,
+        },
+      ],
+    },
+  ],
+]
+
+const recoveryConfig = readRecoveryCampaigns(process.env)
+
+function recoveryCampaignParameters(campaign: RecoveryCampaign) {
+  return {
+    numRuns: recoveryConfig.numRuns,
+    examples: recoveryExamples,
+    ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+    ...(campaign.path === undefined ? {} : { path: campaign.path }),
+  }
+}
 
 function expectWholeRecoveryTrace(
   entries: Array<Exposure>,
@@ -235,7 +376,39 @@ describe(`persisted Electric recovery laws`, () => {
     vi.clearAllMocks()
   })
 
-  it(`keeps repaired intermediate publications in the persisted recovery record`, async () => {
+  it(`selects only a validated seed-and-path replay when requested`, () => {
+    expect(
+      readRecoveryCampaigns({
+        [RECOVERY_SEED_ENV]: `42`,
+        [RECOVERY_PATH_ENV]: `0:3:1`,
+        [RECOVERY_RUNS_ENV]: `7`,
+      }),
+    ).toEqual({
+      campaigns: [{ name: `replay`, seed: 42, path: `0:3:1` }],
+      numRuns: 7,
+    })
+  })
+
+  it.each([
+    [{ [RECOVERY_PATH_ENV]: `0` }, `requires ${RECOVERY_SEED_ENV}`],
+    [{ [RECOVERY_SEED_ENV]: `42` }, `requires ${RECOVERY_PATH_ENV}`],
+    [
+      { [RECOVERY_SEED_ENV]: `nope`, [RECOVERY_PATH_ENV]: `0` },
+      `must be an integer`,
+    ],
+    [
+      { [RECOVERY_SEED_ENV]: `42`, [RECOVERY_PATH_ENV]: `0:-1` },
+      `colon-separated nonnegative integers`,
+    ],
+    [{ [RECOVERY_RUNS_ENV]: `0` }, `must be a positive integer`],
+  ])(
+    `rejects an invalid recovery replay configuration`,
+    (environment, text) => {
+      expect(() => readRecoveryCampaigns(environment)).toThrow(text)
+    },
+  )
+
+  it(`rejects the wrong whole-trace answer that omits a stale intermediate publication`, async () => {
     const f = fixture(`eager`)
     try {
       f.start()
@@ -256,9 +429,8 @@ describe(`persisted Electric recovery laws`, () => {
             kind === `event` && rows[0]?.name === `wrong`,
         ),
       ).toBe(true)
-      expect(() =>
-        expectWholeRecoveryTrace(entries, [[oldRow], correct]),
-      ).toThrow()
+      const wrongAnswer = [[oldRow], correct]
+      expect(() => expectWholeRecoveryTrace(entries, wrongAnswer)).toThrow()
       expectWholeRecoveryTrace(entries, [
         [oldRow],
         [{ ...oldRow, name: `wrong` }],
@@ -373,32 +545,9 @@ describe(`persisted Electric recovery laws`, () => {
     },
   )
 
-  fcTest.prop(
-    [
-      fc.array(
-        fc.record({
-          id: fc.integer({ min: 2, max: 4 }),
-          name: fc.string({ maxLength: 8 }),
-          deleted: fc.boolean(),
-          fullReload: fc.boolean(),
-        }),
-        { minLength: 1, maxLength: 8 },
-      ),
-    ],
-    {
-      numRuns: 20,
-      examples: [
-        [
-          [
-            { id: 2, name: `external`, deleted: false, fullReload: false },
-            { id: 2, name: `removed`, deleted: true, fullReload: true },
-          ],
-        ],
-      ],
-    },
-  )(
-    `independent persistence publications and stream deltas agree with complete-row state`,
-    async (commands) => {
+  const independentPublicationProperty = fc.asyncProperty(
+    recoveryHistoryArbitrary,
+    async ({ startupOrder, commands }) => {
       subscribers.length = 0
       const peer = externalPublisher()
       const f = fixture(`on-demand`, peer.coordinator)
@@ -410,8 +559,25 @@ describe(`persisted Electric recovery laws`, () => {
         await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
           interval: 1,
         })
-        await f.collection._sync.loadSubset({})
-        subscribers[0]!([upToDate])
+
+        // These two legal startup orders ablate the only readiness boundary in
+        // this history. On-demand hydration alone is not upstream readiness.
+        if (startupOrder === `hydrate-before-ready`) {
+          await f.collection._sync.loadSubset({})
+          expect(f.collection.status).toBe(`loading`)
+          subscribers[0]!([upToDate])
+        } else {
+          subscribers[0]!([upToDate])
+          await vi.waitFor(() => expect(f.collection.status).toBe(`ready`), {
+            interval: 1,
+          })
+          await f.collection._sync.loadSubset({})
+        }
+        await vi.waitFor(() => expect(f.collection.status).toBe(`ready`), {
+          interval: 1,
+        })
+        expect(f.publicRows()).toEqual(expectedRows())
+
         for (const command of commands) {
           const before = expectedRows()
           const cut = f.exposures.length
@@ -447,18 +613,39 @@ describe(`persisted Electric recovery laws`, () => {
             { interval: 1 },
           )
           expect(f.publicRows()).toEqual(expectedRows())
+          expect(f.collection.status).toBe(`ready`)
           f.record(`peer revision ${revision} settled`)
           const afterPeer = expectedRows()
           expectWholeRecoveryTrace(f.exposures.slice(cut), [before, afterPeer])
           const streamCut = f.exposures.length
           f.record(`before stream revision ${revision}`)
-          subscribers[0]!([
-            change(`update`, { id: row.id, name: `stream` }),
-            upToDate,
-          ])
+          const streamUpdate = change(`update`, {
+            id: row.id,
+            name: `stream`,
+          })
+          if (command.splitCommitControl) {
+            subscribers[0]!([streamUpdate])
+            f.record(`after uncommitted stream data ${revision}`)
+            expect(f.publicRows()).toEqual(afterPeer)
+            expect(f.durableRows()).toEqual(afterPeer)
+            expect(f.collection.status).toBe(`ready`)
+            subscribers[0]!([upToDate])
+          } else {
+            subscribers[0]!([streamUpdate, upToDate])
+          }
           if (!command.deleted) expected.set(row.id, { ...row, name: `stream` })
           f.record(`after stream revision ${revision}`)
-          expect(f.publicRows()).toEqual(expectedRows())
+          expect(
+            f.publicRows(),
+            JSON.stringify({
+              command,
+              publicRows: f.publicRows(),
+              durableRows: f.durableRows(),
+              expectedRows: expectedRows(),
+              status: f.collection.status,
+            }),
+          ).toEqual(expectedRows())
+          expect(f.collection.status).toBe(`ready`)
           await vi.waitFor(
             () => expect(f.durableRows()).toEqual(expectedRows()),
             { interval: 1 },
@@ -472,6 +659,16 @@ describe(`persisted Electric recovery laws`, () => {
         f.stopObserving()
         await f.collection.cleanup()
       }
+    },
+  )
+
+  it.each(recoveryConfig.campaigns)(
+    `independent persistence publications and stream deltas agree with complete-row state ($name campaign)`,
+    async (campaign) => {
+      await fc.assert(
+        independentPublicationProperty,
+        recoveryCampaignParameters(campaign),
+      )
     },
   )
 
