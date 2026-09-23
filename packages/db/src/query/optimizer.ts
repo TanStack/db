@@ -976,12 +976,54 @@ function optimizeFromWithTracking(
   // Add the WHERE clause to the existing subquery
   // Create a deep copy to ensure immutability
   const existingWhere = from.query.where || []
+  const remappedWhere = remapWhereForSubquery(
+    from.query,
+    whereClause,
+    from.alias,
+  )
   const optimizedSubQuery: QueryIR = {
     ...deepCopyQuery(from.query),
-    where: [...existingWhere, whereClause],
+    where: [...existingWhere, remappedWhere],
   }
   actuallyOptimized.add(from.alias) // Mark as successfully optimized
   return new QueryRefClass(optimizedSubQuery, from.alias)
+}
+
+/**
+ * Rewrites references to an outer QueryRef alias so a pushed predicate can be
+ * evaluated inside the subquery's namespace. Pass-through SELECT fields use
+ * their projected source path; unprojected rows use the first source alias.
+ */
+function remapWhereForSubquery(
+  subquery: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string,
+): BasicExpression<boolean> {
+  const firstFromAlias = getFirstFromAlias(subquery)
+  if (firstFromAlias === undefined) return whereClause
+
+  const remapExpression = (expression: BasicExpression): BasicExpression => {
+    if (expression instanceof PropRef) {
+      if (expression.path[0] !== outerAlias) return expression
+
+      const field = expression.path[1]
+      const projected = field ? subquery.select?.[field] : undefined
+      const innerPath =
+        projected instanceof PropRef
+          ? projected.path
+          : [firstFromAlias, ...expression.path.slice(1)]
+
+      return new PropRef([...innerPath, ...expression.path.slice(2)])
+    }
+
+    if (expression instanceof Func) {
+      return new Func(expression.name, expression.args.map(remapExpression))
+    }
+
+    return expression
+  }
+
+  return remapExpression(whereClause) as BasicExpression<boolean>
 }
 
 function optimizeJoinFromWithTracking(

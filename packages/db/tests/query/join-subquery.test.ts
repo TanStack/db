@@ -394,6 +394,91 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         expect(charlieIssue).toBeUndefined()
       })
 
+      test.each([
+        [`inner`, `collection`],
+        [`inner`, `subquery`],
+        [`left`, `collection`],
+        [`left`, `subquery`],
+      ] as const)(
+        `applies an outer joined-alias filter for a %s join with a %s source`,
+        (joinType, sourceKind) => {
+          const joinQuery = createLiveQueryCollection({
+            startSync: true,
+            query: (q) => {
+              if (sourceKind === `subquery`) {
+                const activeUsers = q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+
+                return q
+                  .from({ issue: issuesCollection })
+                  .join(
+                    { user: activeUsers },
+                    ({ issue, user }) => eq(issue.userId, user.id),
+                    joinType,
+                  )
+                  .where(({ user }) => eq(user.name, `Bob`))
+                  .select(({ issue }) => ({ id: issue.id }))
+              }
+
+              return q
+                .from({ issue: issuesCollection })
+                .join(
+                  { user: usersCollection },
+                  ({ issue, user }) => eq(issue.userId, user.id),
+                  joinType,
+                )
+                .where(({ user }) => eq(user.name, `Bob`))
+                .select(({ issue }) => ({ id: issue.id }))
+            },
+          })
+
+          expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+        },
+      )
+
+      test(`applies an outer joined-alias filter through innerJoin`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const activeUsers = q
+              .from({ user: usersCollection })
+              .where(({ user }) => eq(user.status, `active`))
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ user: activeUsers }, ({ issue, user }) =>
+                eq(issue.userId, user.id),
+              )
+              .where(({ user }) => eq(user.name, `Charlie`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray).toEqual([])
+      })
+
+      test(`remaps a pushed predicate to a subquery's inner alias`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const activeUsers = q
+              .from({ user: usersCollection })
+              .where(({ user }) => eq(user.status, `active`))
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: activeUsers }, ({ issue, member }) =>
+                eq(issue.userId, member.id),
+              )
+              .where(({ member }) => eq(member.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+      })
+
       test(`should use subquery in JOIN clause - left join`, () => {
         const joinQuery = createLiveQueryCollection({
           startSync: true,
@@ -658,6 +743,29 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           },
         ])
       })
+    })
+
+    test(`applies an outer filter pushed into a FROM subquery`, () => {
+      const issuesCollection = createIssuesCollection(autoIndex)
+      const usersCollection = createUsersCollection(autoIndex)
+      const joinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const activeUsers = q
+            .from({ user: usersCollection })
+            .where(({ user }) => eq(user.status, `active`))
+
+          return q
+            .from({ user: activeUsers })
+            .innerJoin({ issue: issuesCollection }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .where(({ user }) => eq(user.name, `Bob`))
+            .select(({ issue }) => ({ id: issue.id }))
+        },
+      })
+
+      expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
     })
 
     describe(`nested subqueries with joins (alias remapping)`, () => {
