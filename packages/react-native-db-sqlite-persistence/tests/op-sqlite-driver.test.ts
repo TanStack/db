@@ -741,6 +741,18 @@ it(`preserves a __proto__ column as own data without changing the row prototype`
   expect(row?.[`__proto__`]).toBe(`ordinary-data`)
 })
 
+it(`preserves a constructor column as own data without changing the row prototype`, async () => {
+  const [row] = await queryInjectedResult<Record<string, unknown>>({
+    rowsAffected: 0,
+    rawRows: [[`ordinary-data`]],
+    columnNames: [`constructor`],
+  })
+
+  expect(Object.getPrototypeOf(row)).toBe(Object.prototype)
+  expect(Object.prototype.hasOwnProperty.call(row, `constructor`)).toBe(true)
+  expect(row?.[`constructor`]).toBe(`ordinary-data`)
+})
+
 const malformedColumnarResults: ReadonlyArray<{
   name: string
   result: unknown
