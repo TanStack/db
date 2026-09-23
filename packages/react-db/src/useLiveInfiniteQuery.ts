@@ -28,6 +28,7 @@ import type {
 import type {
   Collection,
   CollectionImpl as CollectionImplType,
+  CollectionStatus,
   Context,
   DbClient,
   InferResultType,
@@ -62,6 +63,29 @@ export type UseLiveInfiniteQueryReturn<TContext extends Context> = Omit<
 > & {
   data: InferResultType<TContext>
   pages: Array<Array<InferResultType<TContext>[number]>>
+  pageParams: Array<number>
+  fetchNextPage: () => Promise<void>
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+  error: unknown
+}
+
+export type UseLiveInfiniteQueryReturnWithCollection<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+> = {
+  data: Array<TResult>
+  state: Map<TKey, TResult>
+  collection: Collection<TResult, TKey, TUtils> & NonSingleResult
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: true
+  pages: Array<Array<TResult>>
   pageParams: Array<number>
   fetchNextPage: () => Promise<void>
   hasNextPage: boolean
@@ -111,7 +135,7 @@ export function useLiveInfiniteQuery<
 >(
   liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
   config: UseLiveInfiniteQueryConfig<any>,
-): UseLiveInfiniteQueryReturn<any>
+): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>
 
 // Overload for query function
 export function useLiveInfiniteQuery<TContext extends Context>(

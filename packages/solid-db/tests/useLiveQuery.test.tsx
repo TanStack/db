@@ -2077,6 +2077,50 @@ describe(`Query Collections`, () => {
         dispose()
       })
     })
+
+    /**
+     * Driver: public `useLiveQuery` with a Solid signal. Initial reads and each
+     * `waitFor` completion are observation cuts for disabled, enabled, and
+     * disabled-again public results. Collection/state behavior remains in
+     * shared conformance; this test isolates conditional `findOne` data.
+     */
+    it(`keeps conditional findOne data empty while disabled`, async () => {
+      return createRoot(async (dispose) => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-find-one-solid`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          }),
+        )
+        const [enabled, setEnabled] = createSignal(false)
+        const rendered = renderHook(() =>
+          useLiveQuery((q) =>
+            enabled()
+              ? q
+                  .from({ collection })
+                  .where(({ collection: person }) => eq(person.id, `3`))
+                  .findOne()
+              : null,
+          ),
+        )
+
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result()).toEqual([])
+
+        setEnabled(true)
+        await waitFor(() => {
+          expect(rendered.result()).toMatchObject({ id: `3` })
+        })
+
+        setEnabled(false)
+        await waitFor(() => {
+          expect(rendered.result.status).toBe(`disabled`)
+        })
+        expect(rendered.result()).toEqual([])
+        dispose()
+      })
+    })
   })
 
   describe(`Suspense Integration`, () => {
