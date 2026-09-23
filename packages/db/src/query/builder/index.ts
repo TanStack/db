@@ -24,6 +24,7 @@ import {
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
 import { getQueryIR } from './query-ir.js'
+import { cloneQueryForPlacement } from './clone-query.js'
 import {
   createRefProxy,
   createRefProxyWithSelected,
@@ -215,7 +216,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         }
         ref = new CollectionRef(this.resolveCollection(sourceValue), alias)
       } else if (sourceValue instanceof BaseQueryBuilder) {
-        const subQuery = sourceValue._getQuery()
+        const subQuery = cloneQueryForPlacement(sourceValue._getQuery())
         if (!(subQuery as Partial<QueryIR>).from) {
           throw new SubQueryMustHaveFromClauseError(context)
         }
@@ -286,8 +287,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       return this._clone({
         ...this.query,
         from: new UnionAll(
-          [sourceOrBranch, ...branches].map((branch) =>
-            (branch as unknown as BaseQueryBuilder)._getQuery(),
+          [sourceOrBranch, ...branches].map(
+            (branch) => (branch as unknown as BaseQueryBuilder)._getQuery(),
           ),
         ),
       }) as any
@@ -1370,7 +1371,7 @@ function buildIncludesSubquery(
   parentAliases: Array<string>,
   materialization: IncludesMaterialization,
 ): IncludesSubquery {
-  const childQuery = childBuilder._getQuery()
+  const childQuery = cloneQueryForPlacement(childBuilder._getQuery())
 
   // Collect child's own aliases
   const childAliases = collectQueryAliases(childQuery)
