@@ -458,9 +458,16 @@ prose claims more reach than the test has.
 
 ### Keep the prose proportional
 
-Do not turn every regression test into an essay. Use this form when a file owns
-a reusable law, state machine, lifecycle boundary, or reference model. A focused
-test can remain short when its name and setup already state the whole contract.
+Every oracle and generated-history test must make the five layers visible. This
+structure is not optional when the file owns a reusable law, state machine,
+lifecycle boundary, or reference model. A focused regression that is not an
+oracle can remain short when its name and setup already state the whole contract,
+but it does not replace applicable oracle coverage.
+
+Mandatory structure does not mean five classes or a long essay. A compact
+oracle can state its contract and limits in one opening comment, keep a pure
+model beside it, define a small grammar, drive the production entry point, and
+compare the promised observations at a named checkpoint.
 
 As a starting budget, add only prose that helps a reader answer one of the five
 layer questions. After the first draft, remove comments that only translate the
