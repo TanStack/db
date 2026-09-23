@@ -130,9 +130,10 @@ materialization laws.
 | checkpoint or observation cut | The exact point where the contract requires comparison. |
 | oracle replay | Re-running a recorded oracle failure from its seed, shrink path, actions, or other replay inputs. Do not use it for runtime truncate replay, retry, or a new random campaign. |
 | projection or abstraction | The parts of concrete state retained for one judgment. |
-| refinement check | A check that observed production behavior is allowed by the model. A sampled check is not a proof for every behavior. |
+| refinement check | An executable comparison at a named checkpoint that accepts only production observations allowed by the model. A sampled check is not a proof for every behavior. |
 | partial oracle | An oracle that judges only named parts of the contract. |
 | reach witness | Evidence that the production driver reached the claimed boundary. |
+| versioned review record | Review evidence stored at a stable location with the exact reviewed head and append-only entries, so later edits cannot silently change the recorded verdict. |
 | mutant | A deliberate wrong answer or implementation used to test oracle sensitivity. |
 | fault injection | A deliberate runtime failure, delay, cancellation, or malformed response used to test a system boundary. |
 | shrinking | Reducing a failing generated history while preserving the failure. |
