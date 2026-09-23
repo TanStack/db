@@ -3179,6 +3179,93 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it.each([
+    {
+      action: `retain` as const,
+      expectedEnsures: 1,
+      expectedReleases: 0,
+    },
+    {
+      action: `unload` as const,
+      expectedEnsures: 0,
+      expectedReleases: 1,
+    },
+    {
+      action: `abort` as const,
+      expectedEnsures: 0,
+      expectedReleases: 0,
+    },
+  ])(
+    `acquires coordinator demand after hydration iff it remains active: $action`,
+    async ({ action, expectedEnsures, expectedReleases }) => {
+      const adapter = createRecordingAdapter()
+      const hydrate = adapter.loadSubset
+      let enterHydration!: () => void
+      let finishHydration!: () => void
+      const entered = new Promise<void>((resolve) => {
+        enterHydration = resolve
+      })
+      const gate = new Promise<void>((resolve) => {
+        finishHydration = resolve
+      })
+      adapter.loadSubset = async (...args) => {
+        enterHydration()
+        await gate
+        return hydrate(...args)
+      }
+      const ensure = vi.fn(async () => {})
+      const release = vi.fn(async () => {})
+      const coordinator = createCoordinatorHarness()
+      coordinator.isLeader = () => false
+      coordinator.requestEnsureRemoteSubset = ensure
+      coordinator.requestReleaseRemoteSubset = release
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `coordinator-hydration-demand-${action}`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const controller = new AbortController()
+      const options: LoadSubsetOptions = {
+        limit: 1,
+        signal: controller.signal,
+      }
+
+      try {
+        collection.startSyncImmediate()
+        const pending = collection._sync.loadSubset(options)
+        await entered
+        if (action === `unload`) collection._sync.unloadSubset(options)
+        if (action === `abort`) controller.abort()
+        finishHydration()
+        await pending
+
+        // The earlier history law cancelled only after remote acquisition had
+        // begun. Holding the real adapter hydration seam exposes the distinct
+        // post-hydration transfer boundary. `retain` is the hostile control:
+        // the cancellation guard must not suppress live demand.
+        expect({
+          ensures: ensure.mock.calls.length,
+          releases: release.mock.calls.length,
+        }).toEqual({
+          ensures: expectedEnsures,
+          releases: expectedReleases,
+        })
+      } finally {
+        finishHydration()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`hydrates a multiprocess follower locally while only the elected owner acquires remote demand`, async () => {
     const adapter = createRecordingAdapter([
       { id: `persisted`, title: `Persisted follower row` },
@@ -3280,7 +3367,7 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
-  it.each([`abort`, `release`, `offline`] as const)(
+  it.each([`abort`, `signal-abort`, `release`, `offline`] as const)(
     `handles remote ensure after %s without resurrecting cancelled demand`,
     async (action) => {
       vi.useFakeTimers()
@@ -3331,7 +3418,11 @@ describe(`persistedCollectionOptions`, () => {
           persistence: { adapter: createRecordingAdapter(), coordinator },
         }),
       )
-      const options = { limit: 1 }
+      const controller = new AbortController()
+      const options: LoadSubsetOptions = {
+        limit: 1,
+        ...(action === `signal-abort` ? { signal: controller.signal } : {}),
+      }
       try {
         collection.startSyncImmediate()
         const result = await Promise.resolve(
@@ -3341,8 +3432,12 @@ describe(`persistedCollectionOptions`, () => {
           (error: unknown) => error,
         )
         if (action === `release`) collection._sync.unloadSubset(options)
+        if (action === `signal-abort`) controller.abort()
         const callsBeforeRetry = ensure.mock.calls.length
         await vi.advanceTimersByTimeAsync(200)
+        // The old matrix supplied an AbortError or explicitly unloaded demand,
+        // but never aborted an already-queued retry. The signal row owns that
+        // distinct boundary; offline is its hostile liveness control.
         expect(result).toBe(failure)
         expect(followerUpstreamLoad).not.toHaveBeenCalled()
         if (action === `offline`) {
@@ -3662,6 +3757,112 @@ describe(`persistedCollectionOptions`, () => {
     )
     expect(collection.get(`ack-mismatch`)).toBeUndefined()
   })
+
+  it.each([
+    {
+      boundary: `follower` as const,
+      responseCode: `PERSISTENCE_ERROR` as const,
+      expectedDurabilityError: true,
+    },
+    {
+      boundary: `elected-leader` as const,
+      responseCode: `PERSISTENCE_ERROR` as const,
+      expectedDurabilityError: true,
+    },
+    {
+      boundary: `follower` as const,
+      responseCode: `NOT_LEADER` as const,
+      expectedDurabilityError: false,
+    },
+    {
+      boundary: `follower` as const,
+      responseCode: `VALIDATION_ERROR` as const,
+      expectedDurabilityError: false,
+    },
+    {
+      boundary: `follower` as const,
+      responseCode: `CONFLICT` as const,
+      expectedDurabilityError: false,
+    },
+    {
+      boundary: `follower` as const,
+      responseCode: `TIMEOUT` as const,
+      expectedDurabilityError: false,
+    },
+  ])(
+    `classifies public local-mutation failure at the $boundary boundary: $responseCode`,
+    async ({ boundary, responseCode, expectedDurabilityError }) => {
+      const persistenceResponse =
+        responseCode === `PERSISTENCE_ERROR`
+          ? {
+              type: `rpc:applyLocalMutations:res` as const,
+              rpcId: `local-${boundary}-persistence-response`,
+              ok: false as const,
+              code: `PERSISTENCE_ERROR` as const,
+              error: `disk write failed`,
+              sourceCode: `SQLITE_IOERR_FSYNC`,
+              path: [`database`, `wal`] as const,
+            }
+          : {
+              type: `rpc:applyLocalMutations:res` as const,
+              rpcId: `local-${boundary}-failure-response`,
+              ok: false as const,
+              code: responseCode,
+              error: `mutation route changed`,
+            }
+      const coordinator = createCoordinatorHarness()
+      coordinator.isLeader = () => boundary === `elected-leader`
+      coordinator.requestApplyLocalMutations = () =>
+        Promise.resolve(persistenceResponse)
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `local-mutation-${boundary}-${responseCode}`,
+          getKey: (item) => item.id,
+          persistence: {
+            adapter: createRecordingAdapter(),
+            coordinator,
+          },
+        }),
+      )
+
+      try {
+        const tx = collection.insert({
+          id: `local-failure`,
+          title: `Must not persist`,
+        })
+        const rejection = await tx.isPersisted.promise.then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+
+        // Earlier laws covered external-sync commit classification and a
+        // successful follower mutation acknowledgement. They never varied a
+        // serialized applyLocalMutations failure by route. The elected-leader
+        // and non-durability rows are hostile controls for topology parity and
+        // for avoiding an over-broad fail-stop classifier.
+        if (expectedDurabilityError) {
+          expect(rejection).toMatchObject({
+            name: `PersistedCollectionDurabilityError`,
+            code: `SQLITE_IOERR_FSYNC`,
+            path: [`database`, `wal`],
+            cause: persistenceResponse,
+          })
+          expect(collection.status).toBe(`error`)
+          expect(collection._lifecycle.getSyncError()).toBe(rejection)
+        } else {
+          expect(rejection).toMatchObject({
+            name: `Error`,
+            message:
+              `failed to apply local mutations through coordinator: ` +
+              `mutation route changed`,
+          })
+          expect(collection._lifecycle.getSyncError()).toBeUndefined()
+        }
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`targeted update avoids full loadSubset call`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Original` }])

@@ -1304,6 +1304,92 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
+    it.each([
+      { requestType: `committed transaction` as const },
+      { requestType: `local mutations` as const },
+    ])(
+      `keeps pre-adapter failures outside the durability boundary for $requestType`,
+      async ({ requestType }) => {
+        type LeaderState = {
+          participatesInLeadership: boolean
+          isLeader: boolean
+          leaderId: string
+          lockAbortController: null
+          heartbeatTimer: null
+          latestTerm: number
+          latestSeq: number
+          latestRowVersion: number
+          subscribers: Set<(message: unknown) => void>
+        }
+        type CoordinatorInternals = {
+          collections: Map<string, LeaderState>
+          withWriterLock: <T>(task: () => Promise<T>) => Promise<T>
+        }
+        const leaderState = (): LeaderState => ({
+          participatesInLeadership: true,
+          isLeader: true,
+          leaderId: `forced-local-leader`,
+          lockAbortController: null,
+          heartbeatTimer: null,
+          latestTerm: 1,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          subscribers: new Set(),
+        })
+        const invoke = (
+          coordinator: BrowserCollectionCoordinator,
+          suffix: string,
+        ) =>
+          requestType === `committed transaction`
+            ? coordinator.requestApplyCommittedTx(`todos`, {
+                txId: `classification-boundary-${suffix}`,
+                term: 0,
+                seq: 0,
+                rowVersion: 0,
+                mutations: [],
+              })
+            : coordinator.requestApplyLocalMutations(`todos`, [
+                {
+                  mutationId: `classification-boundary-${suffix}`,
+                  type: `insert`,
+                  key: `classification-boundary-${suffix}`,
+                  value: { id: `classification-boundary-${suffix}` },
+                },
+              ])
+        const missingAdapter = new BrowserCollectionCoordinator({
+          dbName: `missing-adapter`,
+        })
+        const missingInternals =
+          missingAdapter as unknown as CoordinatorInternals
+        missingInternals.collections.set(`todos`, leaderState())
+        const lockFailure = new Error(`writer lock unavailable`)
+        const lockCoordinator = createCoordinator()
+        const lockInternals = lockCoordinator as unknown as CoordinatorInternals
+        lockInternals.collections.set(`todos`, leaderState())
+        lockInternals.withWriterLock = () => Promise.reject(lockFailure)
+
+        try {
+          const missingError = await invoke(missingAdapter, `missing`).then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          const lockError = await invoke(lockCoordinator, `writer-lock`).then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+
+          expect(missingError).toMatchObject({
+            name: `Error`,
+            message: expect.stringContaining(`adapter not set`),
+          })
+          expect(lockError).toBe(lockFailure)
+        } finally {
+          missingAdapter.dispose()
+          lockCoordinator.dispose()
+        }
+      },
+    )
+
     it(`reuses the durable stream position after local mutation persistence fails`, async () => {
       const adapter = createStubAdapter()
       const persistenceError = new Error(`local disk full`)
@@ -2268,6 +2354,230 @@ describe(`BrowserCollectionCoordinator`, () => {
   })
 
   describe(`RPC - ensureRemoteSubset`, () => {
+    /**
+     * Route-pending was absent from the earlier acquisition grammar: every
+     * generated request began after a leader was known. This law varies the
+     * terminal action while the same first acquisition is waiting for its
+     * route, and checks both transport exclusion and live local-only identity.
+     */
+    it.each([
+      { terminalAction: `complete` as const },
+      { terminalAction: `abort` as const },
+    ])(
+      `settles a route-pending first subset request after $terminalAction without premature transport or replay`,
+      async ({ terminalAction }) => {
+        const lockName = `tsdb:leader:test-db:todos`
+        let releaseInitialLock = (): void => {}
+        heldLocks.set(lockName, {
+          release: () => {
+            heldLocks.delete(lockName)
+            tryGrantNextLock(lockName)
+          },
+        })
+        releaseInitialLock = heldLocks.get(lockName)!.release
+        const coordinator = createCoordinator()
+        const owner = withUnusedUnloadSubset(vi.fn())
+        const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+          `todos`,
+          owner,
+        )
+        coordinator.subscribe(`todos`, () => {})
+        const internals = coordinator as unknown as {
+          sendRPCOnce: (
+            collectionId: string,
+            request: unknown,
+          ) => Promise<unknown>
+        }
+        const originalSendRPCOnce = internals.sendRPCOnce.bind(coordinator)
+        const prematureTransport = vi.fn(() =>
+          Promise.reject(new Error(`no leader route yet`)),
+        )
+        internals.sendRPCOnce = prematureTransport
+        const abortController = new AbortController()
+        const signal = abortController.signal
+        const subscription = { on: () => () => {} } as unknown as Subscription
+        const options: LoadSubsetOptions = { limit: 1, signal, subscription }
+        const acquisitionInternals = coordinator as unknown as {
+          outboundRemoteSubsetAcquisitions: Map<string, unknown>
+        }
+
+        try {
+          const request = coordinator.requestEnsureRemoteSubset(
+            `todos`,
+            options,
+          )
+          await flush(0)
+          const transportCallsBeforeLeadership =
+            prematureTransport.mock.calls.length
+
+          if (terminalAction === `abort`) {
+            abortController.abort()
+            await expect(request).rejects.toMatchObject({ name: `AbortError` })
+          }
+          releaseInitialLock()
+          await vi.waitFor(() =>
+            expect(coordinator.isLeader(`todos`)).toBe(true),
+          )
+          if (terminalAction === `complete`) await request
+          await flush(0)
+
+          expect(transportCallsBeforeLeadership).toBe(0)
+          if (terminalAction === `complete`) {
+            expect(owner).toHaveBeenCalledTimes(1)
+            expect(owner.mock.calls[0]?.[0]).toMatchObject({ limit: 1 })
+            expect(owner.mock.calls[0]?.[0].signal).toBe(signal)
+            expect(owner.mock.calls[0]?.[0].subscription).toBe(subscription)
+          } else {
+            expect(owner).not.toHaveBeenCalled()
+            expect(
+              acquisitionInternals.outboundRemoteSubsetAcquisitions.size,
+            ).toBe(0)
+          }
+          await coordinator.requestReleaseRemoteSubset(`todos`, options)
+        } finally {
+          internals.sendRPCOnce = originalSendRPCOnce
+          releaseInitialLock()
+          unregisterOwner()
+          coordinator.dispose()
+        }
+      },
+    )
+
+    it.each([
+      { cleanupOrder: `owner then subscriptions` as const, subscriberCount: 1 },
+      { cleanupOrder: `owner then subscriptions` as const, subscriberCount: 2 },
+      { cleanupOrder: `subscriptions then owner` as const, subscriberCount: 1 },
+      { cleanupOrder: `subscriptions then owner` as const, subscriberCount: 2 },
+    ])(
+      `relinquishes leadership after $subscriberCount runtime subscriber(s) clean up in $cleanupOrder order`,
+      async ({ cleanupOrder, subscriberCount }) => {
+        const first = createCoordinator()
+        const second = createCoordinator()
+        const unsubscribeFirst = Array.from({ length: subscriberCount }, () =>
+          first.subscribe(`todos`, () => {}),
+        )
+        second.subscribe(`todos`, () => {})
+        const firstOwner = withUnusedUnloadSubset(vi.fn())
+        const secondOwner = withUnusedUnloadSubset(vi.fn())
+        const unregisterFirst = first.registerRemoteSubsetOwner(
+          `todos`,
+          firstOwner,
+        )
+        const unregisterSecond = second.registerRemoteSubsetOwner(
+          `todos`,
+          secondOwner,
+        )
+
+        try {
+          await vi.waitFor(() => {
+            expect({
+              first: first.isLeader(`todos`),
+              second: second.isLeader(`todos`),
+            }).toEqual({ first: true, second: false })
+          })
+
+          if (cleanupOrder === `owner then subscriptions`) unregisterFirst()
+          for (const [index, unsubscribe] of unsubscribeFirst.entries()) {
+            unsubscribe()
+            if (index < unsubscribeFirst.length - 1) {
+              expect(first.isLeader(`todos`)).toBe(true)
+            }
+          }
+          if (cleanupOrder === `subscriptions then owner`) unregisterFirst()
+
+          await vi.waitFor(() => {
+            expect({
+              first: first.isLeader(`todos`),
+              second: second.isLeader(`todos`),
+            }).toEqual({ first: false, second: true })
+          })
+
+          const options: LoadSubsetOptions = { limit: 1 }
+          await second.requestEnsureRemoteSubset(`todos`, options)
+          expect(secondOwner).toHaveBeenCalledTimes(1)
+          await second.requestReleaseRemoteSubset(`todos`, options)
+        } finally {
+          for (const unsubscribe of unsubscribeFirst) unsubscribe()
+          unregisterFirst()
+          unregisterSecond()
+          first.dispose()
+          second.dispose()
+        }
+      },
+    )
+
+    it(`does not orphan an overlapping leadership attempt across rapid unsubscribe and resubscribe`, async () => {
+      // The earlier generated histories changed leaders only after a settled
+      // acquisition. This hostile history leaves getStreamPosition in flight
+      // while participation toggles twice, which can overlap lock loops.
+      const NativeAbortController = globalThis.AbortController
+      const leadershipControllers: Array<AbortController> = []
+      class TrackingAbortController extends NativeAbortController {
+        constructor() {
+          super()
+          leadershipControllers.push(this)
+        }
+      }
+      Object.defineProperty(globalThis, `AbortController`, {
+        value: TrackingAbortController,
+        writable: true,
+        configurable: true,
+      })
+      const adapter = createStubAdapter()
+      const positionResolvers: Array<() => void> = []
+      adapter.getStreamPosition = vi.fn(
+        () =>
+          new Promise<{
+            latestTerm: number
+            latestSeq: number
+            latestRowVersion: number
+          }>((resolve) => {
+            positionResolvers.push(() =>
+              resolve({
+                latestTerm: 0,
+                latestSeq: 0,
+                latestRowVersion: 0,
+              }),
+            )
+          }),
+      )
+      const participant = createCoordinator(adapter)
+      let unsubscribe = participant.subscribe(`todos`, () => {})
+      let contender: BrowserCollectionCoordinator | undefined
+
+      try {
+        await vi.waitFor(() => expect(positionResolvers).toHaveLength(1))
+
+        unsubscribe()
+        unsubscribe = participant.subscribe(`todos`, () => {})
+        positionResolvers[0]!()
+        await vi.waitFor(() => expect(positionResolvers).toHaveLength(2))
+        await flush(0)
+
+        contender = createCoordinator()
+        contender.subscribe(`todos`, () => {})
+        unsubscribe()
+        positionResolvers[1]!()
+
+        await vi.waitFor(() => {
+          expect({
+            participant: participant.isLeader(`todos`),
+            contender: contender!.isLeader(`todos`),
+          }).toEqual({ participant: false, contender: true })
+        })
+      } finally {
+        unsubscribe()
+        for (const controller of leadershipControllers) controller.abort()
+        participant.dispose()
+        contender?.dispose()
+        Object.defineProperty(globalThis, `AbortController`, {
+          value: NativeAbortController,
+          writable: true,
+          configurable: true,
+        })
+      }
+    })
+
     it(`rejects a second live remote subset owner instead of replacing the first`, () => {
       const coordinator = createCoordinator()
       const first = Object.assign(
@@ -2499,137 +2809,208 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
-    it(`releases a transferred Browser lease whose initial load rejected`, async () => {
-      const coordinator = createCoordinator()
-      coordinator.subscribe(`todos`, () => {})
-      await flush(50)
-      expect(coordinator.isLeader(`todos`)).toBe(true)
-      const loadError = new Error(`browser transferred load failed`)
-      const ownerErrors: Array<unknown> = []
-      const owner = Object.assign(
-        vi.fn((_options: TransportedLoadSubsetOptions) =>
-          Promise.reject(loadError),
-        ),
-        {
-          unloadSubset: vi.fn(
-            (_options: TransportedLoadSubsetOptions) => undefined,
-          ),
-          onError: (error: unknown) => ownerErrors.push(error),
-        },
-      )
-      const unregisterOwner = coordinator.registerRemoteSubsetOwner(
-        `todos`,
-        owner,
-      )
-      const options: LoadSubsetOptions = { offset: 20 }
-      const unhandled: Array<unknown> = []
-      const onUnhandled = (error: unknown) => unhandled.push(error)
-      process.on(`unhandledRejection`, onUnhandled)
-      const internals = coordinator as unknown as {
-        inboundRemoteSubsetAcquisitions: Map<string, Record<string, unknown>>
-      }
-
-      try {
-        const ensureError = await coordinator
-          .requestEnsureRemoteSubset(`todos`, options)
-          .then(
-            () => undefined,
-            (error: unknown) => error,
-          )
-        await coordinator.requestReleaseRemoteSubset(`todos`, options)
-        await flush(0)
-        const [terminal] = internals.inboundRemoteSubsetAcquisitions.values()
-
-        expect(ensureError).toBe(loadError)
-        expect(owner).toHaveBeenCalledTimes(1)
-        expect(owner.unloadSubset).toHaveBeenCalledTimes(1)
-        expect(owner.unloadSubset.mock.calls[0]?.[0]).toBe(
-          owner.mock.calls[0]?.[0],
+    it.each([
+      { failureMode: `before lease transfer` as const, expectedUnloads: 1 },
+      { failureMode: `after lease transfer` as const, expectedUnloads: 2 },
+    ])(
+      `retires a rejected owner load $failureMode and permits a fresh retry`,
+      async ({ failureMode, expectedUnloads }) => {
+        // The previous grammar generated only fulfilled owner loads. Both sides
+        // of the promise-return lease-transfer boundary must permit a fresh
+        // attempt without caching the rejected acquisition.
+        const coordinator = createCoordinator()
+        coordinator.subscribe(`todos`, () => {})
+        await flush(50)
+        expect(coordinator.isLeader(`todos`)).toBe(true)
+        const loadError = new Error(`browser transferred load failed`)
+        const ownerErrors: Array<unknown> = []
+        let loadCalls = 0
+        const owner = Object.assign(
+          vi.fn((_options: TransportedLoadSubsetOptions) => {
+            loadCalls++
+            if (loadCalls !== 1) return Promise.resolve()
+            if (failureMode === `before lease transfer`) throw loadError
+            return Promise.reject(loadError)
+          }),
+          {
+            unloadSubset: vi.fn(
+              (_options: TransportedLoadSubsetOptions) => undefined,
+            ),
+            onError: (error: unknown) => ownerErrors.push(error),
+          },
         )
-        expect(ownerErrors).toEqual([loadError])
-        expect(unhandled).toEqual([])
-        expect({
-          inbound: internals.inboundRemoteSubsetAcquisitions.size,
-          terminalKeys: Object.keys(terminal ?? {}).sort(),
-        }).toEqual({
-          inbound: 1,
-          terminalKeys: [
-            `acquisitionId`,
-            `collectionId`,
-            `released`,
-            `requesterId`,
-          ],
-        })
-      } finally {
-        process.off(`unhandledRejection`, onUnhandled)
-        unregisterOwner()
-        coordinator.dispose()
-      }
-    })
-
-    it(`retains a follower acquisition when its release transport fails`, async () => {
-      const leader = createCoordinator()
-      const follower = createCoordinator()
-      leader.subscribe(`todos`, () => {})
-      follower.subscribe(`todos`, () => {})
-      await flush(50)
-      const owner = Object.assign(
-        vi.fn(() => Promise.resolve()),
-        {
-          unloadSubset: vi.fn(() => Promise.resolve()),
-          onError: vi.fn(),
-        },
-      )
-      const unregisterOwner = leader.registerRemoteSubsetOwner(`todos`, owner)
-      const options: LoadSubsetOptions = { limit: 1 }
-      const followerInternals = follower as unknown as {
-        sendRPC: (collectionId: string, request: unknown) => Promise<unknown>
-        outboundRemoteSubsetAcquisitions: Map<string, unknown>
-      }
-
-      try {
-        await follower.requestEnsureRemoteSubset(`todos`, options)
-        const sendRPC = followerInternals.sendRPC.bind(follower)
-        let releaseAttempts = 0
-        followerInternals.sendRPC = async (collectionId, request) => {
-          if (
-            (request as { type?: string }).type ===
-            `rpc:releaseRemoteSubset:req`
-          ) {
-            releaseAttempts++
-            if (releaseAttempts === 1) {
-              return {
-                type: `rpc:releaseRemoteSubset:res`,
-                rpcId: (request as { rpcId: string }).rpcId,
-                ok: false,
-                error: `transient release transport failure`,
-              }
-            }
-          }
-          return sendRPC(collectionId, request)
+        const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+          `todos`,
+          owner,
+        )
+        const options: LoadSubsetOptions = { offset: 20 }
+        const unhandled: Array<unknown> = []
+        const onUnhandled = (error: unknown) => unhandled.push(error)
+        process.on(`unhandledRejection`, onUnhandled)
+        const internals = coordinator as unknown as {
+          inboundRemoteSubsetAcquisitions: Map<string, Record<string, unknown>>
         }
 
-        await expect(
-          follower.requestReleaseRemoteSubset(`todos`, options),
-        ).rejects.toThrow(`transient release transport failure`)
-        expect({
-          releaseAttempts,
-          retained: followerInternals.outboundRemoteSubsetAcquisitions.size,
-          unloads: owner.unloadSubset.mock.calls.length,
-        }).toEqual({ releaseAttempts: 1, retained: 1, unloads: 0 })
+        try {
+          const ensureError = await coordinator
+            .requestEnsureRemoteSubset(`todos`, options)
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            )
+          await coordinator.requestEnsureRemoteSubset(`todos`, options)
+          await coordinator.requestReleaseRemoteSubset(`todos`, options)
+          await flush(0)
+          const [terminal] = internals.inboundRemoteSubsetAcquisitions.values()
 
-        await follower.requestReleaseRemoteSubset(`todos`, options)
-        expect({
-          releaseAttempts,
-          retained: followerInternals.outboundRemoteSubsetAcquisitions.size,
-          unloads: owner.unloadSubset.mock.calls.length,
-        }).toEqual({ releaseAttempts: 2, retained: 0, unloads: 1 })
-      } finally {
-        unregisterOwner()
-        leader.dispose()
-        follower.dispose()
-      }
-    })
+          expect(ensureError).toBe(loadError)
+          expect(owner).toHaveBeenCalledTimes(2)
+          expect(owner.unloadSubset).toHaveBeenCalledTimes(expectedUnloads)
+          if (failureMode === `after lease transfer`) {
+            expect(owner.unloadSubset.mock.calls[0]?.[0]).toBe(
+              owner.mock.calls[0]?.[0],
+            )
+          }
+          expect(owner.unloadSubset.mock.calls.at(-1)?.[0]).toBe(
+            owner.mock.calls[1]?.[0],
+          )
+          expect(ownerErrors).toEqual([])
+          expect(unhandled).toEqual([])
+          expect({
+            inbound: internals.inboundRemoteSubsetAcquisitions.size,
+            terminalKeys: Object.keys(terminal ?? {}).sort(),
+          }).toEqual({
+            inbound: 1,
+            terminalKeys: [
+              `acquisitionId`,
+              `collectionId`,
+              `released`,
+              `requesterId`,
+            ],
+          })
+        } finally {
+          process.off(`unhandledRejection`, onUnhandled)
+          unregisterOwner()
+          coordinator.dispose()
+        }
+      },
+    )
+
+    it.each([
+      {
+        transportFailure: `delivered negative response` as const,
+        retainedAfterFailure: 0,
+      },
+      {
+        transportFailure: `undelivered rejection` as const,
+        retainedAfterFailure: 1,
+      },
+    ])(
+      `resolves a $transportFailure by delivery boundary without takeover replay`,
+      async ({ transportFailure, retainedAfterFailure }) => {
+        // Earlier takeover histories replayed only live demand; release failure
+        // was tested without a real leader change. No-response transport keeps
+        // retry debt; a leader response proves delivery and retires it. Both
+        // terminal paths must suppress takeover replay.
+        const leader = createCoordinator()
+        const follower = createCoordinator()
+        const unsubscribeLeader = leader.subscribe(`todos`, () => {})
+        follower.subscribe(`todos`, () => {})
+        await flush(50)
+        const firstOwner = Object.assign(
+          vi.fn(() => Promise.resolve()),
+          {
+            unloadSubset: vi.fn(() => Promise.resolve()),
+            onError: vi.fn(),
+          },
+        )
+        const secondOwner = Object.assign(
+          vi.fn(() => Promise.resolve()),
+          {
+            unloadSubset: vi.fn(() => Promise.resolve()),
+            onError: vi.fn(),
+          },
+        )
+        const unregisterFirst = leader.registerRemoteSubsetOwner(
+          `todos`,
+          firstOwner,
+        )
+        const unregisterSecond = follower.registerRemoteSubsetOwner(
+          `todos`,
+          secondOwner,
+        )
+        const options: LoadSubsetOptions = { limit: 1 }
+        const followerInternals = follower as unknown as {
+          sendRPC: (collectionId: string, request: unknown) => Promise<unknown>
+          outboundRemoteSubsetAcquisitions: Map<string, unknown>
+        }
+
+        try {
+          await follower.requestEnsureRemoteSubset(`todos`, options)
+          const sendRPC = followerInternals.sendRPC.bind(follower)
+          let releaseAttempts = 0
+          followerInternals.sendRPC = async (collectionId, request) => {
+            if (
+              (request as { type?: string }).type ===
+              `rpc:releaseRemoteSubset:req`
+            ) {
+              releaseAttempts++
+              if (releaseAttempts === 1) {
+                if (transportFailure === `undelivered rejection`) {
+                  throw new Error(`transient release transport rejection`)
+                }
+                return {
+                  type: `rpc:releaseRemoteSubset:res`,
+                  rpcId: (request as { rpcId: string }).rpcId,
+                  ok: false,
+                  error: `transient release transport failure`,
+                }
+              }
+            }
+            return sendRPC(collectionId, request)
+          }
+
+          await expect(
+            follower.requestReleaseRemoteSubset(`todos`, options),
+          ).rejects.toThrow(/transient release transport/)
+          expect({
+            releaseAttempts,
+            retained: followerInternals.outboundRemoteSubsetAcquisitions.size,
+            unloads: firstOwner.unloadSubset.mock.calls.length,
+          }).toEqual({
+            releaseAttempts: 1,
+            retained: retainedAfterFailure,
+            unloads: 0,
+          })
+
+          unsubscribeLeader()
+          await vi.waitFor(() => expect(follower.isLeader(`todos`)).toBe(true))
+          await vi.waitFor(() =>
+            expect(firstOwner.unloadSubset).toHaveBeenCalledTimes(1),
+          )
+          expect(secondOwner).not.toHaveBeenCalled()
+
+          await follower.requestReleaseRemoteSubset(`todos`, options)
+          expect({
+            releaseAttempts,
+            retained: followerInternals.outboundRemoteSubsetAcquisitions.size,
+            firstUnloads: firstOwner.unloadSubset.mock.calls.length,
+            takeoverLoads: secondOwner.mock.calls.length,
+          }).toEqual({
+            releaseAttempts: 1,
+            retained: 0,
+            firstUnloads: 1,
+            takeoverLoads: 0,
+          })
+        } finally {
+          unsubscribeLeader()
+          unregisterFirst()
+          unregisterSecond()
+          leader.dispose()
+          follower.dispose()
+        }
+      },
+    )
 
     it(`keeps a Browser release tombstone when a transferred load rejects concurrently`, async () => {
       const coordinator = createCoordinator()
@@ -2720,7 +3101,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         })
         expect(owner).toHaveBeenCalledTimes(1)
         expect(owner.unloadSubset).toHaveBeenCalledTimes(1)
-        expect(ownerErrors).toEqual([loadError])
+        expect(ownerErrors).toEqual([])
         expect(unhandled).toEqual([])
         expect({
           inbound: internals.inboundRemoteSubsetAcquisitions.size,
@@ -3637,7 +4018,7 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
-    it(`reports a failed Browser replay once without self-retrying`, async () => {
+    it(`contains a failed Browser replay without fail-stopping the owner`, async () => {
       const coordinator = createCoordinator()
       coordinator.subscribe(`todos`, () => {})
       await flush(50)
@@ -3689,7 +4070,7 @@ describe(`BrowserCollectionCoordinator`, () => {
           unhandled,
         }).toEqual({
           attempts: 1,
-          ownerErrors: [replayError],
+          ownerErrors: [],
           acquiredLeaderId: `retired-browser-leader`,
           inFlight: null,
           unhandled: [],
@@ -4352,6 +4733,66 @@ describe(`BrowserCollectionCoordinator`, () => {
         coordinator.dispose()
       }
     })
+
+    it.each([
+      { failureMode: `synchronous throw` as const },
+      { failureMode: `asynchronous rejection` as const },
+    ])(
+      `retires a terminal owner release after reporting one $failureMode`,
+      async ({ failureMode }) => {
+        // Previous cleanup laws observed and reported unload rejection, but
+        // never repeated the same terminal caller release. The owner receives
+        // one release attempt; after it reports failure the logical demand is
+        // terminal and must not replay or accrue retry debt here.
+        const coordinator = createCoordinator()
+        coordinator.subscribe(`todos`, () => {})
+        await flush(50)
+        const unloadError = new Error(`transient Browser owner unload failure`)
+        const ownerErrors: Array<unknown> = []
+        let unloadAttempts = 0
+        const owner = Object.assign(vi.fn(), {
+          unloadSubset: vi.fn(() => {
+            unloadAttempts++
+            if (unloadAttempts !== 1) return undefined
+            if (failureMode === `synchronous throw`) throw unloadError
+            return Promise.reject(unloadError)
+          }),
+          onError: (error: unknown) => ownerErrors.push(error),
+        })
+        const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+          `todos`,
+          owner,
+        )
+        const options: LoadSubsetOptions = { offset: 41 }
+        const internals = coordinator as unknown as {
+          outboundRemoteSubsetAcquisitions: Map<string, unknown>
+          replayRemoteSubsetAcquisitions: (
+            collectionId: string,
+          ) => Promise<void>
+        }
+
+        try {
+          await coordinator.requestEnsureRemoteSubset(`todos`, options)
+          await expect(
+            coordinator.requestReleaseRemoteSubset(`todos`, options),
+          ).rejects.toBe(unloadError)
+
+          await expect(
+            coordinator.requestReleaseRemoteSubset(`todos`, options),
+          ).resolves.toBeUndefined()
+          await internals.replayRemoteSubsetAcquisitions(`todos`)
+          expect({ unloadAttempts, ownerErrors }).toEqual({
+            unloadAttempts: 1,
+            ownerErrors: [unloadError],
+          })
+          expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(0)
+          expect(owner).toHaveBeenCalledTimes(1)
+        } finally {
+          unregisterOwner()
+          coordinator.dispose()
+        }
+      },
+    )
 
     it(`reports local Browser disposal unload rejection once and completes cleanup`, async () => {
       const coordinator = createCoordinator()

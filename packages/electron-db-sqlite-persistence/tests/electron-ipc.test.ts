@@ -1854,6 +1854,72 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
+  it(`retires an aborted route-pending Electron subset request before transport or replay`, async () => {
+    // Route-pending was absent from the earlier Electron acquisition grammar:
+    // every generated request began after a leader was known. Exercise the
+    // shared engine through the Electron wrapper and prove abort retires the
+    // logical demand without transport, owner work, or later replay debt.
+    const coordinator = new ElectronCollectionCoordinator({
+      dbName: `electron-subset-route-pending-abort`,
+    })
+    registerCleanup(() => coordinator.dispose())
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(),
+      onError: vi.fn(),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const internals = coordinator as unknown as {
+      acquireLeadership: () => Promise<void>
+      sendRPCOnce: (collectionId: string, request: unknown) => Promise<unknown>
+      collections: Map<string, { routeWaiters?: Set<() => void> }>
+      outboundRemoteSubsetAcquisitions: Map<string, unknown>
+      replayRemoteSubsetAcquisitions: (collectionId: string) => Promise<void>
+    }
+    internals.acquireLeadership = vi.fn(() => Promise.resolve())
+    const prematureTransport = vi.fn(() =>
+      Promise.reject(new Error(`no Electron leader route yet`)),
+    )
+    internals.sendRPCOnce = prematureTransport
+    const unsubscribe = coordinator.subscribe(`todos`, () => {})
+    const abortController = new AbortController()
+    const options: LoadSubsetOptions = {
+      limit: 1,
+      signal: abortController.signal,
+    }
+
+    try {
+      const request = coordinator.requestEnsureRemoteSubset(`todos`, options)
+      await Promise.resolve()
+      abortController.abort()
+
+      await expect(request).rejects.toMatchObject({ name: `AbortError` })
+      await internals.replayRemoteSubsetAcquisitions(`todos`)
+      expect({
+        ownerCalls: owner.mock.calls.length,
+        transportCalls: prematureTransport.mock.calls.length,
+        outbound: internals.outboundRemoteSubsetAcquisitions.size,
+        routeWaiters:
+          internals.collections.get(`todos`)?.routeWaiters?.size ?? 0,
+      }).toEqual({
+        ownerCalls: 0,
+        transportCalls: 0,
+        outbound: 0,
+        routeWaiters: 0,
+      })
+      await expect(
+        coordinator.requestReleaseRemoteSubset(`todos`, options),
+      ).resolves.toBeUndefined()
+    } finally {
+      abortController.abort()
+      unsubscribe()
+      unregisterOwner()
+      coordinator.dispose()
+    }
+  })
+
   it(`holds same-stack Electron subset reentry behind the original owner load`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-same-stack`,
@@ -1990,75 +2056,94 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`releases a transferred Electron lease whose initial load rejected`, async () => {
-    const coordinator = new ElectronCollectionCoordinator({
-      dbName: `electron-subset-rejected-transfer`,
-      adapter: createElectronCoordinatorTestAdapter(),
-    })
-    registerCleanup(() => coordinator.dispose())
-    coordinator.isLeader = () => true
-    const loadError = new Error(`electron transferred load failed`)
-    const ownerErrors: Array<unknown> = []
-    const owner = Object.assign(
-      vi.fn((_options: TransportedLoadSubsetOptions) =>
-        Promise.reject(loadError),
-      ),
-      {
-        unloadSubset: vi.fn(
-          (_options: TransportedLoadSubsetOptions) => undefined,
-        ),
-        onError: (error: unknown) => ownerErrors.push(error),
-      },
-    )
-    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
-      `todos`,
-      owner,
-    )
-    const options: LoadSubsetOptions = { offset: 20 }
-    const unhandled: Array<unknown> = []
-    const onUnhandled = (error: unknown) => unhandled.push(error)
-    process.on(`unhandledRejection`, onUnhandled)
-    const internals = coordinator as unknown as {
-      inboundRemoteSubsetAcquisitions: Map<string, Record<string, unknown>>
-    }
-
-    try {
-      const ensureError = await coordinator
-        .requestEnsureRemoteSubset(`todos`, options)
-        .then(
-          () => undefined,
-          (error: unknown) => error,
-        )
-      await coordinator.requestReleaseRemoteSubset(`todos`, options)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      const [terminal] = internals.inboundRemoteSubsetAcquisitions.values()
-
-      expect(ensureError).toBe(loadError)
-      expect(owner).toHaveBeenCalledTimes(1)
-      expect(owner.unloadSubset).toHaveBeenCalledTimes(1)
-      expect(owner.unloadSubset.mock.calls[0]?.[0]).toBe(
-        owner.mock.calls[0]?.[0],
-      )
-      expect(ownerErrors).toEqual([loadError])
-      expect(unhandled).toEqual([])
-      expect({
-        inbound: internals.inboundRemoteSubsetAcquisitions.size,
-        terminalKeys: Object.keys(terminal ?? {}).sort(),
-      }).toEqual({
-        inbound: 1,
-        terminalKeys: [
-          `acquisitionId`,
-          `collectionId`,
-          `released`,
-          `requesterId`,
-        ],
+  it.each([
+    { failureMode: `before lease transfer` as const, expectedUnloads: 1 },
+    { failureMode: `after lease transfer` as const, expectedUnloads: 2 },
+  ])(
+    `retires a rejected Electron owner load $failureMode and permits a fresh retry`,
+    async ({ failureMode, expectedUnloads }) => {
+      // The previous grammar generated only fulfilled owner loads. Both sides
+      // of the promise-return lease-transfer boundary must permit a fresh
+      // attempt without caching the rejected acquisition.
+      const coordinator = new ElectronCollectionCoordinator({
+        dbName: `electron-subset-rejected-transfer-${failureMode}`,
+        adapter: createElectronCoordinatorTestAdapter(),
       })
-    } finally {
-      process.off(`unhandledRejection`, onUnhandled)
-      unregisterOwner()
-      coordinator.dispose()
-    }
-  })
+      registerCleanup(() => coordinator.dispose())
+      coordinator.isLeader = () => true
+      const loadError = new Error(`electron transferred load failed`)
+      const ownerErrors: Array<unknown> = []
+      let loadCalls = 0
+      const owner = Object.assign(
+        vi.fn((_options: TransportedLoadSubsetOptions) => {
+          loadCalls++
+          if (loadCalls !== 1) return Promise.resolve()
+          if (failureMode === `before lease transfer`) throw loadError
+          return Promise.reject(loadError)
+        }),
+        {
+          unloadSubset: vi.fn(
+            (_options: TransportedLoadSubsetOptions) => undefined,
+          ),
+          onError: (error: unknown) => ownerErrors.push(error),
+        },
+      )
+      const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+        `todos`,
+        owner,
+      )
+      const options: LoadSubsetOptions = { offset: 20 }
+      const unhandled: Array<unknown> = []
+      const onUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, onUnhandled)
+      const internals = coordinator as unknown as {
+        inboundRemoteSubsetAcquisitions: Map<string, Record<string, unknown>>
+      }
+
+      try {
+        const ensureError = await coordinator
+          .requestEnsureRemoteSubset(`todos`, options)
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+        await coordinator.requestEnsureRemoteSubset(`todos`, options)
+        await coordinator.requestReleaseRemoteSubset(`todos`, options)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        const [terminal] = internals.inboundRemoteSubsetAcquisitions.values()
+
+        expect(ensureError).toBe(loadError)
+        expect(owner).toHaveBeenCalledTimes(2)
+        expect(owner.unloadSubset).toHaveBeenCalledTimes(expectedUnloads)
+        if (failureMode === `after lease transfer`) {
+          expect(owner.unloadSubset.mock.calls[0]?.[0]).toBe(
+            owner.mock.calls[0]?.[0],
+          )
+        }
+        expect(owner.unloadSubset.mock.calls.at(-1)?.[0]).toBe(
+          owner.mock.calls[1]?.[0],
+        )
+        expect(ownerErrors).toEqual([])
+        expect(unhandled).toEqual([])
+        expect({
+          inbound: internals.inboundRemoteSubsetAcquisitions.size,
+          terminalKeys: Object.keys(terminal ?? {}).sort(),
+        }).toEqual({
+          inbound: 1,
+          terminalKeys: [
+            `acquisitionId`,
+            `collectionId`,
+            `released`,
+            `requesterId`,
+          ],
+        })
+      } finally {
+        process.off(`unhandledRejection`, onUnhandled)
+        unregisterOwner()
+        coordinator.dispose()
+      }
+    },
+  )
 
   it(`keeps an Electron release tombstone when a transferred load rejects concurrently`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
@@ -2151,7 +2236,7 @@ describe(`electron sqlite persistence bridge`, () => {
       })
       expect(owner).toHaveBeenCalledTimes(1)
       expect(owner.unloadSubset).toHaveBeenCalledTimes(1)
-      expect(ownerErrors).toEqual([loadError])
+      expect(ownerErrors).toEqual([])
       expect(unhandled).toEqual([])
       expect({
         inbound: internals.inboundRemoteSubsetAcquisitions.size,
@@ -3102,7 +3187,7 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`reports a failed Electron replay once without self-retrying`, async () => {
+  it(`contains a failed Electron replay without fail-stopping the owner`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-replay-error`,
     })
@@ -3160,7 +3245,7 @@ describe(`electron sqlite persistence bridge`, () => {
         unhandled,
       }).toEqual({
         attempts: 1,
-        ownerErrors: [replayError],
+        ownerErrors: [],
         acquiredLeaderId: `retired-electron-leader`,
         inFlight: null,
         unhandled: [],
@@ -3350,6 +3435,66 @@ describe(`electron sqlite persistence bridge`, () => {
       forwardedHeartbeats: 1,
     })
   })
+
+  it.each([
+    { failureMode: `synchronous throw` as const },
+    { failureMode: `asynchronous rejection` as const },
+  ])(
+    `retires a terminal Electron owner release after reporting one $failureMode`,
+    async ({ failureMode }) => {
+      // Previous cleanup laws observed unload rejection, but never repeated the
+      // same caller release. A delivered terminal release retires the logical
+      // demand after one owner unload attempt, even when that attempt fails.
+      const coordinator = new ElectronCollectionCoordinator({
+        dbName: `electron-subset-terminal-unload-${failureMode}`,
+        adapter: createElectronCoordinatorTestAdapter(),
+      })
+      registerCleanup(() => coordinator.dispose())
+      coordinator.isLeader = () => true
+      const unloadError = new Error(`transient Electron owner unload failure`)
+      const ownerErrors: Array<unknown> = []
+      let unloadAttempts = 0
+      const owner = Object.assign(vi.fn(), {
+        unloadSubset: vi.fn(() => {
+          unloadAttempts++
+          if (unloadAttempts !== 1) return undefined
+          if (failureMode === `synchronous throw`) throw unloadError
+          return Promise.reject(unloadError)
+        }),
+        onError: (error: unknown) => ownerErrors.push(error),
+      })
+      const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+        `todos`,
+        owner,
+      )
+      const options: LoadSubsetOptions = { offset: 41 }
+      const internals = coordinator as unknown as {
+        outboundRemoteSubsetAcquisitions: Map<string, unknown>
+        replayRemoteSubsetAcquisitions: (collectionId: string) => Promise<void>
+      }
+
+      try {
+        await coordinator.requestEnsureRemoteSubset(`todos`, options)
+        await expect(
+          coordinator.requestReleaseRemoteSubset(`todos`, options),
+        ).rejects.toBe(unloadError)
+
+        await expect(
+          coordinator.requestReleaseRemoteSubset(`todos`, options),
+        ).resolves.toBeUndefined()
+        await internals.replayRemoteSubsetAcquisitions(`todos`)
+        expect({ unloadAttempts, ownerErrors }).toEqual({
+          unloadAttempts: 1,
+          ownerErrors: [unloadError],
+        })
+        expect(internals.outboundRemoteSubsetAcquisitions.size).toBe(0)
+        expect(owner).toHaveBeenCalledTimes(1)
+      } finally {
+        unregisterOwner()
+        coordinator.dispose()
+      }
+    },
+  )
 
   it(`reports owner unload rejection while completing sibling Electron cleanup`, async () => {
     const coordinator = new ElectronCollectionCoordinator({

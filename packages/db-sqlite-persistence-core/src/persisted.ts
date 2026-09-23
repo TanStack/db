@@ -1342,6 +1342,13 @@ class PersistedCollectionRuntime<
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.waitForAppliedReceiptsAfter(appliedCursor)
 
+    if (
+      options.signal?.aborted ||
+      this.activeSubsets.get(this.getSubsetKey(options)) !== options
+    ) {
+      return
+    }
+
     if (this.canRouteRemoteDemandThroughCoordinator()) {
       try {
         await this.persistence.coordinator.requestEnsureRemoteSubset(
@@ -2030,6 +2037,18 @@ class PersistedCollectionRuntime<
         )
 
       if (!response.ok) {
+        if (response.code === `PERSISTENCE_ERROR`) {
+          const error = new PersistedCollectionDurabilityError(
+            `Failed to durably persist collection "${this.collectionId}": ${response.error}`,
+            {
+              cause: response,
+              code: response.sourceCode ?? response.code,
+              path: response.path,
+            },
+          )
+          this.reportSyncError(error)
+          throw error
+        }
         throw new Error(
           `failed to apply local mutations through coordinator: ${response.error}`,
         )
@@ -2227,6 +2246,7 @@ class PersistedCollectionRuntime<
 
   private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
     if (
+      options.signal?.aborted ||
       !this.canRouteRemoteDemandThroughCoordinator() ||
       this.activeSubsets.get(this.getSubsetKey(options)) !== options
     ) {
@@ -2272,6 +2292,13 @@ class PersistedCollectionRuntime<
     }
 
     for (const [subsetKey, options] of this.pendingRemoteSubsetEnsures) {
+      if (
+        options.signal?.aborted ||
+        this.activeSubsets.get(subsetKey) !== options
+      ) {
+        this.pendingRemoteSubsetEnsures.delete(subsetKey)
+        continue
+      }
       try {
         await this.persistence.coordinator.requestEnsureRemoteSubset(
           this.collectionId,
@@ -2279,7 +2306,14 @@ class PersistedCollectionRuntime<
         )
         this.pendingRemoteSubsetEnsures.delete(subsetKey)
       } catch (error) {
-        console.warn(`Failed to ensure remote subset:`, error)
+        if (
+          options.signal?.aborted ||
+          this.activeSubsets.get(subsetKey) !== options
+        ) {
+          this.pendingRemoteSubsetEnsures.delete(subsetKey)
+        } else {
+          console.warn(`Failed to ensure remote subset:`, error)
+        }
       }
     }
 
