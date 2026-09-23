@@ -278,6 +278,57 @@ it(`uses the declared mode for a markerless statement-array envelope`, async () 
   ).resolves.toEqual([{ id: `nested-row` }])
 })
 
+it(`applies the same row-carrier policy to object and declared statement envelopes`, async () => {
+  const rows = [{ id: `row-with-provider-extension` }]
+  const envelope = {
+    rows,
+    res: [{ id: `ignored-provider-res` }],
+    error: undefined,
+    providerExtension: `retained`,
+  }
+
+  await expect(queryInjectedResult(envelope)).resolves.toEqual(rows)
+  await expect(
+    queryInjectedResult([envelope], `statement-results`),
+  ).resolves.toEqual(rows)
+})
+
+it(`rejects positional rows without column metadata`, async () => {
+  const positionalRows = [[`1`, `title`, 7]]
+
+  await expect(queryInjectedResult(positionalRows)).rejects.toThrow(
+    `positional rows require column metadata`,
+  )
+  await expect(queryInjectedResult(positionalRows, `rows`)).rejects.toThrow(
+    `positional rows require column metadata`,
+  )
+})
+
+it(`rejects inherited result carriers instead of treating them as writes`, async () => {
+  let getterReads = 0
+  const prototype = Object.defineProperty({}, `rows`, {
+    get: () => {
+      getterReads++
+      return [{ id: `inherited-row` }]
+    },
+  })
+  const result = Object.assign(Object.create(prototype), { rowsAffected: 0 })
+
+  await expect(queryInjectedResult(result)).rejects.toThrow(
+    `inherited rows carrier`,
+  )
+  expect(getterReads).toBe(0)
+})
+
+it.each([undefined, null])(
+  `rejects a nullish rows carrier beside a write marker: %s`,
+  async (rows) => {
+    await expect(
+      queryInjectedResult({ rowsAffected: 0, rows }),
+    ).rejects.toThrow(`invalid rows carrier`)
+  },
+)
+
 it(`materializes a declared statement row list exactly once`, async () => {
   const expected = [{ id: `first` }, { id: `second` }]
   const requestedIndexes: Array<number> = []
@@ -305,7 +356,7 @@ it.each([
       [{ rowsAffected: 0, rows: { length, item: () => ({ id: `row` }) } }],
       `statement-results`,
     ),
-  ).rejects.toThrow(`recognized statement envelope`)
+  ).rejects.toThrow(`invalid rows carrier`)
 })
 
 it(`rejects an empty array in statement-results mode`, async () => {
@@ -676,6 +727,18 @@ it(`returns an exact empty row set for an empty columnar SELECT`, async () => {
     )
     expect(queryExecutions()).toBe(1)
   })
+})
+
+it(`preserves a __proto__ column as own data without changing the row prototype`, async () => {
+  const [row] = await queryInjectedResult<Record<string, unknown>>({
+    rowsAffected: 0,
+    rawRows: [[`ordinary-data`]],
+    columnNames: [`__proto__`],
+  })
+
+  expect(Object.getPrototypeOf(row)).toBe(Object.prototype)
+  expect(Object.prototype.hasOwnProperty.call(row, `__proto__`)).toBe(true)
+  expect(row?.[`__proto__`]).toBe(`ordinary-data`)
 })
 
 const malformedColumnarResults: ReadonlyArray<{

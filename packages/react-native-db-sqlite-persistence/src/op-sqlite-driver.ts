@@ -128,6 +128,23 @@ function hasOwnKey(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key)
 }
 
+function rejectInheritedCarrierKeys(
+  value: Record<string, unknown>,
+  sql: string,
+): void {
+  for (const key of [
+    `rows`,
+    `resultRows`,
+    `rawRows`,
+    `columnNames`,
+    `results`,
+  ]) {
+    if (!hasOwnKey(value, key) && key in value) {
+      unsupportedQueryResult(sql, `inherited ${key} carrier`)
+    }
+  }
+}
+
 function hasWriteResultMarker(value: Record<string, unknown>): boolean {
   for (const key of WRITE_RESULT_KEYS) {
     if (hasOwnKey(value, key)) {
@@ -269,10 +286,32 @@ function decodeColumnarRows(
       )
     }
 
-    return Object.fromEntries(
-      columnNames.map((columnName, index) => [columnName, rawRow[index]]),
-    )
+    const row: Record<string, unknown> = {}
+    for (let index = 0; index < columnNames.length; index++) {
+      const columnName = columnNames[index]!
+      if (columnName === `__proto__`) {
+        Object.defineProperty(row, columnName, {
+          configurable: true,
+          enumerable: true,
+          value: rawRow[index],
+          writable: true,
+        })
+      } else {
+        row[columnName] = rawRow[index]
+      }
+    }
+    return row
   })
+}
+
+function rejectPositionalRows(
+  rows: Array<unknown>,
+  sql: string,
+): Array<unknown> {
+  if (rows.some((row) => Array.isArray(row))) {
+    unsupportedQueryResult(sql, `positional rows require column metadata`)
+  }
+  return rows
 }
 
 function extractRowsFromStatementResult(
@@ -280,6 +319,7 @@ function extractRowsFromStatementResult(
   sql: string,
   allowResultsWrapper: boolean,
 ): Array<unknown> {
+  rejectInheritedCarrierKeys(record, sql)
   const rowCarrierKeys = [`rows`, `resultRows`].filter((key) =>
     hasOwnKey(record, key),
   )
@@ -298,7 +338,7 @@ function extractRowsFromStatementResult(
     if (!rows) {
       unsupportedQueryResult(sql, `invalid ${rowCarrierKey} carrier`)
     }
-    return rows
+    return rejectPositionalRows(rows, sql)
   }
 
   if (
@@ -356,21 +396,17 @@ function extractRowsFromExecuteResult(
     }
 
     if (arrayResultMode === `rows`) {
-      return result
+      return rejectPositionalRows(result, sql)
     }
 
     const firstEntry = result[0]
     const isStructuralStatementResult =
       isObjectRecord(firstEntry) && isStatementResultEnvelope(firstEntry)
-    const isStatementResult =
-      isStructuralStatementResult ||
-      (isObjectRecord(firstEntry) && isWriteResultEnvelope(firstEntry))
-
     if (arrayResultMode === `statement-results`) {
-      if (!isStatementResult) {
+      if (!isObjectRecord(firstEntry)) {
         return unsupportedQueryResult(
           sql,
-          `statement-results mode requires a recognized statement envelope`,
+          `statement-results mode requires an object statement envelope`,
         )
       }
       if (result.length !== 1) {
@@ -389,7 +425,7 @@ function extractRowsFromExecuteResult(
       )
     }
 
-    return result
+    return rejectPositionalRows(result, sql)
   }
 
   if (isObjectRecord(result)) {

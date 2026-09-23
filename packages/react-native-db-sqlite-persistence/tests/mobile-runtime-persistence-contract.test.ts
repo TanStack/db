@@ -10,14 +10,12 @@ import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
+import type { OpSQLiteArrayResultMode, OpSQLiteDatabaseLike } from '../src'
+import type { OpSQLiteArrayResultMode as ReactNativeOpSQLiteArrayResultMode } from '../src/react-native'
 import type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
 } from '@tanstack/db-sqlite-persistence-core'
-import type {
-  OpSQLiteArrayResultMode,
-  OpSQLiteDatabaseLike,
-} from '../src/op-sqlite-driver'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
@@ -25,7 +23,7 @@ import type {
 
 type RuntimePersistenceFactory = (options: {
   database: OpSQLiteDatabaseLike
-  arrayResultMode?: OpSQLiteArrayResultMode
+  arrayResultMode?: OpSQLiteArrayResultMode & ReactNativeOpSQLiteArrayResultMode
   coordinator?: PersistedCollectionCoordinator
 }) => PersistedCollectionPersistence
 
