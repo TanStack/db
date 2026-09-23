@@ -21,22 +21,90 @@ import type {
 import type { LoadSubsetOptions, Subscription, SyncConfig } from '@tanstack/db'
 import type { BrowserWASQLiteDatabase } from '../src'
 
-const seedText = process.env.TANSTACK_DB_COORDINATOR_ORACLE_SEED ?? `165902`
-const runText = process.env.TANSTACK_DB_COORDINATOR_ORACLE_RUNS ?? `12`
-const SEED = Number(seedText)
-const RUNS = Number(runText)
-const PATH = process.env.TANSTACK_DB_COORDINATOR_ORACLE_PATH
+const FIXED_SEED = 165902
+const DEFAULT_RUNS = 12
 
-if (!/^-?\d+$/.test(seedText) || !Number.isSafeInteger(SEED)) {
-  throw new Error(`Invalid TANSTACK_DB_COORDINATOR_ORACLE_SEED`)
+type CoordinatorOracleProperty = `remote-lease` | `routing`
+type CoordinatorOracleEnvironment = Record<string, string | undefined>
+type CoordinatorOracleReplay = {
+  property: CoordinatorOracleProperty
+  seed: number
+  path: string
 }
-if (!/^\d+$/.test(runText) || !Number.isSafeInteger(RUNS) || RUNS < 1) {
-  throw new Error(`Invalid TANSTACK_DB_COORDINATOR_ORACLE_RUNS`)
+type CoordinatorOracleCampaign = {
+  mode: `fixed` | `random` | `replay`
+  parameters: {
+    numRuns: number
+    seed?: number
+    path?: string
+  }
 }
-if (PATH !== undefined && !/^\d+(?::\d+)*$/.test(PATH)) {
-  throw new Error(
-    `TANSTACK_DB_COORDINATOR_ORACLE_PATH must be a numeric shrink path`,
-  )
+
+function readCoordinatorOracleConfig(
+  environment: CoordinatorOracleEnvironment = process.env,
+): { runs: number; replay?: CoordinatorOracleReplay } {
+  const runText =
+    environment.TANSTACK_DB_COORDINATOR_ORACLE_RUNS ?? String(DEFAULT_RUNS)
+  const runs = Number(runText)
+  if (!/^\d+$/.test(runText) || !Number.isSafeInteger(runs) || runs < 1) {
+    throw new Error(`Invalid TANSTACK_DB_COORDINATOR_ORACLE_RUNS`)
+  }
+
+  const seedText = environment.TANSTACK_DB_COORDINATOR_ORACLE_SEED
+  const path = environment.TANSTACK_DB_COORDINATOR_ORACLE_PATH
+  const property = environment.TANSTACK_DB_COORDINATOR_ORACLE_PROPERTY
+  if (seedText === undefined && path === undefined && property === undefined) {
+    return { runs }
+  }
+  if (seedText === undefined || path === undefined || property === undefined) {
+    throw new Error(
+      `Coordinator oracle replay requires SEED, PATH, and PROPERTY together`,
+    )
+  }
+
+  const seed = Number(seedText)
+  if (!/^-?\d+$/.test(seedText) || !Number.isSafeInteger(seed)) {
+    throw new Error(`Invalid TANSTACK_DB_COORDINATOR_ORACLE_SEED`)
+  }
+  if (!/^\d+(?::\d+)*$/.test(path)) {
+    throw new Error(
+      `TANSTACK_DB_COORDINATOR_ORACLE_PATH must be a numeric shrink path`,
+    )
+  }
+  if (property !== `remote-lease` && property !== `routing`) {
+    throw new Error(
+      `TANSTACK_DB_COORDINATOR_ORACLE_PROPERTY must be remote-lease or routing`,
+    )
+  }
+  return { runs, replay: { property, seed, path } }
+}
+
+const { runs: RUNS, replay: REPLAY } = readCoordinatorOracleConfig()
+
+function coordinatorOracleCampaigns(
+  property: CoordinatorOracleProperty,
+): Array<CoordinatorOracleCampaign> {
+  if (REPLAY) {
+    return REPLAY.property === property
+      ? [
+          {
+            mode: `replay`,
+            parameters: {
+              numRuns: RUNS,
+              seed: REPLAY.seed,
+              path: REPLAY.path,
+            },
+          },
+        ]
+      : []
+  }
+  return [
+    {
+      mode: `fixed`,
+      parameters: { numRuns: RUNS, seed: FIXED_SEED },
+    },
+    { mode: `random`, parameters: { numRuns: RUNS } },
+  ]
 }
 
 /*
@@ -107,9 +175,12 @@ Reach, challenge, replay, cleanup, and limits:
   the leader upstream fixture can really enter/complete, and the ownership
   checker rejects an unowned apply. Every production-path test records a
   reached checkpoint before comparing the independent ledger.
-- The default is one fixed fast-check campaign. Replay with
-  TANSTACK_DB_COORDINATOR_ORACLE_{SEED,PATH,RUNS}; the thrown report retains the
-  first failing trace and final shrunk candidate.
+- Each generated property uses the same generator, driver, observations, and
+  run budget in a retained fixed-seed lane and a seedless random lane. Replay
+  registers only the requested property when
+  TANSTACK_DB_COORDINATOR_ORACLE_{PROPERTY,SEED,PATH} are supplied together;
+  RUNS may adjust the shared budget. The thrown report retains the first
+  failing trace and final shrunk candidate.
 - Coordinators, Collections, and databases use failure-preserving cleanup. A
   final lifecycle test proves no channel, held lock, queued lock, or delayed
   delivery remains and that a fresh database name elects normally.
@@ -1529,6 +1600,43 @@ const remoteLeaseHistoryArbitrary = fc.record({
   reverseFinalRelease: fc.boolean(),
 })
 
+type RemoteLeaseGrammarPlan = {
+  demands: Array<{ limit: number; offset?: number }>
+  releaseCount: number
+  prefixReleaseIndexes: Array<number>
+  finalReleaseIndexes: Array<number>
+  releasePasses: number
+}
+
+function remoteLeaseGrammarPlan(
+  history: RemoteLeaseHistory,
+): RemoteLeaseGrammarPlan {
+  const demands = Array.from(
+    { length: history.siblingCount },
+    (_unused, index) => ({
+      limit: 1,
+      ...(history.identical ? {} : { offset: index }),
+    }),
+  )
+  const releaseCount = Math.min(history.releasePrefix, history.siblingCount - 1)
+  const prefixReleaseIndexes = Array.from(
+    { length: releaseCount },
+    (_unused, index) => index,
+  )
+  const finalReleaseIndexes = Array.from(
+    { length: history.siblingCount - releaseCount },
+    (_unused, index) => releaseCount + index,
+  )
+  if (history.reverseFinalRelease) finalReleaseIndexes.reverse()
+  return {
+    demands,
+    releaseCount,
+    prefixReleaseIndexes,
+    finalReleaseIndexes,
+    releasePasses: history.duplicateRelease ? 2 : 1,
+  }
+}
+
 // Every accepted physical acquisition remains active until its exact
 // acquisition lease is released. Leadership transfer releases retired-owner
 // acquisitions and establishes replacements only for surviving demand.
@@ -1536,7 +1644,7 @@ function remoteLeaseHistoryViolations(
   history: RemoteLeaseHistory,
   actual: RemoteLeaseHistoryTrace,
 ): Array<RemoteLeaseTakeoverViolation> {
-  const releaseCount = Math.min(history.releasePrefix, history.siblingCount - 1)
+  const { releaseCount } = remoteLeaseGrammarPlan(history)
   const remaining = history.siblingCount - releaseCount
   const expected: RemoteLeaseHistoryTrace = {
     firstAfterAcquire: {
@@ -1913,7 +2021,71 @@ describe(`remote subset ownership lease oracle`, () => {
     ])
   })
 
-  it(`preserves independent sibling leases through release, retry-safe takeover, and cleanup histories`, async () => {
+  it(`reconstructs the remote-lease grammar and ablates every declared axis`, () => {
+    const witness: RemoteLeaseHistory = {
+      siblingCount: 3,
+      releasePrefix: 1,
+      identical: false,
+      duplicateRelease: true,
+      reverseFinalRelease: true,
+    }
+    const reconstructed = remoteLeaseGrammarPlan(witness)
+    expect(reconstructed).toEqual({
+      demands: [
+        { limit: 1, offset: 0 },
+        { limit: 1, offset: 1 },
+        { limit: 1, offset: 2 },
+      ],
+      releaseCount: 1,
+      prefixReleaseIndexes: [0],
+      finalReleaseIndexes: [2, 1],
+      releasePasses: 2,
+    })
+
+    const ablations: Array<{
+      axis: keyof RemoteLeaseHistory
+      history: RemoteLeaseHistory
+      observe: (plan: RemoteLeaseGrammarPlan) => unknown
+    }> = [
+      {
+        axis: `siblingCount`,
+        history: { ...witness, siblingCount: 1 },
+        observe: ({ demands }) => demands.length,
+      },
+      {
+        axis: `releasePrefix`,
+        history: { ...witness, releasePrefix: 0 },
+        observe: ({ prefixReleaseIndexes }) => prefixReleaseIndexes,
+      },
+      {
+        axis: `identical`,
+        history: { ...witness, identical: true },
+        observe: ({ demands }) => demands,
+      },
+      {
+        axis: `duplicateRelease`,
+        history: { ...witness, duplicateRelease: false },
+        observe: ({ releasePasses }) => releasePasses,
+      },
+      {
+        axis: `reverseFinalRelease`,
+        history: { ...witness, reverseFinalRelease: false },
+        observe: ({ finalReleaseIndexes }) => finalReleaseIndexes,
+      },
+    ]
+    expect(ablations.map(({ axis }) => axis).sort()).toEqual(
+      (Object.keys(witness) as Array<keyof RemoteLeaseHistory>).sort(),
+    )
+    for (const { history, observe } of ablations) {
+      expect(observe(remoteLeaseGrammarPlan(history))).not.toEqual(
+        observe(reconstructed),
+      )
+    }
+  })
+
+  async function runRemoteLeaseCampaign(
+    campaign: CoordinatorOracleCampaign,
+  ): Promise<void> {
     let originalHistory: RemoteLeaseHistory | undefined
     let originalViolation: RemoteLeaseTakeoverViolation | undefined
     let targetDiscriminant: string | undefined
@@ -1995,13 +2167,8 @@ describe(`remote subset ownership lease oracle`, () => {
             )
             cleanupCollection = () => collection.cleanup()
             collection.startSyncImmediate()
-            const demands = Array.from(
-              { length: history.siblingCount },
-              (_, index): LoadSubsetOptions => ({
-                limit: 1,
-                ...(history.identical ? {} : { offset: index }),
-              }),
-            )
+            const plan = remoteLeaseGrammarPlan(history)
+            const demands: Array<LoadSubsetOptions> = plan.demands
 
             checkpoint = `initial acquisitions`
             for (const demand of demands) {
@@ -2014,13 +2181,9 @@ describe(`remote subset ownership lease oracle`, () => {
             const firstAfterAcquire = firstOwner.snapshot()
 
             checkpoint = `prefix releases`
-            const releaseCount = Math.min(
-              history.releasePrefix,
-              history.siblingCount - 1,
-            )
-            for (const demand of demands.slice(0, releaseCount)) {
-              collection._sync.unloadSubset(demand)
-              if (history.duplicateRelease) {
+            for (const index of plan.prefixReleaseIndexes) {
+              const demand = demands[index]!
+              for (let pass = 0; pass < plan.releasePasses; pass++) {
                 collection._sync.unloadSubset(demand)
               }
             }
@@ -2040,11 +2203,9 @@ describe(`remote subset ownership lease oracle`, () => {
             const secondAfterTakeover = secondOwner.snapshot()
 
             checkpoint = `final releases`
-            const finalDemands = demands.slice(releaseCount)
-            if (history.reverseFinalRelease) finalDemands.reverse()
-            for (const demand of finalDemands) {
-              collection._sync.unloadSubset(demand)
-              if (history.duplicateRelease) {
+            for (const index of plan.finalReleaseIndexes) {
+              const demand = demands[index]!
+              for (let pass = 0; pass < plan.releasePasses; pass++) {
                 collection._sync.unloadSubset(demand)
               }
             }
@@ -2140,9 +2301,7 @@ describe(`remote subset ownership lease oracle`, () => {
           if (semanticFailure !== NO_PRIMARY_FAILURE) throw semanticFailure
         }),
         {
-          seed: SEED,
-          numRuns: RUNS,
-          ...(PATH === undefined ? {} : { path: PATH }),
+          ...campaign.parameters,
           examples: [
             [
               {
@@ -2163,7 +2322,12 @@ describe(`remote subset ownership lease oracle`, () => {
     expect.soft(cleanupDiagnostics).toEqual([])
     expect.soft(executionDiagnostics).toEqual([])
     if (propertyFailure !== NO_PRIMARY_FAILURE) throw propertyFailure
-  })
+  }
+
+  for (const campaign of coordinatorOracleCampaigns(`remote-lease`)) {
+    it(`preserves independent sibling leases through release, retry-safe takeover, and cleanup histories (${campaign.mode})`, () =>
+      runRemoteLeaseCampaign(campaign))
+  }
 })
 
 type RawCollectionSnapshot = {
@@ -2622,6 +2786,22 @@ const orderArbitrary = fc
     forward ? [`alpha`, `beta`] : [`beta`, `alpha`],
   )
 
+type RoutingHistoryAxes = Omit<RoutingHistory, `betaVersion`> & {
+  versionDelta: number
+}
+
+function routingHistoryFromAxes({
+  alphaVersion,
+  versionDelta,
+  ...history
+}: RoutingHistoryAxes): RoutingHistory {
+  return {
+    ...history,
+    alphaVersion,
+    betaVersion: alphaVersion + versionDelta,
+  }
+}
+
 const routingHistoryArbitrary: fc.Arbitrary<RoutingHistory> = fc
   .record({
     alphaVersion: fc.integer({ min: 1, max: 50 }),
@@ -2630,11 +2810,34 @@ const routingHistoryArbitrary: fc.Arbitrary<RoutingHistory> = fc
     firstDeliveryOrder: orderArbitrary,
     secondDeliveryOrder: orderArbitrary,
   })
-  .map(({ alphaVersion, versionDelta, ...history }) => ({
-    ...history,
-    alphaVersion,
-    betaVersion: alphaVersion + versionDelta,
-  }))
+  .map(routingHistoryFromAxes)
+
+type RoutingGrammarPlan = {
+  initialCollection: CollectionName
+  registrationOrder: [CollectionName, CollectionName]
+  firstDeliveryOrder: [CollectionName, CollectionName]
+  secondDeliveryOrder: [CollectionName, CollectionName]
+  adapterIds: Record<TabName, Record<CollectionName, string>>
+}
+
+function routingGrammarPlan(history: RoutingHistory): RoutingGrammarPlan {
+  return {
+    initialCollection: history.registrationOrder[0],
+    registrationOrder: history.registrationOrder,
+    firstDeliveryOrder: history.firstDeliveryOrder,
+    secondDeliveryOrder: history.secondDeliveryOrder,
+    adapterIds: {
+      leader: {
+        alpha: `leader-alpha-v${history.alphaVersion}-reset`,
+        beta: `leader-beta-v${history.betaVersion}-error`,
+      },
+      follower: {
+        alpha: `follower-alpha-v${history.alphaVersion}-reset`,
+        beta: `follower-beta-v${history.betaVersion}-error`,
+      },
+    },
+  }
+}
 
 function mutation(
   collectionId: CollectionName,
@@ -2695,6 +2898,48 @@ async function requestBothCollections(
 }
 
 describe(`generated collection-route histories`, () => {
+  it(`requires a complete property, seed, and shrink path for replay`, () => {
+    expect(readCoordinatorOracleConfig({})).toEqual({ runs: DEFAULT_RUNS })
+    for (const environment of [
+      { TANSTACK_DB_COORDINATOR_ORACLE_SEED: `123` },
+      { TANSTACK_DB_COORDINATOR_ORACLE_PATH: `0:1` },
+      { TANSTACK_DB_COORDINATOR_ORACLE_PROPERTY: `routing` },
+      {
+        TANSTACK_DB_COORDINATOR_ORACLE_SEED: `123`,
+        TANSTACK_DB_COORDINATOR_ORACLE_PATH: `0:1`,
+      },
+    ]) {
+      expect(() => readCoordinatorOracleConfig(environment)).toThrow(
+        /requires SEED, PATH, and PROPERTY together/,
+      )
+    }
+    expect(() =>
+      readCoordinatorOracleConfig({
+        TANSTACK_DB_COORDINATOR_ORACLE_SEED: `123`,
+        TANSTACK_DB_COORDINATOR_ORACLE_PATH: `not-a-path`,
+        TANSTACK_DB_COORDINATOR_ORACLE_PROPERTY: `routing`,
+      }),
+    ).toThrow(/numeric shrink path/)
+    expect(() =>
+      readCoordinatorOracleConfig({
+        TANSTACK_DB_COORDINATOR_ORACLE_SEED: `123`,
+        TANSTACK_DB_COORDINATOR_ORACLE_PATH: `0:1`,
+        TANSTACK_DB_COORDINATOR_ORACLE_PROPERTY: `unknown`,
+      }),
+    ).toThrow(/remote-lease or routing/)
+    expect(
+      readCoordinatorOracleConfig({
+        TANSTACK_DB_COORDINATOR_ORACLE_RUNS: `7`,
+        TANSTACK_DB_COORDINATOR_ORACLE_SEED: `123`,
+        TANSTACK_DB_COORDINATOR_ORACLE_PATH: `0:1`,
+        TANSTACK_DB_COORDINATOR_ORACLE_PROPERTY: `routing`,
+      }),
+    ).toEqual({
+      runs: 7,
+      replay: { property: `routing`, seed: 123, path: `0:1` },
+    })
+  })
+
   it(`calibrates collection-key comparison against one peer-routed apply`, () => {
     const expected: Array<RoutedApply> = [
       {
@@ -2758,6 +3003,99 @@ describe(`generated collection-route histories`, () => {
         field: `calls`,
       },
     ])
+  })
+
+  it(`reconstructs the routing grammar and ablates every declared axis`, () => {
+    const witnessAxes: RoutingHistoryAxes = {
+      alphaVersion: 11,
+      versionDelta: 18,
+      registrationOrder: [`beta`, `alpha`],
+      firstDeliveryOrder: [`alpha`, `beta`],
+      secondDeliveryOrder: [`beta`, `alpha`],
+    }
+    const witness = routingHistoryFromAxes(witnessAxes)
+    expect(witness).toEqual({
+      alphaVersion: 11,
+      betaVersion: 29,
+      registrationOrder: [`beta`, `alpha`],
+      firstDeliveryOrder: [`alpha`, `beta`],
+      secondDeliveryOrder: [`beta`, `alpha`],
+    })
+    const reconstructed = routingGrammarPlan(witness)
+    expect(reconstructed).toEqual({
+      initialCollection: `beta`,
+      registrationOrder: [`beta`, `alpha`],
+      firstDeliveryOrder: [`alpha`, `beta`],
+      secondDeliveryOrder: [`beta`, `alpha`],
+      adapterIds: {
+        leader: {
+          alpha: `leader-alpha-v11-reset`,
+          beta: `leader-beta-v29-error`,
+        },
+        follower: {
+          alpha: `follower-alpha-v11-reset`,
+          beta: `follower-beta-v29-error`,
+        },
+      },
+    })
+
+    const ablations: Array<{
+      axis: keyof RoutingHistoryAxes
+      history: RoutingHistory
+      observe: (plan: RoutingGrammarPlan) => unknown
+    }> = [
+      {
+        axis: `alphaVersion`,
+        history: routingHistoryFromAxes({
+          ...witnessAxes,
+          alphaVersion: 12,
+        }),
+        observe: ({ adapterIds }) => adapterIds.leader.alpha,
+      },
+      {
+        axis: `versionDelta`,
+        history: routingHistoryFromAxes({
+          ...witnessAxes,
+          versionDelta: 19,
+        }),
+        observe: ({ adapterIds }) => adapterIds.leader.beta,
+      },
+      {
+        axis: `registrationOrder`,
+        history: routingHistoryFromAxes({
+          ...witnessAxes,
+          registrationOrder: [`alpha`, `beta`],
+        }),
+        observe: ({ initialCollection, registrationOrder }) => ({
+          initialCollection,
+          registrationOrder,
+        }),
+      },
+      {
+        axis: `firstDeliveryOrder`,
+        history: routingHistoryFromAxes({
+          ...witnessAxes,
+          firstDeliveryOrder: [`beta`, `alpha`],
+        }),
+        observe: ({ firstDeliveryOrder }) => firstDeliveryOrder,
+      },
+      {
+        axis: `secondDeliveryOrder`,
+        history: routingHistoryFromAxes({
+          ...witnessAxes,
+          secondDeliveryOrder: [`alpha`, `beta`],
+        }),
+        observe: ({ secondDeliveryOrder }) => secondDeliveryOrder,
+      },
+    ]
+    expect(ablations.map(({ axis }) => axis).sort()).toEqual(
+      (Object.keys(witnessAxes) as Array<keyof RoutingHistoryAxes>).sort(),
+    )
+    for (const { history, observe } of ablations) {
+      expect(observe(routingGrammarPlan(history))).not.toEqual(
+        observe(reconstructed),
+      )
+    }
   })
 
   it(`routes every adapter-bound RPC by collection before and after leadership transfer`, async () => {
@@ -3008,7 +3346,9 @@ describe(`generated collection-route histories`, () => {
     ])
   })
 
-  it(`uses the collection's registered adapter before and after leadership transfer`, async () => {
+  async function runRoutingCampaign(
+    campaign: CoordinatorOracleCampaign,
+  ): Promise<void> {
     let originalFailingTrace: RoutingHistory | undefined
     let originalViolation: RouteViolation | undefined
     let targetDiscriminant: string | undefined
@@ -3024,33 +3364,34 @@ describe(`generated collection-route histories`, () => {
     try {
       await fc.assert(
         fc.asyncProperty(routingHistoryArbitrary, async (history) => {
+          const plan = routingGrammarPlan(history)
           const oracle = new PerCollectionRouteOracle()
           const leaderAdapters = {
             alpha: createRecordingAdapter({
-              id: `leader-alpha-v${history.alphaVersion}-reset`,
+              id: plan.adapterIds.leader.alpha,
               schemaVersion: history.alphaVersion,
               policy: `sync-present-reset`,
             }),
             beta: createRecordingAdapter({
-              id: `leader-beta-v${history.betaVersion}-error`,
+              id: plan.adapterIds.leader.beta,
               schemaVersion: history.betaVersion,
               policy: `sync-absent-error`,
             }),
           }
           const followerAdapters = {
             alpha: createRecordingAdapter({
-              id: `follower-alpha-v${history.alphaVersion}-reset`,
+              id: plan.adapterIds.follower.alpha,
               schemaVersion: history.alphaVersion,
               policy: `sync-present-reset`,
             }),
             beta: createRecordingAdapter({
-              id: `follower-beta-v${history.betaVersion}-error`,
+              id: plan.adapterIds.follower.beta,
               schemaVersion: history.betaVersion,
               policy: `sync-absent-error`,
             }),
           }
           const dbName = `generated-route-${history.alphaVersion}-${history.betaVersion}`
-          const initialCollection = history.registrationOrder[0]
+          const initialCollection = plan.initialCollection
           let leader: BrowserCollectionCoordinator | undefined
           let follower: BrowserCollectionCoordinator | undefined
           const observed: Array<RoutedApply> = []
@@ -3069,7 +3410,7 @@ describe(`generated collection-route histories`, () => {
               followerAdapters[initialCollection],
             )
 
-            for (const collectionId of history.registrationOrder) {
+            for (const collectionId of plan.registrationOrder) {
               registerCollectionAdapter(
                 leader,
                 collectionId,
@@ -3111,7 +3452,7 @@ describe(`generated collection-route histories`, () => {
             await requestBothCollections(
               follower,
               `initial-owner`,
-              history.firstDeliveryOrder,
+              plan.firstDeliveryOrder,
             )
             observed.push(
               ...applyObservation(`initial-owner`, [
@@ -3137,7 +3478,7 @@ describe(`generated collection-route histories`, () => {
             checkpoint = `post-takeover routed applies`
             // The new leader's direct calls still exercise the same production
             // handler and must look up adapters per collection.
-            for (const collectionId of history.secondDeliveryOrder) {
+            for (const collectionId of plan.secondDeliveryOrder) {
               const response = await follower.requestApplyLocalMutations(
                 collectionId,
                 mutation(collectionId, `after-takeover`),
@@ -3230,11 +3571,7 @@ describe(`generated collection-route histories`, () => {
 
           if (semanticFailure !== NO_PRIMARY_FAILURE) throw semanticFailure
         }),
-        {
-          seed: SEED,
-          numRuns: RUNS,
-          ...(PATH === undefined ? {} : { path: PATH }),
-        },
+        campaign.parameters,
       )
     } catch (error) {
       propertyFailure = error
@@ -3247,7 +3584,12 @@ describe(`generated collection-route histories`, () => {
     // only the locked semantic discriminant is eligible for shrinking.
     expect.soft(executionDiagnostics).toEqual([])
     if (propertyFailure !== NO_PRIMARY_FAILURE) throw propertyFailure
-  })
+  }
+
+  for (const campaign of coordinatorOracleCampaigns(`routing`)) {
+    it(`uses the collection's registered adapter before and after leadership transfer (${campaign.mode})`, () =>
+      runRoutingCampaign(campaign))
+  }
 })
 
 type OwnershipObservation = {
