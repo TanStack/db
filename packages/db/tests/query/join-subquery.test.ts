@@ -1066,6 +1066,54 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
       })
     })
+
+    describe(`reused subquery builders`, () => {
+      let usersCollection: ReturnType<typeof createUsersCollection>
+
+      beforeEach(() => {
+        usersCollection = createUsersCollection(autoIndex)
+      })
+
+      const cases = [
+        { shared: true, filterRight: false, expected: [1, 2, 4] },
+        { shared: true, filterRight: true, expected: [2] },
+        { shared: false, filterRight: false, expected: [1, 2, 4] },
+        { shared: false, filterRight: true, expected: [2] },
+      ] as const
+
+      for (const { shared, filterRight, expected } of cases) {
+        test(`${shared ? `shared` : `separate`} builders with${
+          filterRight ? `` : `out`
+        } a right-side predicate`, () => {
+          const joinQuery = createLiveQueryCollection({
+            startSync: true,
+            query: (q) => {
+              const activeUsers = () =>
+                q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+              const left = activeUsers()
+              const right = shared ? left : activeUsers()
+              let query = q
+                .from({ leftUser: left })
+                .innerJoin({ rightUser: right }, ({ leftUser, rightUser }) =>
+                  eq(leftUser.id, rightUser.id),
+                )
+
+              if (filterRight) {
+                query = query.where(({ rightUser }) =>
+                  eq(rightUser.name, `Bob`),
+                )
+              }
+
+              return query.select(({ leftUser }) => ({ id: leftUser.id }))
+            },
+          })
+
+          expect(joinQuery.toArray.map((row) => row.id)).toEqual(expected)
+        })
+      }
+    })
   })
 }
 
