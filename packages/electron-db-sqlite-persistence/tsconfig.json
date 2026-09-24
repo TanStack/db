@@ -19,6 +19,9 @@
       ],
       "@tanstack/db-sqlite-persistence-core": [
         "../db-sqlite-persistence-core/src"
+      ],
+      "@tanstack/db-sqlite-persistence-core/*": [
+        "../db-sqlite-persistence-core/src/*"
       ]
     }
   },

@@ -120,6 +120,20 @@ async function executeRequestAgainstAdapter(
       }
     }
 
+    case `loadResumeSnapshot`: {
+      const result = await adapter.loadResumeSnapshot(
+        request.collectionId,
+        request.payload.ctx,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
     case `loadCollectionMetadata`: {
       if (!adapter.loadCollectionMetadata) {
         throw new InvalidPersistedCollectionConfigError(

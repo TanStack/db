@@ -129,11 +129,34 @@ function tagPersistence() {
     { value: TestRow; metadata?: unknown }
   >()
   const metadata = new Map<string, unknown>()
+  let latestTerm = 0
+  let latestSeq = 0
+  let latestRowVersion = 0
+  let resetEpoch = 0
   const adapter: PersistenceAdapter = {
     loadSubset: () =>
       Promise.resolve(
         Array.from(rows, ([key, row]) => ({ key, ...structuredClone(row) })),
       ),
+    loadResumeSnapshot: (_id, ctx) =>
+      Promise.resolve({
+        rows:
+          ctx?.includeRows === false
+            ? []
+            : Array.from(rows, ([key, row]) => ({
+                key,
+                ...structuredClone(row),
+              })),
+        keySet: { status: `consistent` },
+        collectionMetadata: Array.from(metadata, ([key, value]) => ({
+          key,
+          value: structuredClone(value),
+        })),
+        latestTerm,
+        latestSeq,
+        latestRowVersion,
+        resetEpoch,
+      }),
     loadCollectionMetadata: () =>
       Promise.resolve(
         Array.from(metadata, ([key, value]) => ({
@@ -142,7 +165,10 @@ function tagPersistence() {
         })),
       ),
     applyCommittedTx: (_id, transaction) => {
-      if (transaction.truncate) rows.clear()
+      if (transaction.truncate) {
+        rows.clear()
+        resetEpoch++
+      }
       for (const mutation of transaction.mutations) {
         if (mutation.type === `delete`) rows.delete(mutation.key)
         else
@@ -168,6 +194,9 @@ function tagPersistence() {
         if (mutation.type === `delete`) metadata.delete(mutation.key)
         else metadata.set(mutation.key, structuredClone(mutation.value))
       }
+      latestTerm = transaction.term
+      latestSeq = transaction.seq
+      latestRowVersion = transaction.rowVersion
       return Promise.resolve()
     },
     ensureIndex: () => Promise.resolve(),
@@ -592,6 +621,16 @@ fcTest.prop(
 it(`keeps insert acknowledgements on the owner of a reused persisted descriptor`, async () => {
   const adapter: PersistenceAdapter = {
     loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
     loadCollectionMetadata: () => Promise.resolve([]),
     applyCommittedTx: () => Promise.resolve(),
     ensureIndex: () => Promise.resolve(),

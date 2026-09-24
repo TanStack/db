@@ -490,6 +490,7 @@ export class CollectionSyncManager<
     >[`pendingSyncedTransactions`][number],
   ): SyncMetadataApi<TKey> {
     return {
+      persistence: null,
       row: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
