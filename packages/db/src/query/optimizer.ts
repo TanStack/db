@@ -981,6 +981,9 @@ function optimizeFromWithTracking(
     whereClause,
     from.alias,
   )
+  if (remappedWhere === undefined) {
+    return new QueryRefClass(deepCopyQuery(from.query), from.alias)
+  }
   const optimizedSubQuery: QueryIR = {
     ...deepCopyQuery(from.query),
     where: [...existingWhere, remappedWhere],
@@ -998,9 +1001,9 @@ function remapWhereForSubquery(
   subquery: QueryIR,
   whereClause: BasicExpression<boolean>,
   outerAlias: string,
-): BasicExpression<boolean> {
+): BasicExpression<boolean> | undefined {
   const firstFromAlias = getFirstFromAlias(subquery)
-  if (firstFromAlias === undefined) return whereClause
+  if (firstFromAlias === undefined) return undefined
 
   const remapExpression = (expression: BasicExpression): BasicExpression => {
     if (expression instanceof PropRef) {
@@ -1009,9 +1012,7 @@ function remapWhereForSubquery(
       const field = expression.path[1]
       const projected = field ? subquery.select?.[field] : undefined
       const hasNamespacedResult =
-        subquery.join !== undefined ||
-        subquery.groupBy !== undefined ||
-        subquery.from.type === `unionFrom`
+        subquery.join !== undefined || subquery.from.type === `unionFrom`
       const innerPath =
         projected instanceof PropRef
           ? [...projected.path, ...expression.path.slice(2)]

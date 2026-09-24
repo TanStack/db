@@ -817,6 +817,43 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
       expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
     })
 
+    test(`keeps an outer filter above a unionAll subquery`, () => {
+      const issuesCollection = createIssuesCollection(autoIndex)
+      const usersCollection = createUsersCollection(autoIndex)
+      const query = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const projectOneIssues = q
+            .from({ projectOneIssue: issuesCollection })
+            .where(({ projectOneIssue }) => eq(projectOneIssue.projectId, 1))
+            .select(({ projectOneIssue }) => ({
+              id: projectOneIssue.id,
+              status: projectOneIssue.status,
+              userId: projectOneIssue.userId,
+            }))
+          const projectTwoIssues = q
+            .from({ projectTwoIssue: issuesCollection })
+            .where(({ projectTwoIssue }) => eq(projectTwoIssue.projectId, 2))
+            .select(({ projectTwoIssue }) => ({
+              id: projectTwoIssue.id,
+              status: projectTwoIssue.status,
+              userId: projectTwoIssue.userId,
+            }))
+          const allIssues = q.unionAll(projectOneIssues, projectTwoIssues)
+
+          return q
+            .from({ row: allIssues })
+            .innerJoin({ user: usersCollection }, ({ row, user }) =>
+              eq(row.userId, user.id),
+            )
+            .where(({ row }) => eq(row.status, `open`))
+            .select(({ row }) => ({ id: row.id }))
+        },
+      })
+
+      expect(query.toArray.map((row) => row.id).sort()).toEqual([1, 4])
+    })
+
     describe(`nested subqueries with joins (alias remapping)`, () => {
       let issuesCollection: ReturnType<typeof createIssuesCollection>
       let usersCollection: ReturnType<typeof createUsersCollection>
