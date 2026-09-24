@@ -80,6 +80,14 @@ export class WebOnlineDetector implements OnlineDetector {
   }
 
   isOnline(): boolean {
+    // Browser connectivity hints can be stale. Let visible tabs attempt work
+    // and rely on the executor's retry policy when requests fail.
+    if (
+      typeof document !== `undefined` &&
+      document.visibilityState === `visible`
+    ) {
+      return true
+    }
     if (typeof navigator !== `undefined`) {
       return navigator.onLine
     }
