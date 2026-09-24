@@ -386,7 +386,7 @@ export function createElectronSQLitePersistence(
       if (collectionId === undefined) {
         coordinator.setAdapter(adapter)
       } else {
-        coordinator.setCollectionAdapter(collectionId, adapter)
+        coordinator.setAdapterForCollection(collectionId, adapter)
       }
     }
     return { adapter, coordinator }
