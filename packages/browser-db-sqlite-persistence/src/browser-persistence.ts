@@ -143,7 +143,7 @@ export function createBrowserWASQLitePersistence(
       if (collectionId === undefined) {
         resolvedCoordinator.setAdapter(adapter)
       } else {
-        resolvedCoordinator.setCollectionAdapter(collectionId, adapter)
+        resolvedCoordinator.setAdapterForCollection(collectionId, adapter)
       }
     }
     return {

@@ -44,9 +44,10 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * retain fast-check's seed and shrink path.
  *
  * The fixture does not establish live HTTP delivery, native SQLite host
- * behavior, or callback multiplicity beyond the observations named below.
+ * behavior, or callback multiplicity beyond the observations named below. The
+ * external-publisher fixture routes complete committed transactions through
+ * its bound adapter; that wiring does not add native-host evidence.
  */
-
 type Item = Row & { id: number; name: string; stable: string }
 type Subscriber = (messages: Array<Message<Item>>) => void
 type Exposure = { cut: string; rows: Array<Item> }
@@ -244,6 +245,19 @@ function fixture(
       return Promise.resolve()
     },
     ensureIndex: () => Promise.resolve(),
+  }
+  if (coordinator) {
+    coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+      await adapter.applyCommittedTx(collectionId, tx)
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
   }
   const collection = createCollection(
     persistedCollectionOptions<
@@ -876,6 +890,17 @@ describe(`persisted Electric recovery laws`, () => {
       ensureLeadership: () => Promise.resolve(),
       requestEnsurePersistedIndex: () => Promise.resolve(),
       requestEnsureRemoteSubset: () => Promise.resolve(),
+      requestReleaseRemoteSubset: () => Promise.resolve(),
+      registerRemoteSubsetOwner: () => () => {},
+      requestApplyCommittedTx: (_collectionId, tx) =>
+        Promise.resolve({
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }),
     }
     return {
       coordinator,
