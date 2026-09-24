@@ -1933,6 +1933,14 @@ function createElectricSync<T extends Row<unknown>>(
       const pendingPresence = new Map<string | number, boolean>()
       let usesBaseline = true
 
+      // Persistence decouples publication from its ordered durability suffix.
+      // Reserve that suffix at source admission while keeping the historical
+      // non-persisted Collection scheduling contract unchanged.
+      const beginSourceTransaction = () => {
+        if (metadata?.persistence) begin({ immediate: true })
+        else begin()
+      }
+
       // Track keys that have been synced to handle overlapping subset queries.
       // When multiple subset queries return the same row, the server sends `insert`
       // for each response. We convert subsequent inserts to updates to avoid
@@ -2127,7 +2135,7 @@ function createElectricSync<T extends Row<unknown>>(
 
         if (freshSnapshotPending) {
           freshSnapshotPending = false
-          begin()
+          beginSourceTransaction()
           transactionStarted = true
           truncate()
           pendingPresence.clear()
@@ -2220,7 +2228,7 @@ function createElectricSync<T extends Row<unknown>>(
             } else {
               // Normal processing: write changes immediately
               if (!transactionStarted) {
-                begin()
+                beginSourceTransaction()
                 transactionStarted = true
               }
 
@@ -2252,7 +2260,7 @@ function createElectricSync<T extends Row<unknown>>(
               // Normal processing: process move-out immediately
               transactionStarted = processMoveOutEvent(
                 message.headers.patterns,
-                begin,
+                beginSourceTransaction,
                 write,
                 transactionStarted,
                 (rowId) => {
@@ -2278,7 +2286,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Start a transaction and truncate the collection
             if (!transactionStarted) {
-              begin()
+              beginSourceTransaction()
               transactionStarted = true
             }
 
@@ -2332,7 +2340,7 @@ function createElectricSync<T extends Row<unknown>>(
             )
 
             // Start atomic swap transaction
-            begin()
+            beginSourceTransaction()
 
             // Truncate to clear all snapshot data
             truncate()
@@ -2398,7 +2406,7 @@ function createElectricSync<T extends Row<unknown>>(
               applied = commit()
               transactionStarted = false
             } else if (commitPoint === `up-to-date` && metadata) {
-              begin()
+              beginSourceTransaction()
               stageResumeMetadata()
               applied = commit()
             }

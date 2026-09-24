@@ -35,6 +35,7 @@ const staticOracleProperties = [
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
   `collection-state.optimistic-history`,
+  `collection-state.truncate-capture-ownership`,
   `collection-state.mixed-transaction`,
   `collection-state.optimistic-outcomes`,
   `collection-state.same-key`,

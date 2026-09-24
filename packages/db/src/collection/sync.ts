@@ -450,10 +450,8 @@ export class CollectionSyncManager<
     pendingTransaction.rowMetadataWrites.clear()
     // Collection-scoped metadata intentionally survives truncate.
     pendingTransaction.truncate = true
-    pendingTransaction.optimisticSnapshot = {
-      upserts: new Map(this.state.optimisticUpserts),
-      deletes: new Set(this.state.optimisticDeletes),
-    }
+    pendingTransaction.optimisticSnapshot =
+      this.state.captureTruncateOptimisticSnapshot()
   }
 
   private getActivePendingSyncTransaction(

@@ -509,11 +509,159 @@ function rowsFromMap(
   ]).sort(([left], [right]) => String(left).localeCompare(String(right)))
 }
 
+/**
+ * A persisted Electric sync transaction publishes at its applied receipt; an
+ * earlier adapter durability turn must not hide later source callbacks. This
+ * is the established Collection publication-before-durability contract used by
+ * the persisted wrapper, limited here to Electric insert, update, delete, and
+ * truncate/reset callbacks for one queued key.
+ *
+ * The independent model folds those four source histories into the expected
+ * public rows. The grammar permutes every history and varies distinguishable
+ * queued/later payload names. The production driver uses the Electric sync
+ * adapter through a persisted Collection, holds the real persistence adapter,
+ * and records public rows at that held observation cut before checking durable
+ * convergence. ShapeStream is mocked at the installed SDK boundary, so this
+ * owner does not establish live-service framing or native-host scheduling.
+ */
 type QueuedPresenceHistory =
   | `insert-update`
   | `update-update`
   | `delete-update`
   | `truncate-update`
+
+type QueuedPresenceCampaign = {
+  histories: Array<QueuedPresenceHistory>
+  names: [string, string]
+}
+
+const queuedPresenceProperty = `electric.queued-presence-order`
+const queuedPresenceFixedSeed = 20_260_924
+const queuedPresenceRuns = 8
+const queuedPresenceHistories: ReadonlyArray<QueuedPresenceHistory> = [
+  `insert-update`,
+  `update-update`,
+  `delete-update`,
+  `truncate-update`,
+]
+const queuedPresenceArbitraries: [
+  fc.Arbitrary<Array<QueuedPresenceHistory>>,
+  fc.Arbitrary<[string, string]>,
+] = [
+  fc.uniqueArray(fc.constantFrom(...queuedPresenceHistories), {
+    minLength: queuedPresenceHistories.length,
+    maxLength: queuedPresenceHistories.length,
+  }),
+  fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
+]
+const requestedQueuedPresenceProperty =
+  process.env.TANSTACK_DB_ELECTRIC_ORACLE_PROPERTY
+
+if (
+  requestedQueuedPresenceProperty !== undefined &&
+  requestedQueuedPresenceProperty !== queuedPresenceProperty
+) {
+  throw new Error(
+    `unknown Electric oracle replay property: ${requestedQueuedPresenceProperty}`,
+  )
+}
+
+function queuedPresencePropertyOptions(mode: `fixed` | `random` | `replay`): {
+  numRuns: number
+  seed?: number
+  path?: string
+} {
+  if (mode === `fixed`) {
+    return { numRuns: queuedPresenceRuns, seed: queuedPresenceFixedSeed }
+  }
+  if (mode === `random`) return { numRuns: queuedPresenceRuns }
+
+  const seedValue = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED
+  const path = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH
+  if (seedValue === undefined || path === undefined || path.trim() === ``) {
+    throw new Error(
+      `Electric queued-presence replay requires both seed and path`,
+    )
+  }
+  const seed = Number(seedValue)
+  if (!Number.isSafeInteger(seed)) {
+    throw new Error(`Electric queued-presence replay seed must be an integer`)
+  }
+  if (!/^\d+(?::\d+)*$/.test(path)) {
+    throw new Error(
+      `Electric queued-presence replay path must contain colon-separated nonnegative integers`,
+    )
+  }
+  return { numRuns: queuedPresenceRuns, seed, path }
+}
+
+function reconstructQueuedPresenceCampaign(
+  value: unknown,
+): QueuedPresenceCampaign {
+  if (typeof value !== `object` || value === null) {
+    throw new Error(`queued-presence campaign must be an object`)
+  }
+  const campaign = value as { histories?: unknown; names?: unknown }
+  if (
+    !Array.isArray(campaign.histories) ||
+    campaign.histories.length !== queuedPresenceHistories.length ||
+    new Set(campaign.histories).size !== queuedPresenceHistories.length ||
+    !campaign.histories.every((history) =>
+      queuedPresenceHistories.includes(history),
+    )
+  ) {
+    throw new Error(
+      `queued-presence histories must contain every supported transition exactly once`,
+    )
+  }
+  if (
+    !Array.isArray(campaign.names) ||
+    campaign.names.length !== 2 ||
+    !campaign.names.every(
+      (name) => typeof name === `string` && name.length <= 12,
+    )
+  ) {
+    throw new Error(`queued-presence names are outside the grammar`)
+  }
+  return campaign as unknown as QueuedPresenceCampaign
+}
+
+function expectedQueuedPresenceRows(
+  history: QueuedPresenceHistory,
+  gate: OracleRow,
+  laterName: string,
+): Map<string | number, OracleRow> {
+  const expectedRows = new Map<string | number, OracleRow>()
+  if (history !== `truncate-update`) expectedRows.set(1, gate)
+  if (history === `insert-update` || history === `update-update`) {
+    expectedRows.set(2, {
+      id: 2,
+      name: laterName,
+      stable: `stable-2`,
+    })
+  }
+  return expectedRows
+}
+
+function expectQueuedPresenceObservation(
+  actual: Array<[string | number, string, string]>,
+  history: QueuedPresenceHistory,
+  gate: OracleRow,
+  laterName: string,
+): void {
+  expect(actual).toEqual(
+    rowsFromMap(expectedQueuedPresenceRows(history, gate, laterName)),
+  )
+}
+
+async function runQueuedPresenceCampaign(
+  histories: Array<QueuedPresenceHistory>,
+  names: [string, string],
+): Promise<void> {
+  for (const history of histories) {
+    await runQueuedPresenceHistory(history, names[0], names[1])
+  }
+}
 
 let queuedPresenceHistoryId = 0
 
@@ -612,15 +760,22 @@ async function runQueuedPresenceHistory(
     mockStream.lastOffset = `104_0`
     subscriber!([laterUpdate, upToDate])
 
-    const expectedRows = new Map<string | number, OracleRow>()
-    if (history !== `truncate-update`) expectedRows.set(1, gate.value)
-    if (history === `insert-update` || history === `update-update`) {
-      expectedRows.set(2, {
-        id: 2,
-        name: laterName,
-        stable: `stable-2`,
-      })
-    }
+    const expectedRows = expectedQueuedPresenceRows(
+      history,
+      gate.value,
+      laterName,
+    )
+
+    // Public application is a source-order boundary, not a durability
+    // boundary. This held cut rejects an implementation that keeps later
+    // callbacks behind the first adapter write while still converging after
+    // the hold is released.
+    expectQueuedPresenceObservation(
+      rowsFromCollection(collection),
+      history,
+      gate.value,
+      laterName,
+    )
 
     releaseFirstPersistence.resolve()
     await vi.waitFor(
@@ -2178,15 +2333,23 @@ async function runSchedulerPermutation(
   }
 }
 
-describe(`Electric adapter laws`, () => {
+const describeUnlessQueuedPresenceReplay = requestedQueuedPresenceProperty
+  ? describe.skip
+  : describe
+
+function resetElectricOracleMocks(): void {
+  vi.clearAllMocks()
+  mockStream.isUpToDate = false
+  mockStream.shapeHandle = `shape-current`
+  mockStream.lastOffset = `20_0`
+}
+
+describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
   let processGrammarRun = 0
   let persistencePolicyRun = 0
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    mockStream.isUpToDate = false
-    mockStream.shapeHandle = `shape-current`
-    mockStream.lastOffset = `20_0`
+    resetElectricOracleMocks()
   })
 
   it.each([false, true])(
@@ -2424,7 +2587,7 @@ describe(`Electric adapter laws`, () => {
     )
   })
 
-  it(`keeps queued persisted writes visible to later Electric callbacks`, async () => {
+  it(`publishes later Electric callbacks while an earlier durability turn is held`, async () => {
     let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
     mockSubscribe.mockImplementationOnce((callback) => {
       subscriber = callback
@@ -2437,7 +2600,9 @@ describe(`Electric adapter laws`, () => {
     const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
     const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
     let heldFirstRow = false
+    let durabilityCalls = 0
     adapter.applyCommittedTx = async (...args) => {
+      durabilityCalls++
       if (
         !heldFirstRow &&
         args[1].mutations.some((mutation) => mutation.key === 1)
@@ -2468,6 +2633,7 @@ describe(`Electric adapter laws`, () => {
         persistence: { adapter },
       }),
     )
+    const publications = observePublications(collection)
 
     await withElectricCleanup(async () => {
       await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
@@ -2489,6 +2655,7 @@ describe(`Electric adapter laws`, () => {
         firstPersistenceEntered.promise,
         `first Electric persistence entered`,
       )
+      const durabilityCallsAtHold = durabilityCalls
 
       const queued = change(`insert`, 2, `queued insert`)
       queued.value = { id: 2, name: `queued insert`, stable: `stable-2` }
@@ -2499,6 +2666,27 @@ describe(`Electric adapter laws`, () => {
       laterUpdate.value = { id: 2, name: `later update`, stable: `stable-2` }
       mockStream.lastOffset = `93_0`
       subscriber!([laterUpdate, upToDate])
+
+      const expected = rowsFromMap(
+        new Map([
+          [1, first.value],
+          [2, laterUpdate.value],
+        ]),
+      )
+      expect({
+        publicRows: rowsFromCollection(collection),
+        durableRows: rowsFromMap(persistedRows),
+        noLaterDurabilityStarted: durabilityCalls === durabilityCallsAtHold,
+        published: publications.entries.some(
+          ({ cut, rows }) =>
+            cut === `event` && isDeepStrictEqual(rows, expected),
+        ),
+      }).toEqual({
+        publicRows: expected,
+        durableRows: [],
+        noLaterDurabilityStarted: true,
+        published: true,
+      })
 
       releaseFirstPersistence.resolve()
       await vi.waitFor(
@@ -2522,30 +2710,97 @@ describe(`Electric adapter laws`, () => {
         ),
       )
       expect(collection.status).toBe(`ready`)
-    }, [() => releaseFirstPersistence.resolve(), () => collection.cleanup()])
+    }, [
+      () => releaseFirstPersistence.resolve(),
+      () => publications.stop(),
+      () => collection.cleanup(),
+    ])
   })
 
-  fcTest.prop(
-    [
-      fc.uniqueArray(
-        fc.constantFrom(
+  it(`reconstructs the queued-presence grammar and rejects ablated, out-of-range, and foreign campaigns`, () => {
+    const campaigns = fc.sample(fc.tuple(...queuedPresenceArbitraries), {
+      seed: queuedPresenceFixedSeed,
+      numRuns: 20,
+    })
+    for (const [histories, names] of campaigns) {
+      expect(reconstructQueuedPresenceCampaign({ histories, names })).toEqual({
+        histories,
+        names,
+      })
+    }
+
+    const witness = {
+      histories: [...queuedPresenceHistories],
+      names: [``, `x`.repeat(12)] as [string, string],
+    }
+    expect(reconstructQueuedPresenceCampaign(witness)).toEqual(witness)
+    expect(() =>
+      reconstructQueuedPresenceCampaign({ names: witness.names }),
+    ).toThrow()
+    expect(() =>
+      reconstructQueuedPresenceCampaign({ histories: witness.histories }),
+    ).toThrow()
+    expect(() =>
+      reconstructQueuedPresenceCampaign({
+        ...witness,
+        histories: witness.histories.slice(1),
+      }),
+    ).toThrow()
+    expect(() =>
+      reconstructQueuedPresenceCampaign({
+        ...witness,
+        histories: [
+          `insert-update`,
+          `insert-update`,
+          `delete-update`,
+          `truncate-update`,
+        ],
+      }),
+    ).toThrow()
+    expect(() =>
+      reconstructQueuedPresenceCampaign({
+        ...witness,
+        histories: [
           `insert-update`,
           `update-update`,
           `delete-update`,
-          `truncate-update`,
-        ) as fc.Arbitrary<QueuedPresenceHistory>,
-        { minLength: 4, maxLength: 4 },
+          `replace-update`,
+        ],
+      }),
+    ).toThrow()
+    expect(() =>
+      reconstructQueuedPresenceCampaign({
+        ...witness,
+        names: [`x`.repeat(13), ``],
+      }),
+    ).toThrow()
+  })
+
+  it(`rejects named wrong answer: later callback stays hidden until durability`, () => {
+    expect(() =>
+      expectQueuedPresenceObservation(
+        [[1, `holds persistence`, `stable-1`]],
+        `insert-update`,
+        { id: 1, name: `holds persistence`, stable: `stable-1` },
+        `later`,
       ),
-      fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
-    ],
-    persistencePolicyPropertyOptions(),
+    ).toThrow()
+  })
+
+  fcTest.prop(
+    queuedPresenceArbitraries,
+    queuedPresencePropertyOptions(`fixed`),
   )(
-    `generated queued Electric histories preserve staged presence and reset fences`,
-    async (histories, names) => {
-      for (const history of histories) {
-        await runQueuedPresenceHistory(history, names[0], names[1])
-      }
-    },
+    `generated queued Electric histories preserve staged presence and reset fences (fixed)`,
+    runQueuedPresenceCampaign,
+  )
+
+  fcTest.prop(
+    queuedPresenceArbitraries,
+    queuedPresencePropertyOptions(`random`),
+  )(
+    `generated queued Electric histories preserve staged presence and reset fences (random)`,
+    runQueuedPresenceCampaign,
   )
 
   fcTest.prop(
@@ -5457,3 +5712,17 @@ describe(`Electric adapter laws`, () => {
     await trace.collection.cleanup()
   })
 })
+
+if (requestedQueuedPresenceProperty === queuedPresenceProperty) {
+  describe(`Electric queued-presence replay`, () => {
+    beforeEach(resetElectricOracleMocks)
+
+    fcTest.prop(
+      queuedPresenceArbitraries,
+      queuedPresencePropertyOptions(`replay`),
+    )(
+      `generated queued Electric histories preserve staged presence and reset fences (replay)`,
+      runQueuedPresenceCampaign,
+    )
+  })
+}
