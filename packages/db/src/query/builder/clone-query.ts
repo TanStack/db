@@ -35,9 +35,10 @@ function cloneQuery(query: QueryIR, clones: WeakMap<object, object>): QueryIR {
     ...join,
     from: cloneSourceForPlacement(join.from, clones),
   }))
-  cloned.select = query.select
-    ? cloneSelectForPlacement(query.select, clones)
-    : undefined
+  cloned.select =
+    query.select === undefined || isExpressionLike(query.select)
+      ? query.select
+      : cloneSelectForPlacement(query.select, clones)
   return cloned
 }
 
