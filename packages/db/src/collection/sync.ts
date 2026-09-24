@@ -454,6 +454,7 @@ export class CollectionSyncManager<
     isCurrentSync: () => boolean,
   ): SyncMetadataApi<TKey> {
     return {
+      persistence: null,
       row: {
         get: (key) => {
           if (!isCurrentSync()) return undefined

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
+import {
+  createBrowserWASQLitePersistence,
+  persistedCollectionOptions,
+} from '../src'
+import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordinator'
 import type { PersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
 
@@ -193,6 +198,16 @@ function createStubAdapter(): PersistenceAdapter & {
   return {
     appliedTxs,
     loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
     applyCommittedTx: (collectionId, tx) => {
       appliedTxs.push({ collectionId, txId: tx.txId })
       return Promise.resolve()
@@ -284,6 +299,91 @@ describe(`BrowserCollectionCoordinator`, () => {
       expect(coord2.isLeader(`todos`)).toBe(true)
       coord2.dispose()
     })
+
+    it.each([
+      { schemaV1: 1, schemaV2: 2 },
+      { schemaV1: 2, schemaV2: 4 },
+    ])(
+      `routes each collection through its schema-version adapter: $schemaV1/$schemaV2`,
+      async ({ schemaV1, schemaV2 }) => {
+        const database = createWASQLiteTestDatabase({ filename: `:memory:` })
+        const coordinator = new BrowserCollectionCoordinator({
+          dbName: `schema-routed-db`,
+        })
+        const persistence = createBrowserWASQLitePersistence({
+          database,
+          coordinator,
+        })
+        const collectionV1 = `schema-routed-v1`
+        const collectionV2 = `schema-routed-v2`
+
+        try {
+          const optionsV1 = persistedCollectionOptions<
+            { id: string; title: string },
+            string
+          >({
+            id: collectionV1,
+            schemaVersion: schemaV1,
+            getKey: (row) => row.id,
+            persistence,
+          })
+          await optionsV1.persistence.adapter.loadResumeSnapshot(collectionV1)
+
+          const optionsV2 = persistedCollectionOptions<
+            { id: string; title: string },
+            string
+          >({
+            id: collectionV2,
+            schemaVersion: schemaV2,
+            getKey: (row) => row.id,
+            persistence,
+          })
+          await optionsV2.persistence.adapter.loadResumeSnapshot(collectionV2)
+
+          coordinator.subscribe(collectionV1, () => {})
+          coordinator.subscribe(collectionV2, () => {})
+          await vi.waitFor(() => {
+            expect(coordinator.isLeader(collectionV1)).toBe(true)
+            expect(coordinator.isLeader(collectionV2)).toBe(true)
+          })
+
+          const [resultV1, resultV2] = await Promise.all([
+            coordinator.requestApplyLocalMutations(collectionV1, [
+              {
+                mutationId: `mutation-v1`,
+                type: `insert`,
+                key: `v1`,
+                value: { id: `v1`, title: `schema one` },
+              },
+            ]),
+            coordinator.requestApplyLocalMutations(collectionV2, [
+              {
+                mutationId: `mutation-v2`,
+                type: `insert`,
+                key: `v2`,
+                value: { id: `v2`, title: `schema two` },
+              },
+            ]),
+          ])
+
+          expect(resultV1.ok).toBe(true)
+          expect(resultV2.ok).toBe(true)
+          expect(
+            await optionsV1.persistence.adapter.loadSubset(collectionV1, {}),
+          ).toMatchObject([
+            { key: `v1`, value: { id: `v1`, title: `schema one` } },
+          ])
+          expect(
+            await optionsV2.persistence.adapter.loadSubset(collectionV2, {}),
+          ).toMatchObject([
+            { key: `v2`, value: { id: `v2`, title: `schema two` } },
+          ])
+        } finally {
+          coordinator.dispose()
+          await Promise.resolve(database.close?.())
+        }
+      },
+    )
 
     it(`different collections have independent leaders`, async () => {
       const coord1 = createCoordinator()
