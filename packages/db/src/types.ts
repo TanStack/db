@@ -476,6 +476,51 @@ export interface SyncMetadataApi<
       value: unknown
     }>
   }
+  /**
+   * Unstable, versioned bridge between persistence-aware collection adapters
+   * and sync adapters. Application code should not construct this capability.
+   * Custom adapter wrappers must forward it unchanged. `null` explicitly means
+   * that the collection has no persistence capability; a missing property is
+   * invalid.
+   *
+   * @internal Adapter infrastructure; not an application-facing API.
+   */
+  persistence: SyncPersistenceCapabilityV1<TKey> | null
+}
+
+export type SyncPersistenceKeySetEvidence = {
+  status: `unknown` | `consistent` | `incompatible`
+}
+
+export type SyncPersistenceScanOptions = {
+  metadataOnly?: boolean
+}
+
+export type SyncPersistenceScannedRow<
+  TKey extends string | number = string | number,
+> = {
+  key: TKey
+  value: object
+  metadata?: unknown
+}
+
+/**
+ * @internal Unstable cross-package protocol for persistence-aware adapters.
+ */
+export type SyncPersistenceCapabilityV1<
+  TKey extends string | number = string | number,
+> = {
+  readonly protocol: `@tanstack/db/sync-persistence`
+  readonly version: 1
+  readonly hydrateBaseline: () => Promise<void>
+  readonly scanPersistedRows: (
+    options?: SyncPersistenceScanOptions,
+  ) => Promise<Array<SyncPersistenceScannedRow<TKey>>>
+  readonly resumeSnapshot: {
+    readonly certify: () => Promise<void>
+    readonly getKeySetEvidence: () => SyncPersistenceKeySetEvidence | undefined
+    readonly expectCurrentCommit: () => void
+  }
 }
 
 export interface ChangeMessage<

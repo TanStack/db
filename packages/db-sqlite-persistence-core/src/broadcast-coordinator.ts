@@ -110,8 +110,12 @@ type CollectionState = {
   routeWaiters?: Set<() => void>
 }
 
-// Adapter capabilities used by coordinator-side operations
-type CoordinatorAdapter = PersistenceAdapter & {
+// Adapter capabilities used by coordinator-side operations. Resume snapshots
+// belong to the persisted sync wrapper, not the elected writer transport.
+type CoordinatorAdapter = Pick<
+  PersistenceAdapter,
+  `loadSubset` | `applyCommittedTx` | `ensureIndex`
+> & {
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,

@@ -35,6 +35,7 @@ import type {
   LoadSubsetOptions,
   Subscription,
   SyncConfig,
+  SyncMetadataApi,
 } from '@tanstack/db'
 
 /**
@@ -66,30 +67,43 @@ import type {
  * source.
  */
 
-/**
- * # Does persisted wrapping preserve one Collection history?
- *
- * Persistence adds a durable replica beneath an optional upstream sync source.
- * Startup hydrates rows and metadata, buffers concurrent remote work, then
- * publishes one coherent state. Committed transactions persist in sequence;
- * gaps recover through deltas or reload. Subset demands keep local and upstream
- * ownership separate so cancellation, release, offline mode, and retry cannot
- * steal a sibling acquisition lease.
- *
- * The recording adapter is a plain durable-state model: Maps for rows and
- * metadata plus ordered transaction, index, load, and reload calls. Tests drive
- * the real wrapper, Collection, coordinator, receipts, transactions, indexes,
- * cleanup, and restart. They compare durable state, public rows, metadata,
- * request options, sequence evidence, errors, and late-work fencing.
- *
- * Known omissions: driver SQL behavior, browser page ownership, native
- * runtimes, and the shared conformance portfolio have separate owners. This
- * file models persistence protocol state, not a particular SQLite engine.
- */
-
 type Todo = {
   id: string
   title: string
+}
+
+const persistedKeySetEvidenceStatuses = [
+  `consistent`,
+  `unknown`,
+  `incompatible`,
+] as const
+
+type OnDemandEvidenceObservation = {
+  status: (typeof persistedKeySetEvidenceStatuses)[number]
+  route: `loadSubset` | `forceReloadSubset`
+  baselineVisible: boolean | `not-observed`
+  onDemandVisible: boolean
+}
+
+function expectOnDemandEvidenceLaw(
+  observation: OnDemandEvidenceObservation,
+): void {
+  try {
+    expect(observation).toEqual({
+      status: observation.status,
+      route: observation.route,
+      baselineVisible:
+        observation.route === `loadSubset`
+          ? observation.status !== `incompatible`
+          : `not-observed`,
+      onDemandVisible: true,
+    })
+  } catch (cause) {
+    throw new Error(
+      `on-demand rows must not inherit baseline evidence rejection`,
+      { cause },
+    )
+  }
 }
 
 type RecordingAdapter = PersistenceAdapter & {
@@ -114,6 +128,11 @@ type RecordingAdapter = PersistenceAdapter & {
     requiredIndexSignatures: ReadonlyArray<string>
   }>
   loadCollectionMetadataCalls: Array<string>
+  loadResumeSnapshotCalls: Array<{
+    collectionId: string
+    includeRows: boolean | undefined
+    requiredIndexSignatures: ReadonlyArray<string>
+  }>
   rows: Map<string, Todo>
   rowMetadata: Map<string, unknown>
   collectionMetadata: Map<string, unknown>
@@ -134,6 +153,7 @@ function createRecordingAdapter(
     markIndexRemovedCalls: [],
     loadSubsetCalls: [],
     loadCollectionMetadataCalls: [],
+    loadResumeSnapshotCalls: [],
     loadSubset: (collectionId, options, ctx) => {
       adapter.loadSubsetCalls.push({
         collectionId,
@@ -147,6 +167,33 @@ function createRecordingAdapter(
           metadata: rowMetadata.get(value.id),
         })),
       )
+    },
+    loadResumeSnapshot: (collectionId, options) => {
+      adapter.loadResumeSnapshotCalls.push({
+        collectionId,
+        includeRows: options?.includeRows,
+        requiredIndexSignatures: options?.requiredIndexSignatures ?? [],
+      })
+      const latest = adapter.applyCommittedTxCalls.at(-1)?.tx
+      return Promise.resolve({
+        rows:
+          options?.includeRows === false
+            ? []
+            : Array.from(rows.values()).map((value) => ({
+                key: value.id,
+                value,
+                metadata: rowMetadata.get(value.id),
+              })),
+        keySet: { status: `consistent` },
+        collectionMetadata: Array.from(
+          adapter.collectionMetadata,
+          ([key, value]) => ({ key, value }),
+        ),
+        latestTerm: latest?.term ?? 0,
+        latestSeq: latest?.seq ?? 0,
+        latestRowVersion: latest?.rowVersion ?? 0,
+        resetEpoch: 0,
+      })
     },
     loadCollectionMetadata: (collectionId) => {
       adapter.loadCollectionMetadataCalls.push(collectionId)
@@ -236,6 +283,16 @@ function createRecordingAdapter(
 function createNoopAdapter(): PersistenceAdapter {
   return {
     loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
     applyCommittedTx: () => Promise.resolve(),
     ensureIndex: () => Promise.resolve(),
   }
@@ -388,6 +445,66 @@ describe(`persistedCollectionOptions`, () => {
     expect(collection.utils.getLeadershipState?.().isLeader).toBe(true)
   })
 
+  it(`hydrates a local-only baseline after a managed write advances startup evidence`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `baseline`, title: `Persisted before startup` },
+    ])
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    let releaseInitialSnapshot!: () => void
+    const initialSnapshotRelease = new Promise<void>((resolve) => {
+      releaseInitialSnapshot = resolve
+    })
+    let reportInitialSnapshot!: () => void
+    const initialSnapshotCaptured = new Promise<void>((resolve) => {
+      reportInitialSnapshot = resolve
+    })
+    let snapshotCalls = 0
+    adapter.loadResumeSnapshot = async (...args) => {
+      const snapshot = await loadResumeSnapshot(...args)
+      snapshotCalls++
+      if (snapshotCalls === 1) {
+        reportInitialSnapshot()
+        await initialSnapshotRelease
+      }
+      return snapshot
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-only-startup-write`,
+        startSync: false,
+        getKey: (item) => item.id,
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await initialSnapshotCaptured
+
+      const insert = collection.insert({
+        id: `concurrent`,
+        title: `Managed during startup`,
+      })
+      releaseInitialSnapshot()
+      await insert.isPersisted.promise
+      await collection.stateWhenReady()
+      await vi.waitFor(() => expect(snapshotCalls).toBeGreaterThanOrEqual(2))
+
+      expect(
+        Array.from(collection.values(), (row) => stripVirtualProps(row)).sort(
+          (left, right) => left.id.localeCompare(right.id),
+        ),
+      ).toEqual([
+        { id: `baseline`, title: `Persisted before startup` },
+        { id: `concurrent`, title: `Managed during startup` },
+      ])
+    } finally {
+      releaseInitialSnapshot()
+      await collection.cleanup()
+    }
+  })
+
   it(`supports acceptMutations for manual transactions`, async () => {
     const adapter = createRecordingAdapter()
     const collection = createCollection(
@@ -445,9 +562,10 @@ describe(`persistedCollectionOptions`, () => {
 
     await collection.stateWhenReady()
 
-    expect(adapter.loadCollectionMetadataCalls).toEqual([
-      `persisted-startup-metadata`,
-    ])
+    expect(adapter.loadResumeSnapshotCalls[0]).toMatchObject({
+      collectionId: `persisted-startup-metadata`,
+      includeRows: false,
+    })
     expect(
       collection._state.syncedCollectionMetadata.get(`electric:resume`),
     ).toEqual({
@@ -544,6 +662,10 @@ describe(`persistedCollectionOptions`, () => {
       mode: `until-revalidated`,
     })
   })
+
+  it.todo(
+    `loads active subsets and collection metadata from one atomic full-reload generation`,
+  )
 
   it(`persists metadata-only wrapped sync transactions`, async () => {
     const adapter = createRecordingAdapter()
@@ -1887,10 +2009,23 @@ describe(`persistedCollectionOptions`, () => {
   it(`replays a hydration-buffered write before its named durability rejection`, async () => {
     const adapter = createRecordingAdapter()
     let releaseHydration: (() => void) | undefined
-    adapter.loadSubset = () =>
-      new Promise<Array<{ key: string; value: Todo }>>((resolve) => {
-        releaseHydration = () => resolve([])
+    adapter.loadResumeSnapshot = (_collectionId, options) => {
+      const snapshot = {
+        rows: [],
+        keySet: { status: `consistent` as const },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }
+      if (options?.includeRows === false) {
+        return Promise.resolve(snapshot)
+      }
+      return new Promise((resolve) => {
+        releaseHydration = () => resolve(snapshot)
       })
+    }
     const persistenceError = Object.assign(
       new Error(`buffered persistence failed`),
       {
@@ -2078,7 +2213,7 @@ describe(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
 
     expect(collection.id).toBe(options.id)
-    expect(adapter.loadSubsetCalls[0]?.collectionId).toBe(collection.id)
+    expect(adapter.loadResumeSnapshotCalls[0]?.collectionId).toBe(collection.id)
   })
 
   it(`keeps hydrated rows ahead of persisted startup rows`, async () => {
@@ -2191,19 +2326,14 @@ describe(`persistedCollectionOptions`, () => {
       },
     ])
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return [
-        {
-          key: `cached-1`,
-          value: {
-            id: `cached-1`,
-            title: `Cached row`,
-          },
-        },
-      ]
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
 
     let remoteBegin: (() => void) | undefined
@@ -2269,11 +2399,14 @@ describe(`persistedCollectionOptions`, () => {
   it(`discards a hydration-buffered transaction aborted before replay`, async () => {
     const adapter = createRecordingAdapter()
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return []
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
@@ -2332,11 +2465,14 @@ describe(`persistedCollectionOptions`, () => {
   it(`rejects every hydration-buffered receipt when replay fails`, async () => {
     const adapter = createRecordingAdapter()
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return []
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
 
     const replayError = new Error(`replay key failed`)
@@ -2413,8 +2549,12 @@ describe(`persistedCollectionOptions`, () => {
 
   it(`marks ready even when persisted startup fails before markReady`, async () => {
     const adapter = createRecordingAdapter()
-    adapter.loadSubset = async () => {
-      throw new Error(`startup failure`)
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = (...args) => {
+      if (args[1]?.includeRows === true) {
+        return Promise.reject(new Error(`startup failure`))
+      }
+      return loadResumeSnapshot(...args)
     }
 
     const collection = createCollection(
@@ -2449,20 +2589,14 @@ describe(`persistedCollectionOptions`, () => {
     adapter.collectionMetadata.set(`startup:key`, { ready: true })
 
     let resolveLoadSubset: (() => void) | undefined
-    adapter.loadSubset = async () => {
-      await new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
-      return [
-        {
-          key: `cached-1`,
-          value: {
-            id: `cached-1`,
-            title: `Cached row`,
-          },
-          metadata: adapter.rowMetadata.get(`cached-1`),
-        },
-      ]
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true) {
+        await new Promise<void>((resolve) => {
+          resolveLoadSubset = resolve
+        })
+      }
+      return loadResumeSnapshot(...args)
     }
 
     let remoteBegin: (() => void) | undefined
@@ -2752,16 +2886,12 @@ describe(`persistedCollectionOptions`, () => {
     const originalLoadSubset = adapter.loadSubset.bind(adapter)
     let loadCalls = 0
     let releaseStaleReload!: () => void
-    let releaseFreshReload!: () => void
     const staleReloadGate = new Promise<void>((resolve) => {
       releaseStaleReload = resolve
     })
-    const freshReloadGate = new Promise<void>((resolve) => {
-      releaseFreshReload = resolve
-    })
     adapter.loadSubset = async (...args) => {
       loadCalls++
-      if (loadCalls === 2) {
+      if (loadCalls === 1) {
         await staleReloadGate
         return [
           {
@@ -2770,7 +2900,6 @@ describe(`persistedCollectionOptions`, () => {
           },
         ]
       }
-      if (loadCalls === 3) await freshReloadGate
       return originalLoadSubset(...args)
     }
 
@@ -2797,22 +2926,17 @@ describe(`persistedCollectionOptions`, () => {
       latestRowVersion: 1,
       requiresFullReload: true,
     })
-    for (let attempt = 0; attempt < 20 && loadCalls < 2; attempt++) {
+    for (let attempt = 0; attempt < 20 && loadCalls < 1; attempt++) {
       await flushAsyncWork()
     }
-    expect(loadCalls).toBe(2)
+    expect(loadCalls).toBe(1)
 
     await collection.cleanup()
     adapter.rows.set(`1`, { id: `1`, title: `Restarted` })
     collection.startSyncImmediate()
     releaseStaleReload()
-    for (let attempt = 0; attempt < 20 && loadCalls < 3; attempt++) {
-      await flushAsyncWork()
-    }
-    expect(loadCalls).toBe(3)
     expect(collection.get(`1`)?.title).not.toBe(`Stale reload`)
 
-    releaseFreshReload()
     for (
       let attempt = 0;
       attempt < 20 && collection.get(`1`)?.title !== `Restarted`;
@@ -2841,7 +2965,7 @@ describe(`persistedCollectionOptions`, () => {
     })
     adapter.loadCollectionMetadata = async (...args) => {
       metadataCalls++
-      if (metadataCalls === 2) await staleMetadataGate
+      if (metadataCalls === 1) await staleMetadataGate
       return originalLoadCollectionMetadata(...args)
     }
     adapter.loadSubset = async (...args) => {
@@ -2864,8 +2988,8 @@ describe(`persistedCollectionOptions`, () => {
 
     await collection.preload()
     await flushAsyncWork()
-    expect(metadataCalls).toBe(1)
-    expect(subsetCalls).toBe(1)
+    expect(metadataCalls).toBe(0)
+    expect(subsetCalls).toBe(0)
 
     coordinator.emit({
       type: `tx:committed`,
@@ -2875,10 +2999,11 @@ describe(`persistedCollectionOptions`, () => {
       latestRowVersion: 1,
       requiresFullReload: true,
     })
-    for (let attempt = 0; attempt < 20 && metadataCalls < 2; attempt++) {
+    for (let attempt = 0; attempt < 20 && metadataCalls < 1; attempt++) {
       await flushAsyncWork()
     }
-    expect(metadataCalls).toBe(2)
+    expect(metadataCalls).toBe(1)
+    expect(subsetCalls).toBe(0)
 
     await collection.cleanup()
     adapter.rows.set(`1`, { id: `1`, title: `Restarted` })
@@ -2886,14 +3011,14 @@ describe(`persistedCollectionOptions`, () => {
     releaseStaleMetadata()
     for (
       let attempt = 0;
-      attempt < 20 && (metadataCalls < 3 || subsetCalls < 2);
+      attempt < 20 && collection.get(`1`)?.title !== `Restarted`;
       attempt++
     ) {
       await flushAsyncWork()
     }
 
-    expect(metadataCalls).toBe(3)
-    expect(subsetCalls).toBe(2)
+    expect(metadataCalls).toBe(1)
+    expect(subsetCalls).toBe(0)
     expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
       title: `Restarted`,
@@ -4042,6 +4167,9 @@ describe(`persistedCollectionOptions`, () => {
     }
     const coordinator = createCoordinatorHarness()
     let hydrateBaseline: (() => Promise<void>) | undefined
+    let persistenceCapability:
+      | NonNullable<SyncMetadataApi<string>[`persistence`]>
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present`,
@@ -4049,11 +4177,12 @@ describe(`persistedCollectionOptions`, () => {
         getKey: (item) => item.id,
         sync: {
           sync: ({ markReady, metadata }) => {
-            hydrateBaseline = (
-              metadata?.row as
-                | { whenHydrated?: () => Promise<void> }
-                | undefined
-            )?.whenHydrated
+            const capability = metadata?.persistence
+            if (!capability) {
+              throw new Error(`Expected persisted sync capability`)
+            }
+            persistenceCapability = capability
+            hydrateBaseline = capability.hydrateBaseline
             markReady()
             return { loadSubset: () => true }
           },
@@ -4064,6 +4193,18 @@ describe(`persistedCollectionOptions`, () => {
 
     collection.startSyncImmediate()
     await vi.waitFor(() => expect(hydrateBaseline).toBeTypeOf(`function`))
+    expect(persistenceCapability).toMatchObject({
+      protocol: `@tanstack/db/sync-persistence`,
+      version: 1,
+    })
+    expect(persistenceCapability?.scanPersistedRows).toBeTypeOf(`function`)
+    expect(persistenceCapability?.resumeSnapshot.certify).toBeTypeOf(`function`)
+    expect(persistenceCapability?.resumeSnapshot.getKeySetEvidence).toBeTypeOf(
+      `function`,
+    )
+    expect(
+      persistenceCapability?.resumeSnapshot.expectCurrentCommit,
+    ).toBeTypeOf(`function`)
     await hydrateBaseline!()
     expect(collection.has(`2`)).toBe(true)
 
@@ -4083,6 +4224,257 @@ describe(`persistedCollectionOptions`, () => {
 
     expect(collection.has(`2`)).toBe(true)
     await collection.cleanup()
+  })
+
+  it.each(persistedKeySetEvidenceStatuses.map((status) => ({ status })))(
+    `keeps on-demand rows independent from $status baseline evidence`,
+    async ({ status }) => {
+      const adapter = createRecordingAdapter([
+        { id: `on-demand`, title: `On-demand row` },
+      ])
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      adapter.loadResumeSnapshot = async (...args) => ({
+        ...(await loadResumeSnapshot(...args)),
+        rows: [
+          {
+            key: `baseline`,
+            value: { id: `baseline`, title: `Baseline row` },
+          },
+        ],
+        keySet: { status },
+      })
+      let hydrateBaseline: (() => Promise<void>) | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `${status}-baseline-and-on-demand`,
+          syncMode: `on-demand`,
+          getKey: (item) => item.id,
+          sync: {
+            sync: ({ markReady, metadata }) => {
+              const capability = metadata?.persistence
+              if (!capability) {
+                throw new Error(`Expected persisted sync capability`)
+              }
+              hydrateBaseline = capability.hydrateBaseline
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+
+      try {
+        collection.startSyncImmediate()
+        await vi.waitFor(() => expect(hydrateBaseline).toBeTypeOf(`function`))
+        await hydrateBaseline!()
+        await flushAsyncWork()
+        await flushAsyncWork()
+
+        const baselineVisible = collection.has(`baseline`)
+        expect(collection.has(`on-demand`)).toBe(false)
+        await collection._sync.loadSubset({})
+
+        expectOnDemandEvidenceLaw({
+          status,
+          route: `loadSubset`,
+          baselineVisible,
+          onDemandVisible: collection.has(`on-demand`),
+        })
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each(persistedKeySetEvidenceStatuses.map((status) => ({ status })))(
+    `keeps force reload rows independent from $status startup evidence`,
+    async ({ status }) => {
+      const adapter = createRecordingAdapter([
+        { id: `on-demand`, title: `On-demand row` },
+      ])
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      adapter.loadResumeSnapshot = async (...args) => ({
+        ...(await loadResumeSnapshot(...args)),
+        keySet: { status },
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `${status}-local-only-force-reload`,
+          syncMode: `on-demand`,
+          getKey: (item) => item.id,
+          persistence: { adapter },
+        }),
+      )
+
+      try {
+        collection.startSyncImmediate()
+        await vi.waitFor(() =>
+          expect(adapter.loadResumeSnapshotCalls.length).toBeGreaterThan(0),
+        )
+        await collection.utils.forceReloadSubset!({})
+
+        expect(adapter.loadResumeSnapshotCalls[0]?.includeRows).toBe(false)
+        expectOnDemandEvidenceLaw({
+          status,
+          route: `forceReloadSubset`,
+          // This local-only route reads startup evidence but does not expose
+          // baseline hydration. Do not claim a baseline observation here.
+          baselineVisible: `not-observed`,
+          onDemandVisible: collection.has(`on-demand`),
+        })
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`rejects an evidence-coupled on-demand hydration mutant`, () => {
+    expect(() =>
+      expectOnDemandEvidenceLaw({
+        status: `incompatible`,
+        route: `loadSubset`,
+        baselineVisible: false,
+        onDemandVisible: false,
+      }),
+    ).toThrow(`on-demand rows must not inherit baseline evidence rejection`)
+
+    expectOnDemandEvidenceLaw({
+      status: `incompatible`,
+      route: `loadSubset`,
+      baselineVisible: false,
+      onDemandVisible: true,
+    })
+  })
+
+  it(`keeps resume certification consistent after an owned no-op commit`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    let persistenceCapability:
+      | SyncMetadataApi<string>[`persistence`]
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `owned-no-op-generation`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, commit, markReady, metadata }) => {
+            remoteBegin = begin
+            remoteCommit = commit
+            persistenceCapability = metadata?.persistence
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() =>
+        expect(persistenceCapability).toMatchObject({
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+        }),
+      )
+
+      remoteBegin?.()
+      persistenceCapability?.resumeSnapshot.expectCurrentCommit()
+      const applied = remoteCommit?.()
+      if (applied !== true) await applied
+
+      expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+      await persistenceCapability?.resumeSnapshot.certify()
+      expect(persistenceCapability?.resumeSnapshot.getKeySetEvidence()).toEqual(
+        { status: `consistent` },
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`invalidates resume evidence when storage advances outside the owned commit generation`, async () => {
+    const adapter = createRecordingAdapter()
+    let durableGeneration = {
+      latestTerm: 0,
+      latestSeq: 0,
+      latestRowVersion: 0,
+      resetEpoch: 0,
+    }
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => ({
+      ...(await loadResumeSnapshot(...args)),
+      ...durableGeneration,
+    })
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    adapter.applyCommittedTx = async (collectionId, tx) => {
+      await applyCommittedTx(collectionId, tx)
+      durableGeneration = {
+        latestTerm: tx.term,
+        latestSeq: tx.seq,
+        latestRowVersion: Math.max(
+          durableGeneration.latestRowVersion + 1,
+          tx.rowVersion,
+        ),
+        resetEpoch: durableGeneration.resetEpoch,
+      }
+    }
+
+    let remoteBegin: (() => void) | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    let remoteMetadata:
+      | Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`]
+      | undefined
+    let persistenceCapability:
+      | SyncMetadataApi<string>[`persistence`]
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `generation-fence`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, commit, markReady, metadata }) => {
+            remoteBegin = begin
+            remoteCommit = commit
+            remoteMetadata = metadata
+            persistenceCapability = metadata?.persistence
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() =>
+        expect(persistenceCapability).toMatchObject({
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+        }),
+      )
+
+      // This is not a supported writer path. It models storage advancing
+      // without the runtime observing the generation that now precedes its
+      // commit. The exact-generation fence must reject that uncertainty.
+      durableGeneration.latestRowVersion = 5
+
+      remoteBegin?.()
+      persistenceCapability?.resumeSnapshot.expectCurrentCommit()
+      remoteMetadata?.collection.set(`cursor`, `next`)
+      const applied = remoteCommit?.()
+      if (applied !== true) await applied
+
+      await persistenceCapability?.resumeSnapshot.certify()
+      expect(persistenceCapability?.resumeSnapshot.getKeySetEvidence()).toEqual(
+        { status: `incompatible` },
+      )
+    } finally {
+      await collection.cleanup()
+    }
   })
 
   it(`ignores late wrapped sync writes after cleanup`, async () => {

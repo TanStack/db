@@ -575,6 +575,16 @@ function createRecordingAdapter(options: {
       record(`load`, collectionId)
       return Promise.resolve([])
     },
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
     applyCommittedTx: (collectionId) => {
       record(`apply`, collectionId)
       return Promise.resolve()
@@ -3740,6 +3750,16 @@ describe(`sync-ingested write ownership oracle`, () => {
       return {
         applied,
         loadSubset: () => Promise.resolve([]),
+        loadResumeSnapshot: () =>
+          Promise.resolve({
+            rows: [],
+            keySet: { status: `consistent` },
+            collectionMetadata: [],
+            latestTerm: 0,
+            latestSeq: 0,
+            latestRowVersion: 0,
+            resetEpoch: 0,
+          }),
         applyCommittedTx: (_collectionId, tx) => {
           applied.push(structuredClone(tx))
           return Promise.resolve()
