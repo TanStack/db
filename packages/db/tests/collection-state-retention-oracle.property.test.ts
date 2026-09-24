@@ -1812,6 +1812,24 @@ it(`publishes prior optimistic ownership when rollback reveals an identical auth
     ],
   )
 })
+it(`publishes the subscriber-visible row when a buffered optimistic update becomes a delete`, async () => {
+  const counts = await runOptimisticHistory(
+    [],
+    [
+      { type: `edit`, key: 1, fields: { c: 0 }, optimistic: true },
+      { type: `edit`, key: 1, fields: { b: 1 }, optimistic: true },
+      { type: `sync`, rows: [], truncate: false, immediate: false, copies: 1 },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      { type: `settle`, slot: 0, success: false, cascade: false },
+    ],
+  )
+  expect(counts).toMatchObject({
+    edits: 2,
+    settlements: 2,
+    failures: 1,
+    queued: 1,
+  })
+})
 fcTest.prop([optimisticHistory], { numRuns: oracleRuns(60), seed: 86103 })(
   `matches optimistic ownership and publication histories with a fixed seed`,
   async ({ initial, steps }) => {

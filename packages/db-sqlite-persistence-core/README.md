@@ -31,6 +31,7 @@ binding. Provide a runtime `SQLiteDriver` implementation from a wrapper package.
 - `PullSinceResponse`
 - `CollectionReset`
 - `PersistedIndexSpec`
+- `PersistedKeySetEvidence`
 - `PersistedTx<T, TKey>`
 - `PersistenceAdapter<T, TKey>`
 - `SQLiteDriver`
@@ -63,6 +64,38 @@ and resolves persistence using:
 
 This lets runtime wrappers expose one shared persistence instance per database
 while still handling per-collection schema versions correctly.
+
+### Atomic resume snapshots
+
+Persistence adapters implement
+`loadResumeSnapshot(collectionId, options)` to let a sync source certify a
+persisted resume baseline. One call must read rows, collection metadata, stream
+position, reset epoch, and key-set evidence from the same atomic database
+snapshot. `includeRows: false` requests the same certification data without
+materializing rows; `requiredIndexSignatures` carries the indexes needed by a
+row-bearing snapshot.
+
+`PersistedKeySetEvidence.status` has three states:
+
+- `consistent`: the persisted rows match the adapter's durable expected-key
+  ledger.
+- `incompatible`: row loss, substitution, or a reset-generation change makes
+  the saved resume baseline unsafe.
+- `unknown`: the adapter has no authoritative pre-migration key set and does
+  not claim completeness.
+
+The method is required because the versioned `metadata.persistence` capability
+always carries hydration, durable row scanning, certification, evidence, and
+generation ownership as one complete bundle. Sync wrappers must forward the
+capability object unchanged rather than copying individual methods. Adapter
+methods are invoked with their receiver and may rely on instance state through
+`this`.
+
+`SyncMetadataApi.persistence` is always present. Core sync sources receive
+`null`, which explicitly means that no persistence bridge is active. The
+persisted wrapper replaces that sentinel with the complete versioned
+capability. A wrapper that omits the property is invalid and fails before a
+consumer can resume or query against uncertified durable state.
 
 ### SQLite core adapter APIs
 

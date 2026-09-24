@@ -71,6 +71,34 @@ type AsyncLocalStorageLike<TStore> = {
 
 type AsyncLocalStorageCtor = new <TStore>() => AsyncLocalStorageLike<TStore>
 
+type DatabaseExecutionState = {
+  queue: Promise<void>
+  nextSavepointId: number
+  transactionContextStoragePromise: Promise<AsyncLocalStorageLike<TransactionContextStore> | null> | null
+}
+
+const databaseExecutionStates = new WeakMap<
+  OpSQLiteDatabaseLike,
+  DatabaseExecutionState
+>()
+
+function getDatabaseExecutionState(
+  database: OpSQLiteDatabaseLike,
+): DatabaseExecutionState {
+  const existing = databaseExecutionStates.get(database)
+  if (existing) {
+    return existing
+  }
+
+  const state: DatabaseExecutionState = {
+    queue: Promise.resolve(),
+    nextSavepointId: 1,
+    transactionContextStoragePromise: null,
+  }
+  databaseExecutionStates.set(database, state)
+  return state
+}
+
 let asyncLocalStorageCtorPromise: Promise<AsyncLocalStorageCtor | null> | null =
   null
 
@@ -480,10 +508,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
   private readonly executeMethod: OpSQLiteExecuteFn
   private readonly arrayResultMode: OpSQLiteArrayResultMode | undefined
   private readonly ownsDatabase: boolean
-  private queue: Promise<void> = Promise.resolve()
-  private nextSavepointId = 1
-  private transactionContextStoragePromise: Promise<AsyncLocalStorageLike<TransactionContextStore> | null> | null =
-    null
+  private readonly executionState: DatabaseExecutionState
 
   constructor(options: OpSQLiteDriverOptions) {
     if (hasExistingDatabase(options)) {
@@ -496,6 +521,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
 
     this.executeMethod = resolveExecuteMethod(this.database)
     this.arrayResultMode = options.arrayResultMode
+    this.executionState = getDatabaseExecutionState(this.database)
   }
 
   async exec(sql: string): Promise<void> {
@@ -613,8 +639,8 @@ export class OpSQLiteDriver implements SQLiteDriver {
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const queuedOperation = this.queue.then(operation, operation)
-    this.queue = queuedOperation.then(
+    const queuedOperation = this.executionState.queue.then(operation, operation)
+    this.executionState.queue = queuedOperation.then(
       () => undefined,
       () => undefined,
     )
@@ -622,11 +648,11 @@ export class OpSQLiteDriver implements SQLiteDriver {
   }
 
   private async getTransactionContextStorage(): Promise<AsyncLocalStorageLike<TransactionContextStore> | null> {
-    if (this.transactionContextStoragePromise) {
-      return this.transactionContextStoragePromise
+    if (this.executionState.transactionContextStoragePromise) {
+      return this.executionState.transactionContextStoragePromise
     }
 
-    this.transactionContextStoragePromise = (async () => {
+    this.executionState.transactionContextStoragePromise = (async () => {
       const asyncLocalStorageCtor = await resolveAsyncLocalStorageCtor()
       if (!asyncLocalStorageCtor) {
         return null
@@ -635,7 +661,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
       return new asyncLocalStorageCtor<TransactionContextStore>()
     })()
 
-    return this.transactionContextStoragePromise
+    return this.executionState.transactionContextStoragePromise
   }
 
   private async getActiveTransactionDriver(): Promise<SQLiteDriver | null> {
@@ -695,8 +721,8 @@ export class OpSQLiteDriver implements SQLiteDriver {
     transactionDriver: SQLiteDriver,
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
-    const savepointName = `tsdb_sp_${this.nextSavepointId}`
-    this.nextSavepointId++
+    const savepointName = `tsdb_sp_${this.executionState.nextSavepointId}`
+    this.executionState.nextSavepointId++
     await this.execute(`SAVEPOINT ${savepointName}`)
 
     try {

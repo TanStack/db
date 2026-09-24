@@ -3,6 +3,7 @@ import {
   LoadSubsetOperationAbortedError,
   deepEquals,
   getLoadSubsetDemandKey,
+  validateSyncPersistenceCapability,
   warnOnce,
   withCollectionConfigFactory,
   withCollectionSyncConfigFactory,
@@ -22,7 +23,6 @@ import type {
   LoadSubsetOptions,
   SyncAppliedReceipt,
   SyncConfig,
-  SyncMetadataApi,
 } from '@tanstack/db'
 import type {
   FetchStatus,
@@ -352,22 +352,6 @@ const queryCollectionCurrentFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionSuccessfulFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionRequiredFetchStarts = new WeakMap<AnyQuery, number>()
 const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
-
-type PersistedScannedRowForQuery<TItem extends object> = {
-  key: string | number
-  value: TItem
-  metadata?: unknown
-}
-
-type QuerySyncMetadataWithPersistedScan<TItem extends object> = SyncMetadataApi<
-  string | number
-> & {
-  row: SyncMetadataApi<string | number>[`row`] & {
-    scanPersisted?: (options?: {
-      metadataOnly?: boolean
-    }) => Promise<Array<PersistedScannedRowForQuery<TItem>>>
-  }
-}
 
 /**
  * Implementation class for QueryCollectionUtils with explicit dependency injection
@@ -998,9 +982,10 @@ export function queryCollectionOptions(
     )
     const { begin, write, commit, markReady, markError, collection, metadata } =
       params
-    const persistedMetadata = metadata as
-      | QuerySyncMetadataWithPersistedScan<any>
-      | undefined
+    const persistence =
+      metadata === undefined
+        ? null
+        : validateSyncPersistenceCapability(metadata.persistence)
 
     // Track whether sync has been started
     let syncStarted = false
@@ -1224,7 +1209,7 @@ export function queryCollectionOptions(
         return baseline
       }
 
-      const scanPersisted = persistedMetadata?.row.scanPersisted
+      const scanPersisted = persistence?.scanPersistedRows
       if (!scanPersisted) {
         const baseline = new Map<
           string | number,
@@ -2205,7 +2190,7 @@ export function queryCollectionOptions(
       if (
         effectivePersistedGcTime !== undefined &&
         metadata &&
-        persistedMetadata?.row.scanPersisted
+        persistence?.scanPersistedRows
       ) {
         invalidatePendingResultApplication(hashedQueryKey)
         manualWriteSnapshots.delete(hashedQueryKey)

@@ -122,6 +122,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
   private readonly nodeId = safeRandomUUID()
   private readonly dbName: string
   private adapter: AdapterWithPullSince | null
+  private readonly collectionAdapters = new Map<string, AdapterWithPullSince>()
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
@@ -133,13 +134,14 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     return this.disposed
   }
 
-  private requireAdapter(): AdapterWithPullSince {
-    if (!this.adapter) {
+  private requireAdapter(collectionId: string): AdapterWithPullSince {
+    const adapter = this.collectionAdapters.get(collectionId) ?? this.adapter
+    if (!adapter) {
       throw new Error(
         `ElectronCollectionCoordinator: adapter not set. Call setAdapter() before using leader-side operations.`,
       )
     }
-    return this.adapter
+    return adapter
   }
 
   constructor(options: ElectronCollectionCoordinatorOptions) {
@@ -158,6 +160,14 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
    */
   setAdapter(adapter: AdapterWithPullSince): void {
     this.adapter = adapter
+  }
+
+  /** Register the schema/mode-specific adapter for one collection. */
+  setCollectionAdapter(
+    collectionId: string,
+    adapter: AdapterWithPullSince,
+  ): void {
+    this.collectionAdapters.set(collectionId, adapter)
   }
 
   // -----------------------------------------------------------------------
@@ -223,7 +233,11 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     spec: PersistedIndexSpec,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
-      await this.requireAdapter().ensureIndex(collectionId, signature, spec)
+      await this.requireAdapter(collectionId).ensureIndex(
+        collectionId,
+        signature,
+        spec,
+      )
       return
     }
 
@@ -305,6 +319,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
 
     this.channel.close()
     this.collections.clear()
+    this.collectionAdapters.clear()
   }
 
   // -----------------------------------------------------------------------
@@ -348,7 +363,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
 
           try {
             // Restore stream position from DB before claiming leadership
-            const adapter = this.requireAdapter()
+            const adapter = this.requireAdapter(collectionId)
             if (adapter.getStreamPosition) {
               const pos = await adapter.getStreamPosition(collectionId)
               state.latestTerm = pos.latestTerm
@@ -610,7 +625,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     },
   ): Promise<RPCResponse> {
     await this.withWriterLock(() =>
-      this.requireAdapter().ensureIndex(
+      this.requireAdapter(collectionId).ensureIndex(
         collectionId,
         request.signature,
         request.spec,
@@ -676,7 +691,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
     }
 
     await this.withWriterLock(() =>
-      this.requireAdapter().applyCommittedTx(collectionId, tx),
+      this.requireAdapter(collectionId).applyCommittedTx(collectionId, tx),
     )
 
     // Track envelope for dedup
@@ -736,7 +751,7 @@ export class ElectronCollectionCoordinator implements PersistedCollectionCoordin
   ): Promise<PullSinceResponse> {
     const state = this.collections.get(collectionId)
 
-    const adapter = this.requireAdapter()
+    const adapter = this.requireAdapter(collectionId)
     if (!adapter.pullSince) {
       return {
         type: `rpc:pullSince:res`,

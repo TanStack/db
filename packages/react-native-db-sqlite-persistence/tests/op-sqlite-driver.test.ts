@@ -1568,6 +1568,45 @@ it(`serializes unrelated operations behind an active transaction`, async () => {
   expect(rows).toEqual([{ id: `outside`, title: `Outside transaction` }])
 })
 
+it(`serializes transactions across drivers for one database handle`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
+
+  const firstDriver = new OpSQLiteDriver({ database })
+  const secondDriver = new OpSQLiteDriver({ database })
+  await firstDriver.exec(`CREATE TABLE shared_tx_test (value INTEGER NOT NULL)`)
+
+  const firstTransaction = firstDriver.transaction(
+    async (transactionDriver) => {
+      await transactionDriver.run(
+        `INSERT INTO shared_tx_test (value) VALUES (?)`,
+        [1],
+      )
+      await Promise.resolve()
+      await transactionDriver.run(
+        `INSERT INTO shared_tx_test (value) VALUES (?)`,
+        [2],
+      )
+    },
+  )
+  const secondTransaction = secondDriver.transaction(
+    async (transactionDriver) => {
+      await transactionDriver.run(
+        `INSERT INTO shared_tx_test (value) VALUES (?)`,
+        [3],
+      )
+    },
+  )
+
+  await Promise.all([firstTransaction, secondTransaction])
+
+  const rows = await firstDriver.query<{ value: number }>(
+    `SELECT value FROM shared_tx_test ORDER BY rowid ASC`,
+  )
+  expect(rows.map((row) => row.value)).toEqual([1, 2, 3])
+})
+
 it(`throws config error when db execute methods are missing`, () => {
   expect(() => new OpSQLiteDriver({ database: {} as never })).toThrowError(
     InvalidPersistedCollectionConfigError,

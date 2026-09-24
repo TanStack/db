@@ -1,7 +1,11 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../src'
-import type { PersistedCollectionUtils, PersistenceAdapter } from '../src'
+import type {
+  PersistedCollectionUtils,
+  PersistedKeySetEvidence,
+  PersistenceAdapter,
+} from '../src'
 import type { SyncConfig, UtilsRecord } from '@tanstack/db'
 
 type Todo = {
@@ -19,11 +23,43 @@ interface SyncExtraUtils extends UtilsRecord {
 
 const adapter: PersistenceAdapter = {
   loadSubset: () => Promise.resolve([]),
+  loadResumeSnapshot: () =>
+    Promise.resolve({
+      rows: [],
+      keySet: { status: `consistent` },
+      collectionMetadata: [],
+      latestTerm: 0,
+      latestSeq: 0,
+      latestRowVersion: 0,
+      resetEpoch: 0,
+    }),
   applyCommittedTx: () => Promise.resolve(),
   ensureIndex: () => Promise.resolve(),
 }
 
 describe(`persisted collection types`, () => {
+  it(`requires an exact atomic resume snapshot contract`, () => {
+    type LoadResumeSnapshot = PersistenceAdapter[`loadResumeSnapshot`]
+    type ResumeSnapshot = Awaited<ReturnType<LoadResumeSnapshot>>
+
+    expectTypeOf(adapter).toMatchTypeOf<PersistenceAdapter>()
+    expectTypeOf(adapter.loadResumeSnapshot).toMatchTypeOf<LoadResumeSnapshot>()
+    expectTypeOf<Parameters<LoadResumeSnapshot>[1]>().toEqualTypeOf<
+      | {
+          requiredIndexSignatures?: ReadonlyArray<string>
+          includeRows?: boolean
+        }
+      | undefined
+    >()
+    expectTypeOf<ResumeSnapshot[`keySet`]>().toEqualTypeOf<
+      PersistedKeySetEvidence | undefined
+    >()
+
+    // @ts-expect-error key-set evidence has exactly three supported states
+    const invalidEvidence: PersistedKeySetEvidence = { status: `verified` }
+    expectTypeOf(invalidEvidence).toEqualTypeOf<PersistedKeySetEvidence>()
+  })
+
   it(`adds persisted utils in sync-absent mode`, () => {
     const options = persistedCollectionOptions<
       Todo,
