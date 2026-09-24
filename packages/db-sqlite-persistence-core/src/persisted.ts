@@ -1,4 +1,6 @@
 import {
+  SYNC_PERSISTENCE_PROTOCOL,
+  SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
   compileSingleRowExpression,
   safeRandomUUID,
@@ -6,13 +8,26 @@ import {
   withCollectionConfigFactory,
 } from '@tanstack/db'
 import {
+  DuplicateRemoteSubsetOwnerError,
   InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
   InvalidPersistenceAdapterError,
   InvalidSyncConfigError,
+  PersistedCollectionDurabilityError,
+  toPersistedCollectionDurabilityError,
 } from './errors'
+import {
+  toProcessLocalLoadSubsetOptions,
+  toTransportedLoadSubsetOptions,
+} from './remote-subset-wire'
+import {
+  reportRemoteSubsetOwnerError,
+  unloadRemoteSubsetOwner,
+} from './remote-subset-owner'
+import type { TransportedLoadSubsetOptions } from './remote-subset-wire'
+import type { RemoteSubsetOwner } from './remote-subset-owner'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -29,6 +44,9 @@ import type {
   SyncConfig,
   SyncConfigRes,
   SyncMetadataApi,
+  SyncPersistenceCapabilityV1,
+  SyncPersistenceKeySetEvidence,
+  SyncPersistenceScanOptions,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
@@ -39,12 +57,20 @@ export type PersistedMutationEnvelope =
       type: `insert`
       key: string | number
       value: Record<string, unknown>
+      /** Persisted row metadata, not optimistic-transaction metadata. */
+      metadata?: unknown
+      /** Whether this envelope replaces or deletes the persisted row metadata. */
+      metadataChanged?: boolean
     }
   | {
       mutationId: string
       type: `update`
       key: string | number
       value: Record<string, unknown>
+      /** Persisted row metadata, not optimistic-transaction metadata. */
+      metadata?: unknown
+      /** Whether this envelope replaces or deletes the persisted row metadata. */
+      metadataChanged?: boolean
     }
   | {
       mutationId: string
@@ -97,7 +123,8 @@ export type TxCommitted = {
 export type EnsureRemoteSubsetRequest = {
   type: `rpc:ensureRemoteSubset:req`
   rpcId: string
-  options: LoadSubsetOptions
+  acquisitionId: string
+  options: TransportedLoadSubsetOptions
 }
 
 export type EnsureRemoteSubsetResponse =
@@ -105,9 +132,30 @@ export type EnsureRemoteSubsetResponse =
       type: `rpc:ensureRemoteSubset:res`
       rpcId: string
       ok: true
+      leaderId: string
     }
   | {
       type: `rpc:ensureRemoteSubset:res`
+      rpcId: string
+      ok: false
+      error: string
+      retryable?: true
+    }
+
+export type ReleaseRemoteSubsetRequest = {
+  type: `rpc:releaseRemoteSubset:req`
+  rpcId: string
+  acquisitionId: string
+}
+
+export type ReleaseRemoteSubsetResponse =
+  | {
+      type: `rpc:releaseRemoteSubset:res`
+      rpcId: string
+      ok: true
+    }
+  | {
+      type: `rpc:releaseRemoteSubset:res`
       rpcId: string
       ok: false
       error: string
@@ -136,6 +184,48 @@ export type ApplyLocalMutationsResponse =
       ok: false
       code: `NOT_LEADER` | `VALIDATION_ERROR` | `CONFLICT` | `TIMEOUT`
       error: string
+    }
+  | {
+      type: `rpc:applyLocalMutations:res`
+      rpcId: string
+      ok: false
+      code: `PERSISTENCE_ERROR`
+      error: string
+      sourceCode?: string | number
+      path?: string | ReadonlyArray<string | number>
+    }
+
+export type ApplyCommittedTxRequest = {
+  type: `rpc:applyCommittedTx:req`
+  rpcId: string
+  envelopeId: string
+  tx: PersistedTx
+}
+
+export type ApplyCommittedTxResponse =
+  | {
+      type: `rpc:applyCommittedTx:res`
+      rpcId: string
+      ok: true
+      term: number
+      seq: number
+      latestRowVersion: number
+    }
+  | {
+      type: `rpc:applyCommittedTx:res`
+      rpcId: string
+      ok: false
+      code: `NOT_LEADER` | `CONFLICT` | `TIMEOUT`
+      error: string
+    }
+  | {
+      type: `rpc:applyCommittedTx:res`
+      rpcId: string
+      ok: false
+      code: `PERSISTENCE_ERROR`
+      error: string
+      sourceCode?: string | number
+      path?: string | ReadonlyArray<string | number>
     }
 
 export type PullSinceRequest = {
@@ -216,8 +306,15 @@ export type PersistedScannedRow<
   metadata?: unknown
 }
 
-export type PersistedRowScanOptions = {
-  metadataOnly?: boolean
+export type PersistedRowScanOptions = SyncPersistenceScanOptions
+
+export type PersistedKeySetEvidence = SyncPersistenceKeySetEvidence
+
+type PersistedResumeGeneration = {
+  latestTerm: number
+  latestSeq: number
+  latestRowVersion: number
+  resetEpoch: number
 }
 
 export type PersistedTx<
@@ -262,6 +359,25 @@ export interface PersistenceAdapter {
       metadata?: unknown
     }>
   >
+  loadResumeSnapshot: (
+    collectionId: string,
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      includeRows?: boolean
+    },
+  ) => Promise<{
+    rows: Array<{
+      key: string | number
+      value: Record<string, unknown>
+      metadata?: unknown
+    }>
+    keySet?: PersistedKeySetEvidence
+    collectionMetadata: Array<{ key: string; value: unknown }>
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }>
   applyCommittedTx: (collectionId: string, tx: PersistedTx) => Promise<void>
   loadCollectionMetadata?: (
     collectionId: string,
@@ -281,6 +397,14 @@ export interface PersistenceAdapter {
     latestSeq: number
     latestRowVersion: number
   }>
+}
+
+export type { RemoteSubsetOwner } from './remote-subset-owner'
+
+type SingleProcessRemoteSubsetAcquisition = {
+  owner: RemoteSubsetOwner
+  options: TransportedLoadSubsetOptions
+  load: Promise<void>
 }
 
 export interface SQLiteDriver {
@@ -307,10 +431,18 @@ export interface PersistedCollectionCoordinator {
   publish: (collectionId: string, message: ProtocolEnvelope<unknown>) => void
   isLeader: (collectionId: string) => boolean
   ensureLeadership: (collectionId: string) => Promise<void>
-  requestEnsureRemoteSubset?: (
+  requestEnsureRemoteSubset: (
     collectionId: string,
     options: LoadSubsetOptions,
   ) => Promise<void>
+  requestReleaseRemoteSubset: (
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ) => Promise<void>
+  registerRemoteSubsetOwner: (
+    collectionId: string,
+    owner: RemoteSubsetOwner,
+  ) => () => void
   requestEnsurePersistedIndex: (
     collectionId: string,
     signature: string,
@@ -320,6 +452,10 @@ export interface PersistedCollectionCoordinator {
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ) => Promise<ApplyLocalMutationsResponse>
+  requestApplyCommittedTx: (
+    collectionId: string,
+    tx: PersistedTx,
+  ) => Promise<ApplyCommittedTxResponse>
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,
@@ -406,7 +542,11 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
     | `publish`
     | `isLeader`
     | `ensureLeadership`
+    | `requestEnsureRemoteSubset`
+    | `requestReleaseRemoteSubset`
+    | `registerRemoteSubsetOwner`
     | `requestEnsurePersistedIndex`
+    | `requestApplyCommittedTx`
   >
 > = [
   `getNodeId`,
@@ -414,15 +554,19 @@ const REQUIRED_COORDINATOR_METHODS: ReadonlyArray<
   `publish`,
   `isLeader`,
   `ensureLeadership`,
+  `requestEnsureRemoteSubset`,
+  `requestReleaseRemoteSubset`,
+  `registerRemoteSubsetOwner`,
   `requestEnsurePersistedIndex`,
+  `requestApplyCommittedTx`,
 ]
 
 const REQUIRED_ADAPTER_METHODS: ReadonlyArray<
   keyof Pick<
     PersistenceAdapter,
-    `loadSubset` | `applyCommittedTx` | `ensureIndex`
+    `loadSubset` | `loadResumeSnapshot` | `applyCommittedTx` | `ensureIndex`
   >
-> = [`loadSubset`, `applyCommittedTx`, `ensureIndex`]
+> = [`loadSubset`, `loadResumeSnapshot`, `applyCommittedTx`, `ensureIndex`]
 
 const TARGETED_INVALIDATION_KEY_LIMIT = 128
 const DEFAULT_DB_NAME = `tanstack-db`
@@ -441,6 +585,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
   truncate: (() => void) | null
   metadata: SyncMetadataApi<TKey> | null
+  markError: ((error: unknown) => void) | null
 }
 
 /**
@@ -449,6 +594,12 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
  */
 export class SingleProcessCoordinator implements PersistedCollectionCoordinator {
   private readonly nodeId: string
+  private readonly collectionAdapters = new Map<string, PersistenceAdapter>()
+  private readonly remoteSubsetOwners = new Map<string, RemoteSubsetOwner>()
+  private readonly remoteSubsetAcquisitions = new Map<
+    string,
+    Map<LoadSubsetOptions, SingleProcessRemoteSubsetAcquisition>
+  >()
 
   constructor(nodeId: string = safeRandomUUID()) {
     this.nodeId = nodeId
@@ -470,9 +621,128 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
 
   public async ensureLeadership(): Promise<void> {}
 
-  public async requestEnsureRemoteSubset(): Promise<void> {}
+  public async requestEnsureRemoteSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    const transported = toTransportedLoadSubsetOptions(options)
+    const localOptions = toProcessLocalLoadSubsetOptions(options, transported)
+    const owner = this.remoteSubsetOwners.get(collectionId)
+    if (!owner) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SingleProcessCoordinator has no remote subset owner configured for collection "${collectionId}"`,
+      )
+    }
+    let acquisitions = this.remoteSubsetAcquisitions.get(collectionId)
+    if (!acquisitions) {
+      acquisitions = new Map()
+      this.remoteSubsetAcquisitions.set(collectionId, acquisitions)
+    }
+    const existing = acquisitions.get(options)
+    if (existing) {
+      await existing.load
+      return
+    }
+
+    let resolveLoad!: () => void
+    let rejectLoad!: (error: unknown) => void
+    const load = new Promise<void>((resolve, reject) => {
+      resolveLoad = resolve
+      rejectLoad = reject
+    })
+    acquisitions.set(options, { owner, options: localOptions, load })
+    try {
+      const ownerLoad = owner(localOptions)
+      void Promise.resolve(ownerLoad).then(resolveLoad, (error) => {
+        reportRemoteSubsetOwnerError(owner, error)
+        rejectLoad(error)
+      })
+    } catch (error) {
+      reportRemoteSubsetOwnerError(owner, error)
+      rejectLoad(error)
+    }
+    await load
+  }
+
+  public async requestReleaseRemoteSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+  ): Promise<void> {
+    const acquisitions = this.remoteSubsetAcquisitions.get(collectionId)
+    const acquisition = acquisitions?.get(options)
+    if (!acquisition) return
+    acquisitions!.delete(options)
+    if (acquisitions!.size === 0) {
+      this.remoteSubsetAcquisitions.delete(collectionId)
+    }
+    try {
+      await acquisition.load
+    } catch {
+      // Calling the owner transferred the lease even when its load rejected.
+    }
+    await unloadRemoteSubsetOwner(acquisition.owner, acquisition.options)
+  }
+
+  public registerRemoteSubsetOwner(
+    collectionId: string,
+    owner: RemoteSubsetOwner,
+  ): () => void {
+    if (this.remoteSubsetOwners.has(collectionId)) {
+      throw new DuplicateRemoteSubsetOwnerError(collectionId)
+    }
+    this.remoteSubsetOwners.set(collectionId, owner)
+    return () => {
+      if (this.remoteSubsetOwners.get(collectionId) !== owner) return
+      const acquisitions = this.remoteSubsetAcquisitions.get(collectionId)
+      this.remoteSubsetAcquisitions.delete(collectionId)
+      this.remoteSubsetOwners.delete(collectionId)
+      for (const acquisition of acquisitions?.values() ?? []) {
+        void (async () => {
+          try {
+            await acquisition.load
+          } catch {
+            // Calling the owner transferred the lease even when its load rejected.
+          }
+          await unloadRemoteSubsetOwner(owner, acquisition.options)
+        })().catch(() => undefined)
+      }
+    }
+  }
 
   public async requestEnsurePersistedIndex(): Promise<void> {}
+
+  public setAdapterForCollection(
+    collectionId: string,
+    adapter: PersistenceAdapter,
+  ): void {
+    this.collectionAdapters.set(collectionId, adapter)
+  }
+
+  public async requestApplyCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+  ): Promise<ApplyCommittedTxResponse> {
+    const adapter = this.collectionAdapters.get(collectionId)
+    if (!adapter) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SingleProcessCoordinator has no persistence adapter configured for collection "${collectionId}"`,
+      )
+    }
+
+    try {
+      await adapter.applyCommittedTx(collectionId, tx)
+    } catch (error) {
+      throw toPersistedCollectionDurabilityError(collectionId, error)
+    }
+    return {
+      type: `rpc:applyCommittedTx:res`,
+      rpcId: safeRandomUUID(),
+      ok: true,
+      term: tx.term,
+      seq: tx.seq,
+      latestRowVersion: tx.rowVersion,
+    }
+  }
 
   public pullSince(): Promise<PullSinceResponse> {
     return Promise.resolve({
@@ -510,10 +780,14 @@ function validatePersistenceAdapter(adapter: PersistenceAdapter): void {
 
 function resolvePersistence(
   persistence: PersistedCollectionPersistence,
+  collectionId: string,
 ): PersistedResolvedPersistence {
   validatePersistenceAdapter(persistence.adapter)
 
   const coordinator = persistence.coordinator ?? new SingleProcessCoordinator()
+  if (coordinator instanceof SingleProcessCoordinator) {
+    coordinator.setAdapterForCollection(collectionId, persistence.adapter)
+  }
   validatePersistedCollectionCoordinator(coordinator)
 
   return {
@@ -525,9 +799,13 @@ function resolvePersistence(
 function resolvePersistenceForMode(
   persistence: PersistedCollectionPersistence,
   mode: PersistedCollectionMode,
+  collectionId: string,
 ): PersistedResolvedPersistence {
   const modeSpecificPersistence = persistence.resolvePersistenceForMode?.(mode)
-  return resolvePersistence(modeSpecificPersistence ?? persistence)
+  return resolvePersistence(
+    modeSpecificPersistence ?? persistence,
+    collectionId,
+  )
 }
 
 function resolvePersistenceForCollection(
@@ -541,10 +819,17 @@ function resolvePersistenceForCollection(
   const collectionSpecificPersistence =
     persistence.resolvePersistenceForCollection?.(options)
   if (collectionSpecificPersistence) {
-    return resolvePersistence(collectionSpecificPersistence)
+    return resolvePersistence(
+      collectionSpecificPersistence,
+      options.collectionId,
+    )
   }
 
-  return resolvePersistenceForMode(persistence, options.mode)
+  return resolvePersistenceForMode(
+    persistence,
+    options.mode,
+    options.collectionId,
+  )
 }
 
 function hasOwnSyncKey(options: object): options is { sync: unknown } {
@@ -591,6 +876,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   >
   truncate: boolean
   internal: boolean
+  expectedResumeGenerationOwner?: symbol
   signal?: AbortSignal
   resolveApplied?: () => void
   rejectApplied?: (error: unknown) => void
@@ -770,6 +1056,8 @@ function toPersistedMutationEnvelope(
       ? (mutation.original as Record<string, unknown>)
       : mutation.modified
 
+  // PendingMutation.metadata belongs to the optimistic transaction and is
+  // consumed by mutation handlers. It must not overwrite persisted row metadata.
   return {
     mutationId: mutation.mutationId,
     type: mutation.type,
@@ -802,17 +1090,25 @@ class PersistedCollectionRuntime<
     commit: null,
     truncate: null,
     metadata: null,
+    markError: null,
   }
   private started = false
   private startupMetadataPromise: Promise<void> | null = null
   private startPromise: Promise<void> | null = null
   private resumeBaselinePromise: Promise<void> | null = null
+  private resumeCertificationPromise: Promise<void> | null = null
+  private persistedKeySetEvidence: PersistedKeySetEvidence | undefined
+  private persistedResumeGeneration: PersistedResumeGeneration | undefined
+  private resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
   private appliedReceiptSequence = 0
+  private syncErrorReported = false
+  private reportedSyncError: unknown
   private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private hydratingGeneration: number | null = null
   private coordinatorUnsubscribe: (() => void) | null = null
+  private remoteSubsetOwnerUnsubscribe: (() => void) | null = null
   private indexAddedUnsubscribe: (() => void) | null = null
   private indexRemovedUnsubscribe: (() => void) | null = null
   private remoteEnsureRetryTimer: ReturnType<typeof setTimeout> | null = null
@@ -835,6 +1131,8 @@ class PersistedCollectionRuntime<
 
   setSyncControls(syncControls: SyncControlFns<T, TKey>): void {
     this.advanceLifecycle()
+    this.syncErrorReported = false
+    this.reportedSyncError = undefined
 
     const commit = syncControls.commit
     this.syncControls = {
@@ -843,6 +1141,30 @@ class PersistedCollectionRuntime<
         ? (signal) => this.trackAppliedReceipt(commit(signal))
         : null,
     }
+  }
+
+  reportSyncError(error: unknown): unknown {
+    const markError = this.syncControls.markError
+    if (this.syncErrorReported) return this.reportedSyncError
+    if (!markError) return error
+
+    this.syncErrorReported = true
+    this.reportedSyncError = error
+    try {
+      markError(error)
+    } catch {
+      // Reporting must not replace the original asynchronous failure.
+    }
+    return error
+  }
+
+  registerRemoteSubsetOwner(owner: RemoteSubsetOwner): void {
+    this.remoteSubsetOwnerUnsubscribe?.()
+    this.remoteSubsetOwnerUnsubscribe =
+      this.persistence.coordinator.registerRemoteSubsetOwner(
+        this.collectionId,
+        owner,
+      )
   }
 
   private trackAppliedReceipt(receipt: SyncAppliedReceipt): SyncAppliedReceipt {
@@ -871,6 +1193,7 @@ class PersistedCollectionRuntime<
       commit: null,
       truncate: null,
       metadata: null,
+      markError: null,
     }
   }
 
@@ -900,13 +1223,14 @@ class PersistedCollectionRuntime<
     }
   }
 
-  async ensureStarted(): Promise<void> {
+  ensureStarted(): Promise<void> {
     if (this.startPromise) {
       return this.startPromise
     }
 
     const lifecycleGeneration = this.lifecycleGeneration
     this.startPromise = this.startInternal(lifecycleGeneration)
+    void this.startPromise.catch(() => undefined)
     return this.startPromise
   }
 
@@ -926,6 +1250,37 @@ class PersistedCollectionRuntime<
     return this.resumeBaselinePromise
   }
 
+  ensureResumeBaselineCertified(): Promise<void> {
+    if (this.resumeCertificationPromise) {
+      return this.resumeCertificationPromise
+    }
+
+    const lifecycleGeneration = this.lifecycleGeneration
+    this.resumeCertificationPromise = (async () => {
+      await this.ensureStarted()
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+
+      const snapshot = await this.persistence.adapter.loadResumeSnapshot(
+        this.collectionId,
+        {
+          requiredIndexSignatures: this.getRequiredIndexSignatures(),
+          includeRows: false,
+        },
+      )
+      if (lifecycleGeneration !== this.lifecycleGeneration) return
+      this.bindResumeSnapshotEvidence(snapshot)
+    })()
+    return this.resumeCertificationPromise
+  }
+
+  getKeySetEvidence(): PersistedKeySetEvidence | undefined {
+    return this.persistedKeySetEvidence
+  }
+
+  getResumeGenerationOwner(): symbol {
+    return this.resumeGenerationOwner
+  }
+
   private async hydrateBaseline(lifecycleGeneration: number): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
 
@@ -937,6 +1292,7 @@ class PersistedCollectionRuntime<
       await this.hydrateSubsetUnsafe(baseline, {
         requestRemoteEnsure: false,
         lifecycleGeneration,
+        bindKeySetEvidence: true,
       })
     })
     if (lifecycleGeneration !== this.lifecycleGeneration) return
@@ -977,23 +1333,19 @@ class PersistedCollectionRuntime<
   private async loadStartupMetadataInternal(
     lifecycleGeneration: number,
   ): Promise<void> {
-    // Restore stream position from the database so that new mutations
-    // don't collide with previously applied transactions.
-    if (this.persistence.adapter.getStreamPosition) {
-      const position = await this.persistence.adapter.getStreamPosition(
-        this.collectionId,
-      )
-      if (lifecycleGeneration !== this.lifecycleGeneration) return
-      this.observeStreamPosition(
-        position.latestTerm,
-        position.latestSeq,
-        position.latestRowVersion,
-      )
-    }
-
-    const collectionMetadata = await this.loadCollectionMetadataSnapshot()
+    const snapshot = await this.persistence.adapter.loadResumeSnapshot(
+      this.collectionId,
+      { includeRows: false },
+    )
     if (lifecycleGeneration !== this.lifecycleGeneration) return
-    this.replaceCollectionMetadataSnapshot(collectionMetadata)
+    this.persistedResumeGeneration = this.getResumeSnapshotGeneration(snapshot)
+    this.persistedKeySetEvidence = snapshot.keySet
+    this.observeStreamPosition(
+      snapshot.latestTerm,
+      snapshot.latestSeq,
+      snapshot.latestRowVersion,
+    )
+    this.replaceCollectionMetadataSnapshot(snapshot.collectionMetadata)
   }
 
   private async loadCollectionMetadataSnapshot(): Promise<
@@ -1046,17 +1398,50 @@ class PersistedCollectionRuntime<
     upstreamLoadSubset?: LoadSubsetFn,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
+    const routeRemoteDemandDuringHydration =
+      this.canRouteRemoteDemandThroughCoordinator()
     this.activeSubsets.set(this.getSubsetKey(options), options)
 
     const appliedCursor = this.appliedReceiptSequence
     await this.applyMutex.run(() =>
       this.hydrateSubsetUnsafe(options, {
-        requestRemoteEnsure: this.mode === `sync-present`,
+        requestRemoteEnsure:
+          this.mode === `sync-present` && !routeRemoteDemandDuringHydration,
         lifecycleGeneration,
       }),
     )
     if (lifecycleGeneration !== this.lifecycleGeneration) return
     await this.waitForAppliedReceiptsAfter(appliedCursor)
+
+    if (
+      options.signal?.aborted ||
+      this.activeSubsets.get(this.getSubsetKey(options)) !== options
+    ) {
+      return
+    }
+
+    if (this.canRouteRemoteDemandThroughCoordinator()) {
+      try {
+        await this.persistence.coordinator.requestEnsureRemoteSubset(
+          this.collectionId,
+          options,
+        )
+      } catch (error) {
+        if (
+          options.signal?.aborted ||
+          (typeof error === `object` &&
+            error !== null &&
+            `name` in error &&
+            error.name === `AbortError`)
+        ) {
+          this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+          throw error
+        }
+        this.queueRemoteSubsetEnsure(options)
+        throw error
+      }
+      return
+    }
 
     if (upstreamLoadSubset) {
       try {
@@ -1086,7 +1471,27 @@ class PersistedCollectionRuntime<
   ): void {
     this.activeSubsets.delete(this.getSubsetKey(options))
     this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
-    upstreamUnloadSubset?.(options)
+    if (this.mode === `sync-present`) {
+      void this.persistence.coordinator
+        .requestReleaseRemoteSubset(this.collectionId, options)
+        .catch((error) => {
+          this.reportSyncError(error)
+        })
+    }
+    if (upstreamUnloadSubset) {
+      try {
+        const result = (
+          upstreamUnloadSubset as unknown as (
+            options: LoadSubsetOptions,
+          ) => unknown
+        )(options)
+        void Promise.resolve(result).catch((error) => {
+          this.reportSyncError(error)
+        })
+      } catch (error) {
+        this.reportSyncError(error)
+      }
+    }
   }
 
   async forceReloadSubset(options: LoadSubsetOptions): Promise<void> {
@@ -1183,6 +1588,10 @@ class PersistedCollectionRuntime<
     }
 
     await this.applyMutex.run(async () => {
+      // Startup metadata establishes the durable term/sequence boundary. A
+      // mutation admitted before it resolves must wait rather than allocate a
+      // default position that can collide with an already-applied transaction.
+      await this.ensureStartupMetadataLoaded()
       const acceptedMutationIds =
         await this.persistCollectionMutationsUnsafe(mutations)
       const acceptedMutationIdSet = new Set(acceptedMutationIds)
@@ -1217,8 +1626,21 @@ class PersistedCollectionRuntime<
   cleanup(): void {
     this.advanceLifecycle()
 
+    if (this.mode === `sync-present`) {
+      for (const options of this.activeSubsets.values()) {
+        void this.persistence.coordinator
+          .requestReleaseRemoteSubset(this.collectionId, options)
+          .catch((error) => {
+            this.reportSyncError(error)
+          })
+      }
+    }
+
     this.coordinatorUnsubscribe?.()
     this.coordinatorUnsubscribe = null
+
+    this.remoteSubsetOwnerUnsubscribe?.()
+    this.remoteSubsetOwnerUnsubscribe = null
 
     this.indexAddedUnsubscribe?.()
     this.indexAddedUnsubscribe = null
@@ -1248,6 +1670,10 @@ class PersistedCollectionRuntime<
     this.startupMetadataPromise = null
     this.startPromise = null
     this.resumeBaselinePromise = null
+    this.resumeCertificationPromise = null
+    this.persistedKeySetEvidence = undefined
+    this.persistedResumeGeneration = undefined
+    this.resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   }
 
   private withInternalApply<TResult>(task: () => TResult): TResult {
@@ -1301,14 +1727,38 @@ class PersistedCollectionRuntime<
     config: {
       requestRemoteEnsure: boolean
       lifecycleGeneration: number
+      bindKeySetEvidence?: boolean
     },
   ): Promise<void> {
     this.hydratingGeneration = config.lifecycleGeneration
     try {
-      const rows = await this.loadSubsetRowsUnsafe(options)
+      let rows: Array<{ key: TKey; value: T; metadata?: unknown }>
+      if (config.bindKeySetEvidence) {
+        const snapshot = await this.persistence.adapter.loadResumeSnapshot(
+          this.collectionId,
+          {
+            requiredIndexSignatures: this.getRequiredIndexSignatures(),
+            includeRows: true,
+          },
+        )
+        rows = snapshot.rows as Array<{
+          key: TKey
+          value: T
+          metadata?: unknown
+        }>
+        if (config.lifecycleGeneration !== this.lifecycleGeneration) return
+        this.bindResumeSnapshotEvidence(snapshot)
+      } else {
+        rows = await this.loadSubsetRowsUnsafe(options)
+      }
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
 
-      this.applyRowsToCollection(rows)
+      if (
+        !config.bindKeySetEvidence ||
+        this.persistedKeySetEvidence?.status !== `incompatible`
+      ) {
+        this.applyRowsToCollection(rows)
+      }
     } finally {
       if (this.hydratingGeneration === config.lifecycleGeneration) {
         this.hydratingGeneration = null
@@ -1350,6 +1800,66 @@ class PersistedCollectionRuntime<
 
       this.syncControls.commit?.()
     })
+  }
+
+  private getResumeSnapshotGeneration(snapshot: {
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }): PersistedResumeGeneration {
+    return {
+      latestTerm: snapshot.latestTerm,
+      latestSeq: snapshot.latestSeq,
+      latestRowVersion: snapshot.latestRowVersion,
+      resetEpoch: snapshot.resetEpoch,
+    }
+  }
+
+  private isExpectedResumeGeneration(
+    generation: PersistedResumeGeneration,
+  ): boolean {
+    const expected = this.persistedResumeGeneration
+    return (
+      expected !== undefined &&
+      expected.latestTerm === generation.latestTerm &&
+      expected.latestSeq === generation.latestSeq &&
+      expected.latestRowVersion === generation.latestRowVersion &&
+      expected.resetEpoch === generation.resetEpoch
+    )
+  }
+
+  private bindResumeSnapshotEvidence(snapshot: {
+    keySet?: PersistedKeySetEvidence
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }): void {
+    const generation = this.getResumeSnapshotGeneration(snapshot)
+    const previousEvidenceStatus = this.persistedKeySetEvidence?.status
+    // An uncertified sync baseline never authorized a persisted resume cursor,
+    // so a later atomic snapshot may replace its evidence while the source
+    // performs the already-required fresh snapshot. Local-only collections
+    // have no remote cursor to fence; a managed write may advance a still-
+    // consistent SQLite baseline during startup. Incompatible evidence remains
+    // fail-closed in both modes.
+    const mayAcceptUnownedGeneration =
+      (this.mode === `sync-present` &&
+        previousEvidenceStatus !== `consistent` &&
+        previousEvidenceStatus !== `incompatible`) ||
+      (this.mode === `sync-absent` &&
+        previousEvidenceStatus === `consistent` &&
+        snapshot.keySet?.status === `consistent`)
+    this.observeStreamPosition(
+      snapshot.latestTerm,
+      snapshot.latestSeq,
+      snapshot.latestRowVersion,
+    )
+    this.persistedKeySetEvidence =
+      this.isExpectedResumeGeneration(generation) || mayAcceptUnownedGeneration
+        ? snapshot.keySet
+        : { status: `incompatible` }
   }
 
   private replaceCollectionSnapshot(
@@ -1497,51 +2007,63 @@ class PersistedCollectionRuntime<
       return
     }
 
-    const streamPosition = this.nextLocalStreamPosition()
-
     if (
       !transaction.truncate &&
       transaction.operations.length === 0 &&
       transaction.rowMetadataWrites.size === 0 &&
       transaction.collectionMetadataWrites.size === 0
     ) {
-      this.publishTxCommittedEvent(
-        this.createTxCommittedPayload({
-          term: streamPosition.term,
-          seq: streamPosition.seq,
-          txId: safeRandomUUID(),
-          latestRowVersion: streamPosition.rowVersion,
-          changedRows: [],
-          deletedKeys: [],
-          requiresFullReload: true,
-        }),
-      )
       return
     }
 
+    const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
-
-    await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
-    this.publishTxCommittedEvent(
-      this.createTxCommittedPayload({
-        term: tx.term,
-        seq: tx.seq,
-        txId: tx.txId,
-        latestRowVersion: tx.rowVersion,
-        requiresFullReload: transaction.truncate,
-        changedRows: transaction.operations
-          .filter((operation) => operation.type === `update`)
-          .map((operation) => ({
-            key: operation.key,
-            value: operation.value as Record<string, unknown>,
-          })),
-        deletedKeys: transaction.operations
-          .filter((operation) => operation.type === `delete`)
-          .map((operation) => operation.key),
-        rowMetadataMutations: tx.rowMetadataMutations,
-        collectionMetadataMutations: tx.collectionMetadataMutations,
-      }),
+    let response: ApplyCommittedTxResponse
+    try {
+      response = await this.persistence.coordinator.requestApplyCommittedTx(
+        this.collectionId,
+        tx,
+      )
+    } catch (error) {
+      if (error instanceof PersistedCollectionDurabilityError) {
+        this.reportSyncError(error)
+      }
+      throw error
+    }
+    if (!response.ok) {
+      if (response.code === `PERSISTENCE_ERROR`) {
+        const error = new PersistedCollectionDurabilityError(
+          `Failed to durably persist collection "${this.collectionId}": ${response.error}`,
+          {
+            cause: response,
+            code: response.sourceCode ?? response.code,
+            path: response.path,
+          },
+        )
+        this.reportSyncError(error)
+        throw error
+      }
+      throw new Error(
+        `failed to apply external sync transaction through coordinator: ${response.error}`,
+      )
+    }
+    this.observeStreamPosition(
+      response.term,
+      response.seq,
+      response.latestRowVersion,
     )
+    if (
+      transaction.expectedResumeGenerationOwner ===
+        this.resumeGenerationOwner &&
+      this.persistedResumeGeneration !== undefined
+    ) {
+      this.persistedResumeGeneration = {
+        ...this.persistedResumeGeneration,
+        latestTerm: response.term,
+        latestSeq: response.seq,
+        latestRowVersion: response.latestRowVersion,
+      }
+    }
   }
 
   private createPersistedTxFromOperations(
@@ -1690,6 +2212,18 @@ class PersistedCollectionRuntime<
         )
 
       if (!response.ok) {
+        if (response.code === `PERSISTENCE_ERROR`) {
+          const error = new PersistedCollectionDurabilityError(
+            `Failed to durably persist collection "${this.collectionId}": ${response.error}`,
+            {
+              cause: response,
+              code: response.sourceCode ?? response.code,
+              path: response.path,
+            },
+          )
+          this.reportSyncError(error)
+          throw error
+        }
         throw new Error(
           `failed to apply local mutations through coordinator: ${response.error}`,
         )
@@ -1869,10 +2403,26 @@ class PersistedCollectionRuntime<
     return id
   }
 
-  private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
+  private canRouteRemoteDemandThroughCoordinator(): boolean {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset ||
+      this.persistence.coordinator instanceof SingleProcessCoordinator
+    ) {
+      return false
+    }
+
+    // A follower routes demand to the elected owner even when its own source
+    // cannot own acquisitions. Only an elected node needs a local owner.
+    return (
+      !this.persistence.coordinator.isLeader(this.collectionId) ||
+      this.remoteSubsetOwnerUnsubscribe !== null
+    )
+  }
+
+  private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
+    if (
+      options.signal?.aborted ||
+      !this.canRouteRemoteDemandThroughCoordinator() ||
       this.activeSubsets.get(this.getSubsetKey(options)) !== options
     ) {
       return
@@ -1885,7 +2435,7 @@ class PersistedCollectionRuntime<
   private scheduleRemoteEnsureRetry(): void {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset
+      this.persistence.coordinator instanceof SingleProcessCoordinator
     ) {
       return
     }
@@ -1906,7 +2456,7 @@ class PersistedCollectionRuntime<
   private async flushPendingRemoteSubsetEnsures(): Promise<void> {
     if (
       this.mode !== `sync-present` ||
-      !this.persistence.coordinator.requestEnsureRemoteSubset
+      this.persistence.coordinator instanceof SingleProcessCoordinator
     ) {
       return
     }
@@ -1917,6 +2467,13 @@ class PersistedCollectionRuntime<
     }
 
     for (const [subsetKey, options] of this.pendingRemoteSubsetEnsures) {
+      if (
+        options.signal?.aborted ||
+        this.activeSubsets.get(subsetKey) !== options
+      ) {
+        this.pendingRemoteSubsetEnsures.delete(subsetKey)
+        continue
+      }
       try {
         await this.persistence.coordinator.requestEnsureRemoteSubset(
           this.collectionId,
@@ -1924,7 +2481,14 @@ class PersistedCollectionRuntime<
         )
         this.pendingRemoteSubsetEnsures.delete(subsetKey)
       } catch (error) {
-        console.warn(`Failed to ensure remote subset:`, error)
+        if (
+          options.signal?.aborted ||
+          this.activeSubsets.get(subsetKey) !== options
+        ) {
+          this.pendingRemoteSubsetEnsures.delete(subsetKey)
+        } else {
+          console.warn(`Failed to ensure remote subset:`, error)
+        }
       }
     }
 
@@ -2330,7 +2894,13 @@ function createWrappedSyncConfig<
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
+      let sourceResultPromise: Promise<SyncConfigRes> | null = null
+      let resolveSourceResultAssigned!: () => void
+      const sourceResultAssigned = new Promise<void>((resolve) => {
+        resolveSourceResultAssigned = resolve
+      })
       const startupState = { cleanedUp: false }
+      const isCleanedUp = () => startupState.cleanedUp
       const acquisitions = new Map<LoadSubsetOptions, { forwarded: boolean }>()
       runtime.setSyncControls({
         begin: params.begin,
@@ -2338,18 +2908,67 @@ function createWrappedSyncConfig<
         commit: params.commit,
         truncate: params.truncate,
         metadata: params.metadata ?? null,
+        markError: params.markError,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
       )
+
+      const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
+        protocol: SYNC_PERSISTENCE_PROTOCOL,
+        version: SYNC_PERSISTENCE_VERSION,
+        hydrateBaseline: async () => {
+          if (startupState.cleanedUp) return
+          try {
+            await runtime.ensureResumeBaselineHydrated()
+          } catch (error) {
+            throw runtime.reportSyncError(error)
+          }
+        },
+        scanPersistedRows: (options) =>
+          startupState.cleanedUp
+            ? Promise.resolve([])
+            : runtime.scanPersistedRows(options),
+        resumeSnapshot: {
+          certify: async () => {
+            if (startupState.cleanedUp) return
+            try {
+              await runtime.ensureResumeBaselineCertified()
+            } catch (error) {
+              throw runtime.reportSyncError(error)
+            }
+          },
+          getKeySetEvidence: () =>
+            startupState.cleanedUp ? undefined : runtime.getKeySetEvidence(),
+          expectCurrentCommit: () => {
+            if (startupState.cleanedUp) return
+            const openTransaction = getOpenTransaction()
+            if (!openTransaction) {
+              throw new InvalidPersistedCollectionConfigError(
+                `resumeSnapshot.expectCurrentCommit must be called within an open sync transaction`,
+              )
+            }
+            openTransaction.expectedResumeGenerationOwner =
+              runtime.getResumeGenerationOwner()
+          },
+        },
+      }
 
       const wrappedParams = {
         ...params,
         markReady: () => {
           if (startupState.cleanedUp) return
           void (fullStartPromise ?? runtime.ensureStarted())
-            .then(() => {
-              if (startupState.cleanedUp) return
+            .then(async () => {
+              if (isCleanedUp()) return
+              await sourceResultAssigned
+              try {
+                await sourceResultPromise
+              } catch (error) {
+                runtime.reportSyncError(error)
+                return
+              }
+              if (isCleanedUp()) return
               params.markReady()
             })
             .catch((error) => {
@@ -2424,11 +3043,8 @@ function createWrappedSyncConfig<
         },
         metadata: params.metadata
           ? {
+              persistence: persistenceCapability,
               row: {
-                whenHydrated: () =>
-                  startupState.cleanedUp
-                    ? Promise.resolve()
-                    : runtime.ensureResumeBaselineHydrated(),
                 get: (key: TKey) => {
                   if (startupState.cleanedUp) return undefined
                   const openTransaction = getOpenTransaction()
@@ -2444,10 +3060,6 @@ function createWrappedSyncConfig<
                   }
                   return params.metadata!.row.get(key)
                 },
-                scanPersisted: (options?: PersistedRowScanOptions) =>
-                  startupState.cleanedUp
-                    ? Promise.resolve([])
-                    : runtime.scanPersistedRows(options),
                 set: (key: TKey, value: unknown) => {
                   if (startupState.cleanedUp) return
                   const openTransaction = getOpenTransaction()
@@ -2601,6 +3213,8 @@ function createWrappedSyncConfig<
                 openTransaction.collectionMetadataWrites,
               truncate: openTransaction.truncate,
               internal: openTransaction.internal,
+              expectedResumeGenerationOwner:
+                openTransaction.expectedResumeGenerationOwner,
               signal,
               resolveApplied,
               rejectApplied,
@@ -2619,6 +3233,8 @@ function createWrappedSyncConfig<
                   openTransaction.collectionMetadataWrites,
                 truncate: openTransaction.truncate,
                 internal: false,
+                expectedResumeGenerationOwner:
+                  openTransaction.expectedResumeGenerationOwner,
               })
             }
             const persisted = persistAfterApplication()
@@ -2631,7 +3247,7 @@ function createWrappedSyncConfig<
 
       let sourceResult: SyncConfigRes = {}
       fullStartPromise = runtime.ensureStarted()
-      const sourceResultPromise = (async () => {
+      sourceResultPromise = (async () => {
         await runtime.ensureStartupMetadataLoaded()
 
         if (startupState.cleanedUp) {
@@ -2641,8 +3257,31 @@ function createWrappedSyncConfig<
         sourceResult = normalizeSyncFnResult(
           sourceSyncConfig.sync(wrappedParams),
         )
+        if (sourceResult.loadSubset) {
+          const loadSubset = async (options: TransportedLoadSubsetOptions) => {
+            if (startupState.cleanedUp) {
+              throw new Error(`persisted sync source is no longer active`)
+            }
+            await sourceResult.loadSubset?.(
+              options as unknown as LoadSubsetOptions,
+            )
+          }
+          runtime.registerRemoteSubsetOwner(
+            Object.assign(loadSubset, {
+              unloadSubset: (options: TransportedLoadSubsetOptions) =>
+                sourceResult.unloadSubset?.(
+                  options as unknown as LoadSubsetOptions,
+                ),
+              onError: (error: unknown) => runtime.reportSyncError(error),
+            }),
+          )
+        }
         return sourceResult
       })()
+      resolveSourceResultAssigned()
+      void sourceResultPromise.catch((error) => {
+        runtime.reportSyncError(error)
+      })
 
       return {
         cleanup: () => {
@@ -2709,6 +3348,7 @@ function createLoopbackSyncConfig<
         commit: params.commit,
         truncate: params.truncate,
         metadata: params.metadata ?? null,
+        markError: params.markError,
       })
       runtime.setCollection(
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,

@@ -12,20 +12,21 @@ type OpSQLiteRowListLike = {
   _array?: unknown
 }
 
-type OpSQLiteStatementResultLike = {
-  rows?: unknown
-  resultRows?: unknown
-  rowsAffected?: unknown
-  changes?: unknown
-  insertId?: unknown
-  lastInsertRowId?: unknown
-}
-
 const WRITE_RESULT_KEYS = new Set([
   `rowsAffected`,
   `changes`,
   `insertId`,
   `lastInsertRowId`,
+])
+
+const STATEMENT_RESULT_KEYS = new Set([
+  ...WRITE_RESULT_KEYS,
+  `rows`,
+  `resultRows`,
+  `rawRows`,
+  `columnNames`,
+  `results`,
+  `metadata`,
 ])
 
 export type OpSQLiteDatabaseLike = {
@@ -36,11 +37,22 @@ export type OpSQLiteDatabaseLike = {
   close?: () => Promise<void> | void
 }
 
-type OpSQLiteExistingDatabaseOptions = {
+export type OpSQLiteArrayResultMode = `rows` | `statement-results`
+
+type OpSQLiteResultOptions = {
+  /**
+   * Declares how to interpret a bare array when its first entry could be either
+   * a data row or a statement-result envelope. Published op-sqlite methods
+   * return object envelopes and do not need this option.
+   */
+  arrayResultMode?: OpSQLiteArrayResultMode
+}
+
+type OpSQLiteExistingDatabaseOptions = OpSQLiteResultOptions & {
   database: OpSQLiteDatabaseLike
 }
 
-type OpSQLiteOpenDatabaseOptions = {
+type OpSQLiteOpenDatabaseOptions = OpSQLiteResultOptions & {
   openDatabase: () => OpSQLiteDatabaseLike
 }
 
@@ -58,6 +70,34 @@ type AsyncLocalStorageLike<TStore> = {
 }
 
 type AsyncLocalStorageCtor = new <TStore>() => AsyncLocalStorageLike<TStore>
+
+type DatabaseExecutionState = {
+  queue: Promise<void>
+  nextSavepointId: number
+  transactionContextStoragePromise: Promise<AsyncLocalStorageLike<TransactionContextStore> | null> | null
+}
+
+const databaseExecutionStates = new WeakMap<
+  OpSQLiteDatabaseLike,
+  DatabaseExecutionState
+>()
+
+function getDatabaseExecutionState(
+  database: OpSQLiteDatabaseLike,
+): DatabaseExecutionState {
+  const existing = databaseExecutionStates.get(database)
+  if (existing) {
+    return existing
+  }
+
+  const state: DatabaseExecutionState = {
+    queue: Promise.resolve(),
+    nextSavepointId: 1,
+    transactionContextStoragePromise: null,
+  }
+  databaseExecutionStates.set(database, state)
+  return state
+}
 
 let asyncLocalStorageCtorPromise: Promise<AsyncLocalStorageCtor | null> | null =
   null
@@ -112,13 +152,63 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === `object` && value !== null
 }
 
+function hasOwnKey(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function rejectInheritedCarrierKeys(
+  value: Record<string, unknown>,
+  sql: string,
+): void {
+  for (const key of [
+    `rows`,
+    `resultRows`,
+    `rawRows`,
+    `columnNames`,
+    `results`,
+  ]) {
+    if (!hasOwnKey(value, key) && key in value) {
+      unsupportedQueryResult(sql, `inherited ${key} carrier`)
+    }
+  }
+}
+
 function hasWriteResultMarker(value: Record<string, unknown>): boolean {
   for (const key of WRITE_RESULT_KEYS) {
-    if (key in value) {
+    if (hasOwnKey(value, key)) {
       return true
     }
   }
   return false
+}
+
+function isWriteResultEnvelope(value: Record<string, unknown>): boolean {
+  return (
+    hasWriteResultMarker(value) &&
+    Object.keys(value).every((key) => WRITE_RESULT_KEYS.has(key))
+  )
+}
+
+function unsupportedQueryResult(sql: string, details?: string): never {
+  throw new InvalidPersistedCollectionConfigError(
+    `Unsupported op-sqlite query result shape for SQL "${sql}"${
+      details ? `: ${details}` : ``
+    }`,
+  )
+}
+
+function isValidRowList(
+  rowsObject: OpSQLiteRowListLike,
+): rowsObject is OpSQLiteRowListLike & {
+  length: number
+  item: (index: number) => unknown
+} {
+  return (
+    typeof rowsObject.length === `number` &&
+    Number.isSafeInteger(rowsObject.length) &&
+    rowsObject.length >= 0 &&
+    typeof rowsObject.item === `function`
+  )
 }
 
 function toRowArray(rowsValue: unknown): Array<unknown> | null {
@@ -135,14 +225,10 @@ function toRowArray(rowsValue: unknown): Array<unknown> | null {
     return rowsObject._array
   }
 
-  if (
-    typeof rowsObject.length === `number` &&
-    typeof rowsObject.item === `function`
-  ) {
-    const item = rowsObject.item as (index: number) => unknown
+  if (isValidRowList(rowsObject)) {
     const rows: Array<unknown> = []
     for (let index = 0; index < rowsObject.length; index++) {
-      rows.push(item(index))
+      rows.push(rowsObject.item(index))
     }
     return rows
   }
@@ -150,71 +236,231 @@ function toRowArray(rowsValue: unknown): Array<unknown> | null {
   return null
 }
 
+function isRowCarrier(rowsValue: unknown): boolean {
+  if (Array.isArray(rowsValue)) {
+    return true
+  }
+
+  if (!isObjectRecord(rowsValue)) {
+    return false
+  }
+
+  const rowsObject = rowsValue as OpSQLiteRowListLike
+  return Array.isArray(rowsObject._array) || isValidRowList(rowsObject)
+}
+
+function isStatementResultEnvelope(value: Record<string, unknown>): boolean {
+  if (!Object.keys(value).every((key) => STATEMENT_RESULT_KEYS.has(key))) {
+    return false
+  }
+
+  // Bare arrays are also a supported row carrier. A legitimate row can contain
+  // only write-marker aliases, so markers alone cannot prove that an array is a
+  // statement wrapper; wrappers need an actual row structure.
+  const hasRowCarrier =
+    isRowCarrier(value.rows) ||
+    isRowCarrier(value.resultRows) ||
+    Array.isArray(value.results)
+  const hasStructuralCarrier =
+    hasRowCarrier ||
+    Array.isArray(value.rawRows) ||
+    Array.isArray(value.columnNames)
+
+  return (
+    hasRowCarrier ||
+    (hasWriteResultMarker(value) && hasStructuralCarrier) ||
+    (Array.isArray(value.rawRows) && Array.isArray(value.columnNames))
+  )
+}
+
+function decodeColumnarRows(
+  value: Record<string, unknown>,
+  sql: string,
+): Array<Record<string, unknown>> | null {
+  const hasRawRows = hasOwnKey(value, `rawRows`)
+  const hasColumnNames = hasOwnKey(value, `columnNames`)
+  if (!hasRawRows && !hasColumnNames) {
+    return null
+  }
+
+  if (!hasRawRows || !hasColumnNames) {
+    unsupportedQueryResult(
+      sql,
+      `columnar results require both rawRows and columnNames`,
+    )
+  }
+  const rawRows = value.rawRows
+  const columnNames = value.columnNames
+  if (
+    !Array.isArray(rawRows) ||
+    !Array.isArray(columnNames) ||
+    !columnNames.every((columnName) => typeof columnName === `string`)
+  ) {
+    unsupportedQueryResult(sql, `invalid columnar row or column metadata`)
+  }
+
+  if (rawRows.length > 0 && columnNames.length === 0) {
+    unsupportedQueryResult(
+      sql,
+      `nonempty columnar results require at least one column name`,
+    )
+  }
+
+  return rawRows.map((rawRow) => {
+    if (!Array.isArray(rawRow) || rawRow.length !== columnNames.length) {
+      unsupportedQueryResult(
+        sql,
+        `columnar row width does not match columnNames`,
+      )
+    }
+
+    const row: Record<string, unknown> = {}
+    for (let index = 0; index < columnNames.length; index++) {
+      const columnName = columnNames[index]!
+      if (columnName === `__proto__`) {
+        Object.defineProperty(row, columnName, {
+          configurable: true,
+          enumerable: true,
+          value: rawRow[index],
+          writable: true,
+        })
+      } else {
+        row[columnName] = rawRow[index]
+      }
+    }
+    return row
+  })
+}
+
+function rejectPositionalRows(
+  rows: Array<unknown>,
+  sql: string,
+): Array<unknown> {
+  if (rows.some((row) => Array.isArray(row))) {
+    unsupportedQueryResult(sql, `positional rows require column metadata`)
+  }
+  return rows
+}
+
 function extractRowsFromStatementResult(
-  value: OpSQLiteStatementResultLike,
-): Array<unknown> | null {
-  const rowsFromRows = toRowArray(value.rows)
-  if (rowsFromRows) {
-    return rowsFromRows
+  record: Record<string, unknown>,
+  sql: string,
+  allowResultsWrapper: boolean,
+): Array<unknown> {
+  rejectInheritedCarrierKeys(record, sql)
+  const rowCarrierKeys = [`rows`, `resultRows`].filter((key) =>
+    hasOwnKey(record, key),
+  )
+  const rowCarrierKey = rowCarrierKeys[0]
+  if (
+    rowCarrierKeys.length > 1 ||
+    (rowCarrierKeys.length > 0 &&
+      (hasOwnKey(record, `results`) ||
+        (rowCarrierKey === `resultRows` && hasOwnKey(record, `rawRows`))))
+  ) {
+    unsupportedQueryResult(sql, `query result contains conflicting carriers`)
   }
 
-  const rowsFromResultRows = toRowArray(value.resultRows)
-  if (rowsFromResultRows) {
-    return rowsFromResultRows
+  if (rowCarrierKeys.length === 1) {
+    const rows = toRowArray(record[rowCarrierKey!])
+    if (!rows) {
+      unsupportedQueryResult(sql, `invalid ${rowCarrierKey} carrier`)
+    }
+    return rejectPositionalRows(rows, sql)
   }
 
-  if (hasWriteResultMarker(value as Record<string, unknown>)) {
+  if (
+    (hasOwnKey(record, `rawRows`) || hasOwnKey(record, `columnNames`)) &&
+    hasOwnKey(record, `results`)
+  ) {
+    unsupportedQueryResult(sql, `query result contains conflicting carriers`)
+  }
+
+  const columnarRows = decodeColumnarRows(record, sql)
+  if (columnarRows) {
+    return columnarRows
+  }
+
+  if (hasOwnKey(record, `results`)) {
+    if (!allowResultsWrapper) {
+      unsupportedQueryResult(sql, `unsupported nested results depth`)
+    }
+    const nestedResults = record.results
+    if (
+      !Array.isArray(nestedResults) ||
+      nestedResults.length !== 1 ||
+      !isObjectRecord(nestedResults[0])
+    ) {
+      unsupportedQueryResult(sql, `invalid nested results carrier`)
+    }
+    return extractRowsFromStatementResult(nestedResults[0], sql, false)
+  }
+
+  if (isWriteResultEnvelope(record)) {
     return []
   }
 
-  return null
+  return unsupportedQueryResult(sql)
 }
 
 function extractRowsFromExecuteResult(
   result: unknown,
   sql: string,
+  arrayResultMode?: OpSQLiteArrayResultMode,
 ): Array<unknown> {
   if (result == null) {
-    return []
+    return unsupportedQueryResult(sql)
   }
 
   if (Array.isArray(result)) {
     if (result.length === 0) {
+      if (arrayResultMode === `statement-results`) {
+        return unsupportedQueryResult(
+          sql,
+          `statement-result arrays must contain exactly one result`,
+        )
+      }
       return []
     }
 
-    const firstEntry = result[0]
-    if (isObjectRecord(firstEntry)) {
-      const rowsFromStatement = extractRowsFromStatementResult(firstEntry)
-      if (rowsFromStatement) {
-        return rowsFromStatement
-      }
+    if (arrayResultMode === `rows`) {
+      return rejectPositionalRows(result, sql)
     }
 
-    return result
+    const firstEntry = result[0]
+    const isStructuralStatementResult =
+      isObjectRecord(firstEntry) && isStatementResultEnvelope(firstEntry)
+    if (arrayResultMode === `statement-results`) {
+      if (!isObjectRecord(firstEntry)) {
+        return unsupportedQueryResult(
+          sql,
+          `statement-results mode requires an object statement envelope`,
+        )
+      }
+      if (result.length !== 1) {
+        return unsupportedQueryResult(
+          sql,
+          `statement-result arrays must contain exactly one result`,
+        )
+      }
+      return extractRowsFromStatementResult(firstEntry, sql, false)
+    }
+
+    if (isStructuralStatementResult) {
+      return unsupportedQueryResult(
+        sql,
+        `ambiguous bare result array; set arrayResultMode to "rows" or "statement-results"`,
+      )
+    }
+
+    return rejectPositionalRows(result, sql)
   }
 
   if (isObjectRecord(result)) {
-    const rowsFromStatement = extractRowsFromStatementResult(result)
-    if (rowsFromStatement) {
-      return rowsFromStatement
-    }
-
-    const nestedResults = result.results
-    if (Array.isArray(nestedResults) && nestedResults.length > 0) {
-      const firstResult = nestedResults[0]
-      if (isObjectRecord(firstResult)) {
-        const rowsFromNested = extractRowsFromStatementResult(firstResult)
-        if (rowsFromNested) {
-          return rowsFromNested
-        }
-      }
-    }
+    return extractRowsFromStatementResult(result, sql, true)
   }
 
-  throw new InvalidPersistedCollectionConfigError(
-    `Unsupported op-sqlite query result shape for SQL "${sql}"`,
-  )
+  return unsupportedQueryResult(sql)
 }
 
 function hasExistingDatabase(
@@ -260,11 +506,9 @@ function resolveExecuteMethod(
 export class OpSQLiteDriver implements SQLiteDriver {
   private readonly database: OpSQLiteDatabaseLike
   private readonly executeMethod: OpSQLiteExecuteFn
+  private readonly arrayResultMode: OpSQLiteArrayResultMode | undefined
   private readonly ownsDatabase: boolean
-  private queue: Promise<void> = Promise.resolve()
-  private nextSavepointId = 1
-  private transactionContextStoragePromise: Promise<AsyncLocalStorageLike<TransactionContextStore> | null> | null =
-    null
+  private readonly executionState: DatabaseExecutionState
 
   constructor(options: OpSQLiteDriverOptions) {
     if (hasExistingDatabase(options)) {
@@ -276,6 +520,8 @@ export class OpSQLiteDriver implements SQLiteDriver {
     }
 
     this.executeMethod = resolveExecuteMethod(this.database)
+    this.arrayResultMode = options.arrayResultMode
+    this.executionState = getDatabaseExecutionState(this.database)
   }
 
   async exec(sql: string): Promise<void> {
@@ -301,7 +547,11 @@ export class OpSQLiteDriver implements SQLiteDriver {
 
     return this.enqueue(async () => {
       const result = await this.execute(sql, params)
-      return extractRowsFromExecuteResult(result, sql) as ReadonlyArray<T>
+      return extractRowsFromExecuteResult(
+        result,
+        sql,
+        this.arrayResultMode,
+      ) as ReadonlyArray<T>
     })
   }
 
@@ -389,8 +639,8 @@ export class OpSQLiteDriver implements SQLiteDriver {
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const queuedOperation = this.queue.then(operation, operation)
-    this.queue = queuedOperation.then(
+    const queuedOperation = this.executionState.queue.then(operation, operation)
+    this.executionState.queue = queuedOperation.then(
       () => undefined,
       () => undefined,
     )
@@ -398,11 +648,11 @@ export class OpSQLiteDriver implements SQLiteDriver {
   }
 
   private async getTransactionContextStorage(): Promise<AsyncLocalStorageLike<TransactionContextStore> | null> {
-    if (this.transactionContextStoragePromise) {
-      return this.transactionContextStoragePromise
+    if (this.executionState.transactionContextStoragePromise) {
+      return this.executionState.transactionContextStoragePromise
     }
 
-    this.transactionContextStoragePromise = (async () => {
+    this.executionState.transactionContextStoragePromise = (async () => {
       const asyncLocalStorageCtor = await resolveAsyncLocalStorageCtor()
       if (!asyncLocalStorageCtor) {
         return null
@@ -411,7 +661,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
       return new asyncLocalStorageCtor<TransactionContextStore>()
     })()
 
-    return this.transactionContextStoragePromise
+    return this.executionState.transactionContextStoragePromise
   }
 
   private async getActiveTransactionDriver(): Promise<SQLiteDriver | null> {
@@ -442,7 +692,11 @@ export class OpSQLiteDriver implements SQLiteDriver {
         params: ReadonlyArray<unknown> = [],
       ): Promise<ReadonlyArray<T>> => {
         const result = await this.execute(sql, params)
-        return extractRowsFromExecuteResult(result, sql) as ReadonlyArray<T>
+        return extractRowsFromExecuteResult(
+          result,
+          sql,
+          this.arrayResultMode,
+        ) as ReadonlyArray<T>
       },
       run: async (sql, params = []) => {
         await this.execute(sql, params)
@@ -467,8 +721,8 @@ export class OpSQLiteDriver implements SQLiteDriver {
     transactionDriver: SQLiteDriver,
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
-    const savepointName = `tsdb_sp_${this.nextSavepointId}`
-    this.nextSavepointId++
+    const savepointName = `tsdb_sp_${this.executionState.nextSavepointId}`
+    this.executionState.nextSavepointId++
     await this.execute(`SAVEPOINT ${savepointName}`)
 
     try {

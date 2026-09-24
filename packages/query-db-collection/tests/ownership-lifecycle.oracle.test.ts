@@ -80,7 +80,7 @@ type OwnershipFixtureOptions = {
   staleTime?: number
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
-  scanPersisted?: () => Promise<
+  scanPersistedRows?: () => Promise<
     Array<{ key: string | number; value: Item; metadata?: unknown }>
   >
 }
@@ -127,6 +127,7 @@ function recordMetadata(
 ): SyncMetadataApi<string | number> {
   // These are emitted writes, captured before delegation, not durable commits.
   return {
+    ...metadata,
     row: {
       get: (key) => metadata.row.get(key),
       set: (key, value) => {
@@ -155,7 +156,7 @@ function createOwnershipFixture({
   syncMode = `on-demand`,
   metadataRecorder,
   setupMetadata,
-  scanPersisted,
+  scanPersistedRows,
   customHash,
   staleTime,
 }: OwnershipFixtureOptions): OwnershipFixture {
@@ -177,7 +178,7 @@ function createOwnershipFixture({
   const originalSync = baseOptions.sync
   let pendingSetup = setupMetadata
   const collection = createCollection(
-    metadataRecorder || setupMetadata || scanPersisted
+    metadataRecorder || setupMetadata || scanPersistedRows
       ? {
           ...baseOptions,
           sync: {
@@ -188,11 +189,23 @@ function createOwnershipFixture({
               const observedMetadata = metadataRecorder
                 ? recordMetadata(params.metadata, metadataRecorder)
                 : params.metadata
-              const metadataWithPersistedScan = scanPersisted
-                ? ({
+              const metadataWithPersistedScan: SyncMetadataApi<
+                string | number
+              > = scanPersistedRows
+                ? {
                     ...observedMetadata,
-                    row: { ...observedMetadata.row, scanPersisted },
-                  } as SyncMetadataApi<string | number>)
+                    persistence: {
+                      protocol: `@tanstack/db/sync-persistence`,
+                      version: 1,
+                      hydrateBaseline: async () => {},
+                      scanPersistedRows,
+                      resumeSnapshot: {
+                        certify: async () => {},
+                        getKeySetEvidence: () => ({ status: `consistent` }),
+                        expectCurrentCommit: () => {},
+                      },
+                    },
+                  }
                 : observedMetadata
               if (pendingSetup) {
                 params.begin()
@@ -325,6 +338,9 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
   const entered = createDeferred<void>()
   const released = createDeferred<void>()
   let commitCount = 0
+  let latestTerm = 0
+  let latestSeq = 0
+  let latestRowVersion = 0
   const adapter: PersistenceAdapter = {
     loadSubset: (_id, options) =>
       Promise.resolve(
@@ -334,6 +350,26 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
           metadata: structuredClone(state.rowMetadata.get(value.id)),
         })),
       ),
+    loadResumeSnapshot: (_id, options) =>
+      Promise.resolve({
+        rows:
+          options?.includeRows === false
+            ? []
+            : Array.from(state.rows, ([key, value]) => ({
+                key,
+                value: structuredClone(value),
+                metadata: structuredClone(state.rowMetadata.get(key)),
+              })),
+        keySet: { status: `consistent` },
+        collectionMetadata: Array.from(
+          state.collectionMetadata,
+          ([key, value]) => ({ key, value: structuredClone(value) }),
+        ),
+        latestTerm,
+        latestSeq,
+        latestRowVersion,
+        resetEpoch: 0,
+      }),
     loadCollectionMetadata: () =>
       Promise.resolve(
         Array.from(state.collectionMetadata, ([key, value]) => ({
@@ -397,6 +433,9 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
             structuredClone(mutation.value),
           )
       }
+      latestTerm = tx.term
+      latestSeq = tx.seq
+      latestRowVersion = tx.rowVersion
     },
   }
   return {
@@ -2236,7 +2275,7 @@ describe(`query collection ownership lifecycle`, () => {
       createDeferred<
         Array<{ key: string | number; value: Item; metadata?: unknown }>
       >()
-    const scanPersisted = vi
+    const scanPersistedRows = vi
       .fn()
       .mockReturnValueOnce(firstScan.promise)
       .mockResolvedValue([])
@@ -2244,7 +2283,7 @@ describe(`query collection ownership lifecycle`, () => {
       id,
       results: [[stale], [fresh]],
       syncMode: `eager`,
-      scanPersisted,
+      scanPersistedRows,
       setupMetadata: (metadata) => {
         metadata.collection.set(`queryCollection:gc:${queryHash}`, {
           queryHash,
@@ -2261,7 +2300,7 @@ describe(`query collection ownership lifecycle`, () => {
       return Promise.resolve()
     })
 
-    await vi.waitFor(() => expect(scanPersisted).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(scanPersistedRows).toHaveBeenCalledOnce())
     expect(queryFn).toHaveBeenCalledOnce()
     const refetch = collection.utils.refetch({ throwOnError: true })
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))

@@ -348,12 +348,14 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
     describe(`subqueries in JOIN clause`, () => {
       let issuesCollection: ReturnType<typeof createIssuesCollection>
       let usersCollection: ReturnType<typeof createUsersCollection>
+      let profilesCollection: ReturnType<typeof createProfilesCollection>
       let productsCollection: ReturnType<typeof createProductsCollection>
       let trialsCollection: ReturnType<typeof createTrialsCollection>
 
       beforeEach(() => {
         issuesCollection = createIssuesCollection(autoIndex)
         usersCollection = createUsersCollection(autoIndex)
+        profilesCollection = createProfilesCollection(autoIndex)
         productsCollection = createProductsCollection(autoIndex)
         trialsCollection = createTrialsCollection(autoIndex)
       })
@@ -469,6 +471,53 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
             return q
               .from({ issue: issuesCollection })
               .innerJoin({ member: activeUsers }, ({ issue, member }) =>
+                eq(issue.userId, member.id),
+              )
+              .where(({ member }) => eq(member.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+      })
+
+      test(`remaps a pushed predicate through a joined subquery result`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .innerJoin({ profile: profilesCollection }, ({ user, profile }) =>
+                eq(user.id, profile.userId),
+              )
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: usersWithProfiles }, ({ issue, member }) =>
+                eq(issue.userId, member.user.id),
+              )
+              .where(({ member }) => eq(member.user.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+      })
+
+      test(`preserves a predicate on a spread-selected join result`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .innerJoin({ profile: profilesCollection }, ({ user, profile }) =>
+                eq(user.id, profile.userId),
+              )
+              .select(({ user }) => user)
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: usersWithProfiles }, ({ issue, member }) =>
                 eq(issue.userId, member.id),
               )
               .where(({ member }) => eq(member.name, `Bob`))
@@ -766,6 +815,43 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
       })
 
       expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+    })
+
+    test(`keeps an outer filter above a unionAll subquery`, () => {
+      const issuesCollection = createIssuesCollection(autoIndex)
+      const usersCollection = createUsersCollection(autoIndex)
+      const query = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const projectOneIssues = q
+            .from({ projectOneIssue: issuesCollection })
+            .where(({ projectOneIssue }) => eq(projectOneIssue.projectId, 1))
+            .select(({ projectOneIssue }) => ({
+              id: projectOneIssue.id,
+              status: projectOneIssue.status,
+              userId: projectOneIssue.userId,
+            }))
+          const projectTwoIssues = q
+            .from({ projectTwoIssue: issuesCollection })
+            .where(({ projectTwoIssue }) => eq(projectTwoIssue.projectId, 2))
+            .select(({ projectTwoIssue }) => ({
+              id: projectTwoIssue.id,
+              status: projectTwoIssue.status,
+              userId: projectTwoIssue.userId,
+            }))
+          const allIssues = q.unionAll(projectOneIssues, projectTwoIssues)
+
+          return q
+            .from({ row: allIssues })
+            .innerJoin({ user: usersCollection }, ({ row, user }) =>
+              eq(row.userId, user.id),
+            )
+            .where(({ row }) => eq(row.status, `open`))
+            .select(({ row }) => ({ id: row.id }))
+        },
+      })
+
+      expect(query.toArray.map((row) => row.id).sort()).toEqual([1, 4])
     })
 
     describe(`nested subqueries with joins (alias remapping)`, () => {

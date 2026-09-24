@@ -110,11 +110,24 @@ This works with any adapter: `electricCollectionOptions`, `queryCollectionOption
 
 Coordinators handle leader election and cross-instance communication so only one tab/process owns the database writer.
 
-| Platform                              | Coordinator                     | Mechanism                    |
-| ------------------------------------- | ------------------------------- | ---------------------------- |
-| Browser                               | `BrowserCollectionCoordinator`  | BroadcastChannel + Web Locks |
-| Electron                              | `ElectronCollectionCoordinator` | BroadcastChannel + Web Locks |
-| Single-process (RN, Expo, Node, etc.) | `SingleProcessCoordinator`      | No-op (always leader)        |
+| Platform                              | Coordinator                     | Mechanism                                            |
+| ------------------------------------- | ------------------------------- | ---------------------------------------------------- |
+| Browser                               | `BrowserCollectionCoordinator`  | BroadcastChannel + Web Locks                         |
+| Electron                              | `ElectronCollectionCoordinator` | BroadcastChannel + Web Locks                         |
+| Single-process (RN, Expo, Node, etc.) | `SingleProcessCoordinator`      | Always leader; direct per-collection adapter routing |
+
+Every coordinator must implement
+`requestApplyCommittedTx(collectionId, tx)`. The method routes a complete
+committed transaction to the collection's supported writer, including
+truncate, rows, row metadata, collection metadata, and stream position. This
+is a required contract, not an optional capability. Do not feature-detect it,
+fall back to row-only mutation routing, or bypass the coordinator after source
+publication. Untyped custom coordinators that omit the method fail during
+collection configuration.
+
+`SingleProcessCoordinator` has no election or cross-process communication, but
+it is not a no-op persistence owner. It registers the resolved adapter for each
+collection and applies complete committed transactions through that adapter.
 
 Browser persistence uses single-process semantics by default. That is correct
 when the app runs in one tab at a time or each tab has its own database. Pass a
@@ -163,7 +176,9 @@ const persistence = createElectronSQLitePersistence({
 
 Electron persistence calls cross the renderer/main boundary through IPC. The
 `ElectronCollectionCoordinator` separately coordinates renderer instances with
-`BroadcastChannel` and Web Locks.
+`BroadcastChannel` and Web Locks. It elects an owner per collection and routes
+the complete committed transaction through that collection's resolved renderer
+adapter to the main-process persistence owner.
 
 ## Schema Versioning
 

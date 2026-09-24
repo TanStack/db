@@ -981,6 +981,9 @@ function optimizeFromWithTracking(
     whereClause,
     from.alias,
   )
+  if (remappedWhere === undefined) {
+    return new QueryRefClass(deepCopyQuery(from.query), from.alias)
+  }
   const optimizedSubQuery: QueryIR = {
     ...deepCopyQuery(from.query),
     where: [...existingWhere, remappedWhere],
@@ -998,9 +1001,9 @@ function remapWhereForSubquery(
   subquery: QueryIR,
   whereClause: BasicExpression<boolean>,
   outerAlias: string,
-): BasicExpression<boolean> {
+): BasicExpression<boolean> | undefined {
   const firstFromAlias = getFirstFromAlias(subquery)
-  if (firstFromAlias === undefined) return whereClause
+  if (firstFromAlias === undefined) return undefined
 
   const remapExpression = (expression: BasicExpression): BasicExpression => {
     if (expression instanceof PropRef) {
@@ -1008,12 +1011,16 @@ function remapWhereForSubquery(
 
       const field = expression.path[1]
       const projected = field ? subquery.select?.[field] : undefined
+      const hasNamespacedResult =
+        subquery.join !== undefined || subquery.from.type === `unionFrom`
       const innerPath =
         projected instanceof PropRef
-          ? projected.path
-          : [firstFromAlias, ...expression.path.slice(1)]
+          ? [...projected.path, ...expression.path.slice(2)]
+          : hasNamespacedResult
+            ? expression.path.slice(1)
+            : [firstFromAlias, ...expression.path.slice(1)]
 
-      return new PropRef([...innerPath, ...expression.path.slice(2)])
+      return new PropRef(innerPath)
     }
 
     if (expression instanceof Func) {
@@ -1205,6 +1212,9 @@ function referencesAliasWithRemappedSelect(
   if (!select) {
     return false
   }
+  const hasSpreadProjection = Object.keys(select).some((key) =>
+    key.startsWith(`__SPREAD_SENTINEL__`),
+  )
 
   for (const ref of refs) {
     const path = ref.path
@@ -1213,8 +1223,12 @@ function referencesAliasWithRemappedSelect(
     if (path[0] !== outerAlias) continue
 
     const projected = select[path[1]!]
-    // Unselected fields can't be remapped, so skip - only care about fields in the SELECT.
-    if (!projected) continue
+    // A spread-selected field has no direct projection entry to remap.
+    // Keep its predicate outside rather than guessing its input source.
+    if (!projected) {
+      if (hasSpreadProjection) return true
+      continue
+    }
 
     // Non-PropRef projections are computed values; cannot push down.
     if (!(projected instanceof PropRef)) {

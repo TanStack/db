@@ -8,7 +8,10 @@ import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persist
 export type ReactNativeSQLitePersistenceOptions = MobileSQLitePersistenceOptions
 export type ReactNativeSQLiteSchemaMismatchPolicy =
   MobileSQLiteSchemaMismatchPolicy
-export type { OpSQLiteDatabaseLike } from './mobile-persistence'
+export type {
+  OpSQLiteArrayResultMode,
+  OpSQLiteDatabaseLike,
+} from './mobile-persistence'
 
 export function createReactNativeSQLitePersistence(
   options: ReactNativeSQLitePersistenceOptions,

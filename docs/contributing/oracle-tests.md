@@ -863,4 +863,39 @@ or a claimed repair, ask:
 6. Can capture, cleanup or shrinking turn this into a different failure?
 7. Which larger promises remain outside this test, and where are they tracked?
 
+### Reusable boundary-law checklist
+
+Adapter and lifecycle oracles should consider these laws when the contract has
+the corresponding boundary. They are prompts, not universal requirements. State
+why an inapplicable law does not belong to the owner instead of adding a vacuous
+case.
+
+- **Real-provider conformance:** freeze representative values from each
+  supported provider version. Prove the fixture accepts those values before it
+  stands in for that provider.
+- **Minimal ambiguity:** include the smallest valid input for every classifier
+  branch. Rich values that carry several redundant signals do not cover a
+  one-field collision.
+- **Name invariance:** changing a user-controlled name or SQL alias must not
+  change envelope classification unless the public contract assigns that name
+  structural meaning.
+- **Representation symmetry:** equivalent array/object forms and coexisting
+  carriers must produce the same public result or the same documented error.
+- **Await-boundary transitions:** hold each relevant `await`, change ownership,
+  leadership, generation, abort, cleanup, or restart state, then release it.
+  Compare the result with the contract for that transition.
+- **Local/transport refinement:** immutable transported data must have the same
+  meaning on local and remote paths. Live local references must remain local,
+  and cleanup must receive the exact lifecycle object delivered locally.
+- **Partial-construction cleanup:** fail each construction step after it acquires
+  a resource. Preserve the primary error and prove every acquired resource is
+  released exactly once.
+- **Value-and-work refinement:** when bounded work is promised, check the exact
+  result and a deterministic work/cardinality measure. Correct rows alone do
+  not establish the work law.
+
+Every owner should also state its known omissions beside the contract. The
+coverage map tracks open reusable laws; an unchecked item is not evidence that
+the neighboring laws are absent.
+
 The payoff is not a bigger test framework. It is a smaller distance between “this test is green” and a precise account of what that green result protects.

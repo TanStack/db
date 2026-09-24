@@ -16,6 +16,9 @@
       "@tanstack/db-ivm": ["../db-ivm/src"],
       "@tanstack/db-sqlite-persistence-core": [
         "../db-sqlite-persistence-core/src"
+      ],
+      "@tanstack/db-sqlite-persistence-core/*": [
+        "../db-sqlite-persistence-core/src/*"
       ]
     }
   },
