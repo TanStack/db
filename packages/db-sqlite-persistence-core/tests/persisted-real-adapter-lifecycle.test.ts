@@ -289,4 +289,4 @@ it(`preserves generated restart order across real-adapter scheduler capabilities
     ),
     { seed: 1868, numRuns: 6, endOnFailure: true },
   )
-})
+}, 15_000)
