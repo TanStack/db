@@ -1,4 +1,9 @@
-import { QueryObserver, hashKey, partialMatchKey } from '@tanstack/query-core'
+import {
+  CancelledError,
+  QueryObserver,
+  hashKey,
+  partialMatchKey,
+} from '@tanstack/query-core'
 import {
   LoadSubsetOperationAbortedError,
   deepEquals,
@@ -11,6 +16,7 @@ import {
 import {
   GetKeyRequiredError,
   InitialDataInOnDemandModeError,
+  InvalidQueryResultError,
   QueryClientRequiredError,
   QueryFnRequiredError,
   QueryKeyRequiredError,
@@ -254,6 +260,11 @@ export interface QueryCollectionConfig<
 /**
  * Type for the refetch utility function
  * Returns the QueryObserverResult from TanStack Query
+ *
+ * `throwOnError` controls Query transport errors. A successful Query result
+ * that the adapter cannot apply rejects with `InvalidQueryResultError`
+ * regardless of that option. If application is deferred, the promise waits
+ * for the replacement result to apply.
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
@@ -916,6 +927,17 @@ export function queryCollectionOptions(
   // observation, not that ownership or its rows.
   let ensureEagerSubscription = () => {}
 
+  type ExceptionalResultSettlement =
+    | {
+        type: `pending`
+        promise: Promise<QueryObserverResult<unknown, unknown>>
+        reject: (error: unknown) => void
+      }
+    | { type: `rejected`; error: unknown }
+  let getExceptionalResultSettlement = (
+    _hashedQueryKey: string,
+  ): ExceptionalResultSettlement | undefined => undefined
+
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
     owners.add(hashedQueryKey)
@@ -994,6 +1016,13 @@ export function queryCollectionOptions(
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
+    const exceptionalResultSettlements = new Map<
+      string,
+      ExceptionalResultSettlement
+    >()
+    const readExceptionalResultSettlement = (hashedQueryKey: string) =>
+      exceptionalResultSettlements.get(hashedQueryKey)
+    getExceptionalResultSettlement = readExceptionalResultSettlement
     type ResultApplicationController = AbortController & {
       rollback?: () => void
     }
@@ -1035,6 +1064,68 @@ export function queryCollectionOptions(
           }
         }
       }
+    }
+
+    const scheduleDeferredResultSettlement = (
+      hashedQueryKey: string,
+      barrier: Promise<void>,
+    ): ExceptionalResultSettlement & { type: `pending` } => {
+      const existing = exceptionalResultSettlements.get(hashedQueryKey)
+      if (existing?.type === `pending`) return existing
+
+      let resolveSettlement!: (
+        result: QueryObserverResult<unknown, unknown>,
+      ) => void
+      let rejectSettlement!: (error: unknown) => void
+      const promise = new Promise<QueryObserverResult<unknown, unknown>>(
+        (resolve, reject) => {
+          resolveSettlement = resolve
+          rejectSettlement = reject
+        },
+      )
+      // Automatic refreshes may have no public waiter. Their Query and
+      // application paths retain diagnostics; this prevents an unhandled
+      // rejection while preserving the rejection for a public refetch waiter.
+      void promise.catch(() => {})
+      const settlement = {
+        type: `pending` as const,
+        promise,
+        reject: rejectSettlement,
+      }
+      exceptionalResultSettlements.set(hashedQueryKey, settlement)
+
+      void barrier
+        .then(async () => {
+          if (exceptionalResultSettlements.get(hashedQueryKey) !== settlement) {
+            throw new CancelledError()
+          }
+          const observer = state.observers.get(hashedQueryKey)
+          if (!observer) throw new CancelledError()
+
+          const result = await observer.refetch({ throwOnError: true })
+          const application = getResultApplicationSettlement(hashedQueryKey)
+          if (application !== true) await application
+          return result
+        })
+        .then(resolveSettlement, rejectSettlement)
+
+      void promise.then(
+        () => {
+          if (exceptionalResultSettlements.get(hashedQueryKey) === settlement) {
+            exceptionalResultSettlements.delete(hashedQueryKey)
+          }
+        },
+        (error) => {
+          if (exceptionalResultSettlements.get(hashedQueryKey) === settlement) {
+            exceptionalResultSettlements.set(hashedQueryKey, {
+              type: `rejected`,
+              error,
+            })
+          }
+        },
+      )
+
+      return settlement
     }
 
     const getResultApplicationSettlement = (
@@ -1633,6 +1724,12 @@ export function queryCollectionOptions(
       const rawData = result.data
       const newItemsArray = select ? select(rawData) : rawData
 
+      const previousExceptionalSettlement =
+        exceptionalResultSettlements.get(hashedQueryKey)
+      if (previousExceptionalSettlement?.type === `rejected`) {
+        exceptionalResultSettlements.delete(hashedQueryKey)
+      }
+
       if (
         !Array.isArray(newItemsArray) ||
         newItemsArray.some((item) => typeof item !== `object`)
@@ -1641,8 +1738,13 @@ export function queryCollectionOptions(
           ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
           : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
 
+        const error = new InvalidQueryResultError(errorMessage)
+        exceptionalResultSettlements.set(hashedQueryKey, {
+          type: `rejected`,
+          error,
+        })
         console.error(errorMessage)
-        return
+        throw error
       }
 
       const currentSyncedItems: Map<string | number, any> = new Map(
@@ -1901,14 +2003,10 @@ export function queryCollectionOptions(
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
           if (collection.deferDataRefresh) {
-            collection.deferDataRefresh.then(() => {
-              const observer = state.observers.get(hashedQueryKey)
-              if (observer) {
-                observer.refetch().catch(() => {
-                  // Errors handled by the next handleQueryResult invocation
-                })
-              }
-            })
+            scheduleDeferredResultSettlement(
+              hashedQueryKey,
+              collection.deferDataRefresh,
+            )
             return
           }
 
@@ -2294,6 +2392,19 @@ export function queryCollectionOptions(
         clearTimeout(timer)
       })
       persistedRetentionTimers.clear()
+      exceptionalResultSettlements.forEach((settlement, hashedQueryKey) => {
+        if (settlement.type === `pending`) {
+          const error = new CancelledError()
+          settlement.reject(error)
+          exceptionalResultSettlements.set(hashedQueryKey, {
+            type: `rejected`,
+            error,
+          })
+        }
+      })
+      if (getExceptionalResultSettlement === readExceptionalResultSettlement) {
+        getExceptionalResultSettlement = () => undefined
+      }
 
       const allHashedKeys = new Set([
         ...state.observers.keys(),
@@ -2415,11 +2526,17 @@ export function queryCollectionOptions(
     // An idle eager observer still owns rows; refetch must deliver its result.
     ensureEagerSubscription()
     const allQueryKeys = [...hashToQueryKey.values()]
-    const refetchPromises = allQueryKeys.map((qKey) => {
+    const refetchPromises = allQueryKeys.map(async (qKey) => {
       const queryObserver = state.observers.get(hashKey(qKey))!
-      return queryObserver.refetch({
+      const readExceptionalSettlement = getExceptionalResultSettlement
+      const result = await queryObserver.refetch({
         throwOnError: opts?.throwOnError,
       })
+      if (!result.isSuccess) return result
+
+      const settlement = readExceptionalSettlement(hashKey(qKey))
+      if (settlement?.type === `rejected`) throw settlement.error
+      return settlement?.type === `pending` ? settlement.promise : result
     })
 
     return Promise.all(refetchPromises)

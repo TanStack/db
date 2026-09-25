@@ -15,7 +15,10 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src/index.js'
-import { SyncNotInitializedError } from '../src/errors.js'
+import {
+  InvalidQueryResultError,
+  SyncNotInitializedError,
+} from '../src/errors.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type {
   Collection,
@@ -43,10 +46,104 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * queries. They compare source rows, derived rows, cache rows, metadata writes,
  * exact request lifetimes, and bounded refetch work at each boundary.
  *
+ * A public refetch has a related result-settlement law. Every successful Query
+ * result reaches exactly one explicit terminal outcome: its rows apply, its
+ * application rejects, or its work is cancelled or retired. A deferred result
+ * is not terminal. Its caller waits for the replacement result to apply.
+ *
+ * The result-settlement model below is intentionally smaller than production.
+ * `applicable` combines adapter validation and the ability to materialize the
+ * result; it does not classify arrays, select wrappers, Query states, or sync
+ * transactions. The action grammar covers immediate results, valid empty
+ * results, invalid shapes, one deferred replacement, and cleanup retirement.
+ * The production driver uses `collection.utils.refetch()` and observes only
+ * public promise settlement plus public rows at the settlement checkpoint.
+ *
  * The file is large because it crosses the real Query cache boundary, not
  * because it duplicates Query internals. Each history names one ownership edge
  * or generation race; shared fixtures provide the graph and observations.
+ *
+ * Known omissions: this result-settlement refinement does not model accepted-
+ * result generations or the diff-free application signal requested by #1828.
+ * Transport failure and cache replacement remain owned by the existing Query
+ * lifecycle histories in this file.
  */
+
+type ResultSettlementModelState =
+  | { phase: `waiting-for-result` }
+  | { phase: `waiting-for-refresh` }
+  | {
+      phase: `terminal`
+      outcome: `applied` | `rejected` | `cancelled`
+      rowCount?: 0 | 1
+    }
+
+type ResultSettlementModelAction =
+  | {
+      type: `query-succeeded`
+      result: `applicable` | `invalid-shape`
+      rowCount?: 0 | 1
+      deferApplication: boolean
+    }
+  | {
+      type: `refresh-succeeded`
+      result: `applicable` | `invalid-shape`
+      rowCount?: 0 | 1
+    }
+  | { type: `retire` }
+
+type PublicRefetchObservation =
+  | { settled: false }
+  | { settled: true; outcome: `fulfilled` | `rejected`; rowCount?: number }
+
+function advanceResultSettlementModel(
+  state: ResultSettlementModelState,
+  action: ResultSettlementModelAction,
+): ResultSettlementModelState {
+  if (state.phase === `terminal`) {
+    throw new Error(`A public refetch already has a terminal outcome`)
+  }
+
+  if (action.type === `retire`) {
+    return { phase: `terminal`, outcome: `cancelled` }
+  }
+
+  if (action.type === `refresh-succeeded`) {
+    if (state.phase !== `waiting-for-refresh`) {
+      throw new Error(`A replacement result requires a deferred result`)
+    }
+    return action.result === `applicable`
+      ? { phase: `terminal`, outcome: `applied`, rowCount: action.rowCount }
+      : { phase: `terminal`, outcome: `rejected` }
+  }
+
+  if (state.phase !== `waiting-for-result`) {
+    throw new Error(`A deferred result requires a replacement result`)
+  }
+  if (action.result === `invalid-shape`) {
+    return { phase: `terminal`, outcome: `rejected` }
+  }
+  if (action.deferApplication) {
+    return { phase: `waiting-for-refresh` }
+  }
+  return { phase: `terminal`, outcome: `applied`, rowCount: action.rowCount }
+}
+
+function expectPublicRefetchObservation(
+  state: ResultSettlementModelState,
+  observation: PublicRefetchObservation,
+): void {
+  if (state.phase !== `terminal`) {
+    expect(observation).toEqual({ settled: false })
+    return
+  }
+
+  expect(observation).toEqual(
+    state.outcome === `applied`
+      ? { settled: true, outcome: `fulfilled`, rowCount: state.rowCount }
+      : { settled: true, outcome: `rejected` },
+  )
+}
 
 type Item = {
   id: string
@@ -576,6 +673,269 @@ function expectColdOwnerRevalidation(
 describe(`query collection ownership lifecycle`, () => {
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+  })
+
+  it(`rejects silent fulfillment in the public result-settlement checker`, () => {
+    const deferred = advanceResultSettlementModel(
+      { phase: `waiting-for-result` },
+      {
+        type: `query-succeeded`,
+        result: `applicable`,
+        rowCount: 1,
+        deferApplication: true,
+      },
+    )
+    const invalid = advanceResultSettlementModel(
+      { phase: `waiting-for-result` },
+      {
+        type: `query-succeeded`,
+        result: `invalid-shape`,
+        deferApplication: false,
+      },
+    )
+
+    expect(() =>
+      expectPublicRefetchObservation(deferred, {
+        settled: true,
+        outcome: `fulfilled`,
+        rowCount: 1,
+      }),
+    ).toThrow()
+    expect(() =>
+      expectPublicRefetchObservation(invalid, {
+        settled: true,
+        outcome: `fulfilled`,
+      }),
+    ).toThrow()
+  })
+
+  it(`fulfills a public refetch after applying a valid empty result`, async () => {
+    const id = `empty-result-settlement`
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([shared])
+      .mockResolvedValueOnce([])
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    const refetch = collection.utils.refetch({ throwOnError: true })
+    await refetch
+
+    const expected = advanceResultSettlementModel(
+      { phase: `waiting-for-result` },
+      {
+        type: `query-succeeded`,
+        result: `applicable`,
+        rowCount: 0,
+        deferApplication: false,
+      },
+    )
+    expectPublicRefetchObservation(expected, {
+      settled: true,
+      outcome: `fulfilled`,
+      rowCount: collection.size,
+    })
+  })
+
+  it.each([false, true])(
+    `rejects a public refetch whose successful Query result has an invalid shape, throwOnError=%s`,
+    async (throwOnError) => {
+      const id = `invalid-result-settlement`
+      const invalidResult = 42 as unknown as Array<Item>
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([shared])
+        .mockResolvedValueOnce(invalidResult)
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+        }),
+      )
+      cleanups.push(async () => {
+        consoleError.mockRestore()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      await collection.stateWhenReady()
+      let rejection: unknown
+      const refetch = collection.utils.refetch({ throwOnError }).then(
+        () => ({ settled: true, outcome: `fulfilled` as const }),
+        (error: unknown) => {
+          rejection = error
+          return { settled: true, outcome: `rejected` as const }
+        },
+      )
+
+      const expected = advanceResultSettlementModel(
+        { phase: `waiting-for-result` },
+        {
+          type: `query-succeeded`,
+          result: `invalid-shape`,
+          deferApplication: false,
+        },
+      )
+      expectPublicRefetchObservation(expected, await refetch)
+      expect(rejection).toBeInstanceOf(InvalidQueryResultError)
+      expect(rows(collection)).toEqual([shared.id])
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `@tanstack/query-db-collection: queryFn must return an array of objects`,
+        ),
+      )
+    },
+  )
+
+  it(`keeps a deferred public refetch pending until its replacement applies`, async () => {
+    const id = `deferred-result-settlement`
+    const barrier = createDeferred<void>()
+    const initial = { ...shared, name: `Initial` }
+    const skipped = { ...shared, name: `Skipped` }
+    const replacement = { ...shared, name: `Replacement` }
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([skipped])
+      .mockResolvedValueOnce([replacement])
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      collection.deferDataRefresh = null
+      barrier.resolve()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    collection.deferDataRefresh = barrier.promise
+    let observation: PublicRefetchObservation = { settled: false }
+    const refetch = collection.utils.refetch({ throwOnError: true }).then(
+      () => {
+        observation = {
+          settled: true,
+          outcome: `fulfilled`,
+          rowCount: collection.size,
+        }
+      },
+      () => {
+        observation = { settled: true, outcome: `rejected` }
+      },
+    )
+
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+    let expected = advanceResultSettlementModel(
+      { phase: `waiting-for-result` },
+      {
+        type: `query-succeeded`,
+        result: `applicable`,
+        rowCount: 1,
+        deferApplication: true,
+      },
+    )
+    expectPublicRefetchObservation(expected, observation)
+    expect(collection.get(shared.id)?.name).toBe(initial.name)
+
+    collection.deferDataRefresh = null
+    barrier.resolve()
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    await refetch
+
+    expected = advanceResultSettlementModel(expected, {
+      type: `refresh-succeeded`,
+      result: `applicable`,
+      rowCount: 1,
+    })
+    expectPublicRefetchObservation(expected, observation)
+    expect(collection.get(shared.id)?.name).toBe(replacement.name)
+  })
+
+  it(`cancels a deferred public refetch when cleanup retires it`, async () => {
+    const id = `deferred-result-cleanup`
+    const barrier = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([shared])
+      .mockResolvedValueOnce([{ ...shared, name: `Skipped` }])
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      collection.deferDataRefresh = null
+      barrier.resolve()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    collection.deferDataRefresh = barrier.promise
+    const refetch = collection.utils.refetch({ throwOnError: true }).then(
+      () => ({ observation: { settled: true, outcome: `fulfilled` as const } }),
+      (error: unknown) => ({
+        observation: { settled: true, outcome: `rejected` as const },
+        error,
+      }),
+    )
+
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    let expected = advanceResultSettlementModel(
+      { phase: `waiting-for-result` },
+      {
+        type: `query-succeeded`,
+        result: `applicable`,
+        rowCount: 1,
+        deferApplication: true,
+      },
+    )
+    await collection.cleanup()
+    expected = advanceResultSettlementModel(expected, { type: `retire` })
+
+    const result = await refetch
+    expectPublicRefetchObservation(expected, result.observation)
+    expect(isCancelledError(`error` in result ? result.error : undefined)).toBe(
+      true,
+    )
   })
 
   it(`starts an idle collection only when a direct write is invoked`, () => {
