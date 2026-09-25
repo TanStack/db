@@ -510,6 +510,9 @@ it(`retracts the exact Effect source row after an ordered truncate`, async () =>
 
     harness.publish([{ type: `delete`, key: 1, value: staleDelete }])
     await flushPromises()
+    expect(events).toEqual([{ type: `enter`, key: 1, value: publishedValue }])
+
+    await harness.resolveReplay()
     expect(events).toEqual([
       { type: `enter`, key: 1, value: publishedValue },
       { type: `exit`, key: 1, value: publishedValue },
@@ -603,6 +606,9 @@ it(`replaces the retained Effect source row after an ordered truncate`, async ()
       },
     ])
     await flushPromises()
+    expect(batches).toHaveLength(1)
+
+    await harness.resolveReplay()
     expect(batches).toHaveLength(2)
     expect(batches[1]).toHaveLength(1)
     expect(batches[1]![0]).toMatchObject({

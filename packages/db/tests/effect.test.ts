@@ -2605,6 +2605,44 @@ describe(`createEffect`, () => {
       await effect.dispose()
     })
 
+    it(`publishes updates between same-size Sets of different objects`, async () => {
+      type SetRow = { id: number; values: Set<{ label: string }> }
+      const initial: SetRow = {
+        id: 1,
+        values: new Set([{ label: `before` }]),
+      }
+      const rows = createCollection(
+        mockSyncCollectionOptions<SetRow>({
+          id: `effect-object-set-update`,
+          getKey: (row) => row.id,
+          initialData: [initial],
+        }),
+      )
+      const events: Array<DeltaEvent<SetRow, number>> = []
+      const effect = createEffect<SetRow, number>({
+        query: (q) => q.from({ row: rows }),
+        onUpdate: collectEvents(events),
+        skipInitial: true,
+      })
+
+      try {
+        await flushPromises()
+        rows.utils.begin()
+        rows.utils.write({
+          type: `update`,
+          value: { id: 1, values: new Set([{ label: `after` }]) },
+        })
+        rows.utils.commit()
+        await flushPromises()
+
+        expect(events).toHaveLength(1)
+        expect(events[0]).toMatchObject({ type: `update`, key: 1 })
+      } finally {
+        await effect.dispose()
+        await rows.cleanup()
+      }
+    })
+
     it(`exit events should not have previousValue`, async () => {
       const users = createUsersCollection([
         { id: 1, name: `Alice`, active: true },
