@@ -274,7 +274,11 @@ function toPropRef(expr: unknown): PropRef | undefined {
     (expr as { type?: string }).type === `ref` &&
     Array.isArray((expr as { path?: unknown }).path)
   ) {
-    return new PropRef((expr as unknown as { path: Array<string> }).path)
+    const ref = expr as unknown as {
+      path: Array<string>
+      sourceAlias?: string
+    }
+    return new PropRef(ref.path, ref.sourceAlias)
   }
   return undefined
 }

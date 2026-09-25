@@ -18,6 +18,7 @@ describe(`ref-proxy`, () => {
 
       expect(expression).toBeInstanceOf(PropRef)
       expect((expression as PropRef).path).toEqual([`timestamp`, `seconds`])
+      expect((expression as PropRef).sourceAlias).toBeUndefined()
     })
 
     it(`records built-in method paths only when the type boundary is bypassed`, () => {
@@ -195,6 +196,7 @@ describe(`ref-proxy`, () => {
       expect(expr).toBeInstanceOf(PropRef)
       expect(expr.type).toBe(`ref`)
       expect((expr as PropRef).path).toEqual([`users`, `id`])
+      expect((expr as PropRef).sourceAlias).toBe(`users`)
     })
 
     it(`converts literal values to Value expression`, () => {

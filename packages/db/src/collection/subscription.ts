@@ -1,6 +1,6 @@
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq } from '../query/builder/functions.js'
-import { PropRef, Value } from '../query/ir.js'
+import { PropRef, Value, getPropRefPropertyPath } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
@@ -1458,7 +1458,10 @@ export class CollectionSubscription
     const orderByExpression = orderBy[0]!.expression
     const valueExtractor =
       orderByExpression.type === `ref`
-        ? compileExpression(new PropRef(orderByExpression.path), true)
+        ? compileExpression(
+            new PropRef(getPropRefPropertyPath(orderByExpression)),
+            true,
+          )
         : null
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {

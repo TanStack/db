@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { compileExpression } from '../../../src/query/compiler/evaluators.js'
+import {
+  compileExpression,
+  compileSingleRowExpression,
+} from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import type { NamespacedRow } from '../../../src/types.js'
 
@@ -235,6 +238,27 @@ describe(`evaluators`, () => {
         const row: NamespacedRow = { users: undefined as any }
 
         expect(compiled(row)).toBeUndefined()
+      })
+
+      it(`uses explicit qualification in namespaced and single-row evaluation`, () => {
+        const ref = new PropRef([`users`, `profile`, `score`], `users`)
+
+        expect(
+          compileExpression(ref)({ users: { profile: { score: 7 } } }),
+        ).toBe(7)
+        expect(compileSingleRowExpression(ref)({ profile: { score: 7 } })).toBe(
+          7,
+        )
+      })
+
+      it(`keeps unqualified multi-segment refs as nested single-row paths`, () => {
+        const ref = new PropRef([`profile`, `score`])
+        const row = {
+          score: 3,
+          profile: { score: 7 },
+        }
+
+        expect(compileSingleRowExpression(ref)(row)).toBe(7)
       })
     })
 
