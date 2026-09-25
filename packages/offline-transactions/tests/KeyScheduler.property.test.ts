@@ -18,6 +18,7 @@ type Command =
   | { type: `fail` }
   | { type: `retry`; delay: number; payload: number }
   | { type: `bulkUpdate`; payload: number }
+  | { type: `remove`; ids: Array<string> }
   | { type: `advance`; duration: number }
   | { type: `clear` }
 
@@ -64,22 +65,33 @@ const {
 /**
  * # Which offline transaction may run next?
  *
- * The scheduler is globally serial in creation order. Equal creation times keep
- * scheduling order. A delayed FIFO head blocks younger work. At most one entry
- * is active. Failure makes that entry retryable; retry updates its deadline and
- * payload without changing its place. Clear retires active and pending work and
- * leaves the scheduler reusable.
+ * Contract and source: the established KeyScheduler FIFO tests and
+ * TransactionExecutor calling order require one globally serial queue. Equal
+ * creation times retain scheduling order. A delayed FIFO head blocks younger
+ * work. Failure makes the active transaction retryable without changing its
+ * place. Replay reconciliation may retire only unissued IDs. Clear retires all
+ * scheduler work and leaves the scheduler reusable.
  *
- * A declarative ledger, fake clock, and stable sequence form the model. Legal
- * commands are schedule, inspect, start, complete, fail, retry, bulk update,
- * advance time, and clear. The driver calls only executor-facing scheduler
- * methods, then compares returned identity and payload, ordered pending records,
- * counts, active state, and eligibility after every command.
+ * Model: a declarative ledger, fake clock, stable creation sequence, and active
+ * ID predict scheduler observations. The model does not import scheduler state
+ * or production classifiers.
  *
- * Fixed histories cover every transition and deadline relation. Generated
- * histories add shrinking and replay; four injected faults calibrate the path.
- * Persistence, promise settlement, leadership, and real timers have separate
- * owners.
+ * History grammar: legal commands schedule, inspect, start, fulfill, reject,
+ * update one or all pending records, reconcile one replay snapshot, advance
+ * the clock, and clear. A reject is followed immediately by its retry update.
+ * IDs are unique while pending. At most five IDs exist in generated histories.
+ *
+ * Production driver and refinement check: the driver calls the real
+ * executor-facing scheduler methods. After every command, it compares the next
+ * eligible ID and payload, ordered pending records, counts, and active state.
+ *
+ * Reach and controls: one fixed history reaches every transition. Two fixed
+ * histories cross retry-deadline order. Five injected observation faults prove
+ * the comparison rejects bypass, double issue, stale payload, stale clear, and
+ * failed selective retirement. The generated lane supports seed/path replay.
+ *
+ * Limits: persistence, caller promise settlement, leadership, and real timers
+ * have separate owners. The model does not promise fairness beyond FIFO order.
  */
 
 type CommandToken = {
@@ -161,6 +173,11 @@ function applyPlanningCommand(
     state.retryableId = undefined
   } else if (nextCommand.type === `advance`) {
     state.now += nextCommand.duration * 1000
+  } else if (nextCommand.type === `remove`) {
+    const ids = new Set(nextCommand.ids)
+    state.pending = state.pending.filter(
+      ({ id }) => id === state.activeId || !ids.has(id),
+    )
   } else if (nextCommand.type === `clear`) {
     state.pending = []
     state.activeId = undefined
@@ -183,6 +200,22 @@ function buildLegalHistory(tokens: Array<CommandToken>): Array<Command> {
       { type: `advance`, duration: token.duration },
       { type: `clear` },
     ]
+    const removable = state.pending.filter(({ id }) => id !== state.activeId)
+    if (removable.length > 0) {
+      const mode = Math.abs(token.payload) % 4
+      const ids =
+        mode === 0
+          ? []
+          : mode === 1
+            ? [removable[token.slot % removable.length]!.id]
+            : mode === 2
+              ? removable.map(({ id }) => id)
+              : [removable[0]!.id, `missing`]
+      choices.push({
+        type: `remove`,
+        ids,
+      })
+    }
 
     if (state.pending.length < 5) {
       choices.push({
@@ -259,6 +292,8 @@ function ordered(model: Model): Array<LedgerEntry> {
   )
 }
 
+// Model law: only the oldest pending transaction can become eligible. An
+// active transaction or a delayed FIFO head makes the next result empty.
 function expectedNext(model: Model): OfflineTransaction | undefined {
   if (model.activeId) return undefined
   const first = ordered(model)[0]?.transaction
@@ -420,6 +455,18 @@ function runHistory(
       const duration = nextCommand.duration * 1000
       vi.advanceTimersByTime(duration)
       model.now += duration
+    } else if (nextCommand.type === `remove`) {
+      const expectedRemoved = [
+        ...new Set(nextCommand.ids.filter((id) => id !== model.activeId)),
+      ]
+      expect(scheduler.removePendingTransactions(nextCommand.ids)).toEqual(
+        expectedRemoved,
+      )
+      const ids = new Set(nextCommand.ids)
+      model.pending = model.pending.filter(
+        ({ transaction }) =>
+          transaction.id === model.activeId || !ids.has(transaction.id),
+      )
     } else {
       scheduler.clear()
       model.pending = []
@@ -459,6 +506,7 @@ describe(`KeyScheduler generated lifecycle`, () => {
       { type: `schedule`, slot: 1, createdAt: 0, delay: 0, payload: 2 },
       { type: `getNext` },
       { type: `start` },
+      { type: `remove`, ids: [`tx-0`, `tx-1`, `missing`] },
       { type: `fail` },
       { type: `retry`, delay: 2, payload: 3 },
       { type: `getNext` },
@@ -477,6 +525,7 @@ describe(`KeyScheduler generated lifecycle`, () => {
         `fail`,
         `retry`,
         `bulkUpdate`,
+        `remove`,
         `advance`,
         `complete`,
         `clear`,
@@ -594,5 +643,55 @@ describe(`KeyScheduler generated lifecycle`, () => {
         }),
       }),
     ).toThrow()
+  })
+
+  it(`rejects retaining selectively revoked work on its scheduler path`, () => {
+    const history: Array<Command> = [
+      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
+      { type: `schedule`, slot: 1, createdAt: 1, delay: 0, payload: 2 },
+      { type: `remove`, ids: [`tx-0`] },
+    ]
+
+    expect(() =>
+      runHistory(history, {
+        commandIndex: 2,
+        apply: (actual) => ({
+          ...actual,
+          pending: [
+            {
+              id: `tx-0`,
+              createdAt: BASE_TIME,
+              nextAttemptAt: BASE_TIME,
+              retryCount: 0,
+              payload: 1,
+            },
+            ...actual.pending,
+          ],
+          pendingCount: actual.pendingCount + 1,
+        }),
+      }),
+    ).toThrow()
+  })
+
+  it(`selectively removes only unissued work`, () => {
+    const scheduler = new KeyScheduler()
+    const active = createTransaction(``, BASE_TIME, BASE_TIME, 1)
+    const removed = createTransaction(`removed`, BASE_TIME + 1, BASE_TIME, 2)
+    const retained = createTransaction(`retained`, BASE_TIME + 2, BASE_TIME, 3)
+    scheduler.schedule(active)
+    scheduler.schedule(removed)
+    scheduler.schedule(retained)
+    scheduler.markStarted(active)
+
+    expect(
+      scheduler.removePendingTransactions([active.id, removed.id, `missing`]),
+    ).toEqual([removed.id, `missing`])
+
+    expect({
+      pending: scheduler.getAllPendingTransactions().map(({ id }) => id),
+      running: scheduler.getRunningCount(),
+    }).toEqual({ pending: [active.id, retained.id], running: 1 })
+    scheduler.markCompleted(active)
+    expect(scheduler.getNext()?.id).toBe(retained.id)
   })
 })

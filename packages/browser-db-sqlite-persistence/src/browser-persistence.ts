@@ -130,26 +130,30 @@ export function createBrowserWASQLitePersistence(
       ...(schemaVersion === undefined ? {} : { schemaVersion }),
     })
     adapterCache.set(cacheKey, adapter)
-
     return adapter
   }
 
   const createCollectionPersistence = (
+    collectionId: string | undefined,
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-    collectionId?: string,
   ): PersistedCollectionPersistence => {
     const adapter = getAdapterForCollection(mode, schemaVersion)
-    if (
-      collectionId !== undefined &&
-      resolvedCoordinator instanceof BrowserCollectionCoordinator
-    ) {
-      resolvedCoordinator.setAdapterForCollection(collectionId, adapter)
+    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
+      if (collectionId === undefined) {
+        resolvedCoordinator.setAdapter(adapter)
+      } else {
+        resolvedCoordinator.setAdapterForCollection(collectionId, adapter)
+      }
     }
-    return { adapter, coordinator: resolvedCoordinator }
+    return {
+      adapter,
+      coordinator: resolvedCoordinator,
+    }
   }
 
   const defaultPersistence = createCollectionPersistence(
+    undefined,
     `sync-absent`,
     undefined,
   )
@@ -160,8 +164,8 @@ export function createBrowserWASQLitePersistence(
   return {
     ...defaultPersistence,
     resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
-      createCollectionPersistence(mode, schemaVersion, collectionId),
+      createCollectionPersistence(collectionId, mode, schemaVersion),
     resolvePersistenceForMode: (mode) =>
-      createCollectionPersistence(mode, undefined),
+      createCollectionPersistence(undefined, mode, undefined),
   }
 }

@@ -13,9 +13,9 @@ import { deepEquals } from '../src/utils'
  * remain unequal. Separate bounded graph laws construct corresponding rings
  * and acyclic copies without reusing the production walk.
  *
- * Object-valued Set matching and arbitrary different cycle topologies are
- * outside this model. Naming those exclusions matters: more random examples
- * cannot establish semantics the reference relation does not define.
+ * Arbitrary different cycle topologies are outside this model. Naming that
+ * exclusion matters: more random examples cannot establish semantics the
+ * reference relation does not define.
  */
 const arbitraryPrimitive = fc.oneof(
   fc.string(),
@@ -413,6 +413,15 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(original, different, false)
       },
     )
+
+    it(`matches object-valued Sets by value rather than cardinality`, () => {
+      expectEqualityPair(
+        new Set([{ id: 1 }, { id: 2 }]),
+        new Set([{ id: 2 }, { id: 1 }]),
+        true,
+      )
+      expectEqualityPair(new Set([{ id: 1 }]), new Set([{ id: 2 }]), false)
+    })
   })
 
   describe(`equivalence relation properties`, () => {

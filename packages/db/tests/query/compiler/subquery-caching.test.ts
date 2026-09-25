@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { D2 } from '@tanstack/db-ivm'
 import { compileQuery } from '../../../src/query/compiler/index.js'
-import { CollectionRef, PropRef, QueryRef } from '../../../src/query/ir.js'
+import { queriesMatchForCaching } from '../../../src/query/compiler/query-equivalence.js'
+import {
+  CollectionRef,
+  Func,
+  PropRef,
+  QueryRef,
+  Value,
+} from '../../../src/query/ir.js'
 import type { QueryIR } from '../../../src/query/ir.js'
 import type { CollectionImpl } from '../../../src/collection/index.js'
 
@@ -20,6 +27,28 @@ function createMockCollection(id: string): CollectionImpl {
 }
 
 describe(`Subquery Caching`, () => {
+  it(`reuses cache identity only when optimizer copies preserve query meaning`, () => {
+    const usersCollection = createMockCollection(`users`)
+    const original: QueryIR = {
+      from: new CollectionRef(usersCollection, `u`),
+      select: { id: new PropRef([`u`, `id`]) },
+    }
+    const copied: QueryIR = {
+      ...original,
+      join: undefined,
+      where: undefined,
+    }
+    const filtered: QueryIR = {
+      ...copied,
+      where: [
+        new Func(`eq`, [new PropRef([`u`, `status`]), new Value(`active`)]),
+      ],
+    }
+
+    expect(queriesMatchForCaching(copied, original)).toBe(true)
+    expect(queriesMatchForCaching(filtered, original)).toBe(false)
+  })
+
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {
     // Create a mock collection
     const usersCollection = createMockCollection(`users`)

@@ -14,7 +14,10 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     filename: dbPath,
     resultShape: `statement-array`,
   })
-  const driver = new OpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({
+    database,
+    arrayResultMode: `statement-results`,
+  })
 
   const adapter = new SQLiteCorePersistenceAdapter({
     driver,

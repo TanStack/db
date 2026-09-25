@@ -200,6 +200,20 @@ function createResolvedRendererAdapter(
         value: Record<string, unknown>
       }>
     },
+    loadResumeSnapshot: async (
+      collectionId: string,
+      ctx?: {
+        requiredIndexSignatures?: ReadonlyArray<string>
+        includeRows?: boolean
+      },
+    ) => {
+      return executeRequest(
+        `loadResumeSnapshot`,
+        collectionId,
+        { ctx },
+        resolution,
+      )
+    },
     applyCommittedTx: async (
       collectionId: string,
       tx: PersistedTx<Record<string, unknown>, string | number>,
@@ -359,26 +373,27 @@ export function createElectronSQLitePersistence(
       schemaVersion,
     })
     adapterCache.set(cacheKey, adapter)
-
     return adapter
   }
 
   const createCollectionPersistence = (
+    collectionId: string | undefined,
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-    collectionId?: string,
   ): PersistedCollectionPersistence => {
     const adapter = getAdapterForCollection(mode, schemaVersion)
-    if (
-      collectionId !== undefined &&
-      coordinator instanceof ElectronCollectionCoordinator
-    ) {
-      coordinator.setAdapterForCollection(collectionId, adapter)
+    if (coordinator instanceof ElectronCollectionCoordinator) {
+      if (collectionId === undefined) {
+        coordinator.setAdapter(adapter)
+      } else {
+        coordinator.setAdapterForCollection(collectionId, adapter)
+      }
     }
     return { adapter, coordinator }
   }
 
   const defaultPersistence = createCollectionPersistence(
+    undefined,
     `sync-absent`,
     undefined,
   )
@@ -389,9 +404,9 @@ export function createElectronSQLitePersistence(
   return {
     ...defaultPersistence,
     resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
-      createCollectionPersistence(mode, schemaVersion, collectionId),
+      createCollectionPersistence(collectionId, mode, schemaVersion),
     // Backward compatible fallback for older callers.
     resolvePersistenceForMode: (mode) =>
-      createCollectionPersistence(mode, undefined),
+      createCollectionPersistence(undefined, mode, undefined),
   }
 }

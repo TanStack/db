@@ -53,10 +53,29 @@ function createDeferred(): Deferred {
   return { promise, resolve }
 }
 
+function fixtureQueryRows<T>(sql: string): ReadonlyArray<T> {
+  if (sql.includes(`FROM collection_registry`)) {
+    return [
+      {
+        table_name: `c_fixture`,
+        tombstone_table_name: `t_fixture`,
+        schema_version: 1,
+      } as T,
+    ]
+  }
+  return []
+}
+
+function isMetadataQuery(sql: string): boolean {
+  return sql.includes(`FROM collection_metadata`)
+}
+
 class FirstQueryGatedDriver implements SQLiteDriver {
   readonly [SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY]: object
   readonly admissions: Array<string> = []
+  readonly metadataAdmissions: Array<string> = []
   readonly firstQueryEntered = createDeferred()
+  firstQueryAdmissionCount = 0
   onQuery: (() => void) | undefined
   private readonly firstQueryGate = createDeferred()
   private holdFirstQuery = true
@@ -71,15 +90,19 @@ class FirstQueryGatedDriver implements SQLiteDriver {
     return Promise.resolve()
   }
 
-  async query<T>(): Promise<ReadonlyArray<T>> {
+  async query<T>(sql: string): Promise<ReadonlyArray<T>> {
     this.admissions.push(`query`)
-    this.onQuery?.()
-    if (this.holdFirstQuery) {
+    if (isMetadataQuery(sql)) {
+      this.metadataAdmissions.push(`query`)
+      this.onQuery?.()
+    }
+    if (this.holdFirstQuery && isMetadataQuery(sql)) {
       this.holdFirstQuery = false
+      this.firstQueryAdmissionCount = this.admissions.length
       this.firstQueryEntered.resolve()
       await this.firstQueryGate.promise
     }
-    return []
+    return fixtureQueryRows<T>(sql)
   }
 
   run(): Promise<void> {
@@ -101,7 +124,9 @@ class FirstQueryGatedDriver implements SQLiteDriver {
 
 class PromiseBrandedFirstQueryGatedDriver implements SQLiteDriver {
   readonly admissions: Array<string> = []
+  readonly metadataAdmissions: Array<string> = []
   readonly firstQueryEntered = createDeferred()
+  firstQueryAdmissionCount = 0
   private readonly firstQueryGate = createDeferred()
   private holdFirstQuery = true
 
@@ -112,15 +137,17 @@ class PromiseBrandedFirstQueryGatedDriver implements SQLiteDriver {
     return this.brand(Promise.resolve())
   }
 
-  query<T>(): Promise<ReadonlyArray<T>> {
+  query<T>(sql: string): Promise<ReadonlyArray<T>> {
     this.admissions.push(`query`)
+    if (isMetadataQuery(sql)) this.metadataAdmissions.push(`query`)
     const result = (async () => {
-      if (this.holdFirstQuery) {
+      if (this.holdFirstQuery && isMetadataQuery(sql)) {
         this.holdFirstQuery = false
+        this.firstQueryAdmissionCount = this.admissions.length
         this.firstQueryEntered.resolve()
         await this.firstQueryGate.promise
       }
-      return [] as ReadonlyArray<T>
+      return fixtureQueryRows<T>(sql)
     })()
     return this.brand(result)
   }
@@ -158,8 +185,8 @@ class UnbrandedPromiseLookupDriver implements SQLiteDriver {
     return this.unbranded(Promise.resolve())
   }
 
-  query<T>(): Promise<ReadonlyArray<T>> {
-    return this.unbranded(Promise.resolve([] as ReadonlyArray<T>))
+  query<T>(sql: string): Promise<ReadonlyArray<T>> {
+    return this.unbranded(Promise.resolve(fixtureQueryRows<T>(sql)))
   }
 
   run(): Promise<void> {
@@ -243,11 +270,13 @@ describe(`shared logical scheduling`, () => {
 
       const regular = regularAdapter.loadCollectionMetadata!(`regular`)
 
-      expect(underlying.admissions).toEqual([`query`])
+      expect(underlying.admissions).toHaveLength(
+        underlying.firstQueryAdmissionCount,
+      )
 
       underlying.releaseFirstQuery()
       await Promise.all([hydrate, regular])
-      expect(underlying.admissions.length).toBeGreaterThan(1)
+      expect(underlying.metadataAdmissions).toEqual([`query`, `query`])
     },
   )
 
@@ -263,11 +292,11 @@ describe(`shared logical scheduling`, () => {
 
     const regular = regularAdapter.loadCollectionMetadata!(`regular`)
 
-    expect(driver.admissions).toEqual([`query`])
+    expect(driver.admissions).toHaveLength(driver.firstQueryAdmissionCount)
 
     driver.releaseFirstQuery()
     await Promise.all([hydrate, regular])
-    expect(driver.admissions).toEqual([`query`, `query`])
+    expect(driver.metadataAdmissions).toEqual([`query`, `query`])
   })
 
   it(`keeps generated promise-discovered hydrate units non-preemptible`, async () => {
@@ -296,11 +325,13 @@ describe(`shared logical scheduling`, () => {
           const peers = peerAdapters.map((adapter, index) =>
             adapter.loadCollectionMetadata!(`peer-${index}`),
           )
-          expect(driver.admissions).toEqual([`query`])
+          expect(driver.admissions).toHaveLength(
+            driver.firstQueryAdmissionCount,
+          )
 
           driver.releaseFirstQuery()
           await Promise.all([hydrate, ...peers])
-          expect(driver.admissions).toEqual(
+          expect(driver.metadataAdmissions).toEqual(
             Array.from({ length: hydrateQueries + peerQueries }, () => `query`),
           )
         },

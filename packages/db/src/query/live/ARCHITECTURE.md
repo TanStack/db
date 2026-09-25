@@ -584,6 +584,15 @@ only when callers supply no abort signal. Independently cancelable requests
 use separate transports, trading duplicate concurrent fetches for simpler
 ownership. An adapter may share its own resources, but releasing one owner
 must not cancel work or remove rows still owned by another.
+`LoadSubsetOptions.refetch` starts a new acquisition attempt for the same exact
+demand even when an adapter has completed or cached it. It is operation
+control, not request data: exact-demand identity, Query cache identity, and
+unload identity ignore it, and adapters must not expose it as user query
+metadata. The new attempt still establishes its own acquisition lease. Its
+settlement and release follow the same rules as every other acquisition: the
+returned promise waits for authoritative applied rows and rejects if its final
+logical owner releases it first. A shared transport may be replaced to satisfy
+the fresh attempt, but peer logical owners remain attached to the replacement.
 
 Request data is immutable from submission onward, including the options,
 expression trees, comparison options, and constant payloads such as Dates,
@@ -728,12 +737,14 @@ behind the active replay barrier.
 
 ### Ordered requests, continuation, and recovery
 
-Core constructs cursors only for one order column. A direct
+Core constructs cursors only from the leading order column. A direct
 `requestLimitedSnapshot()` call with a nonempty `minValues` must supply one
-value and one order term; composite or partial-composite inputs throw before
-local delivery or source acquisition. Multi-column queries remain supported
-through the ordered loader's prefix-and-tie fallback. Its first-column equality
-request closes a tie group; it is not a composite continuation cursor.
+leading value and at least one order term; multiple boundary values throw
+before local delivery or source acquisition. For a multi-column query, the
+provider still receives the complete order, while the continuation predicate
+selects rows after the leading value. A separate first-column equality request
+loads that complete tie before local ordering applies the trailing terms. This
+is a leading-column continuation plus tie expansion, not a composite cursor.
 
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
@@ -785,6 +796,43 @@ still follow the explicit-retry rule above. Release callbacks retire ownership
 before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
+A visible delete or source-order change after an otherwise settled,
+expressible window uses a narrower authoritative path. Core reissues the
+ordered prefix from the start with the query predicate, order terms, and
+`limit = offset + limit`; the transport `offset` is omitted because this
+acquisition starts at the provider's source prefix. It then reacquires the
+first-column tie boundary and any required refill before publishing. Only the
+new repair acquisitions remain. Every acquisition in this chain uses
+`refetch: true`, so an adapter must revalidate the exact demand instead of
+reusing completed or in-flight work. A source-order invalidation generation
+fences the chain. If another qualifying mutation arrives before it finishes,
+core starts a replacement repair before releasing the publication barrier and
+before the obsolete chain can issue another tie or refill. A repeated prefix or
+page fixed point ends the repair when no more data is needed; it cannot leave a
+held repair without pending work.
+The finite prefix and tie acquisitions they replace retire after the whole
+replacement chain succeeds.
+An invalidation that overlaps unfinished non-repair source work, a failed
+or canceled request, or a boundary that cannot be expressed still requires the
+full-source recovery above. A bounded repair failure likewise upgrades its
+next attempt to full-source recovery because partial writes cannot establish
+finite coverage.
+
+“Bounded prefix” describes the adapter acquisition, not the subscription's
+immediate local replay. `requestSnapshot()` composes the subscription and
+request predicates for both legs, but its local snapshot is predicate-only: it
+may deliver every matching row already installed in the Collection without
+applying the request's order or limit. The ordered graph's top-K operator owns
+the local result window. Provider transfer remains bounded by `orderBy` and
+`limit`; local delivery cardinality is a separate observation.
+
+Bounded repair is available only when a provider prefix is sufficient for the
+local plan. Core requires full-source recovery for an indirect order
+expression, a non-root ordered source, an inner or right join, a residual or
+cross-alias predicate, a functional predicate, grouping, `having`, functional
+`having`, or `distinct`. These cases can discard or reorder an otherwise valid
+provider prefix even when a cursor value itself is expressible.
+
 An ordered request cannot start another ordered request through its own
 synchronous writes. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
@@ -804,6 +852,11 @@ The ordered loader retains one settled loading boundary, independently of
 live rows sent to D2. It derives invalidation from the existing contribution
 rows rather than tracking a second largest-row cursor. New keys may reopen
 refinement, while duplicate delivery and order-equal updates do not. After a
+successful request, only a delete or a change that compares differently on the
+first provider order term for a row previously contributed to D2 starts the
+authoritative repair path. An unseen/new row clears continuation state so the
+graph may request more work, but does not invalidate settled prefix authority;
+a later-order-term-only update also does not take this repair path. After a
 successful finite acquisition, it reads at
 most the requested limit within that request's filtered, ordered range. That
 range's last available row can advance the boundary; an unrelated live outlier
@@ -811,11 +864,11 @@ cannot advance it merely by entering D2. This relies on the adapter fulfilling
 the exact ordered request, not just resolving after an arbitrary partial write.
 An empty range does not invent a boundary or prove source exhaustion.
 
-For no-index and multi-column prefix loading, an unrelated new key does not
-reacquire an already full window. An explicit window move, an underfilled
-window, or a settled prefix smaller than a window widened during that request
-still requires acquisition. A full local window alone does not prove that the
-provider fulfilled a concurrent window change.
+For no-index prefix loading, an unrelated new key does not reacquire an already
+full window. An explicit window move, an underfilled window, or a settled
+prefix smaller than a window widened during that request still requires
+acquisition. A full local window alone does not prove that the provider
+fulfilled a concurrent window change.
 
 A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
@@ -883,8 +936,10 @@ Ordinary source mutations stay synchronous except while an initial ordered
 load, imperative window move, or asynchronous repair of invalid finite source
 coverage owns this publication barrier. A visible delete or a change to a
 visible row's source-order value can invalidate a provider prefix because a
-hidden row may now belong in the window. That repair loads the authoritative
-source and keeps the last complete public snapshot until it settles; an update
+hidden row may now belong in the window. After a settled request, that repair
+reacquires the bounded ordered prefix and its tie/refill chain; unsafe overlap,
+inexpressible ordering, and request failure retain the full-source fallback.
+Both paths keep the last complete public snapshot until they settle. An update
 that compares equal under the source order does not broaden demand. Mutations
 that arrive during a barrier join the private state and publish with the
 completed replacement; a failed operation keeps them private until retry or
@@ -894,6 +949,25 @@ because it returned no acquisition promise. The queued task belongs to the
 loader that scheduled it, not a replacement created after cleanup.
 The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
+
+Effects use a separate callback-publication gate because they do not publish
+through a Collection. During an authoritative ordered repair,
+source changes continue to advance the private D2 graph and accumulate a net
+delta, but `onBatch`/`onEnter`/`onUpdate`/`onExit` callbacks retain the last
+complete result. Prefix, tie, and refill promises join one continuous gate;
+the final successful participant schedules one flush of the accumulated delta.
+A synchronous adapter result still contributes the loader's wrapped repair
+participant. At flush, equal insert/delete counts are classified against the
+last callback-visible membership and value: absent-to-absent produces no event,
+while present-to-present produces an update only when the value changed.
+If truncate replay aborts an obsolete repair participant, its replacement
+completion inherits the same callback hold; the abort alone does not freeze or
+dispose the still-live Effect. Any unhandled participant failure never exposes
+the private intermediate state: source-error handling disposes the Effect and
+clears the retained delta and participants. With `skipInitial`, an asynchronous
+initial ordered chain also stays behind the gate until all initial participants
+settle, so its rows do not become later `enter` callbacks. Other ordinary
+initial/refinement requests keep their existing callback timing.
 
 ### Replay participants and failure
 

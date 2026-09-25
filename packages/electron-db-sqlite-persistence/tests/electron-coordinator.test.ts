@@ -126,6 +126,14 @@ function createStubAdapter(): StubAdapter {
   return {
     appliedTxs,
     loadSubset: async () => [],
+    loadResumeSnapshot: async () => ({
+      rows: [],
+      collectionMetadata: [],
+      latestTerm: 0,
+      latestSeq: 0,
+      latestRowVersion: 0,
+      resetEpoch: 0,
+    }),
     applyCommittedTx: async (_collectionId, tx) => {
       appliedTxs.push(tx.txId)
     },
@@ -168,7 +176,7 @@ async function waitForLeadership(
 type CoordinatorInspection = {
   collectionAdapters: Map<string, unknown>
   collections: Map<string, unknown>
-  appliedEnvelopeIds: Map<string, unknown>
+  appliedEnvelopes: Map<string, unknown>
 }
 
 function inspectCoordinator(
@@ -213,6 +221,7 @@ describe(`ElectronCollectionCoordinator parity`, () => {
     const leader = createCoordinator(todosAdapter)
     const follower = createCoordinator(notesAdapter)
     try {
+      leader.setAdapterForCollection(`todos`, todosAdapter)
       leader.subscribe(`todos`, () => {})
       await leadershipReadPromise
       await waitForLeadership(leader, `todos`)
@@ -512,14 +521,14 @@ describe(`ElectronCollectionCoordinator parity`, () => {
       expect({
         adapters: inspectCoordinator(coordinator).collectionAdapters.size,
         collections: inspectCoordinator(coordinator).collections.size,
-        envelopes: inspectCoordinator(coordinator).appliedEnvelopeIds.size,
+        envelopes: inspectCoordinator(coordinator).appliedEnvelopes.size,
       }).toEqual({ adapters: 1, collections: 1, envelopes: 1 })
 
       release()
       expect({
         adapters: inspectCoordinator(coordinator).collectionAdapters.size,
         collections: inspectCoordinator(coordinator).collections.size,
-        envelopes: inspectCoordinator(coordinator).appliedEnvelopeIds.size,
+        envelopes: inspectCoordinator(coordinator).appliedEnvelopes.size,
       }).toEqual({ adapters: 0, collections: 0, envelopes: 0 })
     } finally {
       release()
@@ -543,10 +552,10 @@ describe(`ElectronCollectionCoordinator parity`, () => {
           value: { id: `1` },
         },
       ])
-      expect(inspectCoordinator(coordinator).appliedEnvelopeIds.size).toBe(1)
+      expect(inspectCoordinator(coordinator).appliedEnvelopes.size).toBe(1)
 
       await vi.advanceTimersByTimeAsync(60_000)
-      expect(inspectCoordinator(coordinator).appliedEnvelopeIds.size).toBe(0)
+      expect(inspectCoordinator(coordinator).appliedEnvelopes.size).toBe(0)
     } finally {
       release()
       coordinator.dispose()

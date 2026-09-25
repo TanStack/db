@@ -1,12 +1,13 @@
 /**
  * # Does real-adapter restart preserve the sync-run start boundary?
  *
- * A stale lifecycle may finish its already-admitted SQLite read, but it must
- * not retain the wrapper mutex that gates startup metadata for the replacement
- * sync run. The replacement upstream sync function may start once its metadata
- * is loaded, before the stale row read is released. This file uses the real
- * core adapter because recording adapters do not expose its public
- * hydration-scope method and therefore select a different startup branch.
+ * A stale lifecycle may keep its already-admitted hydrate pending before its
+ * SQLite row read, but it must not retain the wrapper mutex that gates startup
+ * metadata for the replacement sync run. The replacement upstream sync
+ * function may start once its metadata is loaded, before the stale hydrate is
+ * released. This file uses the real core adapter because recording adapters
+ * do not expose its public hydration-scope method and therefore select a
+ * different startup branch.
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -20,7 +21,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { SqliteCliDriver } from './sqlite-core-adapter.test'
-import type { SQLiteDriver } from '../src'
+import type { PersistenceAdapter, SQLiteDriver } from '../src'
 
 type Deferred = {
   promise: Promise<void>
@@ -35,11 +36,28 @@ function createDeferred(): Deferred {
   return { promise, resolve }
 }
 
-class QueryGateDriver implements SQLiteDriver {
+async function reachCheckpoint(
+  promise: Promise<void>,
+  checkpoint: string,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Did not reach checkpoint: ${checkpoint}`)),
+          2_000,
+        )
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+class QueryObservingDriver implements SQLiteDriver {
   readonly queries: Array<string> = []
-  private matcher: ((sql: string) => boolean) | undefined
-  private gate: Deferred | undefined
-  private entered: Deferred | undefined
 
   constructor(
     private readonly driver: SQLiteDriver,
@@ -52,19 +70,6 @@ class QueryGateDriver implements SQLiteDriver {
     }
   }
 
-  holdNextQuery(matcher: (sql: string) => boolean): {
-    entered: Promise<void>
-    release: () => void
-  } {
-    this.matcher = matcher
-    this.gate = createDeferred()
-    this.entered = createDeferred()
-    return {
-      entered: this.entered.promise,
-      release: () => this.release(),
-    }
-  }
-
   exec(sql: string): Promise<void> {
     return this.driver.exec(sql)
   }
@@ -73,13 +78,16 @@ class QueryGateDriver implements SQLiteDriver {
     sql: string,
     params: ReadonlyArray<unknown> = [],
   ): Promise<ReadonlyArray<T>> {
+    return this.queryThroughDriver(sql, params, this.driver)
+  }
+
+  private async queryThroughDriver<T>(
+    sql: string,
+    params: ReadonlyArray<unknown>,
+    queryDriver: SQLiteDriver,
+  ): Promise<ReadonlyArray<T>> {
     const normalizedSql = sql.replace(/\s+/g, ` `).trim()
     this.queries.push(normalizedSql)
-    if (this.matcher?.(sql)) {
-      this.matcher = undefined
-      this.entered?.resolve()
-      await this.gate?.promise
-    }
     if (
       normalizedSql.includes(`FROM leader_term`) ||
       normalizedSql.includes(`FROM collection_version`) ||
@@ -88,7 +96,7 @@ class QueryGateDriver implements SQLiteDriver {
     ) {
       return []
     }
-    return this.driver.query<T>(sql, params)
+    return queryDriver.query<T>(sql, params)
   }
 
   run(sql: string, params: ReadonlyArray<unknown> = []): Promise<void> {
@@ -98,22 +106,60 @@ class QueryGateDriver implements SQLiteDriver {
   transaction<T>(
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
-    return this.driver.transaction(fn)
+    return this.driver.transaction((transactionDriver) =>
+      fn(this.observeTransactionDriver(transactionDriver)),
+    )
   }
 
   transactionWithDriver<T>(
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
     return this.driver.transactionWithDriver
-      ? this.driver.transactionWithDriver(fn)
-      : this.driver.transaction(fn)
+      ? this.driver.transactionWithDriver((transactionDriver) =>
+          fn(this.observeTransactionDriver(transactionDriver)),
+        )
+      : this.transaction(fn)
   }
 
-  private release(): void {
-    this.gate?.resolve()
-    this.gate = undefined
-    this.entered = undefined
+  private observeTransactionDriver(driver: SQLiteDriver): SQLiteDriver {
+    return {
+      exec: (sql) => driver.exec(sql),
+      query: (sql, params = []) => this.queryThroughDriver(sql, params, driver),
+      run: (sql, params = []) => driver.run(sql, params),
+      transaction: (fn) =>
+        driver.transaction((nestedDriver) =>
+          fn(this.observeTransactionDriver(nestedDriver)),
+        ),
+    }
   }
+}
+
+function holdFirstHydrationRead(adapter: PersistenceAdapter): {
+  entered: Promise<void>
+  release: () => void
+} {
+  const entered = createDeferred()
+  const gate = createDeferred()
+  if (!adapter.runInHydrationScope) {
+    throw new Error(`The real adapter must expose a hydration scope`)
+  }
+  const runInHydrationScope = adapter.runInHydrationScope.bind(adapter)
+  let held = false
+  adapter.runInHydrationScope = (task) =>
+    runInHydrationScope((scopedAdapter) =>
+      task({
+        ...scopedAdapter,
+        loadResumeSnapshot: async (...args) => {
+          if (!held && args[1]?.includeRows !== false) {
+            held = true
+            entered.resolve()
+            await gate.promise
+          }
+          return scopedAdapter.loadResumeSnapshot(...args)
+        },
+      }),
+    )
+  return { entered: entered.promise, release: gate.resolve }
 }
 
 async function observeRestartOrder(options: {
@@ -127,7 +173,7 @@ async function observeRestartOrder(options: {
   collectionMetadataReadsBeforeRelease: number
 }> {
   const directory = mkdtempSync(join(tmpdir(), `persisted-real-lifecycle-`))
-  const driver = new QueryGateDriver(
+  const driver = new QueryObservingDriver(
     new SqliteCliDriver(join(directory, `state.sqlite`)),
     options.scheduled ? {} : undefined,
   )
@@ -135,10 +181,9 @@ async function observeRestartOrder(options: {
     driver,
     schemaVersion: options.schemaVersion,
   })
-  const staleRows = driver.holdNextQuery((sql) =>
-    /SELECT\s+key,\s*value,\s*metadata,\s*row_version\s+FROM/i.test(sql),
-  )
+  const staleRows = holdFirstHydrationRead(adapter)
   let sourceStarts = 0
+  const freshSourceStarted = createDeferred()
 
   const collection = createCollection(
     persistedCollectionOptions<{ id: string }, string>({
@@ -147,6 +192,7 @@ async function observeRestartOrder(options: {
       sync: {
         sync: ({ markReady }) => {
           sourceStarts++
+          if (sourceStarts === 2) freshSourceStarted.resolve()
           markReady()
         },
       },
@@ -165,14 +211,24 @@ async function observeRestartOrder(options: {
 
   try {
     await staleRows.entered
+    for (let microtask = 0; microtask < 12 && sourceStarts === 0; microtask++) {
+      await Promise.resolve()
+    }
     expect(sourceStarts).toBe(1)
     await collection.cleanup()
 
     collection.startSyncImmediate()
     freshReady = collection.stateWhenReady()
     void freshReady.catch(() => undefined)
-    for (let microtask = 0; microtask < 12; microtask++) {
-      await Promise.resolve()
+    if (options.scheduled) {
+      for (let microtask = 0; microtask < 12; microtask++) {
+        await Promise.resolve()
+      }
+    } else {
+      await reachCheckpoint(
+        freshSourceStarted.promise,
+        `replacement source started while stale hydration is held`,
+      )
     }
 
     observation = {

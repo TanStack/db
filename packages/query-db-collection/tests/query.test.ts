@@ -95,7 +95,7 @@ function createInMemorySyncMetadataApi<
   const rowMetadata = new Map(seed?.rowMetadata)
   const collectionMetadata = new Map(seed?.collectionMetadata)
   const persistedRows = new Map(seed?.persistedRows)
-  const api = {
+  const api: SyncMetadataApi<TKey> = {
     row: {
       get: (key: TKey) => rowMetadata.get(key),
       set: (key: TKey, value: unknown) => {
@@ -104,12 +104,22 @@ function createInMemorySyncMetadataApi<
       delete: (key: TKey) => {
         rowMetadata.delete(key)
       },
-      scanPersisted: async () =>
+    },
+    persistence: {
+      protocol: `@tanstack/db/sync-persistence`,
+      version: 1,
+      hydrateBaseline: async () => {},
+      scanPersistedRows: async () =>
         Array.from(persistedRows.entries()).map(([key, value]) => ({
           key,
           value,
           metadata: rowMetadata.get(key),
         })),
+      resumeSnapshot: {
+        certify: async () => {},
+        getKeySetEvidence: () => ({ status: `consistent` }),
+        expectCurrentCommit: () => {},
+      },
     },
     collection: {
       get: (key: string) => collectionMetadata.get(key),
@@ -130,7 +140,7 @@ function createInMemorySyncMetadataApi<
     rowMetadata,
     collectionMetadata,
     persistedRows,
-    api: api as SyncMetadataApi<TKey>,
+    api,
   }
 }
 
@@ -144,6 +154,9 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
   const rows = new Map(seed.rows)
   const rowMetadata = new Map(seed.rowMetadata)
   const collectionMetadata = new Map(seed.collectionMetadata)
+  let latestTerm = 0
+  let latestSeq = 0
+  let latestRowVersion = 0
 
   return {
     rows,
@@ -155,6 +168,28 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
         value,
         metadata: rowMetadata.get(value.id),
       })),
+    loadResumeSnapshot: async (
+      _collectionId: string,
+      options?: { includeRows?: boolean },
+    ) => ({
+      rows:
+        options?.includeRows === false
+          ? []
+          : Array.from(rows.values()).map((value) => ({
+              key: value.id,
+              value,
+              metadata: rowMetadata.get(value.id),
+            })),
+      keySet: { status: `consistent` as const },
+      collectionMetadata: Array.from(
+        collectionMetadata.entries(),
+        ([key, value]) => ({ key, value }),
+      ),
+      latestTerm,
+      latestSeq,
+      latestRowVersion,
+      resetEpoch: 0,
+    }),
     loadCollectionMetadata: async () =>
       Array.from(collectionMetadata.entries()).map(([key, value]) => ({
         key,
@@ -193,6 +228,9 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
           collectionMetadata.set(mutation.key, mutation.value)
         }
       }
+      latestTerm = tx.term
+      latestSeq = tx.seq
+      latestRowVersion = tx.rowVersion
     },
     ensureIndex: async () => {},
   }
@@ -278,6 +316,107 @@ describe(`QueryCollection`, () => {
   afterEach(() => {
     // Ensure all queries are properly cleaned up after each test
     queryClient.clear()
+  })
+
+  it(`accepts the explicit null persistence sentinel from core`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `explicit-null-persistence-test`,
+      queryClient,
+      queryKey: [`explicit-null-persistence-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const originalSync = options.sync
+    let observedPersistence: unknown
+    const collection = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          observedPersistence = params.metadata?.persistence
+          return originalSync.sync(params)
+        },
+      },
+    })
+
+    collection.startSyncImmediate()
+    await collection.stateWhenReady()
+
+    expect(observedPersistence).toBeNull()
+    expect(queryFn).toHaveBeenCalledOnce()
+    await collection.cleanup()
+  })
+
+  it(`treats omitted optional sync metadata as no persistence`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `omitted-sync-metadata-test`,
+      queryClient,
+      queryKey: [`omitted-sync-metadata-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const querySync = options.sync
+    const collectionWithoutMetadata = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof querySync.sync>[0]) => {
+          const { metadata: _omitted, ...paramsWithoutMetadata } = params
+          return querySync.sync(paramsWithoutMetadata)
+        },
+      },
+    })
+
+    let startError: unknown
+    try {
+      collectionWithoutMetadata.startSyncImmediate()
+      await collectionWithoutMetadata.stateWhenReady()
+    } catch (error) {
+      startError = error
+    } finally {
+      await collectionWithoutMetadata.cleanup()
+    }
+
+    expect(startError).toBeUndefined()
+    expect(queryFn).toHaveBeenCalledOnce()
+  })
+
+  it(`rejects a sync wrapper that drops the entire persistence field before querying`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `missing-persistence-field-test`,
+      queryClient,
+      queryKey: [`missing-persistence-field-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const originalSync = options.sync
+    const malformedCollection = createCollection({
+      ...options,
+      startSync: false,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          const { persistence: _dropped, ...metadataWithoutPersistence } =
+            params.metadata!
+          return originalSync.sync({
+            ...params,
+            metadata: metadataWithoutPersistence as unknown as SyncMetadataApi<
+              string | number
+            >,
+          })
+        },
+      },
+    })
+
+    expect(() => malformedCollection.startSyncImmediate()).toThrow(
+      /expected null or a complete capability object.*forward metadata\.persistence unchanged/i,
+    )
+    expect(malformedCollection.status).toBe(`error`)
+    expect(queryFn).not.toHaveBeenCalled()
+    await malformedCollection.cleanup()
   })
 
   it(`should pass through additional top-level Query observer options`, async () => {
@@ -2012,7 +2151,7 @@ describe(`QueryCollection`, () => {
       expect(options.onDelete).toBeDefined()
     })
 
-    it(`should wrap handlers and call the original handler`, async () => {
+    it(`should preserve handler parameter identity`, async () => {
       const queryKey = [`handlerTest`]
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
@@ -2096,10 +2235,19 @@ describe(`QueryCollection`, () => {
       await options.onUpdate!(updateMockParams)
       await options.onDelete!(deleteMockParams)
 
-      // Verify the original handlers were called
-      expect(onInsert).toHaveBeenCalledWith(insertMockParams)
-      expect(onUpdate).toHaveBeenCalledWith(updateMockParams)
-      expect(onDelete).toHaveBeenCalledWith(deleteMockParams)
+      // Phase tracking gives handler-local refetch calls their non-circular
+      // fetch boundary without replacing public objects.
+      for (const [handler, expected] of [
+        [onInsert, insertMockParams],
+        [onUpdate, updateMockParams],
+        [onDelete, deleteMockParams],
+      ] as const) {
+        expect(handler).toHaveBeenCalledOnce()
+        const actual = handler.mock.calls[0]![0]
+        expect(actual.transaction).toBe(expected.transaction)
+        expect(actual.collection).toBe(expected.collection)
+        expect(actual.collection.utils).toBe(expected.collection.utils)
+      }
     })
 
     it(`should call refetch based on handler return value`, async () => {
@@ -2179,7 +2327,10 @@ describe(`QueryCollection`, () => {
       await optionsDefault.onInsert!(insertParamsDefault)
 
       // Verify handler was called and refetch was triggered (queryFn called again)
-      expect(onInsertDefault).toHaveBeenCalledWith(insertParamsDefault)
+      expect(onInsertDefault).toHaveBeenCalledOnce()
+      expect(onInsertDefault.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       await vi.waitFor(() => {
         expect(queryFnDefault).toHaveBeenCalledTimes(1)
       })
@@ -2208,7 +2359,10 @@ describe(`QueryCollection`, () => {
       await optionsFalse.onInsert!(insertParamsFalse)
 
       // Verify handler was called but refetch was NOT triggered (queryFn not called)
-      expect(onInsertFalse).toHaveBeenCalledWith(insertParamsFalse)
+      expect(onInsertFalse).toHaveBeenCalledOnce()
+      expect(onInsertFalse.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       // Wait a bit to ensure no refetch happens
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(queryFnFalse).not.toHaveBeenCalled()
@@ -2234,7 +2388,10 @@ describe(`QueryCollection`, () => {
 
       await optionsPrimitive.onInsert!(insertParamsPrimitive)
 
-      expect(onInsertPrimitive).toHaveBeenCalledWith(insertParamsPrimitive)
+      expect(onInsertPrimitive).toHaveBeenCalledOnce()
+      expect(onInsertPrimitive.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       await vi.waitFor(() => {
         expect(queryFnPrimitive).toHaveBeenCalledTimes(1)
       })
@@ -2270,13 +2427,8 @@ describe(`QueryCollection`, () => {
         })
         queryFn.mockClear()
 
-        await options.onInsert!({
-          transaction: {
-            id: `explicit-refetch-transaction`,
-            mutations: [],
-          } as unknown as TransactionWithMutations<TestItem, `insert`>,
-          collection,
-        })
+        const mutation = collection.insert({ id: `2`, name: `Item 2` })
+        await mutation.isPersisted.promise
 
         expect(queryFn).toHaveBeenCalledTimes(1)
         expect(warning).not.toHaveBeenCalled()
@@ -6693,14 +6845,21 @@ describe(`QueryCollection`, () => {
           ],
         ]),
       })
-      const scanPersisted = vi.fn().mockReturnValue(persistedScan.promise)
-      const metadataApi = {
+      const scanPersistedRows = vi.fn().mockReturnValue(persistedScan.promise)
+      const metadataApi: SyncMetadataApi<string | number> = {
         ...metadataHarness.api,
-        row: {
-          ...metadataHarness.api.row,
-          scanPersisted,
+        persistence: {
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+          hydrateBaseline: async () => {},
+          scanPersistedRows,
+          resumeSnapshot: {
+            certify: async () => {},
+            getKeySetEvidence: () => ({ status: `consistent` }),
+            expectCurrentCommit: () => {},
+          },
         },
-      } as SyncMetadataApi<string | number>
+      }
 
       const baseOptions = queryCollectionOptions<CategorisedItem>({
         id: `stale-retained-reconciliation`,
@@ -6724,7 +6883,8 @@ describe(`QueryCollection`, () => {
       })
       const load = collection._sync.loadSubset({})
       await vi.waitFor(() => {
-        expect(scanPersisted).toHaveBeenCalledOnce()
+        expect(scanPersistedRows).toHaveBeenCalledOnce()
+        expect(scanPersistedRows).toHaveBeenCalledWith()
       })
 
       collection._sync.unloadSubset({})

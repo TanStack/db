@@ -623,3 +623,147 @@ it(`rejects only the transaction whose durable admission fails`, async () => {
     { seed: 20260916, numRuns: 10 },
   )
 })
+
+it(`fulfills successful provider work when durable acknowledgement cleanup fails`, async () => {
+  const deletionAttempted = gate()
+  const storageError = new Error(`acknowledgement cleanup failed`)
+  class Storage extends FakeStorageAdapter {
+    override async delete(key: string): Promise<void> {
+      if (key.startsWith(`tx:`)) {
+        deletionAttempted.resolve()
+        throw storageError
+      }
+      await super.delete(key)
+    }
+  }
+  const env = createTestOfflineEnvironment({ storage: new Storage() })
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let status: unknown = `pending`
+  let transactionId = ``
+  let observed: Promise<void> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const transaction = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    transactionId = transaction.id
+    transaction.mutate(() =>
+      env.collection.insert({
+        id: `successful-cleanup-failure`,
+        value: `provider-applied`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    observed = transaction.commit().then(
+      () => {
+        status = `fulfilled`
+      },
+      (error: unknown) => {
+        status = error
+      },
+    )
+
+    await atOracleCheckpoint(
+      deletionAttempted.promise,
+      `successful acknowledgement cleanup attempted`,
+    )
+    await turn()
+
+    expect(status).toBe(`fulfilled`)
+    expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      transaction.id,
+    ])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    if (status === `pending` && transactionId)
+      env.executor.resolveTransaction(transactionId, undefined)
+    await cleanupOfflineOracle(
+      [
+        () => observed,
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+        () => warning.mockRestore(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+it(`preserves permanent provider failure when rejection cleanup also fails`, async () => {
+  const deletionAttempted = gate()
+  const primaryError = new NonRetriableError(`provider rejected permanently`)
+  const storageError = new Error(`rejection cleanup failed`)
+  class Storage extends FakeStorageAdapter {
+    override async delete(key: string): Promise<void> {
+      if (key.startsWith(`tx:`)) {
+        deletionAttempted.resolve()
+        throw storageError
+      }
+      await super.delete(key)
+    }
+  }
+  const env = createTestOfflineEnvironment({
+    storage: new Storage(),
+    mutationFn: () => Promise.reject(primaryError),
+  })
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let status: unknown = `pending`
+  let transactionId = ``
+  let observed: Promise<void> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const transaction = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    transactionId = transaction.id
+    transaction.mutate(() =>
+      env.collection.insert({
+        id: `permanent-cleanup-failure`,
+        value: `optimistic`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    observed = transaction.commit().then(
+      () => {
+        status = `fulfilled`
+      },
+      (error: unknown) => {
+        status = error
+      },
+    )
+
+    await atOracleCheckpoint(
+      deletionAttempted.promise,
+      `permanent rejection cleanup attempted`,
+    )
+    await turn()
+
+    expect(status).toBe(primaryError)
+    expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      transaction.id,
+    ])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    if (status === `pending` && transactionId)
+      env.executor.rejectTransaction(transactionId, primaryError)
+    await cleanupOfflineOracle(
+      [
+        () => observed,
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+        () => warning.mockRestore(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})

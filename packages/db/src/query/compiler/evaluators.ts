@@ -10,6 +10,7 @@ import {
   isUnorderable,
   normalizeValue,
 } from '../../utils/comparison.js'
+import { getPropRefPropertyPath, getPropRefSourceAlias } from '../ir.js'
 import type { BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
@@ -144,7 +145,13 @@ function compileExpressionInternal(
  * Compiles a reference expression into an optimized evaluator
  */
 function compileRef(ref: PropRef): CompiledExpression {
-  const [namespace, ...propertyPath] = ref.path
+  const explicitAlias = getPropRefSourceAlias(ref)
+  const [legacyNamespace, ...legacyPropertyPath] = ref.path
+  const namespace = explicitAlias ?? legacyNamespace
+  const propertyPath =
+    explicitAlias === undefined
+      ? legacyPropertyPath
+      : getPropRefPropertyPath(ref)
 
   if (!namespace) {
     throw new EmptyReferencePathError()
@@ -221,7 +228,7 @@ function compileRef(ref: PropRef): CompiledExpression {
  * Compiles a reference expression for single-row evaluation
  */
 function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
-  const propertyPath = ref.path
+  const propertyPath = getPropRefPropertyPath(ref)
 
   // This function works for all path lengths including empty path
   return (item) => {
@@ -635,6 +642,13 @@ export function isCaseWhenConditionTrue(value: any): boolean {
 
 /**
  * Evaluates LIKE/ILIKE patterns
+ *
+ * `%` matches any sequence of characters (including none), `_` matches
+ * exactly one. The pattern is matched with an iterative two-pointer walk
+ * instead of being compiled to a RegExp: patterns with many `%` wildcards
+ * would produce overlapping `.*` segments whose catastrophic backtracking
+ * makes near-miss inputs take exponential time (CWE-1333). The walk is
+ * O(value.length * pattern.length) in the worst case.
  */
 function evaluateLike(
   value: any,
@@ -648,15 +662,37 @@ function evaluateLike(
   const searchValue = caseInsensitive ? value.toLowerCase() : value
   const searchPattern = caseInsensitive ? pattern.toLowerCase() : pattern
 
-  // Convert SQL LIKE pattern to regex
-  // First escape all regex special chars except % and _
-  let regexPattern = searchPattern.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
+  let valueIndex = 0
+  let patternIndex = 0
+  // Position of the most recent `%` and the value position it restarts from
+  let starPatternIndex = -1
+  let starValueIndex = 0
 
-  // Then convert SQL wildcards to regex
-  regexPattern = regexPattern.replace(/%/g, `.*`) // % matches any sequence
-  regexPattern = regexPattern.replace(/_/g, `.`) // _ matches any single char
+  while (valueIndex < searchValue.length) {
+    const patternChar =
+      patternIndex < searchPattern.length
+        ? searchPattern[patternIndex]
+        : undefined
+    if (patternChar === `%`) {
+      starPatternIndex = patternIndex
+      starValueIndex = valueIndex
+      patternIndex++
+    } else if (patternChar === `_` || patternChar === searchValue[valueIndex]) {
+      valueIndex++
+      patternIndex++
+    } else if (starPatternIndex !== -1) {
+      // Mismatch after a `%`: let it consume one more character and retry
+      starValueIndex++
+      valueIndex = starValueIndex
+      patternIndex = starPatternIndex + 1
+    } else {
+      return false
+    }
+  }
 
-  // 's' (dotAll flag) makes '.' match all characters including line terminations
-  const regex = new RegExp(`^${regexPattern}$`, 's')
-  return regex.test(searchValue)
+  // The value is consumed; only trailing `%` wildcards may remain
+  while (searchPattern[patternIndex] === `%`) {
+    patternIndex++
+  }
+  return patternIndex === searchPattern.length
 }
