@@ -9,6 +9,7 @@ import {
   IR,
   createCollection,
   createLiveQueryCollection,
+  createTransaction,
   eq,
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
@@ -75,6 +76,7 @@ type MetadataRecorder = {
 type OwnershipFixtureOptions = {
   id: string
   results: Array<Array<Item> | Promise<Array<Item>>>
+  getKey?: (item: Item) => string | number
   syncMode?: `eager` | `on-demand`
   customHash?: boolean
   staleTime?: number
@@ -102,6 +104,383 @@ const shared = { id: `shared`, category: `shared`, name: `Shared` }
 const detailOnly = { id: `detail`, category: `detail`, name: `Detail` }
 const listOnly = { id: `list`, category: `list`, name: `List` }
 const cleanups: Array<() => Promise<void>> = []
+
+async function runCleanups(): Promise<void> {
+  const results = await Promise.allSettled(
+    cleanups.splice(0).map((cleanup) => cleanup()),
+  )
+  const failures = results.flatMap((result) =>
+    result.status === `rejected` ? [result.reason] : [],
+  )
+  if (failures.length > 0) {
+    throw new AggregateError(failures, `Ownership oracle cleanup failed`, {
+      cause: failures[0],
+    })
+  }
+}
+
+/**
+ * `collection.utils.refetch()` is an application barrier. The public contract
+ * is `docs/collections/query-collection.md#controlling-refetch-behavior`:
+ * outside a mutation handler, successful fulfillment waits for every result
+ * accepted for Collection application, including an application with no row
+ * diff. Rejection is fail-fast and may leave independent obligations pending.
+ * The handler receives a scoped Collection view whose refetch keeps the Query
+ * fetch boundary so it cannot await the transaction that invoked the handler.
+ *
+ * Model mapping:
+ * - `callId` and `resultId` are model-only identities for one public call and
+ *   its ordered Query results; they are not production generation counters.
+ * - `accept-result` means the observer result has an exact application promise.
+ * - `fulfill-application` and `reject-application` mean that promise settled.
+ * - `retire-application` means cancellation or supersession won before the
+ *   application no-cancel point and therefore rejects that exact obligation.
+ * - `publicValues` represents Collection rows at the public checkpoint.
+ * - `RefetchCallSettlementModel` splits each tracked Query fetch from the zero
+ *   or more Collection applications it accepts while that fetch is active.
+ * - `HandlerRefetchBoundaryModel` excludes the causally queued Collection
+ *   application from the handler call while retaining its later error record.
+ *
+ * Results skipped before application because refresh is deferred, or because a
+ * manual-write snapshot is unchanged, are outside this accepted-result model.
+ * Invalid query shapes remain the input-validation contract in `query.test.ts`.
+ *
+ * State minimality: result order is observable in the returned array; pending
+ * result identity controls call settlement; accepted values control publication;
+ * `throwOnError` distinguishes rejection from suppressed failure; separate calls
+ * retain the outcome of a superseded caller.
+ *
+ * ORC review record for this extension: ORC-001, 002, 003, 005, 006, 008, 009,
+ * 010, and 012 apply and are evidenced by this prose, independent reducer,
+ * fixed action histories, real drivers, observation helper, wrong-result
+ * control, state explanation, mapping, and aggregate cleanup. ORC-004 and 007
+ * do not apply because these are bounded fixed histories, not generated-property
+ * coverage. ORC-011 does not apply because no shared production/model semantic
+ * fault requiring a second formulation is claimed.
+ */
+type RefetchApplicationOutcome = `pending` | `resolved` | `rejected`
+
+type ExplicitRefetchCallModel = {
+  resultOrder: Array<string>
+  pendingResultIds: Set<string>
+  acceptedValues: Map<string, string>
+  throwOnError: boolean
+  outcome: RefetchApplicationOutcome
+}
+
+type ExplicitRefetchApplicationModel = {
+  calls: Map<number, ExplicitRefetchCallModel>
+  publicValues: Map<string, string>
+}
+
+type ExplicitRefetchApplicationAction =
+  | {
+      type: `start-call`
+      callId: number
+      resultIds: Array<string>
+      throwOnError: boolean
+    }
+  | {
+      type: `accept-result`
+      callId: number
+      resultId: string
+      value: string
+    }
+  | { type: `fulfill-application`; callId: number; resultId: string }
+  | { type: `reject-application`; callId: number; resultId: string }
+  | { type: `retire-application`; callId: number; resultId: string }
+
+type ExplicitRefetchObservation = {
+  publicValues: Record<string, string | undefined>
+  refetch: RefetchApplicationOutcome
+  resultOrder?: Array<string>
+}
+
+function reduceExplicitRefetchApplication(
+  model: ExplicitRefetchApplicationModel,
+  action: ExplicitRefetchApplicationAction,
+): ExplicitRefetchApplicationModel {
+  if (action.type === `start-call`) {
+    if (model.calls.has(action.callId)) {
+      throw new Error(`Refetch call ${action.callId} already exists`)
+    }
+    if (new Set(action.resultIds).size !== action.resultIds.length) {
+      throw new Error(
+        `A refetch call cannot contain duplicate result identities`,
+      )
+    }
+    const calls = new Map(model.calls)
+    calls.set(action.callId, {
+      resultOrder: [...action.resultIds],
+      pendingResultIds: new Set(action.resultIds),
+      acceptedValues: new Map(),
+      throwOnError: action.throwOnError,
+      outcome: action.resultIds.length === 0 ? `resolved` : `pending`,
+    })
+    return { ...model, calls }
+  }
+
+  const call = model.calls.get(action.callId)
+  if (!call) throw new Error(`Unknown refetch call ${action.callId}`)
+  if (!call.resultOrder.includes(action.resultId)) {
+    throw new Error(`Unknown result ${action.resultId}`)
+  }
+  if (!call.pendingResultIds.has(action.resultId)) {
+    throw new Error(`Result ${action.resultId} already settled`)
+  }
+
+  if (action.type === `accept-result`) {
+    if (call.acceptedValues.has(action.resultId)) {
+      throw new Error(`Result ${action.resultId} already accepted`)
+    }
+    const calls = new Map(model.calls)
+    calls.set(action.callId, {
+      ...call,
+      acceptedValues: new Map(call.acceptedValues).set(
+        action.resultId,
+        action.value,
+      ),
+    })
+    return { ...model, calls }
+  }
+
+  const acceptedValue = call.acceptedValues.get(action.resultId)
+  if (acceptedValue === undefined) {
+    throw new Error(`Cannot settle a result before it is accepted`)
+  }
+
+  const pendingResultIds = new Set(call.pendingResultIds)
+  pendingResultIds.delete(action.resultId)
+  const calls = new Map(model.calls)
+  if (action.type === `fulfill-application`) {
+    const publicValues = new Map(model.publicValues).set(
+      action.resultId,
+      acceptedValue,
+    )
+    calls.set(action.callId, {
+      ...call,
+      pendingResultIds,
+      outcome:
+        call.outcome === `rejected`
+          ? `rejected`
+          : pendingResultIds.size === 0
+            ? `resolved`
+            : `pending`,
+    })
+    return { calls, publicValues }
+  }
+
+  calls.set(action.callId, {
+    ...call,
+    pendingResultIds,
+    outcome: call.throwOnError
+      ? `rejected`
+      : pendingResultIds.size === 0
+        ? `resolved`
+        : `pending`,
+  })
+  return { ...model, calls }
+}
+
+function observeExplicitRefetchApplication(
+  model: ExplicitRefetchApplicationModel,
+  callId: number,
+): ExplicitRefetchObservation {
+  const call = model.calls.get(callId)
+  if (!call) throw new Error(`Unknown refetch call ${callId}`)
+  return {
+    publicValues: Object.fromEntries(
+      call.resultOrder.map((resultId) => [
+        resultId,
+        model.publicValues.get(resultId),
+      ]),
+    ),
+    refetch: call.outcome,
+    ...(call.outcome === `resolved`
+      ? { resultOrder: call.resultOrder }
+      : undefined),
+  }
+}
+
+function expectExplicitRefetchObservation(
+  actual: ExplicitRefetchObservation,
+  expected: ExplicitRefetchObservation,
+): void {
+  expect(actual).toEqual(expected)
+}
+
+/**
+ * This model-only call ledger separates Query fetch settlement from every
+ * accepted Collection application. One tracked Query may accept several
+ * results while its fetch is active. A successful call waits for every fetch
+ * and application obligation. A throwing call rejects at its first failure;
+ * its other obligations may remain pending. This is the `Promise.all`
+ * aggregate promised by the public utility, not an all-settled barrier.
+ */
+type RefetchCallSettlementModel = {
+  queryOrder: Array<string>
+  fetches: Map<string, `pending` | `fulfilled` | `rejected`>
+  applications: Map<
+    string,
+    {
+      queryId: string
+      outcome: `pending` | `fulfilled` | `rejected`
+    }
+  >
+  throwOnError: boolean
+}
+
+type RefetchCallSettlementAction =
+  | { type: `accept-application`; queryId: string; applicationId: string }
+  | {
+      type: `settle-fetch`
+      queryId: string
+      outcome: `fulfilled` | `rejected`
+    }
+  | {
+      type: `settle-application`
+      applicationId: string
+      outcome: `fulfilled` | `rejected`
+    }
+
+function createRefetchCallSettlementModel(
+  queryOrder: Array<string>,
+  throwOnError: boolean,
+): RefetchCallSettlementModel {
+  if (new Set(queryOrder).size !== queryOrder.length) {
+    throw new Error(`A refetch call cannot contain duplicate Query identities`)
+  }
+  return {
+    queryOrder: [...queryOrder],
+    fetches: new Map(queryOrder.map((queryId) => [queryId, `pending`])),
+    applications: new Map(),
+    throwOnError,
+  }
+}
+
+function reduceRefetchCallSettlement(
+  model: RefetchCallSettlementModel,
+  action: RefetchCallSettlementAction,
+): RefetchCallSettlementModel {
+  if (action.type === `accept-application`) {
+    if (model.fetches.get(action.queryId) !== `pending`) {
+      throw new Error(`Applications belong to an active Query fetch`)
+    }
+    if (model.applications.has(action.applicationId)) {
+      throw new Error(`Application ${action.applicationId} already exists`)
+    }
+    return {
+      ...model,
+      applications: new Map(model.applications).set(action.applicationId, {
+        queryId: action.queryId,
+        outcome: `pending`,
+      }),
+    }
+  }
+
+  if (action.type === `settle-fetch`) {
+    if (model.fetches.get(action.queryId) !== `pending`) {
+      throw new Error(`Query fetch ${action.queryId} already settled`)
+    }
+    return {
+      ...model,
+      fetches: new Map(model.fetches).set(action.queryId, action.outcome),
+    }
+  }
+
+  const application = model.applications.get(action.applicationId)
+  if (!application) {
+    throw new Error(`Unknown application ${action.applicationId}`)
+  }
+  if (application.outcome !== `pending`) {
+    throw new Error(`Application ${action.applicationId} already settled`)
+  }
+  return {
+    ...model,
+    applications: new Map(model.applications).set(action.applicationId, {
+      ...application,
+      outcome: action.outcome,
+    }),
+  }
+}
+
+function observeRefetchCallSettlement(model: RefetchCallSettlementModel): {
+  refetch: RefetchApplicationOutcome
+  resultOrder?: Array<string>
+} {
+  const fetchOutcomes = [...model.fetches.values()]
+  const applicationOutcomes = [...model.applications.values()].map(
+    ({ outcome }) => outcome,
+  )
+  if (
+    model.throwOnError &&
+    [...fetchOutcomes, ...applicationOutcomes].includes(`rejected`)
+  ) {
+    return { refetch: `rejected` }
+  }
+  if (
+    fetchOutcomes.includes(`pending`) ||
+    applicationOutcomes.includes(`pending`)
+  ) {
+    return { refetch: `pending` }
+  }
+  return { refetch: `resolved`, resultOrder: model.queryOrder }
+}
+
+/**
+ * A handler-scoped refetch has one Query fetch obligation. Its accepted
+ * Collection application remains outside the handler boundary because that
+ * application is queued behind the invoking mutation transaction. A later
+ * application failure is recorded by Collection error utilities; it cannot
+ * retroactively change the already-settled handler call.
+ */
+type HandlerRefetchBoundaryModel = {
+  fetch: `pending` | `fulfilled` | `rejected`
+  application: `unaccepted` | `pending` | `fulfilled` | `rejected`
+  throwOnError: boolean
+}
+
+type HandlerRefetchBoundaryAction =
+  | { type: `accept-application` }
+  | { type: `settle-fetch`; outcome: `fulfilled` | `rejected` }
+  | { type: `settle-application`; outcome: `fulfilled` | `rejected` }
+
+function reduceHandlerRefetchBoundary(
+  model: HandlerRefetchBoundaryModel,
+  action: HandlerRefetchBoundaryAction,
+): HandlerRefetchBoundaryModel {
+  if (action.type === `accept-application`) {
+    if (model.application !== `unaccepted`) {
+      throw new Error(`Handler application already accepted`)
+    }
+    return { ...model, application: `pending` }
+  }
+  if (action.type === `settle-fetch`) {
+    if (model.fetch !== `pending`) {
+      throw new Error(`Handler Query fetch already settled`)
+    }
+    return { ...model, fetch: action.outcome }
+  }
+  if (model.application !== `pending`) {
+    throw new Error(`Handler application is not pending`)
+  }
+  return { ...model, application: action.outcome }
+}
+
+function observeHandlerRefetchBoundary(model: HandlerRefetchBoundaryModel): {
+  refetch: RefetchApplicationOutcome
+  applicationErrorRecorded: boolean
+} {
+  return {
+    refetch:
+      model.fetch === `pending`
+        ? `pending`
+        : model.fetch === `rejected` && model.throwOnError
+          ? `rejected`
+          : `resolved`,
+    applicationErrorRecorded: model.application === `rejected`,
+  }
+}
 
 function createQueryClient(
   customHash = false,
@@ -153,6 +532,7 @@ function recordMetadata(
 function createOwnershipFixture({
   id,
   results,
+  getKey = (item) => item.id,
   syncMode = `on-demand`,
   metadataRecorder,
   setupMetadata,
@@ -171,7 +551,7 @@ function createOwnershipFixture({
     queryClient,
     queryKey: [id],
     queryFn,
-    getKey: (item) => item.id,
+    getKey,
     syncMode,
     startSync: true,
   })
@@ -575,7 +955,1022 @@ function expectColdOwnerRevalidation(
 
 describe(`query collection ownership lifecycle`, () => {
   afterEach(async () => {
-    await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()))
+    await runCleanups()
+  })
+
+  it(`keeps an accepted empty-diff result pending until application`, () => {
+    const initial: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, `same`]]),
+    }
+    const started = reduceExplicitRefetchApplication(initial, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    const accepted = reduceExplicitRefetchApplication(started, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: `same`,
+    })
+
+    expectExplicitRefetchObservation(
+      observeExplicitRefetchApplication(accepted, 1),
+      {
+        publicValues: { query: `same` },
+        refetch: `pending`,
+      },
+    )
+    const fulfilled = reduceExplicitRefetchApplication(accepted, {
+      type: `fulfill-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+    expectExplicitRefetchObservation(
+      observeExplicitRefetchApplication(fulfilled, 1),
+      {
+        publicValues: { query: `same` },
+        refetch: `resolved`,
+        resultOrder: [`query`],
+      },
+    )
+  })
+
+  it(`retains separate outcomes for a retired caller and its successor`, () => {
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, `initial`]]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: `first`,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 2,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 2,
+      resultId: `query`,
+      value: `second`,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `retire-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+
+    expectExplicitRefetchObservation(
+      observeExplicitRefetchApplication(model, 1),
+      {
+        publicValues: { query: `initial` },
+        refetch: `rejected`,
+      },
+    )
+    expectExplicitRefetchObservation(
+      observeExplicitRefetchApplication(model, 2),
+      {
+        publicValues: { query: `initial` },
+        refetch: `pending`,
+      },
+    )
+
+    model = reduceExplicitRefetchApplication(model, {
+      type: `fulfill-application`,
+      callId: 2,
+      resultId: `query`,
+    })
+    expectExplicitRefetchObservation(
+      observeExplicitRefetchApplication(model, 2),
+      {
+        publicValues: { query: `second` },
+        refetch: `resolved`,
+        resultOrder: [`query`],
+      },
+    )
+  })
+
+  it(`rejects a fetch-boundary-only wrong-result control`, () => {
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, `Optimistic`]]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: `Authoritative`,
+    })
+    const expected = observeExplicitRefetchApplication(model, 1)
+    const fetchBoundaryOnly: ExplicitRefetchObservation = {
+      publicValues: { query: `Optimistic` },
+      refetch: `pending`,
+      resultOrder: [`query`],
+    }
+    fetchBoundaryOnly.refetch = `resolved`
+
+    expect(() =>
+      expectExplicitRefetchObservation(fetchBoundaryOnly, expected),
+    ).toThrow()
+    expect(() =>
+      expectExplicitRefetchObservation(expected, expected),
+    ).not.toThrow()
+  })
+
+  it(`rejects illegal explicit-refetch model histories`, () => {
+    const started = reduceExplicitRefetchApplication(
+      { calls: new Map(), publicValues: new Map() },
+      {
+        type: `start-call`,
+        callId: 1,
+        resultIds: [`query`],
+        throwOnError: true,
+      },
+    )
+    const accepted = reduceExplicitRefetchApplication(started, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: `accepted`,
+    })
+
+    expect(() =>
+      reduceExplicitRefetchApplication(started, {
+        type: `start-call`,
+        callId: 1,
+        resultIds: [`replacement`],
+        throwOnError: true,
+      }),
+    ).toThrow(`already exists`)
+    expect(() =>
+      reduceExplicitRefetchApplication(accepted, {
+        type: `accept-result`,
+        callId: 1,
+        resultId: `query`,
+        value: `replacement`,
+      }),
+    ).toThrow(`already accepted`)
+    expect(() =>
+      reduceExplicitRefetchApplication(accepted, {
+        type: `fulfill-application`,
+        callId: 1,
+        resultId: `unknown`,
+      }),
+    ).toThrow(`Unknown result`)
+    const fulfilled = reduceExplicitRefetchApplication(accepted, {
+      type: `fulfill-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+    expect(() =>
+      reduceExplicitRefetchApplication(fulfilled, {
+        type: `fulfill-application`,
+        callId: 1,
+        resultId: `query`,
+      }),
+    ).toThrow(`already settled`)
+  })
+
+  it(`keeps a suppressed fetch failure pending for its accepted application`, () => {
+    let model = createRefetchCallSettlementModel([`query`], false)
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `query`,
+      applicationId: `cached-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-fetch`,
+      queryId: `query`,
+      outcome: `rejected`,
+    })
+    expect(observeRefetchCallSettlement(model)).toEqual({
+      refetch: `pending`,
+    })
+
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `cached-result`,
+      outcome: `fulfilled`,
+    })
+    expect(observeRefetchCallSettlement(model)).toEqual({
+      refetch: `resolved`,
+      resultOrder: [`query`],
+    })
+  })
+
+  it(`rejects fail-fast while an independent application remains pending`, () => {
+    let model = createRefetchCallSettlementModel([`detail`, `list`], true)
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `detail`,
+      applicationId: `detail-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `list`,
+      applicationId: `list-result`,
+    })
+    for (const queryId of [`detail`, `list`]) {
+      model = reduceRefetchCallSettlement(model, {
+        type: `settle-fetch`,
+        queryId,
+        outcome: `fulfilled`,
+      })
+    }
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `detail-result`,
+      outcome: `rejected`,
+    })
+
+    expect(observeRefetchCallSettlement(model)).toEqual({
+      refetch: `rejected`,
+    })
+    expect(model.applications.get(`list-result`)?.outcome).toBe(`pending`)
+  })
+
+  it(`rejects a handler call that resolves before its Query fetch`, () => {
+    const model: HandlerRefetchBoundaryModel = {
+      fetch: `pending`,
+      application: `unaccepted`,
+      throwOnError: true,
+    }
+    const expected = observeHandlerRefetchBoundary(model)
+    const returnsAfterInvocation = {
+      ...expected,
+      refetch: `resolved` as const,
+    }
+
+    expect(() => expect(returnsAfterInvocation).toEqual(expected)).toThrow()
+    expect(expected).toEqual({
+      refetch: `pending`,
+      applicationErrorRecorded: false,
+    })
+  })
+
+  it(`resolves a refetch with no tracked Query results`, async () => {
+    const { collection, queryFn } = createOwnershipFixture({
+      id: `explicit-refetch-empty-aggregate`,
+      results: [],
+      syncMode: `on-demand`,
+    })
+    const model = reduceExplicitRefetchApplication(
+      { calls: new Map(), publicValues: new Map() },
+      {
+        type: `start-call`,
+        callId: 1,
+        resultIds: [],
+        throwOnError: true,
+      },
+    )
+
+    const results = await collection.utils.refetch({ throwOnError: true })
+
+    expect(queryFn).not.toHaveBeenCalled()
+    expectExplicitRefetchObservation(
+      { publicValues: {}, refetch: `resolved`, resultOrder: [] },
+      observeExplicitRefetchApplication(model, 1),
+    )
+    expect(results).toEqual([])
+  })
+
+  it(`waits for an accepted fetching result after a suppressed fetch failure`, async () => {
+    const initial = { ...shared, name: `Initial` }
+    const fetchError = new Error(`Explicit refetch fetch failed`)
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([initial])
+      .mockRejectedValueOnce(fetchError)
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id: `explicit-refetch-suppressed-fetch-failure`,
+        queryClient,
+        queryKey: [`explicit-refetch-suppressed-fetch-failure`],
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    cleanups.push(async () => {
+      persistence.resolve()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      consoleError.mockRestore()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    await collection.stateWhenReady()
+    transaction.mutate(() => {
+      collection.update(shared.id, (draft) => {
+        draft.name = `Optimistic`
+      })
+    })
+
+    let model = createRefetchCallSettlementModel([`query`], false)
+    let actualOutcome: RefetchApplicationOutcome = `pending`
+    const refetch = collection.utils.refetch({ throwOnError: false }).then(
+      (result) => {
+        actualOutcome = `resolved`
+        return result
+      },
+      (error: unknown) => {
+        actualOutcome = `rejected`
+        throw error
+      },
+    )
+    void refetch.catch(() => undefined)
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(collection.utils.isFetching).toBe(false)
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `query`,
+      applicationId: `cached-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-fetch`,
+      queryId: `query`,
+      outcome: `rejected`,
+    })
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+    expect(actualOutcome).toBe(observeRefetchCallSettlement(model).refetch)
+    expect(collection.get(shared.id)?.name).toBe(`Optimistic`)
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    const results = await refetch
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `cached-result`,
+      outcome: `fulfilled`,
+    })
+    expect(actualOutcome).toBe(observeRefetchCallSettlement(model).refetch)
+    expect(results).toHaveLength(1)
+    expect(results[0]?.isError).toBe(true)
+  })
+
+  it(`waits for every Query result and preserves tracked-key order`, async () => {
+    const firstRefresh = createDeferred<Array<Item>>()
+    const secondRefresh = createDeferred<Array<Item>>()
+    const refreshedDetail = { ...detailOnly, name: `Detail refreshed` }
+    const refreshedList = { ...listOnly, name: `List refreshed` }
+    const { collection, queryFn } = createOwnershipFixture({
+      id: `explicit-refetch-aggregate-order`,
+      results: [
+        [detailOnly],
+        [listOnly],
+        firstRefresh.promise,
+        secondRefresh.promise,
+      ],
+    })
+    cleanups.push(() => {
+      firstRefresh.resolve([refreshedDetail])
+      secondRefresh.resolve([refreshedList])
+      return Promise.resolve()
+    })
+    const detail = { where: eq(`category`, `detail`) }
+    const list = { where: eq(`category`, `list`) }
+    await collection._sync.loadSubset(detail)
+    await collection._sync.loadSubset(list)
+
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([
+        [`detail`, detailOnly.name],
+        [`list`, listOnly.name],
+      ]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`detail`, `list`],
+      throwOnError: true,
+    })
+    let refetchOutcome: RefetchApplicationOutcome = `pending`
+    const refetch = collection.utils.refetch({ throwOnError: true }).then(
+      (results) => {
+        refetchOutcome = `resolved`
+        return results
+      },
+      (error: unknown) => {
+        refetchOutcome = `rejected`
+        throw error
+      },
+    )
+    void refetch.catch(() => {})
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(4))
+
+    secondRefresh.resolve([refreshedList])
+    await vi.waitFor(() =>
+      expect(collection.get(listOnly.id)?.name).toBe(refreshedList.name),
+    )
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `list`,
+      value: refreshedList.name,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `fulfill-application`,
+      callId: 1,
+      resultId: `list`,
+    })
+    expectExplicitRefetchObservation(
+      {
+        publicValues: {
+          detail: collection.get(detailOnly.id)?.name,
+          list: collection.get(listOnly.id)?.name,
+        },
+        refetch: refetchOutcome,
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+
+    firstRefresh.resolve([refreshedDetail])
+    const results = await refetch
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `detail`,
+      value: refreshedDetail.name,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `fulfill-application`,
+      callId: 1,
+      resultId: `detail`,
+    })
+    expectExplicitRefetchObservation(
+      {
+        publicValues: {
+          detail: collection.get(detailOnly.id)?.name,
+          list: collection.get(listOnly.id)?.name,
+        },
+        refetch: refetchOutcome,
+        resultOrder: results.map((result) => {
+          if (!result || !Array.isArray(result.data) || !result.data[0]) {
+            throw new Error(`Expected one applied row per Query result`)
+          }
+          return (result.data[0] as Item).category
+        }),
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+  })
+
+  it(`rejects before an independent accepted application settles`, async () => {
+    const id = `explicit-refetch-fail-fast`
+    const detail = { where: eq(`category`, `detail`) }
+    const list = { where: eq(`category`, `list`) }
+    const listKey = [id, getLoadSubsetDemandKey(list)]
+    const invalidDetail = { ...detailOnly, name: `Invalid detail` }
+    const refreshedList = { ...listOnly, name: `Refreshed list` }
+    const applicationError = new Error(`Detail application failed`)
+    const pendingListScan =
+      createDeferred<
+        Array<{ key: string | number; value: Item; metadata?: unknown }>
+      >()
+    const scanPersistedRows = vi.fn(() => pendingListScan.promise)
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const { collection } = createOwnershipFixture({
+      id,
+      results: [[detailOnly], [listOnly], [invalidDetail], [refreshedList]],
+      getKey: (item) => {
+        if (item.name === invalidDetail.name) throw applicationError
+        return item.id
+      },
+      scanPersistedRows,
+      setupMetadata: (metadata) => {
+        const queryHash = hashKey(listKey)
+        metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+          queryHash,
+          mode: `until-revalidated`,
+        })
+      },
+    })
+    cleanups.push(() => {
+      pendingListScan.resolve([])
+      consoleError.mockRestore()
+      return Promise.resolve()
+    })
+    await collection._sync.loadSubset(detail)
+    const initialListLoad = Promise.resolve(collection._sync.loadSubset(list))
+    void initialListLoad.catch(() => undefined)
+    await vi.waitFor(() => expect(scanPersistedRows).toHaveBeenCalledOnce())
+
+    let model = createRefetchCallSettlementModel([`detail`, `list`], true)
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `detail`,
+      applicationId: `detail-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `list`,
+      applicationId: `list-result`,
+    })
+    for (const queryId of [`detail`, `list`]) {
+      model = reduceRefetchCallSettlement(model, {
+        type: `settle-fetch`,
+        queryId,
+        outcome: `fulfilled`,
+      })
+    }
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `detail-result`,
+      outcome: `rejected`,
+    })
+
+    const refetch = collection.utils.refetch({ throwOnError: true })
+    void refetch.catch(() => undefined)
+    await vi.waitFor(() => expect(scanPersistedRows).toHaveBeenCalledTimes(2))
+    await expect(refetch).rejects.toBe(applicationError)
+    expect(observeRefetchCallSettlement(model)).toEqual({
+      refetch: `rejected`,
+    })
+    expect(model.applications.get(`list-result`)?.outcome).toBe(`pending`)
+
+    pendingListScan.resolve([])
+    await initialListLoad.catch(() => undefined)
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `list-result`,
+      outcome: `fulfilled`,
+    })
+    await vi.waitFor(() => {
+      expect(collection.get(listOnly.id)?.name).toBe(refreshedList.name)
+    })
+    expect(observeRefetchCallSettlement(model)).toEqual({
+      refetch: `rejected`,
+    })
+  })
+
+  it.each([
+    {
+      caseName: `changed`,
+      id: `explicit-refetch-changed-application`,
+      initialName: `Initial`,
+      authoritativeName: `Authoritative`,
+    },
+    {
+      caseName: `empty-diff`,
+      id: `explicit-refetch-empty-diff-application`,
+      initialName: `Same`,
+      authoritativeName: `Same`,
+    },
+  ])(
+    `settles a $caseName accepted result after application`,
+    async ({ id, initialName, authoritativeName }) => {
+      const initial = { ...shared, name: initialName }
+      const authoritative = { ...shared, name: authoritativeName }
+      const { collection, queryClient, queryFn } = createOwnershipFixture({
+        id,
+        results: [[initial], [authoritative]],
+        syncMode: `eager`,
+      })
+      await collection.stateWhenReady()
+
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() => {
+        collection.update(shared.id, (draft) => {
+          draft.name = `Optimistic`
+        })
+      })
+      cleanups.push(async () => {
+        persistence.resolve()
+        await transaction.isPersisted.promise
+      })
+
+      let model: ExplicitRefetchApplicationModel = {
+        calls: new Map(),
+        publicValues: new Map([[`query`, `Optimistic`]]),
+      }
+      model = reduceExplicitRefetchApplication(model, {
+        type: `start-call`,
+        callId: 1,
+        resultIds: [`query`],
+        throwOnError: true,
+      })
+      let refetchOutcome: RefetchApplicationOutcome = `pending`
+      const refetch = collection.utils.refetch({ throwOnError: true }).then(
+        (result) => {
+          refetchOutcome = `resolved`
+          return result
+        },
+        (error: unknown) => {
+          refetchOutcome = `rejected`
+          throw error
+        },
+      )
+      void refetch.catch(() => {})
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(
+          queryClient.getQueryCache().find({ queryKey: [id], exact: true })
+            ?.state.dataUpdateCount,
+        ).toBe(2)
+        expect(collection.utils.isFetching).toBe(false)
+      })
+      model = reduceExplicitRefetchApplication(model, {
+        type: `accept-result`,
+        callId: 1,
+        resultId: `query`,
+        value: authoritative.name,
+      })
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+      expectExplicitRefetchObservation(
+        {
+          publicValues: { query: collection.get(shared.id)?.name },
+          refetch: refetchOutcome,
+        },
+        observeExplicitRefetchApplication(model, 1),
+      )
+
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await refetch
+      model = reduceExplicitRefetchApplication(model, {
+        type: `fulfill-application`,
+        callId: 1,
+        resultId: `query`,
+      })
+      expectExplicitRefetchObservation(
+        {
+          publicValues: { query: collection.get(shared.id)?.name },
+          refetch: refetchOutcome,
+          resultOrder: [`query`],
+        },
+        observeExplicitRefetchApplication(model, 1),
+      )
+    },
+  )
+
+  it(`keeps an external refetch at the application boundary during a mutation handler`, async () => {
+    const initial = { ...shared, name: `Initial` }
+    const authoritative = { ...shared, name: `Authoritative` }
+    const handlerStarted = createDeferred<void>()
+    const releaseHandler = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([authoritative])
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id: `external-refetch-overlaps-handler`,
+        queryClient,
+        queryKey: [`external-refetch-overlaps-handler`],
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+        onUpdate: async () => {
+          handlerStarted.resolve()
+          await releaseHandler.promise
+          return { refetch: false }
+        },
+      }),
+    )
+    cleanups.push(async () => {
+      releaseHandler.resolve()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    await collection.stateWhenReady()
+
+    const mutation = collection.update(shared.id, (draft) => {
+      draft.name = `Optimistic`
+    })
+    await handlerStarted.promise
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, `Optimistic`]]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    let refetchOutcome: RefetchApplicationOutcome = `pending`
+    const refetch = collection.utils.refetch({ throwOnError: true }).then(
+      (result) => {
+        refetchOutcome = `resolved`
+        return result
+      },
+      (error: unknown) => {
+        refetchOutcome = `rejected`
+        throw error
+      },
+    )
+    void refetch.catch(() => {})
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(collection.utils.isFetching).toBe(false)
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: authoritative.name,
+    })
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: collection.get(shared.id)?.name },
+        refetch: refetchOutcome,
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+
+    releaseHandler.resolve()
+    await mutation.isPersisted.promise
+    await refetch
+    model = reduceExplicitRefetchApplication(model, {
+      type: `fulfill-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: collection.get(shared.id)?.name },
+        refetch: refetchOutcome,
+        resultOrder: [`query`],
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+  })
+
+  it.each([`parameter`, `mutation-alias`] as const)(
+    `keeps the Query fetch boundary through the handler %s collection`,
+    async (accessPath) => {
+      const initial = { ...shared, name: `Initial` }
+      const inserted = { id: `inserted`, category: `shared`, name: `Client` }
+      const authoritative = { ...inserted, name: `Server` }
+      const refresh = createDeferred<Array<Item>>()
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([initial])
+        .mockReturnValueOnce(refresh.promise)
+      let aliasesMatch = false
+      let handlerOutcome: RefetchApplicationOutcome = `pending`
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id: `handler-refetch-boundary-${accessPath}`,
+          queryClient,
+          queryKey: [`handler-refetch-boundary`, accessPath],
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+          onInsert: async ({ transaction, collection: handlerCollection }) => {
+            const mutationCollection = transaction.mutations[0].collection
+            aliasesMatch = mutationCollection === handlerCollection
+            const refetchCollection =
+              accessPath === `parameter`
+                ? handlerCollection
+                : mutationCollection
+            await refetchCollection.utils.refetch({ throwOnError: true }).then(
+              () => {
+                handlerOutcome = `resolved`
+              },
+              (error: unknown) => {
+                handlerOutcome = `rejected`
+                throw error
+              },
+            )
+            return { refetch: false }
+          },
+        }),
+      )
+      cleanups.push(async () => {
+        refresh.resolve([initial, authoritative])
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection.stateWhenReady()
+
+      let model: HandlerRefetchBoundaryModel = {
+        fetch: `pending`,
+        application: `unaccepted`,
+        throwOnError: true,
+      }
+      const mutation = collection.insert(inserted)
+      void mutation.isPersisted.promise.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      expect(handlerOutcome).toBe(observeHandlerRefetchBoundary(model).refetch)
+
+      refresh.resolve([initial, authoritative])
+      model = reduceHandlerRefetchBoundary(model, {
+        type: `accept-application`,
+      })
+      model = reduceHandlerRefetchBoundary(model, {
+        type: `settle-fetch`,
+        outcome: `fulfilled`,
+      })
+      await vi.waitFor(() => {
+        expect(handlerOutcome).toBe(
+          observeHandlerRefetchBoundary(model).refetch,
+        )
+      })
+      expect(aliasesMatch).toBe(true)
+
+      await mutation.isPersisted.promise
+      model = reduceHandlerRefetchBoundary(model, {
+        type: `settle-application`,
+        outcome: `fulfilled`,
+      })
+      expect(observeHandlerRefetchBoundary(model)).toEqual({
+        refetch: `resolved`,
+        applicationErrorRecorded: false,
+      })
+      expect(collection.get(inserted.id)?.name).toBe(authoritative.name)
+    },
+  )
+
+  it.each([
+    { throwOnError: true, expectedOutcome: `rejected` as const },
+    { throwOnError: false, expectedOutcome: `resolved` as const },
+  ])(
+    `settles an application failure with throwOnError=$throwOnError`,
+    async ({ throwOnError, expectedOutcome }) => {
+      const initial = { ...shared, name: `Initial` }
+      const invalid = { ...shared, name: `Invalid` }
+      const applicationError = new Error(`Explicit refetch application failed`)
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([initial])
+        .mockResolvedValueOnce([invalid])
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id: `explicit-refetch-application-failure-${throwOnError}`,
+          queryClient,
+          queryKey: [`explicit-refetch-application-failure`, throwOnError],
+          queryFn,
+          getKey: (item) => {
+            if (item.name === invalid.name) throw applicationError
+            return item.id
+          },
+          startSync: true,
+        }),
+      )
+      cleanups.push(async () => {
+        consoleError.mockRestore()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection.stateWhenReady()
+
+      let model: ExplicitRefetchApplicationModel = {
+        calls: new Map(),
+        publicValues: new Map([[`query`, initial.name]]),
+      }
+      model = reduceExplicitRefetchApplication(model, {
+        type: `start-call`,
+        callId: 1,
+        resultIds: [`query`],
+        throwOnError,
+      })
+      model = reduceExplicitRefetchApplication(model, {
+        type: `accept-result`,
+        callId: 1,
+        resultId: `query`,
+        value: invalid.name,
+      })
+      model = reduceExplicitRefetchApplication(model, {
+        type: `reject-application`,
+        callId: 1,
+        resultId: `query`,
+      })
+
+      let actualOutcome: RefetchApplicationOutcome
+      const refetch = collection.utils.refetch({ throwOnError })
+      if (throwOnError) {
+        await expect(refetch).rejects.toBe(applicationError)
+        actualOutcome = `rejected`
+      } else {
+        await expect(refetch).resolves.toHaveLength(1)
+        actualOutcome = `resolved`
+      }
+      expect(actualOutcome).toBe(expectedOutcome)
+      expectExplicitRefetchObservation(
+        {
+          publicValues: { query: collection.get(shared.id)?.name },
+          refetch: actualOutcome,
+          ...(actualOutcome === `resolved`
+            ? { resultOrder: [`query`] }
+            : undefined),
+        },
+        observeExplicitRefetchApplication(model, 1),
+      )
+    },
+  )
+
+  it(`records a handler-scoped application failure after fetch settlement`, async () => {
+    const initial = { ...shared, name: `Initial` }
+    const invalid = { ...shared, name: `Invalid` }
+    const applicationError = new Error(`Handler application failed`)
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([invalid])
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    let handlerOutcome: RefetchApplicationOutcome = `pending`
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id: `handler-refetch-application-failure`,
+        queryClient,
+        queryKey: [`handler-refetch-application-failure`],
+        queryFn,
+        getKey: (item) => {
+          if (item.name === invalid.name) throw applicationError
+          return item.id
+        },
+        startSync: true,
+        onUpdate: async ({ collection: handlerCollection }) => {
+          await handlerCollection.utils.refetch({ throwOnError: true }).then(
+            () => {
+              handlerOutcome = `resolved`
+            },
+            (error: unknown) => {
+              handlerOutcome = `rejected`
+              throw error
+            },
+          )
+          return { refetch: false }
+        },
+      }),
+    )
+    cleanups.push(async () => {
+      consoleError.mockRestore()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    await collection.stateWhenReady()
+
+    let model: HandlerRefetchBoundaryModel = {
+      fetch: `pending`,
+      application: `unaccepted`,
+      throwOnError: true,
+    }
+    const mutation = collection.update(shared.id, (draft) => {
+      draft.name = `Optimistic`
+    })
+    await mutation.isPersisted.promise
+    model = reduceHandlerRefetchBoundary(model, {
+      type: `accept-application`,
+    })
+    model = reduceHandlerRefetchBoundary(model, {
+      type: `settle-fetch`,
+      outcome: `fulfilled`,
+    })
+    model = reduceHandlerRefetchBoundary(model, {
+      type: `settle-application`,
+      outcome: `rejected`,
+    })
+    await vi.waitFor(() => {
+      expect(collection.utils.lastError).toBe(applicationError)
+    })
+
+    expect({
+      refetch: handlerOutcome,
+      applicationErrorRecorded: collection.utils.lastError === applicationError,
+    }).toEqual(observeHandlerRefetchBoundary(model))
   })
 
   it(`starts an idle collection only when a direct write is invoked`, () => {
@@ -2014,9 +3409,11 @@ describe(`query collection ownership lifecycle`, () => {
       subscription.unsubscribe()
       for (let turn = 0; turn < 30; turn++) await Promise.resolve()
       const before = queryFn.mock.calls.length
-      await collection.utils.refetch({ throwOnError: true })
+      const [result] = await collection.utils.refetch({ throwOnError: true })
       expect(queryFn).toHaveBeenCalledTimes(before + 1)
       expect(collection.subscriberCount).toBe(0)
+      expect((result?.data as Array<Item>)[0]?.name).toBe(`Refetched`)
+      expect(collection.get(shared.id)?.name).toBe(`Refetched`)
     },
   )
 
@@ -2265,23 +3662,29 @@ describe(`query collection ownership lifecycle`, () => {
     expectColdOwnerRevalidation(await observeColdOwnerRevalidation())
   })
 
-  it(`does not publish a superseded result after its persisted scan resolves`, async () => {
+  it(`rejects a superseded accepted result while publishing its successor`, async () => {
     const id = `superseded-retained-scan`
     const queryKey = [id] as const
     const queryHash = hashKey(queryKey)
-    const stale = { id: `stale`, category: `retained`, name: `Stale` }
-    const fresh = { id: `fresh`, category: `retained`, name: `Fresh` }
-    const firstScan =
+    const initial = { id: `initial`, category: `retained`, name: `Initial` }
+    const first = { id: `first`, category: `retained`, name: `First` }
+    const second = { id: `second`, category: `retained`, name: `Second` }
+    const initialScan =
+      createDeferred<
+        Array<{ key: string | number; value: Item; metadata?: unknown }>
+      >()
+    const firstRefetchScan =
       createDeferred<
         Array<{ key: string | number; value: Item; metadata?: unknown }>
       >()
     const scanPersistedRows = vi
       .fn()
-      .mockReturnValueOnce(firstScan.promise)
+      .mockReturnValueOnce(initialScan.promise)
+      .mockReturnValueOnce(firstRefetchScan.promise)
       .mockResolvedValue([])
     const { collection, queryFn } = createOwnershipFixture({
       id,
-      results: [[stale], [fresh]],
+      results: [[initial], [first], [second]],
       syncMode: `eager`,
       scanPersistedRows,
       setupMetadata: (metadata) => {
@@ -2299,18 +3702,90 @@ describe(`query collection ownership lifecycle`, () => {
       subscription.unsubscribe()
       return Promise.resolve()
     })
+    cleanups.push(() => {
+      initialScan.resolve([])
+      firstRefetchScan.resolve([])
+      return Promise.resolve()
+    })
 
     await vi.waitFor(() => expect(scanPersistedRows).toHaveBeenCalledOnce())
     expect(queryFn).toHaveBeenCalledOnce()
-    const refetch = collection.utils.refetch({ throwOnError: true })
-    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
-    await refetch
-    firstScan.resolve([])
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, `none`]]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    const firstRefetch = collection.utils.refetch({ throwOnError: true })
+    void firstRefetch.catch(() => {})
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(scanPersistedRows).toHaveBeenCalledTimes(2)
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: first.name,
+    })
+
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 2,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    const secondRefetch = collection.utils.refetch({ throwOnError: true })
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(3)
+      expect(collection.get(second.id)?.name).toBe(second.name)
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 2,
+      resultId: `query`,
+      value: second.name,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `retire-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `fulfill-application`,
+      callId: 2,
+      resultId: `query`,
+    })
+    await secondRefetch
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: collection.get(second.id)?.name },
+        refetch: `resolved`,
+        resultOrder: [`query`],
+      },
+      observeExplicitRefetchApplication(model, 2),
+    )
+
+    firstRefetchScan.resolve([])
+    await expect(firstRefetch).rejects.toMatchObject({ name: `AbortError` })
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: collection.get(second.id)?.name },
+        refetch: `rejected`,
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+    initialScan.resolve([])
 
     await vi.waitFor(() => {
-      expect(itemIds(collection.toArray)).toEqual([fresh.id])
+      expect(itemIds(collection.toArray)).toEqual([second.id])
     })
-    expect(publications).not.toContainEqual([stale.id])
+    expect(publications).not.toContainEqual([initial.id])
+    expect(publications).not.toContainEqual([first.id])
   })
 
   it(`rejects emitted ownership that is absent from cold storage`, async () => {

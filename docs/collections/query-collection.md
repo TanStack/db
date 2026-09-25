@@ -600,6 +600,29 @@ onInsert: async ({ transaction, collection }) => {
 }
 ```
 
+Outside a mutation handler, the `refetch()` promise resolves after every
+accepted result from that call has been applied to Collection rows. This is also
+the application barrier when the result has no row diff and therefore emits no
+change event. Rejection is fail-fast: with several tracked Queries, one failure
+may reject the call while independent work remains pending.
+
+Inside the Collection's own mutation handler, application is queued behind that
+same transaction. To avoid a circular wait, `refetch()` on the `collection`
+parameter passed to the handler resolves at the Query fetch boundary. This is a
+scoped Collection view: an external `refetch()` still waits for application,
+even when it overlaps the handler. Code that starts the mutation can await the
+mutation's `isPersisted.promise` when it needs the complete transaction and its
+queued Collection application.
+
+Outside a mutation handler, `throwOnError` applies to both Query fetch errors and
+errors applying an accepted result to Collection rows. With `throwOnError: true`,
+application failure or cancellation rejects the call; cancellation uses an
+`AbortError`. With `throwOnError: false` (the default), `refetch()` returns its
+Query results instead. On the scoped Collection passed to a mutation handler,
+`throwOnError` applies only to the Query fetch because application happens after
+that call's fetch boundary. A later application failure is recorded by the
+Collection's error utilities.
+
 To skip refetch in v1.0, simply don't call `refetch()`:
 
 ```typescript
@@ -622,10 +645,10 @@ Skip refetching when:
 
 The collection provides these utility methods via `collection.utils`:
 
-- `refetch(opts?)`: Trigger a refetch of the query
-  - `opts.throwOnError`: Whether to throw an error if the refetch fails (default: `false`)
+- `refetch(opts?)`: Refetch every tracked Query and await application of each accepted result
+  - `opts.throwOnError`: Whether Query fetch or Collection application errors reject an external call (default: `false`); handler-scoped calls cover fetch errors only
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
-  - Returns `QueryObserverResult` for inspecting the result
+  - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
 
 ## Direct Writes
 

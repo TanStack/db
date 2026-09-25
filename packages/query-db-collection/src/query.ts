@@ -253,7 +253,13 @@ export interface QueryCollectionConfig<
 
 /**
  * Type for the refetch utility function
- * Returns the QueryObserverResult from TanStack Query
+ * Returns QueryObserverResults from TanStack Query after each accepted
+ * result has been applied to the Collection. The scoped Collection parameter
+ * passed to a mutation handler retains the fetch boundary because application
+ * is causally queued behind that handler's transaction. Outside a handler,
+ * `throwOnError` applies to both Query fetch and Collection application
+ * failures. On the handler-scoped view it applies only to Query fetch failure;
+ * a later application failure is recorded by the Collection error utilities.
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
@@ -276,7 +282,7 @@ export interface QueryCollectionUtils<
 > {
   // Keep this interface closed: extending UtilsRecord would make every
   // nonexistent adapter utility appear as `any`.
-  /** Manually trigger a refetch of the query */
+  /** Manually refetch and await application of each accepted result. */
   refetch: RefetchFn
   /** Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
   writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
@@ -359,7 +365,6 @@ const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
  */
 class QueryCollectionUtilsImpl {
   private state: QueryCollectionState
-  private refetchFn: RefetchFn
 
   // Write methods
   public refetch: RefetchFn
@@ -375,7 +380,6 @@ class QueryCollectionUtilsImpl {
     writeUtils: ReturnType<typeof createWriteUtils>,
   ) {
     this.state = state
-    this.refetchFn = refetch
 
     // Initialize methods to use passed dependencies
     this.refetch = refetch
@@ -390,7 +394,7 @@ class QueryCollectionUtilsImpl {
     this.state.lastError = undefined
     this.state.errorCount = 0
     this.state.lastErrorUpdatedAt = 0
-    await this.refetchFn({ throwOnError: true })
+    await this.refetch({ throwOnError: true })
   }
 
   // Getters for error state
@@ -800,6 +804,17 @@ export function queryCollectionOptions(
     >(),
   }
 
+  // Public refetch calls register a collector for each tracked Query while its
+  // fetch is active. Result application records its exact promise in every
+  // current collector, including an intermediate cached success followed by a
+  // terminal fetch error.
+  type RefetchApplicationCollector = {
+    application?: Promise<void>
+  }
+  const refetchApplicationCollectors = new Map<
+    string,
+    Set<RefetchApplicationCollector>
+  >()
   // Query-cache ownership is scoped to this sync run and keyed by the
   // actual Query object. Weak membership survives subset unload without
   // retaining entries after Query Core garbage-collects them.
@@ -915,6 +930,10 @@ export function queryCollectionOptions(
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
   let ensureEagerSubscription = () => {}
+  let applyRefetchResultWhenUnsubscribed = (
+    _hashedQueryKey: string,
+    _result: QueryObserverResult<any, any>,
+  ): void => {}
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
@@ -1627,7 +1646,7 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(queryKey)
 
       if (collection.status === `cleaned-up` || signal?.aborted) {
-        return
+        throw new LoadSubsetOperationAbortedError()
       }
 
       const rawData = result.data
@@ -1796,7 +1815,7 @@ export function queryCollectionOptions(
         collection.status === `cleaned-up` ||
         resultApplicationControllers.get(hashedQueryKey) !== applicationToken
       ) {
-        return
+        throw new LoadSubsetOperationAbortedError()
       }
       await applySuccessfulResult(
         queryKey,
@@ -1851,6 +1870,9 @@ export function queryCollectionOptions(
       const controller: ResultApplicationController = new AbortController()
       resultApplicationControllers.set(hashedQueryKey, controller)
       const application = apply(controller.signal, controller)
+      refetchApplicationCollectors.get(hashedQueryKey)?.forEach((collector) => {
+        collector.application = application
+      })
       const cleanupController = () => {
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
@@ -1990,6 +2012,12 @@ export function queryCollectionOptions(
 
     const isSubscribed = (hashedQueryKey: string) => {
       return unsubscribes.has(hashedQueryKey)
+    }
+
+    applyRefetchResultWhenUnsubscribed = (hashedQueryKey, result) => {
+      if (syncMode !== `eager` || isSubscribed(hashedQueryKey)) return
+      const trackedQueryKey = hashToQueryKey.get(hashedQueryKey)
+      if (trackedQueryKey) makeQueryResultHandler(trackedQueryKey)(result)
     }
 
     const subscribeToQuery = (
@@ -2288,6 +2316,7 @@ export function queryCollectionOptions(
     const cleanup = () => {
       pendingStartupLoads.clear()
       ensureEagerSubscription = () => {}
+      applyRefetchResultWhenUnsubscribed = () => {}
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2409,21 +2438,84 @@ export function queryCollectionOptions(
    * - utils.refetch() - for explicit user-triggered refetches
    * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
    *
-   * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
+   * Public calls wait for each accepted Query result to be applied to Collection
+   * rows. The scoped Collection parameter passed to a mutation handler retains
+   * the fetch boundary to avoid waiting on its own transaction.
+   *
+   * @returns Promise that resolves with each QueryObserverResult
    */
-  const refetch: RefetchFn = async (opts) => {
-    // An idle eager observer still owns rows; refetch must deliver its result.
-    ensureEagerSubscription()
+  const refetchQueryResults = async (
+    opts: Parameters<RefetchFn>[0],
+    awaitApplications: boolean,
+  ): ReturnType<RefetchFn> => {
     const allQueryKeys = [...hashToQueryKey.values()]
-    const refetchPromises = allQueryKeys.map((qKey) => {
-      const queryObserver = state.observers.get(hashKey(qKey))!
-      return queryObserver.refetch({
-        throwOnError: opts?.throwOnError,
-      })
-    })
+    const applicationCollectors = new Map<string, RefetchApplicationCollector>()
+    const detachApplicationCollector = (hashedQueryKey: string): void => {
+      const collector = applicationCollectors.get(hashedQueryKey)
+      if (!collector) return
+      const currentCollectors = refetchApplicationCollectors.get(hashedQueryKey)
+      currentCollectors?.delete(collector)
+      if (currentCollectors?.size === 0) {
+        refetchApplicationCollectors.delete(hashedQueryKey)
+      }
+    }
 
-    return Promise.all(refetchPromises)
+    if (awaitApplications) {
+      for (const trackedQueryKey of allQueryKeys) {
+        const hashedQueryKey = hashKey(trackedQueryKey)
+        const collector: RefetchApplicationCollector = {}
+        applicationCollectors.set(hashedQueryKey, collector)
+        const currentCollectors =
+          refetchApplicationCollectors.get(hashedQueryKey) ?? new Set()
+        currentCollectors.add(collector)
+        refetchApplicationCollectors.set(hashedQueryKey, currentCollectors)
+      }
+    }
+
+    try {
+      // A replaced eager Query must reattach before refetch. An idle observer
+      // on the same Query is applied explicitly below to avoid an extra fetch.
+      ensureEagerSubscription()
+      const refetchPromises = allQueryKeys.map(async (trackedQueryKey) => {
+        const hashedQueryKey = hashKey(trackedQueryKey)
+        const queryObserver = state.observers.get(hashedQueryKey)!
+        let result: QueryObserverResult<any, any>
+        try {
+          result = await queryObserver.refetch({
+            throwOnError: opts?.throwOnError,
+          })
+          applyRefetchResultWhenUnsubscribed(hashedQueryKey, result)
+        } catch (error) {
+          applyRefetchResultWhenUnsubscribed(
+            hashedQueryKey,
+            queryObserver.getCurrentResult(),
+          )
+          throw error
+        } finally {
+          detachApplicationCollector(hashedQueryKey)
+        }
+
+        const application =
+          applicationCollectors.get(hashedQueryKey)?.application
+        if (application) {
+          if (opts?.throwOnError) {
+            await application
+          } else {
+            await application.catch(() => undefined)
+          }
+        }
+        return result
+      })
+
+      return await Promise.all(refetchPromises)
+    } finally {
+      applicationCollectors.forEach((_collector, hashedQueryKey) => {
+        detachApplicationCollector(hashedQueryKey)
+      })
+    }
   }
+
+  const refetch: RefetchFn = (opts) => refetchQueryResults(opts, true)
 
   /**
    * Updates a single query key in the cache with new items, handling both direct arrays
@@ -2785,8 +2877,87 @@ export function queryCollectionOptions(
           "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
           'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
       )
-      await refetch()
+      await refetchQueryResults(undefined, false)
     }
+  }
+
+  const handlerRefetch: RefetchFn = (opts) => refetchQueryResults(opts, false)
+
+  const createMutationHandlerCollection = <
+    TCollection extends { utils: object },
+  >(
+    handlerCollection: TCollection,
+  ): TCollection => {
+    const handlerUtils = new Proxy(handlerCollection.utils, {
+      get: (target, property, receiver) =>
+        property === `refetch`
+          ? handlerRefetch
+          : Reflect.get(target, property, receiver),
+    })
+
+    return new Proxy(handlerCollection, {
+      get: (target, property, receiver) =>
+        property === `utils`
+          ? handlerUtils
+          : Reflect.get(target, property, receiver),
+    })
+  }
+
+  const createMutationHandlerTransaction = <
+    TCollection extends { utils: object },
+    TTransaction extends {
+      mutations: ReadonlyArray<{ collection: unknown }>
+    },
+  >(
+    transaction: TTransaction,
+    collection: TCollection,
+    handlerCollection: TCollection,
+  ): TTransaction => {
+    const hasScopedMutation = transaction.mutations.some(
+      (mutation) => mutation.collection === collection,
+    )
+    if (!hasScopedMutation) return transaction
+
+    const mutations = transaction.mutations.map((mutation) => {
+      if (mutation.collection !== collection) return mutation
+      return new Proxy(mutation, {
+        get: (target, property, receiver) =>
+          property === `collection`
+            ? handlerCollection
+            : Reflect.get(target, property, receiver),
+      })
+    })
+
+    return new Proxy(transaction, {
+      get: (target, property, receiver) =>
+        property === `mutations`
+          ? mutations
+          : Reflect.get(target, property, receiver),
+    })
+  }
+
+  const runMutationHandler = <
+    TParams extends {
+      collection: { utils: object }
+      transaction: {
+        mutations: ReadonlyArray<{ collection: unknown }>
+      }
+    },
+  >(
+    handler: (params: TParams) => unknown,
+    params: TParams,
+  ): unknown => {
+    const collection = createMutationHandlerCollection(params.collection)
+    const handlerParams = {
+      ...params,
+      collection,
+      transaction: createMutationHandlerTransaction(
+        params.transaction,
+        params.collection,
+        collection,
+      ),
+    } as TParams
+    return handler(handlerParams)
   }
 
   // Create wrapper handlers for direct persistence operations that handle refetching
@@ -2795,7 +2966,7 @@ export function queryCollectionOptions(
     ? async (
         params: Parameters<NonNullable<typeof onInsert>>[0],
       ): Promise<void> => {
-        const handlerResult = (await onInsert(params)) ?? {}
+        const handlerResult = (await runMutationHandler(onInsert, params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
@@ -2804,7 +2975,7 @@ export function queryCollectionOptions(
     ? async (
         params: Parameters<NonNullable<typeof onUpdate>>[0],
       ): Promise<void> => {
-        const handlerResult = (await onUpdate(params)) ?? {}
+        const handlerResult = (await runMutationHandler(onUpdate, params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
@@ -2813,7 +2984,7 @@ export function queryCollectionOptions(
     ? async (
         params: Parameters<NonNullable<typeof onDelete>>[0],
       ): Promise<void> => {
-        const handlerResult = (await onDelete(params)) ?? {}
+        const handlerResult = (await runMutationHandler(onDelete, params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
