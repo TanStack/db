@@ -1095,7 +1095,8 @@ export function queryCollectionOptions(
         const observer = state.observers.get(hashedQueryKey)
         if (!observer) throw new CancelledError()
 
-        const replacement = await observer.refetch({ throwOnError: true })
+        const replacement = await observer.refetch()
+        if (!replacement.isSuccess) return replacement
         const replacementSettlement =
           readExceptionalResultSettlement(replacement)
         if (replacementSettlement?.type === `rejected`) {
@@ -1734,6 +1735,32 @@ export function queryCollectionOptions(
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
 
+    const readSuccessfulResultItems = (
+      resultQueryKey: QueryKey,
+      result: QueryObserverResult<any, any>,
+    ): Array<any> => {
+      const rawData = result.data
+      const newItemsArray = select ? select(rawData) : rawData
+
+      if (
+        !Array.isArray(newItemsArray) ||
+        newItemsArray.some((item) => item === null || typeof item !== `object`)
+      ) {
+        const errorMessage = select
+          ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(resultQueryKey)}`
+          : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(resultQueryKey)}`
+
+        const error = new InvalidQueryResultError(errorMessage)
+        writeExceptionalResultSettlement(result, {
+          type: `rejected`,
+          error,
+        })
+        throw error
+      }
+
+      return newItemsArray
+    }
+
     const applySuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
@@ -1746,6 +1773,7 @@ export function queryCollectionOptions(
         }
       >,
       signal?: AbortSignal,
+      validatedItems?: Array<any>,
     ): Promise<void> => {
       const hashedQueryKey = hashKey(queryKey)
 
@@ -1753,24 +1781,8 @@ export function queryCollectionOptions(
         return
       }
 
-      const rawData = result.data
-      const newItemsArray = select ? select(rawData) : rawData
-
-      if (
-        !Array.isArray(newItemsArray) ||
-        newItemsArray.some((item) => item === null || typeof item !== `object`)
-      ) {
-        const errorMessage = select
-          ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-          : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-
-        const error = new InvalidQueryResultError(errorMessage)
-        writeExceptionalResultSettlement(result, {
-          type: `rejected`,
-          error,
-        })
-        throw error
-      }
+      const newItemsArray =
+        validatedItems ?? readSuccessfulResultItems(queryKey, result)
 
       const currentSyncedItems: Map<string | number, any> = new Map(
         collection._state.syncedData.entries(),
@@ -1917,6 +1929,9 @@ export function queryCollectionOptions(
       signal: AbortSignal,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
+      // Validate before persistence I/O so the public refetch can observe this
+      // result's application rejection instead of fulfilling early.
+      const validatedItems = readSuccessfulResultItems(queryKey, result)
       const persistedBaseline =
         await loadPersistedBaselineForQuery(hashedQueryKey)
       if (
@@ -1931,6 +1946,7 @@ export function queryCollectionOptions(
         applicationToken,
         persistedBaseline,
         signal,
+        validatedItems,
       )
     }
 
@@ -2565,7 +2581,13 @@ export function queryCollectionOptions(
       if (activeSyncSession !== syncSession) throw new CancelledError()
       const settlement = readExceptionalSettlement(result)
       if (settlement?.type === `rejected`) throw settlement.error
-      return settlement?.type === `pending` ? settlement.promise : result
+      if (settlement?.type !== `pending`) return result
+
+      const replacement = await settlement.promise
+      if (!replacement.isSuccess && opts?.throwOnError) {
+        throw replacement.error
+      }
+      return replacement
     })
 
     return Promise.all(refetchPromises)

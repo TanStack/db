@@ -1058,10 +1058,7 @@ describe(`query collection ownership lifecycle`, () => {
       createDeferred<
         Array<{ key: string | number; value: Item; metadata?: unknown }>
       >()
-    const scanPersistedRows = vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockReturnValueOnce(persistedScan.promise)
+    const scanPersistedRows = vi.fn(() => persistedScan.promise)
     const invalidResult = 42 as unknown as Array<Item>
     const recovered = { ...shared, name: `Recovered` }
     const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
@@ -1104,7 +1101,7 @@ describe(`query collection ownership lifecycle`, () => {
       )
       await vi.waitFor(() => {
         expect(queryFn).toHaveBeenCalledTimes(2)
-        expect(scanPersistedRows).toHaveBeenCalledTimes(2)
+        expect(scanPersistedRows).toHaveBeenCalledOnce()
       })
       persistedScan.resolve([])
       expected = advanceResultSettlementModel(expected, {
@@ -1119,6 +1116,72 @@ describe(`query collection ownership lifecycle`, () => {
       })
     } finally {
       persistedScan.resolve([])
+    }
+  })
+
+  it(`rejects an invalid retained revalidation before its persisted baseline loads`, async () => {
+    const id = `retained-invalid-result-settlement`
+    const queryHash = hashKey([id])
+    const persistedScan =
+      createDeferred<
+        Array<{ key: string | number; value: Item; metadata?: unknown }>
+      >()
+    const scanPersistedRows = vi.fn(() => persistedScan.promise)
+    const invalidResult = 42 as unknown as Array<Item>
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      results: [[shared], invalidResult],
+      syncMode: `on-demand`,
+      scanPersistedRows,
+      setupMetadata: (metadata) => {
+        metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+          queryHash,
+          mode: `until-revalidated`,
+        })
+      },
+    })
+    cleanups.push(() => {
+      consoleError.mockRestore()
+      return Promise.resolve()
+    })
+
+    const initialLoad = collection._sync.loadSubset({})
+    const initialLoadPromise = Promise.resolve(
+      initialLoad === true ? undefined : initialLoad,
+    )
+    void initialLoadPromise.catch(() => undefined)
+
+    try {
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(scanPersistedRows).toHaveBeenCalledTimes(1)
+      })
+
+      let rejection: unknown
+      const refetch = collection.utils.refetch({ throwOnError: true }).then(
+        () => ({ settled: true, outcome: `fulfilled` as const }),
+        (error: unknown) => {
+          rejection = error
+          return { settled: true, outcome: `rejected` as const }
+        },
+      )
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+      const operation = `retained-invalid-result`
+      const expected = advanceResultSettlementModel(
+        startResultSettlementModel(operation),
+        {
+          type: `query-succeeded`,
+          operation,
+          result: `invalid-shape`,
+        },
+      )
+      expectPublicRefetchObservation(expected, operation, await refetch)
+      expect(rejection).toBeInstanceOf(InvalidQueryResultError)
+    } finally {
+      persistedScan.resolve([])
+      await initialLoadPromise.catch(() => undefined)
     }
   })
 

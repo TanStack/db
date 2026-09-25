@@ -257,6 +257,19 @@ describe(`offline transactions + query collection refresh`, () => {
       expect(resolveMutation).not.toBeNull()
     })
 
+    const deferBarrier = collection.deferDataRefresh
+    expect(deferBarrier).not.toBeNull()
+    if (!deferBarrier) throw new Error(`Expected an active refresh barrier`)
+    let signalDeferredResult!: () => void
+    const deferredResultScheduled = new Promise<void>((resolve) => {
+      signalDeferredResult = resolve
+    })
+    const originalThen = deferBarrier.then.bind(deferBarrier)
+    deferBarrier.then = ((...args) => {
+      signalDeferredResult()
+      return originalThen(...args)
+    }) as typeof deferBarrier.then
+
     // Trigger a query refetch that returns stale server state.
     // The server doesn't have item-2 yet (the mutation is still in progress).
     // This simulates what refetchOnReconnect would do.
@@ -265,7 +278,8 @@ describe(`offline transactions + query collection refresh`, () => {
       refetchSettled = true
       return result
     })
-    await flushMicrotasks()
+    await deferredResultScheduled
+    deferBarrier.then = originalThen
 
     // The query returned stale data (only item-1), but item-2 should still be
     // visible because the offline transaction is still pending

@@ -939,6 +939,95 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it.each([
+      { label: `the default option`, options: undefined, rejects: false },
+      {
+        label: `throwOnError false`,
+        options: { throwOnError: false },
+        rejects: false,
+      },
+      {
+        label: `throwOnError true`,
+        options: { throwOnError: true },
+        rejects: true,
+      },
+    ] as const)(
+      `preserves $label when a deferred replacement has a transport error`,
+      async ({ options, rejects }) => {
+        const barrier = createDeferred<void>()
+        const transportError = new Error(`Deferred replacement failed`)
+        const queryFn = vi
+          .fn()
+          .mockResolvedValueOnce([{ id: `server`, name: `Initial` }])
+          .mockResolvedValueOnce([{ id: `server`, name: `Skipped` }])
+          .mockRejectedValueOnce(transportError)
+        const consoleError = vi
+          .spyOn(console, `error`)
+          .mockImplementation(() => {})
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `deferred-transport-error-${String(rejects)}-${String(options === undefined)}`,
+            queryClient,
+            queryKey: [
+              `deferred-transport-error`,
+              rejects,
+              options === undefined,
+            ],
+            queryFn,
+            getKey,
+            startSync: true,
+            retry: false,
+          }),
+        )
+
+        try {
+          await collection.stateWhenReady()
+          collection.deferDataRefresh = barrier.promise
+          let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+          const observed = collection.utils.refetch(options).then(
+            (results) => {
+              outcome = `fulfilled`
+              return { results }
+            },
+            (error: unknown) => {
+              outcome = `rejected`
+              return { error }
+            },
+          )
+
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+          for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+          expect(outcome).toBe(`pending`)
+
+          collection.deferDataRefresh = null
+          barrier.resolve()
+          const settlement = await observed
+
+          if (rejects) {
+            expect(outcome).toBe(`rejected`)
+            expect(`error` in settlement ? settlement.error : undefined).toBe(
+              transportError,
+            )
+          } else {
+            expect(outcome).toBe(`fulfilled`)
+            expect(
+              `results` in settlement ? settlement.results : undefined,
+            ).toEqual([
+              expect.objectContaining({
+                isError: true,
+                error: transportError,
+              }),
+            ])
+          }
+        } finally {
+          collection.deferDataRefresh = null
+          barrier.resolve()
+          consoleError.mockRestore()
+          await collection.cleanup()
+        }
+      },
+    )
+
     it(`applies successive eager results in publication order`, async () => {
       const queryKey = [`eager-result-publication-order`]
       const collection = createCollection(
