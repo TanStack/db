@@ -23,6 +23,7 @@ const staticOracleProperties = [
   `sqlite-persistence.abort-graph`,
   `sqlite-persistence.owner-isolation`,
   `sqlite-persistence.reservation-boundary`,
+  `sqlite-persistence.request-local-failure-buffered-source`,
   `trailbase.lifecycle`,
   `electric.bound-descriptor-history`,
   `electric.persisted-tag-history`,

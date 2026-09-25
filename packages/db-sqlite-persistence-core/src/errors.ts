@@ -183,6 +183,10 @@ export class PersistenceUnavailableError extends PersistedCollectionCoreError {
   }
 }
 
+/**
+ * @deprecated Retained for compatibility with earlier PR-preview builds.
+ * Current persistence failures use `PersistedCollectionDurabilityError`.
+ */
 export class PersistenceDurabilityError extends PersistedCollectionCoreError {
   readonly code: string | undefined
   readonly path: string

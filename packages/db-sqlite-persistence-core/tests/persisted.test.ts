@@ -266,6 +266,14 @@ function createRecordingAdapter(
         if (mutation.type === `delete`) {
           rows.delete(mutation.key as string)
           rowMetadata.delete(mutation.key as string)
+        } else if (mutation.type === `update`) {
+          rows.set(mutation.key as string, {
+            ...rows.get(mutation.key as string),
+            ...(mutation.value as Todo),
+          })
+          if (mutation.metadataChanged) {
+            rowMetadata.set(mutation.key as string, mutation.metadata)
+          }
         } else {
           rows.set(mutation.key as string, mutation.value as Todo)
           if (mutation.metadataChanged) {
@@ -894,6 +902,14 @@ type ReservationBoundaryObservation = {
   pendingMarkers: number
 }
 
+type RequestLocalFailureObservation = {
+  receiptStatus: `pending` | `fulfilled` | `rejected`
+  publicRows: Array<Todo>
+  durableRows: Array<Todo>
+  status: string
+  publicError: unknown
+}
+
 function expectReservationBoundaryObservation(
   actual: ReservationBoundaryObservation,
   boundary: `abort` | `cleanup` | `terminal-failure`,
@@ -906,6 +922,19 @@ function expectReservationBoundaryObservation(
           ? `ready`
           : `error`,
     pendingMarkers: 0,
+  })
+}
+
+function expectRequestLocalFailureObservation(
+  actual: RequestLocalFailureObservation,
+  expectedRows: ReadonlyArray<Todo>,
+): void {
+  expect(actual).toEqual({
+    receiptStatus: `fulfilled`,
+    publicRows: expectedRows,
+    durableRows: expectedRows,
+    status: `ready`,
+    publicError: undefined,
   })
 }
 
@@ -1445,6 +1474,152 @@ async function runInternalReservationBoundaryLaw(
   }
 }
 
+type RequestLocalFailureOperation = `partial-update` | `delete` | `insert`
+
+async function runRequestLocalFailureOperationLaw(
+  operation: RequestLocalFailureOperation,
+  baselineTitle: string,
+  sourceTitle: string,
+): Promise<void> {
+  const historyId = ++generatedOwnershipHistoryId
+  const baseline: Todo = {
+    id: `shared`,
+    title: baselineTitle,
+    detail: `required baseline detail`,
+  }
+  const inserted: Todo = {
+    id: baseline.id,
+    title: sourceTitle,
+    detail: `complete insert detail`,
+  }
+  const adapter = createRecordingAdapter(
+    operation === `insert` ? [] : [baseline],
+  )
+  const loadPersistedRows = adapter.loadSubset.bind(adapter)
+  const loadEntered = createEventGate()
+  const rejectLoad = createEventGate()
+  const loadFailure = new Error(
+    `generated request-local ${operation} load failure`,
+  )
+  let loadCalls = 0
+  adapter.loadSubset = async (...args) => {
+    loadCalls++
+    if (loadCalls === 1) {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw loadFailure
+    }
+    return loadPersistedRows(...args)
+  }
+  let sourceParams!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `generated-request-local-failure-${historyId}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        rowUpdateMode: `partial`,
+        sync: (params) => {
+          sourceParams = params
+          params.markReady()
+          return { loadSubset: () => true }
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  const expectedRows =
+    operation === `delete`
+      ? []
+      : operation === `insert`
+        ? [inserted]
+        : [{ ...baseline, title: sourceTitle }]
+  let load: Promise<void> | undefined
+  let receipt: Promise<void> | undefined
+  let hasPrimaryFailure = false
+
+  try {
+    await atPersistedOracleCheckpoint(
+      collection.stateWhenReady(),
+      `generated request-local collection ready`,
+    )
+    load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+      () => undefined,
+    )
+    void load.catch(() => undefined)
+    await atPersistedOracleCheckpoint(
+      loadEntered.promise,
+      `generated request-local load entered`,
+    )
+
+    sourceParams.begin()
+    sourceParams.write(
+      operation === `delete`
+        ? { type: `delete`, key: baseline.id }
+        : operation === `insert`
+          ? { type: `insert`, value: inserted }
+          : {
+              type: `update`,
+              value: { id: baseline.id, title: sourceTitle } as Todo,
+            },
+    )
+    receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+    const receiptState = observeSettlement(receipt)
+    expect(receiptState.read()).toEqual({ status: `pending` })
+
+    rejectLoad.resolve()
+    await expect(
+      atPersistedOracleCheckpoint(load, `generated request-local rejection`),
+    ).rejects.toBe(loadFailure)
+    await atPersistedOracleCheckpoint(
+      receipt,
+      `generated request-local receipt settlement`,
+    )
+    expectRequestLocalFailureObservation(
+      {
+        receiptStatus: receiptState.read().status,
+        publicRows: sortedTodoRows(
+          [...collection.values()].map(stripVirtualProps),
+        ),
+        durableRows: sortedTodoRows(adapter.rows.values()),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      },
+      expectedRows,
+    )
+
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+      `generated request-local retry`,
+    )
+    expectRequestLocalFailureObservation(
+      {
+        receiptStatus: receiptState.read().status,
+        publicRows: sortedTodoRows(
+          [...collection.values()].map(stripVirtualProps),
+        ),
+        durableRows: sortedTodoRows(adapter.rows.values()),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      },
+      expectedRows,
+    )
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    rejectLoad.resolve()
+    await cleanupPersistedOracle(
+      [
+        () => load?.catch(() => undefined),
+        () => receipt?.catch(() => undefined),
+        () => collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+
 type GeneratedPersistenceHistory = {
   axes: Array<string>
   titles: Array<string>
@@ -1466,12 +1641,14 @@ const reservationBoundaryAxes = [
   `cleanup`,
   `terminal-failure`,
 ] as const
+const requestLocalFailureAxes = [`partial-update`, `delete`, `insert`] as const
 const generatedTitleMaxLength = 12
 const generatedPersistenceFixedSeeds = {
   immediateOrdering: 18_530_101,
   abortGraph: 18_530_102,
   ownerIsolation: 18_530_103,
   reservationBoundary: 18_530_104,
+  requestLocalFailure: 18_530_105,
 } as const
 
 const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGrammar> =
@@ -1528,6 +1705,20 @@ const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGrammar> =
       witness: {
         axes: [`abort`, `cleanup`, `terminal-failure`],
         titles: [`hydrated`],
+      },
+    },
+    {
+      property: `sqlite-persistence.request-local-failure-buffered-source`,
+      axes: requestLocalFailureAxes,
+      axisContribution: {
+        [`partial-update`]: `an unseen persisted baseline is reconstructed`,
+        delete: `a buffered delete settles without resurrection`,
+        insert: `a complete buffered insert settles without duplication`,
+      },
+      titleCount: 2,
+      witness: {
+        axes: [`partial-update`, `delete`, `insert`],
+        titles: [`baseline`, `source`],
       },
     },
   ]
@@ -1588,6 +1779,11 @@ type ReservationBoundaryHistory = {
   hydratedTitle: string
 }
 
+type RequestLocalFailureHistory = {
+  operations: Array<RequestLocalFailureOperation>
+  titles: [string, string]
+}
+
 const immediateOrderingHistory: fc.Arbitrary<ImmediateOrderingHistory> =
   fc.record({
     relations: fullAxisOrder(immediateOrderingAxes),
@@ -1608,6 +1804,12 @@ const reservationBoundaryHistory: fc.Arbitrary<ReservationBoundaryHistory> =
   fc.record({
     boundaries: fullAxisOrder(reservationBoundaryAxes),
     hydratedTitle: generatedTitle,
+  })
+
+const requestLocalFailureHistory: fc.Arbitrary<RequestLocalFailureHistory> =
+  fc.record({
+    operations: fullAxisOrder(requestLocalFailureAxes),
+    titles: fc.tuple(generatedTitle, generatedTitle),
   })
 
 function generatedPersistenceGrammarSamples(): ReadonlyArray<{
@@ -1671,6 +1873,20 @@ function generatedPersistenceGrammarSamples(): ReadonlyArray<{
           titles: [history.hydratedTitle],
         })),
     },
+    {
+      grammar: grammar(
+        `sqlite-persistence.request-local-failure-buffered-source`,
+      ),
+      histories: fc
+        .sample(
+          requestLocalFailureHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.requestLocalFailure),
+        )
+        .map((history) => ({
+          axes: history.operations,
+          titles: [...history.titles],
+        })),
+    },
   ]
 }
 
@@ -1711,6 +1927,18 @@ async function runGeneratedReservationBoundaryHistory(
 ): Promise<void> {
   for (const boundary of history.boundaries) {
     await runInternalReservationBoundaryLaw(boundary, history.hydratedTitle)
+  }
+}
+
+async function runGeneratedRequestLocalFailureHistory(
+  history: RequestLocalFailureHistory,
+): Promise<void> {
+  for (const operation of history.operations) {
+    await runRequestLocalFailureOperationLaw(
+      operation,
+      history.titles[0],
+      history.titles[1],
+    )
   }
 }
 
@@ -1869,6 +2097,32 @@ describe(`generated persistence durability oracles`, () => {
             `terminal-failure`,
           ),
       },
+      {
+        name: `request-local partial update drops the unseen baseline field`,
+        reject: () =>
+          expectRequestLocalFailureObservation(
+            {
+              receiptStatus: `fulfilled`,
+              publicRows: [{ id: `shared`, title: `source` }],
+              durableRows: [
+                {
+                  id: `shared`,
+                  title: `source`,
+                  detail: `required baseline detail`,
+                },
+              ],
+              status: `ready`,
+              publicError: undefined,
+            },
+            [
+              {
+                id: `shared`,
+                title: `source`,
+                detail: `required baseline detail`,
+              },
+            ],
+          ),
+      },
     ])(`rejects named wrong answer: $name`, ({ reject }) => {
       expect(reject).toThrow()
     })
@@ -1901,6 +2155,13 @@ describe(`generated persistence durability oracles`, () => {
     arbitrary: reservationBoundaryHistory,
     fixedSeed: generatedPersistenceFixedSeeds.reservationBoundary,
     run: runGeneratedReservationBoundaryHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.request-local-failure-buffered-source`,
+    title: `request-local load failure preserves buffered source semantics`,
+    arbitrary: requestLocalFailureHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.requestLocalFailure,
+    run: runGeneratedRequestLocalFailureHistory,
   })
 })
 
@@ -11600,9 +11861,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`settles hydration-buffered source work when an incremental subset load rejects`, async () => {
+  it(`settles hydration-buffered source work and reconciles an overlapping retry after incremental load rejection`, async () => {
     const failure = new Error(`incremental subset rejected exactly`)
     const adapter = createRecordingAdapter()
+    const loadPersistedRows = adapter.loadSubset.bind(adapter)
     const loadEntered = createEventGate()
     const rejectLoad = createEventGate()
     adapter.loadSubset = async () => {
@@ -11663,15 +11925,34 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
 
       expect({
+        receipt: receiptState.read(),
         status: collection.status,
         publicError: collection._lifecycle.getSyncError(),
         publicRow: stripVirtualProps(collection.get(`source`)),
         durableRow: adapter.rows.get(`source`),
       }).toEqual({
+        receipt: { status: `fulfilled` },
         status: `ready`,
         publicError: undefined,
         publicRow: { id: `source`, title: `Must outlive request failure` },
         durableRow: { id: `source`, title: `Must outlive request failure` },
+      })
+
+      adapter.loadSubset = loadPersistedRows
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+        `overlapping request-local retry loaded durable source row`,
+      )
+      expect({
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicRows: [...collection.values()].map(stripVirtualProps),
+        durableRows: [...adapter.rows.values()],
+      }).toEqual({
+        status: `ready`,
+        publicError: undefined,
+        publicRows: [{ id: `source`, title: `Must outlive request failure` }],
+        durableRows: [{ id: `source`, title: `Must outlive request failure` }],
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -11682,6 +11963,919 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         [
           () => load?.catch(() => undefined),
           () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`fail-stops when a buffered partial update cannot reconstruct its persisted baseline`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const baselineFailure = new Error(
+      `persisted baseline reconstruction failed`,
+    )
+    const adapter = createRecordingAdapter([
+      {
+        id: `shared`,
+        title: `Persisted baseline`,
+        detail: `required baseline field`,
+      },
+    ])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-partial-baseline-failure`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `partial baseline failure collection ready`,
+      )
+      adapter.loadResumeSnapshot = () => Promise.reject(baselineFailure)
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        loadEntered.promise,
+        `partial baseline failure load entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `shared`, title: `Partial update` },
+      })
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      void receipt.catch(() => undefined)
+      expect(observeSettlement(receipt).read()).toEqual({ status: `pending` })
+
+      rejectLoad.resolve()
+      await expect(
+        atPersistedOracleCheckpoint(load, `partial baseline load rejected`),
+      ).rejects.toBe(baselineFailure)
+      await expect(
+        atPersistedOracleCheckpoint(
+          receipt,
+          `partial baseline source receipt rejected`,
+        ),
+      ).rejects.toBe(baselineFailure)
+      expect({
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === baselineFailure,
+        publicRow: collection.get(`shared`),
+        durableRow: adapter.rows.get(`shared`),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        status: `error`,
+        exactPublicError: true,
+        publicRow: undefined,
+        durableRow: {
+          id: `shared`,
+          title: `Persisted baseline`,
+          detail: `required baseline field`,
+        },
+        durabilityCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`applies a partial upsert when the persisted snapshot proves the key absent`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const adapter = createRecordingAdapter()
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-missing-partial-baseline`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `missing`, title: `partial` },
+      })
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      void receipt.catch(() => undefined)
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toBe(requestFailure)
+      await receipt
+      expect({
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicRow: stripVirtualProps(collection.get(`missing`)),
+        durableRow: adapter.rows.get(`missing`),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        status: `ready`,
+        publicError: undefined,
+        publicRow: { id: `missing`, title: `partial` },
+        durableRow: { id: `missing`, title: `partial` },
+        durabilityCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`binds a transaction begun before hydration at its write and commit cut`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `required baseline field`,
+    }
+    const adapter = createRecordingAdapter([baseline])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-begin-before-hydration`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      sourceParams.begin()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: `Source update` },
+      })
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      const settlement = observeSettlement(receipt)
+      expect(settlement.read()).toEqual({ status: `pending` })
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toBe(requestFailure)
+      await receipt
+      expect({
+        receipt: settlement.read(),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicRow: stripVirtualProps(collection.get(baseline.id)),
+        durableRow: adapter.rows.get(baseline.id),
+        recoverySnapshotCalls: adapter.loadResumeSnapshotCalls.filter(
+          ({ includeRows }) => includeRows === true,
+        ).length,
+      }).toEqual({
+        receipt: { status: `fulfilled` },
+        status: `ready`,
+        publicError: undefined,
+        publicRow: {
+          id: baseline.id,
+          title: `Source update`,
+          detail: baseline.detail,
+        },
+        durableRow: {
+          id: baseline.id,
+          title: `Source update`,
+          detail: baseline.detail,
+        },
+        recoverySnapshotCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`publishes a recovered baseline and dependent partial update atomically`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `required baseline field`,
+    }
+    const expected: Todo = { ...baseline, title: `Source update` }
+    const adapter = createRecordingAdapter([baseline])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-atomic-baseline-recovery`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const abortController = new AbortController()
+    const publicCuts: Array<Todo | undefined> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      if (changes.some(({ key }) => key === baseline.id)) {
+        publicCuts.push(stripVirtualProps(collection.get(baseline.id)))
+        abortController.abort()
+      }
+    })
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: expected.title },
+      })
+      receipt = Promise.resolve(
+        sourceParams.commit(abortController.signal),
+      ).then(() => undefined)
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toBe(requestFailure)
+      await receipt
+      expect({
+        abortedFromPublication: abortController.signal.aborted,
+        publicCuts,
+        publicRow: stripVirtualProps(collection.get(baseline.id)),
+        durableRow: adapter.rows.get(baseline.id),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        abortedFromPublication: true,
+        publicCuts: [expected],
+        publicRow: expected,
+        durableRow: expected,
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      subscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it.each([`delete`, `truncate`] as const)(
+    `treats a buffered %s prefix as authoritative absence for a partial upsert`,
+    async (prefix) => {
+      const requestFailure = new Error(`incremental subset rejected`)
+      const baseline: Todo = {
+        id: `shared`,
+        title: `Persisted baseline`,
+        detail: `required baseline field`,
+      }
+      const adapter = createRecordingAdapter([baseline])
+      const loadEntered = createEventGate()
+      const rejectLoad = createEventGate()
+      adapter.loadSubset = async () => {
+        loadEntered.resolve()
+        await rejectLoad.promise
+        throw requestFailure
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `request-local-${prefix}-partial-prefix`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            rowUpdateMode: `partial`,
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      let load: Promise<void> | undefined
+      let prefixReceipt: Promise<void> | undefined
+      let partialReceipt: Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        await collection.stateWhenReady()
+        load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+          () => undefined,
+        )
+        void load.catch(() => undefined)
+        await loadEntered.promise
+
+        sourceParams.begin()
+        if (prefix === `delete`) {
+          sourceParams.write({ type: `delete`, key: baseline.id })
+        } else {
+          sourceParams.truncate()
+        }
+        prefixReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void prefixReceipt.catch(() => undefined)
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `update`,
+          value: { id: baseline.id, title: `partial after ${prefix}` },
+        })
+        partialReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void partialReceipt.catch(() => undefined)
+        rejectLoad.resolve()
+
+        await expect(load).rejects.toBe(requestFailure)
+        await prefixReceipt
+        await partialReceipt
+        expect({
+          status: collection.status,
+          publicError: collection._lifecycle.getSyncError(),
+          publicRow: collection.get(baseline.id),
+          durableRow: adapter.rows.get(baseline.id),
+          durableOrder: adapter.applyCommittedTxCalls.map(({ tx }) =>
+            tx.truncate ? `truncate` : tx.mutations[0]?.type,
+          ),
+        }).toEqual({
+          status: `ready`,
+          publicError: undefined,
+          publicRow: expect.objectContaining({
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          }),
+          durableRow: {
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          },
+          durableOrder: [prefix, `update`],
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        rejectLoad.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => load?.catch(() => undefined),
+            () => prefixReceipt?.catch(() => undefined),
+            () => partialReceipt?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it.each([`delete`, `truncate`] as const)(
+    `treats a same-transaction %s prefix as authoritative absence for a partial upsert`,
+    async (prefix) => {
+      const baseline: Todo = {
+        id: `shared`,
+        title: `Persisted baseline`,
+        detail: `required baseline field`,
+      }
+      const adapter = createRecordingAdapter([baseline])
+      const loadEntered = createEventGate()
+      const rejectLoad = createEventGate()
+      adapter.loadSubset = async () => {
+        loadEntered.resolve()
+        await rejectLoad.promise
+        throw new Error(`incremental subset rejected`)
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `request-local-same-transaction-${prefix}-partial`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            rowUpdateMode: `partial`,
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      let load: Promise<void> | undefined
+      let receipt: Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        await collection.stateWhenReady()
+        load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+          () => undefined,
+        )
+        void load.catch(() => undefined)
+        await loadEntered.promise
+
+        sourceParams.begin()
+        if (prefix === `delete`) {
+          sourceParams.write({ type: `delete`, key: baseline.id })
+        } else {
+          sourceParams.truncate()
+        }
+        sourceParams.write({
+          type: `update`,
+          value: { id: baseline.id, title: `partial after ${prefix}` },
+        })
+        receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+        void receipt.catch(() => undefined)
+        rejectLoad.resolve()
+
+        await expect(load).rejects.toThrow(`incremental subset rejected`)
+        await receipt
+        expect({
+          status: collection.status,
+          publicRow: stripVirtualProps(collection.get(baseline.id)),
+          durableRow: adapter.rows.get(baseline.id),
+          durabilityCalls: adapter.applyCommittedTxCalls.length,
+          recoverySnapshotCalls: adapter.loadResumeSnapshotCalls.filter(
+            ({ includeRows }) => includeRows === true,
+          ).length,
+        }).toEqual({
+          status: `ready`,
+          publicRow: {
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          },
+          durableRow: {
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          },
+          durabilityCalls: 1,
+          recoverySnapshotCalls: 0,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        rejectLoad.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => load?.catch(() => undefined),
+            () => receipt?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`keeps fallback-snapshot admissions inside buffered baseline recovery`, async () => {
+    const rows: Array<Todo> = [
+      { id: `a`, title: `A baseline`, detail: `A required` },
+      { id: `b`, title: `B baseline`, detail: `B required` },
+    ]
+    const adapter = createRecordingAdapter(rows)
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    const fallbackEntered = createEventGate()
+    const releaseFallback = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw new Error(`incremental subset rejected`)
+    }
+    const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+      fallbackEntered.resolve()
+      await releaseFallback.promise
+      return rows.map((value) => ({ key: value.id, value }))
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-fallback-admission`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    const receipts: Array<Promise<void>> = []
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `a`, title: `A source` },
+      })
+      receipts.push(
+        Promise.resolve(sourceParams.commit()).then(() => undefined),
+      )
+      receipts.forEach((receipt) => void receipt.catch(() => undefined))
+      rejectLoad.resolve()
+      await fallbackEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `b`, title: `B source` },
+      })
+      const lateReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      receipts.push(lateReceipt)
+      void lateReceipt.catch(() => undefined)
+      expect(observeSettlement(lateReceipt).read()).toEqual({
+        status: `pending`,
+      })
+
+      releaseFallback.resolve()
+      await expect(load).rejects.toThrow(`incremental subset rejected`)
+      await Promise.all(receipts)
+      expect({
+        publicRows: [`a`, `b`].map((key) =>
+          stripVirtualProps(collection.get(key)),
+        ),
+        durableRows: [`a`, `b`].map((key) => adapter.rows.get(key)),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        publicRows: [
+          { id: `a`, title: `A source`, detail: `A required` },
+          { id: `b`, title: `B source`, detail: `B required` },
+        ],
+        durableRows: [
+          { id: `a`, title: `A source`, detail: `A required` },
+          { id: `b`, title: `B source`, detail: `B required` },
+        ],
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      releaseFallback.resolve()
+      restoreBaselineRows()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not publish a fallback baseline for an aborted dependent update`, async () => {
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `required baseline field`,
+    }
+    const adapter = createRecordingAdapter([baseline])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    const fallbackEntered = createEventGate()
+    const releaseFallback = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw new Error(`incremental subset rejected`)
+    }
+    const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+      fallbackEntered.resolve()
+      await releaseFallback.promise
+      return [{ key: baseline.id, value: baseline }]
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-aborted-partial-baseline`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const publicEvents: Array<string> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      publicEvents.push(
+        ...changes.map((change) => `${change.type}:${change.key}`),
+      )
+    })
+    const abortController = new AbortController()
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: `aborted partial` },
+      })
+      receipt = Promise.resolve(
+        sourceParams.commit(abortController.signal),
+      ).then(() => undefined)
+      void receipt.catch(() => undefined)
+      rejectLoad.resolve()
+      await fallbackEntered.promise
+      abortController.abort()
+      releaseFallback.resolve()
+
+      await expect(load).rejects.toThrow(`incremental subset rejected`)
+      await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
+      expect({
+        publicEvents,
+        publicRow: collection.get(baseline.id),
+        durableRow: adapter.rows.get(baseline.id),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        publicEvents: [],
+        publicRow: undefined,
+        durableRow: baseline,
+        durabilityCalls: 0,
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      releaseFallback.resolve()
+      restoreBaselineRows()
+      subscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not let a later fallback dependency preserve metadata deleted by a fresh insert`, async () => {
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `old detail`,
+    }
+    const adapter = createRecordingAdapter([baseline])
+    adapter.rowMetadata.set(baseline.id, { owner: `stale` })
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw new Error(`incremental subset rejected`)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-insert-partial-metadata`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    const receipts: Array<Promise<void>> = []
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: baseline.id, title: `Fresh insert`, detail: `new detail` },
+      })
+      receipts.push(
+        Promise.resolve(sourceParams.commit()).then(() => undefined),
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: `Later partial` },
+      })
+      receipts.push(
+        Promise.resolve(sourceParams.commit()).then(() => undefined),
+      )
+      receipts.forEach((receipt) => void receipt.catch(() => undefined))
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toThrow(`incremental subset rejected`)
+      await Promise.all(receipts)
+      expect({
+        publicRow: stripVirtualProps(collection.get(baseline.id)),
+        durableRow: adapter.rows.get(baseline.id),
+        publicMetadata: sourceParams.metadata!.row.get(baseline.id),
+        durableMetadata: adapter.rowMetadata.get(baseline.id),
+      }).toEqual({
+        publicRow: {
+          id: baseline.id,
+          title: `Later partial`,
+          detail: `new detail`,
+        },
+        durableRow: {
+          id: baseline.id,
+          title: `Later partial`,
+          detail: `new detail`,
+        },
+        publicMetadata: undefined,
+        durableMetadata: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
           () => collection.cleanup(),
         ],
         hasPrimaryFailure,
@@ -13975,6 +15169,84 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     ).not.toThrow()
     expect(collection.has(`late`)).toBe(false)
+  })
+
+  it(`keeps retired sync controls inert after cleanup and restart`, async () => {
+    const adapter = createRecordingAdapter()
+    const runs: Array<TodoSyncParams> = []
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `retired-controls-after-restart`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: (params) => {
+            runs.push(params)
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.preload()
+      expect(runs).toHaveLength(1)
+      const retired = runs[0]!
+
+      await collection.cleanup()
+      const replacementReady = createEventGate()
+      const unsubscribe = collection.on(`status:ready`, () =>
+        replacementReady.resolve(),
+      )
+      collection.startSyncImmediate()
+      await atPersistedOracleCheckpoint(
+        replacementReady.promise,
+        `replacement controls ready`,
+      )
+      unsubscribe()
+      expect(runs).toHaveLength(2)
+
+      retired.begin()
+      retired.write({
+        type: `insert`,
+        value: { id: `retired`, title: `must stay retired` },
+      })
+      const retiredReceipt = retired.commit()
+      if (retiredReceipt !== true) await retiredReceipt
+
+      const replacement = runs[1]!
+      replacement.begin()
+      replacement.write({
+        type: `insert`,
+        value: { id: `replacement`, title: `new controls own this row` },
+      })
+      const replacementReceipt = replacement.commit()
+      if (replacementReceipt !== true) await replacementReceipt
+
+      expect({
+        retiredPublic: collection.get(`retired`),
+        retiredDurable: adapter.rows.get(`retired`),
+        replacementPublic: stripVirtualProps(collection.get(`replacement`)),
+        replacementDurable: adapter.rows.get(`replacement`),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        retiredPublic: undefined,
+        retiredDurable: undefined,
+        replacementPublic: {
+          id: `replacement`,
+          title: `new controls own this row`,
+        },
+        replacementDurable: {
+          id: `replacement`,
+          title: `new controls own this row`,
+        },
+        status: `ready`,
+        publicError: undefined,
+      })
+    } finally {
+      await collection.cleanup()
+    }
   })
 })
 

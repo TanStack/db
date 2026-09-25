@@ -255,8 +255,19 @@ describe(`sync publication reentrancy`, () => {
       const abandoned = sync.begin()
       abandoned!.write({ type: `insert`, value: { id: 3, value: `abandoned` } })
       abandoned!.abort()
+      abandoned!.abort()
       expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
       expect(collection.has(3)).toBe(false)
+
+      const committed = sync.begin()
+      committed!.write({ type: `insert`, value: { id: 4, value: `committed` } })
+      expect(committed!.commit()).toBe(true)
+      committed!.abort()
+      committed!.abort()
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
+      expect(collection.get(4)).toEqual(
+        expect.objectContaining({ id: 4, value: `committed` }),
+      )
     } finally {
       await collection.cleanup()
     }

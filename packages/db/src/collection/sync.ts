@@ -48,6 +48,13 @@ type LoadSubsetOperation = {
   deferred?: Deferred<void>
 }
 
+// Internal cross-package hook used by the persistence wrapper to fold a
+// durable baseline into an already-reserved source transaction. A global
+// symbol keeps this capability off the public SyncTransactionHandle surface.
+const PREPEND_PERSISTED_HYDRATION_ROWS = Symbol.for(
+  `@tanstack/db/prepend-persisted-hydration-rows`,
+)
+
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -280,7 +287,11 @@ export class CollectionSyncManager<
     }
     this.state.pendingSyncedTransactions.push(pendingTransaction)
 
-    return {
+    const handle: SyncTransactionHandle<TOutput, TKey> & {
+      [PREPEND_PERSISTED_HYDRATION_ROWS]: (
+        rows: Array<{ key: TKey; value: TOutput; metadata?: unknown }>,
+      ) => void
+    } = {
       write: (message, knownKey) =>
         this.writeSyncTransaction(
           message,
@@ -297,7 +308,32 @@ export class CollectionSyncManager<
         if (!isCurrentSync()) return
         this.state.cancelPendingSyncedTransaction(pendingTransaction)
       },
+      [PREPEND_PERSISTED_HYDRATION_ROWS]: (
+        rows: Array<{ key: TKey; value: TOutput; metadata?: unknown }>,
+      ) => {
+        if (!isCurrentSync()) return
+        const active = this.getActivePendingSyncTransaction(pendingTransaction)
+        const baselineOperations = rows.map(
+          ({ key, value, metadata }) =>
+            ({
+              type: `update`,
+              key,
+              value,
+              metadata,
+            }) as OptimisticChangeMessage<TOutput, TKey>,
+        )
+        active.operations.unshift(...baselineOperations)
+        for (const { key, metadata } of rows) {
+          if (metadata !== undefined && !active.rowMetadataWrites.has(key)) {
+            active.rowMetadataWrites.set(key, {
+              type: `set`,
+              value: metadata,
+            })
+          }
+        }
+      },
     }
+    return handle
   }
 
   private writeSyncTransaction(

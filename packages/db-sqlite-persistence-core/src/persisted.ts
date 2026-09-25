@@ -54,6 +54,19 @@ import type {
   UtilsRecord,
 } from '@tanstack/db'
 
+const PREPEND_PERSISTED_HYDRATION_ROWS = Symbol.for(
+  `@tanstack/db/prepend-persisted-hydration-rows`,
+)
+
+type PersistedHydrationPrependHandle<
+  T extends object,
+  TKey extends string | number,
+> = SyncTransactionHandle<T, TKey> & {
+  [PREPEND_PERSISTED_HYDRATION_ROWS]: (
+    rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+  ) => void
+}
+
 export type PersistedMutationEnvelope =
   | {
       mutationId: string
@@ -869,6 +882,7 @@ type NormalizedSyncOperation<T extends object, TKey extends string | number> =
 
 type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   operations: Array<NormalizedSyncOperation<T, TKey>>
+  partialUpdateOperationIndexes: Set<number>
   rowMetadataWrites: Map<
     TKey,
     { type: `set`; value: unknown } | { type: `delete` }
@@ -885,6 +899,9 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   beginOptions?: { immediate?: boolean }
   expectedResumeGenerationOwner?: symbol
   signal?: AbortSignal
+  prependHydrationRows: (
+    rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+  ) => void
   applyToCollection: () => SyncAppliedReceipt
   shouldFailStopOnAbort?: () => boolean
   resolveApplied?: () => void
@@ -893,7 +910,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
 
 type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   BufferedSyncTransaction<T, TKey>,
-  `applyToCollection` | `shouldFailStopOnAbort`
+  `applyToCollection` | `prependHydrationRows` | `shouldFailStopOnAbort`
 > & {
   reservation?: SyncTransactionHandle<T, TKey>
   signal?: AbortSignal
@@ -1669,9 +1686,9 @@ class PersistedCollectionRuntime<
     if (transaction.beginOptions?.immediate) {
       return this.applyImmediateBufferedSyncTransaction(transaction)
     }
-    return this.applyMutex.run(() =>
-      this.applyBufferedSyncTransactionUnsafe(transaction),
-    )
+    return this.applyMutex.run(async () => {
+      await this.applyBufferedSyncTransactionUnsafe(transaction)
+    })
   }
 
   private async applyImmediateBufferedSyncTransaction(
@@ -2014,7 +2031,27 @@ class PersistedCollectionRuntime<
       }
     } catch (error) {
       if (config.requestLocalLoadFailure && !rowsLoaded) {
-        await this.flushQueuedHydrationTransactionsUnsafe()
+        // Keep admitting source work to the hydration queue while recovery
+        // reconstructs any persisted baseline required by partial updates.
+        // The failed subset itself owns no rows, so recovery must evaluate
+        // each queued transaction against the durable snapshot at its exact
+        // FIFO cut instead of treating the snapshot as a successful load.
+        this.hydratingGeneration = config.lifecycleGeneration
+        try {
+          await this.recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+            config.lifecycleGeneration,
+          )
+        } catch (baselineError) {
+          const terminalError = this.markTerminalFailure(
+            baselineError,
+            config.lifecycleGeneration,
+          )
+          throw terminalError
+        } finally {
+          if (this.hydratingGeneration === config.lifecycleGeneration) {
+            this.hydratingGeneration = null
+          }
+        }
         await this.flushQueuedTxCommittedUnsafe()
         throw error
       }
@@ -2022,6 +2059,130 @@ class PersistedCollectionRuntime<
     } finally {
       if (this.activeHydrationContext === hydrationContext) {
         this.activeHydrationContext = undefined
+      }
+    }
+  }
+
+  private async recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+    lifecycleGeneration: number,
+  ): Promise<void> {
+    let snapshotRows:
+      | Map<TKey, { key: TKey; value: T; metadata?: unknown }>
+      | undefined
+    type RecoveryPresence = `present` | `absent` | `unknown`
+    const recoveredPresence = new Map<TKey, RecoveryPresence>()
+    let snapshotInvalidatedByTruncate = false
+
+    while (this.queuedHydrationTransactions.length > 0) {
+      const transaction = this.queuedHydrationTransactions.shift()
+      if (!transaction) continue
+
+      try {
+        this.throwIfLifecycleReplaced(lifecycleGeneration)
+        const baselineRows = new Map<
+          TKey,
+          { key: TKey; value: T; metadata?: unknown }
+        >()
+        const transactionPresence = new Map<TKey, RecoveryPresence>()
+        const transactionStartsWithTruncate = transaction.truncate
+        const getPresence = (key: TKey): RecoveryPresence => {
+          const known = transactionPresence.get(key)
+          if (known !== undefined) return known
+          if (transactionStartsWithTruncate) {
+            transactionPresence.set(key, `absent`)
+            return `absent`
+          }
+          const recovered = recoveredPresence.get(key)
+          if (recovered !== undefined) {
+            transactionPresence.set(key, recovered)
+            return recovered
+          }
+          const present =
+            this.collection?._hasHydratedKey(key) === true
+              ? `present`
+              : snapshotInvalidatedByTruncate
+                ? `absent`
+                : `unknown`
+          transactionPresence.set(key, present)
+          return present
+        }
+
+        if (!transaction.signal?.aborted) {
+          for (const [index, operation] of transaction.operations.entries()) {
+            const key = operation.key
+            if (
+              operation.type === `update` &&
+              transaction.partialUpdateOperationIndexes.has(index) &&
+              getPresence(key) === `unknown`
+            ) {
+              if (snapshotRows === undefined) {
+                const snapshot =
+                  await this.persistence.adapter.loadResumeSnapshot(
+                    this.collectionId,
+                    {
+                      requiredIndexSignatures:
+                        this.getRequiredIndexSignatures(),
+                      includeRows: true,
+                    },
+                  )
+                this.throwIfLifecycleReplaced(lifecycleGeneration)
+                if (transaction.signal?.aborted) break
+                snapshotRows = new Map(
+                  (
+                    snapshot.rows as Array<{
+                      key: TKey
+                      value: T
+                      metadata?: unknown
+                    }>
+                  ).map((row) => [row.key, row]),
+                )
+              }
+              const baseline = snapshotRows.get(key)
+              if (baseline === undefined) {
+                transactionPresence.set(key, `absent`)
+              } else {
+                baselineRows.set(key, baseline)
+                transactionPresence.set(key, `present`)
+              }
+            }
+
+            transactionPresence.set(
+              key,
+              operation.type === `delete` ? `absent` : `present`,
+            )
+          }
+
+          if (baselineRows.size > 0) {
+            // Fold the durable baseline into the dependent reservation. It
+            // must never become a separately observable publication: the
+            // partial source value and its unseen fields are one atomic row.
+            if (!transaction.signal?.aborted) {
+              transaction.prependHydrationRows([...baselineRows.values()])
+            }
+          }
+        }
+
+        const transactionApplied =
+          await this.applyBufferedSyncTransactionUnsafe(transaction)
+        if (transactionApplied) {
+          if (transaction.truncate) {
+            snapshotInvalidatedByTruncate = true
+            recoveredPresence.clear()
+          }
+          for (const operation of transaction.operations) {
+            recoveredPresence.set(
+              operation.key,
+              operation.type === `delete` ? `absent` : `present`,
+            )
+          }
+        }
+      } catch (error) {
+        transaction.rejectApplied?.(error)
+        for (const abandoned of this.queuedHydrationTransactions) {
+          abandoned.rejectApplied?.(error)
+        }
+        this.queuedHydrationTransactions.length = 0
+        throw error
       }
     }
   }
@@ -2189,7 +2350,7 @@ class PersistedCollectionRuntime<
 
   private async applyBufferedSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.throwIfTerminal()
     this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
 
@@ -2206,6 +2367,7 @@ class PersistedCollectionRuntime<
         await this.persistAndBroadcastExternalSyncTransactionUnsafe(transaction)
       }
       transaction.resolveApplied?.()
+      return true
     } catch (error) {
       const aborted =
         transaction.signal?.aborted ||
@@ -2218,7 +2380,7 @@ class PersistedCollectionRuntime<
       )
       transaction.rejectApplied?.(terminalError)
       if (aborted && !shouldFailStop && transaction.rejectApplied) {
-        return
+        return false
       }
       throw terminalError
     }
@@ -3201,6 +3363,13 @@ function createWrappedSyncConfig<
       > = []
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
+      const bindToCurrentHydration = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        if (transaction.internal || !runtime.isHydratingNow()) return
+        transaction.queuedBecauseHydrating = true
+        transaction.hydrationContext ??= runtime.getActiveHydrationContext()
+      }
       const markPendingMetadataDependency = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
@@ -3426,6 +3595,7 @@ function createWrappedSyncConfig<
           const internal = runtime.isApplyingInternally()
           const transaction: OpenSyncTransaction<T, TKey> = {
             operations: [],
+            partialUpdateOperationIndexes: new Set(),
             rowMetadataWrites: new Map(),
             collectionMetadataWrites: new Map(),
             deferredHydrationMetadataDeleteKeys: new Set(),
@@ -3469,12 +3639,18 @@ function createWrappedSyncConfig<
           if (!openTransaction) {
             throw new NoPendingSyncTransactionWriteError()
           }
+          bindToCurrentHydration(openTransaction)
           const normalization = runtime.normalizeSyncWriteMessage(message)
 
           if (
             message.type === `update` &&
             sourceSyncConfig.rowUpdateMode !== `full`
           ) {
+            if (!openTransaction.internal) {
+              openTransaction.partialUpdateOperationIndexes.add(
+                openTransaction.operations.length,
+              )
+            }
             for (const pending of pendingPublicationTransactions) {
               if (
                 pending.truncate ||
@@ -3711,6 +3887,7 @@ function createWrappedSyncConfig<
 
           openTransaction.operations = []
           openTransaction.operationKeys.clear()
+          openTransaction.partialUpdateOperationIndexes.clear()
           openTransaction.rowMetadataWrites.clear()
           openTransaction.deferredHydrationMetadataDeleteKeys.clear()
           // Intentionally preserve collectionMetadataWrites across truncate.
@@ -3745,8 +3922,11 @@ function createWrappedSyncConfig<
             settlePendingTransaction(openTransaction)
             return createHandledRejection(new SyncTransactionAbortedError())
           }
+          bindToCurrentHydration(openTransaction)
           const transaction = {
             operations: openTransaction.operations,
+            partialUpdateOperationIndexes:
+              openTransaction.partialUpdateOperationIndexes,
             rowMetadataWrites: openTransaction.rowMetadataWrites,
             collectionMetadataWrites: openTransaction.collectionMetadataWrites,
             deferredHydrationMetadataDeleteKeys:
@@ -3759,6 +3939,20 @@ function createWrappedSyncConfig<
             expectedResumeGenerationOwner:
               openTransaction.expectedResumeGenerationOwner,
             signal,
+            prependHydrationRows: (
+              rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+            ) => {
+              const reservation = openTransaction.reservation as
+                | PersistedHydrationPrependHandle<T, TKey>
+                | undefined
+              const prepend = reservation?.[PREPEND_PERSISTED_HYDRATION_ROWS]
+              if (!prepend) {
+                throw new InvalidPersistedCollectionConfigError(
+                  `wrapped sync transaction cannot reconstruct a persisted hydration baseline`,
+                )
+              }
+              prepend(rows)
+            },
             applyToCollection: () =>
               applyTransactionToCollection(openTransaction, signal),
             shouldFailStopOnAbort: () => openTransaction.hasDependentSuccessor,

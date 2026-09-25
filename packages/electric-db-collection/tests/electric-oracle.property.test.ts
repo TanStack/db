@@ -4635,6 +4635,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     await Promise.resolve()
 
     expect(trace.collection.status).toBe(`cleaned-up`)
+    expect(trace.collection._lifecycle.getSyncError()).toBeUndefined()
     expect(trace.collection.has(1)).toBe(false)
   })
 
