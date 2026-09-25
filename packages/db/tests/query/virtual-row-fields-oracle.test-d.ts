@@ -14,8 +14,8 @@
  *
  * Legal forms include required, optional, and nullable nested `Ref` and
  * `SingleRowRefProxy` helpers; virtual-field-specific root helpers; and inline
- * `toArray` or `materialize` queries with whole-row, object, nested-object,
- * array, `findOne`, and Date results.
+ * `toArray` or `materialize` queries with unprojected or directly selected
+ * whole rows, object, nested-object, array, `findOne`, and Date results.
  *
  * The production type paths are `RefsForContext`, `SingleRowRefProxy`, and
  * `GetInlineResult`. The checkpoint is the inferred callback or published
@@ -196,6 +196,17 @@ describe(`virtual row field type boundary`, () => {
         wholeRows: toArray(
           q.from({ child: rows }).where(({ child }) => eq(child.id, row.id)),
         ),
+        selectedWholeRows: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => {
+              expectTypeOf(child).toEqualTypeOf<
+                Ref<WithVirtualProps<Row, string | number>, false, true>
+              >()
+              return child
+            }),
+        ),
         objects: toArray(
           q
             .from({ child: rows })
@@ -228,6 +239,19 @@ describe(`virtual row field type boundary`, () => {
 
     const result = collection.toArray[0]!
     expectTypeOf(result.wholeRows[0]!).toEqualTypeOf<
+      PublishedValueFor<Row, `whole-row-child`>
+    >()
+    expectTypeOf(result.selectedWholeRows[0]!.$key).toEqualTypeOf<
+      string | number
+    >()
+    expectTypeOf(result.selectedWholeRows[0]!.$synced).toEqualTypeOf<boolean>()
+    expectTypeOf(result.selectedWholeRows[0]!.$origin).toEqualTypeOf<
+      `local` | `remote`
+    >()
+    expectTypeOf(
+      result.selectedWholeRows[0]!.$collectionId,
+    ).toEqualTypeOf<string>()
+    expectTypeOf(result.selectedWholeRows[0]!).toEqualTypeOf<
       PublishedValueFor<Row, `whole-row-child`>
     >()
     expectTypeOf(result.objects[0]!).toEqualTypeOf<

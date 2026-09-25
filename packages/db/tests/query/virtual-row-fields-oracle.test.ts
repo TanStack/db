@@ -11,10 +11,11 @@
  * whole-row children are rows. Projected children, nested values, and opaque
  * values are values. The paired type oracle uses the same classification.
  *
- * The legal query forms exercised here are an unprojected whole-row child and
- * object, nested-object, array, `findOne`, and Date child projections. The
- * production driver calls `createLiveQueryCollection`, `preload`, `toArray`,
- * and `materialize`. The checkpoint is `live.toArray` after `preload` resolves.
+ * The legal query forms exercised here are unprojected and directly selected
+ * whole-row children plus object, nested-object, array, `findOne`, and Date
+ * child projections. The production driver calls `createLiveQueryCollection`,
+ * `preload`, `toArray`, and `materialize`. The checkpoint is `live.toArray`
+ * after `preload` resolves.
  *
  * `hasVirtualProps` observes all four virtual fields. Exact `$key`, selected
  * shapes, and nonempty child results prove the intended paths ran. This oracle
@@ -33,9 +34,12 @@ import {
 import { hasVirtualProps } from '../../src/virtual-props.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
+type Profile = { label: string }
+
 type Row = {
   id: string
-  profile: { label: string }
+  profile: Profile
+  optionalProfile?: Profile
   createdAt: Date
   tags: Array<string>
 }
@@ -97,6 +101,12 @@ describe(`virtual row field runtime boundary`, () => {
         ),
         wholeRows: toArray(
           q.from({ child: rows }).where(({ child }) => eq(child.id, row.id)),
+        ),
+        selectedWholeRows: toArray(
+          q
+            .from({ child: rows })
+            .where(({ child }) => eq(child.id, row.id))
+            .select(({ child }) => child),
         ),
         objects: toArray(
           q
@@ -164,6 +174,11 @@ describe(`virtual row field runtime boundary`, () => {
           value: result.wholeRows[0],
         },
         {
+          name: `directly selected whole-row child`,
+          subject: `whole-row-child`,
+          value: result.selectedWholeRows[0],
+        },
+        {
           name: `projected child object`,
           subject: `projected-child`,
           value: result.objects[0],
@@ -217,6 +232,9 @@ describe(`virtual row field runtime boundary`, () => {
 
       expect(result.wholeRows).toHaveLength(1)
       expect(result.wholeRows[0]!.$key).toBe(`row-1`)
+      expect(result.selectedWholeRows).toHaveLength(1)
+      expect(result.selectedWholeRows[0]!.$key).toBe(`row-1`)
+      expect(`optionalProfile` in result.selectedWholeRows[0]!).toBe(false)
       expect(result.objects).toEqual([{ label: `nested` }])
       expect(result.nestedObjects).toEqual([{ nested: { label: `nested` } }])
       expect(result.arrays).toEqual([[`one`, `two`]])
