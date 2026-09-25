@@ -1186,6 +1186,48 @@ export function queryCollectionOptions(
       }
     }
 
+    const waitForAuthoritativeObserverResult = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+      createCancellationError: () => Error,
+    ): Promise<QueryObserverResult<Array<any>, any>> =>
+      new Promise((resolve, reject) => {
+        let active = true
+        let unsubscribe = () => {}
+        const pending =
+          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+        const finish = (settle: () => void) => {
+          if (!active) return
+          active = false
+          unsubscribe()
+          pending.delete(cancel)
+          if (pending.size === 0) {
+            pendingReadyUnsubscribes.delete(hashedQueryKey)
+          }
+          settle()
+        }
+        const cancel = () => {
+          finish(() => reject(createCancellationError()))
+        }
+        pending.add(cancel)
+        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+
+        unsubscribe = observer.subscribe((result) => {
+          // Query observers notify before cache subscribers record authority.
+          queueMicrotask(() => {
+            const query = observer.getCurrentQuery()
+            if (
+              (result.isSuccess &&
+                hasPostWriteAuthority(hashedQueryKey, query) &&
+                !collection.deferDataRefresh) ||
+              (result.isError && !result.isFetching)
+            ) {
+              finish(() => resolve(result))
+            }
+          })
+        })
+      })
+
     const getDeferredRefresh = (
       hashedQueryKey: string,
       barrier: Promise<void>,
@@ -1198,19 +1240,39 @@ export function queryCollectionOptions(
         const observer = state.observers.get(hashedQueryKey)
         if (!observer) throw new CancelledError()
 
-        const replacement = await observer.refetch()
-        if (!replacement.isSuccess) return replacement
-        const replacementSettlement =
-          readExceptionalResultSettlement(replacement)
-        if (replacementSettlement?.type === `rejected`) {
-          throw replacementSettlement.error
+        let replacement = await observer.refetch()
+        for (;;) {
+          if (!replacement.isSuccess) return replacement
+          // Query observers report success before the Query cache records
+          // fetch authority. Let an on-demand handler classify the replacement
+          // before deciding whether its Collection application settled.
+          await new Promise<void>((resolve) => queueMicrotask(resolve))
+          if (
+            !hasPostWriteAuthority(
+              hashedQueryKey,
+              observer.getCurrentQuery(),
+            ) ||
+            collection.deferDataRefresh
+          ) {
+            replacement = await waitForAuthoritativeObserverResult(
+              observer,
+              hashedQueryKey,
+              () => new CancelledError(),
+            )
+            continue
+          }
+          const replacementSettlement =
+            readExceptionalResultSettlement(replacement)
+          if (replacementSettlement?.type === `rejected`) {
+            throw replacementSettlement.error
+          }
+          if (replacementSettlement?.type === `pending`) {
+            return replacementSettlement.promise
+          }
+          const application = getResultApplicationSettlement(hashedQueryKey)
+          if (application !== true) await application
+          return replacement
         }
-        if (replacementSettlement?.type === `pending`) {
-          return replacementSettlement.promise
-        }
-        const application = getResultApplicationSettlement(hashedQueryKey)
-        if (application !== true) await application
-        return replacement
       })
 
       barrierRefreshes.set(hashedQueryKey, refresh)
@@ -1632,40 +1694,12 @@ export function queryCollectionOptions(
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
     ): Promise<void> =>
-      new Promise<void>((resolve, reject) => {
-        const unsubscribe = observer.subscribe((result) => {
-          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
-          queueMicrotask(() => {
-            const query = observer.getCurrentQuery()
-            if (
-              (result.isSuccess &&
-                hasPostWriteAuthority(hashedQueryKey, query) &&
-                !collection.deferDataRefresh) ||
-              (result.isError && !result.isFetching)
-            ) {
-              unsubscribe()
-              const pending = pendingReadyUnsubscribes.get(hashedQueryKey)
-              pending?.delete(cancel)
-              if (pending?.size === 0) {
-                pendingReadyUnsubscribes.delete(hashedQueryKey)
-              }
-
-              if (result.isSuccess) {
-                resolve()
-              } else {
-                reject(result.error)
-              }
-            }
-          })
-        })
-        const cancel = () => {
-          unsubscribe()
-          reject(new LoadSubsetOperationAbortedError())
-        }
-        const pending =
-          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
-        pending.add(cancel)
-        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+      waitForAuthoritativeObserverResult(
+        observer,
+        hashedQueryKey,
+        () => new LoadSubsetOperationAbortedError(),
+      ).then((result) => {
+        if (result.isError) throw result.error
       })
 
     const waitForQueryReadyAndApplied = (
@@ -2936,8 +2970,7 @@ export function queryCollectionOptions(
       await new Promise<void>((resolve) => queueMicrotask(resolve))
       const exceptionalSettlement =
         readExceptionalSettlement(causalResult) ??
-        readExceptionalSettlement(result) ??
-        readExceptionalSettlement(startingResult)
+        readExceptionalSettlement(result)
       const settlement =
         fetchRecord?.settlement ??
         getRecordedResultApplicationSettlement(hashedQueryKey, result) ??

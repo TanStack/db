@@ -58,10 +58,14 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * `applicable` combines adapter validation and the ability to materialize the
  * result; it does not classify arrays, select wrappers, Query states, or sync
  * transactions. The action grammar covers multiple public refetch operations,
- * immediate results, valid empty results, invalid shapes, overlapping defer
- * generations, replacement results, and cleanup retirement. The production
- * driver uses `collection.utils.refetch()` and observes only public promise
- * settlement plus public rows at the settlement checkpoint.
+ * immediate results, valid empty results, invalid shapes, eager recovery,
+ * overlapping defer generations, replacement results, and cleanup retirement.
+ * The production driver crosses eager and on-demand ownership, including
+ * post-write fetch authority, and observes only public promise settlement plus
+ * public rows at the settlement checkpoint.
+ * `refresh-retired` records a replacement that lost authority to a newer write;
+ * that result is terminal, but the public operation still waits for its next
+ * replacement. It does not model Query fetch counters or observer scheduling.
  *
  * The file is large because it crosses the real Query cache boundary, not
  * because it duplicates Query internals. Each history names one ownership edge
@@ -103,6 +107,7 @@ type ResultSettlementModelAction =
       rowCount?: 0 | 1
       deferOn?: string
     }
+  | { type: `refresh-retired`; barrier: string }
   | { type: `retire` }
 
 type PublicRefetchObservation =
@@ -132,7 +137,10 @@ function advanceResultSettlementModel(
     return next
   }
 
-  if (action.type === `refresh-succeeded`) {
+  if (
+    action.type === `refresh-succeeded` ||
+    action.type === `refresh-retired`
+  ) {
     const waiting = [...next].filter(
       ([, operation]) =>
         operation.phase === `waiting-for-refresh` &&
@@ -141,6 +149,7 @@ function advanceResultSettlementModel(
     if (waiting.length === 0) {
       throw new Error(`A replacement result requires its defer generation`)
     }
+    if (action.type === `refresh-retired`) return next
     waiting.forEach(([id]) => {
       next.set(
         id,
@@ -3580,6 +3589,10 @@ describe(`query collection ownership lifecycle`, () => {
       result: `applicable`,
       deferOn: `barrier-b`,
     })
+    const retired = advanceResultSettlementModel(deferred, {
+      type: `refresh-retired`,
+      barrier: `barrier-a`,
+    })
 
     expect(() =>
       expectPublicRefetchObservation(deferred, deferredOperation, {
@@ -3602,6 +3615,13 @@ describe(`query collection ownership lifecycle`, () => {
     ).toThrow()
     expect(() =>
       expectPublicRefetchObservation(rebound, deferredOperation, {
+        settled: true,
+        outcome: `fulfilled`,
+        rowCount: 1,
+      }),
+    ).toThrow()
+    expect(() =>
+      expectPublicRefetchObservation(retired, deferredOperation, {
         settled: true,
         outcome: `fulfilled`,
         rowCount: 1,
@@ -3866,18 +3886,21 @@ describe(`query collection ownership lifecycle`, () => {
     })
   })
 
-  it(`classifies post-write authority before settling a deferred replacement`, async () => {
+  it(`waits for an authoritative on-demand replacement before settling a deferred result`, async () => {
     const queryKey = [`deferred-result-post-write-authority`]
     const replacementBarrier = createDeferred<void>()
     const writerBarrier = createDeferred<void>()
+    const replacementResult = createDeferred<Array<Item>>()
     const initial = { ...shared, name: `Initial` }
     const skipped = { ...shared, name: `Skipped` }
+    const authoritative = { ...shared, name: `Authoritative` }
     const queryClient = createQueryClient()
     const queryFn = vi
       .fn<() => Promise<Array<Item>>>()
       .mockResolvedValueOnce([initial])
       .mockResolvedValueOnce([skipped])
-      .mockResolvedValueOnce([null] as unknown as Array<Item>)
+      .mockImplementationOnce(() => replacementResult.promise)
+      .mockResolvedValue([authoritative])
     const reader = createCollection(
       queryCollectionOptions<Item>({
         id: `deferred-result-authority-reader`,
@@ -3885,7 +3908,7 @@ describe(`query collection ownership lifecycle`, () => {
         queryKey,
         queryFn,
         getKey: (item) => item.id,
-        syncMode: `eager`,
+        syncMode: `on-demand`,
         startSync: true,
       }),
     )
@@ -3907,12 +3930,13 @@ describe(`query collection ownership lifecycle`, () => {
       writer.deferDataRefresh = null
       replacementBarrier.resolve()
       writerBarrier.resolve()
+      replacementResult.resolve([])
       await Promise.allSettled([reader.cleanup(), writer.cleanup()])
       queryClient.clear()
     })
 
-    await reader.stateWhenReady()
     await writer._sync.loadSubset({})
+    await reader._sync.loadSubset({})
     reader.deferDataRefresh = replacementBarrier.promise
     writer.deferDataRefresh = writerBarrier.promise
 
@@ -3947,20 +3971,36 @@ describe(`query collection ownership lifecycle`, () => {
     )
     expectPublicRefetchObservation(expected, operation, observation)
 
-    writer.utils.writeUpdate({ ...shared, name: `Manual` })
     reader.deferDataRefresh = null
     replacementBarrier.resolve()
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
 
-    const result = await refetch
+    // This write begins after the replacement fetch, so that result cannot
+    // satisfy the newer shared authority requirement. The public call must
+    // remain pending for the authoritative follow-up behind the writer barrier.
+    writer.utils.writeUpdate({ ...shared, name: `Manual` })
+    replacementResult.resolve([null] as unknown as Array<Item>)
+    expected = advanceResultSettlementModel(expected, {
+      type: `refresh-retired`,
+      barrier: `replacement-barrier`,
+    })
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+    expectPublicRefetchObservation(expected, operation, observation)
+
+    writer.deferDataRefresh = null
+    writerBarrier.resolve()
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(5))
+
+    await refetch
     expected = advanceResultSettlementModel(expected, {
       type: `refresh-succeeded`,
       barrier: `replacement-barrier`,
-      result: `invalid-shape`,
+      result: `applicable`,
+      rowCount: 1,
     })
     expectPublicRefetchObservation(expected, operation, observation)
-    expect(result).toBeInstanceOf(InvalidQueryResultError)
-    expect(queryFn).toHaveBeenCalledTimes(3)
-    expect(reader.get(shared.id)?.name).toBe(initial.name)
+    expect(queryFn).toHaveBeenCalledTimes(5)
+    expect(reader.get(shared.id)?.name).toBe(authoritative.name)
   })
 
   it(`cancels a deferred public refetch when cleanup retires it`, async () => {
@@ -4086,6 +4126,77 @@ describe(`query collection ownership lifecycle`, () => {
     } finally {
       persistedScan.resolve([])
     }
+  })
+
+  it(`does not reuse an eager initial rejection when clearError applies a valid result`, async () => {
+    const id = `eager-recovered-result-settlement`
+    const invalidResult = 42 as unknown as Array<Item>
+    const recovered = { ...shared, name: `Recovered` }
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce(invalidResult)
+      .mockResolvedValueOnce([recovered])
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `eager`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      consoleError.mockRestore()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    let expected = startResultSettlementModel(`invalid`)
+    await expect(collection.stateWhenReady()).rejects.toBeInstanceOf(
+      InvalidQueryResultError,
+    )
+    expected = advanceResultSettlementModel(expected, {
+      type: `query-succeeded`,
+      operation: `invalid`,
+      result: `invalid-shape`,
+    })
+    expect(collection.status).toBe(`error`)
+    expect(collection.utils.errorCount).toBe(1)
+
+    expected = advanceResultSettlementModel(expected, {
+      type: `start-refetch`,
+      operation: `recovered`,
+    })
+    let rejection: unknown
+    const recovery = collection.utils.clearError().then(
+      () => ({
+        settled: true,
+        outcome: `fulfilled` as const,
+        rowCount: collection.size,
+      }),
+      (error: unknown) => {
+        rejection = error
+        return { settled: true, outcome: `rejected` as const }
+      },
+    )
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    expected = advanceResultSettlementModel(expected, {
+      type: `query-succeeded`,
+      operation: `recovered`,
+      result: `applicable`,
+      rowCount: 1,
+    })
+
+    expectPublicRefetchObservation(expected, `recovered`, await recovery)
+    expect(rejection).toBeUndefined()
+    expect(collection.status).toBe(`ready`)
+    expect(collection.utils.lastError).toBeUndefined()
+    expect(collection.utils.errorCount).toBe(0)
+    expect(collection.get(shared.id)?.name).toBe(recovered.name)
   })
 
   it(`rejects an invalid retained revalidation before its persisted baseline loads`, async () => {
