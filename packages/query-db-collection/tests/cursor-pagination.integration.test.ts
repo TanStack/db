@@ -64,6 +64,7 @@ function createFixture(
   const pager = makePager()
   const ties = new Map<number, ReturnType<typeof makePager>>()
   const requests: Array<{ offset: number; limit: number | undefined }> = []
+  let cursorRequestCount = 0
   const direction = scope.descending ? `desc` : `asc`
   const source = createCollection(
     queryCollectionOptions<Row>({
@@ -99,6 +100,7 @@ function createFixture(
           reader = tie
         }
         if (options?.cursor) {
+          cursorRequestCount++
           expect(options.cursor.whereCurrent).toMatchObject({
             type: `func`,
             name: `eq`,
@@ -139,6 +141,7 @@ function createFixture(
     backend,
     gate,
     requests,
+    cursorRequestCount: () => cursorRequestCount,
     live,
     source,
     refresh: () =>
@@ -408,6 +411,9 @@ describe(`cursor adapter through production pagination`, () => {
         }
         expect(fixture.requests.length).toBeGreaterThan(0)
         expect(fixture.requests[0]?.limit).toBe(pageSize + 1)
+        if (count > pageSize) {
+          expect(fixture.cursorRequestCount()).toBeGreaterThan(0)
+        }
         expect(fixture.backend.calls).toHaveLength(
           Math.max(1, Math.ceil(count / backendSize)),
         )
