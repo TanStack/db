@@ -9,6 +9,7 @@ import {
   IR,
   createCollection,
   createLiveQueryCollection,
+  createOptimisticAction,
   createTransaction,
   eq,
   getLoadSubsetDemandKey,
@@ -22,6 +23,7 @@ import type {
   Collection,
   LoadSubsetOptions,
   SyncMetadataApi,
+  Transaction,
 } from '@tanstack/db'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src/index.js'
@@ -120,17 +122,24 @@ async function runCleanups(): Promise<void> {
 }
 
 /**
- * `collection.utils.refetch()` is an application barrier. The public contract
- * is `docs/collections/query-collection.md#controlling-refetch-behavior`:
- * outside a mutation handler, successful fulfillment waits for every result
- * accepted for Collection application, including an application with no row
- * diff. Rejection is fail-fast and may leave independent obligations pending.
- * The handler receives a scoped Collection view whose refetch keeps the Query
- * fetch boundary so it cannot await the transaction that invoked the handler.
+ * `collection.utils.refetch()` is normally an application barrier. The public
+ * contract is `docs/collections/query-collection.md#controlling-refetch-behavior`:
+ * when no user mutation is persisting and no mutation handler is active,
+ * successful fulfillment waits for every result accepted for Collection
+ * application, including an application with no row diff. Rejection is
+ * fail-fast and may leave independent obligations pending. While publication
+ * is blocked by a persisting mutation or active handler, every call uses the
+ * Query fetch boundary, including an overlapping external call.
+ *
+ * The handler receives a scoped Collection view whose refetch also keeps the
+ * Query fetch boundary so it cannot await the transaction that invoked it.
  * The handler parameter and every matching mutation alias share that scoped
  * view. They are not identity-equal to the external Collection. Code can use
  * either scoped path, but an identity-keyed external registry does not match
- * them.
+ * them. The same acyclic fetch boundary applies when a manual transaction,
+ * `createOptimisticAction`, or a direct handler awaits a captured Collection:
+ * those documented forms do not receive the scoped handler parameter but
+ * still cannot wait on publication blocked by their own transaction.
  *
  * Model mapping:
  * - `callId` and `resultId` are model-only identities for one public call and
@@ -149,6 +158,13 @@ async function runCleanups(): Promise<void> {
  *   identity and identity-keyed registry results. It does not reproduce Proxy
  *   construction. Its bounded grammar exhausts insert, update, and delete;
  *   handler parameter and mutation-alias access; and refetch and clearError.
+ * - `MutationRefreshLivenessModel` is a wait-for graph. Its mutation, fetch,
+ *   and application nodes map to the user transaction, Query promise, and
+ *   Collection publication boundary. Invocation labels test both owned and
+ *   overlapping external calls but do not affect the phase-based law.
+ * - `QueryCacheWorkModel` treats Query ownership as the only edge authorizing
+ *   Collection cache-listener work. The driver subtracts Query Core's own
+ *   microtask baseline before comparing that bounded diagnostic.
  *
  * Results skipped before application because refresh is deferred, or because a
  * manual-write snapshot is unchanged, are outside this accepted-result model.
@@ -165,15 +181,16 @@ async function runCleanups(): Promise<void> {
  * invocations is not promised. Direct Collection handlers own one Collection,
  * so unrelated multi-Collection mutation aliases are outside this driver.
  *
- * Embedded ORC-012 review record for this extension: ORC-001, 002, 003, 005,
- * 006, 008, 009, and 010 apply and are evidenced by this prose, independent
- * reducer, fixed action histories, real drivers, observation helper,
- * wrong-result controls, state explanation, vocabulary mapping, and aggregate
- * cleanup. ORC-004 and 007 do not apply because these are bounded fixed
- * histories, not generated-property coverage. ORC-011 does not apply because
- * no shared production/model semantic fault requiring a second formulation is
- * claimed. This executable comment records every ORC-001 through ORC-011
- * outcome; no verdict-critical evidence lives only in the PR description.
+ * Embedded ORC-012 review record for this extension: ORC-001 through 006 and
+ * ORC-008 through 010 apply and are evidenced by this prose, independent
+ * reducers, bounded grammar with an exhaustiveness assertion, real drivers,
+ * observation helpers, wrong-result controls, state explanation, vocabulary
+ * mapping, and aggregate cleanup. ORC-007 does not apply because this bounded
+ * grammar is not a generated campaign. ORC-011 applies to the shared deadlock
+ * claim: the wait-for-graph formulation is structurally separate from the
+ * production drivers and from the earlier result/application ledger. This
+ * executable comment records every ORC-001 through ORC-011 outcome; no
+ * verdict-critical evidence lives only in the PR description.
  */
 type RefetchApplicationOutcome = `pending` | `resolved` | `rejected`
 
@@ -520,6 +537,130 @@ function observeHandlerRefetchBoundary(model: HandlerRefetchBoundaryModel): {
           ? `rejected`
           : `resolved`,
     applicationErrorRecorded: model.application === `rejected`,
+  }
+}
+
+/**
+ * A refresh started while a mutation is persisting cannot wait for publication
+ * that the transaction prevents. This law comes from the documented
+ * `createOptimisticAction` protocol in `packages/db/src/optimistic-action.ts`
+ * and `docs/guides/mutations.md`: a mutation function may await Query
+ * `refetch()` before it returns, while its optimistic transaction remains
+ * active until that function returns.
+ *
+ * This reference model is a wait-for graph, not a copy of Query Collection
+ * branches. `mutation` is the user transaction, `fetch` is the Query boundary,
+ * and `application` is publication into Collection rows. During that phase the
+ * refresh depends on `fetch`, regardless of which Collection reference invoked
+ * it. When the mutation owns the refresh, an `application` dependency would
+ * create the forbidden cycle mutation -> refresh -> application -> mutation;
+ * for an external caller it would add an unrelated persistence delay.
+ */
+type MutationRefreshOperation = `refetch` | `clearError`
+type MutationRefreshInvocation =
+  | `manual-transaction`
+  | `optimistic-action`
+  | `captured-handler-collection`
+  | `external-handler-overlap`
+
+type MutationRefreshHistory = {
+  invocation: MutationRefreshInvocation
+  operation: MutationRefreshOperation
+}
+
+const mutationRefreshInvocations = [
+  `manual-transaction`,
+  `optimistic-action`,
+  `captured-handler-collection`,
+  `external-handler-overlap`,
+] as const
+const mutationRefreshOperations = [`refetch`, `clearError`] as const
+const mutationRefreshHistoryGrammar: ReadonlyArray<MutationRefreshHistory> =
+  mutationRefreshInvocations.flatMap((invocation) =>
+    mutationRefreshOperations.map((operation) => ({ invocation, operation })),
+  )
+
+type MutationRefreshLivenessModel = {
+  fetch: `pending` | `fulfilled` | `rejected`
+  application: `unaccepted` | `pending` | `fulfilled` | `rejected`
+  boundary: `fetch` | `application`
+  throwOnError: boolean
+}
+
+type MutationRefreshLivenessAction =
+  | { type: `accept-application` }
+  | { type: `settle-fetch`; outcome: `fulfilled` | `rejected` }
+  | { type: `settle-application`; outcome: `fulfilled` | `rejected` }
+
+function reduceMutationRefreshLiveness(
+  model: MutationRefreshLivenessModel,
+  action: MutationRefreshLivenessAction,
+): MutationRefreshLivenessModel {
+  if (action.type === `accept-application`) {
+    if (model.application !== `unaccepted`) {
+      throw new Error(`Mutation refresh application already accepted`)
+    }
+    return { ...model, application: `pending` }
+  }
+  if (action.type === `settle-fetch`) {
+    if (model.fetch !== `pending`) {
+      throw new Error(`Mutation refresh fetch already settled`)
+    }
+    return { ...model, fetch: action.outcome }
+  }
+  if (model.application !== `pending`) {
+    throw new Error(`Mutation refresh application is not pending`)
+  }
+  return { ...model, application: action.outcome }
+}
+
+function observeMutationRefreshLiveness(model: MutationRefreshLivenessModel): {
+  refresh: RefetchApplicationOutcome
+  application: `unaccepted` | RefetchApplicationOutcome
+} {
+  const refresh =
+    model.fetch === `pending`
+      ? `pending`
+      : model.fetch === `rejected` && model.throwOnError
+        ? `rejected`
+        : model.boundary === `application` && model.application === `pending`
+          ? `pending`
+          : model.boundary === `application` &&
+              model.application === `rejected` &&
+              model.throwOnError
+            ? `rejected`
+            : `resolved`
+  return {
+    refresh,
+    application:
+      model.application === `unaccepted`
+        ? `unaccepted`
+        : model.application === `pending`
+          ? `pending`
+          : model.application === `fulfilled`
+            ? `resolved`
+            : `rejected`,
+  }
+}
+
+/**
+ * Query-cache observation is an ownership boundary. A Collection may schedule
+ * bookkeeping for a Query it owns, but a foreign Query has no modeled edge to
+ * that Collection and therefore contributes no Collection microtasks. The
+ * production observation subtracts Query Core's own baseline work, leaving
+ * only work introduced by registered Query Collections.
+ */
+type QueryCacheWorkModel = {
+  collectionCount: number
+  queryOwnership: `owned` | `foreign`
+}
+
+function observeQueryCacheWork(model: QueryCacheWorkModel): {
+  collectionMicrotasks: number
+} {
+  return {
+    collectionMicrotasks:
+      model.queryOwnership === `owned` ? model.collectionCount : 0,
   }
 }
 
@@ -1583,7 +1724,7 @@ describe(`query collection ownership lifecycle`, () => {
     }).toEqual(observeRefetchCallSettlement(model))
   })
 
-  it(`waits for an accepted fetching result after a suppressed fetch failure`, async () => {
+  it(`settles a suppressed fetch failure at the fetch boundary while a mutation persists`, async () => {
     const initial = { ...shared, name: `Initial` }
     const fetchError = new Error(`Explicit refetch fetch failed`)
     const queryClient = createQueryClient()
@@ -1620,7 +1761,12 @@ describe(`query collection ownership lifecycle`, () => {
       })
     })
 
-    let model = createRefetchCallSettlementModel([`query`], false)
+    let model: MutationRefreshLivenessModel = {
+      fetch: `pending`,
+      application: `unaccepted`,
+      boundary: `fetch`,
+      throwOnError: false,
+    }
     let actualOutcome: RefetchApplicationOutcome = `pending`
     const refetch = collection.utils.refetch({ throwOnError: false }).then(
       (result) => {
@@ -1637,29 +1783,29 @@ describe(`query collection ownership lifecycle`, () => {
       expect(queryFn).toHaveBeenCalledTimes(2)
       expect(collection.utils.isFetching).toBe(false)
     })
-    model = reduceRefetchCallSettlement(model, {
+    model = reduceMutationRefreshLiveness(model, {
       type: `accept-application`,
-      queryId: `query`,
-      applicationId: `cached-result`,
     })
-    model = reduceRefetchCallSettlement(model, {
+    model = reduceMutationRefreshLiveness(model, {
       type: `settle-fetch`,
-      queryId: `query`,
       outcome: `rejected`,
     })
     for (let turn = 0; turn < 20; turn++) await Promise.resolve()
-    expect(actualOutcome).toBe(observeRefetchCallSettlement(model).refetch)
+    expect({ refresh: actualOutcome, application: `pending` }).toEqual(
+      observeMutationRefreshLiveness(model),
+    )
     expect(collection.get(shared.id)?.name).toBe(`Optimistic`)
 
     persistence.resolve()
     await transaction.isPersisted.promise
     const results = await refetch
-    model = reduceRefetchCallSettlement(model, {
+    model = reduceMutationRefreshLiveness(model, {
       type: `settle-application`,
-      applicationId: `cached-result`,
       outcome: `fulfilled`,
     })
-    expect(actualOutcome).toBe(observeRefetchCallSettlement(model).refetch)
+    expect({ refresh: actualOutcome, application: `resolved` }).toEqual(
+      observeMutationRefreshLiveness(model),
+    )
     expect(results).toHaveLength(1)
     expect(results[0]?.isError).toBe(true)
   })
@@ -1985,7 +2131,7 @@ describe(`query collection ownership lifecycle`, () => {
       authoritativeName: `Same`,
     },
   ])(
-    `settles a $caseName accepted result after application`,
+    `settles a $caseName accepted result at fetch and applies it after mutation`,
     async ({ id, initialName, authoritativeName }) => {
       const initial = { ...shared, name: initialName }
       const authoritative = { ...shared, name: authoritativeName }
@@ -2010,16 +2156,12 @@ describe(`query collection ownership lifecycle`, () => {
         await transaction.isPersisted.promise
       })
 
-      let model: ExplicitRefetchApplicationModel = {
-        calls: new Map(),
-        publicValues: new Map([[`query`, `Optimistic`]]),
-      }
-      model = reduceExplicitRefetchApplication(model, {
-        type: `start-call`,
-        callId: 1,
-        resultIds: [`query`],
+      let model: MutationRefreshLivenessModel = {
+        fetch: `pending`,
+        application: `unaccepted`,
+        boundary: `fetch`,
         throwOnError: true,
-      })
+      }
       let refetchOutcome: RefetchApplicationOutcome = `pending`
       const refetch = collection.utils.refetch({ throwOnError: true }).then(
         (result) => {
@@ -2041,42 +2183,38 @@ describe(`query collection ownership lifecycle`, () => {
         ).toBe(2)
         expect(collection.utils.isFetching).toBe(false)
       })
-      model = reduceExplicitRefetchApplication(model, {
-        type: `accept-result`,
-        callId: 1,
-        resultId: `query`,
-        value: authoritative.name,
+      model = reduceMutationRefreshLiveness(model, {
+        type: `accept-application`,
+      })
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-fetch`,
+        outcome: `fulfilled`,
       })
       for (let turn = 0; turn < 20; turn++) await Promise.resolve()
 
-      expectExplicitRefetchObservation(
-        {
-          publicValues: { query: collection.get(shared.id)?.name },
-          refetch: refetchOutcome,
-        },
-        observeExplicitRefetchApplication(model, 1),
-      )
+      expect({
+        refresh: refetchOutcome,
+        application:
+          collection.get(shared.id)?.name === authoritative.name
+            ? `resolved`
+            : `pending`,
+      }).toEqual(observeMutationRefreshLiveness(model))
 
       persistence.resolve()
       await transaction.isPersisted.promise
       await refetch
-      model = reduceExplicitRefetchApplication(model, {
-        type: `fulfill-application`,
-        callId: 1,
-        resultId: `query`,
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-application`,
+        outcome: `fulfilled`,
       })
-      expectExplicitRefetchObservation(
-        {
-          publicValues: { query: collection.get(shared.id)?.name },
-          refetch: refetchOutcome,
-          resultOrder: [`query`],
-        },
-        observeExplicitRefetchApplication(model, 1),
+      expect({ refresh: refetchOutcome, application: `resolved` }).toEqual(
+        observeMutationRefreshLiveness(model),
       )
+      expect(collection.get(shared.id)?.name).toBe(authoritative.name)
     },
   )
 
-  it(`keeps an authority-gated eager refetch pending until application`, async () => {
+  it(`settles an authority-gated eager refetch at fetch while a mutation persists`, async () => {
     const queryClient = createQueryClient()
     const automaticResult = createDeferred<Array<Item>>()
     const explicitResult = createDeferred<Array<Item>>()
@@ -2138,16 +2276,12 @@ describe(`query collection ownership lifecycle`, () => {
     onDemand.utils.writeUpdate({ ...shared, name: `Manual` })
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
-    let model: ExplicitRefetchApplicationModel = {
-      calls: new Map(),
-      publicValues: new Map([[`query`, `Optimistic`]]),
-    }
-    model = reduceExplicitRefetchApplication(model, {
-      type: `start-call`,
-      callId: 1,
-      resultIds: [`query`],
+    let model: MutationRefreshLivenessModel = {
+      fetch: `pending`,
+      application: `unaccepted`,
+      boundary: `fetch`,
       throwOnError: true,
-    })
+    }
     let refetchOutcome: RefetchApplicationOutcome = `pending`
     const refetch = eager.utils.refetch({ throwOnError: true }).then(
       (results) => {
@@ -2165,132 +2299,450 @@ describe(`query collection ownership lifecycle`, () => {
     explicitResult.resolve([authoritative])
     await vi.waitFor(() => expect(eager.utils.isFetching).toBe(false))
     for (let turn = 0; turn < 20; turn++) await Promise.resolve()
-    model = reduceExplicitRefetchApplication(model, {
-      type: `accept-result`,
-      callId: 1,
-      resultId: `query`,
-      value: authoritative.name,
+    model = reduceMutationRefreshLiveness(model, {
+      type: `accept-application`,
     })
-    expectExplicitRefetchObservation(
-      {
-        publicValues: { query: eager.get(shared.id)?.name },
-        refetch: refetchOutcome,
-      },
-      observeExplicitRefetchApplication(model, 1),
-    )
+    model = reduceMutationRefreshLiveness(model, {
+      type: `settle-fetch`,
+      outcome: `fulfilled`,
+    })
+    expect({
+      refresh: refetchOutcome,
+      application:
+        eager.get(shared.id)?.name === authoritative.name
+          ? `resolved`
+          : `pending`,
+    }).toEqual(observeMutationRefreshLiveness(model))
 
     persistence.resolve()
     await transaction.isPersisted.promise
     const results = await refetch
-    model = reduceExplicitRefetchApplication(model, {
-      type: `fulfill-application`,
-      callId: 1,
-      resultId: `query`,
+    model = reduceMutationRefreshLiveness(model, {
+      type: `settle-application`,
+      outcome: `fulfilled`,
     })
-    expectExplicitRefetchObservation(
-      {
-        publicValues: { query: eager.get(shared.id)?.name },
-        refetch: refetchOutcome,
-        resultOrder: results.map(() => `query`),
-      },
-      observeExplicitRefetchApplication(model, 1),
+    expect({ refresh: refetchOutcome, application: `resolved` }).toEqual(
+      observeMutationRefreshLiveness(model),
     )
+    expect(results.map(() => `query`)).toEqual([`query`])
+    expect(eager.get(shared.id)?.name).toBe(authoritative.name)
   })
 
-  it(`keeps an external refetch at the application boundary during a mutation handler`, async () => {
-    const initial = { ...shared, name: `Initial` }
-    const authoritative = { ...shared, name: `Authoritative` }
-    const handlerStarted = createDeferred<void>()
-    const releaseHandler = createDeferred<void>()
+  it.each(
+    mutationRefreshHistoryGrammar.filter(
+      ({ invocation }) => invocation === `external-handler-overlap`,
+    ),
+  )(
+    `settles an external $operation at fetch during a mutation handler`,
+    async ({ operation }) => {
+      const initial = { ...shared, name: `Initial` }
+      const authoritative = { ...shared, name: `Authoritative` }
+      const handlerStarted = createDeferred<void>()
+      const releaseHandler = createDeferred<void>()
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([initial])
+        .mockResolvedValueOnce([authoritative])
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id: `external-${operation}-overlaps-handler`,
+          queryClient,
+          queryKey: [`external-${operation}-overlaps-handler`],
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+          onUpdate: async () => {
+            handlerStarted.resolve()
+            await releaseHandler.promise
+            return { refetch: false }
+          },
+        }),
+      )
+      cleanups.push(async () => {
+        releaseHandler.resolve()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection.stateWhenReady()
+
+      const mutation = collection.update(shared.id, (draft) => {
+        draft.name = `Optimistic`
+      })
+      await handlerStarted.promise
+      let model: MutationRefreshLivenessModel = {
+        fetch: `pending`,
+        application: `unaccepted`,
+        boundary: `fetch`,
+        throwOnError: true,
+      }
+      let refetchOutcome: RefetchApplicationOutcome = `pending`
+      const refresh = (
+        operation === `refetch`
+          ? collection.utils.refetch({ throwOnError: true })
+          : collection.utils.clearError()
+      ).then(
+        (result) => {
+          refetchOutcome = `resolved`
+          return result
+        },
+        (error: unknown) => {
+          refetchOutcome = `rejected`
+          throw error
+        },
+      )
+      void refresh.catch(() => {})
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(collection.utils.isFetching).toBe(false)
+      })
+      model = reduceMutationRefreshLiveness(model, {
+        type: `accept-application`,
+      })
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-fetch`,
+        outcome: `fulfilled`,
+      })
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+      expect({
+        refresh: refetchOutcome,
+        application:
+          collection.get(shared.id)?.name === authoritative.name
+            ? `resolved`
+            : `pending`,
+      }).toEqual(observeMutationRefreshLiveness(model))
+
+      releaseHandler.resolve()
+      await mutation.isPersisted.promise
+      await refresh
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-application`,
+        outcome: `fulfilled`,
+      })
+      expect({ refresh: refetchOutcome, application: `resolved` }).toEqual(
+        observeMutationRefreshLiveness(model),
+      )
+      expect(collection.get(shared.id)?.name).toBe(authoritative.name)
+    },
+  )
+
+  it(`rejects an application-boundary mutant for a mutation-owned refresh`, () => {
+    let model: MutationRefreshLivenessModel = {
+      fetch: `pending`,
+      application: `unaccepted`,
+      boundary: `fetch`,
+      throwOnError: true,
+    }
+    model = reduceMutationRefreshLiveness(model, {
+      type: `accept-application`,
+    })
+    model = reduceMutationRefreshLiveness(model, {
+      type: `settle-fetch`,
+      outcome: `fulfilled`,
+    })
+
+    const expected = observeMutationRefreshLiveness(model)
+    const applicationBoundaryMutant = observeMutationRefreshLiveness({
+      ...model,
+      boundary: `application`,
+    })
+
+    expect(expected).toEqual({ refresh: `resolved`, application: `pending` })
+    expect(applicationBoundaryMutant).not.toEqual(expected)
+  })
+
+  it(`enumerates every mutation-owned refresh history exactly once`, () => {
+    expect(mutationRefreshHistoryGrammar).toHaveLength(8)
+    expect(
+      new Set(
+        mutationRefreshHistoryGrammar.map(
+          ({ invocation, operation }) => `${invocation}:${operation}`,
+        ),
+      ).size,
+    ).toBe(mutationRefreshHistoryGrammar.length)
+  })
+
+  it.each(
+    mutationRefreshHistoryGrammar.filter(
+      ({ invocation }) =>
+        invocation === `manual-transaction` ||
+        invocation === `optimistic-action`,
+    ),
+  )(
+    `settles a $invocation $operation at the fetch boundary`,
+    async ({ invocation, operation }) => {
+      const id = `mutation-refresh-${invocation}-${operation}`
+      const initial = { ...shared, name: `Initial` }
+      const authoritative = { ...shared, name: `Authoritative` }
+      const refreshResult = createDeferred<Array<Item>>()
+      const releaseMutation = createDeferred<void>()
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([initial])
+        .mockReturnValueOnce(refreshResult.promise)
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+        }),
+      )
+      let refreshOutcome: RefetchApplicationOutcome = `pending`
+      const mutationFn = async (): Promise<void> => {
+        const refresh =
+          operation === `refetch`
+            ? collection.utils.refetch({ throwOnError: true })
+            : collection.utils.clearError()
+        await refresh.then(
+          () => {
+            refreshOutcome = `resolved`
+          },
+          (error: unknown) => {
+            refreshOutcome = `rejected`
+            throw error
+          },
+        )
+        await releaseMutation.promise
+      }
+      const transactionReference: {
+        current?: Transaction<Record<string, unknown>>
+      } = {}
+      cleanups.push(async () => {
+        refreshResult.resolve([authoritative])
+        if (transactionReference.current) {
+          // An immediate direct write drains the accepted sync result and
+          // breaks the deliberately reproduced cycle during RED cleanup.
+          collection.utils.writeUpdate(authoritative)
+          releaseMutation.resolve()
+          await transactionReference.current.isPersisted.promise
+        }
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection.stateWhenReady()
+
+      let transaction: Transaction<Record<string, unknown>>
+      if (invocation === `manual-transaction`) {
+        transaction = createTransaction<Record<string, unknown>>({ mutationFn })
+        transaction.mutate(() => {
+          collection.update(shared.id, (draft) => {
+            draft.name = `Optimistic`
+          })
+        })
+      } else {
+        const action = createOptimisticAction<string>({
+          onMutate: () => {
+            collection.update(shared.id, (draft) => {
+              draft.name = `Optimistic`
+            })
+          },
+          mutationFn: async () => mutationFn(),
+        })
+        transaction = action(`refresh`)
+      }
+      transactionReference.current = transaction
+      void transaction.isPersisted.promise.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+      let model: MutationRefreshLivenessModel = {
+        fetch: `pending`,
+        application: `unaccepted`,
+        boundary: `fetch`,
+        throwOnError: true,
+      }
+      refreshResult.resolve([authoritative])
+      await vi.waitFor(() => expect(collection.utils.isFetching).toBe(false))
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+      model = reduceMutationRefreshLiveness(model, {
+        type: `accept-application`,
+      })
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-fetch`,
+        outcome: `fulfilled`,
+      })
+
+      expect({
+        refresh: refreshOutcome,
+        application:
+          collection.get(shared.id)?.name === authoritative.name
+            ? `resolved`
+            : `pending`,
+      }).toEqual(observeMutationRefreshLiveness(model))
+    },
+  )
+
+  it.each(
+    mutationRefreshHistoryGrammar.filter(
+      ({ invocation }) => invocation === `captured-handler-collection`,
+    ),
+  )(
+    `settles a captured handler Collection $operation at the fetch boundary`,
+    async ({ operation }) => {
+      const id = `captured-handler-refresh-${operation}`
+      const initial = { ...shared, name: `Initial` }
+      const authoritative = { ...shared, name: `Authoritative` }
+      const refreshResult = createDeferred<Array<Item>>()
+      const releaseHandler = createDeferred<void>()
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([initial])
+        .mockReturnValueOnce(refreshResult.promise)
+      let refreshOutcome: RefetchApplicationOutcome = `pending`
+      const collectionReference: { current?: OwnershipFixture[`collection`] } =
+        {}
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          startSync: true,
+          onUpdate: async () => {
+            const capturedCollection = collectionReference.current
+            if (!capturedCollection) {
+              throw new Error(`The captured Collection is not available`)
+            }
+            const refresh =
+              operation === `refetch`
+                ? capturedCollection.utils.refetch({ throwOnError: true })
+                : capturedCollection.utils.clearError()
+            await refresh.then(
+              () => {
+                refreshOutcome = `resolved`
+              },
+              (error: unknown) => {
+                refreshOutcome = `rejected`
+                throw error
+              },
+            )
+            await releaseHandler.promise
+            return { refetch: false }
+          },
+        }),
+      )
+      collectionReference.current = collection
+      const transactionReference: {
+        current?: ReturnType<typeof collection.update>
+      } = {}
+      cleanups.push(async () => {
+        refreshResult.resolve([authoritative])
+        if (transactionReference.current) {
+          collection.utils.writeUpdate(authoritative)
+          releaseHandler.resolve()
+          await transactionReference.current.isPersisted.promise
+        }
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection.stateWhenReady()
+
+      const transaction = collection.update(shared.id, (draft) => {
+        draft.name = `Optimistic`
+      })
+      transactionReference.current = transaction
+      void transaction.isPersisted.promise.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+      let model: MutationRefreshLivenessModel = {
+        fetch: `pending`,
+        application: `unaccepted`,
+        boundary: `fetch`,
+        throwOnError: true,
+      }
+      refreshResult.resolve([authoritative])
+      await vi.waitFor(() => expect(collection.utils.isFetching).toBe(false))
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+      model = reduceMutationRefreshLiveness(model, {
+        type: `accept-application`,
+      })
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-fetch`,
+        outcome: `fulfilled`,
+      })
+
+      expect({
+        refresh: refreshOutcome,
+        application:
+          collection.get(shared.id)?.name === authoritative.name
+            ? `resolved`
+            : `pending`,
+      }).toEqual(observeMutationRefreshLiveness(model))
+    },
+  )
+
+  it(`does not schedule Collection work for a foreign Query`, async () => {
     const queryClient = createQueryClient()
-    const queryFn = vi
-      .fn<() => Promise<Array<Item>>>()
-      .mockResolvedValueOnce([initial])
-      .mockResolvedValueOnce([authoritative])
-    const collection = createCollection(
+    const baselineClient = createQueryClient()
+    const first = createCollection(
       queryCollectionOptions<Item>({
-        id: `external-refetch-overlaps-handler`,
+        id: `foreign-query-work-first`,
         queryClient,
-        queryKey: [`external-refetch-overlaps-handler`],
-        queryFn,
+        queryKey: [`foreign-query-work-first`],
+        queryFn: () => Promise.resolve([]),
         getKey: (item) => item.id,
         startSync: true,
-        onUpdate: async () => {
-          handlerStarted.resolve()
-          await releaseHandler.promise
-          return { refetch: false }
-        },
       }),
     )
+    const second = createCollection(
+      queryCollectionOptions<Item>({
+        id: `foreign-query-work-second`,
+        queryClient,
+        queryKey: [`foreign-query-work-second`],
+        queryFn: () => Promise.resolve([]),
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    await Promise.all([first.stateWhenReady(), second.stateWhenReady()])
+
+    const nativeQueueMicrotask = globalThis.queueMicrotask
+    let scheduledMicrotasks = 0
+    const queueMicrotaskSpy = vi
+      .spyOn(globalThis, `queueMicrotask`)
+      .mockImplementation((callback) => {
+        scheduledMicrotasks++
+        nativeQueueMicrotask(callback)
+      })
     cleanups.push(async () => {
-      releaseHandler.resolve()
-      await collection.cleanup()
+      queueMicrotaskSpy.mockRestore()
+      await Promise.all([first.cleanup(), second.cleanup()])
       queryClient.clear()
+      baselineClient.clear()
     })
-    await collection.stateWhenReady()
 
-    const mutation = collection.update(shared.id, (draft) => {
-      draft.name = `Optimistic`
-    })
-    await handlerStarted.promise
-    let model: ExplicitRefetchApplicationModel = {
-      calls: new Map(),
-      publicValues: new Map([[`query`, `Optimistic`]]),
+    const measureFetchMicrotasks = async (
+      client: QueryClient,
+      queryKey: ReadonlyArray<string>,
+    ): Promise<number> => {
+      scheduledMicrotasks = 0
+      await client.fetchQuery({ queryKey, queryFn: () => Promise.resolve([]) })
+      for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      return scheduledMicrotasks
     }
-    model = reduceExplicitRefetchApplication(model, {
-      type: `start-call`,
-      callId: 1,
-      resultIds: [`query`],
-      throwOnError: true,
+    const baseline = await measureFetchMicrotasks(baselineClient, [
+      `baseline-foreign-query`,
+    ])
+    const withCollections = await measureFetchMicrotasks(queryClient, [
+      `foreign-query`,
+    ])
+    const model = observeQueryCacheWork({
+      collectionCount: 2,
+      queryOwnership: `foreign`,
     })
-    let refetchOutcome: RefetchApplicationOutcome = `pending`
-    const refetch = collection.utils.refetch({ throwOnError: true }).then(
-      (result) => {
-        refetchOutcome = `resolved`
-        return result
-      },
-      (error: unknown) => {
-        refetchOutcome = `rejected`
-        throw error
-      },
-    )
-    void refetch.catch(() => {})
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      expect(collection.utils.isFetching).toBe(false)
+    const ownedQueryMutant = observeQueryCacheWork({
+      collectionCount: 2,
+      queryOwnership: `owned`,
     })
-    model = reduceExplicitRefetchApplication(model, {
-      type: `accept-result`,
-      callId: 1,
-      resultId: `query`,
-      value: authoritative.name,
-    })
-    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
 
-    expectExplicitRefetchObservation(
-      {
-        publicValues: { query: collection.get(shared.id)?.name },
-        refetch: refetchOutcome,
-      },
-      observeExplicitRefetchApplication(model, 1),
-    )
-
-    releaseHandler.resolve()
-    await mutation.isPersisted.promise
-    await refetch
-    model = reduceExplicitRefetchApplication(model, {
-      type: `fulfill-application`,
-      callId: 1,
-      resultId: `query`,
-    })
-    expectExplicitRefetchObservation(
-      {
-        publicValues: { query: collection.get(shared.id)?.name },
-        refetch: refetchOutcome,
-        resultOrder: [`query`],
-      },
-      observeExplicitRefetchApplication(model, 1),
-    )
+    expect({ collectionMicrotasks: withCollections - baseline }).toEqual(model)
+    expect(ownedQueryMutant).not.toEqual(model)
   })
 
   it.each(handlerCollectionHistoryGrammar)(

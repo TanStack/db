@@ -253,13 +253,14 @@ export interface QueryCollectionConfig<
 
 /**
  * Type for the refetch utility function
- * Returns QueryObserverResults from TanStack Query after each accepted
- * result has been applied to the Collection. The scoped Collection parameter
- * passed to a mutation handler retains the fetch boundary because application
- * is causally queued behind that handler's transaction. Outside a handler,
+ * Returns QueryObserverResults from TanStack Query after the applicable
+ * boundary. Normally this waits until each accepted result has been applied to
+ * the Collection. While a user mutation is persisting or its handler is
+ * active, refetch retains the Query fetch boundary because normal application
+ * is queued behind that transaction. At the application boundary,
  * `throwOnError` applies to both Query fetch and Collection application
- * failures. On the handler-scoped view it applies only to Query fetch failure;
- * a later application failure is recorded by the Collection error utilities.
+ * failures. At the fetch boundary it applies only to Query fetch failure; a
+ * later application failure is recorded by the Collection error utilities.
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
@@ -282,7 +283,7 @@ export interface QueryCollectionUtils<
 > {
   // Keep this interface closed: extending UtilsRecord would make every
   // nonexistent adapter utility appear as `any`.
-  /** Manually refetch and await application of each accepted result. */
+  /** Manually refetch and await the applicable fetch or application boundary. */
   refetch: RefetchFn
   /** Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
   writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
@@ -317,9 +318,10 @@ export interface QueryCollectionUtils<
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
-   * Clear the error state and trigger a refetch of the query. On the scoped
-   * Collection passed to a mutation handler, this retains the Query fetch
-   * boundary so it cannot wait on its own transaction.
+   * Clear the error state and trigger a refetch of the query. While a user
+   * mutation is persisting or its handler is active, this retains the Query
+   * fetch boundary so it cannot wait on publication blocked by that
+   * transaction.
    * @returns Promise that resolves when the applicable refetch boundary completes
    * @throws Error if the refetch fails
    */
@@ -805,6 +807,7 @@ export function queryCollectionOptions(
       QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
     >(),
   }
+  let activeMutationHandlerCount = 0
 
   // Query Cache fetch actions give each request a stable identity. Observer
   // results and their exact Collection applications are attached to that
@@ -2348,6 +2351,8 @@ export function queryCollectionOptions(
           trackCacheQuery(event.query)
         }
 
+        if (!trackedCacheQueries.has(event.query)) return
+
         if (event.type === `updated`) {
           if (event.action.type === `fetch`) {
             let fetchStart = queryCollectionFetchActionStarts.get(event.action)
@@ -2539,9 +2544,10 @@ export function queryCollectionOptions(
    * - utils.refetch() - for explicit user-triggered refetches
    * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
    *
-   * Public calls wait for each accepted Query result to be applied to Collection
-   * rows. The scoped Collection parameter passed to a mutation handler retains
-   * the fetch boundary to avoid waiting on its own transaction.
+   * Calls wait for each accepted Query result to be applied to Collection rows
+   * unless a user mutation is persisting or its handler is active. Normal
+   * publication is blocked behind that transaction, so those calls retain the
+   * Query fetch boundary.
    *
    * @returns Promise that resolves with each QueryObserverResult
    */
@@ -2629,7 +2635,17 @@ export function queryCollectionOptions(
     return await Promise.all(refetchPromises)
   }
 
-  const refetch: RefetchFn = (opts) => refetchQueryResults(opts, true)
+  const isMutationPublicationBlocked = (): boolean => {
+    if (activeMutationHandlerCount > 0) return true
+    for (const transaction of writeContext?.collection._state.transactions.values() ??
+      []) {
+      if (transaction.state === `persisting`) return true
+    }
+    return false
+  }
+
+  const refetch: RefetchFn = (opts) =>
+    refetchQueryResults(opts, !isMutationPublicationBlocked())
 
   /**
    * Updates a single query key in the cache with new items, handling both direct arrays
@@ -3052,7 +3068,7 @@ export function queryCollectionOptions(
     })
   }
 
-  const runMutationHandler = <
+  const runMutationHandler = async <
     TParams extends {
       collection: { utils: object }
       transaction: {
@@ -3062,7 +3078,7 @@ export function queryCollectionOptions(
   >(
     handler: (params: TParams) => unknown,
     params: TParams,
-  ): unknown => {
+  ): Promise<unknown> => {
     const collection = createMutationHandlerCollection(params.collection)
     const handlerParams = {
       ...params,
@@ -3073,7 +3089,12 @@ export function queryCollectionOptions(
         collection,
       ),
     } as TParams
-    return handler(handlerParams)
+    activeMutationHandlerCount++
+    try {
+      return await handler(handlerParams)
+    } finally {
+      activeMutationHandlerCount--
+    }
   }
 
   // Create wrapper handlers for direct persistence operations that handle refetching

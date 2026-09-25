@@ -600,20 +600,22 @@ onInsert: async ({ transaction, collection }) => {
 }
 ```
 
-Outside a mutation handler, the `refetch()` promise resolves after every
-accepted result from that call has been applied to Collection rows. This is also
-the application barrier when the result has no row diff and therefore emits no
-change event. Rejection is fail-fast: with several tracked Queries, one failure
-may reject the call while independent work remains pending.
+When no user mutation is persisting and no mutation handler is active, the
+`refetch()` promise resolves after every accepted result from that call has been
+applied to Collection rows. This is also the application barrier when the
+result has no row diff and therefore emits no change event. Rejection is
+fail-fast: with several tracked Queries, one failure may reject the call while
+independent work remains pending.
 
-Inside the Collection's own mutation handler, application is queued behind that
-same transaction. To avoid a circular wait, `refetch()` on the `collection`
-parameter passed to the handler resolves at the Query fetch boundary. This is a
-scoped Collection view: an external `refetch()` still waits for application,
-even when it overlaps the handler. Code that starts the mutation can await the
+While a user mutation is persisting or a Collection mutation handler is active,
+normal application is queued behind that transaction. To avoid a circular wait
+or an unrelated persistence delay, all overlapping `refetch()` calls resolve at
+the Query fetch boundary. This includes calls through the handler parameter,
+captured or external Collection references, manual transaction mutation
+functions, and `createOptimisticAction` mutation functions. Code can await the
 mutation's `isPersisted.promise` when it needs the complete transaction and its
-queued Collection application. Utilities that refetch through the scoped view,
-including `clearError()`, inherit the same fetch boundary.
+queued Collection application. Utilities that refetch, including `clearError()`,
+inherit the same phase boundary.
 
 The handler's `collection` parameter and every matching
 `transaction.mutations[n].collection` alias use the same scoped view. That view
@@ -623,13 +625,13 @@ mutation alias with the handler parameter when identity is needed inside one
 handler invocation. Identity across separate handler invocations is not part of
 the contract.
 
-Outside a mutation handler, `throwOnError` applies to both Query fetch errors and
-errors applying an accepted result to Collection rows. With `throwOnError: true`,
-application failure or cancellation rejects the call; cancellation uses an
-`AbortError`. With `throwOnError: false` (the default), `refetch()` returns its
-Query results instead. On the scoped Collection passed to a mutation handler,
-`throwOnError` applies only to the Query fetch because application happens after
-that call's fetch boundary. A later application failure is recorded by the
+At the application boundary, `throwOnError` applies to both Query fetch errors
+and errors applying an accepted result to Collection rows. With
+`throwOnError: true`, application failure or cancellation rejects the call;
+cancellation uses an `AbortError`. With `throwOnError: false` (the default),
+`refetch()` returns its Query results instead. At the mutation-phase fetch
+boundary, `throwOnError` applies only to the Query fetch because application
+happens after that call settles. A later application failure is recorded by the
 Collection's error utilities.
 
 To skip refetch in v1.0, simply don't call `refetch()`:
@@ -654,13 +656,13 @@ Skip refetching when:
 
 The collection provides these utility methods via `collection.utils`:
 
-- `refetch(opts?)`: Refetch every tracked Query and await application of each accepted result
-  - `opts.throwOnError`: Whether Query fetch or Collection application errors reject an external call (default: `false`); handler-scoped calls cover fetch errors only
+- `refetch(opts?)`: Refetch every tracked Query and await the applicable fetch or application boundary
+  - `opts.throwOnError`: Whether Query fetch or Collection application errors reject an application-boundary call (default: `false`); mutation-phase calls cover fetch errors only
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
   - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
 - `clearError()`: Clear recorded Query error state and refetch with errors enabled
-  - Uses the same application boundary as `refetch()` outside handlers and the same fetch boundary on a handler-scoped Collection
+  - Uses the same phase-dependent boundary as `refetch()`
 
 ## Direct Writes
 
