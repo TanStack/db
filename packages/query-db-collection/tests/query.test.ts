@@ -939,6 +939,95 @@ describe(`QueryCollection`, () => {
       }
     })
 
+    it.each([
+      { label: `the default option`, options: undefined, rejects: false },
+      {
+        label: `throwOnError false`,
+        options: { throwOnError: false },
+        rejects: false,
+      },
+      {
+        label: `throwOnError true`,
+        options: { throwOnError: true },
+        rejects: true,
+      },
+    ] as const)(
+      `preserves $label when a deferred replacement has a transport error`,
+      async ({ options, rejects }) => {
+        const barrier = createDeferred<void>()
+        const transportError = new Error(`Deferred replacement failed`)
+        const queryFn = vi
+          .fn()
+          .mockResolvedValueOnce([{ id: `server`, name: `Initial` }])
+          .mockResolvedValueOnce([{ id: `server`, name: `Skipped` }])
+          .mockRejectedValueOnce(transportError)
+        const consoleError = vi
+          .spyOn(console, `error`)
+          .mockImplementation(() => {})
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `deferred-transport-error-${String(rejects)}-${String(options === undefined)}`,
+            queryClient,
+            queryKey: [
+              `deferred-transport-error`,
+              rejects,
+              options === undefined,
+            ],
+            queryFn,
+            getKey,
+            startSync: true,
+            retry: false,
+          }),
+        )
+
+        try {
+          await collection.stateWhenReady()
+          collection.deferDataRefresh = barrier.promise
+          let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+          const observed = collection.utils.refetch(options).then(
+            (results) => {
+              outcome = `fulfilled`
+              return { results }
+            },
+            (error: unknown) => {
+              outcome = `rejected`
+              return { error }
+            },
+          )
+
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+          for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+          expect(outcome).toBe(`pending`)
+
+          collection.deferDataRefresh = null
+          barrier.resolve()
+          const settlement = await observed
+
+          if (rejects) {
+            expect(outcome).toBe(`rejected`)
+            expect(`error` in settlement ? settlement.error : undefined).toBe(
+              transportError,
+            )
+          } else {
+            expect(outcome).toBe(`fulfilled`)
+            expect(
+              `results` in settlement ? settlement.results : undefined,
+            ).toEqual([
+              expect.objectContaining({
+                isError: true,
+                error: transportError,
+              }),
+            ])
+          }
+        } finally {
+          collection.deferDataRefresh = null
+          barrier.resolve()
+          consoleError.mockRestore()
+          await collection.cleanup()
+        }
+      },
+    )
+
     it(`applies successive eager results in publication order`, async () => {
       const queryKey = [`eager-result-publication-order`]
       const collection = createCollection(
@@ -1475,12 +1564,16 @@ describe(`QueryCollection`, () => {
 
     // Verify the validation error was logged
     await vi.waitFor(() => {
-      const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
-        call[0].includes(
-          `@tanstack/query-db-collection: queryFn must return an array of objects`,
-        ),
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`[QueryCollection] Error applying query`),
+        expect.objectContaining({
+          name: `InvalidQueryResultError`,
+          message: expect.stringContaining(
+            `@tanstack/query-db-collection: queryFn must return an array of objects`,
+          ),
+        }),
       )
-      expect(errorCallArgs).toBeDefined()
     })
 
     // The collection state should remain empty or unchanged
@@ -1864,12 +1957,16 @@ describe(`QueryCollection`, () => {
 
       // Verify the validation error was logged
       await vi.waitFor(() => {
-        const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
-          call[0].includes(
-            `@tanstack/query-db-collection: select() must return an array of objects`,
-          ),
+        expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`[QueryCollection] Error applying query`),
+          expect.objectContaining({
+            name: `InvalidQueryResultError`,
+            message: expect.stringContaining(
+              `@tanstack/query-db-collection: select() must return an array of objects`,
+            ),
+          }),
         )
-        expect(errorCallArgs).toBeDefined()
       })
 
       expect(collection.size).toBe(0)
@@ -2403,6 +2500,52 @@ describe(`QueryCollection`, () => {
       ])
     })
 
+    it(`does not reject a deprecated auto-refetch when result application fails`, async () => {
+      resetWarnings()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const queryFn = vi
+        .fn<() => Promise<Array<TestItem>>>()
+        .mockResolvedValueOnce([{ id: `1`, name: `Initial` }])
+        .mockResolvedValueOnce(42 as unknown as Array<TestItem>)
+      const onInsert = vi.fn().mockResolvedValue(undefined)
+      const options = queryCollectionOptions<TestItem>({
+        id: `invalid-deprecated-auto-refetch`,
+        queryClient,
+        queryKey: [`invalid-deprecated-auto-refetch`],
+        queryFn,
+        getKey,
+        onInsert,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+      const transaction = {
+        id: `invalid-deprecated-auto-refetch-transaction`,
+        mutations: [],
+      } as unknown as TransactionWithMutations<TestItem, `insert`>
+
+      try {
+        await collection.stateWhenReady()
+
+        await expect(
+          options.onInsert!({ transaction, collection }),
+        ).resolves.toBeUndefined()
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        await vi.waitFor(() => {
+          expect(consoleError).toHaveBeenCalledWith(
+            expect.stringContaining(`[QueryCollection] Error applying query`),
+            expect.objectContaining({ name: `InvalidQueryResultError` }),
+          )
+        })
+      } finally {
+        warning.mockRestore()
+        consoleError.mockRestore()
+        await collection.cleanup()
+      }
+    })
+
     it(`supports a warning-free single-refetch migration path`, async () => {
       resetWarnings()
       const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
@@ -2615,6 +2758,61 @@ describe(`QueryCollection`, () => {
 
       postCleanupSubscription.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
+    })
+
+    it(`does not cancel an applied refetch when sync restarts before settlement classification`, async () => {
+      const queryKey = [`refetch-sync-restart`]
+      const refetchResult = createDeferred<Array<TestItem>>()
+      const queryFn = vi
+        .fn<() => Promise<Array<TestItem>>>()
+        .mockResolvedValueOnce([{ id: `1`, name: `Initial` }])
+        .mockImplementationOnce(() => refetchResult.promise)
+        .mockResolvedValue([{ id: `1`, name: `Restarted` }])
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `refetch-sync-restart`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          startSync: true,
+        }),
+      )
+      const heldMicrotasks: Array<VoidFunction> = []
+      const scheduleMicrotask = globalThis.queueMicrotask
+      let queueMicrotaskSpy: { mockRestore: () => void } | undefined
+
+      try {
+        await collection.stateWhenReady()
+        queueMicrotaskSpy = vi
+          .spyOn(globalThis, `queueMicrotask`)
+          .mockImplementation((callback) => heldMicrotasks.push(callback))
+        const refetch = collection.utils.refetch({ throwOnError: true })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+        refetchResult.resolve([{ id: `1`, name: `Refetched` }])
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+        expect(collection.get(`1`)?.name).toBe(`Refetched`)
+        expect(heldMicrotasks.length).toBeGreaterThan(0)
+
+        queueMicrotaskSpy.mockRestore()
+        queueMicrotaskSpy = undefined
+        await collection.cleanup()
+        collection.startSyncImmediate()
+        heldMicrotasks.forEach((callback) => scheduleMicrotask(callback))
+
+        await expect(refetch).resolves.toEqual([
+          expect.objectContaining({
+            isSuccess: true,
+            data: [{ id: `1`, name: `Refetched` }],
+          }),
+        ])
+      } finally {
+        queueMicrotaskSpy?.mockRestore()
+        refetchResult.resolve([{ id: `1`, name: `Refetched` }])
+        heldMicrotasks.forEach((callback) => scheduleMicrotask(callback))
+        await collection.cleanup()
+      }
     })
 
     it(`should handle query lifecycle during restart cycle`, async () => {
