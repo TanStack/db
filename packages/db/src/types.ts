@@ -292,8 +292,9 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
 export type CursorExpressions = {
   /**
    * Expression for rows greater than (after) the cursor value.
-   * Core emits cursors for a single order column. Multi-column queries use
-   * prefix-and-tie loading instead of constructing a composite cursor.
+   * Core emits this predicate from the leading order column. Multi-column
+   * queries load the complete leading-value tie separately instead of
+   * constructing a composite cursor.
    */
   whereFrom: BasicExpression<boolean>
   /**
@@ -319,6 +320,12 @@ export type CursorExpressions = {
  * live: aborting the signal or releasing the subscription is supported.
  */
 export type LoadSubsetOptions = {
+  /**
+   * Revalidate this exact semantic demand even when an adapter has already
+   * completed or cached it. This controls the acquisition attempt; it does
+   * not change demand identity or the matching unload operation.
+   */
+  refetch?: boolean
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
   /** The order by clause to sort the data */
@@ -475,6 +482,51 @@ export interface SyncMetadataApi<
       key: string
       value: unknown
     }>
+  }
+  /**
+   * Unstable, versioned bridge between persistence-aware collection adapters
+   * and sync adapters. Application code should not construct this capability.
+   * Custom adapter wrappers must forward it unchanged. `null` explicitly means
+   * that the collection has no persistence capability; a missing property is
+   * invalid.
+   *
+   * @internal Adapter infrastructure; not an application-facing API.
+   */
+  persistence: SyncPersistenceCapabilityV1<TKey> | null
+}
+
+export type SyncPersistenceKeySetEvidence = {
+  status: `unknown` | `consistent` | `incompatible`
+}
+
+export type SyncPersistenceScanOptions = {
+  metadataOnly?: boolean
+}
+
+export type SyncPersistenceScannedRow<
+  TKey extends string | number = string | number,
+> = {
+  key: TKey
+  value: object
+  metadata?: unknown
+}
+
+/**
+ * @internal Unstable cross-package protocol for persistence-aware adapters.
+ */
+export type SyncPersistenceCapabilityV1<
+  TKey extends string | number = string | number,
+> = {
+  readonly protocol: `@tanstack/db/sync-persistence`
+  readonly version: 1
+  readonly hydrateBaseline: () => Promise<void>
+  readonly scanPersistedRows: (
+    options?: SyncPersistenceScanOptions,
+  ) => Promise<Array<SyncPersistenceScannedRow<TKey>>>
+  readonly resumeSnapshot: {
+    readonly certify: () => Promise<void>
+    readonly getKeySetEvidence: () => SyncPersistenceKeySetEvidence | undefined
+    readonly expectCurrentCommit: () => void
   }
 }
 

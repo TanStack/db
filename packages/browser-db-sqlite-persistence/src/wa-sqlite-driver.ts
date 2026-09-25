@@ -13,6 +13,32 @@ export type BrowserWASQLiteDriverOptions = {
   database: BrowserWASQLiteDatabase
 }
 
+type DatabaseExecutionState = {
+  queue: Promise<void>
+  nextSavepointId: number
+}
+
+const databaseExecutionStates = new WeakMap<
+  BrowserWASQLiteDatabase,
+  DatabaseExecutionState
+>()
+
+function getDatabaseExecutionState(
+  database: BrowserWASQLiteDatabase,
+): DatabaseExecutionState {
+  const existing = databaseExecutionStates.get(database)
+  if (existing) {
+    return existing
+  }
+
+  const state: DatabaseExecutionState = {
+    queue: Promise.resolve(),
+    nextSavepointId: 1,
+  }
+  databaseExecutionStates.set(database, state)
+  return state
+}
+
 function assertTransactionCallbackHasDriverArg(
   fn: (transactionDriver: SQLiteDriver) => Promise<unknown>,
 ): void {
@@ -37,13 +63,13 @@ function assertDatabaseShape(
 
 export class BrowserWASQLiteDriver implements SQLiteDriver {
   private readonly database: BrowserWASQLiteDatabase
-  private queue: Promise<void> = Promise.resolve()
-  private nextSavepointId = 1
+  private readonly executionState: DatabaseExecutionState
   private closed = false
 
   constructor(options: BrowserWASQLiteDriverOptions) {
     assertDatabaseShape(options.database)
     this.database = options.database
+    this.executionState = getDatabaseExecutionState(this.database)
   }
 
   async exec(sql: string): Promise<void> {
@@ -128,8 +154,8 @@ export class BrowserWASQLiteDriver implements SQLiteDriver {
   ): Promise<T> {
     assertTransactionCallbackHasDriverArg(fn)
 
-    const savepointName = `tsdb_sp_${this.nextSavepointId}`
-    this.nextSavepointId++
+    const savepointName = `tsdb_sp_${this.executionState.nextSavepointId}`
+    this.executionState.nextSavepointId++
     await this.database.execute(`SAVEPOINT ${savepointName}`)
     try {
       const result = await fn(this.createTransactionDriver())
@@ -143,8 +169,8 @@ export class BrowserWASQLiteDriver implements SQLiteDriver {
   }
 
   private enqueue<T>(operation: () => Promise<T> | T): Promise<T> {
-    const queuedOperation = this.queue.then(operation, operation)
-    this.queue = queuedOperation.then(
+    const queuedOperation = this.executionState.queue.then(operation, operation)
+    this.executionState.queue = queuedOperation.then(
       () => undefined,
       () => undefined,
     )

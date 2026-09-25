@@ -29,6 +29,7 @@ import type { CollectionImpl } from './index.js'
 import type { Deferred } from '../deferred.js'
 
 type RequestSnapshotOptions = {
+  refetch?: boolean
   where?: BasicExpression<boolean>
   signal?: AbortSignal
   optimizedOnly?: boolean
@@ -44,6 +45,7 @@ type RequestSnapshotOptions = {
 }
 
 type RequestLimitedSnapshotOptions = {
+  refetch?: boolean
   orderBy: OrderBy
   limit: number
   /** A single cursor value; composite cursor inputs are rejected. */
@@ -1159,6 +1161,7 @@ export class CollectionSubscription
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
     const loadOptions: LoadSubsetOptions = {
+      ...(opts?.refetch ? { refetch: true } : {}),
       where: stateOpts.where,
       signal: opts?.signal,
       subscription: this,
@@ -1349,14 +1352,16 @@ export class CollectionSubscription
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
    *
-   * Cursor requests support one order term and one minValue. Multi-column
-   * queries use the ordered loader's prefix-and-tie fallback instead.
+   * Cursor requests use one minValue for the leading order term. For a
+   * multi-column order, a separate equality request loads the complete
+   * leading-value tie before local ordering applies the trailing terms.
    *
    * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
    * Note 2: it does not send keys that have already been sent before.
    */
   requestLimitedSnapshot({
+    refetch,
     orderBy,
     limit,
     minValues,
@@ -1527,6 +1532,7 @@ export class CollectionSubscription
     // Note: `where` does NOT include cursor expressions - they are passed separately
     // The sync layer can choose to use cursor-based or offset-based pagination
     const loadOptions: LoadSubsetOptions = {
+      ...(refetch ? { refetch: true } : {}),
       where, // Main filter only, no cursor
       limit,
       orderBy,

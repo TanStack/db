@@ -12,6 +12,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [`db/tests/SortedMap.test.ts`, `sorted-map`, `key ascending descending`],
   [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
   [
+    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `sqlite-persistence`,
+    `source-fifo-order abort-graph owner-isolation open-transaction-boundary`,
+  ],
+  [
     `db/tests/optimistic-transaction-oracle.property.test.ts`,
     `collection-state`,
     `mixed-transaction same-key`,
@@ -39,7 +44,12 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `electric-db-collection/tests/electric-oracle.property.test.ts`,
     `electric`,
-    `match-reentry`,
+    `match-reentry publication-epoch-convergence persistence-interleaving`,
+  ],
+  [
+    `electric-db-collection/tests/electric-recovery-oracle.test.ts`,
+    `electric-recovery`,
+    `publication-stream-convergence`,
   ],
   [
     `electric-db-collection/tests/electric-sdk-delivery.property.test.ts`,
@@ -90,6 +100,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `db/tests/live-query-observer-history.property.test.ts`,
     `live-query-observer`,
     `granular-history wholesale-history`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot.test.ts`,
+    `sqlite-resume`,
+    `startup-generation`,
   ],
   [
     `db/tests/query/derived-delete-reconciliation.test.ts`,

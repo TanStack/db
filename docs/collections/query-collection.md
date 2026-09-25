@@ -600,6 +600,39 @@ onInsert: async ({ transaction, collection }) => {
 }
 ```
 
+When no user mutation is persisting and no mutation handler is active, the
+`refetch()` promise resolves after every accepted result from that call has been
+applied to Collection rows. This is also the application barrier when the
+result has no row diff and therefore emits no change event. Rejection is
+fail-fast: with several tracked Queries, one failure may reject the call while
+independent work remains pending.
+
+While a user mutation is persisting or a Collection mutation handler is active,
+normal application is queued behind that transaction. To avoid a circular wait
+or an unrelated persistence delay, all overlapping `refetch()` calls resolve at
+the Query fetch boundary. This rule applies whether the mutation or the refetch
+starts first. It includes calls through the handler parameter, captured or
+external Collection references, manual transaction mutation functions, and
+`createOptimisticAction` mutation functions. Code can await the mutation's
+`isPersisted.promise` when it needs the complete transaction and its queued
+Collection application. Utilities that refetch, including `clearError()`,
+inherit the same phase boundary.
+
+The handler's `collection` parameter and every matching
+`transaction.mutations[n].collection` alias preserve the external Collection
+identity. Strict equality, `Map`, and `WeakMap` lookups therefore continue to
+work in shared persistence handlers. Phase tracking changes the refetch wait
+boundary without replacing the Collection, transaction, or mutation objects.
+
+At the application boundary, `throwOnError` applies to both Query fetch errors
+and errors applying an accepted result to Collection rows. With
+`throwOnError: true`, application failure or cancellation rejects the call;
+cancellation uses an `AbortError`. With `throwOnError: false` (the default),
+`refetch()` returns its Query results instead. At the mutation-phase fetch
+boundary, `throwOnError` applies only to the Query fetch because application
+happens after that call settles. A later application failure is recorded by the
+Collection's error utilities.
+
 To skip refetch in v1.0, simply don't call `refetch()`:
 
 ```typescript
@@ -622,10 +655,13 @@ Skip refetching when:
 
 The collection provides these utility methods via `collection.utils`:
 
-- `refetch(opts?)`: Trigger a refetch of the query
-  - `opts.throwOnError`: Whether to throw an error if the refetch fails (default: `false`)
+- `refetch(opts?)`: Refetch every tracked Query and await the applicable fetch or application boundary
+  - `opts.throwOnError`: Whether Query fetch or Collection application errors reject an application-boundary call (default: `false`); mutation-phase calls cover fetch errors only
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
-  - Returns `QueryObserverResult` for inspecting the result
+  - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
+  - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
+- `clearError()`: Clear recorded Query error state and refetch with errors enabled
+  - Uses the same phase-dependent boundary as `refetch()`
 
 ## Direct Writes
 

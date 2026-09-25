@@ -7,6 +7,172 @@ import {
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import type { NamespacedRow } from '../../../src/types.js'
 
+/**
+ * # Does the LIKE evaluator preserve wildcard meaning without regex work?
+ *
+ * Contract: `like` and `ilike` match the complete string. `%` consumes zero or
+ * more UTF-16 code units, `_` consumes exactly one, and every other code unit
+ * is literal. `ilike` applies the evaluator's established lowercase fold.
+ *
+ * Model: `referenceLike` uses a dynamic program, not production's two-pointer
+ * walk. It predicts only the boolean result for non-null strings.
+ *
+ * History grammar: each case contains a value, a pattern, and a case-fold flag.
+ * The small alphabet concentrates on literal/wildcard precedence, `_`, case,
+ * newlines, and non-ASCII code units. Every generated string is legal. Pinned
+ * witnesses reconstruct the reported `%` collision; removing `%` removes that
+ * distinction, while empty and literal-only cases exercise its boundaries.
+ *
+ * Production driver: compile a public `like` or `ilike` expression and invoke
+ * it at the synchronous evaluator boundary.
+ *
+ * Refinement check: production and the model must return the same boolean for
+ * every fixed, random, or replayed case. The recorder retains the seed and the
+ * first five mismatches. A deliberate wrong-result control proves that the
+ * comparison rejects the literal-before-wildcard regression. Nullish SQL
+ * three-valued logic and broader Unicode folding remain in focused tests.
+ */
+type LikeCase = {
+  value: string
+  pattern: string
+  caseInsensitive: boolean
+}
+
+type LikeMismatch = LikeCase & {
+  expected: boolean
+  actual: boolean
+}
+
+const FIXED_LIKE_ORACLE_SEED = 0x1745
+const likeReplaySeedText = process.env.TANSTACK_DB_LIKE_ORACLE_SEED
+const likeReplaySeed =
+  likeReplaySeedText === undefined ? undefined : Number(likeReplaySeedText)
+const LIKE_ORACLE_RUNS = Number(
+  process.env.TANSTACK_DB_LIKE_ORACLE_RUNS ?? 10_000,
+)
+const likeCalibrationCases: Array<LikeCase> = [
+  { value: ``, pattern: ``, caseInsensitive: false },
+  { value: `A`, pattern: `a`, caseInsensitive: true },
+  { value: `anything`, pattern: `%`, caseInsensitive: false },
+  { value: `a`, pattern: `_`, caseInsensitive: true },
+  { value: `100% done`, pattern: `100%done`, caseInsensitive: false },
+]
+
+if (
+  likeReplaySeedText !== undefined &&
+  (likeReplaySeedText.trim() === `` ||
+    !Number.isSafeInteger(likeReplaySeed) ||
+    likeReplaySeed! < 0 ||
+    likeReplaySeed! > 0xffff_ffff)
+) {
+  throw new Error(`TANSTACK_DB_LIKE_ORACLE_SEED must be a uint32 integer`)
+}
+if (
+  !Number.isSafeInteger(LIKE_ORACLE_RUNS) ||
+  LIKE_ORACLE_RUNS < likeCalibrationCases.length
+) {
+  throw new Error(
+    `TANSTACK_DB_LIKE_ORACLE_RUNS must be an integer of at least ${likeCalibrationCases.length}`,
+  )
+}
+
+const likeOracleCampaigns =
+  likeReplaySeed === undefined
+    ? [
+        { name: `fixed`, seed: FIXED_LIKE_ORACLE_SEED },
+        { name: `random`, seed: Math.floor(Math.random() * 0x1_0000_0000) },
+      ]
+    : [{ name: `replay`, seed: likeReplaySeed }]
+
+function referenceLike(
+  value: string,
+  pattern: string,
+  caseInsensitive: boolean,
+): boolean {
+  const searchValue = caseInsensitive ? value.toLowerCase() : value
+  const searchPattern = caseInsensitive ? pattern.toLowerCase() : pattern
+  let previous = new Array<boolean>(searchPattern.length + 1).fill(false)
+  previous[0] = true
+
+  for (
+    let patternIndex = 1;
+    patternIndex <= searchPattern.length;
+    patternIndex++
+  ) {
+    previous[patternIndex] =
+      searchPattern[patternIndex - 1] === `%` && previous[patternIndex - 1]!
+  }
+
+  for (let valueIndex = 1; valueIndex <= searchValue.length; valueIndex++) {
+    const current = new Array<boolean>(searchPattern.length + 1).fill(false)
+    for (
+      let patternIndex = 1;
+      patternIndex <= searchPattern.length;
+      patternIndex++
+    ) {
+      const patternCharacter = searchPattern[patternIndex - 1]
+      current[patternIndex] =
+        patternCharacter === `%`
+          ? current[patternIndex - 1]! || previous[patternIndex]!
+          : (patternCharacter === `_` ||
+              patternCharacter === searchValue[valueIndex - 1]) &&
+            previous[patternIndex - 1]!
+    }
+    previous = current
+  }
+
+  return previous[searchPattern.length]!
+}
+
+function* seededLikeCases(count: number, seed: number): Generator<LikeCase> {
+  // Repeated wildcard entries keep the bounded campaign concentrated on the
+  // precedence boundary while retaining literals, case folds, and newlines.
+  const alphabet = [`a`, `b`, `A`, `B`, `%`, `%`, `%`, `_`, `_`, `.`, `\n`, `é`]
+  let state = seed
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return state
+  }
+  const pick = (exclusiveUpperBound: number) =>
+    Math.floor((next() / 0x1_0000_0000) * exclusiveUpperBound)
+  const build = (length: number) => {
+    let result = ``
+    for (let index = 0; index < length; index++) {
+      result += alphabet[pick(alphabet.length)]
+    }
+    return result
+  }
+
+  yield* likeCalibrationCases
+  for (let index = likeCalibrationCases.length; index < count; index++) {
+    const value = build(pick(8))
+    const pattern = build(pick(8))
+    yield { value, pattern, caseInsensitive: pick(2) === 1 }
+  }
+}
+
+function evaluateLikeWithProduction(testCase: LikeCase): boolean {
+  const functionName = testCase.caseInsensitive ? `ilike` : `like`
+  return compileExpression(
+    new Func(functionName, [
+      new Value(testCase.value),
+      new Value(testCase.pattern),
+    ]),
+  )({})
+}
+
+function findLikeMismatch(
+  testCase: LikeCase,
+  actual: boolean,
+): LikeMismatch | undefined {
+  const expected = referenceLike(
+    testCase.value,
+    testCase.pattern,
+    testCase.caseInsensitive,
+  )
+  return actual === expected ? undefined : { ...testCase, expected, actual }
+}
+
 describe(`evaluators`, () => {
   describe(`compileExpression`, () => {
     it(`handles unknown expression type`, () => {
@@ -338,6 +504,150 @@ describe(`evaluators`, () => {
           const compiled = compileExpression(func)
 
           expect(compiled({})).toBe(true)
+        })
+
+        it(`handles like with wildcard in the middle`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello brave new world`),
+            new Value(`hello%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`treats % as a wildcard when the value also contains %`, () => {
+          const likeFunc = compileExpression(
+            new Func(`like`, [new Value(`100% done`), new Value(`100%done`)]),
+          )
+          const ilikeFunc = compileExpression(
+            new Func(`ilike`, [
+              new Value(`A% LONG VALUE`),
+              new Value(`a%value`),
+            ]),
+          )
+
+          expect(likeFunc({})).toBe(true)
+          expect(ilikeFunc({})).toBe(true)
+        })
+
+        it(`rejects the literal-before-wildcard wrong result`, () => {
+          const witness: LikeCase = {
+            value: `100% done`,
+            pattern: `100%done`,
+            caseInsensitive: false,
+          }
+
+          expect(
+            findLikeMismatch(witness, evaluateLikeWithProduction(witness)),
+          ).toBeUndefined()
+          expect(findLikeMismatch(witness, false)).toEqual({
+            ...witness,
+            expected: true,
+            actual: false,
+          })
+        })
+
+        it.each(likeOracleCampaigns)(
+          `matches the LIKE law in the $name campaign`,
+          ({ seed }) => {
+            let mismatchCount = 0
+            const mismatchSamples: Array<LikeMismatch> = []
+            const reach = {
+              caseSensitive: 0,
+              caseInsensitive: 0,
+              percentPattern: 0,
+              underscorePattern: 0,
+              literalPattern: 0,
+            }
+
+            for (const testCase of seededLikeCases(LIKE_ORACLE_RUNS, seed)) {
+              reach[
+                testCase.caseInsensitive ? `caseInsensitive` : `caseSensitive`
+              ]++
+              if (testCase.pattern.includes(`%`)) reach.percentPattern++
+              if (testCase.pattern.includes(`_`)) reach.underscorePattern++
+              if (/[^%_]/u.test(testCase.pattern)) reach.literalPattern++
+
+              const mismatch = findLikeMismatch(
+                testCase,
+                evaluateLikeWithProduction(testCase),
+              )
+              if (mismatch !== undefined) {
+                mismatchCount++
+                if (mismatchSamples.length < 5) {
+                  mismatchSamples.push(mismatch)
+                }
+              }
+            }
+
+            expect({ seed, mismatchCount, mismatchSamples }).toEqual({
+              seed,
+              mismatchCount: 0,
+              mismatchSamples: [],
+            })
+            expect(
+              Object.entries(reach).filter(([, count]) => count === 0),
+            ).toEqual([])
+          },
+        )
+
+        it(`handles like where _ must match exactly one character`, () => {
+          const func = new Func(`like`, [new Value(`hell`), new Value(`hell_`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(false)
+        })
+
+        it(`handles like with a pattern of only wildcards`, () => {
+          const func = new Func(`like`, [new Value(``), new Value(`%%`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`handles like with an empty pattern`, () => {
+          const emptyValue = compileExpression(
+            new Func(`like`, [new Value(``), new Value(``)]),
+          )
+          const nonEmptyValue = compileExpression(
+            new Func(`like`, [new Value(`a`), new Value(``)]),
+          )
+
+          expect(emptyValue({})).toBe(true)
+          expect(nonEmptyValue({})).toBe(false)
+        })
+
+        it(`handles like matching across line breaks`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello\nworld`),
+            new Value(`hello%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`evaluates pathological wildcard patterns without backtracking (ReDoS)`, () => {
+          // Compiled to a regex, this pattern produces 20 overlapping `.*`
+          // segments; the near-miss value (fails only at the last character)
+          // then made the regex engine backtrack exponentially and hang.
+          const pattern = `a%`.repeat(19) + `a`
+          const nearMiss = `a`.repeat(200) + `b`
+          const likeFunc = compileExpression(
+            new Func(`like`, [new Value(nearMiss), new Value(pattern)]),
+          )
+          const ilikeFunc = compileExpression(
+            new Func(`ilike`, [
+              new Value(nearMiss.toUpperCase()),
+              new Value(pattern),
+            ]),
+          )
+
+          const start = performance.now()
+          expect(likeFunc({})).toBe(false)
+          expect(ilikeFunc({})).toBe(false)
+          expect(performance.now() - start).toBeLessThan(1000)
         })
 
         it(`handles like with null value (3-valued logic)`, () => {

@@ -1167,10 +1167,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`main_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
 
@@ -1181,10 +1178,7 @@ describe(`Query Optimizer`, () => {
         expect(joinClause.from.type).toBe(`queryRef`)
         if (joinClause.from.type === `queryRef`) {
           expect(joinClause.from.query.where).toContainEqual(
-            createEq(
-              createPropRef(`other_users`, `department_id`),
-              createValue(2),
-            ),
+            createEq(createPropRef(`u`, `department_id`), createValue(2)),
           )
         }
       }
@@ -1301,10 +1295,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`filtered_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1429,10 +1420,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`sorted_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1485,7 +1473,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(createPropRef(`users`, `department_id`), createValue(1)),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })

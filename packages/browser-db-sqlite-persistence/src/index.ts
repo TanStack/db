@@ -11,9 +11,18 @@ export type { BrowserCollectionCoordinatorOptions } from './browser-coordinator'
 export {
   DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
   DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+  DuplicateRemoteSubsetOwnerError,
+  IndeterminateCommitError,
+  PersistedCollectionDurabilityError,
+  RemoteSubsetWireValueError,
   persistedCollectionOptions,
 } from '@tanstack/db-sqlite-persistence-core'
 export type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
+  IndeterminateCommitRequestType,
+  RemoteSubsetOwner,
+  RemoteSubsetWireExpression,
+  RemoteSubsetWireValue,
+  TransportedLoadSubsetOptions,
 } from '@tanstack/db-sqlite-persistence-core'

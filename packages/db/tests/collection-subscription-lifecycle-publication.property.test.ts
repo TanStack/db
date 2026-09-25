@@ -623,7 +623,7 @@ async function runPublicationHistory(
   const subscription = collection.subscribeChanges(
     (changes) => {
       const batch = changes.map((change): PublicationChange => {
-        const key = change.key
+        const key: unknown = change.key
         if (key !== `a` && key !== `b` && key !== `c` && key !== `d`) {
           throw new Error(`publication used an unknown row key`)
         }
