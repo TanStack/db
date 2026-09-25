@@ -5,6 +5,7 @@ import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
+import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { eq, gte } from '../../src/query/builder/functions.js'
@@ -16,6 +17,7 @@ import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
+import type { DeltaEvent } from '../../src/query/effect.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -127,14 +129,16 @@ let harnessId = 0
 
 // A finite request recorder, not another production identity implementation.
 // Preserve fields and primitive kinds; reject opaque values rather than merging
-// them into an empty object. Signals/subscriptions are ownership, not demand.
+// them into an empty object. Signals/subscriptions are ownership, while
+// refetch controls the attempt; none of the three changes demand identity.
 function requestFingerprint(options: LoadSubsetOptions): string {
   const semantic = new Set([`where`, `orderBy`, `limit`, `offset`, `cursor`])
   for (const key of Reflect.ownKeys(options)) {
     if (
       !semantic.has(String(key)) &&
       key !== `signal` &&
-      key !== `subscription`
+      key !== `subscription` &&
+      key !== `refetch`
     )
       throw new Error(`Unsupported request field ${String(key)}`)
   }
@@ -692,7 +696,7 @@ async function observeFinitePrefixMutation(
       sync: (operations) => {
         sync = operations
         operations.markReady()
-        return {
+        const deduplicated = new DeduplicatedLoadSubset({
           loadSubset: async (options) => {
             requests++
             let selected = [...truth.values()].sort(
@@ -728,6 +732,9 @@ async function observeFinitePrefixMutation(
             const receipt = operations.commit()
             if (receipt !== true) await receipt
           },
+        })
+        return {
+          loadSubset: deduplicated.loadSubset,
           unloadSubset: () => {},
         }
       },
@@ -811,6 +818,490 @@ async function observeFinitePrefixMutation(
   )
 }
 
+async function observeMutationDuringBoundedRepair(): Promise<{
+  rows: Array<number>
+  requests: number
+  publications: Array<Array<number>>
+}> {
+  const truth = new Map<number, Row>([
+    [1, { id: 1, rank: 1, eligible: true, label: `first` }],
+    [2, { id: 2, rank: 2, eligible: true, label: `second` }],
+    [3, { id: 3, rank: 3, eligible: true, label: `third` }],
+  ])
+  const delivered = new Set<number>()
+  const repairPrefixStarted = createDeferred<void>()
+  const releaseRepairPrefix = createDeferred<void>()
+  const repairTieStarted = createDeferred<void>()
+  const releaseRepairTie = createDeferred<void>()
+  const publications: Array<Array<number>> = []
+  let heldRepairPrefix = false
+  let heldRepairTie = false
+  let requests = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let commit!: () => true | Promise<void>
+
+  const source = createCollection<Row, number>({
+    id: `ordered-mutation-during-repair-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        operations.markReady()
+        const apply = async (options: LoadSubsetOptions) => {
+          let selected = [...truth.values()].filter(
+            (row) =>
+              (!options.where ||
+                evaluateReferenceExpression(options.where, row) === true) &&
+              (!options.cursor ||
+                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                  true),
+          )
+          selected.sort(
+            (left, right) => left.rank - right.rank || left.id - right.id,
+          )
+          const offset = options.cursor ? 0 : (options.offset ?? 0)
+          selected = selected.slice(
+            offset,
+            options.limit === undefined ? undefined : offset + options.limit,
+          )
+          const additions = selected.filter(({ id }) => !delivered.has(id))
+          if (additions.length === 0) return
+          begin()
+          for (const row of additions) {
+            delivered.add(row.id)
+            write({ type: `insert`, value: { ...row } })
+          }
+          const receipt = commit()
+          if (receipt !== true) await receipt
+        }
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            requests++
+            const isRepairPrefix =
+              options.refetch === true &&
+              options.orderBy !== undefined &&
+              options.cursor === undefined
+            if (isRepairPrefix && !heldRepairPrefix) {
+              heldRepairPrefix = true
+              repairPrefixStarted.resolve()
+              return releaseRepairPrefix.promise.then(() => apply(options))
+            }
+            const isRepairTie =
+              options.refetch === true &&
+              options.orderBy === undefined &&
+              options.where !== undefined
+            if (isRepairTie && !heldRepairTie) {
+              heldRepairTie = true
+              repairTieStarted.resolve()
+              return releaseRepairTie.promise.then(() => apply(options))
+            }
+            return apply(options)
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank)
+      .limit(1),
+  )
+  const subscription = live.subscribeChanges(() => {
+    publications.push(live.toArray.map(({ id }) => id))
+  })
+
+  return withHistoryCleanup(
+    async () => {
+      await live.preload()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+      publications.length = 0
+
+      const first = { ...truth.get(1)!, rank: 10 }
+      truth.set(1, first)
+      begin()
+      write({ type: `update`, value: { ...first } })
+      const firstReceipt = commit()
+      if (firstReceipt !== true) await firstReceipt
+      await repairPrefixStarted.promise
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      releaseRepairPrefix.resolve()
+      await repairTieStarted.promise
+
+      const second = { ...truth.get(2)!, rank: 20 }
+      truth.set(2, second)
+      begin()
+      write({ type: `update`, value: { ...second } })
+      const secondReceipt = commit()
+      if (secondReceipt !== true) await secondReceipt
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      releaseRepairTie.resolve()
+      await vi.waitFor(() =>
+        expect(live.toArray.map(({ id }) => id)).toEqual([3]),
+      )
+      expect(publications).toEqual([[3]])
+      expect(requests).toBeGreaterThanOrEqual(6)
+      return {
+        rows: live.toArray.map(({ id }) => id),
+        requests,
+        publications: publications.map((rows) => [...rows]),
+      }
+    },
+    () => [
+      () => releaseRepairPrefix.resolve(),
+      () => releaseRepairTie.resolve(),
+      () => subscription.unsubscribe(),
+      () => live.cleanup(),
+      () => source.cleanup(),
+    ],
+  )
+}
+
+async function observeHeldEffectRepair(
+  repairPrefix: `synchronous` | `asynchronous`,
+): Promise<Array<Array<number>>> {
+  const truth: Array<Row> = [
+    { id: 1, rank: 1, eligible: true, label: `first` },
+    { id: 2, rank: 2, eligible: true, label: `second` },
+  ]
+  const repairStarted = createDeferred<void>()
+  const releaseRepair = createDeferred<void>()
+  const effectRows = new Set<number>()
+  const publications: Array<Array<number>> = []
+  let recovering = false
+  let loadCount = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let commit!: () => void
+
+  const source = createCollection<Row, number>({
+    id: `ordered-held-effect-repair-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        operations.markReady()
+        const apply = (options: LoadSubsetOptions) => {
+          const selected = truth
+            .filter(
+              (row) =>
+                (!options.where ||
+                  evaluateReferenceExpression(options.where, row) === true) &&
+                (!options.cursor ||
+                  evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                    true),
+            )
+            .sort((left, right) => left.rank - right.rank || left.id - right.id)
+            .slice(
+              options.offset ?? 0,
+              options.limit === undefined
+                ? undefined
+                : (options.offset ?? 0) + options.limit,
+            )
+          begin()
+          for (const row of selected) {
+            write({ type: `insert`, value: { ...row } })
+          }
+          commit()
+        }
+        return {
+          loadSubset: (options) => {
+            loadCount++
+            const isRepair =
+              recovering &&
+              options.orderBy !== undefined &&
+              options.limit === 1 &&
+              options.cursor === undefined
+            if (!isRepair) {
+              apply(options)
+              return true
+            }
+            if (repairPrefix === `synchronous`) {
+              apply(options)
+              return true
+            }
+            repairStarted.resolve()
+            return releaseRepair.promise.then(() => apply(options))
+          },
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    onBatch: (events) => {
+      for (const event of events) {
+        if (event.type === `exit`) effectRows.delete(event.key)
+        else effectRows.add(event.key)
+      }
+      publications.push([...effectRows].sort((left, right) => left - right))
+    },
+  })
+
+  return withHistoryCleanup(
+    async () => {
+      await vi.waitFor(() => expect([...effectRows]).toEqual([1]))
+      await vi.waitFor(() => expect(loadCount).toBeGreaterThanOrEqual(2))
+      await flushPromises()
+      publications.length = 0
+      recovering = true
+      const removed = truth.shift()!
+      begin()
+      write({ type: `delete`, value: removed })
+      commit()
+      if (repairPrefix === `asynchronous`) {
+        await repairStarted.promise
+        await flushPromises()
+
+        expect(
+          [...effectRows],
+          `last complete effect result while held`,
+        ).toEqual([1])
+        expect(publications, `no intermediate effect publication`).toEqual([])
+
+        releaseRepair.resolve()
+      }
+      await vi.waitFor(() => expect([...effectRows]).toEqual([2]))
+      expect(publications).toEqual([[2]])
+      return publications.map((rows) => [...rows])
+    },
+    () => [
+      () => releaseRepair.resolve(),
+      () => effect.dispose(),
+      () => source.cleanup(),
+    ],
+  )
+}
+
+async function observeHeldEffectDelta(
+  history: `absent-cycle` | `present-update-exit`,
+): Promise<{
+  batches: Array<Array<string>>
+  rows: Array<number>
+  exitedValues: Map<number, Row>
+}> {
+  const limit = history === `absent-cycle` ? 1 : 2
+  const truth = new Map<number, Row>(
+    (history === `absent-cycle`
+      ? [
+          { id: 1, rank: 1, eligible: true, label: `first` },
+          { id: 3, rank: 3, eligible: true, label: `third` },
+        ]
+      : [
+          { id: 1, rank: 1, eligible: true, label: `first` },
+          { id: 2, rank: 2, eligible: true, label: `second` },
+          { id: 3, rank: 3, eligible: true, label: `third` },
+          { id: 4, rank: 4, eligible: true, label: `fourth` },
+        ]
+    ).map((row) => [row.id, row]),
+  )
+  const delivered = new Set<number>()
+  const repairStarted = createDeferred<void>()
+  const releaseRepair = createDeferred<void>()
+  const effectRows = new Map<number, Row>()
+  const batches: Array<Array<string>> = []
+  const exitedValues = new Map<number, Row>()
+  let heldRepair = false
+  let loadCount = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let commit!: () => true | Promise<void>
+
+  const source = createCollection<Row, number>({
+    id: `ordered-held-effect-delta-${history}-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        operations.markReady()
+        const apply = async (options: LoadSubsetOptions) => {
+          let selected = [...truth.values()].filter(
+            (row) =>
+              (!options.where ||
+                evaluateReferenceExpression(options.where, row) === true) &&
+              (!options.cursor ||
+                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                  true),
+          )
+          selected.sort(
+            (left, right) => left.rank - right.rank || left.id - right.id,
+          )
+          const offset = options.cursor ? 0 : (options.offset ?? 0)
+          selected = selected.slice(
+            offset,
+            options.limit === undefined ? undefined : offset + options.limit,
+          )
+          const additions = selected.filter(({ id }) => !delivered.has(id))
+          if (additions.length === 0) return
+          begin()
+          for (const row of additions) {
+            delivered.add(row.id)
+            write({ type: `insert`, value: { ...row } })
+          }
+          const receipt = commit()
+          if (receipt !== true) await receipt
+        }
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            loadCount++
+            const isRepairPrefix =
+              options.refetch === true &&
+              options.orderBy !== undefined &&
+              options.cursor === undefined
+            if (isRepairPrefix && !heldRepair) {
+              heldRepair = true
+              repairStarted.resolve()
+              return releaseRepair.promise.then(() => apply(options))
+            }
+            return apply(options)
+          },
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(limit),
+    onBatch: (events: Array<DeltaEvent<Row, number>>) => {
+      const labels: Array<string> = []
+      for (const event of events) {
+        labels.push(`${event.type}:${String(event.key)}`)
+        if (event.type === `exit`) {
+          exitedValues.set(event.key, copiedRow(event.value))
+          effectRows.delete(event.key)
+        } else {
+          effectRows.set(event.key, { ...event.value })
+        }
+      }
+      batches.push(labels)
+    },
+  })
+
+  const applySourceChange = async (
+    type: `insert` | `update` | `delete`,
+    row: Row,
+  ) => {
+    begin()
+    write({ type, value: { ...row } })
+    const receipt = commit()
+    if (receipt !== true) await receipt
+  }
+
+  return withHistoryCleanup(
+    async () => {
+      const initialIds = history === `absent-cycle` ? [1] : [1, 2]
+      await vi.waitFor(() =>
+        expect([...effectRows.keys()].sort((a, b) => a - b)).toEqual(
+          initialIds,
+        ),
+      )
+      await vi.waitFor(() => expect(loadCount).toBeGreaterThanOrEqual(2))
+      await flushPromises()
+      batches.length = 0
+
+      const first = truth.get(1)!
+      truth.delete(1)
+      delivered.delete(1)
+      await applySourceChange(`delete`, first)
+      await repairStarted.promise
+
+      if (history === `absent-cycle`) {
+        const transient: Row = {
+          id: 2,
+          rank: 2,
+          eligible: true,
+          label: `transient`,
+        }
+        delivered.add(transient.id)
+        await applySourceChange(`insert`, transient)
+        delivered.delete(transient.id)
+        await applySourceChange(`delete`, transient)
+      } else {
+        const previous = truth.get(2)!
+        const updated = { ...previous, rank: 20, label: `updated` }
+        truth.set(2, updated)
+        await applySourceChange(`update`, updated)
+        truth.delete(2)
+        delivered.delete(2)
+        await applySourceChange(`delete`, updated)
+      }
+
+      expect(batches).toEqual([])
+      releaseRepair.resolve()
+      const expectedIds = history === `absent-cycle` ? [3] : [3, 4]
+      await vi.waitFor(() =>
+        expect([...effectRows.keys()].sort((a, b) => a - b)).toEqual(
+          expectedIds,
+        ),
+      )
+
+      expect(batches).toHaveLength(1)
+      const flattened = batches.flat()
+      if (history === `absent-cycle`) {
+        expect(flattened).not.toContain(`update:2`)
+        expect(flattened).not.toContain(`enter:2`)
+        expect(flattened).not.toContain(`exit:2`)
+      } else {
+        expect(flattened).toContain(`exit:2`)
+        expect(flattened).not.toContain(`update:2`)
+        expect(exitedValues.get(2)).toEqual({
+          id: 2,
+          rank: 2,
+          eligible: true,
+          label: `second`,
+        })
+      }
+      return {
+        batches: batches.map((batch) => [...batch]),
+        rows: [...effectRows.keys()].sort((a, b) => a - b),
+        exitedValues,
+      }
+    },
+    () => [
+      () => releaseRepair.resolve(),
+      () => effect.dispose(),
+      () => source.cleanup(),
+    ],
+  )
+}
+
 describe(`ordered source work oracle`, () => {
   it(`rejects scrambled order and partial or regressed initial publications`, () => {
     const rows: Array<Row> = [
@@ -887,6 +1378,37 @@ describe(`ordered source work oracle`, () => {
       expect(effect.publications.at(-1)).toEqual(collection.publications.at(-1))
     },
   )
+
+  it(`holds the last complete Effect result across an asynchronous prefix and synchronous tie repair`, async () => {
+    await expect(observeHeldEffectRepair(`asynchronous`)).resolves.toEqual([
+      [2],
+    ])
+  })
+
+  it(`publishes one Effect replacement when ordered repair settles synchronously`, async () => {
+    await expect(observeHeldEffectRepair(`synchronous`)).resolves.toEqual([[2]])
+  })
+
+  it(`restarts bounded repair when another order mutation arrives during its tie request`, async () => {
+    await expect(observeMutationDuringBoundedRepair()).resolves.toMatchObject({
+      rows: [3],
+      publications: [[3]],
+    })
+  })
+
+  it(`emits no Effect delta for a row that enters and exits during held repair`, async () => {
+    await expect(observeHeldEffectDelta(`absent-cycle`)).resolves.toMatchObject(
+      {
+        rows: [3],
+      },
+    )
+  })
+
+  it(`emits the published value when an updated row exits during held repair`, async () => {
+    await expect(
+      observeHeldEffectDelta(`present-update-exit`),
+    ).resolves.toMatchObject({ rows: [3, 4] })
+  })
 
   it(`loads each source of a filtered join once`, async () => {
     type Order = {

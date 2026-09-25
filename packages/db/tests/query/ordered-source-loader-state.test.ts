@@ -98,6 +98,135 @@ function fakeSubscription(
 }
 
 describe(`Ordered source request ownership`, () => {
+  it(`reissues a bounded prefix when settled source ordering is invalidated`, async () => {
+    const requests: Array<Observed> = []
+    const releases: Array<LoadSubsetOptions> = []
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({
+        index: undefined,
+        offset: 2,
+        limit: 2,
+        dataNeeded: () => 0,
+      }),
+      fakeSubscription(requests, releases),
+      `row`,
+    )
+    let repair: Promise<unknown> | undefined
+
+    try {
+      loader.start()
+      const initial = (
+        loader as unknown as { pending: Promise<unknown> | undefined }
+      ).pending!
+      requests[0]!.deferred.resolve()
+      await initial
+
+      loader.invalidateSourceOrdering()
+      repair = loader.loadMore()
+
+      expect(requests).toHaveLength(2)
+      expect(requests[1]!.method).toBe(`snapshot`)
+      expect(
+        requests[1]!.options.orderBy?.map(({ expression, compareOptions }) => ({
+          path: expression instanceof PropRef ? expression.path : undefined,
+          direction: compareOptions.direction,
+        })),
+      ).toStrictEqual([{ path: [`rank`], direction: `asc` }])
+      expect(requests[1]!.options.limit).toBe(4)
+      expect(requests[1]!.options.refetch).toBe(true)
+      expect(requests[1]!.options.cursor).toBeUndefined()
+      expect(requests[1]!.options.offset).toBeUndefined()
+    } finally {
+      for (const request of requests) request.deferred.resolve()
+      await Promise.allSettled(repair ? [repair] : [])
+      loader.dispose()
+    }
+  })
+
+  it(`retains finite leases after bounded repair fails until full-source recovery succeeds`, async () => {
+    const requests: Array<{
+      options: RequestOptions
+      acquisition: LoadSubsetOptions
+      deferred: ReturnType<typeof createDeferred>
+    }> = []
+    const releases: Array<number> = []
+    const request = (options: RequestOptions) => {
+      const deferred = createDeferred()
+      const acquisition: LoadSubsetOptions = {
+        orderBy: options.orderBy,
+        limit: options.limit,
+        where: options.where,
+        cursor: options.cursor,
+        offset: options.offset,
+      }
+      const index = requests.length
+      requests.push({ options, acquisition, deferred })
+      options.onLoadSubsetResult?.(deferred.promise, acquisition, () => {
+        releases.push(index)
+      })
+    }
+    const subscription = {
+      hasPendingTruncateReplacement: false,
+      readOrderedSnapshot: () => [{ value: { id: 1, rank: 1 } }],
+      setOrderByIndex: () => {},
+      requestLimitedSnapshot: request,
+      requestSnapshot: request,
+    } as unknown as CollectionSubscription
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({
+        index: undefined,
+        dataNeeded: () => 0,
+      }),
+      subscription,
+      `row`,
+    )
+    const pending = () =>
+      (loader as unknown as { pending: Promise<unknown> | undefined }).pending!
+    const settle = async (index: number) => {
+      const participant = pending()
+      requests[index]!.deferred.resolve()
+      await participant
+    }
+
+    try {
+      loader.start()
+      await settle(0)
+      await settle(1)
+
+      loader.invalidateSourceOrdering()
+      loader.loadMore()
+      await settle(2)
+      expect(requests).toHaveLength(4)
+
+      // Core cannot know whether the failed adapter request wrote a partial
+      // result, so finite continuation is no longer authoritative.
+      const failedTie = pending()
+      const failure = new Error(`partial bounded-repair failure`)
+      requests[3]!.deferred.reject(failure)
+      await expect(failedTie).rejects.toBe(failure)
+
+      const retry = loader.loadMore(1)
+      expect(retry).toBeDefined()
+      expect(requests).toHaveLength(5)
+      expect(requests[4]!.options.orderBy).toBeUndefined()
+      expect(requests[4]!.options.where).toBeUndefined()
+      expect(requests[4]!.options.limit).toBeUndefined()
+      expect(requests[4]!.options.cursor).toBeUndefined()
+      expect(requests[4]!.options.offset).toBeUndefined()
+      await settle(4)
+
+      expect(
+        requests.map(({ options }) =>
+          options.orderBy ? `prefix` : options.where ? `tie` : `full-source`,
+        ),
+      ).toEqual([`prefix`, `tie`, `prefix`, `tie`, `full-source`])
+      expect(releases).toEqual([3, 0, 1, 2])
+    } finally {
+      loader.dispose()
+      for (const observed of requests) observed.deferred.resolve()
+    }
+  })
+
   it.each([`success`, `failure`] as const)(
     `keeps a failed public window private when its older tie request ends in %s`,
     async (olderOutcome) => {
@@ -758,9 +887,11 @@ describe(`Successful finite demand retirement`, () => {
         loader.invalidateSourceOrdering()
         loader.loadMore()
         requests[2]!.deferred.resolve()
+        await participants[2]
+        requests[3]!.deferred.resolve()
         if (action === `throw`)
-          await expect(participants[2]).rejects.toBe(failure)
-        else await participants[2]
+          await expect(participants[3]).rejects.toBe(failure)
+        else await participants[3]
         expect(releases).toEqual(
           requests
             .slice(0, action === `truncate` || action === `dispose` ? 1 : 2)
@@ -774,7 +905,7 @@ describe(`Successful finite demand retirement`, () => {
         }
         loader.loadMore(1)
         expect(new Set(releases).size).toBe(releases.length)
-        expect(requests).toHaveLength(3)
+        expect(requests).toHaveLength(4)
       } finally {
         loader.dispose()
         for (const request of requests) request.deferred.resolve()

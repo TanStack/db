@@ -5,6 +5,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   eq,
+  getLoadSubsetDemandKey,
 } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
@@ -459,6 +460,82 @@ function createOnDemandCollection(idPrefix: string, rows: Array<Row>) {
     }),
   )
   return { queryClient, collection, queryFn }
+}
+
+async function expectRefetchRevalidatesExistingDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-existing-${collectionSequence++}`
+  let rows: Array<Row> = [{ id: `initial` }]
+  const queryKeyInputs: Array<LoadSubsetOptions> = []
+  const queryFn = vi.fn(() => Promise.resolve(rows.map((row) => ({ ...row }))))
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: (options) => {
+        queryKeyInputs.push(options)
+        return [id, getLoadSubsetDemandKey(options)]
+      },
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+
+  try {
+    await collection._sync.loadSubset({})
+    expect(collection.has(`initial`)).toBe(true)
+
+    rows = [{ id: `refetched` }]
+    await collection._sync.loadSubset({ refetch: true })
+
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(collection.has(`initial`)).toBe(false)
+    expect(collection.has(`refetched`)).toBe(true)
+    expect(
+      queryKeyInputs.every(
+        (options) => !Object.prototype.hasOwnProperty.call(options, `refetch`),
+      ),
+    ).toBe(true)
+    expect(
+      queryClient.getQueryCache().findAll({ queryKey: [id] }),
+    ).toHaveLength(1)
+  } finally {
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+async function expectRefetchRevalidatesCachedDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-cached-${collectionSequence++}`
+  const queryKey = [id]
+  queryClient.setQueryData(queryKey, [{ id: `cached` } satisfies Row])
+  const queryFn = vi.fn().mockResolvedValue([{ id: `fresh` } satisfies Row])
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+
+  try {
+    await collection._sync.loadSubset({ refetch: true })
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(collection.has(`cached`)).toBe(false)
+    expect(collection.has(`fresh`)).toBe(true)
+  } finally {
+    await collection.cleanup()
+    queryClient.clear()
+  }
 }
 
 type IdentityForm =
@@ -988,6 +1065,14 @@ function expectLateRetiredQuery(observation: RetiredQueryObservation): void {
 }
 
 describe(`loadSubset lifecycle oracle`, () => {
+  it(`refetches an existing semantic demand without changing its query or unload identity`, async () => {
+    await expectRefetchRevalidatesExistingDemand()
+  })
+
+  it(`refetches a newly observed cached demand before reporting it applied`, async () => {
+    await expectRefetchRevalidatesCachedDemand()
+  })
+
   it(`reports an initial query failure and recovers after a successful refetch`, async () => {
     await expectInitialQueryFailureStatus()
   })

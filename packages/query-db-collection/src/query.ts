@@ -1363,8 +1363,10 @@ export function queryCollectionOptions(
      */
     const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
-        // Function-based queryKey: use it to build the key from opts
-        return queryKey(opts)
+        // Refetch starts another acquisition for the same semantic demand. It
+        // must not create a second Query cache or unload identity.
+        const { refetch: _refetch, ...queryKeyOptions } = opts
+        return queryKey(queryKeyOptions)
       } else if (syncMode === `on-demand`) {
         // A static on-demand key is extended by exact semantic demand so
         // equivalent predicates share one entry while distinct windows do not.
@@ -1442,6 +1444,15 @@ export function queryCollectionOptions(
         return settlement === true ? undefined : settlement
       })
 
+    const refetchAndWaitForApplication = async (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+    ): Promise<void> => {
+      await observer.refetch({ throwOnError: true })
+      const settlement = getResultApplicationSettlement(hashedQueryKey)
+      if (settlement !== true) await settlement
+    }
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
@@ -1493,6 +1504,10 @@ export function queryCollectionOptions(
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
         const currentResult = observer.getCurrentResult()
+
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(observer, hashedQueryKey)
+        }
 
         if (
           currentResult.isSuccess &&
@@ -1576,6 +1591,9 @@ export function queryCollectionOptions(
           subscribeToQuery(localObserver, hashedQueryKey)
         }
         const currentResult = localObserver.getCurrentResult()
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(localObserver, hashedQueryKey)
+        }
         if (currentResult.isError && !currentResult.isFetching) {
           return Promise.reject(currentResult.error)
         }

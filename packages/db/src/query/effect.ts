@@ -7,6 +7,7 @@ import {
 import { getActiveTransaction } from '../transactions.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
+import { deepEquals } from '../utils.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -398,6 +399,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Ordered subscription state for cursor-based loading
   private readonly orderedLoaders = new Map<string, OrderedSourceLoader>()
+  // An asynchronous authoritative repair may update the private D2 state in
+  // several prefix/tie/refill steps. Keep their net Effect delta private until
+  // the final participant settles, matching live-query Collection publication.
+  private readonly pendingOrderedPublications = new Set<Promise<unknown>>()
+  private orderedPublicationFailed = false
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
@@ -409,6 +415,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Output accumulator
   private pendingChanges: Map<unknown, EffectChanges<TRow>> = new Map()
+  // Callback-visible result. Held repair deltas are classified against this
+  // last coherent membership rather than their net multiplicity alone.
+  private readonly publishedRows = new Map<unknown, TRow>()
 
   // skipInitial state
   private readonly skipInitial: boolean
@@ -624,7 +633,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
       if (orderByInfo) {
-        const loader = new OrderedSourceLoader(orderByInfo, subscription, alias)
+        const loader = new OrderedSourceLoader(
+          orderByInfo,
+          subscription,
+          alias,
+          (result, holdPublication) => {
+            if (holdPublication) {
+              this.trackOrderedPublication(Promise.resolve(result))
+            }
+          },
+        )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
       }
@@ -795,6 +813,33 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.runGraph()
   }
 
+  /** Hold Effect callback publication across one authoritative repair chain. */
+  private trackOrderedPublication(promise: Promise<unknown>): void {
+    if (this.disposed) return
+    if (this.pendingOrderedPublications.size === 0) {
+      this.orderedPublicationFailed = false
+    }
+    this.pendingOrderedPublications.add(promise)
+    const finish = (succeeded: boolean) => {
+      if (!this.pendingOrderedPublications.delete(promise)) return
+      if (!succeeded) this.orderedPublicationFailed = true
+      if (
+        succeeded &&
+        !this.orderedPublicationFailed &&
+        this.pendingOrderedPublications.size === 0 &&
+        !this.disposed
+      ) {
+        // The repair chain already drove its private D2 state to quiescence.
+        // Run once more to publish the accumulated net delta.
+        this.scheduleGraphRun()
+      }
+    }
+    void promise.then(
+      () => finish(true),
+      () => finish(false),
+    )
+  }
+
   /**
    * Send changes to the D2 input for the given lexical source.
    * Returns the number of multiset entries sent.
@@ -851,18 +896,27 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private flushPendingChanges(): void {
     if (this.pendingChanges.size === 0) return
 
-    // If skipInitial and initial load isn't complete yet, discard
-    if (this.skipInitial && !this.initialLoadComplete) {
-      this.pendingChanges = new Map()
+    if (
+      this.orderedPublicationFailed ||
+      this.pendingOrderedPublications.size > 0
+    ) {
       return
     }
+
+    const shouldPublish = !this.skipInitial || this.initialLoadComplete
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
     for (const [key, changes] of this.pendingChanges) {
-      const event = classifyDelta<TRow, TKey>(key as TKey, changes)
+      const event = classifyDelta<TRow, TKey>(
+        key as TKey,
+        changes,
+        this.publishedRows,
+      )
       if (event) {
-        events.push(event)
+        if (event.type === `exit`) this.publishedRows.delete(key)
+        else this.publishedRows.set(key, event.value)
+        if (shouldPublish) events.push(event)
       }
     }
 
@@ -970,6 +1024,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private clearPipelineState(): void {
     this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
+    this.publishedRows.clear()
+    this.pendingOrderedPublications.clear()
+    this.orderedPublicationFailed = false
     this.lazySources.clear()
     this.demand.clear()
     this.builderDependencies.clear()
@@ -1048,31 +1105,42 @@ function accumulateEffectChanges<T>(
 function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
+  publishedRows: ReadonlyMap<unknown, TRow>,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
+  const wasPresent = publishedRows.has(key)
+  const previousValue = publishedRows.get(key)
+  const nextMultiplicity = Number(wasPresent) + inserts - deletes
+  const isPresent = nextMultiplicity > 0
 
-  if (inserts > 0 && deletes === 0) {
+  if (!wasPresent && isPresent) {
     // Row entered the query result
     return { type: `enter`, key, value: insertValue! }
   }
 
-  if (deletes > 0 && inserts === 0) {
+  if (wasPresent && !isPresent) {
     // Row exited the query result — value is the exiting value,
     // previousValue is omitted (it would be identical to value)
-    return { type: `exit`, key, value: deleteValue! }
+    return { type: `exit`, key, value: previousValue ?? deleteValue! }
   }
 
-  if (inserts > 0 && deletes > 0) {
+  if (
+    wasPresent &&
+    isPresent &&
+    insertValue !== undefined &&
+    !deepEquals(previousValue, insertValue)
+  ) {
     // Row updated within the query result
     return {
       type: `update`,
       key,
-      value: insertValue!,
-      previousValue: deleteValue!,
+      value: insertValue,
+      previousValue: previousValue!,
     }
   }
 
-  // inserts === 0 && deletes === 0 — no net change (should not happen)
+  // The row was absent both before and after the held delta, or its final
+  // value is equal to the last callback-visible value.
   return undefined
 }
 
