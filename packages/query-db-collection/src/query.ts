@@ -267,9 +267,11 @@ export interface QueryCollectionConfig<
  * `throwOnError` applies to both Query fetch and Collection application
  * failures. At the fetch boundary it applies only to Query fetch failure; a
  * later application failure is recorded by the Collection error utilities.
- * A successful Query result that the adapter cannot apply rejects with
- * `InvalidQueryResultError` regardless of `throwOnError`. If application is
- * deferred, the promise waits for the replacement result to apply.
+ * At the application boundary, a successful Query result that the adapter
+ * cannot apply rejects with `InvalidQueryResultError` regardless of
+ * `throwOnError`. At the fetch boundary, that failure is recorded by the
+ * Collection error utilities. If application is deferred at the application
+ * boundary, the promise waits for the replacement result to apply.
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
@@ -1893,30 +1895,52 @@ export function queryCollectionOptions(
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
 
-    const readSuccessfulResultItems = (
+    const validateSuccessfulResultItems = (
       resultQueryKey: QueryKey,
       result: QueryObserverResult<any, any>,
-    ): Array<any> => {
+    ): { items: Array<any> } | { error: InvalidQueryResultError } => {
       const rawData = result.data
       const newItemsArray = select ? select(rawData) : rawData
 
-      if (
-        !Array.isArray(newItemsArray) ||
-        newItemsArray.some((item) => item === null || typeof item !== `object`)
-      ) {
-        const errorMessage = select
-          ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(resultQueryKey)}`
-          : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(resultQueryKey)}`
-
-        const error = new InvalidQueryResultError(errorMessage)
-        writeExceptionalResultSettlement(result, {
-          type: `rejected`,
-          error,
-        })
-        throw error
+      const source = select ? `select()` : `queryFn`
+      if (!Array.isArray(newItemsArray)) {
+        return {
+          error: new InvalidQueryResultError(
+            `@tanstack/query-db-collection: ${source} must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(resultQueryKey)}`,
+          ),
+        }
       }
 
-      return newItemsArray
+      const invalidItemIndex = newItemsArray.findIndex(
+        (item) => item === null || typeof item !== `object`,
+      )
+      if (invalidItemIndex !== -1) {
+        const invalidItem = newItemsArray[invalidItemIndex]
+        const invalidItemDescription =
+          invalidItem === null ? `null` : typeof invalidItem
+        return {
+          error: new InvalidQueryResultError(
+            `@tanstack/query-db-collection: ${source} must return an array of objects. Invalid item at index ${invalidItemIndex}: ${invalidItemDescription} for queryKey ${JSON.stringify(resultQueryKey)}`,
+          ),
+        }
+      }
+
+      return { items: newItemsArray }
+    }
+
+    const validateSuccessfulResultItemsForApplication = (
+      resultQueryKey: QueryKey,
+      result: QueryObserverResult<any, any>,
+    ): Array<any> => {
+      const validation = validateSuccessfulResultItems(resultQueryKey, result)
+      if (`error` in validation) {
+        writeExceptionalResultSettlement(result, {
+          type: `rejected`,
+          error: validation.error,
+        })
+        throw validation.error
+      }
+      return validation.items
     }
 
     const applySuccessfulResult = async (
@@ -1944,7 +1968,8 @@ export function queryCollectionOptions(
       }
 
       const newItemsArray =
-        validatedItems ?? readSuccessfulResultItems(queryKey, result)
+        validatedItems ??
+        validateSuccessfulResultItemsForApplication(queryKey, result)
 
       const currentSyncedItems: Map<string | number, any> = new Map(
         collection._state.syncedData.entries(),
@@ -2121,7 +2146,10 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(queryKey)
       // Validate before persistence I/O so the public refetch can observe this
       // result's application rejection instead of fulfilling early.
-      const validatedItems = readSuccessfulResultItems(queryKey, result)
+      const validatedItems = validateSuccessfulResultItemsForApplication(
+        queryKey,
+        result,
+      )
       const persistedBaseline =
         await loadPersistedBaselineForQuery(hashedQueryKey)
       if (
@@ -2250,7 +2278,13 @@ export function queryCollectionOptions(
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
           if (collection.deferDataRefresh) {
-            if (result.isFetching) return
+            if (result.isFetching) {
+              void getDeferredRefresh(
+                hashedQueryKey,
+                collection.deferDataRefresh,
+              )
+              return
+            }
             scheduleDeferredResultSettlement(
               hashedQueryKey,
               result,
@@ -2900,26 +2934,34 @@ export function queryCollectionOptions(
       // fetch authority used by the result handler. Let that queued handler
       // classify this result before reading its exceptional settlement.
       await new Promise<void>((resolve) => queueMicrotask(resolve))
-      if (activeSyncSession !== syncSession) throw new CancelledError()
       const exceptionalSettlement =
         readExceptionalSettlement(causalResult) ??
         readExceptionalSettlement(result) ??
         readExceptionalSettlement(startingResult)
-      if (exceptionalSettlement?.type === `rejected`) {
-        throw exceptionalSettlement.error
-      }
-      if (exceptionalSettlement?.type === `pending`) {
-        const replacement = await exceptionalSettlement.promise
-        if (!replacement.isSuccess && opts?.throwOnError) {
-          throw replacement.error
-        }
-        return replacement
-      }
-
       const settlement =
         fetchRecord?.settlement ??
         getRecordedResultApplicationSettlement(hashedQueryKey, result) ??
         getRecordedResultApplicationSettlement(hashedQueryKey, startingResult)
+      if (
+        activeSyncSession !== syncSession &&
+        exceptionalSettlement === undefined &&
+        settlement === undefined
+      ) {
+        throw new CancelledError()
+      }
+      if (awaitApplications) {
+        if (exceptionalSettlement?.type === `rejected`) {
+          throw exceptionalSettlement.error
+        }
+        if (exceptionalSettlement?.type === `pending`) {
+          const replacement = await exceptionalSettlement.promise
+          if (!replacement.isSuccess && opts?.throwOnError) {
+            throw replacement.error
+          }
+          return replacement
+        }
+      }
+
       if (awaitApplications && !isMutationPublicationBlocked() && settlement) {
         if (opts?.throwOnError) {
           await settlement

@@ -3653,13 +3653,33 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it.each([
-    [`non-array`, false, 42],
-    [`non-array`, true, 42],
-    [`null array member`, false, [null]],
-    [`null array member`, true, [null]],
+    {
+      invalidShape: `non-array`,
+      throwOnError: false,
+      invalidResult: 42,
+      diagnostic: `Got: number`,
+    },
+    {
+      invalidShape: `non-array`,
+      throwOnError: true,
+      invalidResult: 42,
+      diagnostic: `Got: number`,
+    },
+    {
+      invalidShape: `null array member`,
+      throwOnError: false,
+      invalidResult: [null],
+      diagnostic: `Invalid item at index 0: null`,
+    },
+    {
+      invalidShape: `null array member`,
+      throwOnError: true,
+      invalidResult: [null],
+      diagnostic: `Invalid item at index 0: null`,
+    },
   ] as const)(
-    `rejects a public refetch whose successful Query result has an invalid %s shape, throwOnError=%s`,
-    async (_invalidShape, throwOnError, invalidResult) => {
+    `rejects a public refetch whose successful Query result has an invalid $invalidShape shape, throwOnError=$throwOnError`,
+    async ({ throwOnError, invalidResult, diagnostic }) => {
       const id = `invalid-result-settlement`
       const queryClient = createQueryClient()
       const queryFn = vi
@@ -3706,6 +3726,11 @@ describe(`query collection ownership lifecycle`, () => {
       )
       expectPublicRefetchObservation(expected, operation, await refetch)
       expect(rejection).toBeInstanceOf(InvalidQueryResultError)
+      expect(rejection).toEqual(
+        expect.objectContaining({
+          message: expect.stringContaining(diagnostic),
+        }),
+      )
       expect(rows(collection)).toEqual([shared.id])
       expect(consoleError).toHaveBeenCalledTimes(1)
       expect(consoleError).toHaveBeenCalledWith(
@@ -3795,6 +3820,147 @@ describe(`query collection ownership lifecycle`, () => {
     })
     expectPublicRefetchObservation(expected, operation, observation)
     expect(collection.get(shared.id)?.name).toBe(replacement.name)
+  })
+
+  it(`starts the deferred replacement when the barrier resolves during a fetch`, async () => {
+    const id = `deferred-result-in-flight`
+    const barrier = createDeferred<void>()
+    const inFlight = createDeferred<Array<Item>>()
+    const initial = { ...shared, name: `Initial` }
+    const replacement = { ...shared, name: `Replacement` }
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([initial])
+      .mockImplementationOnce(() => inFlight.promise)
+      .mockResolvedValue([replacement])
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      collection.deferDataRefresh = null
+      barrier.resolve()
+      inFlight.resolve([initial])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.stateWhenReady()
+    collection.deferDataRefresh = barrier.promise
+    void collection.utils.refetch().catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+    collection.deferDataRefresh = null
+    barrier.resolve()
+
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    await vi.waitFor(() => {
+      expect(collection.get(shared.id)?.name).toBe(replacement.name)
+    })
+  })
+
+  it(`classifies post-write authority before settling a deferred replacement`, async () => {
+    const queryKey = [`deferred-result-post-write-authority`]
+    const replacementBarrier = createDeferred<void>()
+    const writerBarrier = createDeferred<void>()
+    const initial = { ...shared, name: `Initial` }
+    const skipped = { ...shared, name: `Skipped` }
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([skipped])
+      .mockResolvedValueOnce([null] as unknown as Array<Item>)
+    const reader = createCollection(
+      queryCollectionOptions<Item>({
+        id: `deferred-result-authority-reader`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `eager`,
+        startSync: true,
+      }),
+    )
+    const writer = createCollection(
+      queryCollectionOptions<Item>({
+        id: `deferred-result-authority-writer`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    cleanups.push(async () => {
+      consoleError.mockRestore()
+      reader.deferDataRefresh = null
+      writer.deferDataRefresh = null
+      replacementBarrier.resolve()
+      writerBarrier.resolve()
+      await Promise.allSettled([reader.cleanup(), writer.cleanup()])
+      queryClient.clear()
+    })
+
+    await reader.stateWhenReady()
+    await writer._sync.loadSubset({})
+    reader.deferDataRefresh = replacementBarrier.promise
+    writer.deferDataRefresh = writerBarrier.promise
+
+    let observation: PublicRefetchObservation = { settled: false }
+    const refetch = reader.utils.refetch({ throwOnError: true }).then(
+      () => {
+        observation = {
+          settled: true,
+          outcome: `fulfilled`,
+          rowCount: reader.size,
+        }
+        return undefined
+      },
+      (error: unknown) => {
+        observation = { settled: true, outcome: `rejected` }
+        return error
+      },
+    )
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+
+    const operation = `deferred-post-write-authority`
+    let expected = advanceResultSettlementModel(
+      startResultSettlementModel(operation),
+      {
+        type: `query-succeeded`,
+        operation,
+        result: `applicable`,
+        rowCount: 1,
+        deferOn: `replacement-barrier`,
+      },
+    )
+    expectPublicRefetchObservation(expected, operation, observation)
+
+    writer.utils.writeUpdate({ ...shared, name: `Manual` })
+    reader.deferDataRefresh = null
+    replacementBarrier.resolve()
+
+    const result = await refetch
+    expected = advanceResultSettlementModel(expected, {
+      type: `refresh-succeeded`,
+      barrier: `replacement-barrier`,
+      result: `invalid-shape`,
+    })
+    expectPublicRefetchObservation(expected, operation, observation)
+    expect(result).toBeInstanceOf(InvalidQueryResultError)
+    expect(queryFn).toHaveBeenCalledTimes(3)
+    expect(reader.get(shared.id)?.name).toBe(initial.name)
   })
 
   it(`cancels a deferred public refetch when cleanup retires it`, async () => {
