@@ -189,6 +189,23 @@ outside the public wire type and cannot be portably distinguished from its
 target. Untyped callers must not rely on Proxy identity, traps, or a
 Proxy-specific diagnostic; no non-standard detection is attempted.
 
+### Source replay ordering
+
+The persisted wrapper buffers authoritative source sync transactions and
+replays them into the Collection in FIFO order, one transaction at a time.
+Local optimistic mutations remain visible immediately; this queue governs
+source publication and its durable suffix. A source may mark a transaction
+`immediate` when it must update the authoritative base beneath an active
+optimistic layer. The wrapper still gives that transaction one FIFO turn and
+writes its durable suffix before admitting the next source turn.
+
+The wrapper deliberately rejects schedules that would require a second
+ordering mechanism. An `immediate` source transaction cannot enter while an
+earlier normal source publication is waiting, and a source transaction cannot
+cross a hydration cycle. These cases throw
+`InvalidPersistedCollectionConfigError` instead of reordering data or waiting
+in a dependency cycle.
+
 ### Atomic resume snapshots
 
 Persistence adapters implement
@@ -246,6 +263,11 @@ consumer can resume or query against uncertified durable state.
 - `InvalidPersistedStorageKeyError`
 - `InvalidPersistedStorageKeyEncodingError`
 - `PersistenceUnavailableError`
+
+Adapter and coordinator commit failures reject the applied receipt and become
+the collection's terminal sync error as `PersistedCollectionDurabilityError`.
+That error preserves its original `cause`, `code`, and `path`. Hydration and
+source errors remain distinct and are not wrapped as durability errors.
 
 ## Typical usage (via runtime wrappers)
 

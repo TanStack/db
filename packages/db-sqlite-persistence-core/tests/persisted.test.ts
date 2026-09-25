@@ -1,18 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
+import { fc, test as fcTest } from '@fast-check/vitest'
 import {
   BasicIndex,
   DbClient,
   IR,
+  NoPendingSyncTransactionCommitError,
+  NoPendingSyncTransactionWriteError,
+  SyncTransactionAbortedError,
   collectionOptions,
   createCollection,
   createTransaction,
 } from '@tanstack/db'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import {
   IndeterminateCommitError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
   InvalidSyncConfigError,
+  PersistedCollectionDurabilityError,
   SingleProcessCoordinator,
   createPersistedTableName,
   decodePersistedStorageKey,
@@ -33,6 +43,7 @@ import type {
 import type {
   Collection,
   LoadSubsetOptions,
+  PendingMutation,
   Subscription,
   SyncConfig,
   SyncMetadataApi,
@@ -41,36 +52,52 @@ import type {
 /**
  * # Does persisted wrapping preserve one Collection history?
  *
+ * RFC #1659 invariant 7 requires each accepted sync transaction to become
+ * durable, remain replayable, or fail through an observable channel.
  * Persistence adds a durable replica beneath an optional upstream sync source.
- * Startup hydrates rows and metadata, buffers concurrent remote work, then
+ * Startup hydrates rows and metadata, buffers concurrent source work, then
  * publishes one coherent public snapshot. Complete committed transactions
- * route through the configured collection owner. Publication may precede
- * durability settlement, but a later failure must stay observable.
+ * route through the configured collection owner. Publication precedes
+ * durability, but a rejected durability boundary must reject its applied
+ * receipt and fail-stop that sync run without admitting a suffix.
  *
- * The recording adapter is a plain durable-state model: Maps for rows and
- * metadata plus ordered transaction, index, load, and reload calls. Histories
- * vary hydration, source commits, applied receipts, remote subset demand,
- * acquisition release, retry, failure, cleanup, and restart. The driver uses
- * the real persisted wrapper, Collection, coordinator, transactions, and
- * indexes.
+ * `foldDurabilityLedger` is the independent model for append-only source
+ * obligations. The recording adapter is a plain durable-state model: Maps for
+ * rows and metadata plus ordered transaction, index, load, and reload calls.
+ * Histories cross hydration, held adapters, source FIFO ordering,
+ * independent/dependent aborts, open-transaction failure boundaries, ambient owner
+ * operations, applied-receipt rejection, remote subset demand, acquisition
+ * release, retry, coordinator replay, cleanup, and restart. Tests drive the
+ * real persisted wrapper, Collection, coordinator, adapter, transactions,
+ * indexes, and local mutation path.
  *
  * Refinement checkpoints compare public rows, durable state, metadata, request
  * data, sequence evidence, exact errors, and late-work fencing. Fixed hostile
  * values challenge wire admission. Controlled failures challenge publication
- * and durability classification. Focused Browser and Electron suites own the
+ * and durability classification. Fixed witnesses and bounded schedule tables
+ * preserve known failure paths, while omission and reordering controls
+ * challenge the model's judgment. Focused Browser and Electron suites own the
  * multiprocess transport and host-specific replay partitions.
  *
  * Known omissions: driver SQL behavior, native host ownership, and the shared
  * conformance portfolio have separate owners. This file proves the role
  * partition for non-single-process remote demand: an ownerless elected node
  * does not route, while a follower may route to the elected owner's registered
- * source.
+ * source. Native SQLite hosts, live Electric service behavior, adapter
+ * cancellation, and the open B2-failure/E4 schedule remain separate evidence.
  */
 
 type Todo = {
   id: string
   title: string
+  detail?: string
 }
+
+type TodoSyncParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
+
+const requestedOracleReplayProperty = readOracleRunConfig().replayProperty
+const describeUnlessOracleReplay =
+  requestedOracleReplayProperty === undefined ? describe : describe.skip
 
 const persistedKeySetEvidenceStatuses = [
   `consistent`,
@@ -238,6 +265,14 @@ function createRecordingAdapter(
         if (mutation.type === `delete`) {
           rows.delete(mutation.key as string)
           rowMetadata.delete(mutation.key as string)
+        } else if (mutation.type === `update`) {
+          rows.set(mutation.key as string, {
+            ...rows.get(mutation.key as string),
+            ...(mutation.value as Todo),
+          })
+          if (mutation.metadataChanged) {
+            rowMetadata.set(mutation.key as string, mutation.metadata)
+          }
         } else {
           rows.set(mutation.key as string, mutation.value as Todo)
           if (mutation.metadataChanged) {
@@ -278,6 +313,23 @@ function createRecordingAdapter(
   }
 
   return adapter
+}
+
+function overrideBaselineRows(
+  adapter: RecordingAdapter,
+  loadRows: () =>
+    | Array<{ key: string; value: Todo; metadata?: unknown }>
+    | Promise<Array<{ key: string; value: Todo; metadata?: unknown }>>,
+): () => void {
+  const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+  adapter.loadResumeSnapshot = async (...args) => {
+    const snapshot = await loadResumeSnapshot(...args)
+    if (args[1]?.includeRows === false) return snapshot
+    return { ...snapshot, rows: await loadRows() }
+  }
+  return () => {
+    adapter.loadResumeSnapshot = loadResumeSnapshot
+  }
 }
 
 function createNoopAdapter(): PersistenceAdapter {
@@ -367,6 +419,67 @@ function createCoordinatorHarness(): CoordinatorHarness {
   return harness
 }
 
+type FailStopCoordinatorHarness = PersistedCollectionCoordinator & {
+  emit: (payload: unknown, senderId?: string) => void
+  publishCalls: Array<ProtocolEnvelope<unknown>>
+  remoteEnsureCalls: Array<LoadSubsetOptions>
+  remoteReleaseCalls: Array<LoadSubsetOptions>
+  unsubscribeCalls: number
+}
+
+function createFailStopCoordinatorHarness(
+  collectionId: string,
+): FailStopCoordinatorHarness {
+  let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+  const harness: FailStopCoordinatorHarness = {
+    publishCalls: [],
+    remoteEnsureCalls: [],
+    remoteReleaseCalls: [],
+    unsubscribeCalls: 0,
+    getNodeId: () => `fail-stop-coordinator`,
+    subscribe: (_collectionId, onMessage) => {
+      subscriber = onMessage
+      return () => {
+        harness.unsubscribeCalls++
+        subscriber = undefined
+      }
+    },
+    publish: (_collectionId, message) => {
+      harness.publishCalls.push(message)
+    },
+    isLeader: () => true,
+    ensureLeadership: async () => {},
+    requestEnsurePersistedIndex: async () => {},
+    requestEnsureRemoteSubset: async (_collectionId, options) => {
+      harness.remoteEnsureCalls.push(options)
+    },
+    requestReleaseRemoteSubset: async (_collectionId, options) => {
+      harness.remoteReleaseCalls.push(options)
+    },
+    registerRemoteSubsetOwner: () => () => {},
+    requestApplyCommittedTx: (_collectionId, tx) =>
+      Promise.resolve({
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }),
+    emit: (payload, senderId = `remote-fail-stop-peer`) => {
+      subscriber?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId,
+        senderId,
+        ts: Date.now(),
+        payload,
+      })
+    },
+  }
+  return harness
+}
+
 const stripVirtualProps = <T extends Record<string, any> | undefined>(
   value: T,
 ): T => {
@@ -385,7 +498,1789 @@ async function flushAsyncWork(delayMs: number = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
 
-describe(`persistedCollectionOptions`, () => {
+function createEventGate(): {
+  promise: Promise<void>
+  resolve: () => void
+  reject: (error: unknown) => void
+} {
+  let resolve!: () => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+async function atPersistedOracleCheckpoint<T>(
+  promise: Promise<T>,
+  label: string,
+  timeout = 1000,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(`Persisted oracle checkpoint timed out: ${label}`),
+            ),
+          timeout,
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function cleanupPersistedOracle(
+  actions: Array<() => void | Promise<unknown>>,
+  hasPrimaryFailure: boolean,
+): Promise<void> {
+  const failures: Array<unknown> = []
+  for (const [index, action] of actions.entries()) {
+    try {
+      await atPersistedOracleCheckpoint(
+        Promise.resolve().then(action),
+        `cleanup stage ${index}`,
+        250,
+      )
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    if (hasPrimaryFailure) {
+      console.warn(
+        `Persisted oracle cleanup failed after the primary failure:`,
+        failures,
+      )
+    } else {
+      throw new AggregateError(failures, `Persisted oracle cleanup failed`)
+    }
+  }
+}
+
+type DurabilityLedgerEvent =
+  | { type: `begin`; transactionId: string }
+  | { type: `write`; transactionId: string; row: Todo }
+  | { type: `commit`; transactionId: string }
+  | { type: `abort`; transactionId: string }
+
+// RFC #1659 durability law: a source commit remains one append-only obligation
+// across a persistence hydration boundary. The independent fold deliberately
+// has no hydration phase, queue, generation, or production transaction helper.
+// These fixtures exercise the core adapter contract with in-memory storage;
+// they do not claim native SQLite host or device execution.
+function foldDurabilityLedger(events: ReadonlyArray<DurabilityLedgerEvent>): {
+  committedRows: Map<string, Todo>
+  commitOrder: Array<string>
+} {
+  const open = new Map<string, Array<Todo>>()
+  const committedRows = new Map<string, Todo>()
+  const commitOrder: Array<string> = []
+
+  for (const event of events) {
+    if (event.type === `begin`) {
+      open.set(event.transactionId, [])
+    } else if (event.type === `write`) {
+      open.get(event.transactionId)?.push(structuredClone(event.row))
+    } else if (event.type === `abort`) {
+      open.delete(event.transactionId)
+    } else {
+      const rows = open.get(event.transactionId)
+      if (!rows) continue
+      for (const row of rows) committedRows.set(row.id, row)
+      commitOrder.push(event.transactionId)
+      open.delete(event.transactionId)
+    }
+  }
+
+  return { committedRows, commitOrder }
+}
+
+function observeSettlement(promise: Promise<void>): {
+  read: () =>
+    | { status: `pending` }
+    | { status: `fulfilled` }
+    | { status: `rejected`; reason: unknown }
+} {
+  let outcome:
+    | { status: `pending` }
+    | { status: `fulfilled` }
+    | { status: `rejected`; reason: unknown } = { status: `pending` }
+  void promise.then(
+    () => {
+      outcome = { status: `fulfilled` }
+    },
+    (reason: unknown) => {
+      outcome = { status: `rejected`, reason }
+    },
+  )
+  return { read: () => outcome }
+}
+
+function expectPendingKeyMembershipWork(
+  actual: number,
+  pendingOwners: number,
+  partialWrites: number,
+): void {
+  expect(
+    actual,
+    `one key-membership lookup per pending owner and partial write`,
+  ).toBe(pendingOwners * partialWrites)
+}
+
+async function runRejectedHydrationBufferWitness(
+  id: string,
+  rows: ReadonlyArray<Todo>,
+  options: { commitAfterHydrationFailure?: boolean } = {},
+): Promise<void> {
+  const hydrationEntered = createEventGate()
+  const releaseHydration = createEventGate()
+  const hydrationRejected = createEventGate()
+  const hydrationError = new Error(`persisted hydration rejected exactly`)
+  const adapter = createRecordingAdapter()
+  const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+    hydrationEntered.resolve()
+    await releaseHydration.promise
+    hydrationRejected.resolve()
+    throw hydrationError
+  })
+
+  let remoteBegin: (() => void) | undefined
+  let remoteWrite:
+    | ((message: { type: `insert`; value: Todo }) => void)
+    | undefined
+  let remoteCommit: (() => true | Promise<void>) | undefined
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          remoteBegin = begin
+          remoteWrite = write as (message: {
+            type: `insert`
+            value: Todo
+          }) => void
+          remoteCommit = commit
+          markReady()
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  let hasPrimaryFailure = false
+  let initialCollectionCleaned = false
+  const cleanupActions: Array<() => void | Promise<unknown>> = [
+    () => (initialCollectionCleaned ? undefined : collection.cleanup()),
+  ]
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+  try {
+    void collection.stateWhenReady().catch(() => undefined)
+    await atPersistedOracleCheckpoint(
+      hydrationEntered.promise,
+      `${id} hydration entered`,
+    )
+    expect(remoteBegin).toBeTypeOf(`function`)
+    expect(remoteWrite).toBeTypeOf(`function`)
+    expect(remoteCommit).toBeTypeOf(`function`)
+
+    const committers = rows.map((row) => {
+      remoteBegin!()
+      remoteWrite!({ type: `insert`, value: row })
+      return () => {
+        const receipt = remoteCommit!()
+        expect(receipt).toBeInstanceOf(Promise)
+        return observeSettlement(Promise.resolve(receipt).then(() => undefined))
+      }
+    })
+    let receipts = options.commitAfterHydrationFailure
+      ? []
+      : committers.map((commit) => commit())
+
+    releaseHydration.resolve()
+    await atPersistedOracleCheckpoint(
+      hydrationRejected.promise,
+      `${id} hydration rejected`,
+    )
+    await flushAsyncWork()
+
+    if (options.commitAfterHydrationFailure) {
+      receipts = committers.map((commit) => commit())
+      await flushAsyncWork()
+    }
+
+    const receiptOutcomes = receipts.map((receipt) => {
+      const outcome = receipt.read()
+      return outcome.status === `rejected`
+        ? {
+            status: outcome.status,
+            exactReason: outcome.reason === hydrationError,
+          }
+        : outcome
+    })
+    expect({
+      status: collection.status,
+      exactPublicError: collection._lifecycle.getSyncError() === hydrationError,
+      receiptOutcomes,
+      visibleRows: rows.filter((row) => collection.has(row.id)),
+      durableRows: rows.filter((row) => adapter.rows.has(row.id)),
+      durabilityCalls: adapter.applyCommittedTxCalls.length,
+    }).toEqual({
+      status: `error`,
+      exactPublicError: true,
+      receiptOutcomes: rows.map(() => ({
+        status: `rejected`,
+        exactReason: true,
+      })),
+      visibleRows: [],
+      durableRows: [],
+      durabilityCalls: 0,
+    })
+
+    await atPersistedOracleCheckpoint(
+      collection.cleanup(),
+      `${id} failed collection cleanup`,
+    )
+    initialCollectionCleaned = true
+    restoreBaselineRows()
+
+    const reopened = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (item) => item.id,
+        persistence: { adapter },
+      }),
+    )
+    cleanupActions.push(() => reopened.cleanup())
+    await atPersistedOracleCheckpoint(
+      reopened.stateWhenReady(),
+      `${id} reopened hydration`,
+    )
+    await flushAsyncWork()
+
+    expect({
+      visibleRows: rows.filter((row) => reopened.has(row.id)),
+      durableRows: rows.filter((row) => adapter.rows.has(row.id)),
+      rowMetadata: Array.from(adapter.rowMetadata.entries()),
+      collectionMetadata: Array.from(adapter.collectionMetadata.entries()),
+      durabilityCalls: adapter.applyCommittedTxCalls.length,
+    }).toEqual({
+      visibleRows: [],
+      durableRows: [],
+      rowMetadata: [],
+      collectionMetadata: [],
+      durabilityCalls: 0,
+    })
+
+    const freshRow = { id: `${id}:fresh`, title: `post-restart control` }
+    const freshTransaction = reopened.insert(freshRow)
+    await atPersistedOracleCheckpoint(
+      (async () => {
+        await freshTransaction.isPersisted.promise
+      })(),
+      `${id} fresh transaction persisted`,
+    )
+    await flushAsyncWork()
+
+    expect({
+      visibleFreshRow: stripVirtualProps(reopened.get(freshRow.id)),
+      durableFreshRow: adapter.rows.get(freshRow.id),
+      staleVisibleRows: rows.filter((row) => reopened.has(row.id)),
+      staleDurableRows: rows.filter((row) => adapter.rows.has(row.id)),
+      rowMetadata: Array.from(adapter.rowMetadata.entries()),
+      collectionMetadata: Array.from(adapter.collectionMetadata.entries()),
+      appliedKeys: adapter.applyCommittedTxCalls.flatMap(({ tx }) =>
+        tx.mutations.map((mutation) => mutation.key),
+      ),
+    }).toEqual({
+      visibleFreshRow: freshRow,
+      durableFreshRow: freshRow,
+      staleVisibleRows: [],
+      staleDurableRows: [],
+      rowMetadata: [],
+      collectionMetadata: [],
+      appliedKeys: [freshRow.id],
+    })
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseHydration.resolve()
+    warning.mockRestore()
+    await cleanupPersistedOracle(cleanupActions, hasPrimaryFailure)
+  }
+}
+
+let generatedOwnershipHistoryId = 0
+
+function sortedTodoRows(rows: Iterable<Todo>): Array<Todo> {
+  return Array.from(rows).sort((left, right) => left.id.localeCompare(right.id))
+}
+
+type SourceFifoOrderingObservation = {
+  publicRows: Array<Todo>
+  durableRows: Array<Todo>
+  status: string
+  pendingMarkers: number
+}
+
+function expectSourceFifoOrderingObservation(
+  actual: SourceFifoOrderingObservation,
+  expectedRows: ReadonlyArray<Todo>,
+): void {
+  expect(actual).toEqual({
+    publicRows: expectedRows,
+    durableRows: expectedRows,
+    status: `ready`,
+    pendingMarkers: 0,
+  })
+}
+
+type AbortGraphObservation = {
+  predecessorStatus: `fulfilled` | `rejected`
+  predecessorName: string | undefined
+  successorStatus: `fulfilled` | `rejected`
+  sameFailure: boolean
+  status: string
+  publicSuccessor: Todo | undefined
+  durableSuccessor: Todo | undefined
+  pendingMarkers: number
+}
+
+function expectAbortGraphObservation(
+  actual: AbortGraphObservation,
+  relationship: `independent` | `same-key`,
+  successorKey: string,
+  successorTitle: string,
+): void {
+  expect(actual).toEqual(
+    relationship === `same-key`
+      ? {
+          predecessorStatus: `rejected`,
+          predecessorName: `AbortError`,
+          successorStatus: `rejected`,
+          sameFailure: true,
+          status: `error`,
+          publicSuccessor: undefined,
+          durableSuccessor: undefined,
+          pendingMarkers: 0,
+        }
+      : {
+          predecessorStatus: `rejected`,
+          predecessorName: `AbortError`,
+          successorStatus: `fulfilled`,
+          sameFailure: false,
+          status: `ready`,
+          publicSuccessor: { id: successorKey, title: successorTitle },
+          durableSuccessor: { id: successorKey, title: successorTitle },
+          pendingMarkers: 0,
+        },
+  )
+}
+
+type OwnerIsolationAdmissionObservation = {
+  exactError: boolean
+  strayVisible: boolean
+}
+
+function expectOwnerIsolationAdmission(
+  actual: OwnerIsolationAdmissionObservation,
+): void {
+  expect(actual).toEqual({ exactError: true, strayVisible: false })
+}
+
+type OpenTransactionBoundaryObservation = {
+  status: string
+  pendingMarkers: number
+}
+
+type RequestLocalFailureObservation = {
+  receiptStatus: `pending` | `fulfilled` | `rejected`
+  publicRows: Array<Todo>
+  durableRows: Array<Todo>
+  status: string
+  publicError: unknown
+}
+
+function expectOpenTransactionBoundaryObservation(
+  actual: OpenTransactionBoundaryObservation,
+  boundary: `abort` | `cleanup` | `terminal-failure`,
+): void {
+  expect(actual).toEqual({
+    status:
+      boundary === `cleanup`
+        ? `cleaned-up`
+        : boundary === `abort`
+          ? `ready`
+          : `error`,
+    pendingMarkers: 0,
+  })
+}
+
+function expectRequestLocalFailureObservation(
+  actual: RequestLocalFailureObservation,
+  expectedRows: ReadonlyArray<Todo>,
+): void {
+  expect(actual).toEqual({
+    receiptStatus: `fulfilled`,
+    publicRows: expectedRows,
+    durableRows: expectedRows,
+    status: `ready`,
+    publicError: undefined,
+  })
+}
+
+async function runSourceFifoOrderingLaw(
+  relation: `same-key` | `disjoint`,
+  olderTitle: string,
+  newerTitle: string,
+): Promise<void> {
+  const historyId = ++generatedOwnershipHistoryId
+  const adapter = createRecordingAdapter()
+  const firstPersistenceEntered = createEventGate()
+  const releaseFirstPersistence = createEventGate()
+  const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+  let applyCalls = 0
+  adapter.applyCommittedTx = async (...args) => {
+    applyCalls++
+    if (applyCalls === 1) {
+      firstPersistenceEntered.resolve()
+      await releaseFirstPersistence.promise
+    }
+    await applyCommittedTx(...args)
+  }
+  let sourceParams!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `generated-source-fifo-order-${historyId}`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          sourceParams = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  const receipts: Array<Promise<void>> = []
+  let hasPrimaryFailure = false
+
+  try {
+    await atPersistedOracleCheckpoint(
+      collection.stateWhenReady(),
+      `generated source FIFO ordering ready`,
+    )
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: { id: `gate`, title: `holds adapter` },
+    })
+    receipts.push(Promise.resolve(sourceParams.commit()).then(() => undefined))
+    receipts.forEach((receipt) => void receipt.catch(() => undefined))
+    await atPersistedOracleCheckpoint(
+      firstPersistenceEntered.promise,
+      `generated source FIFO ordering adapter hold`,
+    )
+
+    const olderKey = relation === `same-key` ? `shared` : `older`
+    const newerKey = relation === `same-key` ? `shared` : `newer`
+    const expected = new Map<string, Todo>([
+      [`gate`, { id: `gate`, title: `holds adapter` }],
+    ])
+    expected.set(olderKey, { id: olderKey, title: olderTitle })
+
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: { id: olderKey, title: olderTitle },
+    })
+    const olderReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(olderReceipt)
+    void olderReceipt.catch(() => undefined)
+
+    sourceParams.begin()
+    sourceParams.write({
+      type: relation === `same-key` ? `update` : `insert`,
+      value: { id: newerKey, title: newerTitle },
+    })
+    expected.set(newerKey, { id: newerKey, title: newerTitle })
+    const newerReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(newerReceipt)
+    void newerReceipt.catch(() => undefined)
+
+    expect(
+      sortedTodoRows(Array.from(collection.values()).map(stripVirtualProps)),
+    ).toEqual(sortedTodoRows([{ id: `gate`, title: `holds adapter` }]))
+
+    releaseFirstPersistence.resolve()
+    for (const [index, receipt] of receipts.entries()) {
+      await atPersistedOracleCheckpoint(
+        receipt,
+        `generated source FIFO receipt ${index}`,
+      )
+    }
+    expectSourceFifoOrderingObservation(
+      {
+        publicRows: sortedTodoRows(
+          Array.from(collection.values()).map(stripVirtualProps),
+        ),
+        durableRows: sortedTodoRows(adapter.rows.values()),
+        status: collection.status,
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      },
+      sortedTodoRows(expected.values()),
+    )
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseFirstPersistence.resolve()
+    await cleanupPersistedOracle(
+      [
+        ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
+        () => collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+
+async function runAbortRelationshipLaw(
+  relationship: `independent` | `same-key`,
+  predecessorTitle: string,
+  successorTitle: string,
+): Promise<void> {
+  const historyId = ++generatedOwnershipHistoryId
+  const adapter = createRecordingAdapter()
+  const firstPersistenceEntered = createEventGate()
+  const releaseFirstPersistence = createEventGate()
+  const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+  let applyCalls = 0
+  adapter.applyCommittedTx = async (...args) => {
+    applyCalls++
+    if (applyCalls === 1) {
+      firstPersistenceEntered.resolve()
+      await releaseFirstPersistence.promise
+    }
+    await applyCommittedTx(...args)
+  }
+  let sourceParams!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `generated-abort-graph-${historyId}`,
+      getKey: (row) => row.id,
+      sync: {
+        rowUpdateMode: `partial`,
+        sync: (params) => {
+          sourceParams = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  const abortController = new AbortController()
+  const receipts: Array<Promise<void>> = []
+  let hasPrimaryFailure = false
+
+  try {
+    await atPersistedOracleCheckpoint(
+      collection.stateWhenReady(),
+      `generated abort graph ready`,
+    )
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: { id: `gate`, title: `holds adapter` },
+    })
+    const gateReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(gateReceipt)
+    void gateReceipt.catch(() => undefined)
+    await atPersistedOracleCheckpoint(
+      firstPersistenceEntered.promise,
+      `generated abort graph adapter hold`,
+    )
+
+    const predecessorKey = relationship === `same-key` ? `shared` : `aborted`
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: {
+        id: predecessorKey,
+        title: predecessorTitle,
+        detail: `predecessor-only`,
+      },
+    })
+    const predecessorReceipt = Promise.resolve(
+      sourceParams.commit(abortController.signal),
+    ).then(() => undefined)
+    receipts.push(predecessorReceipt)
+    void predecessorReceipt.catch(() => undefined)
+
+    const successorKey = relationship === `same-key` ? `shared` : `survivor`
+    sourceParams.begin()
+    sourceParams.write({
+      type: relationship === `same-key` ? `update` : `insert`,
+      value: { id: successorKey, title: successorTitle },
+    })
+    const successorReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(successorReceipt)
+    void successorReceipt.catch(() => undefined)
+
+    abortController.abort()
+    releaseFirstPersistence.resolve()
+    await atPersistedOracleCheckpoint(gateReceipt, `generated abort gate`)
+    const predecessor = await atPersistedOracleCheckpoint(
+      predecessorReceipt.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      ),
+      `generated predecessor abort`,
+    )
+    const successor = await atPersistedOracleCheckpoint(
+      successorReceipt.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      ),
+      `generated successor settlement`,
+    )
+    const abortError =
+      predecessor.status === `rejected` ? predecessor.reason : undefined
+
+    expectAbortGraphObservation(
+      {
+        predecessorStatus: predecessor.status,
+        predecessorName:
+          abortError instanceof Error ? abortError.name : undefined,
+        successorStatus: successor.status,
+        sameFailure:
+          successor.status === `rejected` && successor.reason === abortError,
+        status: collection.status,
+        publicSuccessor: stripVirtualProps(collection.get(successorKey)),
+        durableSuccessor: adapter.rows.get(successorKey),
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      },
+      relationship,
+      successorKey,
+      successorTitle,
+    )
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseFirstPersistence.resolve()
+    await cleanupPersistedOracle(
+      [
+        ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
+        () => collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+
+async function runBareOwnerOperationLaw(
+  operation: `write` | `commit` | `truncate`,
+  queuedTitle: string,
+): Promise<void> {
+  const historyId = ++generatedOwnershipHistoryId
+  const adapter = createRecordingAdapter()
+  const firstPersistenceEntered = createEventGate()
+  const releaseFirstPersistence = createEventGate()
+  const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+  let applyCalls = 0
+  adapter.applyCommittedTx = async (...args) => {
+    applyCalls++
+    if (applyCalls === 1) {
+      firstPersistenceEntered.resolve()
+      await releaseFirstPersistence.promise
+    }
+    await applyCommittedTx(...args)
+  }
+  let sourceParams!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `generated-owner-isolation-${historyId}`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          sourceParams = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  const receipts: Array<Promise<void>> = []
+  let unexpectedReceipt: Promise<void> | undefined
+  let hasPrimaryFailure = false
+
+  try {
+    await atPersistedOracleCheckpoint(
+      collection.stateWhenReady(),
+      `generated owner isolation ready`,
+    )
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: { id: `first`, title: `must survive` },
+    })
+    const firstReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(firstReceipt)
+    void firstReceipt.catch(() => undefined)
+    await atPersistedOracleCheckpoint(
+      firstPersistenceEntered.promise,
+      `generated owner isolation adapter hold`,
+    )
+
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: { id: `queued`, title: queuedTitle },
+    })
+    const queuedReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(queuedReceipt)
+    void queuedReceipt.catch(() => undefined)
+
+    let observedError: unknown
+    try {
+      if (operation === `write`) {
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `stray`, title: `must not publish` },
+        })
+      } else if (operation === `truncate`) {
+        sourceParams.truncate()
+      } else {
+        const result = sourceParams.commit()
+        if (result !== true) {
+          unexpectedReceipt = Promise.resolve(result).then(() => undefined)
+          void unexpectedReceipt.catch(() => undefined)
+        }
+      }
+    } catch (error) {
+      observedError = error
+    }
+    expectOwnerIsolationAdmission({
+      exactError:
+        operation === `commit`
+          ? observedError instanceof NoPendingSyncTransactionCommitError
+          : observedError instanceof NoPendingSyncTransactionWriteError,
+      strayVisible: collection.has(`stray`),
+    })
+
+    releaseFirstPersistence.resolve()
+    await atPersistedOracleCheckpoint(firstReceipt, `generated first owner`)
+    await atPersistedOracleCheckpoint(queuedReceipt, `generated queued owner`)
+    expect({
+      publicRows: sortedTodoRows(
+        Array.from(collection.values()).map(stripVirtualProps),
+      ),
+      durableRows: sortedTodoRows(adapter.rows.values()),
+      pendingMarkers: collection._state.pendingSyncedTransactions.length,
+    }).toEqual({
+      publicRows: sortedTodoRows([
+        { id: `first`, title: `must survive` },
+        { id: `queued`, title: queuedTitle },
+      ]),
+      durableRows: sortedTodoRows([
+        { id: `first`, title: `must survive` },
+        { id: `queued`, title: queuedTitle },
+      ]),
+      pendingMarkers: 0,
+    })
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseFirstPersistence.resolve()
+    await cleanupPersistedOracle(
+      [
+        ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
+        () => unexpectedReceipt?.catch(() => undefined),
+        () => collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+
+async function runInternalOpenTransactionBoundaryLaw(
+  boundary: `abort` | `cleanup` | `terminal-failure`,
+  hydratedTitle: string,
+): Promise<void> {
+  const historyId = ++generatedOwnershipHistoryId
+  const hydrated = { id: `hydrated`, title: hydratedTitle }
+  const adapter = createRecordingAdapter([hydrated])
+  const hydrationEntered = createEventGate()
+  const releaseHydration = createEventGate()
+  overrideBaselineRows(adapter, async () => {
+    hydrationEntered.resolve()
+    await releaseHydration.promise
+    return [{ key: hydrated.id, value: hydrated }]
+  })
+  let sourceParams!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `generated-internal-transaction-${historyId}`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          sourceParams = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  let internalReservationStarted = false
+  const subscription = collection.subscribeChanges((changes) => {
+    if (
+      !internalReservationStarted &&
+      changes.some((change) => change.key === hydrated.id)
+    ) {
+      internalReservationStarted = true
+      sourceParams.begin()
+    }
+  })
+  const receipts: Array<Promise<void>> = []
+  let cleanedUp = false
+  let hasPrimaryFailure = false
+
+  try {
+    const ready = collection.stateWhenReady()
+    await atPersistedOracleCheckpoint(
+      hydrationEntered.promise,
+      `generated internal hydration entered`,
+    )
+    releaseHydration.resolve()
+    await atPersistedOracleCheckpoint(ready, `generated internal ready`)
+    expect({
+      internalReservationStarted,
+      pendingMarkers: collection._state.pendingSyncedTransactions.length,
+    }).toEqual({ internalReservationStarted: true, pendingMarkers: 0 })
+
+    if (boundary === `cleanup`) {
+      await atPersistedOracleCheckpoint(
+        collection.cleanup(),
+        `generated internal cleanup`,
+      )
+      cleanedUp = true
+      expectOpenTransactionBoundaryObservation(
+        {
+          status: collection.status,
+          pendingMarkers: collection._state.pendingSyncedTransactions.length,
+        },
+        boundary,
+      )
+      return
+    }
+
+    if (boundary === `abort`) {
+      const abortController = new AbortController()
+      abortController.abort()
+      const receipt = Promise.resolve(
+        sourceParams.commit(abortController.signal),
+      ).then(() => undefined)
+      receipts.push(receipt)
+      void receipt.catch(() => undefined)
+      await expect(
+        atPersistedOracleCheckpoint(receipt, `generated internal abort`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      expectOpenTransactionBoundaryObservation(
+        {
+          status: collection.status,
+          pendingMarkers: collection._state.pendingSyncedTransactions.length,
+        },
+        boundary,
+      )
+      return
+    }
+
+    const terminalError = new Error(`generated terminal transaction failure`)
+    adapter.applyCommittedTx = () => Promise.reject(terminalError)
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: { id: `terminal`, title: `published before failure` },
+    })
+    const externalReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(externalReceipt)
+    void externalReceipt.catch(() => undefined)
+    await expect(
+      atPersistedOracleCheckpoint(
+        externalReceipt,
+        `generated external terminal failure`,
+      ),
+    ).rejects.toMatchObject({
+      name: `PersistedCollectionDurabilityError`,
+      cause: terminalError,
+    })
+
+    const internalReceipt = Promise.resolve(sourceParams.commit()).then(
+      () => undefined,
+    )
+    receipts.push(internalReceipt)
+    void internalReceipt.catch(() => undefined)
+    await expect(
+      atPersistedOracleCheckpoint(
+        internalReceipt,
+        `generated terminal internal settlement`,
+      ),
+    ).rejects.toMatchObject({ name: `PersistedCollectionDurabilityError` })
+    expectOpenTransactionBoundaryObservation(
+      {
+        status: collection.status,
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      },
+      boundary,
+    )
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseHydration.resolve()
+    subscription.unsubscribe()
+    await cleanupPersistedOracle(
+      [
+        ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
+        () => (cleanedUp ? undefined : collection.cleanup()),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+
+type RequestLocalFailureOperation = `partial-update` | `delete` | `insert`
+
+async function runRequestLocalFailureOperationLaw(
+  operation: RequestLocalFailureOperation,
+  baselineTitle: string,
+  sourceTitle: string,
+): Promise<void> {
+  const historyId = ++generatedOwnershipHistoryId
+  const baseline: Todo = {
+    id: `shared`,
+    title: baselineTitle,
+    detail: `required baseline detail`,
+  }
+  const inserted: Todo = {
+    id: baseline.id,
+    title: sourceTitle,
+    detail: `complete insert detail`,
+  }
+  const adapter = createRecordingAdapter(
+    operation === `insert` ? [] : [baseline],
+  )
+  const loadPersistedRows = adapter.loadSubset.bind(adapter)
+  const loadEntered = createEventGate()
+  const rejectLoad = createEventGate()
+  const loadFailure = new Error(
+    `generated request-local ${operation} load failure`,
+  )
+  let loadCalls = 0
+  adapter.loadSubset = async (...args) => {
+    loadCalls++
+    if (loadCalls === 1) {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw loadFailure
+    }
+    return loadPersistedRows(...args)
+  }
+  let sourceParams!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `generated-request-local-failure-${historyId}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        rowUpdateMode: `partial`,
+        sync: (params) => {
+          sourceParams = params
+          params.markReady()
+          return { loadSubset: () => true }
+        },
+      },
+      persistence: { adapter },
+    }),
+  )
+  const expectedRows =
+    operation === `delete`
+      ? []
+      : operation === `insert`
+        ? [inserted]
+        : [{ ...baseline, title: sourceTitle }]
+  let load: Promise<void> | undefined
+  let receipt: Promise<void> | undefined
+  let hasPrimaryFailure = false
+
+  try {
+    await atPersistedOracleCheckpoint(
+      collection.stateWhenReady(),
+      `generated request-local collection ready`,
+    )
+    load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+      () => undefined,
+    )
+    void load.catch(() => undefined)
+    await atPersistedOracleCheckpoint(
+      loadEntered.promise,
+      `generated request-local load entered`,
+    )
+
+    sourceParams.begin()
+    sourceParams.write(
+      operation === `delete`
+        ? { type: `delete`, key: baseline.id }
+        : operation === `insert`
+          ? { type: `insert`, value: inserted }
+          : {
+              type: `update`,
+              value: { id: baseline.id, title: sourceTitle } as Todo,
+            },
+    )
+    receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+    const receiptState = observeSettlement(receipt)
+    expect(receiptState.read()).toEqual({ status: `pending` })
+
+    rejectLoad.resolve()
+    await expect(
+      atPersistedOracleCheckpoint(load, `generated request-local rejection`),
+    ).rejects.toBe(loadFailure)
+    await atPersistedOracleCheckpoint(
+      receipt,
+      `generated request-local receipt settlement`,
+    )
+    expectRequestLocalFailureObservation(
+      {
+        receiptStatus: receiptState.read().status,
+        publicRows: sortedTodoRows(
+          [...collection.values()].map(stripVirtualProps),
+        ),
+        durableRows: sortedTodoRows(adapter.rows.values()),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      },
+      expectedRows,
+    )
+
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+      `generated request-local retry`,
+    )
+    expectRequestLocalFailureObservation(
+      {
+        receiptStatus: receiptState.read().status,
+        publicRows: sortedTodoRows(
+          [...collection.values()].map(stripVirtualProps),
+        ),
+        durableRows: sortedTodoRows(adapter.rows.values()),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      },
+      expectedRows,
+    )
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    rejectLoad.resolve()
+    await cleanupPersistedOracle(
+      [
+        () => load?.catch(() => undefined),
+        () => receipt?.catch(() => undefined),
+        () => collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+}
+
+type GeneratedPersistenceHistory = {
+  axes: Array<string>
+  titles: Array<string>
+}
+
+type GeneratedPersistenceGrammar = {
+  property: string
+  axes: ReadonlyArray<string>
+  axisContribution: Readonly<Record<string, string>>
+  titleCount: number
+  witness: GeneratedPersistenceHistory
+}
+
+const sourceFifoOrderingAxes = [`same-key`, `disjoint`] as const
+const abortGraphAxes = [`independent`, `same-key`] as const
+const ownerIsolationAxes = [`write`, `commit`, `truncate`] as const
+const openTransactionBoundaryAxes = [
+  `abort`,
+  `cleanup`,
+  `terminal-failure`,
+] as const
+const requestLocalFailureAxes = [`partial-update`, `delete`, `insert`] as const
+const generatedTitleMaxLength = 12
+const generatedPersistenceFixedSeeds = {
+  sourceFifoOrdering: 18_530_101,
+  abortGraph: 18_530_102,
+  ownerIsolation: 18_530_103,
+  openTransactionBoundary: 18_530_104,
+  requestLocalFailure: 18_530_105,
+} as const
+
+const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGrammar> =
+  [
+    {
+      property: `sqlite-persistence.source-fifo-order`,
+      axes: sourceFifoOrderingAxes,
+      axisContribution: {
+        [`same-key`]: `the later source value wins in source order`,
+        disjoint: `both unrelated values and receipts survive`,
+      },
+      titleCount: 2,
+      witness: {
+        axes: [`same-key`, `disjoint`],
+        titles: [`older`, `newer`],
+      },
+    },
+    {
+      property: `sqlite-persistence.abort-graph`,
+      axes: abortGraphAxes,
+      axisContribution: {
+        independent: `an unrelated sibling survives the abort`,
+        [`same-key`]: `a dependent suffix shares the predecessor failure`,
+      },
+      titleCount: 2,
+      witness: {
+        axes: [`independent`, `same-key`],
+        titles: [`predecessor`, `successor`],
+      },
+    },
+    {
+      property: `sqlite-persistence.owner-isolation`,
+      axes: ownerIsolationAxes,
+      axisContribution: {
+        write: `bare write rejects without publishing a stray row`,
+        commit: `bare commit rejects without settling another owner`,
+        truncate: `bare truncate rejects without clearing another owner`,
+      },
+      titleCount: 1,
+      witness: {
+        axes: [`write`, `commit`, `truncate`],
+        titles: [`queued`],
+      },
+    },
+    {
+      property: `sqlite-persistence.open-transaction-boundary`,
+      axes: openTransactionBoundaryAxes,
+      axisContribution: {
+        abort: `explicit abort leaves no core transaction`,
+        cleanup: `cleanup leaves no core transaction`,
+        [`terminal-failure`]: `fail-stop leaves no core transaction`,
+      },
+      titleCount: 1,
+      witness: {
+        axes: [`abort`, `cleanup`, `terminal-failure`],
+        titles: [`hydrated`],
+      },
+    },
+    {
+      property: `sqlite-persistence.request-local-failure-buffered-source`,
+      axes: requestLocalFailureAxes,
+      axisContribution: {
+        [`partial-update`]: `an unseen persisted baseline is reconstructed`,
+        delete: `a buffered delete settles without resurrection`,
+        insert: `a complete buffered insert settles without duplication`,
+      },
+      titleCount: 2,
+      witness: {
+        axes: [`partial-update`, `delete`, `insert`],
+        titles: [`baseline`, `source`],
+      },
+    },
+  ]
+
+function reconstructGeneratedPersistenceHistory(
+  grammar: GeneratedPersistenceGrammar,
+  history: GeneratedPersistenceHistory,
+): GeneratedPersistenceHistory {
+  const requiredAxes = new Set(grammar.axes)
+  const axesAreExact =
+    history.axes.length === grammar.axes.length &&
+    new Set(history.axes).size === grammar.axes.length &&
+    history.axes.every((axis) => requiredAxes.has(axis))
+  const titlesAreInRange =
+    history.titles.length === grammar.titleCount &&
+    history.titles.every(
+      (title) => [...title].length <= generatedTitleMaxLength,
+    )
+  if (!axesAreExact || !titlesAreInRange) {
+    throw new Error(
+      `invalid generated persistence history: ${grammar.property}`,
+    )
+  }
+  return {
+    axes: [...history.axes],
+    titles: [...history.titles],
+  }
+}
+
+function fullAxisOrder<Axis extends string>(
+  axes: ReadonlyArray<Axis>,
+): fc.Arbitrary<Array<Axis>> {
+  return fc.shuffledSubarray([...axes], {
+    minLength: axes.length,
+    maxLength: axes.length,
+  })
+}
+
+const generatedTitle = fc.string({ maxLength: generatedTitleMaxLength })
+
+type SourceFifoOrderingHistory = {
+  relations: Array<`same-key` | `disjoint`>
+  titles: [string, string]
+}
+
+type AbortGraphHistory = {
+  relationships: Array<`independent` | `same-key`>
+  titles: [string, string]
+}
+
+type OwnerIsolationHistory = {
+  operations: Array<`write` | `commit` | `truncate`>
+  queuedTitle: string
+}
+
+type OpenTransactionBoundaryHistory = {
+  boundaries: Array<`abort` | `cleanup` | `terminal-failure`>
+  hydratedTitle: string
+}
+
+type RequestLocalFailureHistory = {
+  operations: Array<RequestLocalFailureOperation>
+  titles: [string, string]
+}
+
+const sourceFifoOrderingHistory: fc.Arbitrary<SourceFifoOrderingHistory> =
+  fc.record({
+    relations: fullAxisOrder(sourceFifoOrderingAxes),
+    titles: fc.tuple(generatedTitle, generatedTitle),
+  })
+
+const abortGraphHistory: fc.Arbitrary<AbortGraphHistory> = fc.record({
+  relationships: fullAxisOrder(abortGraphAxes),
+  titles: fc.tuple(generatedTitle, generatedTitle),
+})
+
+const ownerIsolationHistory: fc.Arbitrary<OwnerIsolationHistory> = fc.record({
+  operations: fullAxisOrder(ownerIsolationAxes),
+  queuedTitle: generatedTitle,
+})
+
+const openTransactionBoundaryHistory: fc.Arbitrary<OpenTransactionBoundaryHistory> =
+  fc.record({
+    boundaries: fullAxisOrder(openTransactionBoundaryAxes),
+    hydratedTitle: generatedTitle,
+  })
+
+const requestLocalFailureHistory: fc.Arbitrary<RequestLocalFailureHistory> =
+  fc.record({
+    operations: fullAxisOrder(requestLocalFailureAxes),
+    titles: fc.tuple(generatedTitle, generatedTitle),
+  })
+
+function generatedPersistenceGrammarSamples(): ReadonlyArray<{
+  grammar: GeneratedPersistenceGrammar
+  histories: Array<GeneratedPersistenceHistory>
+}> {
+  const grammar = (property: string): GeneratedPersistenceGrammar => {
+    const match = generatedPersistenceGrammars.find(
+      (candidate) => candidate.property === property,
+    )
+    if (match === undefined) throw new Error(`missing grammar: ${property}`)
+    return match
+  }
+  const sampleOptions = (seed: number) => ({ seed, numRuns: 4 })
+  return [
+    {
+      grammar: grammar(`sqlite-persistence.source-fifo-order`),
+      histories: fc
+        .sample(
+          sourceFifoOrderingHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.sourceFifoOrdering),
+        )
+        .map((history) => ({
+          axes: history.relations,
+          titles: [...history.titles],
+        })),
+    },
+    {
+      grammar: grammar(`sqlite-persistence.abort-graph`),
+      histories: fc
+        .sample(
+          abortGraphHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.abortGraph),
+        )
+        .map((history) => ({
+          axes: history.relationships,
+          titles: [...history.titles],
+        })),
+    },
+    {
+      grammar: grammar(`sqlite-persistence.owner-isolation`),
+      histories: fc
+        .sample(
+          ownerIsolationHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.ownerIsolation),
+        )
+        .map((history) => ({
+          axes: history.operations,
+          titles: [history.queuedTitle],
+        })),
+    },
+    {
+      grammar: grammar(`sqlite-persistence.open-transaction-boundary`),
+      histories: fc
+        .sample(
+          openTransactionBoundaryHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.openTransactionBoundary),
+        )
+        .map((history) => ({
+          axes: history.boundaries,
+          titles: [history.hydratedTitle],
+        })),
+    },
+    {
+      grammar: grammar(
+        `sqlite-persistence.request-local-failure-buffered-source`,
+      ),
+      histories: fc
+        .sample(
+          requestLocalFailureHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.requestLocalFailure),
+        )
+        .map((history) => ({
+          axes: history.operations,
+          titles: [...history.titles],
+        })),
+    },
+  ]
+}
+
+async function runGeneratedSourceFifoOrderingHistory(
+  history: SourceFifoOrderingHistory,
+): Promise<void> {
+  for (const relation of history.relations) {
+    await runSourceFifoOrderingLaw(
+      relation,
+      history.titles[0],
+      history.titles[1],
+    )
+  }
+}
+
+async function runGeneratedAbortGraphHistory(
+  history: AbortGraphHistory,
+): Promise<void> {
+  for (const relationship of history.relationships) {
+    await runAbortRelationshipLaw(
+      relationship,
+      history.titles[0],
+      history.titles[1],
+    )
+  }
+}
+
+async function runGeneratedOwnerIsolationHistory(
+  history: OwnerIsolationHistory,
+): Promise<void> {
+  for (const operation of history.operations) {
+    await runBareOwnerOperationLaw(operation, history.queuedTitle)
+  }
+}
+
+async function runGeneratedOpenTransactionBoundaryHistory(
+  history: OpenTransactionBoundaryHistory,
+): Promise<void> {
+  for (const boundary of history.boundaries) {
+    await runInternalOpenTransactionBoundaryLaw(boundary, history.hydratedTitle)
+  }
+}
+
+async function runGeneratedRequestLocalFailureHistory(
+  history: RequestLocalFailureHistory,
+): Promise<void> {
+  for (const operation of history.operations) {
+    await runRequestLocalFailureOperationLaw(
+      operation,
+      history.titles[0],
+      history.titles[1],
+    )
+  }
+}
+
+function registerGeneratedPersistenceProperty<Value>(options: {
+  property: string
+  title: string
+  arbitrary: fc.Arbitrary<Value>
+  fixedSeed: number
+  run: (value: Value) => Promise<void>
+}): void {
+  const { property, title, arbitrary, fixedSeed, run } = options
+  if (requestedOracleReplayProperty === undefined) {
+    fcTest.prop([arbitrary], { seed: fixedSeed, numRuns: oracleRuns(4) })(
+      `${title} (fixed)`,
+      run,
+    )
+    fcTest.prop([arbitrary], oraclePropertyOptions(4, property))(
+      `${title} (random)`,
+      run,
+    )
+  } else if (requestedOracleReplayProperty === property) {
+    fcTest.prop([arbitrary], oraclePropertyOptions(4, property))(
+      `${title} (replay)`,
+      run,
+    )
+  }
+}
+
+describe(`generated persistence durability oracles`, () => {
+  if (requestedOracleReplayProperty === undefined) {
+    it(`reconstructs the full grammar and rejects ablated, out-of-range, and foreign histories`, () => {
+      for (const {
+        grammar,
+        histories,
+      } of generatedPersistenceGrammarSamples()) {
+        for (const history of histories) {
+          expect(
+            reconstructGeneratedPersistenceHistory(grammar, history),
+          ).toEqual(history)
+        }
+      }
+
+      for (const grammar of generatedPersistenceGrammars) {
+        expect(Object.keys(grammar.axisContribution).sort()).toEqual(
+          [...grammar.axes].sort(),
+        )
+        for (const contribution of Object.values(grammar.axisContribution)) {
+          expect(contribution).not.toBe(``)
+        }
+        expect(
+          reconstructGeneratedPersistenceHistory(grammar, grammar.witness),
+        ).toEqual(grammar.witness)
+
+        for (const omittedAxis of grammar.axes) {
+          expect(() =>
+            reconstructGeneratedPersistenceHistory(grammar, {
+              ...grammar.witness,
+              axes: grammar.witness.axes.filter((axis) => axis !== omittedAxis),
+            }),
+          ).toThrow(`invalid generated persistence history`)
+        }
+
+        expect(
+          reconstructGeneratedPersistenceHistory(grammar, {
+            axes: [...grammar.axes],
+            titles: Array.from({ length: grammar.titleCount }, () =>
+              `x`.repeat(generatedTitleMaxLength),
+            ),
+          }).titles,
+        ).toEqual(
+          Array.from({ length: grammar.titleCount }, () =>
+            `x`.repeat(generatedTitleMaxLength),
+          ),
+        )
+        expect(
+          reconstructGeneratedPersistenceHistory(grammar, {
+            axes: [...grammar.axes],
+            titles: Array.from({ length: grammar.titleCount }, () => ``),
+          }).titles,
+        ).toEqual(Array.from({ length: grammar.titleCount }, () => ``))
+        expect(() =>
+          reconstructGeneratedPersistenceHistory(grammar, {
+            axes: [...grammar.axes],
+            titles: [
+              `x`.repeat(generatedTitleMaxLength + 1),
+              ...Array.from(
+                { length: Math.max(0, grammar.titleCount - 1) },
+                () => ``,
+              ),
+            ],
+          }),
+        ).toThrow(`invalid generated persistence history`)
+        expect(() =>
+          reconstructGeneratedPersistenceHistory(grammar, {
+            ...grammar.witness,
+            axes: grammar.axes.map((axis, index) =>
+              index === grammar.axes.length - 1 ? grammar.axes[0]! : axis,
+            ),
+          }),
+        ).toThrow(`invalid generated persistence history`)
+        expect(() =>
+          reconstructGeneratedPersistenceHistory(grammar, {
+            ...grammar.witness,
+            axes: [...grammar.axes.slice(0, -1), `foreign-axis`],
+          }),
+        ).toThrow(`invalid generated persistence history`)
+      }
+    })
+
+    it.each([
+      {
+        name: `source-fifo-order older same-key value wins`,
+        reject: () =>
+          expectSourceFifoOrderingObservation(
+            {
+              publicRows: [{ id: `shared`, title: `older` }],
+              durableRows: [{ id: `shared`, title: `older` }],
+              status: `ready`,
+              pendingMarkers: 0,
+            },
+            [{ id: `shared`, title: `newer` }],
+          ),
+      },
+      {
+        name: `abort-graph independent sibling inherits the abort`,
+        reject: () =>
+          expectAbortGraphObservation(
+            {
+              predecessorStatus: `rejected`,
+              predecessorName: `AbortError`,
+              successorStatus: `rejected`,
+              sameFailure: true,
+              status: `error`,
+              publicSuccessor: undefined,
+              durableSuccessor: undefined,
+              pendingMarkers: 0,
+            },
+            `independent`,
+            `survivor`,
+            `must survive`,
+          ),
+      },
+      {
+        name: `owner-isolation bare write steals and publishes a queued marker`,
+        reject: () =>
+          expectOwnerIsolationAdmission({
+            exactError: false,
+            strayVisible: true,
+          }),
+      },
+      {
+        name: `open-transaction boundary leaks one core marker`,
+        reject: () =>
+          expectOpenTransactionBoundaryObservation(
+            { status: `error`, pendingMarkers: 1 },
+            `terminal-failure`,
+          ),
+      },
+      {
+        name: `request-local partial update drops the unseen baseline field`,
+        reject: () =>
+          expectRequestLocalFailureObservation(
+            {
+              receiptStatus: `fulfilled`,
+              publicRows: [{ id: `shared`, title: `source` }],
+              durableRows: [
+                {
+                  id: `shared`,
+                  title: `source`,
+                  detail: `required baseline detail`,
+                },
+              ],
+              status: `ready`,
+              publicError: undefined,
+            },
+            [
+              {
+                id: `shared`,
+                title: `source`,
+                detail: `required baseline detail`,
+              },
+            ],
+          ),
+      },
+    ])(`rejects named wrong answer: $name`, ({ reject }) => {
+      expect(reject).toThrow()
+    })
+  }
+
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.source-fifo-order`,
+    title: `serialized histories preserve source order and settle every receipt`,
+    arbitrary: sourceFifoOrderingHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.sourceFifoOrdering,
+    run: runGeneratedSourceFifoOrderingHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.abort-graph`,
+    title: `abort graphs preserve independent siblings and reject dependent suffixes`,
+    arbitrary: abortGraphHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.abortGraph,
+    run: runGeneratedAbortGraphHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.owner-isolation`,
+    title: `bare operations cannot capture another owner's transaction`,
+    arbitrary: ownerIsolationHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.ownerIsolation,
+    run: runGeneratedOwnerIsolationHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.open-transaction-boundary`,
+    title: `open transaction boundaries leave no core marker`,
+    arbitrary: openTransactionBoundaryHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.openTransactionBoundary,
+    run: runGeneratedOpenTransactionBoundaryHistory,
+  })
+  registerGeneratedPersistenceProperty({
+    property: `sqlite-persistence.request-local-failure-buffered-source`,
+    title: `request-local load failure preserves buffered source semantics`,
+    arbitrary: requestLocalFailureHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.requestLocalFailure,
+    run: runGeneratedRequestLocalFailureHistory,
+  })
+})
+
+async function createTerminalFailureHarness(
+  kind: `hydration` | `durability`,
+  id: string,
+) {
+  const seed = { id: `seed`, title: `stable before terminal failure` }
+  const adapter = createRecordingAdapter([seed])
+  adapter.rowMetadata.set(seed.id, `row-metadata-before-failure`)
+  adapter.collectionMetadata.set(`resume`, `collection-metadata-before-failure`)
+  const coordinator = createFailStopCoordinatorHarness(id)
+  const upstreamLoads: Array<LoadSubsetOptions> = []
+  const upstreamUnloads: Array<LoadSubsetOptions> = []
+  let sourceParams!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          sourceParams = params
+          params.markReady()
+          return {
+            loadSubset: (options) => {
+              upstreamLoads.push(options)
+              return true
+            },
+            unloadSubset: (options) => {
+              upstreamUnloads.push(options)
+            },
+          }
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  const initialLease: LoadSubsetOptions = { limit: 1 }
+  await atPersistedOracleCheckpoint(
+    collection.stateWhenReady(),
+    `${id} initially ready`,
+  )
+  await atPersistedOracleCheckpoint(
+    Promise.resolve(collection._sync.loadSubset(initialLease)),
+    `${id} initial lease hydrated`,
+  )
+  await flushAsyncWork()
+
+  let terminalError: unknown
+  if (kind === `hydration`) {
+    const hydrationError = new Error(`${id} terminal hydration failure`)
+    adapter.loadSubset = () => Promise.reject(hydrationError)
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `${id}-failed-full-reload`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+      changedRows: [],
+      deletedKeys: [],
+    })
+    await vi.waitFor(() =>
+      expect(collection._lifecycle.getSyncError()).toBe(hydrationError),
+    )
+    terminalError = hydrationError
+  } else {
+    const adapterError = Object.assign(new Error(`${id} storage failure`), {
+      code: `SQLITE_FULL`,
+      path: `adapter.applyCommittedTx`,
+    })
+    coordinator.requestApplyCommittedTx = () =>
+      Promise.reject(
+        new PersistedCollectionDurabilityError(
+          `Failed to durably persist collection "${id}"`,
+          {
+            cause: adapterError,
+            code: adapterError.code,
+            path: adapterError.path,
+          },
+        ),
+      )
+    sourceParams.begin()
+    sourceParams.write({
+      type: `insert`,
+      value: { id: `first`, title: `published before terminal failure` },
+    })
+    const outcome = await atPersistedOracleCheckpoint(
+      Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      ),
+      `${id} durability failure settled`,
+    )
+    expect(outcome.status).toBe(`rejected`)
+    terminalError = outcome.status === `rejected` ? outcome.reason : undefined
+    expect(terminalError).toBeInstanceOf(PersistedCollectionDurabilityError)
+    expect(
+      terminalError instanceof Error ? terminalError.cause : undefined,
+    ).toBe(adapterError)
+  }
+
+  expect(collection.status).toBe(`error`)
+  expect(collection._lifecycle.getSyncError()).toBe(terminalError)
+
+  return {
+    adapter,
+    collection,
+    coordinator,
+    initialLease,
+    seed,
+    sourceParams,
+    terminalError,
+    upstreamLoads,
+    upstreamUnloads,
+  }
+}
+
+describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   it(`preserves exact reconciliation context for an indeterminate commit`, () => {
     const cause = new Error(`response channel closed`)
     const error = new IndeterminateCommitError({
@@ -1670,7 +3565,6 @@ describe(`persistedCollectionOptions`, () => {
         persistence: { adapter },
       }),
     )
-
     try {
       await collection.stateWhenReady()
       const abortController = new AbortController()
@@ -1687,6 +3581,24 @@ describe(`persistedCollectionOptions`, () => {
 
       expect(collection.get(`aborted`)).toBeUndefined()
       expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
+
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `recovered`, title: `Later transaction` },
+      })
+      await remoteCommit?.()
+
+      expect(stripVirtualProps(collection.get(`recovered`))).toEqual({
+        id: `recovered`,
+        title: `Later transaction`,
+      })
+      expect(adapter.rows.get(`recovered`)).toEqual({
+        id: `recovered`,
+        title: `Later transaction`,
+      })
+      expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
     } finally {
       await collection.cleanup()
     }
@@ -1862,6 +3774,254 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`fail-stops a queued suffix when its staged predecessor aborts before publication`, async () => {
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-abort-before-publication-suffix`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            remoteBegin = params.begin
+            remoteWrite = params.write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = params.commit
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const localPersistence = createEventGate()
+    const localTransaction = createTransaction({
+      mutationFn: () => localPersistence.promise,
+    })
+    const aborted = new AbortController()
+    let abortedReceipt: Promise<void> | undefined
+    let dependentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      localTransaction.mutate(() => {
+        collection.insert({ id: `local`, title: `publication gate` })
+      })
+
+      remoteBegin?.()
+      sourceParams.metadata!.row.set(`shared`, { owner: `aborted` })
+      abortedReceipt = Promise.resolve(remoteCommit?.(aborted.signal)).then(
+        () => undefined,
+      )
+      void abortedReceipt.catch(() => undefined)
+
+      remoteBegin?.()
+      const stagedOwner = sourceParams.metadata!.row.get(`shared`)
+      remoteWrite?.({
+        type: `insert`,
+        value: {
+          id: `dependent`,
+          title:
+            (stagedOwner as { owner?: string } | undefined)?.owner ?? `missing`,
+        },
+      })
+      dependentReceipt = Promise.resolve(remoteCommit?.()).then(() => undefined)
+      void dependentReceipt.catch(() => undefined)
+
+      expect(stagedOwner).toEqual({ owner: `aborted` })
+      aborted.abort()
+      const abortedOutcome = await atPersistedOracleCheckpoint(
+        abortedReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `staged predecessor aborted before publication`,
+      )
+      localPersistence.resolve()
+      await localTransaction.isPersisted.promise
+      const dependentOutcome = await atPersistedOracleCheckpoint(
+        dependentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `post-abort staged suffix settled`,
+      )
+      const terminalError =
+        abortedOutcome.status === `rejected` ? abortedOutcome.reason : undefined
+
+      expect({
+        abortedStatus: abortedOutcome.status,
+        abortedName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        dependentStatus: dependentOutcome.status,
+        dependentExact:
+          dependentOutcome.status === `rejected` &&
+          dependentOutcome.reason === terminalError,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        visibleDependent: collection.get(`dependent`),
+        durableDependent: adapter.rows.get(`dependent`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+      }).toEqual({
+        abortedStatus: `rejected`,
+        abortedName: `AbortError`,
+        dependentStatus: `rejected`,
+        dependentExact: true,
+        status: `error`,
+        exactPublicError: true,
+        visibleDependent: undefined,
+        durableDependent: undefined,
+        durableMetadata: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      localPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => abortedReceipt?.catch(() => undefined),
+          () => dependentReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects a wrapped sync receipt with a named terminal persistence error`, async () => {
+    const adapter = createRecordingAdapter()
+    const adapterError = Object.assign(
+      new Error(`adapter write failed exactly`),
+      {
+        code: `SQLITE_FULL`,
+        path: `adapter.applyCommittedTx`,
+      },
+    )
+    const persistenceEntered = createEventGate()
+    const persistence = createEventGate()
+    adapter.applyCommittedTx = async () => {
+      persistenceEntered.resolve()
+      await persistence.promise
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-persistence-error`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `failed`, title: `Not durable` },
+      })
+      const receipt = Promise.resolve(remoteCommit?.()).then(() => undefined)
+      const settlement = observeSettlement(receipt)
+      await atPersistedOracleCheckpoint(
+        persistenceEntered.promise,
+        `terminal persistence entered`,
+      )
+      await flushAsyncWork()
+
+      expect({
+        receipt: settlement.read(),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        visible: stripVirtualProps(collection.get(`failed`)),
+        durable: adapter.rows.get(`failed`),
+      }).toEqual({
+        receipt: { status: `pending` },
+        status: `ready`,
+        publicError: undefined,
+        visible: { id: `failed`, title: `Not durable` },
+        durable: undefined,
+      })
+
+      persistence.reject(adapterError)
+      const outcome = await receipt.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+
+      const publicError = collection._lifecycle.getSyncError()
+      const receiptError =
+        outcome.status === `rejected` && outcome.reason instanceof Error
+          ? (outcome.reason as Error & {
+              code?: unknown
+              path?: unknown
+            })
+          : undefined
+      expect({
+        receiptStatus: outcome.status,
+        receiptErrorName: receiptError?.name,
+        receiptHasNamedPersistenceSemantics:
+          outcome.status === `rejected` &&
+          outcome.reason instanceof PersistedCollectionDurabilityError,
+        receiptCauseIsAdapterError: receiptError?.cause === adapterError,
+        receiptErrorCode: receiptError?.code,
+        receiptErrorPath: receiptError?.path,
+        publicErrorIsReceipt:
+          outcome.status === `rejected` && publicError === outcome.reason,
+        status: collection.status,
+        visible: stripVirtualProps(collection.get(`failed`)),
+        durable: adapter.rows.get(`failed`),
+      }).toEqual({
+        receiptStatus: `rejected`,
+        receiptErrorName: `PersistedCollectionDurabilityError`,
+        receiptHasNamedPersistenceSemantics: true,
+        receiptCauseIsAdapterError: true,
+        receiptErrorCode: `SQLITE_FULL`,
+        receiptErrorPath: `adapter.applyCommittedTx`,
+        publicErrorIsReceipt: true,
+        status: `error`,
+        visible: { id: `failed`, title: `Not durable` },
+        durable: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      persistence.reject(adapterError)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`publishes before persistence settles, then fails with the named durability error`, async () => {
     const adapter = createRecordingAdapter()
     const persistenceError = Object.assign(new Error(`persistence failed`), {
@@ -1880,7 +4040,7 @@ describe(`persistedCollectionOptions`, () => {
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
-        id: `sync-present-persistence-error`,
+        id: `sync-present-persistence-error-main`,
         getKey: (item) => item.id,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
@@ -1935,6 +4095,7 @@ describe(`persistedCollectionOptions`, () => {
         path: `todos.sqlite-wal`,
         cause: persistenceError,
       })
+      expect(adapter.rows.get(`failed`)).toBeUndefined()
       expect(collection.status).toBe(`error`)
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
@@ -2003,6 +4164,3319 @@ describe(`persistedCollectionOptions`, () => {
       expect(collection._lifecycle.getSyncError()).toBe(rejection)
     } finally {
       await collection.cleanup()
+    }
+  })
+
+  it.each([`response`, `rejection`] as const)(
+    `installs terminal state before synchronously reporting an external coordinator persistence %s`,
+    async (failureMode) => {
+      const coordinator = createCoordinatorHarness()
+      const persistenceResponse = {
+        type: `rpc:applyCommittedTx:res` as const,
+        rpcId: `reentrant-${failureMode}`,
+        ok: false as const,
+        code: `PERSISTENCE_ERROR` as const,
+        error: `disk write failed`,
+        sourceCode: `SQLITE_IOERR_FSYNC`,
+        path: [`database`, `wal`] as const,
+      }
+      const rejectedError = new PersistedCollectionDurabilityError(
+        `coordinator persistence request rejected`,
+        {
+          cause: persistenceResponse,
+          code: persistenceResponse.sourceCode,
+          path: persistenceResponse.path,
+        },
+      )
+      const requestApplyCommittedTx = vi.fn(() =>
+        failureMode === `response`
+          ? Promise.resolve(persistenceResponse)
+          : Promise.reject(rejectedError),
+      )
+      coordinator.requestApplyCommittedTx = requestApplyCommittedTx
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `terminal-before-report-${failureMode}`,
+          getKey: (item) => item.id,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter: createRecordingAdapter(), coordinator },
+        }),
+      )
+      let reentrantKeyReads = 0
+      let reentrantReceipt:
+        | Promise<
+            { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+          >
+        | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        await collection.stateWhenReady()
+        const originalMarkError = collection._lifecycle.markError.bind(
+          collection._lifecycle,
+        )
+        vi.spyOn(collection._lifecycle, `markError`).mockImplementation(
+          (error) => {
+            sourceParams.begin()
+            sourceParams.write({
+              type: `insert`,
+              value: {
+                get id() {
+                  reentrantKeyReads++
+                  return `reentrant`
+                },
+                title: `must be fenced before error observation`,
+              },
+            })
+            reentrantReceipt = Promise.resolve(sourceParams.commit()).then(
+              () => ({ status: `fulfilled` as const }),
+              (reason: unknown) => ({ status: `rejected` as const, reason }),
+            )
+            originalMarkError(error)
+          },
+        )
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `failed`, title: `must become terminal first` },
+        })
+        const primaryOutcome = await Promise.resolve(
+          sourceParams.commit(),
+        ).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        )
+        const reentrantOutcome = await atPersistedOracleCheckpoint(
+          reentrantReceipt!,
+          `reentrant source receipt after coordinator ${failureMode}`,
+        )
+        const terminalError =
+          primaryOutcome.status === `rejected`
+            ? primaryOutcome.reason
+            : undefined
+
+        expect({
+          primaryStatus: primaryOutcome.status,
+          reentrantStatus: reentrantOutcome.status,
+          sameTerminal:
+            reentrantOutcome.status === `rejected` &&
+            reentrantOutcome.reason === terminalError,
+          reentrantKeyReads,
+          coordinatorCalls: requestApplyCommittedTx.mock.calls.length,
+          exactPublicError:
+            collection._lifecycle.getSyncError() === terminalError,
+        }).toEqual({
+          primaryStatus: `rejected`,
+          reentrantStatus: `rejected`,
+          sameTerminal: true,
+          reentrantKeyReads: 0,
+          coordinatorCalls: 1,
+          exactPublicError: true,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => reentrantReceipt, () => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`keeps durability failure terminal when publication aborts the signal`, async () => {
+    const adapter = createRecordingAdapter()
+    const storageError = Object.assign(
+      new Error(`post-publication durability failed exactly`),
+      {
+        code: `SQLITE_IOERR`,
+        path: `adapter.applyCommittedTx`,
+      },
+    )
+    const persistenceEntered = createEventGate()
+    const releasePersistence = createEventGate()
+    adapter.applyCommittedTx = async () => {
+      persistenceEntered.resolve()
+      await releasePersistence.promise
+      throw storageError
+    }
+    let sourceParams!: TodoSyncParams
+    const abortController = new AbortController()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `post-publication-abort-durability`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const publication = collection.subscribeChanges((changes) => {
+      if (changes.some((entry) => entry.key === `failed`)) {
+        abortController.abort()
+      }
+    })
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `post-publication abort collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `failed`, title: `visible before durability` },
+      })
+      receipt = Promise.resolve(
+        sourceParams.commit(abortController.signal),
+      ).then(() => undefined)
+      void receipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        persistenceEntered.promise,
+        `post-publication abort persistence entered`,
+      )
+
+      expect({
+        signalAborted: abortController.signal.aborted,
+        visible: stripVirtualProps(collection.get(`failed`)),
+        status: collection.status,
+      }).toEqual({
+        signalAborted: true,
+        visible: { id: `failed`, title: `visible before durability` },
+        status: `ready`,
+      })
+
+      releasePersistence.resolve()
+      const outcome = await atPersistedOracleCheckpoint(
+        receipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `post-publication abort durability receipt`,
+      )
+      const terminalError =
+        outcome.status === `rejected` ? outcome.reason : undefined
+
+      expect({
+        receiptStatus: outcome.status,
+        namedDurability:
+          terminalError instanceof PersistedCollectionDurabilityError,
+        cause: terminalError instanceof Error ? terminalError.cause : undefined,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        status: collection.status,
+        durable: adapter.rows.get(`failed`),
+      }).toEqual({
+        receiptStatus: `rejected`,
+        namedDurability: true,
+        cause: storageError,
+        exactPublicError: true,
+        status: `error`,
+        durable: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releasePersistence.resolve()
+      publication.unsubscribe()
+      await cleanupPersistedOracle(
+        [() => receipt?.catch(() => undefined), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`reserves FIFO admission before a publication callback commits a sibling`, async () => {
+    const adapter = createRecordingAdapter()
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    const firstStorageError = new Error(`reentrant first durability failed`)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+        throw firstStorageError
+      }
+      await successfulApply(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `reentrant-fifo-admission`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let siblingReceipt: Promise<void> | undefined
+    let publicationTriggers = 0
+    const subscription = collection.subscribeChanges((changes) => {
+      if (
+        publicationTriggers === 0 &&
+        changes.some((entry) => entry.key === `first`)
+      ) {
+        publicationTriggers++
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `sibling`, title: `must remain queued` },
+        })
+        siblingReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void siblingReceipt.catch(() => undefined)
+      }
+    })
+    let firstReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `reentrant FIFO collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `first`, title: `publishes before durability` },
+      })
+      firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void firstReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `reentrant first persistence entered`,
+      )
+      await Promise.resolve()
+
+      expect(siblingReceipt).toBeInstanceOf(Promise)
+      const firstSettlement = observeSettlement(firstReceipt)
+      const siblingSettlement = observeSettlement(siblingReceipt!)
+      await Promise.resolve()
+      expect({
+        publicationTriggers,
+        applyCalls,
+        firstReceipt: firstSettlement.read(),
+        siblingReceipt: siblingSettlement.read(),
+        visibleFirst: stripVirtualProps(collection.get(`first`)),
+        visibleSibling: collection.get(`sibling`),
+        durableFirst: adapter.rows.get(`first`),
+        durableSibling: adapter.rows.get(`sibling`),
+      }).toEqual({
+        publicationTriggers: 1,
+        applyCalls: 1,
+        firstReceipt: { status: `pending` },
+        siblingReceipt: { status: `pending` },
+        visibleFirst: { id: `first`, title: `publishes before durability` },
+        visibleSibling: undefined,
+        durableFirst: undefined,
+        durableSibling: undefined,
+      })
+
+      releaseFirstPersistence.resolve()
+      const firstOutcome = await atPersistedOracleCheckpoint(
+        firstReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `reentrant first receipt rejected`,
+      )
+      const siblingOutcome = await atPersistedOracleCheckpoint(
+        siblingReceipt!.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `reentrant sibling receipt rejected`,
+      )
+      const terminalError =
+        firstOutcome.status === `rejected` ? firstOutcome.reason : undefined
+      expect({
+        firstStatus: firstOutcome.status,
+        siblingStatus: siblingOutcome.status,
+        sameTerminal:
+          siblingOutcome.status === `rejected` &&
+          siblingOutcome.reason === terminalError,
+        status: collection.status,
+        publicErrorIsFirst:
+          collection._lifecycle.getSyncError() === terminalError,
+        visibleSibling: collection.get(`sibling`),
+        durableSibling: adapter.rows.get(`sibling`),
+        applyCalls,
+      }).toEqual({
+        firstStatus: `rejected`,
+        siblingStatus: `rejected`,
+        sameTerminal: true,
+        status: `error`,
+        publicErrorIsFirst: true,
+        visibleSibling: undefined,
+        durableSibling: undefined,
+        applyCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      subscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => firstReceipt?.catch(() => undefined),
+          () => siblingReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`keeps a reentrant sibling behind its hydration-drained parent outcome`, async () => {
+    const adapter = createRecordingAdapter()
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    const subsetFailure = new Error(`request-local hydration failed`)
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw subsetFailure
+    }
+    const persistenceEntered = createEventGate()
+    const releasePersistence = createEventGate()
+    const durabilityFailure = new Error(`hydration-drained durability failed`)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async () => {
+      applyCalls++
+      persistenceEntered.resolve()
+      await releasePersistence.promise
+      throw durabilityFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydration-drained-reentrant-fifo`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let siblingReceipt: Promise<void> | undefined
+    const publication = collection.subscribeChanges((changes) => {
+      if (
+        siblingReceipt === undefined &&
+        changes.some((change) => change.key === `parent`)
+      ) {
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `sibling`, title: `Must await parent outcome` },
+        })
+        siblingReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void siblingReceipt.catch(() => undefined)
+      }
+    })
+    let load: Promise<void> | undefined
+    let parentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `hydration-drained FIFO collection ready`,
+      )
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        loadEntered.promise,
+        `hydration-drained load entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `parent`, title: `Publishes during failure drain` },
+      })
+      parentReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void parentReceipt.catch(() => undefined)
+      rejectLoad.resolve()
+      await atPersistedOracleCheckpoint(
+        persistenceEntered.promise,
+        `hydration-drained parent persistence entered`,
+      )
+      await Promise.resolve()
+
+      expect(siblingReceipt).toBeInstanceOf(Promise)
+      const parentSettlement = observeSettlement(parentReceipt)
+      const siblingSettlement = observeSettlement(siblingReceipt!)
+      await Promise.resolve()
+      expect({
+        applyCalls,
+        parentReceipt: parentSettlement.read(),
+        siblingReceipt: siblingSettlement.read(),
+        publicParent: stripVirtualProps(collection.get(`parent`)),
+        publicSibling: collection.get(`sibling`),
+        durableSibling: adapter.rows.get(`sibling`),
+      }).toEqual({
+        applyCalls: 1,
+        parentReceipt: { status: `pending` },
+        siblingReceipt: { status: `pending` },
+        publicParent: { id: `parent`, title: `Publishes during failure drain` },
+        publicSibling: undefined,
+        durableSibling: undefined,
+      })
+
+      releasePersistence.resolve()
+      const parentOutcome = await atPersistedOracleCheckpoint(
+        parentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `hydration-drained parent rejected`,
+      )
+      const siblingOutcome = await atPersistedOracleCheckpoint(
+        siblingReceipt!.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `hydration-drained sibling rejected`,
+      )
+      const loadOutcome = await atPersistedOracleCheckpoint(
+        load.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `hydration-drained load settled`,
+      )
+      const terminalError =
+        parentOutcome.status === `rejected` ? parentOutcome.reason : undefined
+
+      expect({
+        parentStatus: parentOutcome.status,
+        siblingStatus: siblingOutcome.status,
+        loadStatus: loadOutcome.status,
+        sameSibling:
+          siblingOutcome.status === `rejected` &&
+          siblingOutcome.reason === terminalError,
+        sameLoad:
+          loadOutcome.status === `rejected` &&
+          loadOutcome.reason === terminalError,
+        namedDurability:
+          terminalError instanceof PersistedCollectionDurabilityError,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicSibling: collection.get(`sibling`),
+        applyCalls,
+      }).toEqual({
+        parentStatus: `rejected`,
+        siblingStatus: `rejected`,
+        loadStatus: `rejected`,
+        sameSibling: true,
+        sameLoad: true,
+        namedDurability: true,
+        status: `error`,
+        publicError: terminalError,
+        publicSibling: undefined,
+        applyCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      releasePersistence.resolve()
+      publication.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => parentReceipt?.catch(() => undefined),
+          () => siblingReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects a queued suffix derived from an aborted staged metadata layer`, async () => {
+    const adapter = createRecordingAdapter()
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await successfulApply(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `aborted-staged-metadata-suffix`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const aborted = new AbortController()
+    let firstReceipt: Promise<void> | undefined
+    let abortedReceipt: Promise<void> | undefined
+    let dependentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `aborted staged metadata collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `first`, title: `durability gate` },
+      })
+      firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void firstReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `first persistence entered before staged suffix`,
+      )
+
+      sourceParams.begin()
+      sourceParams.metadata!.row.set(`shared`, { owner: `aborted` })
+      abortedReceipt = Promise.resolve(
+        sourceParams.commit(aborted.signal),
+      ).then(() => undefined)
+      void abortedReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      const stagedOwner = sourceParams.metadata!.row.get(`shared`)
+      sourceParams.write({
+        type: `insert`,
+        value: {
+          id: `dependent`,
+          title:
+            (stagedOwner as { owner?: string } | undefined)?.owner ?? `missing`,
+        },
+      })
+      dependentReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void dependentReceipt.catch(() => undefined)
+
+      expect(stagedOwner).toEqual({ owner: `aborted` })
+      aborted.abort()
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(
+        firstReceipt,
+        `first durability gate settled`,
+      )
+      const abortedOutcome = await atPersistedOracleCheckpoint(
+        abortedReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `aborted staged receipt settled`,
+      )
+      const dependentOutcome = await atPersistedOracleCheckpoint(
+        dependentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `dependent staged receipt settled`,
+      )
+      const terminalError =
+        abortedOutcome.status === `rejected` ? abortedOutcome.reason : undefined
+
+      expect({
+        abortedStatus: abortedOutcome.status,
+        abortedName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        dependentStatus: dependentOutcome.status,
+        dependentExact:
+          dependentOutcome.status === `rejected` &&
+          dependentOutcome.reason === terminalError,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        visibleDependent: collection.get(`dependent`),
+        durableDependent: adapter.rows.get(`dependent`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+        applyCalls,
+      }).toEqual({
+        abortedStatus: `rejected`,
+        abortedName: `AbortError`,
+        dependentStatus: `rejected`,
+        dependentExact: true,
+        status: `error`,
+        exactPublicError: true,
+        visibleDependent: undefined,
+        durableDependent: undefined,
+        durableMetadata: undefined,
+        applyCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => firstReceipt?.catch(() => undefined),
+          () => abortedReceipt?.catch(() => undefined),
+          () => dependentReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not fail-stop when an aborted staged collection metadata write was superseded`, async () => {
+    const adapter = createRecordingAdapter()
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await successfulApply(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `superseded-staged-collection-metadata`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const olderAbort = new AbortController()
+    let firstReceipt: Promise<void> | undefined
+    let olderReceipt: Promise<void> | undefined
+    let newerReceipt: Promise<void> | undefined
+    let dependentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `superseded collection metadata owner ready`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `first`, title: `durability gate` },
+      })
+      firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void firstReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `first persistence entered before superseded metadata writes`,
+      )
+
+      sourceParams.begin()
+      sourceParams.metadata!.collection.set(`shared`, { owner: `older` })
+      olderReceipt = Promise.resolve(
+        sourceParams.commit(olderAbort.signal),
+      ).then(() => undefined)
+      void olderReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      sourceParams.metadata!.collection.set(`shared`, { owner: `newer` })
+      newerReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void newerReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      const stagedOwner = sourceParams
+        .metadata!.collection.list()
+        .find(({ key }) => key === `shared`)?.value
+      sourceParams.write({
+        type: `insert`,
+        value: {
+          id: `dependent`,
+          title:
+            (stagedOwner as { owner?: string } | undefined)?.owner ?? `missing`,
+        },
+      })
+      dependentReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void dependentReceipt.catch(() => undefined)
+
+      expect(stagedOwner).toEqual({ owner: `newer` })
+      olderAbort.abort()
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(
+        firstReceipt,
+        `superseded metadata durability gate settled`,
+      )
+      const olderOutcome = await atPersistedOracleCheckpoint(
+        olderReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `superseded older metadata receipt settled`,
+      )
+      const newerOutcome = await atPersistedOracleCheckpoint(
+        newerReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `newer metadata receipt settled`,
+      )
+      const dependentOutcome = await atPersistedOracleCheckpoint(
+        dependentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `newest-owner dependent receipt settled`,
+      )
+
+      expect({
+        olderStatus: olderOutcome.status,
+        newerStatus: newerOutcome.status,
+        dependentStatus: dependentOutcome.status,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        visibleDependent: stripVirtualProps(collection.get(`dependent`)),
+        durableDependent: adapter.rows.get(`dependent`),
+        durableMetadata: adapter.collectionMetadata.get(`shared`),
+        applyCalls,
+      }).toEqual({
+        olderStatus: `rejected`,
+        newerStatus: `fulfilled`,
+        dependentStatus: `fulfilled`,
+        status: `ready`,
+        publicError: undefined,
+        visibleDependent: { id: `dependent`, title: `newer` },
+        durableDependent: { id: `dependent`, title: `newer` },
+        durableMetadata: { owner: `newer` },
+        applyCalls: 3,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => firstReceipt?.catch(() => undefined),
+          () => olderReceipt?.catch(() => undefined),
+          () => newerReceipt?.catch(() => undefined),
+          () => dependentReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not let an old external coordinator success affect a restarted lifecycle`, async () => {
+    const id = `external-lifecycle-success`
+    const adapter = createRecordingAdapter()
+    const oldPersistenceEntered = createEventGate()
+    const releaseOldPersistence = createEventGate()
+    const coordinator = createFailStopCoordinatorHarness(id)
+    let requestCalls = 0
+    coordinator.requestApplyCommittedTx = async (_collectionId, tx) => {
+      requestCalls++
+      oldPersistenceEntered.resolve()
+      await releaseOldPersistence.promise
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+    let sourceParams!: TodoSyncParams
+    const replacement = {
+      id: `replacement`,
+      title: `owned by restarted lifecycle`,
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let oldSettlement:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `${id} initial lifecycle ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `old`, title: `must remain owned by old lifecycle` },
+      })
+      oldSettlement = Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        oldPersistenceEntered.promise,
+        `${id} old persistence entered`,
+      )
+
+      await collection.cleanup()
+      cleanedUp = true
+      adapter.rows.set(replacement.id, replacement)
+      collection.startSyncImmediate()
+      cleanedUp = false
+      const replacementSettlement = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      releaseOldPersistence.resolve()
+
+      const oldOutcome = await atPersistedOracleCheckpoint(
+        oldSettlement,
+        `${id} old receipt settled`,
+      )
+      const replacementOutcome = await atPersistedOracleCheckpoint(
+        replacementSettlement,
+        `${id} replacement lifecycle settled`,
+      )
+      await flushAsyncWork()
+
+      expect({
+        oldReceiptStatus: oldOutcome.status,
+        replacementStatus: replacementOutcome.status,
+        replacementVisible: stripVirtualProps(collection.get(replacement.id)),
+        replacementPublicError: collection._lifecycle.getSyncError(),
+        staleBroadcasts: coordinator.publishCalls.length,
+        requestCalls,
+      }).toEqual({
+        oldReceiptStatus: `fulfilled`,
+        replacementStatus: `fulfilled`,
+        replacementVisible: replacement,
+        replacementPublicError: undefined,
+        staleBroadcasts: 0,
+        requestCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseOldPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => oldSettlement,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not let an old external coordinator failure poison a restarted lifecycle`, async () => {
+    const id = `external-lifecycle-failure`
+    const adapter = createRecordingAdapter()
+    const oldPersistenceEntered = createEventGate()
+    const releaseOldPersistence = createEventGate()
+    const oldCoordinatorError = new PersistedCollectionDurabilityError(
+      `old lifecycle coordinator failure`,
+      { code: `SQLITE_IOERR_FSYNC`, path: [`database`, `wal`] },
+    )
+    const coordinator = createFailStopCoordinatorHarness(id)
+    let requestCalls = 0
+    coordinator.requestApplyCommittedTx = async (_collectionId, tx) => {
+      requestCalls++
+      if (requestCalls === 1) {
+        oldPersistenceEntered.resolve()
+        await releaseOldPersistence.promise
+        throw oldCoordinatorError
+      }
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+    let sourceParams!: TodoSyncParams
+    const replacement = {
+      id: `replacement`,
+      title: `owned by restarted lifecycle`,
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const startAndWaitForReady = async (label: string) => {
+      const ready = createEventGate()
+      const unsubscribe = collection.on(`status:ready`, () => ready.resolve())
+      collection.startSyncImmediate()
+      try {
+        await atPersistedOracleCheckpoint(ready.promise, label)
+      } finally {
+        unsubscribe()
+      }
+    }
+    let oldSettlement:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let replacementReceipt:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await startAndWaitForReady(`${id} initial lifecycle ready`)
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `old`, title: `must remain owned by old lifecycle` },
+      })
+      oldSettlement = Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        oldPersistenceEntered.promise,
+        `${id} old persistence entered`,
+      )
+
+      await collection.cleanup()
+      await startAndWaitForReady(
+        `${id} replacement lifecycle ready before old failure`,
+      )
+      sourceParams.begin()
+      sourceParams.write({ type: `insert`, value: replacement })
+      replacementReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      releaseOldPersistence.resolve()
+
+      const oldOutcome = await atPersistedOracleCheckpoint(
+        oldSettlement,
+        `${id} old receipt settled`,
+      )
+      const replacementOutcome = await atPersistedOracleCheckpoint(
+        replacementReceipt,
+        `${id} replacement transaction settled`,
+      )
+      await flushAsyncWork()
+
+      expect({
+        oldReceiptStatus: oldOutcome.status,
+        replacementStatus: replacementOutcome.status,
+        replacementVisible: stripVirtualProps(collection.get(replacement.id)),
+        replacementPublicError: collection._lifecycle.getSyncError(),
+        broadcasts: coordinator.publishCalls.length,
+        requestCalls,
+      }).toEqual({
+        oldReceiptStatus: `rejected`,
+        replacementStatus: `fulfilled`,
+        replacementVisible: replacement,
+        replacementPublicError: undefined,
+        broadcasts: 0,
+        requestCalls: 2,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseOldPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => oldSettlement,
+          () => replacementReceipt,
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not deliver coordinator work accepted before lifecycle replacement into the new owner`, async () => {
+    const id = `queued-coordinator-lifecycle`
+    const adapter = createRecordingAdapter()
+    const oldReloadEntered = createEventGate()
+    const releaseOldReload = createEventGate()
+    const replacementHydrationEntered = createEventGate()
+    const releaseReplacementHydration = createEventGate()
+    let baselineCalls = 0
+    overrideBaselineRows(adapter, async () => {
+      baselineCalls++
+      if (baselineCalls === 2) {
+        replacementHydrationEntered.resolve()
+        await releaseReplacementHydration.promise
+        return [
+          {
+            key: `replacement`,
+            value: { id: `replacement`, title: `new owner baseline` },
+          },
+        ]
+      }
+      return []
+    })
+    let subsetCalls = 0
+    adapter.loadSubset = async () => {
+      subsetCalls++
+      if (subsetCalls === 1) {
+        oldReloadEntered.resolve()
+        await releaseOldReload.promise
+      }
+      return []
+    }
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const replacementControlsReady = createEventGate()
+    let sourceRuns = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            sourceRuns++
+            if (sourceRuns === 2) replacementControlsReady.resolve()
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let replacementReady:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `queued coordinator initial owner ready`,
+      )
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `old-reload-gate`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+      })
+      await atPersistedOracleCheckpoint(
+        oldReloadEntered.promise,
+        `old coordinator reload entered`,
+      )
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `queued-before-restart`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [
+          {
+            key: `stale`,
+            value: { id: `stale`, title: `must stay with old owner` },
+          },
+        ],
+        deletedKeys: [],
+      })
+
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        replacementControlsReady.promise,
+        `replacement sync controls installed`,
+      )
+      releaseOldReload.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementHydrationEntered.promise,
+        `replacement hydration entered after queued coordinator work`,
+      )
+
+      expect({
+        sourceRuns,
+        baselineCalls,
+        subsetCalls,
+        staleVisible: collection.get(`stale`),
+        staleDurable: adapter.rows.get(`stale`),
+        replacementPublicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        sourceRuns: 2,
+        baselineCalls: 2,
+        subsetCalls: 1,
+        staleVisible: undefined,
+        staleDurable: undefined,
+        replacementPublicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseOldReload.resolve()
+      releaseReplacementHydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`discards a queued collection reset when its owner is cleaned up`, async () => {
+    const id = `queued-reset-lifecycle`
+    const adapter = createRecordingAdapter()
+    const oldReloadEntered = createEventGate()
+    const releaseOldReload = createEventGate()
+    let subsetCalls = 0
+    adapter.loadSubset = async () => {
+      subsetCalls++
+      if (subsetCalls === 1) {
+        oldReloadEntered.resolve()
+        await releaseOldReload.promise
+      }
+      return []
+    }
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `queued reset initial owner ready`,
+      )
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `old-reset-gate`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+      })
+      await atPersistedOracleCheckpoint(
+        oldReloadEntered.promise,
+        `old reload entered before queued reset`,
+      )
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+
+      await collection.cleanup()
+      cleanedUp = true
+      releaseOldReload.resolve()
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      expect({
+        subsetCalls,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        subsetCalls: 1,
+        status: `cleaned-up`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseOldReload.resolve()
+      await cleanupPersistedOracle(
+        [() => (cleanedUp ? undefined : collection.cleanup())],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not apply a delayed seq-gap replay response into a restarted lifecycle`, async () => {
+    const id = `delayed-pull-since-lifecycle`
+    const adapter = createRecordingAdapter()
+    const pullEntered = createEventGate()
+    const releasePull = createEventGate()
+    const replacementHydrationEntered = createEventGate()
+    const releaseReplacementHydration = createEventGate()
+    let baselineCalls = 0
+    overrideBaselineRows(adapter, async () => {
+      baselineCalls++
+      if (baselineCalls === 2) {
+        replacementHydrationEntered.resolve()
+        await releaseReplacementHydration.promise
+        return [
+          {
+            key: `replacement`,
+            value: { id: `replacement`, title: `new owner baseline` },
+          },
+        ]
+      }
+      return []
+    })
+    const coordinator = createFailStopCoordinatorHarness(id)
+    coordinator.pullSince = async () => {
+      pullEntered.resolve()
+      await releasePull.promise
+      return {
+        type: `rpc:pullSince:res`,
+        rpcId: `old-delayed-pull`,
+        ok: true,
+        latestTerm: 1,
+        latestSeq: 2,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedKeys: [`stale`],
+        deletedKeys: [],
+        deltas: [
+          {
+            txId: `old-delayed-delta`,
+            latestRowVersion: 2,
+            changedRows: [
+              {
+                key: `stale`,
+                value: { id: `stale`, title: `must stay with old owner` },
+              },
+            ],
+            deletedKeys: [],
+            rowMetadataMutations: [],
+            collectionMetadataMutations: [],
+          },
+        ],
+      }
+    }
+    const replacementControlsReady = createEventGate()
+    let sourceRuns = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            sourceRuns++
+            if (sourceRuns === 2) replacementControlsReady.resolve()
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let replacementReady:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `delayed pull initial owner ready`,
+      )
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `gap-trigger`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        pullEntered.promise,
+        `old pullSince entered`,
+      )
+
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        replacementControlsReady.promise,
+        `delayed pull replacement controls installed`,
+      )
+      releasePull.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementHydrationEntered.promise,
+        `replacement hydration entered after delayed pull replay`,
+      )
+
+      expect({
+        sourceRuns,
+        baselineCalls,
+        staleVisible: collection.get(`stale`),
+        staleDurable: adapter.rows.get(`stale`),
+        replacementPublicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        sourceRuns: 2,
+        baselineCalls: 2,
+        staleVisible: undefined,
+        staleDurable: undefined,
+        replacementPublicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releasePull.resolve()
+      releaseReplacementHydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not apply a later seq-gap replay delta through replacement controls`, async () => {
+    const id = `two-delta-replay-lifecycle`
+    const firstReceiptEntered = createEventGate()
+    const releaseFirstReceipt = createEventGate()
+    const replacementControlsInstalled = createEventGate()
+    const replacementHydrationEntered = createEventGate()
+    const releaseReplacementHydration = createEventGate()
+    let baselineCalls = 0
+    const adapter = createRecordingAdapter()
+    overrideBaselineRows(adapter, async () => {
+      baselineCalls++
+      if (baselineCalls === 2) {
+        replacementHydrationEntered.resolve()
+        await releaseReplacementHydration.promise
+        return [
+          {
+            key: `replacement`,
+            value: { id: `replacement`, title: `B baseline` },
+          },
+        ]
+      }
+      return []
+    })
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const pullArguments: Array<{
+      collectionId: string
+      fromRowVersion: number
+    }> = []
+    coordinator.pullSince = async (collectionId, fromRowVersion) => {
+      pullArguments.push({ collectionId, fromRowVersion })
+      return {
+        type: `rpc:pullSince:res`,
+        rpcId: `two-delta-replay`,
+        ok: true,
+        latestTerm: 1,
+        latestSeq: 3,
+        latestRowVersion: 3,
+        requiresFullReload: false,
+        changedKeys: [`first`, `second`],
+        deletedKeys: [],
+        deltas: [
+          {
+            txId: `A-delta-1`,
+            latestRowVersion: 1,
+            changedRows: [
+              {
+                key: `first`,
+                value: { id: `first`, title: `A first delta` },
+              },
+            ],
+            deletedKeys: [],
+            rowMetadataMutations: [
+              { type: `set`, key: `first`, value: { owner: `A-first` } },
+            ],
+            collectionMetadataMutations: [
+              { type: `set`, key: `replay:first`, value: `A-first` },
+            ],
+          },
+          {
+            txId: `A-delta-2`,
+            latestRowVersion: 2,
+            changedRows: [
+              {
+                key: `second`,
+                value: { id: `second`, title: `A second delta` },
+              },
+            ],
+            deletedKeys: [],
+            rowMetadataMutations: [
+              { type: `set`, key: `second`, value: { owner: `A-second` } },
+            ],
+            collectionMetadataMutations: [
+              { type: `set`, key: `replay:second`, value: `A-second` },
+            ],
+          },
+        ],
+      }
+    }
+
+    let gateNextApplicationReceipt = false
+    let controlsRun = 0
+    const applicationReceipts: Array<{
+      controlsOwner: `A` | `B`
+      returnedReceipt: `actual` | `held`
+      rowMetadataKeys: Array<string>
+      collectionMetadataKeys: Array<string>
+    }> = []
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) => {
+          controlsRun++
+          const controlsOwner =
+            controlsRun === 1 ? (`A` as const) : (`B` as const)
+          if (controlsOwner === `B`) replacementControlsInstalled.resolve()
+          let rowMetadataKeys: Array<string> = []
+          let collectionMetadataKeys: Array<string> = []
+          return baseSync({
+            ...params,
+            begin: (options) => {
+              rowMetadataKeys = []
+              collectionMetadataKeys = []
+              return params.begin(options)
+            },
+            metadata: {
+              persistence: params.metadata!.persistence,
+              row: {
+                ...params.metadata!.row,
+                set: (key, value) => {
+                  rowMetadataKeys.push(String(key))
+                  params.metadata!.row.set(key, value)
+                },
+                delete: (key) => {
+                  rowMetadataKeys.push(String(key))
+                  params.metadata!.row.delete(key)
+                },
+              },
+              collection: {
+                ...params.metadata!.collection,
+                set: (key, value) => {
+                  collectionMetadataKeys.push(key)
+                  params.metadata!.collection.set(key, value)
+                },
+                delete: (key) => {
+                  collectionMetadataKeys.push(key)
+                  params.metadata!.collection.delete(key)
+                },
+              },
+            },
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (
+                !gateNextApplicationReceipt &&
+                applicationReceipts.length === 0
+              ) {
+                return actualReceipt
+              }
+              const trace = {
+                controlsOwner,
+                returnedReceipt: `actual` as `actual` | `held`,
+                rowMetadataKeys: [...rowMetadataKeys],
+                collectionMetadataKeys: [...collectionMetadataKeys],
+              }
+              applicationReceipts.push(trace)
+              if (gateNextApplicationReceipt) {
+                gateNextApplicationReceipt = false
+                trace.returnedReceipt = `held`
+                firstReceiptEntered.resolve()
+                void Promise.resolve(actualReceipt).catch(() => undefined)
+                return releaseFirstReceipt.promise
+              }
+              return actualReceipt
+            },
+          })
+        },
+      },
+    })
+    let replacementReady: Promise<unknown> | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `two-delta A lifecycle ready`,
+      )
+      applicationReceipts.length = 0
+      gateNextApplicationReceipt = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 3,
+        txId: `gap-trigger`,
+        latestRowVersion: 3,
+        requiresFullReload: false,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        firstReceiptEntered.promise,
+        `two-delta first A receipt held`,
+      )
+      expect(collection.get(`first`)?.title).toBe(`A first delta`)
+
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        replacementControlsInstalled.promise,
+        `two-delta B controls installed`,
+      )
+
+      releaseFirstReceipt.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementHydrationEntered.promise,
+        `two-delta B hydration held`,
+      )
+      await Promise.resolve()
+
+      const secondReceipts = applicationReceipts.filter(
+        (receipt) =>
+          receipt.rowMetadataKeys.includes(`second`) ||
+          receipt.collectionMetadataKeys.includes(`replay:second`),
+      )
+      expect({
+        controlsRun,
+        pullArguments,
+        secondReceipts,
+        secondRowMetadata: collection._state.syncedMetadata.get(`second`),
+        secondCollectionMetadata:
+          collection._state.syncedCollectionMetadata.get(`replay:second`),
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        controlsRun: 2,
+        pullArguments: [{ collectionId: id, fromRowVersion: 0 }],
+        secondReceipts: [],
+        secondRowMetadata: undefined,
+        secondCollectionMetadata: undefined,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstReceipt.resolve()
+      releaseReplacementHydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not confirm a delayed local coordinator response through a restarted owner`, async () => {
+    const id = `delayed-local-confirmation-lifecycle`
+    const adapter = createRecordingAdapter()
+    const replacementHydrationEntered = createEventGate()
+    const releaseReplacementHydration = createEventGate()
+    let baselineCalls = 0
+    overrideBaselineRows(adapter, async () => {
+      baselineCalls++
+      if (baselineCalls === 2) {
+        replacementHydrationEntered.resolve()
+        await releaseReplacementHydration.promise
+        return [
+          {
+            key: `replacement`,
+            value: { id: `replacement`, title: `new owner baseline` },
+          },
+        ]
+      }
+      return []
+    })
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const requestEntered = createEventGate()
+    const releaseRequest = createEventGate()
+    coordinator.requestApplyLocalMutations = async (
+      _collectionId,
+      mutations,
+    ) => {
+      requestEntered.resolve()
+      await releaseRequest.promise
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: `old-delayed-local`,
+        ok: true,
+        term: 1,
+        seq: 1,
+        latestRowVersion: 1,
+        acceptedMutationIds: mutations.map((mutation) => mutation.mutationId),
+      }
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const oldRow = { id: `old-local`, title: `must stay with old owner` }
+    let localTransaction: ReturnType<typeof collection.insert> | undefined
+    let replacementReady:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `delayed local initial owner ready`,
+      )
+      localTransaction = collection.insert(oldRow)
+      await atPersistedOracleCheckpoint(
+        requestEntered.promise,
+        `old local coordinator request entered`,
+      )
+
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      releaseRequest.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementHydrationEntered.promise,
+        `replacement hydration entered after delayed local confirmation`,
+      )
+
+      expect({
+        baselineCalls,
+        staleVisible: collection.get(oldRow.id),
+        staleDurable: adapter.rows.get(oldRow.id),
+        replacementPublicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        baselineCalls: 2,
+        staleVisible: undefined,
+        staleDurable: undefined,
+        replacementPublicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseRequest.resolve()
+      releaseReplacementHydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => localTransaction?.isPersisted.promise.catch(() => undefined),
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not admit an old pending user hook through a restarted coordinator`, async () => {
+    const id = `pending-user-hook-lifecycle`
+    const adapter = createRecordingAdapter()
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const hookEntered = createEventGate()
+    const releaseHook = createEventGate()
+    let coordinatorRequests = 0
+    coordinator.requestApplyLocalMutations = async (
+      _collectionId,
+      mutations,
+    ) => {
+      coordinatorRequests++
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: `stale-user-hook-request`,
+        ok: true,
+        term: 1,
+        seq: 1,
+        latestRowVersion: 1,
+        acceptedMutationIds: mutations.map((mutation) => mutation.mutationId),
+      }
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        onInsert: async () => {
+          hookEntered.resolve()
+          await releaseHook.promise
+          return {}
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let transaction: ReturnType<typeof collection.insert> | undefined
+    let transactionOutcome:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let replacementReady:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `pending user hook initial owner ready`,
+      )
+      transaction = collection.insert({
+        id: `old-hook`,
+        title: `must not enter replacement coordinator`,
+      })
+      transactionOutcome = transaction.isPersisted.promise.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        hookEntered.promise,
+        `old user hook entered before coordinator admission`,
+      )
+      expect(coordinatorRequests).toBe(0)
+
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const replacementOutcome = await atPersistedOracleCheckpoint(
+        replacementReady,
+        `pending user hook replacement owner ready`,
+      )
+      releaseHook.resolve()
+      const outcome = await atPersistedOracleCheckpoint(
+        transactionOutcome,
+        `pending user hook transaction settled`,
+      )
+
+      expect({
+        replacementStatus: replacementOutcome.status,
+        transactionStatus: outcome.status,
+        coordinatorRequests,
+        durableOldRow: adapter.rows.get(`old-hook`),
+      }).toEqual({
+        replacementStatus: `fulfilled`,
+        transactionStatus: `rejected`,
+        coordinatorRequests: 0,
+        durableOldRow: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseHook.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => transactionOutcome,
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not let old loopback readiness complete a restarted hydration`, async () => {
+    const adapter = createRecordingAdapter()
+    const oldHydrationEntered = createEventGate()
+    const releaseOldHydration = createEventGate()
+    const replacementHydrationEntered = createEventGate()
+    const releaseReplacementHydration = createEventGate()
+    let baselineCalls = 0
+    overrideBaselineRows(adapter, async () => {
+      baselineCalls++
+      if (baselineCalls === 1) {
+        oldHydrationEntered.resolve()
+        await releaseOldHydration.promise
+        return []
+      }
+      replacementHydrationEntered.resolve()
+      await releaseReplacementHydration.promise
+      return [
+        {
+          key: `replacement`,
+          value: { id: `replacement`, title: `new owner baseline` },
+        },
+      ]
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `loopback-late-readiness-lifecycle`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      }),
+    )
+    const oldReady = collection.stateWhenReady().then(
+      () => ({ status: `fulfilled` as const }),
+      (reason: unknown) => ({ status: `rejected` as const, reason }),
+    )
+    let replacementReady:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        oldHydrationEntered.promise,
+        `old loopback hydration entered`,
+      )
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+
+      releaseOldHydration.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementHydrationEntered.promise,
+        `replacement loopback hydration entered`,
+      )
+      await flushAsyncWork()
+
+      expect({
+        baselineCalls,
+        replacementIsReady: collection.isReady(),
+        replacementVisible: collection.get(`replacement`),
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        baselineCalls: 2,
+        replacementIsReady: false,
+        replacementVisible: undefined,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseOldHydration.resolve()
+      releaseReplacementHydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => oldReady,
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`marks a targeted invalidation commit-receipt rejection terminal`, async () => {
+    const id = `targeted-invalidation-receipt`
+    const adapter = createRecordingAdapter()
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const receiptEntered = createEventGate()
+    const rejectedReceipt = createEventGate()
+    const receiptError = new Error(
+      `targeted invalidation receipt failed exactly`,
+    )
+    let rejectNextCommit = false
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (!rejectNextCommit) return actualReceipt
+              rejectNextCommit = false
+              receiptEntered.resolve()
+              void Promise.resolve(actualReceipt).catch(() => undefined)
+              return rejectedReceipt.promise
+            },
+          }),
+      },
+    })
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `targeted receipt collection ready`,
+      )
+      rejectNextCommit = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `targeted-receipt-failure`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [
+          {
+            key: `targeted`,
+            value: { id: `targeted`, title: `publication attempted` },
+          },
+        ],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        receiptEntered.promise,
+        `targeted invalidation receipt entered`,
+      )
+      rejectedReceipt.reject(receiptError)
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      expect({
+        status: collection.status,
+        exactPublicError: collection._lifecycle.getSyncError() === receiptError,
+      }).toEqual({
+        status: `error`,
+        exactPublicError: true,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectedReceipt.reject(receiptError)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`waits for a reset truncate receipt before reloading`, async () => {
+    const id = `reset-truncate-receipt`
+    const seed = { id: `seed`, title: `must survive a failed reset` }
+    const adapter = createRecordingAdapter([seed])
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const receiptEntered = createEventGate()
+    const rejectedReceipt = createEventGate()
+    const receiptError = new Error(`reset truncate receipt failed exactly`)
+    let rejectNextCommit = false
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (!rejectNextCommit) return actualReceipt
+              rejectNextCommit = false
+              receiptEntered.resolve()
+              void Promise.resolve(actualReceipt).catch(() => undefined)
+              return rejectedReceipt.promise
+            },
+          }),
+      },
+    })
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `reset receipt collection ready`,
+      )
+      const baselineLoadCount = adapter.loadSubsetCalls.length
+      rejectNextCommit = true
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+      await atPersistedOracleCheckpoint(
+        receiptEntered.promise,
+        `reset truncate receipt entered`,
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      expect(adapter.loadSubsetCalls.length).toBe(baselineLoadCount)
+
+      rejectedReceipt.reject(receiptError)
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      expect({
+        status: collection.status,
+        exactPublicError: collection._lifecycle.getSyncError() === receiptError,
+      }).toEqual({
+        status: `error`,
+        exactPublicError: true,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectedReceipt.reject(receiptError)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`keeps local persistence pending through confirmation receipt settlement`, async () => {
+    const id = `local-confirmation-receipt`
+    const adapter = createRecordingAdapter()
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const receiptEntered = createEventGate()
+    const rejectedReceipt = createEventGate()
+    const receiptError = new Error(`local confirmation receipt failed exactly`)
+    let rejectNextCommit = false
+    coordinator.requestApplyLocalMutations = async (
+      _collectionId,
+      mutations,
+    ) => {
+      rejectNextCommit = true
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: `local-confirmation`,
+        ok: true,
+        term: 1,
+        seq: 1,
+        latestRowVersion: 1,
+        acceptedMutationIds: mutations.map((mutation) => mutation.mutationId),
+      }
+    }
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (!rejectNextCommit) return actualReceipt
+              rejectNextCommit = false
+              receiptEntered.resolve()
+              void Promise.resolve(actualReceipt).catch(() => undefined)
+              return rejectedReceipt.promise
+            },
+          }),
+      },
+    })
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `local confirmation receipt collection ready`,
+      )
+      const transaction = collection.insert({
+        id: `local`,
+        title: `durable before confirmation settles`,
+      })
+      const transactionOutcome = transaction.isPersisted.promise.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        receiptEntered.promise,
+        `local confirmation receipt entered`,
+      )
+      const pending = observeSettlement(
+        transactionOutcome.then(() => undefined),
+      )
+      await Promise.resolve()
+      expect(pending.read()).toEqual({ status: `pending` })
+
+      rejectedReceipt.reject(receiptError)
+      const outcome = await atPersistedOracleCheckpoint(
+        transactionOutcome,
+        `local confirmation transaction settled`,
+      )
+      await flushAsyncWork()
+
+      expect({
+        transactionStatus: outcome.status,
+        transactionExact:
+          outcome.status === `rejected` && outcome.reason === receiptError,
+        status: collection.status,
+        exactPublicError: collection._lifecycle.getSyncError() === receiptError,
+      }).toEqual({
+        transactionStatus: `rejected`,
+        transactionExact: true,
+        status: `error`,
+        exactPublicError: true,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectedReceipt.reject(receiptError)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not continue an old hydration into a replacement after its applied receipt settles`, async () => {
+    const id = `hydration-applied-receipt-lifecycle`
+    const adapter = createRecordingAdapter()
+    const receiptEntered = createEventGate()
+    const releaseReceipt = createEventGate()
+    let gateNextCommit = false
+    let baselineCalls = 0
+    overrideBaselineRows(adapter, async () => {
+      baselineCalls++
+      if (baselineCalls === 1) {
+        gateNextCommit = true
+        return [
+          {
+            key: `old`,
+            value: { id: `old`, title: `old owner hydration` },
+          },
+        ]
+      }
+      return [
+        {
+          key: `replacement`,
+          value: { id: `replacement`, title: `new owner hydration` },
+        },
+      ]
+    })
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+      persistence: { adapter },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (!gateNextCommit) return actualReceipt
+              gateNextCommit = false
+              receiptEntered.resolve()
+              void Promise.resolve(actualReceipt).catch(() => undefined)
+              return releaseReceipt.promise
+            },
+          }),
+      },
+    })
+    const oldReady = collection.stateWhenReady().then(
+      () => ({ status: `fulfilled` as const }),
+      (reason: unknown) => ({ status: `rejected` as const, reason }),
+    )
+    let replacementReady:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        receiptEntered.promise,
+        `old hydration applied receipt entered`,
+      )
+      expect(stripVirtualProps(collection.get(`old`))).toEqual({
+        id: `old`,
+        title: `old owner hydration`,
+      })
+
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      releaseReceipt.resolve()
+      const replacementOutcome = await atPersistedOracleCheckpoint(
+        replacementReady,
+        `replacement hydration after old applied receipt`,
+      )
+
+      expect({
+        replacementStatus: replacementOutcome.status,
+        baselineCalls,
+        oldVisible: collection.get(`old`),
+        replacementVisible: stripVirtualProps(collection.get(`replacement`)),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        replacementStatus: `fulfilled`,
+        baselineCalls: 2,
+        oldVisible: undefined,
+        replacementVisible: {
+          id: `replacement`,
+          title: `new owner hydration`,
+        },
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseReceipt.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => oldReady,
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not let an old post-receipt continuation flush replacement coordinator work`, async () => {
+    const id = `post-receipt-queue-lifecycle`
+    const adapter = createRecordingAdapter()
+    const coordinator = createFailStopCoordinatorHarness(id)
+    const receiptEntered = createEventGate()
+    const releaseReceipt = createEventGate()
+    const replacementSourceStarted = createEventGate()
+    const replacementHydrationEntered = createEventGate()
+    const releaseReplacementHydration = createEventGate()
+    let gateNextCommit = false
+    let baselineCalls = 0
+    let sourceRuns = 0
+    overrideBaselineRows(adapter, async () => {
+      baselineCalls++
+      if (baselineCalls === 1) {
+        gateNextCommit = true
+        return [
+          {
+            key: `old`,
+            value: { id: `old`, title: `old owner hydration` },
+          },
+        ]
+      }
+      replacementHydrationEntered.resolve()
+      await releaseReplacementHydration.promise
+      return [
+        {
+          key: `replacement`,
+          value: { id: `replacement`, title: `new owner hydration` },
+        },
+      ]
+    })
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          sourceRuns++
+          if (sourceRuns === 2) replacementSourceStarted.resolve()
+          markReady()
+        },
+      },
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (!gateNextCommit) return actualReceipt
+              gateNextCommit = false
+              receiptEntered.resolve()
+              void Promise.resolve(actualReceipt).catch(() => undefined)
+              return releaseReceipt.promise
+            },
+          }),
+      },
+    })
+    const oldReady = collection.stateWhenReady().then(
+      () => ({ status: `fulfilled` as const }),
+      (reason: unknown) => ({ status: `rejected` as const, reason }),
+    )
+    let replacementReady:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        receiptEntered.promise,
+        `old post-receipt hydration entered`,
+      )
+      await collection.cleanup()
+      cleanedUp = true
+      collection.startSyncImmediate()
+      cleanedUp = false
+      replacementReady = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        replacementSourceStarted.promise,
+        `replacement source subscribed behind old receipt`,
+      )
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `replacement-queued-work`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [
+          {
+            key: `queued`,
+            value: {
+              id: `queued`,
+              title: `belongs after replacement hydrate`,
+            },
+          },
+        ],
+        deletedKeys: [],
+      })
+
+      releaseReceipt.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementHydrationEntered.promise,
+        `replacement hydration entered after old receipt`,
+      )
+      await flushAsyncWork()
+
+      expect({
+        sourceRuns,
+        baselineCalls,
+        queuedVisible: collection.get(`queued`),
+      }).toEqual({
+        sourceRuns: 2,
+        baselineCalls: 2,
+        queuedVisible: undefined,
+      })
+
+      releaseReplacementHydration.resolve()
+      const replacementOutcome = await atPersistedOracleCheckpoint(
+        replacementReady,
+        `replacement hydration settled before coordinator work`,
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      expect({
+        replacementStatus: replacementOutcome.status,
+        oldVisible: collection.get(`old`),
+        replacementVisible: stripVirtualProps(collection.get(`replacement`)),
+        queuedVisible: stripVirtualProps(collection.get(`queued`)),
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        replacementStatus: `fulfilled`,
+        oldVisible: undefined,
+        replacementVisible: {
+          id: `replacement`,
+          title: `new owner hydration`,
+        },
+        queuedVisible: {
+          id: `queued`,
+          title: `belongs after replacement hydrate`,
+        },
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseReceipt.resolve()
+      releaseReplacementHydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => oldReady,
+          () => replacementReady,
+          () => (cleanedUp ? undefined : collection.cleanup()),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects new source transactions after a terminal persistence failure`, async () => {
+    const adapter = createRecordingAdapter()
+    const adapterError = Object.assign(
+      new Error(`terminal adapter write failed exactly`),
+      {
+        code: `SQLITE_FULL`,
+        path: `adapter.applyCommittedTx`,
+      },
+    )
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (collectionId, tx) => {
+      applyCalls++
+      if (applyCalls === 1) throw adapterError
+      await successfulApply(collectionId, tx)
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-terminal-persistence-admission`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `terminal persistence admission collection ready`,
+      )
+      remoteBegin!()
+      remoteWrite!({
+        type: `insert`,
+        value: { id: `first`, title: `published before persistence` },
+      })
+      const firstOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(remoteCommit!()).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `first terminal persistence receipt`,
+      )
+      const terminalError =
+        firstOutcome.status === `rejected` ? firstOutcome.reason : undefined
+
+      expect({
+        receiptStatus: firstOutcome.status,
+        errorName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        cause: terminalError instanceof Error ? terminalError.cause : undefined,
+        publicErrorIsReceipt:
+          collection._lifecycle.getSyncError() === terminalError,
+        status: collection.status,
+        firstVisible: stripVirtualProps(collection.get(`first`)),
+        firstDurable: adapter.rows.get(`first`),
+        applyCalls,
+      }).toEqual({
+        receiptStatus: `rejected`,
+        errorName: `PersistedCollectionDurabilityError`,
+        cause: adapterError,
+        publicErrorIsReceipt: true,
+        status: `error`,
+        firstVisible: {
+          id: `first`,
+          title: `published before persistence`,
+        },
+        firstDurable: undefined,
+        applyCalls: 1,
+      })
+
+      remoteBegin!()
+      remoteWrite!({
+        type: `insert`,
+        value: { id: `late`, title: `must not be admitted` },
+      })
+      const lateOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(remoteCommit!()).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `late terminal persistence receipt`,
+      )
+
+      expect({
+        receiptStatus: lateOutcome.status,
+        exactReceipt:
+          lateOutcome.status === `rejected` &&
+          lateOutcome.reason === terminalError,
+        publicErrorIsTerminal:
+          collection._lifecycle.getSyncError() === terminalError,
+        status: collection.status,
+        lateVisible: collection.get(`late`),
+        lateDurable: adapter.rows.get(`late`),
+        applyCalls,
+      }).toEqual({
+        receiptStatus: `rejected`,
+        exactReceipt: true,
+        publicErrorIsTerminal: true,
+        status: `error`,
+        lateVisible: undefined,
+        lateDurable: undefined,
+        applyCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it.each([`hydration`, `durability`] as const)(
+    `fences metadata and truncate transactions after a terminal %s failure`,
+    async (failureKind) => {
+      const harness = await createTerminalFailureHarness(
+        failureKind,
+        `terminal-transaction-surface-${failureKind}`,
+      )
+      const {
+        adapter,
+        collection,
+        coordinator,
+        seed,
+        sourceParams,
+        terminalError,
+      } = harness
+      const applyCallsBefore = adapter.applyCommittedTxCalls.length
+      const publishCallsBefore = coordinator.publishCalls.length
+      const operations: Array<{ name: string; apply: () => void }> = [
+        {
+          name: `row metadata set`,
+          apply: () =>
+            sourceParams.metadata!.row.set(seed.id, `must-not-replace-row`),
+        },
+        {
+          name: `row metadata delete`,
+          apply: () => sourceParams.metadata!.row.delete(seed.id),
+        },
+        {
+          name: `collection metadata set`,
+          apply: () =>
+            sourceParams.metadata!.collection.set(
+              `resume`,
+              `must-not-replace-collection`,
+            ),
+        },
+        {
+          name: `collection metadata delete`,
+          apply: () => sourceParams.metadata!.collection.delete(`resume`),
+        },
+        {
+          name: `truncate`,
+          apply: () => sourceParams.truncate(),
+        },
+      ]
+      let hasPrimaryFailure = false
+
+      try {
+        for (const operation of operations) {
+          sourceParams.begin()
+          const operationOutcome = await Promise.resolve()
+            .then(operation.apply)
+            .then(
+              () => ({ status: `fulfilled` as const }),
+              (reason: unknown) => ({ status: `rejected` as const, reason }),
+            )
+          const receiptOutcome = await atPersistedOracleCheckpoint(
+            Promise.resolve(sourceParams.commit()).then(
+              () => ({ status: `fulfilled` as const }),
+              (reason: unknown) => ({ status: `rejected` as const, reason }),
+            ),
+            `${failureKind} ${operation.name} terminal receipt`,
+          )
+
+          expect({
+            operation: operationOutcome.status,
+            receipt: receiptOutcome.status,
+            exactReceipt:
+              receiptOutcome.status === `rejected` &&
+              receiptOutcome.reason === terminalError,
+            visibleSeed: stripVirtualProps(collection.get(seed.id)),
+            durableSeed: adapter.rows.get(seed.id),
+            rowMetadata: sourceParams.metadata!.row.get(seed.id),
+            collectionMetadata: sourceParams.metadata!.collection.get(`resume`),
+            applyCalls: adapter.applyCommittedTxCalls.length,
+            publishCalls: coordinator.publishCalls.length,
+            status: collection.status,
+            exactPublicError:
+              collection._lifecycle.getSyncError() === terminalError,
+          }).toEqual({
+            operation: `fulfilled`,
+            receipt: `rejected`,
+            exactReceipt: true,
+            visibleSeed: seed,
+            durableSeed: seed,
+            rowMetadata: `row-metadata-before-failure`,
+            collectionMetadata: `collection-metadata-before-failure`,
+            applyCalls: applyCallsBefore,
+            publishCalls: publishCallsBefore,
+            status: `error`,
+            exactPublicError: true,
+          })
+        }
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`fences reload, upstream hydration, and late readiness after terminal persistence failure`, async () => {
+    const harness = await createTerminalFailureHarness(
+      `durability`,
+      `terminal-persistence-reload-surfaces`,
+    )
+    const {
+      adapter,
+      collection,
+      coordinator,
+      sourceParams,
+      terminalError,
+      upstreamLoads,
+    } = harness
+    const late = { id: `late-reload`, title: `must not hydrate` }
+    const loadCallsBefore = adapter.loadSubsetCalls.length
+    const upstreamCallsBefore = upstreamLoads.length
+    const publishCallsBefore = coordinator.publishCalls.length
+    adapter.loadSubset = (collectionId, options, context) => {
+      adapter.loadSubsetCalls.push({
+        collectionId,
+        options,
+        requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
+      })
+      return Promise.resolve([{ key: late.id, value: late }])
+    }
+    let hasPrimaryFailure = false
+
+    try {
+      const loadOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 3 })).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `post-persistence terminal loadSubset`,
+      )
+      sourceParams.markReady()
+      await flushAsyncWork()
+
+      expect({
+        loadStatus: loadOutcome.status,
+        loadExact:
+          loadOutcome.status === `rejected` &&
+          loadOutcome.reason === terminalError,
+        adapterLoads: adapter.loadSubsetCalls.length,
+        upstreamLoads: upstreamLoads.length,
+        publishCalls: coordinator.publishCalls.length,
+        visibleLate: collection.get(late.id),
+        durableLate: adapter.rows.get(late.id),
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+      }).toEqual({
+        loadStatus: `rejected`,
+        loadExact: true,
+        adapterLoads: loadCallsBefore,
+        upstreamLoads: upstreamCallsBefore,
+        publishCalls: publishCallsBefore,
+        visibleLate: undefined,
+        durableLate: undefined,
+        status: `error`,
+        exactPublicError: true,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects an already-admitted sibling when the preceding persistence fails`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstPersistenceEntered = createEventGate()
+    const firstPersistence = createEventGate()
+    const adapterError = new Error(`first pending persistence failed exactly`)
+    const coordinator = createFailStopCoordinatorHarness(
+      `terminal-pending-sibling`,
+    )
+    let applyCalls = 0
+    coordinator.requestApplyCommittedTx = async (_collectionId, tx) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        try {
+          await firstPersistence.promise
+        } catch (error) {
+          throw new PersistedCollectionDurabilityError(
+            `first pending persistence failed`,
+            { cause: error },
+          )
+        }
+      }
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-pending-sibling`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `pending sibling collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `a`, title: `first publishes before persistence` },
+      })
+      const firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `first persistence entered before sibling admission`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `b`, title: `must not publish or persist` },
+      })
+      const secondReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const secondSettlement = observeSettlement(
+        secondReceipt.then(
+          () => undefined,
+          () => undefined,
+        ),
+      )
+      expect(secondSettlement.read()).toEqual({ status: `pending` })
+
+      firstPersistence.reject(adapterError)
+      const firstOutcome = await atPersistedOracleCheckpoint(
+        firstReceipt,
+        `first failed persistence receipt`,
+      )
+      const terminalError =
+        firstOutcome.status === `rejected` ? firstOutcome.reason : undefined
+      const secondOutcome = await atPersistedOracleCheckpoint(
+        secondReceipt,
+        `already-admitted sibling terminal receipt`,
+      )
+
+      expect({
+        firstStatus: firstOutcome.status,
+        terminalName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        terminalCause:
+          terminalError instanceof Error ? terminalError.cause : undefined,
+        secondStatus: secondOutcome.status,
+        secondExact:
+          secondOutcome.status === `rejected` &&
+          secondOutcome.reason === terminalError,
+        applyCalls,
+        firstVisible: stripVirtualProps(collection.get(`a`)),
+        firstDurable: adapter.rows.get(`a`),
+        secondVisible: collection.get(`b`),
+        secondDurable: adapter.rows.get(`b`),
+        publishCalls: coordinator.publishCalls.length,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+      }).toEqual({
+        firstStatus: `rejected`,
+        terminalName: `PersistedCollectionDurabilityError`,
+        terminalCause: adapterError,
+        secondStatus: `rejected`,
+        secondExact: true,
+        applyCalls: 1,
+        firstVisible: {
+          id: `a`,
+          title: `first publishes before persistence`,
+        },
+        firstDurable: undefined,
+        secondVisible: undefined,
+        secondDurable: undefined,
+        publishCalls: 0,
+        status: `error`,
+        exactPublicError: true,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      firstPersistence.reject(adapterError)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`marks direct adapter failure terminal and fences later local mutations`, async () => {
+    const adapter = createRecordingAdapter()
+    const adapterError = Object.assign(
+      new Error(`local adapter failed exactly`),
+      {
+        code: `SQLITE_IOERR`,
+        path: `adapter.applyCommittedTx`,
+      },
+    )
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) throw adapterError
+      await successfulApply(...args)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-loopback-local-durability`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `local durability collection ready`,
+      )
+      const firstTransaction = collection.insert({
+        id: `first-local`,
+        title: `must roll back`,
+      })
+      const firstOutcome = await atPersistedOracleCheckpoint(
+        firstTransaction.isPersisted.promise.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `first local durability failure`,
+      )
+      const terminalError =
+        firstOutcome.status === `rejected` ? firstOutcome.reason : undefined
+
+      const loadCallsBefore = adapter.loadSubsetCalls.length
+      adapter.loadSubset = (collectionId, options, context) => {
+        adapter.loadSubsetCalls.push({
+          collectionId,
+          options,
+          requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
+        })
+        return Promise.resolve([
+          {
+            key: `forced-late`,
+            value: { id: `forced-late`, title: `must not hydrate` },
+          },
+        ])
+      }
+      const forceOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(collection.utils.forceReloadSubset!({ limit: 4 })).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `force reload after local durability failure`,
+      )
+
+      const lateOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve()
+          .then(async () => {
+            const lateTransaction = collection.insert({
+              id: `late-local`,
+              title: `must not be admitted`,
+            })
+            await lateTransaction.isPersisted.promise
+          })
+          .then(
+            () => ({ status: `fulfilled` as const }),
+            (reason: unknown) => ({ status: `rejected` as const, reason }),
+          ),
+        `late local terminal receipt`,
+      )
+
+      expect({
+        firstStatus: firstOutcome.status,
+        errorName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        errorCause:
+          terminalError instanceof Error ? terminalError.cause : undefined,
+        errorCode:
+          terminalError instanceof Error
+            ? (terminalError as Error & { code?: unknown }).code
+            : undefined,
+        forceStatus: forceOutcome.status,
+        forceExact:
+          forceOutcome.status === `rejected` &&
+          forceOutcome.reason === terminalError,
+        loadCalls: adapter.loadSubsetCalls.length,
+        forceVisible: collection.get(`forced-late`),
+        lateStatus: lateOutcome.status,
+        lateErrorName:
+          lateOutcome.status === `rejected` &&
+          lateOutcome.reason instanceof Error
+            ? lateOutcome.reason.name
+            : undefined,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        applyCalls,
+        firstVisible: collection.get(`first-local`),
+        firstDurable: adapter.rows.get(`first-local`),
+        lateVisible: collection.get(`late-local`),
+        lateDurable: adapter.rows.get(`late-local`),
+      }).toEqual({
+        firstStatus: `rejected`,
+        errorName: `PersistedCollectionDurabilityError`,
+        errorCause: adapterError,
+        errorCode: `SQLITE_IOERR`,
+        forceStatus: `rejected`,
+        forceExact: true,
+        loadCalls: loadCallsBefore,
+        forceVisible: undefined,
+        lateStatus: `rejected`,
+        lateErrorName: `CollectionStateError`,
+        status: `error`,
+        exactPublicError: true,
+        applyCalls: 1,
+        firstVisible: undefined,
+        firstDurable: undefined,
+        lateVisible: undefined,
+        lateDurable: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`fences direct acceptMutations and local mutations after hydration failure`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrationError = new Error(`loopback hydration failed exactly`)
+    const restoreBaselineRows = overrideBaselineRows(adapter, () =>
+      Promise.reject(hydrationError),
+    )
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-loopback-hydration`,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await expect(
+        atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `loopback hydration rejected`,
+        ),
+      ).rejects.toBe(hydrationError)
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(hydrationError)
+
+      restoreBaselineRows()
+      const now = new Date()
+      const directRow = { id: `direct`, title: `must not be accepted` }
+      const directMutation: PendingMutation<Todo, `insert`> = {
+        mutationId: `direct-after-hydration`,
+        original: {},
+        modified: directRow,
+        changes: directRow,
+        globalKey: `terminal-loopback-hydration:direct`,
+        key: directRow.id,
+        type: `insert`,
+        metadata: undefined,
+        syncMetadata: {},
+        optimistic: true,
+        createdAt: now,
+        updatedAt: now,
+        collection,
+      }
+      const directOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(
+          collection.utils.acceptMutations({
+            mutations: [
+              directMutation as unknown as PendingMutation<
+                Record<string, unknown>
+              >,
+            ],
+          }),
+        ).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `direct acceptMutations after hydration failure`,
+      )
+      const localOutcome = await Promise.resolve()
+        .then(() =>
+          collection.insert({
+            id: `late-local-hydration`,
+            title: `must not be admitted`,
+          }),
+        )
+        .then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        )
+
+      expect({
+        directStatus: directOutcome.status,
+        directExact:
+          directOutcome.status === `rejected` &&
+          directOutcome.reason === hydrationError,
+        localStatus: localOutcome.status,
+        localErrorName:
+          localOutcome.status === `rejected` &&
+          localOutcome.reason instanceof Error
+            ? localOutcome.reason.name
+            : undefined,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === hydrationError,
+        applyCalls: adapter.applyCommittedTxCalls.length,
+        directVisible: collection.get(directRow.id),
+        directDurable: adapter.rows.get(directRow.id),
+        localVisible: collection.get(`late-local-hydration`),
+        localDurable: adapter.rows.get(`late-local-hydration`),
+      }).toEqual({
+        directStatus: `rejected`,
+        directExact: true,
+        localStatus: `rejected`,
+        localErrorName: `CollectionStateError`,
+        status: `error`,
+        exactPublicError: true,
+        applyCalls: 0,
+        directVisible: undefined,
+        directDurable: undefined,
+        localVisible: undefined,
+        localDurable: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
     }
   })
 
@@ -2396,6 +7870,609 @@ describe(`persistedCollectionOptions`, () => {
     })
   })
 
+  it(`queues an immediate source write behind its owning hydration baseline`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `shared`, title: `Persisted baseline` },
+    ])
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return [
+        {
+          key: `shared`,
+          value: { id: `shared`, title: `Persisted baseline` },
+        },
+      ]
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `immediate-during-hydration`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const ready = collection.stateWhenReady()
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `immediate hydration entered`,
+      )
+      sourceParams.begin({ immediate: true })
+      sourceParams.write({
+        type: `update`,
+        value: { id: `shared`, title: `Newer immediate source value` },
+      })
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      const settlement = observeSettlement(receipt)
+      await Promise.resolve()
+
+      expect({
+        visible: collection.get(`shared`),
+        receipt: settlement.read(),
+        applyCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        visible: undefined,
+        receipt: { status: `pending` },
+        applyCalls: 0,
+      })
+
+      hydration.resolve()
+      await atPersistedOracleCheckpoint(ready, `immediate hydration ready`)
+      await atPersistedOracleCheckpoint(
+        receipt,
+        `immediate hydration source receipt`,
+      )
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        status: collection.status,
+      }).toEqual({
+        publicRow: { id: `shared`, title: `Newer immediate source value` },
+        durableRow: { id: `shared`, title: `Newer immediate source value` },
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => ready.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`preserves a source transaction committed before the next persisted hydration`, async () => {
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    const adapter = createRecordingAdapter()
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `before-hydration-boundary`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() => {
+        expect(remoteBegin).toBeTypeOf(`function`)
+        expect(remoteWrite).toBeTypeOf(`function`)
+        expect(remoteCommit).toBeTypeOf(`function`)
+      })
+      const row = { id: `before`, title: `before` }
+      remoteBegin?.()
+      remoteWrite?.({ type: `insert`, value: row })
+      const receipt = remoteCommit?.()
+      expect(receipt).toBeInstanceOf(Promise)
+      await receipt
+      adapter.loadSubset = async () => {
+        hydrationEntered.resolve()
+        await hydration.promise
+        return Array.from(adapter.rows, ([key, value]) => ({ key, value }))
+      }
+      const rehydrating = Promise.resolve(collection._sync.loadSubset({}))
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `on-demand hydration entered`,
+      )
+
+      expect(stripVirtualProps(collection.get(`before`))).toEqual(row)
+      expect(adapter.rows.get(`before`)).toEqual(row)
+      hydration.resolve()
+      await atPersistedOracleCheckpoint(
+        rehydrating,
+        `on-demand hydration completed`,
+      )
+      expect(stripVirtualProps(collection.get(`before`))).toEqual(row)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it.each([`during`, `straddles`, `after`] as const)(
+    `durably settles a source transaction that commits %s persisted hydration`,
+    async (position) => {
+      const hydrationEntered = createEventGate()
+      const hydration = createEventGate()
+      const adapter = createRecordingAdapter()
+      const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+        hydrationEntered.resolve()
+        await hydration.promise
+        return []
+      })
+
+      const persistedTransactionOrder: Array<string> = []
+      const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = async (...args) => {
+        const title = args[1].mutations.find(
+          (mutation) => mutation.type !== `delete`,
+        )?.value as Todo | undefined
+        if (title) persistedTransactionOrder.push(title.title)
+        await applyCommittedTx(...args)
+      }
+
+      let remoteBegin: (() => void) | undefined
+      let remoteWrite:
+        | ((message: { type: `insert`; value: Todo }) => void)
+        | undefined
+      let remoteCommit: (() => true | Promise<void>) | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `hydration-boundary-${position}`,
+          getKey: (item) => item.id,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              remoteBegin = begin
+              remoteWrite = write as (message: {
+                type: `insert`
+                value: Todo
+              }) => void
+              remoteCommit = commit
+              markReady()
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const ledger: Array<DurabilityLedgerEvent> = []
+      const transactionId = position
+      const row = { id: `shared`, title: position }
+      let receipt: Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      const beginAndWrite = () => {
+        ledger.push({ type: `begin`, transactionId })
+        remoteBegin?.()
+        ledger.push({ type: `write`, transactionId, row })
+        remoteWrite?.({ type: `insert`, value: row })
+      }
+      const commit = () => {
+        ledger.push({ type: `commit`, transactionId })
+        const applied = remoteCommit?.()
+        expect(applied).toBeInstanceOf(Promise)
+        receipt = Promise.resolve(applied).then(() => undefined)
+      }
+
+      try {
+        const ready = collection.stateWhenReady()
+        await atPersistedOracleCheckpoint(
+          hydrationEntered.promise,
+          `${position} hydration entered`,
+        )
+        expect(remoteBegin).toBeTypeOf(`function`)
+        expect(remoteCommit).toBeTypeOf(`function`)
+
+        if (position === `during`) {
+          beginAndWrite()
+          commit()
+          hydration.resolve()
+          await atPersistedOracleCheckpoint(
+            ready,
+            `${position} hydration completed`,
+          )
+        } else {
+          if (position === `straddles`) beginAndWrite()
+          hydration.resolve()
+          await atPersistedOracleCheckpoint(
+            ready,
+            `${position} hydration completed`,
+          )
+          if (position === `after`) beginAndWrite()
+          commit()
+        }
+
+        const settlement = observeSettlement(receipt!)
+        const checkpointId = `checkpoint-${position}`
+        const checkpointRow = { id: checkpointId, title: checkpointId }
+        ledger.push({ type: `begin`, transactionId: checkpointId })
+        remoteBegin?.()
+        ledger.push({
+          type: `write`,
+          transactionId: checkpointId,
+          row: checkpointRow,
+        })
+        remoteWrite?.({ type: `insert`, value: checkpointRow })
+        ledger.push({ type: `commit`, transactionId: checkpointId })
+        const checkpointReceipt = remoteCommit?.()
+        expect(checkpointReceipt).toBeInstanceOf(Promise)
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(checkpointReceipt),
+          `${position} later durable receipt`,
+        )
+
+        // A settled later durable receipt is the exact cut: FIFO forbids it
+        // from overtaking an earlier commit opened in the old phase.
+        expect(settlement.read()).toEqual({ status: `fulfilled` })
+        const expected = foldDurabilityLedger(ledger)
+        expect(persistedTransactionOrder).toEqual(expected.commitOrder)
+        expect(stripVirtualProps(collection.get(`shared`))).toEqual(row)
+        expect(adapter.rows.get(`shared`)).toEqual(row)
+        expect(adapter.rows.get(checkpointId)).toEqual(checkpointRow)
+
+        await collection.cleanup()
+        restoreBaselineRows()
+        const reopened = createCollection(
+          persistedCollectionOptions<Todo, string>({
+            id: `hydration-boundary-${position}`,
+            getKey: (item) => item.id,
+            sync: { sync: ({ markReady }) => markReady() },
+            persistence: { adapter },
+          }),
+        )
+        let hasReopenFailure = false
+        try {
+          await atPersistedOracleCheckpoint(
+            reopened.stateWhenReady(),
+            `${position} reopened hydration completed`,
+          )
+          expect(stripVirtualProps(reopened.get(`shared`))).toEqual(
+            expected.committedRows.get(`shared`),
+          )
+        } catch (error) {
+          hasReopenFailure = true
+          throw error
+        } finally {
+          await cleanupPersistedOracle(
+            [() => reopened.cleanup()],
+            hasReopenFailure,
+          )
+        }
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        hydration.resolve()
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`does not let a later same-key transaction overtake a hydration-straddling commit`, async () => {
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    const adapter = createRecordingAdapter()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return []
+    })
+    const persistedTransactionOrder: Array<string> = []
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    adapter.applyCommittedTx = async (...args) => {
+      const row = args[1].mutations.find(
+        (mutation) => mutation.type !== `delete`,
+      )?.value as Todo | undefined
+      if (row) persistedTransactionOrder.push(row.title)
+      await applyCommittedTx(...args)
+    }
+
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydration-straddle-sibling-fifo`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const ledger: Array<DurabilityLedgerEvent> = []
+    let firstReceipt: Promise<void> | undefined
+    let secondReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    const sourceTransaction = (transactionId: string, title: string) => {
+      const row = { id: `shared`, title }
+      ledger.push({ type: `begin`, transactionId })
+      remoteBegin?.()
+      ledger.push({ type: `write`, transactionId, row })
+      remoteWrite?.({ type: `insert`, value: row })
+      ledger.push({ type: `commit`, transactionId })
+      return Promise.resolve(remoteCommit?.()).then(() => undefined)
+    }
+
+    try {
+      const ready = collection.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `FIFO hydration entered`,
+      )
+
+      const firstRow = { id: `shared`, title: `first` }
+      ledger.push({ type: `begin`, transactionId: `first` })
+      remoteBegin?.()
+      ledger.push({ type: `write`, transactionId: `first`, row: firstRow })
+      remoteWrite?.({ type: `insert`, value: firstRow })
+      hydration.resolve()
+      await atPersistedOracleCheckpoint(ready, `FIFO hydration completed`)
+      ledger.push({ type: `commit`, transactionId: `first` })
+      firstReceipt = Promise.resolve(remoteCommit?.()).then(() => undefined)
+      const firstSettlement = observeSettlement(firstReceipt)
+
+      secondReceipt = sourceTransaction(`second`, `second`)
+      const secondSettlement = observeSettlement(secondReceipt)
+      await atPersistedOracleCheckpoint(
+        secondReceipt,
+        `later same-key receipt settled`,
+      )
+
+      const expected = foldDurabilityLedger(ledger)
+      expect(persistedTransactionOrder).toEqual(expected.commitOrder)
+      expect(firstSettlement.read()).toEqual({ status: `fulfilled` })
+      expect(secondSettlement.read()).toEqual({ status: `fulfilled` })
+      expect(adapter.rows.get(`shared`)).toEqual(
+        expected.committedRows.get(`shared`),
+      )
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`settles an aborted hydration-straddling commit without applying it`, async () => {
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    const adapter = createRecordingAdapter()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return []
+    })
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `aborted-hydration-straddle`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const ledger: Array<DurabilityLedgerEvent> = []
+    const controller = new AbortController()
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      const ready = collection.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `abort hydration entered`,
+      )
+      ledger.push({ type: `begin`, transactionId: `aborted` })
+      remoteBegin?.()
+      const row = { id: `aborted`, title: `must not apply` }
+      ledger.push({ type: `write`, transactionId: `aborted`, row })
+      remoteWrite?.({ type: `insert`, value: row })
+      controller.abort()
+      ledger.push({ type: `abort`, transactionId: `aborted` })
+      hydration.resolve()
+      await atPersistedOracleCheckpoint(ready, `abort hydration completed`)
+      receipt = Promise.resolve(remoteCommit?.(controller.signal)).then(
+        () => undefined,
+      )
+      await expect(
+        atPersistedOracleCheckpoint(receipt, `aborted receipt settled`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      expect(foldDurabilityLedger(ledger).committedRows.size).toBe(0)
+      expect(collection.get(`aborted`)).toBeUndefined()
+      expect(adapter.rows.get(`aborted`)).toBeUndefined()
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects every buffered receipt with the exact persisted hydration failure`, async () => {
+    await runRejectedHydrationBufferWitness(`rejected-hydration-buffer-fixed`, [
+      { id: `first`, title: `first buffered commit` },
+      { id: `second`, title: `second buffered commit` },
+    ])
+  })
+
+  it(`rejects a hydration-straddling transaction committed after hydration fails`, async () => {
+    await runRejectedHydrationBufferWitness(
+      `rejected-hydration-late-commit-fixed`,
+      [{ id: `late`, title: `must not cross a failed baseline` }],
+      { commitAfterHydrationFailure: true },
+    )
+  })
+
+  it.each([
+    {
+      schedule: `one late commit`,
+      rows: [{ id: `one-late`, title: `` }],
+    },
+    {
+      schedule: `two sibling late commits`,
+      rows: [
+        { id: `late-a`, title: `a` },
+        { id: `late-b`, title: `b` },
+      ],
+    },
+    {
+      schedule: `same-key late replacements`,
+      rows: [
+        { id: `late-shared`, title: `old` },
+        { id: `late-shared`, title: `new` },
+      ],
+    },
+  ])(
+    `rejects generated late commits after hydration failure: $schedule`,
+    async ({ schedule, rows }) => {
+      await runRejectedHydrationBufferWitness(
+        `rejected-hydration-late-${schedule.replaceAll(` `, `-`)}`,
+        rows,
+        { commitAfterHydrationFailure: true },
+      )
+    },
+  )
+
+  it.each([
+    {
+      schedule: `one buffered commit`,
+      rows: [{ id: `one`, title: `one` }],
+    },
+    {
+      schedule: `three sibling commits`,
+      rows: [
+        { id: `a`, title: `a` },
+        { id: `b`, title: `b` },
+        { id: `c`, title: `c` },
+      ],
+    },
+    {
+      schedule: `same-key replacement commits`,
+      rows: [
+        { id: `shared`, title: `old` },
+        { id: `shared`, title: `new` },
+      ],
+    },
+  ])(
+    `rejects all receipts and adopts no rows after hydration failure: $schedule`,
+    async ({ schedule, rows }) => {
+      await runRejectedHydrationBufferWitness(
+        `rejected-hydration-${schedule.replaceAll(` `, `-`)}`,
+        rows,
+      )
+    },
+  )
+
+  it(`append-only transaction judgment rejects omission and reordering`, () => {
+    const events: Array<DurabilityLedgerEvent> = [
+      { type: `begin`, transactionId: `first` },
+      {
+        type: `write`,
+        transactionId: `first`,
+        row: { id: `shared`, title: `first` },
+      },
+      { type: `commit`, transactionId: `first` },
+      { type: `begin`, transactionId: `second` },
+      {
+        type: `write`,
+        transactionId: `second`,
+        row: { id: `shared`, title: `second` },
+      },
+      { type: `commit`, transactionId: `second` },
+    ]
+    const expected = foldDurabilityLedger(events)
+
+    expect(expected.commitOrder).toEqual([`first`, `second`])
+    expect(expected.commitOrder).not.toEqual([`second`])
+    expect(expected.commitOrder).not.toEqual([`second`, `first`])
+    expect(expected.committedRows.get(`shared`)).toEqual({
+      id: `shared`,
+      title: `second`,
+    })
+  })
+
   it(`discards a hydration-buffered transaction aborted before replay`, async () => {
     const adapter = createRecordingAdapter()
     let resolveLoadSubset: (() => void) | undefined
@@ -2462,6 +8539,143 @@ describe(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`continues an independent hydration queue after an in-flight sibling aborts`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return []
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `independent-hydration-abort`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const localPersistence = createEventGate()
+    const localTransaction = createTransaction({
+      mutationFn: () => localPersistence.promise,
+    })
+    const aborted = new AbortController()
+    let abortedReceipt: Promise<void> | undefined
+    let independentReceipt: Promise<void> | undefined
+    const ready = collection.stateWhenReady()
+    void ready.catch(() => undefined)
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `independent abort hydration entered`,
+      )
+      localTransaction.mutate(() => {
+        collection.insert({ id: `local-gate`, title: `local pending` })
+      })
+      expect(localTransaction.state).toBe(`persisting`)
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `aborted`, title: `must not publish` },
+      })
+      abortedReceipt = Promise.resolve(
+        sourceParams.commit(aborted.signal),
+      ).then(() => undefined)
+      void abortedReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `independent`, title: `must survive sibling abort` },
+      })
+      independentReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void independentReceipt.catch(() => undefined)
+
+      hydration.resolve()
+      await vi.waitFor(() =>
+        expect(
+          collection._state.pendingSyncedTransactions.some(
+            (transaction) => transaction.committed,
+          ),
+        ).toBe(true),
+      )
+      aborted.abort()
+      await expect(
+        atPersistedOracleCheckpoint(
+          abortedReceipt,
+          `in-flight hydration sibling aborted`,
+        ),
+      ).rejects.toMatchObject({ name: `AbortError` })
+
+      const independentSettlement = observeSettlement(independentReceipt)
+      await Promise.resolve()
+      expect({
+        independent: independentSettlement.read(),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        independent: { status: `pending` },
+        status: `loading`,
+        publicError: undefined,
+      })
+
+      localPersistence.resolve()
+      await atPersistedOracleCheckpoint(
+        localTransaction.isPersisted.promise,
+        `independent abort local gate settled`,
+      )
+      await atPersistedOracleCheckpoint(
+        independentReceipt,
+        `independent hydration sibling applied`,
+      )
+      await atPersistedOracleCheckpoint(ready, `independent abort ready`)
+      expect({
+        status: collection.status,
+        independent: stripVirtualProps(collection.get(`independent`)),
+        durable: adapter.rows.get(`independent`),
+      }).toEqual({
+        status: `ready`,
+        independent: {
+          id: `independent`,
+          title: `must survive sibling abort`,
+        },
+        durable: {
+          id: `independent`,
+          title: `must survive sibling abort`,
+        },
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      aborted.abort()
+      localPersistence.resolve()
+      await localTransaction.isPersisted.promise.catch(() => undefined)
+      await cleanupPersistedOracle(
+        [
+          () => abortedReceipt?.catch(() => undefined),
+          () => independentReceipt?.catch(() => undefined),
+          () => ready.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`rejects every hydration-buffered receipt when replay fails`, async () => {
     const adapter = createRecordingAdapter()
     let resolveLoadSubset: (() => void) | undefined
@@ -2475,8 +8689,7 @@ describe(`persistedCollectionOptions`, () => {
       return loadResumeSnapshot(...args)
     }
 
-    const replayError = new Error(`replay key failed`)
-    let bufferedRowKeyReads = 0
+    const replayError = new Error(`replay application failed`)
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
       | ((message: { type: `insert`; value: Todo }) => void)
@@ -2486,15 +8699,7 @@ describe(`persistedCollectionOptions`, () => {
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present-replay-failure-receipt`,
-        getKey: (item) => {
-          if (item.id === `during-hydrate`) {
-            bufferedRowKeyReads++
-            if (bufferedRowKeyReads === 2) {
-              throw replayError
-            }
-          }
-          return item.id
-        },
+        getKey: (item) => item.id,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             remoteBegin = begin
@@ -2513,7 +8718,10 @@ describe(`persistedCollectionOptions`, () => {
       }),
     )
 
-    const readyPromise = collection.stateWhenReady()
+    const readyOutcome = collection.stateWhenReady().then(
+      () => ({ status: `fulfilled` as const }),
+      (reason: unknown) => ({ status: `rejected` as const, reason }),
+    )
     for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
       await flushAsyncWork()
     }
@@ -2532,6 +8740,15 @@ describe(`persistedCollectionOptions`, () => {
     const siblingReceipt = remoteCommit?.()
     expect(failingReceipt).toBeInstanceOf(Promise)
     expect(siblingReceipt).toBeInstanceOf(Promise)
+    const setSyncedRow = collection._state.syncedData.set.bind(
+      collection._state.syncedData,
+    )
+    vi.spyOn(collection._state.syncedData, `set`).mockImplementation(
+      (key, value) => {
+        if (key === `during-hydrate`) throw replayError
+        return setSyncedRow(key, value)
+      },
+    )
     const failingExpectation = expect(
       Promise.resolve(failingReceipt),
     ).rejects.toBe(replayError)
@@ -2540,19 +8757,1934 @@ describe(`persistedCollectionOptions`, () => {
     ).rejects.toBe(replayError)
 
     resolveLoadSubset?.()
-    await readyPromise
+    const ready = await atPersistedOracleCheckpoint(
+      readyOutcome,
+      `replay-failed hydration readiness settled`,
+    )
     await failingExpectation
     await siblingExpectation
+    remoteBegin?.()
+    remoteWrite?.({
+      type: `insert`,
+      value: { id: `after-replay-failure`, title: `must not be admitted` },
+    })
+    const lateOutcome = await atPersistedOracleCheckpoint(
+      Promise.resolve(remoteCommit?.()).then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      ),
+      `post-replay-failure source receipt`,
+    )
+
+    expect({
+      readyStatus: ready.status,
+      readyExact: ready.status === `rejected` && ready.reason === replayError,
+      lateStatus: lateOutcome.status,
+      lateExact:
+        lateOutcome.status === `rejected` && lateOutcome.reason === replayError,
+      status: collection.status,
+      exactPublicError: collection._lifecycle.getSyncError() === replayError,
+      visibleLate: collection.get(`after-replay-failure`),
+      durableLate: adapter.rows.get(`after-replay-failure`),
+      applyCalls: adapter.applyCommittedTxCalls.length,
+    }).toEqual({
+      readyStatus: `rejected`,
+      readyExact: true,
+      lateStatus: `rejected`,
+      lateExact: true,
+      status: `error`,
+      exactPublicError: true,
+      visibleLate: undefined,
+      durableLate: undefined,
+      applyCalls: 0,
+    })
 
     await collection.cleanup()
   })
 
-  it(`marks ready even when persisted startup fails before markReady`, async () => {
+  it.each([`metadata-snapshot`, `baseline-snapshot`, `row-apply`] as const)(
+    `fail-stops startup when the %s phase fails`,
+    async (phase) => {
+      const phaseError = new Error(`${phase} failed exactly`)
+      const adapter = createRecordingAdapter(
+        phase === `row-apply`
+          ? [{ id: `row-apply-failure`, title: `must not apply` }]
+          : [],
+      )
+      if (phase !== `row-apply`) {
+        const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+        adapter.loadResumeSnapshot = (...args) =>
+          args[1]?.includeRows === (phase === `baseline-snapshot`)
+            ? Promise.reject(phaseError)
+            : loadResumeSnapshot(...args)
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `terminal-startup-${phase}`,
+          getKey: (row) => {
+            if (phase === `row-apply` && row.id === `row-apply-failure`) {
+              throw phaseError
+            }
+            return row.id
+          },
+          persistence: { adapter },
+        }),
+      )
+      let hasPrimaryFailure = false
+
+      try {
+        const startupOutcome = await atPersistedOracleCheckpoint(
+          collection.stateWhenReady().then(
+            () => ({ status: `fulfilled` as const }),
+            (reason: unknown) => ({ status: `rejected` as const, reason }),
+          ),
+          `${phase} startup boundary settled`,
+        )
+
+        expect({
+          startupStatus: startupOutcome.status,
+          startupExact:
+            startupOutcome.status === `rejected` &&
+            startupOutcome.reason === phaseError,
+          status: collection.status,
+          exactPublicError: collection._lifecycle.getSyncError() === phaseError,
+          visibleRows: Array.from(collection.values()).map(stripVirtualProps),
+          durableRows: Array.from(adapter.rows.values()),
+          applyCalls: adapter.applyCommittedTxCalls.length,
+        }).toEqual({
+          startupStatus: `rejected`,
+          startupExact: true,
+          status: `error`,
+          exactPublicError: true,
+          visibleRows: [],
+          durableRows:
+            phase === `row-apply`
+              ? [{ id: `row-apply-failure`, title: `must not apply` }]
+              : [],
+          applyCalls: 0,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [() => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`fail-stops a coordinator transaction flushed after hydration`, async () => {
     const adapter = createRecordingAdapter()
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return []
+    })
+    const flushError = new Error(`coordinator hydration flush failed exactly`)
+    const coordinator = createFailStopCoordinatorHarness(
+      `terminal-coordinator-hydration-flush`,
+    )
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-coordinator-hydration-flush`,
+        getKey: (row) => {
+          if (row.id === `coordinator-bad`) throw flushError
+          return row.id
+        },
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const readyOutcome = collection.stateWhenReady().then(
+      () => ({ status: `fulfilled` as const }),
+      (reason: unknown) => ({ status: `rejected` as const, reason }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `coordinator flush hydration entered`,
+      )
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `coordinator-flush-failure`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [
+          {
+            key: `coordinator-bad`,
+            value: { id: `coordinator-bad`, title: `must not publish` },
+          },
+        ],
+        deletedKeys: [],
+      })
+      hydration.resolve()
+      const ready = await atPersistedOracleCheckpoint(
+        readyOutcome,
+        `coordinator flush readiness settled`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `late`, title: `must not be admitted` },
+      })
+      const late = await atPersistedOracleCheckpoint(
+        Promise.resolve(sourceParams.commit()).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `coordinator flush late receipt`,
+      )
+
+      expect({
+        readyStatus: ready.status,
+        readyExact: ready.status === `rejected` && ready.reason === flushError,
+        lateStatus: late.status,
+        lateExact: late.status === `rejected` && late.reason === flushError,
+        status: collection.status,
+        exactPublicError: collection._lifecycle.getSyncError() === flushError,
+        visibleBad: collection.get(`coordinator-bad`),
+        visibleLate: collection.get(`late`),
+        durableLate: adapter.rows.get(`late`),
+        applyCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        readyStatus: `rejected`,
+        readyExact: true,
+        lateStatus: `rejected`,
+        lateExact: true,
+        status: `error`,
+        exactPublicError: true,
+        visibleBad: undefined,
+        visibleLate: undefined,
+        durableLate: undefined,
+        applyCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`applies hydration-queued sync work after an unrelated local persistence rollback`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return []
+    })
+    const appliedError = new Error(`hydration applied receipt failed exactly`)
+    const localPersistence = createEventGate()
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-hydration-applied-receipt`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const localTransaction = createTransaction({
+      mutationFn: () => localPersistence.promise,
+    })
+    const readyOutcome = collection.stateWhenReady().then(
+      () => ({ status: `fulfilled` as const }),
+      (reason: unknown) => ({ status: `rejected` as const, reason }),
+    )
+    let remoteReceipt: true | Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `applied-receipt hydration entered`,
+      )
+      localTransaction.mutate(() => {
+        collection.insert({ id: `local-gate`, title: `local pending` })
+      })
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: {
+          id: `remote-applied`,
+          title: `applies after local rollback`,
+        },
+      })
+      remoteReceipt = sourceParams.commit()
+      expect(remoteReceipt).toBeInstanceOf(Promise)
+      hydration.resolve()
+      await flushAsyncWork()
+      localPersistence.reject(appliedError)
+
+      const ready = await atPersistedOracleCheckpoint(
+        readyOutcome,
+        `applied-receipt readiness settled`,
+      )
+      const remote = await atPersistedOracleCheckpoint(
+        Promise.resolve(remoteReceipt).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `hydration-applied remote receipt settled`,
+      )
+
+      expect({
+        readyStatus: ready.status,
+        remoteStatus: remote.status,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        durableRemote: adapter.rows.get(`remote-applied`),
+        applyCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        readyStatus: `fulfilled`,
+        remoteStatus: `fulfilled`,
+        status: `ready`,
+        publicError: undefined,
+        durableRemote: {
+          id: `remote-applied`,
+          title: `applies after local rollback`,
+        },
+        applyCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      localPersistence.reject(appliedError)
+      await localTransaction.isPersisted.promise.catch(() => undefined)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it.each([
+    {
+      label: `immediate source transaction`,
+      options: { immediate: true },
+      expectedVisibleBeforeLocalSettlement: true,
+      expectedApplyCallsBeforeLocalSettlement: 2,
+    },
+    {
+      label: `non-immediate control`,
+      options: undefined,
+      expectedVisibleBeforeLocalSettlement: false,
+      expectedApplyCallsBeforeLocalSettlement: 1,
+    },
+  ] as const)(
+    `preserves $label admission through the persisted wrapper`,
+    async ({
+      options,
+      expectedVisibleBeforeLocalSettlement,
+      expectedApplyCallsBeforeLocalSettlement,
+    }) => {
+      const adapter = createRecordingAdapter()
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `begin-options-${options?.immediate ? `immediate` : `normal`}`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const localPersistence = createEventGate()
+      const localTransaction = createTransaction({
+        autoCommit: false,
+        mutationFn: () => localPersistence.promise,
+      })
+      let localCommit: Promise<unknown> | undefined
+      let remoteReceipt: true | Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        await atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `begin-options collection ready`,
+        )
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `seed`, title: `baseline` },
+        })
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(sourceParams.commit()),
+          `begin-options seed persisted`,
+        )
+
+        localTransaction.mutate(() => {
+          collection.update(`seed`, (draft) => {
+            draft.title = `local pending`
+          })
+        })
+        localCommit = localTransaction.commit()
+        void localCommit.catch(() => undefined)
+        expect(localTransaction.state).toBe(`persisting`)
+
+        sourceParams.begin(options)
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `remote`, title: `source commit` },
+        })
+        remoteReceipt = sourceParams.commit()
+        expect(remoteReceipt).toBeInstanceOf(Promise)
+
+        expect({
+          localState: localTransaction.state,
+          remoteVisible: collection.has(`remote`),
+          applyCalls: adapter.applyCommittedTxCalls.length,
+        }).toEqual({
+          localState: `persisting`,
+          remoteVisible: expectedVisibleBeforeLocalSettlement,
+          applyCalls: expectedApplyCallsBeforeLocalSettlement,
+        })
+
+        if (options?.immediate) {
+          await atPersistedOracleCheckpoint(
+            Promise.resolve(remoteReceipt),
+            `immediate source receipt before local settlement`,
+          )
+          expect(localTransaction.state).toBe(`persisting`)
+        } else {
+          const settlement = observeSettlement(
+            Promise.resolve(remoteReceipt).then(() => undefined),
+          )
+          await Promise.resolve()
+          expect(settlement.read()).toEqual({ status: `pending` })
+        }
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        localPersistence.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => localCommit,
+            () =>
+              remoteReceipt === true
+                ? undefined
+                : Promise.resolve(remoteReceipt),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`rejects immediate replay that would close a normal publication cycle`, async () => {
+    const adapter = createRecordingAdapter()
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `immediate-source-dependency`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const mutationEntered = createEventGate()
+    const startDependency = createEventGate()
+    const dependencySubmitted = createEventGate()
+    let dependencyReceipt: true | Promise<void> | undefined
+    const localTransaction = createTransaction({
+      mutationFn: async () => {
+        mutationEntered.resolve()
+        await startDependency.promise
+        sourceParams.begin({ immediate: true })
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `dependency`, title: `releases user persistence` },
+        })
+        dependencyReceipt = sourceParams.commit()
+        dependencySubmitted.resolve()
+        await dependencyReceipt
+      },
+    })
+    const normalAbort = new AbortController()
+    let normalReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `immediate dependency collection ready`,
+      )
+      localTransaction.mutate(() => {
+        collection.insert({ id: `local`, title: `user persistence pending` })
+      })
+      await atPersistedOracleCheckpoint(
+        mutationEntered.promise,
+        `user persistence entered`,
+      )
+      expect(localTransaction.state).toBe(`persisting`)
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `parked`, title: `waits for user persistence` },
+      })
+      normalReceipt = Promise.resolve(
+        sourceParams.commit(normalAbort.signal),
+      ).then(() => undefined)
+      void normalReceipt.catch(() => undefined)
+      expect(
+        collection._state.pendingSyncedTransactions.some(
+          (transaction) => transaction.committed,
+        ),
+      ).toBe(true)
+
+      startDependency.resolve()
+      await atPersistedOracleCheckpoint(
+        dependencySubmitted.promise,
+        `immediate dependency submitted`,
+      )
+      const dependencyOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(dependencyReceipt).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `immediate dependency rejected`,
+      )
+      expect(dependencyOutcome).toMatchObject({
+        status: `rejected`,
+        reason: { name: `InvalidPersistedCollectionConfigError` },
+      })
+      await expect(
+        atPersistedOracleCheckpoint(
+          localTransaction.isPersisted.promise,
+          `user persistence rejects with unsupported reentry`,
+        ),
+      ).rejects.toMatchObject({ name: `InvalidPersistedCollectionConfigError` })
+      await atPersistedOracleCheckpoint(
+        normalReceipt,
+        `parked predecessor applies after user rollback`,
+      )
+      expect({
+        dependencyVisible: collection.has(`dependency`),
+        dependencyDurable: adapter.rows.get(`dependency`),
+        parkedDurable: adapter.rows.get(`parked`),
+        status: collection.status,
+      }).toEqual({
+        dependencyVisible: false,
+        dependencyDurable: undefined,
+        parkedDurable: {
+          id: `parked`,
+          title: `waits for user persistence`,
+        },
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      startDependency.resolve()
+      normalAbort.abort()
+      await cleanupPersistedOracle(
+        [
+          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => normalReceipt?.catch(() => undefined),
+          () =>
+            dependencyReceipt === true
+              ? undefined
+              : Promise.resolve(dependencyReceipt).catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`replays source transactions one by one behind a held predecessor`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    const persistedSharedTitles: Array<string> = []
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      for (const mutation of args[1].mutations) {
+        if (mutation.type !== `delete` && mutation.key === `shared`) {
+          persistedSharedTitles.push((mutation.value as Todo).title)
+        }
+      }
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await applyCommittedTx(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `source-fifo-order`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let gateReceipt: Promise<void> | undefined
+    let olderReceipt: Promise<void> | undefined
+    let newerReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `source FIFO ordering collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `gate`, title: `holds adapter` },
+      })
+      gateReceipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      void gateReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `source FIFO ordering predecessor persistence entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `shared`, title: `older normal` },
+      })
+      olderReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void olderReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `shared`, title: `newer source value` },
+      })
+      newerReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void newerReceipt.catch(() => undefined)
+
+      expect(collection.get(`shared`)).toBeUndefined()
+
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(gateReceipt, `ordering gate persisted`)
+      await atPersistedOracleCheckpoint(
+        olderReceipt,
+        `older normal source receipt`,
+      )
+      await atPersistedOracleCheckpoint(
+        newerReceipt,
+        `newer source FIFO receipt`,
+      )
+
+      expect({
+        status: collection.status,
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        persistedTitles: persistedSharedTitles,
+      }).toEqual({
+        status: `ready`,
+        publicRow: { id: `shared`, title: `newer source value` },
+        durableRow: { id: `shared`, title: `newer source value` },
+        persistedTitles: [`older normal`, `newer source value`],
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => gateReceipt?.catch(() => undefined),
+          () => olderReceipt?.catch(() => undefined),
+          () => newerReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`admits a queued insert after an earlier queued delete of the same key`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `shared`, title: `Original row` },
+    ])
+    const persistenceEntered = createEventGate()
+    const releasePersistence = createEventGate()
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        persistenceEntered.resolve()
+        await releasePersistence.promise
+      }
+      await applyCommittedTx(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `queued-delete-insert-prefix`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let gateReceipt: Promise<void> | undefined
+    let deleteReceipt: Promise<void> | undefined
+    let insertReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `queued-prefix collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `gate`, title: `Hold durability` },
+      })
+      gateReceipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      void gateReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        persistenceEntered.promise,
+        `queued-prefix durability held`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({ type: `delete`, key: `shared` })
+      deleteReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void deleteReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      expect(() =>
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `shared`, title: `Replacement row` },
+        }),
+      ).not.toThrow()
+      insertReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void insertReceipt.catch(() => undefined)
+
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        deleteReceipt: observeSettlement(deleteReceipt).read(),
+        insertReceipt: observeSettlement(insertReceipt).read(),
+      }).toEqual({
+        publicRow: { id: `shared`, title: `Original row` },
+        deleteReceipt: { status: `pending` },
+        insertReceipt: { status: `pending` },
+      })
+
+      releasePersistence.resolve()
+      await atPersistedOracleCheckpoint(gateReceipt, `queued-prefix gate`)
+      await atPersistedOracleCheckpoint(deleteReceipt, `queued-prefix delete`)
+      await atPersistedOracleCheckpoint(insertReceipt, `queued-prefix insert`)
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        status: collection.status,
+      }).toEqual({
+        publicRow: { id: `shared`, title: `Replacement row` },
+        durableRow: { id: `shared`, title: `Replacement row` },
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releasePersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => gateReceipt?.catch(() => undefined),
+          () => deleteReceipt?.catch(() => undefined),
+          () => insertReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`queues reentrant immediate replay before its later normal sibling`, async () => {
+    const adapter = createRecordingAdapter()
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    const persistedTitles: Array<string> = []
+    adapter.applyCommittedTx = async (...args) => {
+      for (const mutation of args[1].mutations) {
+        if (mutation.type !== `delete` && mutation.key === `shared`) {
+          persistedTitles.push((mutation.value as Todo).title)
+        }
+      }
+      await applyCommittedTx(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `core-publication-source-order`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let immediateReceipt: Promise<void> | undefined
+    let normalReceipt: Promise<void> | undefined
+    let callbackCount = 0
+    const publication = collection.subscribeChanges((changes) => {
+      if (
+        callbackCount === 0 &&
+        changes.some((change) => change.key === `trigger`)
+      ) {
+        callbackCount++
+        sourceParams.begin({ immediate: true })
+        sourceParams.write({
+          type: `update`,
+          value: { id: `shared`, title: `earlier immediate` },
+        })
+        immediateReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void immediateReceipt.catch(() => undefined)
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `update`,
+          value: { id: `shared`, title: `later normal` },
+        })
+        normalReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void normalReceipt.catch(() => undefined)
+      }
+    })
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `core-publication ordering collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `trigger`, title: `Triggers source reentry` },
+      })
+      await Promise.resolve(sourceParams.commit())
+      await vi.waitFor(() => expect(callbackCount).toBe(1))
+      expect(immediateReceipt).toBeInstanceOf(Promise)
+      expect(normalReceipt).toBeInstanceOf(Promise)
+      await atPersistedOracleCheckpoint(
+        immediateReceipt!,
+        `core-publication immediate receipt`,
+      )
+      await atPersistedOracleCheckpoint(
+        normalReceipt!,
+        `core-publication normal receipt`,
+      )
+
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        persistedTitles,
+        status: collection.status,
+      }).toEqual({
+        publicRow: { id: `shared`, title: `later normal` },
+        durableRow: { id: `shared`, title: `later normal` },
+        persistedTitles: [`earlier immediate`, `later normal`],
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      publication.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => immediateReceipt?.catch(() => undefined),
+          () => normalReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`publishes a FIFO source turn beneath an optimistic mutation before demand reentry`, async () => {
+    const adapter = createRecordingAdapter()
+    const mutationEntered = createEventGate()
+    const allowDemand = createEventGate()
+    let upstreamLoads = 0
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `source-publication-before-mutation-demand`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return {
+              loadSubset: () => {
+                upstreamLoads++
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const subset = { limit: 1 }
+    let localReceipt: Promise<unknown> | undefined
+    let sourceReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const local = createTransaction({
+        mutationFn: async () => {
+          mutationEntered.resolve()
+          await allowDemand.promise
+          await Promise.resolve(collection._sync.loadSubset(subset))
+        },
+      })
+      local.mutate(() => {
+        collection.insert({ id: `local`, title: `optimistic local` })
+      })
+      localReceipt = local.isPersisted.promise
+      void localReceipt.catch(() => undefined)
+      await mutationEntered.promise
+
+      sourceParams.begin({ immediate: true })
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `remote`, title: `authoritative source` },
+      })
+      sourceReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      await atPersistedOracleCheckpoint(
+        sourceReceipt,
+        `source publication beneath optimistic mutation`,
+      )
+
+      expect({
+        local: stripVirtualProps(collection.get(`local`)),
+        remote: stripVirtualProps(collection.get(`remote`)),
+        durableRemote: adapter.rows.get(`remote`),
+        localState: local.state,
+      }).toEqual({
+        local: { id: `local`, title: `optimistic local` },
+        remote: { id: `remote`, title: `authoritative source` },
+        durableRemote: { id: `remote`, title: `authoritative source` },
+        localState: `persisting`,
+      })
+
+      allowDemand.resolve()
+      await atPersistedOracleCheckpoint(
+        localReceipt,
+        `mutation demand after source publication`,
+      )
+      expect({
+        status: collection.status,
+        upstreamLoads,
+      }).toEqual({
+        status: `ready`,
+        upstreamLoads: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      allowDemand.resolve()
+      collection._sync.unloadSubset(subset)
+      await cleanupPersistedOracle(
+        [
+          () => sourceReceipt?.catch(() => undefined),
+          () => localReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`queues independent demand behind normal source publication without rejecting it`, async () => {
+    const adapter = createRecordingAdapter()
+    const mutationEntered = createEventGate()
+    const releaseMutation = createEventGate()
+    let upstreamLoads = 0
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `independent-demand-behind-source-publication`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return {
+              loadSubset: () => {
+                upstreamLoads++
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const subset = { limit: 1 }
+    let localReceipt: Promise<unknown> | undefined
+    let sourceReceipt: Promise<void> | undefined
+    let demand: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const local = createTransaction({
+        mutationFn: async () => {
+          mutationEntered.resolve()
+          await releaseMutation.promise
+        },
+      })
+      local.mutate(() => {
+        collection.insert({ id: `local`, title: `optimistic local` })
+      })
+      localReceipt = local.isPersisted.promise
+      void localReceipt.catch(() => undefined)
+      await mutationEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `remote`, title: `normal source` },
+      })
+      sourceReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void sourceReceipt.catch(() => undefined)
+      demand = Promise.resolve(collection._sync.loadSubset(subset)).then(
+        () => undefined,
+      )
+      void demand.catch(() => undefined)
+      const sourceSettlement = observeSettlement(sourceReceipt)
+      const demandSettlement = observeSettlement(demand)
+      await Promise.resolve()
+      expect({
+        source: sourceSettlement.read(),
+        demand: demandSettlement.read(),
+        status: collection.status,
+      }).toEqual({
+        source: { status: `pending` },
+        demand: { status: `pending` },
+        status: `ready`,
+      })
+
+      releaseMutation.resolve()
+      await atPersistedOracleCheckpoint(
+        Promise.all([localReceipt, sourceReceipt, demand]),
+        `independent demand after normal source publication`,
+      )
+      expect({
+        status: collection.status,
+        source: sourceSettlement.read(),
+        demand: demandSettlement.read(),
+        upstreamLoads,
+        durableRemote: adapter.rows.get(`remote`),
+      }).toEqual({
+        status: `ready`,
+        source: { status: `fulfilled`, value: undefined },
+        demand: { status: `fulfilled`, value: undefined },
+        upstreamLoads: 1,
+        durableRemote: { id: `remote`, title: `normal source` },
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseMutation.resolve()
+      collection._sync.unloadSubset(subset)
+      await cleanupPersistedOracle(
+        [
+          () => demand?.catch(() => undefined),
+          () => sourceReceipt?.catch(() => undefined),
+          () => localReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`queues an immediate suffix behind held durability and fails it with the prefix`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const firstDurabilityEntered = createEventGate()
+    const releaseFirstDurability = createEventGate()
+    const persistenceResponse = {
+      type: `rpc:applyCommittedTx:res` as const,
+      rpcId: `failed-prefix`,
+      ok: false as const,
+      code: `PERSISTENCE_ERROR` as const,
+      error: `prefix durability failed`,
+      sourceCode: `SQLITE_IOERR_FSYNC`,
+      path: [`database`, `wal`] as const,
+    }
+    let durabilityCalls = 0
+    coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+      durabilityCalls++
+      if (durabilityCalls === 1) {
+        firstDurabilityEntered.resolve()
+        await releaseFirstDurability.promise
+        return { ...persistenceResponse, rpcId: tx.txId }
+      }
+      await adapter.applyCommittedTx(collectionId, tx)
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `immediate-prefix-fail-stop`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let prefixReceipt: Promise<void> | undefined
+    let suffixReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `immediate prefix fail-stop collection ready`,
+      )
+      sourceParams.begin({ immediate: true })
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `prefix`, title: `fails durability` },
+      })
+      prefixReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void prefixReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstDurabilityEntered.promise,
+        `failed immediate prefix entered durability`,
+      )
+
+      sourceParams.begin({ immediate: true })
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `suffix`, title: `must not become durable` },
+      })
+      suffixReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void suffixReceipt.catch(() => undefined)
+      const prefixSettlement = observeSettlement(prefixReceipt)
+      const suffixSettlement = observeSettlement(suffixReceipt)
+      await Promise.resolve()
+
+      expect({
+        prefixPublic: stripVirtualProps(collection.get(`prefix`)),
+        suffixPublic: stripVirtualProps(collection.get(`suffix`)),
+        prefixReceipt: prefixSettlement.read(),
+        suffixReceipt: suffixSettlement.read(),
+        durabilityCalls,
+        prefixDurable: adapter.rows.get(`prefix`),
+        suffixDurable: adapter.rows.get(`suffix`),
+      }).toEqual({
+        prefixPublic: { id: `prefix`, title: `fails durability` },
+        suffixPublic: undefined,
+        prefixReceipt: { status: `pending` },
+        suffixReceipt: { status: `pending` },
+        durabilityCalls: 1,
+        prefixDurable: undefined,
+        suffixDurable: undefined,
+      })
+
+      releaseFirstDurability.resolve()
+      const prefixOutcome = await atPersistedOracleCheckpoint(
+        prefixReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `failed immediate prefix receipt`,
+      )
+      const suffixOutcome = await atPersistedOracleCheckpoint(
+        suffixReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `failed immediate suffix receipt`,
+      )
+      const terminalError =
+        prefixOutcome.status === `rejected` ? prefixOutcome.reason : undefined
+      expect({
+        prefixStatus: prefixOutcome.status,
+        terminalName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        terminalCause:
+          terminalError instanceof Error ? terminalError.cause : undefined,
+        suffixStatus: suffixOutcome.status,
+        suffixName:
+          suffixOutcome.status === `rejected` &&
+          suffixOutcome.reason instanceof Error
+            ? suffixOutcome.reason.name
+            : undefined,
+        sameTerminal:
+          suffixOutcome.status === `rejected` &&
+          suffixOutcome.reason === terminalError,
+        durabilityCalls,
+        suffixDurable: adapter.rows.get(`suffix`),
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+      }).toEqual({
+        prefixStatus: `rejected`,
+        terminalName: `PersistedCollectionDurabilityError`,
+        terminalCause: expect.objectContaining({
+          code: `PERSISTENCE_ERROR`,
+          path: [`database`, `wal`],
+        }),
+        suffixStatus: `rejected`,
+        suffixName: `PersistedCollectionDurabilityError`,
+        sameTerminal: true,
+        durabilityCalls: 1,
+        suffixDurable: undefined,
+        status: `error`,
+        exactPublicError: true,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstDurability.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => prefixReceipt?.catch(() => undefined),
+          () => suffixReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`bounds partial-update dependency work by pending owner count`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return []
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `pending-key-membership-work`,
+        getKey: (row) => row.id,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const ready = collection.stateWhenReady()
+    const ownerSizes = [47, 83] as const
+    const partialWrites = 19
+    const ownerReceipts: Array<Promise<void>> = []
+    const abortedReceipts: Array<Promise<unknown>> = []
+    let hasPrimaryFailure = false
+    let membershipChecks = 0
+    let membershipSpy: ReturnType<typeof vi.spyOn> | undefined
+
+    try {
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `key-membership hydration entered`,
+      )
+      for (const [ownerIndex, size] of ownerSizes.entries()) {
+        sourceParams.begin()
+        for (let keyIndex = 0; keyIndex < size; keyIndex++) {
+          sourceParams.write({
+            type: `insert`,
+            value: {
+              id: `owner-${ownerIndex}-${keyIndex}`,
+              title: `Queued owner row`,
+            },
+          })
+        }
+        const receipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void receipt.catch(() => undefined)
+        ownerReceipts.push(receipt)
+      }
+
+      const originalHas = Set.prototype.has
+      membershipSpy = vi
+        .spyOn(Set.prototype, `has`)
+        .mockImplementation(function (this: Set<unknown>, value: unknown) {
+          if (
+            typeof value === `string` &&
+            value.startsWith(`partial-`) &&
+            ownerSizes.includes(this.size as (typeof ownerSizes)[number])
+          ) {
+            membershipChecks++
+          }
+          return originalHas.call(this, value)
+        })
+      for (let index = 0; index < partialWrites; index++) {
+        const aborted = new AbortController()
+        aborted.abort()
+        sourceParams.begin()
+        sourceParams.write({
+          type: `update`,
+          value: { id: `partial-${index}`, title: `Partial update` },
+        })
+        abortedReceipts.push(
+          Promise.resolve(sourceParams.commit(aborted.signal)).catch(
+            (error) => error,
+          ),
+        )
+      }
+      membershipSpy.mockRestore()
+      membershipSpy = undefined
+
+      expectPendingKeyMembershipWork(
+        membershipChecks,
+        ownerSizes.length,
+        partialWrites,
+      )
+      hydration.resolve()
+      await atPersistedOracleCheckpoint(ready, `key-membership hydration ready`)
+      await Promise.all(
+        ownerReceipts.map((receipt, index) =>
+          atPersistedOracleCheckpoint(receipt, `queued owner ${index} settled`),
+        ),
+      )
+      await Promise.all(abortedReceipts)
+      expect({
+        durableRows: adapter.rows.size,
+        status: collection.status,
+      }).toEqual({
+        durableRows: ownerSizes[0] + ownerSizes[1],
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      membershipSpy?.mockRestore()
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => ready.catch(() => undefined),
+          ...ownerReceipts.map(
+            (receipt) => () => receipt.catch(() => undefined),
+          ),
+          () => Promise.all(abortedReceipts).then(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects the old operation-scan answer for pending-key work`, () => {
+    const pendingOwnerSizes = [47, 83]
+    const partialWrites = 19
+    expect(() =>
+      expectPendingKeyMembershipWork(
+        pendingOwnerSizes.reduce((sum, size) => sum + size, 0) * partialWrites,
+        pendingOwnerSizes.length,
+        partialWrites,
+      ),
+    ).toThrow()
+    expect(() =>
+      expectPendingKeyMembershipWork(
+        pendingOwnerSizes.length * partialWrites,
+        pendingOwnerSizes.length,
+        partialWrites,
+      ),
+    ).not.toThrow()
+  })
+
+  it(`fail-stops a same-key partial suffix when its staged predecessor aborts`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await applyCommittedTx(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `same-key-abort-dependency`,
+        getKey: (row) => row.id,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const aborted = new AbortController()
+    let gateReceipt: Promise<void> | undefined
+    let abortedReceipt: Promise<void> | undefined
+    let dependentReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `same-key dependency collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `gate`, title: `holds adapter` },
+      })
+      gateReceipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      void gateReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `same-key dependency persistence entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: {
+          id: `shared`,
+          title: `predecessor`,
+          detail: `required inherited field`,
+        },
+      })
+      abortedReceipt = Promise.resolve(
+        sourceParams.commit(aborted.signal),
+      ).then(() => undefined)
+      void abortedReceipt.catch(() => undefined)
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `shared`, title: `dependent suffix` },
+      })
+      dependentReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void dependentReceipt.catch(() => undefined)
+
+      aborted.abort()
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(
+        gateReceipt,
+        `dependency gate persisted`,
+      )
+      const abortedOutcome = await atPersistedOracleCheckpoint(
+        abortedReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `same-key predecessor aborted`,
+      )
+      const dependentOutcome = await atPersistedOracleCheckpoint(
+        dependentReceipt.then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `same-key dependent suffix settled`,
+      )
+      const terminalError =
+        abortedOutcome.status === `rejected` ? abortedOutcome.reason : undefined
+
+      expect({
+        abortedStatus: abortedOutcome.status,
+        abortedName:
+          terminalError instanceof Error ? terminalError.name : undefined,
+        dependentStatus: dependentOutcome.status,
+        dependentExact:
+          dependentOutcome.status === `rejected` &&
+          dependentOutcome.reason === terminalError,
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        publicRow: collection.get(`shared`),
+        durableRow: adapter.rows.get(`shared`),
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      }).toEqual({
+        abortedStatus: `rejected`,
+        abortedName: `AbortError`,
+        dependentStatus: `rejected`,
+        dependentExact: true,
+        status: `error`,
+        exactPublicError: true,
+        publicRow: undefined,
+        durableRow: undefined,
+        pendingMarkers: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => gateReceipt?.catch(() => undefined),
+          () => abortedReceipt?.catch(() => undefined),
+          () => dependentReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`closes a reentrant internal transaction after a terminal failure`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `hydrated`, title: `starts reentrant transaction` },
+    ])
+    const hydrationEntered = createEventGate()
+    const releaseHydration = createEventGate()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await releaseHydration.promise
+      return [
+        {
+          key: `hydrated`,
+          value: { id: `hydrated`, title: `starts reentrant transaction` },
+        },
+      ]
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-internal-transaction`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let internalReservationStarted = false
+    const subscription = collection.subscribeChanges((changes) => {
+      if (
+        !internalReservationStarted &&
+        changes.some((change) => change.key === `hydrated`)
+      ) {
+        internalReservationStarted = true
+        sourceParams.begin()
+      }
+    })
+    const terminalError = new Error(`terminal transaction failure`)
+    let externalReceipt: Promise<void> | undefined
+    let internalReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      const ready = collection.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `reentrant transaction hydration entered`,
+      )
+      await vi.waitFor(() => expect(sourceParams).toBeDefined())
+      releaseHydration.resolve()
+      await atPersistedOracleCheckpoint(ready, `reentrant transaction ready`)
+      expect({
+        internalReservationStarted,
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      }).toEqual({
+        internalReservationStarted: true,
+        pendingMarkers: 0,
+      })
+
+      adapter.applyCommittedTx = () => Promise.reject(terminalError)
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `terminal`, title: `published before failure` },
+      })
+      externalReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void externalReceipt.catch(() => undefined)
+      await expect(
+        atPersistedOracleCheckpoint(
+          externalReceipt,
+          `external durability failure`,
+        ),
+      ).rejects.toMatchObject({
+        name: `PersistedCollectionDurabilityError`,
+        cause: terminalError,
+      })
+
+      internalReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void internalReceipt.catch(() => undefined)
+      await expect(
+        atPersistedOracleCheckpoint(
+          internalReceipt,
+          `terminal internal transaction rejected`,
+        ),
+      ).rejects.toMatchObject({ name: `PersistedCollectionDurabilityError` })
+      expect({
+        status: collection.status,
+        pendingMarkers: collection._state.pendingSyncedTransactions.length,
+      }).toEqual({ status: `error`, pendingMarkers: 0 })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseHydration.resolve()
+      subscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => externalReceipt?.catch(() => undefined),
+          () => internalReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`keeps bare sync operations away from another owner's queued marker`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await applyCommittedTx(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `two-owner-marker-isolation`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let firstReceipt: Promise<void> | undefined
+    let queuedReceipt: Promise<void> | undefined
+    let strayCommitReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `two-owner marker collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `first`, title: `holds adapter` },
+      })
+      firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void firstReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `first owner persistence entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `queued`, title: `owns queued marker` },
+      })
+      queuedReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void queuedReceipt.catch(() => undefined)
+
+      let writeError: unknown
+      try {
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `stray`, title: `must not steal marker` },
+        })
+      } catch (error) {
+        writeError = error
+      }
+      let commitError: unknown
+      try {
+        const receipt = sourceParams.commit()
+        if (receipt !== true) {
+          strayCommitReceipt = Promise.resolve(receipt).then(() => undefined)
+          void strayCommitReceipt.catch(() => undefined)
+        }
+      } catch (error) {
+        commitError = error
+      }
+
+      expect({
+        writeErrorIsOwned:
+          writeError instanceof NoPendingSyncTransactionWriteError,
+        commitErrorIsOwned:
+          commitError instanceof NoPendingSyncTransactionCommitError,
+        queuedVisible: collection.has(`queued`),
+        strayVisible: collection.has(`stray`),
+      }).toEqual({
+        writeErrorIsOwned: true,
+        commitErrorIsOwned: true,
+        queuedVisible: false,
+        strayVisible: false,
+      })
+
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(firstReceipt, `first owner persisted`)
+      await atPersistedOracleCheckpoint(queuedReceipt, `queued owner persisted`)
+      expect({
+        queued: stripVirtualProps(collection.get(`queued`)),
+        stray: collection.get(`stray`),
+      }).toEqual({
+        queued: { id: `queued`, title: `owns queued marker` },
+        stray: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => firstReceipt?.catch(() => undefined),
+          () => queuedReceipt?.catch(() => undefined),
+          () => strayCommitReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`keeps a bare truncate away from another owner's queued marker`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstPersistenceEntered = createEventGate()
+    const releaseFirstPersistence = createEventGate()
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    let applyCalls = 0
+    adapter.applyCommittedTx = async (...args) => {
+      applyCalls++
+      if (applyCalls === 1) {
+        firstPersistenceEntered.resolve()
+        await releaseFirstPersistence.promise
+      }
+      await applyCommittedTx(...args)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `bare-truncate-owner-isolation`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let firstReceipt: Promise<void> | undefined
+    let queuedReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `bare truncate collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `first`, title: `must survive` },
+      })
+      firstReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void firstReceipt.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstPersistenceEntered.promise,
+        `bare truncate first owner persistence entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `queued`, title: `owns queued marker` },
+      })
+      queuedReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void queuedReceipt.catch(() => undefined)
+
+      let truncateError: unknown
+      try {
+        sourceParams.truncate()
+      } catch (error) {
+        truncateError = error
+      }
+      expect({
+        truncateErrorIsOwned:
+          truncateError instanceof NoPendingSyncTransactionWriteError,
+        firstVisible: stripVirtualProps(collection.get(`first`)),
+        queuedVisible: collection.has(`queued`),
+      }).toEqual({
+        truncateErrorIsOwned: true,
+        firstVisible: { id: `first`, title: `must survive` },
+        queuedVisible: false,
+      })
+
+      releaseFirstPersistence.resolve()
+      await atPersistedOracleCheckpoint(firstReceipt, `first owner persisted`)
+      await atPersistedOracleCheckpoint(queuedReceipt, `queued owner persisted`)
+      expect({
+        publicRows: Array.from(collection.values()).map(stripVirtualProps),
+        durableRows: Array.from(adapter.rows.values()),
+      }).toEqual({
+        publicRows: [
+          { id: `first`, title: `must survive` },
+          { id: `queued`, title: `owns queued marker` },
+        ],
+        durableRows: [
+          { id: `first`, title: `must survive` },
+          { id: `queued`, title: `owns queued marker` },
+        ],
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirstPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => firstReceipt?.catch(() => undefined),
+          () => queuedReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`marks the collection errored with the exact persisted startup hydration failure`, async () => {
+    const adapter = createRecordingAdapter()
+    const startupError = new Error(`startup hydration failed exactly`)
     const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
     adapter.loadResumeSnapshot = (...args) => {
       if (args[1]?.includeRows === true) {
-        return Promise.reject(new Error(`startup failure`))
+        return Promise.reject(startupError)
       }
       return loadResumeSnapshot(...args)
     }
@@ -2573,9 +10705,22 @@ describe(`persistedCollectionOptions`, () => {
       }),
     )
 
-    await collection.stateWhenReady()
-    await flushAsyncWork()
-    expect(collection.status).toBe(`ready`)
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let hasPrimaryFailure = false
+    try {
+      await expect(collection.stateWhenReady()).rejects.toBe(startupError)
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(startupError)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      warning.mockRestore()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
   })
 
   it(`reads staged metadata writes during hydration-queued transactions`, async () => {
@@ -2658,6 +10803,395 @@ describe(`persistedCollectionOptions`, () => {
     remoteCommit?.()
     resolveLoadSubset?.()
     await readyPromise
+  })
+
+  it(`preserves metadata only for rows supplied by the owning hydration`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `hydrated`, title: `Persisted baseline` },
+    ])
+    adapter.rowMetadata.set(`hydrated`, { source: `persisted` })
+    adapter.rowMetadata.set(`new`, { source: `orphaned` })
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    let durableMetadataMutations: Array<unknown> = []
+    adapter.applyCommittedTx = async (...args) => {
+      durableMetadataMutations = [...(args[1].rowMetadataMutations ?? [])]
+      await applyCommittedTx(...args)
+    }
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    overrideBaselineRows(adapter, async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return [
+        {
+          key: `hydrated`,
+          value: { id: `hydrated`, title: `Persisted baseline` },
+          metadata: { source: `persisted` },
+        },
+      ]
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydration-owned-metadata`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const ready = collection.stateWhenReady()
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `metadata hydration entered`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `hydrated`, title: `Source replacement` },
+      })
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `new`, title: `Genuinely new row` },
+      })
+
+      // Commit after hydration clears its runtime marker. The transaction's
+      // captured hydration ownership must still distinguish these two keys.
+      hydration.resolve()
+      await atPersistedOracleCheckpoint(ready, `metadata hydration ready`)
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      await atPersistedOracleCheckpoint(receipt, `metadata source receipt`)
+
+      expect({
+        publicHydrated: stripVirtualProps(collection.get(`hydrated`)),
+        publicNew: stripVirtualProps(collection.get(`new`)),
+        hydratedMetadata: adapter.rowMetadata.get(`hydrated`),
+        newMetadata: adapter.rowMetadata.get(`new`),
+        durableMetadataMutations,
+      }).toEqual({
+        publicHydrated: { id: `hydrated`, title: `Source replacement` },
+        publicNew: { id: `new`, title: `Genuinely new row` },
+        hydratedMetadata: { source: `persisted` },
+        newMetadata: undefined,
+        durableMetadataMutations: [{ type: `delete`, key: `new` }],
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => ready.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects a source transaction that crosses a hydration cycle`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstEntered = createEventGate()
+    const releaseFirst = createEventGate()
+    const secondEntered = createEventGate()
+    const releaseSecond = createEventGate()
+    let loads = 0
+    adapter.loadSubset = async () => {
+      loads++
+      if (loads === 1) {
+        firstEntered.resolve()
+        await releaseFirst.promise
+        return []
+      }
+      secondEntered.resolve()
+      await releaseSecond.promise
+      const value = { id: `shared`, title: `second hydration` }
+      adapter.rows.set(value.id, value)
+      adapter.rowMetadata.set(value.id, { owner: `second hydration` })
+      return [
+        {
+          key: value.id,
+          value,
+          metadata: adapter.rowMetadata.get(value.id),
+        },
+      ]
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `bounded-cross-hydration-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const firstOptions = { limit: 1 }
+    const secondOptions = { limit: 2 }
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const first = Promise.resolve(collection._sync.loadSubset(firstOptions))
+      await firstEntered.promise
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `shared`, title: `source value` },
+      })
+      releaseFirst.resolve()
+      await first
+
+      const second = Promise.resolve(collection._sync.loadSubset(secondOptions))
+      await secondEntered.promise
+      expect(() => sourceParams.commit()).toThrow(
+        `cannot cross a hydration cycle`,
+      )
+      releaseSecond.resolve()
+      await second
+
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+        status: collection.status,
+      }).toEqual({
+        publicRow: { id: `shared`, title: `second hydration` },
+        durableRow: { id: `shared`, title: `second hydration` },
+        durableMetadata: { owner: `second hydration` },
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirst.resolve()
+      releaseSecond.resolve()
+      collection._sync.unloadSubset(firstOptions)
+      collection._sync.unloadSubset(secondOptions)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects a source transaction begun before hydration and committed after it`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrationEntered = createEventGate()
+    const releaseHydration = createEventGate()
+    adapter.loadSubset = async () => {
+      hydrationEntered.resolve()
+      await releaseHydration.promise
+      const value = { id: `shared`, title: `hydrated value` }
+      adapter.rows.set(value.id, value)
+      adapter.rowMetadata.set(value.id, { owner: `hydration` })
+      return [
+        {
+          key: value.id,
+          value,
+          metadata: adapter.rowMetadata.get(value.id),
+        },
+      ]
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `bounded-hydration-bracketing-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const options = { limit: 1 }
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `shared`, title: `source value` },
+      })
+
+      const hydration = Promise.resolve(collection._sync.loadSubset(options))
+      await hydrationEntered.promise
+      releaseHydration.resolve()
+      await hydration
+
+      expect(() => sourceParams.commit()).toThrow(
+        `cannot cross a hydration cycle`,
+      )
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+        status: collection.status,
+      }).toEqual({
+        publicRow: { id: `shared`, title: `hydrated value` },
+        durableRow: { id: `shared`, title: `hydrated value` },
+        durableMetadata: { owner: `hydration` },
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseHydration.resolve()
+      collection._sync.unloadSubset(options)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`preserves full-reload metadata only for rows supplied by that reload`, async () => {
+    const adapter = createRecordingAdapter()
+    adapter.rowMetadata.set(`hydrated`, { source: `persisted` })
+    adapter.rowMetadata.set(`new`, { source: `orphaned` })
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    let durableMetadataMutations: Array<unknown> = []
+    adapter.applyCommittedTx = async (...args) => {
+      durableMetadataMutations = [...(args[1].rowMetadataMutations ?? [])]
+      await applyCommittedTx(...args)
+    }
+    const hydrationEntered = createEventGate()
+    const hydration = createEventGate()
+    adapter.loadSubset = async () => {
+      hydrationEntered.resolve()
+      await hydration.promise
+      return [
+        {
+          key: `hydrated`,
+          value: { id: `hydrated`, title: `Persisted reload row` },
+          metadata: { source: `persisted` },
+        },
+      ]
+    }
+    const coordinator = createFailStopCoordinatorHarness(
+      `full-reload-hydration-owned-metadata`,
+    )
+    coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+      await adapter.applyCommittedTx(collectionId, tx)
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `full-reload-hydration-owned-metadata`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `full-reload metadata collection ready`,
+      )
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `full-reload-metadata`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        hydrationEntered.promise,
+        `full-reload metadata hydration entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `hydrated`, title: `Source replacement` },
+      })
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `new`, title: `Genuinely new row` },
+      })
+
+      // Commit only after the reload's runtime marker clears. Ownership must
+      // remain attached to the transaction rather than ambient runtime state.
+      hydration.resolve()
+      await vi.waitFor(() =>
+        expect(stripVirtualProps(collection.get(`hydrated`))).toEqual({
+          id: `hydrated`,
+          title: `Persisted reload row`,
+        }),
+      )
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      await atPersistedOracleCheckpoint(
+        receipt,
+        `full-reload metadata source receipt`,
+      )
+
+      expect({
+        publicHydrated: stripVirtualProps(collection.get(`hydrated`)),
+        publicNew: stripVirtualProps(collection.get(`new`)),
+        hydratedMetadata: adapter.rowMetadata.get(`hydrated`),
+        newMetadata: adapter.rowMetadata.get(`new`),
+        durableMetadataMutations,
+      }).toEqual({
+        publicHydrated: { id: `hydrated`, title: `Source replacement` },
+        publicNew: { id: `new`, title: `Genuinely new row` },
+        hydratedMetadata: { source: `persisted` },
+        newMetadata: undefined,
+        durableMetadataMutations: [{ type: `delete`, key: `new` }],
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      hydration.resolve()
+      await cleanupPersistedOracle(
+        [() => receipt?.catch(() => undefined), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
   })
 
   it(`persists truncate transactions and preserves intended collection metadata`, async () => {
@@ -2754,6 +11288,468 @@ describe(`persistedCollectionOptions`, () => {
       kind: `reset`,
       updatedAt: 1,
     })
+  })
+
+  it(`fail-stops an OK seq-gap delta when its application receipt rejects`, async () => {
+    const id = `gap-targeted-receipt`
+    const receiptError = new Error(`gap targeted receipt failed exactly`)
+    const firstApplied = createEventGate()
+    const receiptEntered = createEventGate()
+    const terminal = createEventGate()
+    const fallbackReload = createEventGate()
+    const barrierApplied = createEventGate()
+    let loadCalls = 0
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = async () => {
+      loadCalls++
+      if (loadCalls > 1) fallbackReload.resolve()
+      return []
+    }
+    const coordinator = createFailStopCoordinatorHarness(id)
+    coordinator.pullSince = async () => ({
+      type: `rpc:pullSince:res`,
+      rpcId: `targeted-replay`,
+      ok: true,
+      latestTerm: 1,
+      latestSeq: 3,
+      latestRowVersion: 3,
+      requiresFullReload: false,
+      changedKeys: [`replayed`],
+      deletedKeys: [],
+      deltas: [
+        {
+          txId: `replayed-delta`,
+          latestRowVersion: 2,
+          changedRows: [
+            {
+              key: `replayed`,
+              value: { id: `replayed`, title: `targeted replay` },
+            },
+          ],
+          deletedKeys: [],
+          rowMetadataMutations: [],
+          collectionMetadataMutations: [],
+        },
+      ],
+    })
+    let rejectNextCommit = false
+    let observeNextCommit = false
+    let observeBarrierCommit = false
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (rejectNextCommit) {
+                rejectNextCommit = false
+                receiptEntered.resolve()
+                void Promise.resolve(actualReceipt).catch(() => undefined)
+                return Promise.reject(receiptError)
+              }
+              if (observeNextCommit) {
+                observeNextCommit = false
+                void Promise.resolve(actualReceipt).then(() =>
+                  firstApplied.resolve(),
+                )
+              }
+              if (observeBarrierCommit) {
+                observeBarrierCommit = false
+                void Promise.resolve(actualReceipt).then(() =>
+                  barrierApplied.resolve(),
+                )
+              }
+              return actualReceipt
+            },
+          }),
+      },
+    })
+    const unsubscribeError = collection.on(`status:error`, () => {
+      terminal.resolve()
+    })
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `targeted gap initial ready`,
+      )
+      observeNextCommit = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `first`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [
+          { key: `first`, value: { id: `first`, title: `first committed` } },
+        ],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        firstApplied.promise,
+        `targeted gap first transaction applied`,
+      )
+
+      rejectNextCommit = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 3,
+        txId: `gap`,
+        latestRowVersion: 3,
+        requiresFullReload: false,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        receiptEntered.promise,
+        `targeted replay receipt entered`,
+      )
+      const outcome = await atPersistedOracleCheckpoint(
+        Promise.race([
+          terminal.promise.then(() => ({ kind: `terminal` as const })),
+          fallbackReload.promise.then(() => ({ kind: `fallback` as const })),
+        ]),
+        `targeted terminal error or fallback reload`,
+      )
+      if (outcome.kind === `fallback`) {
+        observeBarrierCommit = true
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 4,
+          txId: `barrier`,
+          latestRowVersion: 4,
+          requiresFullReload: false,
+          changedRows: [],
+          deletedKeys: [],
+        })
+        await atPersistedOracleCheckpoint(
+          barrierApplied.promise,
+          `targeted fallback barrier`,
+        )
+      }
+
+      expect({
+        outcome: outcome.kind,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        loadCalls,
+      }).toEqual({
+        outcome: `terminal`,
+        status: `error`,
+        publicError: receiptError,
+        loadCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      unsubscribeError()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`fail-stops an OK seq-gap full reload when adapter loading rejects`, async () => {
+    const id = `gap-full-reload-load`
+    const loadError = new Error(`gap full reload load failed exactly`)
+    const firstApplied = createEventGate()
+    const failingLoadEntered = createEventGate()
+    const terminal = createEventGate()
+    const fallbackReload = createEventGate()
+    const barrierApplied = createEventGate()
+    let loadCalls = 0
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = async () => {
+      loadCalls++
+      if (loadCalls === 1) {
+        failingLoadEntered.resolve()
+        throw loadError
+      }
+      if (loadCalls === 2) fallbackReload.resolve()
+      return []
+    }
+    const coordinator = createFailStopCoordinatorHarness(id)
+    coordinator.pullSince = async () => ({
+      type: `rpc:pullSince:res`,
+      rpcId: `full-reload`,
+      ok: true,
+      latestTerm: 1,
+      latestSeq: 3,
+      latestRowVersion: 3,
+      requiresFullReload: true,
+    })
+    let observeNextCommit = false
+    let observeBarrierCommit = false
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (observeNextCommit) {
+                observeNextCommit = false
+                void Promise.resolve(actualReceipt).then(() =>
+                  firstApplied.resolve(),
+                )
+              }
+              if (observeBarrierCommit) {
+                observeBarrierCommit = false
+                void Promise.resolve(actualReceipt).then(() =>
+                  barrierApplied.resolve(),
+                )
+              }
+              return actualReceipt
+            },
+          }),
+      },
+    })
+    const unsubscribeError = collection.on(`status:error`, () => {
+      terminal.resolve()
+    })
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `full reload gap initial ready`,
+      )
+      observeNextCommit = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `first`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [
+          { key: `first`, value: { id: `first`, title: `first committed` } },
+        ],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        firstApplied.promise,
+        `full reload gap first transaction applied`,
+      )
+
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 3,
+        txId: `gap`,
+        latestRowVersion: 3,
+        requiresFullReload: false,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        failingLoadEntered.promise,
+        `full reload gap failing load entered`,
+      )
+      const outcome = await atPersistedOracleCheckpoint(
+        Promise.race([
+          terminal.promise.then(() => ({ kind: `terminal` as const })),
+          fallbackReload.promise.then(() => ({ kind: `fallback` as const })),
+        ]),
+        `full reload terminal error or second fallback reload`,
+      )
+      if (outcome.kind === `fallback`) {
+        observeBarrierCommit = true
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 4,
+          txId: `barrier`,
+          latestRowVersion: 4,
+          requiresFullReload: false,
+          changedRows: [],
+          deletedKeys: [],
+        })
+        await atPersistedOracleCheckpoint(
+          barrierApplied.promise,
+          `full reload fallback barrier`,
+        )
+      }
+
+      expect({
+        outcome: outcome.kind,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        loadCalls,
+      }).toEqual({
+        outcome: `terminal`,
+        status: `error`,
+        publicError: loadError,
+        loadCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      unsubscribeError()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`keeps seq-gap pull transport rejection on the fallback path`, async () => {
+    const id = `gap-transport-control`
+    const transportError = new Error(`gap pull transport failed exactly`)
+    const firstApplied = createEventGate()
+    const fallbackReload = createEventGate()
+    const barrierApplied = createEventGate()
+    let loadCalls = 0
+    const adapter = createRecordingAdapter()
+    adapter.loadSubset = async () => {
+      loadCalls++
+      if (loadCalls === 1) fallbackReload.resolve()
+      return []
+    }
+    const coordinator = createFailStopCoordinatorHarness(id)
+    coordinator.pullSince = async () => {
+      throw transportError
+    }
+    let observeNextCommit = false
+    let observeBarrierCommit = false
+    const baseOptions = persistedCollectionOptions<Todo, string>({
+      id,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+      persistence: { adapter, coordinator },
+    })
+    const baseSync = baseOptions.sync.sync
+    const collection = createCollection({
+      ...baseOptions,
+      sync: {
+        ...baseOptions.sync,
+        sync: (params) =>
+          baseSync({
+            ...params,
+            commit: (signal) => {
+              const actualReceipt = params.commit(signal)
+              if (observeNextCommit) {
+                observeNextCommit = false
+                void Promise.resolve(actualReceipt).then(() =>
+                  firstApplied.resolve(),
+                )
+              }
+              if (observeBarrierCommit) {
+                observeBarrierCommit = false
+                void Promise.resolve(actualReceipt).then(() =>
+                  barrierApplied.resolve(),
+                )
+              }
+              return actualReceipt
+            },
+          }),
+      },
+    })
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `transport gap initial ready`,
+      )
+      observeNextCommit = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `first`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [
+          { key: `first`, value: { id: `first`, title: `first committed` } },
+        ],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        firstApplied.promise,
+        `transport gap first transaction applied`,
+      )
+
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 3,
+        txId: `gap`,
+        latestRowVersion: 3,
+        requiresFullReload: false,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        fallbackReload.promise,
+        `transport gap fallback reload`,
+      )
+      observeBarrierCommit = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 4,
+        txId: `barrier`,
+        latestRowVersion: 4,
+        requiresFullReload: false,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await atPersistedOracleCheckpoint(
+        barrierApplied.promise,
+        `transport fallback barrier`,
+      )
+
+      expect(warning).toHaveBeenCalledWith(
+        `Failed pullSince recovery attempt:`,
+        transportError,
+      )
+      expect({
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        loadCalls,
+      }).toEqual({
+        status: `ready`,
+        publicError: undefined,
+        loadCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      warning.mockRestore()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
   })
 
   it(`uses pullSince recovery when tx sequence gaps are detected`, async () => {
@@ -3168,6 +12164,1574 @@ describe(`persistedCollectionOptions`, () => {
     } finally {
       warn.mockRestore()
       await collection.cleanup()
+    }
+  })
+
+  it(`keeps an incremental persisted subset failure request-local and retries without restart`, async () => {
+    const hydrationFailure = new Error(`later on-demand hydration failed`)
+    const adapter = createRecordingAdapter([
+      { id: `cached`, title: `Last successful snapshot` },
+    ])
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-on-demand-hydration-failure`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `on-demand collection initially ready`,
+      )
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+        `initial persisted subset hydration`,
+      )
+      expect(stripVirtualProps(collection.get(`cached`))).toEqual({
+        id: `cached`,
+        title: `Last successful snapshot`,
+      })
+      expect(collection.status).toBe(`ready`)
+      adapter.loadSubset = () => Promise.reject(hydrationFailure)
+
+      await expect(
+        atPersistedOracleCheckpoint(
+          Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+          `later on-demand hydration rejected`,
+        ),
+      ).rejects.toBe(hydrationFailure)
+
+      expect(collection.status).toBe(`ready`)
+      expect(collection._lifecycle.getSyncError()).toBeUndefined()
+      expect(stripVirtualProps(collection.get(`cached`))).toEqual({
+        id: `cached`,
+        title: `Last successful snapshot`,
+      })
+      expect(adapter.applyCommittedTxCalls).toEqual([])
+
+      adapter.rows.set(`retry`, {
+        id: `retry`,
+        title: `Explicit retry succeeded`,
+      })
+      adapter.loadSubset = async () =>
+        Array.from(adapter.rows, ([key, value]) => ({ key, value }))
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
+        `request-local persisted subset retry`,
+      )
+      expect(stripVirtualProps(collection.get(`retry`))).toEqual({
+        id: `retry`,
+        title: `Explicit retry succeeded`,
+      })
+      expect(collection.status).toBe(`ready`)
+      expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`settles hydration-buffered source work and reconciles an overlapping retry after incremental load rejection`, async () => {
+    const failure = new Error(`incremental subset rejected exactly`)
+    const adapter = createRecordingAdapter()
+    const loadPersistedRows = adapter.loadSubset.bind(adapter)
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw failure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-failure-releases-source-receipt`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `request-local receipt collection ready`,
+      )
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        loadEntered.promise,
+        `request-local hydration entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `source`, title: `Must outlive request failure` },
+      })
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      const receiptState = observeSettlement(receipt)
+      expect(receiptState.read()).toEqual({ status: `pending` })
+
+      rejectLoad.resolve()
+      await expect(
+        atPersistedOracleCheckpoint(load, `request-local load rejected`),
+      ).rejects.toBe(failure)
+      await atPersistedOracleCheckpoint(
+        receipt,
+        `hydration-buffered source receipt settled`,
+      )
+
+      expect({
+        receipt: receiptState.read(),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicRow: stripVirtualProps(collection.get(`source`)),
+        durableRow: adapter.rows.get(`source`),
+      }).toEqual({
+        receipt: { status: `fulfilled` },
+        status: `ready`,
+        publicError: undefined,
+        publicRow: { id: `source`, title: `Must outlive request failure` },
+        durableRow: { id: `source`, title: `Must outlive request failure` },
+      })
+
+      adapter.loadSubset = loadPersistedRows
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+        `overlapping request-local retry loaded durable source row`,
+      )
+      expect({
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicRows: [...collection.values()].map(stripVirtualProps),
+        durableRows: [...adapter.rows.values()],
+      }).toEqual({
+        status: `ready`,
+        publicError: undefined,
+        publicRows: [{ id: `source`, title: `Must outlive request failure` }],
+        durableRows: [{ id: `source`, title: `Must outlive request failure` }],
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`fail-stops when a buffered partial update cannot reconstruct its persisted baseline`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const baselineFailure = new Error(
+      `persisted baseline reconstruction failed`,
+    )
+    const adapter = createRecordingAdapter([
+      {
+        id: `shared`,
+        title: `Persisted baseline`,
+        detail: `required baseline field`,
+      },
+    ])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-partial-baseline-failure`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `partial baseline failure collection ready`,
+      )
+      adapter.loadResumeSnapshot = () => Promise.reject(baselineFailure)
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        loadEntered.promise,
+        `partial baseline failure load entered`,
+      )
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `shared`, title: `Partial update` },
+      })
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      void receipt.catch(() => undefined)
+      expect(observeSettlement(receipt).read()).toEqual({ status: `pending` })
+
+      rejectLoad.resolve()
+      await expect(
+        atPersistedOracleCheckpoint(load, `partial baseline load rejected`),
+      ).rejects.toBe(baselineFailure)
+      await expect(
+        atPersistedOracleCheckpoint(
+          receipt,
+          `partial baseline source receipt rejected`,
+        ),
+      ).rejects.toBe(baselineFailure)
+      expect({
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === baselineFailure,
+        publicRow: collection.get(`shared`),
+        durableRow: adapter.rows.get(`shared`),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        status: `error`,
+        exactPublicError: true,
+        publicRow: undefined,
+        durableRow: {
+          id: `shared`,
+          title: `Persisted baseline`,
+          detail: `required baseline field`,
+        },
+        durabilityCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`applies a partial upsert when the persisted snapshot proves the key absent`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const adapter = createRecordingAdapter()
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-missing-partial-baseline`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `missing`, title: `partial` },
+      })
+      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+      void receipt.catch(() => undefined)
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toBe(requestFailure)
+      await receipt
+      expect({
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicRow: stripVirtualProps(collection.get(`missing`)),
+        durableRow: adapter.rows.get(`missing`),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        status: `ready`,
+        publicError: undefined,
+        publicRow: { id: `missing`, title: `partial` },
+        durableRow: { id: `missing`, title: `partial` },
+        durabilityCalls: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects a transaction begun before hydration at its write cut`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `required baseline field`,
+    }
+    const adapter = createRecordingAdapter([baseline])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-begin-before-hydration`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      sourceParams.begin()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      expect(() =>
+        sourceParams.write({
+          type: `update`,
+          value: { id: baseline.id, title: `Source update` },
+        }),
+      ).toThrow(`cannot cross a hydration cycle`)
+      expect(() => sourceParams.commit()).toThrow(
+        `cannot cross a hydration cycle`,
+      )
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toBe(requestFailure)
+      expect({
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        publicRow: stripVirtualProps(collection.get(baseline.id)),
+        durableRow: adapter.rows.get(baseline.id),
+        recoverySnapshotCalls: adapter.loadResumeSnapshotCalls.filter(
+          ({ includeRows }) => includeRows === true,
+        ).length,
+      }).toEqual({
+        status: `ready`,
+        publicError: undefined,
+        publicRow: undefined,
+        durableRow: baseline,
+        recoverySnapshotCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [() => load?.catch(() => undefined), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`publishes a recovered baseline and dependent partial update atomically`, async () => {
+    const requestFailure = new Error(`incremental subset rejected`)
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `required baseline field`,
+    }
+    const expected: Todo = { ...baseline, title: `Source update` }
+    const adapter = createRecordingAdapter([baseline])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw requestFailure
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-atomic-baseline-recovery`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const abortController = new AbortController()
+    const publicCuts: Array<Todo | undefined> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      if (changes.some(({ key }) => key === baseline.id)) {
+        publicCuts.push(stripVirtualProps(collection.get(baseline.id)))
+        abortController.abort()
+      }
+    })
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: expected.title },
+      })
+      receipt = Promise.resolve(
+        sourceParams.commit(abortController.signal),
+      ).then(() => undefined)
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toBe(requestFailure)
+      await receipt
+      expect({
+        abortedFromPublication: abortController.signal.aborted,
+        publicCuts,
+        publicRow: stripVirtualProps(collection.get(baseline.id)),
+        durableRow: adapter.rows.get(baseline.id),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        abortedFromPublication: true,
+        publicCuts: [expected],
+        publicRow: expected,
+        durableRow: expected,
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      subscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it.each([`delete`, `truncate`] as const)(
+    `treats a buffered %s prefix as authoritative absence for a partial upsert`,
+    async (prefix) => {
+      const requestFailure = new Error(`incremental subset rejected`)
+      const baseline: Todo = {
+        id: `shared`,
+        title: `Persisted baseline`,
+        detail: `required baseline field`,
+      }
+      const adapter = createRecordingAdapter([baseline])
+      const loadEntered = createEventGate()
+      const rejectLoad = createEventGate()
+      adapter.loadSubset = async () => {
+        loadEntered.resolve()
+        await rejectLoad.promise
+        throw requestFailure
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `request-local-${prefix}-partial-prefix`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            rowUpdateMode: `partial`,
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      let load: Promise<void> | undefined
+      let prefixReceipt: Promise<void> | undefined
+      let partialReceipt: Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        await collection.stateWhenReady()
+        load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+          () => undefined,
+        )
+        void load.catch(() => undefined)
+        await loadEntered.promise
+
+        sourceParams.begin()
+        if (prefix === `delete`) {
+          sourceParams.write({ type: `delete`, key: baseline.id })
+        } else {
+          sourceParams.truncate()
+        }
+        prefixReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void prefixReceipt.catch(() => undefined)
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `update`,
+          value: { id: baseline.id, title: `partial after ${prefix}` },
+        })
+        partialReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void partialReceipt.catch(() => undefined)
+        rejectLoad.resolve()
+
+        await expect(load).rejects.toBe(requestFailure)
+        await prefixReceipt
+        await partialReceipt
+        expect({
+          status: collection.status,
+          publicError: collection._lifecycle.getSyncError(),
+          publicRow: collection.get(baseline.id),
+          durableRow: adapter.rows.get(baseline.id),
+          durableOrder: adapter.applyCommittedTxCalls.map(({ tx }) =>
+            tx.truncate ? `truncate` : tx.mutations[0]?.type,
+          ),
+        }).toEqual({
+          status: `ready`,
+          publicError: undefined,
+          publicRow: expect.objectContaining({
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          }),
+          durableRow: {
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          },
+          durableOrder: [prefix, `update`],
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        rejectLoad.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => load?.catch(() => undefined),
+            () => prefixReceipt?.catch(() => undefined),
+            () => partialReceipt?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it.each([`delete`, `truncate`] as const)(
+    `treats a same-transaction %s prefix as authoritative absence for a partial upsert`,
+    async (prefix) => {
+      const baseline: Todo = {
+        id: `shared`,
+        title: `Persisted baseline`,
+        detail: `required baseline field`,
+      }
+      const adapter = createRecordingAdapter([baseline])
+      const loadEntered = createEventGate()
+      const rejectLoad = createEventGate()
+      adapter.loadSubset = async () => {
+        loadEntered.resolve()
+        await rejectLoad.promise
+        throw new Error(`incremental subset rejected`)
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `request-local-same-transaction-${prefix}-partial`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            rowUpdateMode: `partial`,
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      let load: Promise<void> | undefined
+      let receipt: Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        await collection.stateWhenReady()
+        load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+          () => undefined,
+        )
+        void load.catch(() => undefined)
+        await loadEntered.promise
+
+        sourceParams.begin()
+        if (prefix === `delete`) {
+          sourceParams.write({ type: `delete`, key: baseline.id })
+        } else {
+          sourceParams.truncate()
+        }
+        sourceParams.write({
+          type: `update`,
+          value: { id: baseline.id, title: `partial after ${prefix}` },
+        })
+        receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
+        void receipt.catch(() => undefined)
+        rejectLoad.resolve()
+
+        await expect(load).rejects.toThrow(`incremental subset rejected`)
+        await receipt
+        expect({
+          status: collection.status,
+          publicRow: stripVirtualProps(collection.get(baseline.id)),
+          durableRow: adapter.rows.get(baseline.id),
+          durabilityCalls: adapter.applyCommittedTxCalls.length,
+          recoverySnapshotCalls: adapter.loadResumeSnapshotCalls.filter(
+            ({ includeRows }) => includeRows === true,
+          ).length,
+        }).toEqual({
+          status: `ready`,
+          publicRow: {
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          },
+          durableRow: {
+            id: baseline.id,
+            title: `partial after ${prefix}`,
+          },
+          durabilityCalls: 1,
+          recoverySnapshotCalls: 0,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        rejectLoad.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => load?.catch(() => undefined),
+            () => receipt?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`keeps fallback-snapshot admissions inside buffered baseline recovery`, async () => {
+    const rows: Array<Todo> = [
+      { id: `a`, title: `A baseline`, detail: `A required` },
+      { id: `b`, title: `B baseline`, detail: `B required` },
+    ]
+    const adapter = createRecordingAdapter(rows)
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    const fallbackEntered = createEventGate()
+    const releaseFallback = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw new Error(`incremental subset rejected`)
+    }
+    const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+      fallbackEntered.resolve()
+      await releaseFallback.promise
+      return rows.map((value) => ({ key: value.id, value }))
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-fallback-admission`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    const receipts: Array<Promise<void>> = []
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `a`, title: `A source` },
+      })
+      receipts.push(
+        Promise.resolve(sourceParams.commit()).then(() => undefined),
+      )
+      receipts.forEach((receipt) => void receipt.catch(() => undefined))
+      rejectLoad.resolve()
+      await fallbackEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: `b`, title: `B source` },
+      })
+      const lateReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      receipts.push(lateReceipt)
+      void lateReceipt.catch(() => undefined)
+      expect(observeSettlement(lateReceipt).read()).toEqual({
+        status: `pending`,
+      })
+
+      releaseFallback.resolve()
+      await expect(load).rejects.toThrow(`incremental subset rejected`)
+      await Promise.all(receipts)
+      expect({
+        publicRows: [`a`, `b`].map((key) =>
+          stripVirtualProps(collection.get(key)),
+        ),
+        durableRows: [`a`, `b`].map((key) => adapter.rows.get(key)),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        publicRows: [
+          { id: `a`, title: `A source`, detail: `A required` },
+          { id: `b`, title: `B source`, detail: `B required` },
+        ],
+        durableRows: [
+          { id: `a`, title: `A source`, detail: `A required` },
+          { id: `b`, title: `B source`, detail: `B required` },
+        ],
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      releaseFallback.resolve()
+      restoreBaselineRows()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not publish a fallback baseline for an aborted dependent update`, async () => {
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `required baseline field`,
+    }
+    const adapter = createRecordingAdapter([baseline])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    const fallbackEntered = createEventGate()
+    const releaseFallback = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw new Error(`incremental subset rejected`)
+    }
+    const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+      fallbackEntered.resolve()
+      await releaseFallback.promise
+      return [{ key: baseline.id, value: baseline }]
+    })
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-aborted-partial-baseline`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const publicEvents: Array<string> = []
+    const subscription = collection.subscribeChanges((changes) => {
+      publicEvents.push(
+        ...changes.map((change) => `${change.type}:${change.key}`),
+      )
+    })
+    const abortController = new AbortController()
+    let load: Promise<void> | undefined
+    let receipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: `aborted partial` },
+      })
+      receipt = Promise.resolve(
+        sourceParams.commit(abortController.signal),
+      ).then(() => undefined)
+      void receipt.catch(() => undefined)
+      rejectLoad.resolve()
+      await fallbackEntered.promise
+      abortController.abort()
+      releaseFallback.resolve()
+
+      await expect(load).rejects.toThrow(`incremental subset rejected`)
+      await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
+      expect({
+        publicEvents,
+        publicRow: collection.get(baseline.id),
+        durableRow: adapter.rows.get(baseline.id),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        publicEvents: [],
+        publicRow: undefined,
+        durableRow: baseline,
+        durabilityCalls: 0,
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      releaseFallback.resolve()
+      restoreBaselineRows()
+      subscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          () => receipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`does not let a later fallback dependency preserve metadata deleted by a fresh insert`, async () => {
+    const baseline: Todo = {
+      id: `shared`,
+      title: `Persisted baseline`,
+      detail: `old detail`,
+    }
+    const adapter = createRecordingAdapter([baseline])
+    adapter.rowMetadata.set(baseline.id, { owner: `stale` })
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw new Error(`incremental subset rejected`)
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-insert-partial-metadata`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<void> | undefined
+    const receipts: Array<Promise<void>> = []
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      void load.catch(() => undefined)
+      await loadEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: baseline.id, title: `Fresh insert`, detail: `new detail` },
+      })
+      receipts.push(
+        Promise.resolve(sourceParams.commit()).then(() => undefined),
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `update`,
+        value: { id: baseline.id, title: `Later partial` },
+      })
+      receipts.push(
+        Promise.resolve(sourceParams.commit()).then(() => undefined),
+      )
+      receipts.forEach((receipt) => void receipt.catch(() => undefined))
+      rejectLoad.resolve()
+
+      await expect(load).rejects.toThrow(`incremental subset rejected`)
+      await Promise.all(receipts)
+      expect({
+        publicRow: stripVirtualProps(collection.get(baseline.id)),
+        durableRow: adapter.rows.get(baseline.id),
+        publicMetadata: sourceParams.metadata!.row.get(baseline.id),
+        durableMetadata: adapter.rowMetadata.get(baseline.id),
+      }).toEqual({
+        publicRow: {
+          id: baseline.id,
+          title: `Later partial`,
+          detail: `new detail`,
+        },
+        durableRow: {
+          id: baseline.id,
+          title: `Later partial`,
+          detail: `new detail`,
+        },
+        publicMetadata: undefined,
+        durableMetadata: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => load?.catch(() => undefined),
+          ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`preserves an overlapping subset demand when its predecessor fails`, async () => {
+    const failure = new Error(`failed demand is not active`)
+    const adapter = createRecordingAdapter()
+    const failedOptions: LoadSubsetOptions = { limit: 1 }
+    const replacementOptions: LoadSubsetOptions = { limit: 1 }
+    const firstLoadEntered = createEventGate()
+    const rejectFirstLoad = createEventGate()
+    const reloadCalls: Array<LoadSubsetOptions> = []
+    let initialCalls = 0
+    let reloading = false
+    adapter.loadSubset = async (_collectionId, requestedOptions) => {
+      if (reloading) {
+        reloadCalls.push(requestedOptions)
+      }
+      if (!reloading) {
+        initialCalls++
+        if (initialCalls === 1) {
+          firstLoadEntered.resolve()
+          await rejectFirstLoad.promise
+          throw failure
+        }
+      }
+      if (requestedOptions === failedOptions) {
+        return [
+          {
+            key: `phantom`,
+            value: { id: `phantom`, title: `Failed demand leaked` },
+          },
+        ]
+      }
+      return [
+        {
+          key: `replacement`,
+          value: {
+            id: `replacement`,
+            title: reloading ? `Replacement reloaded` : `Replacement initial`,
+          },
+        },
+      ]
+    }
+    const coordinator = createFailStopCoordinatorHarness(
+      `request-local-active-subset-identity`,
+    )
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-active-subset-identity`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let firstLoad: Promise<void> | undefined
+    let replacementLoad: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `active-subset identity collection ready`,
+      )
+      firstLoad = Promise.resolve(
+        collection._sync.loadSubset(failedOptions),
+      ).then(() => undefined)
+      void firstLoad.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        firstLoadEntered.promise,
+        `failed subset demand entered hydration`,
+      )
+      replacementLoad = Promise.resolve(
+        collection._sync.loadSubset(replacementOptions),
+      ).then(() => undefined)
+      void replacementLoad.catch(() => undefined)
+      expect(observeSettlement(replacementLoad).read()).toEqual({
+        status: `pending`,
+      })
+      rejectFirstLoad.resolve()
+      await expect(firstLoad).rejects.toBe(failure)
+      await atPersistedOracleCheckpoint(
+        replacementLoad,
+        `replacement subset loaded`,
+      )
+
+      reloading = true
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `reload-active-subsets`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await vi.waitFor(() =>
+        expect(stripVirtualProps(collection.get(`replacement`))).toEqual({
+          id: `replacement`,
+          title: `Replacement reloaded`,
+        }),
+      )
+
+      expect({
+        reloadCalls,
+        phantom: collection.get(`phantom`),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        reloadCalls: [replacementOptions],
+        phantom: undefined,
+        status: `ready`,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      rejectFirstLoad.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => firstLoad?.catch(() => undefined),
+          () => replacementLoad?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`reports a persisted subset failure only to its requesting subscription`, async () => {
+    const failure = new Error(`requesting subscription failed exactly`)
+    const adapter = createRecordingAdapter([
+      { id: `cached`, title: `Shared cached row` },
+    ])
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    let calls = 0
+    adapter.loadSubset = (...args) => {
+      calls++
+      return calls === 1 ? Promise.reject(failure) : loadSubset(...args)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `request-local-subscription-hydration-failure`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const failing = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const healthy = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    const reported: Array<unknown> = []
+    failing.on(`loadSubset:error`, ({ error }) => reported.push(error))
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `subscription-isolation collection ready`,
+      )
+      failing.requestSnapshot({ optimizedOnly: false })
+      healthy.requestSnapshot({ optimizedOnly: false })
+      await flushAsyncWork()
+
+      expect({
+        reported,
+        failingError: failing.lastError,
+        healthyError: healthy.lastError,
+        failingStatus: failing.status,
+        healthyStatus: healthy.status,
+        collectionStatus: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+        cached: stripVirtualProps(collection.get(`cached`)),
+      }).toEqual({
+        reported: [failure],
+        failingError: failure,
+        healthyError: undefined,
+        failingStatus: `ready`,
+        healthyStatus: `ready`,
+        collectionStatus: `ready`,
+        publicError: undefined,
+        cached: { id: `cached`, title: `Shared cached row` },
+      })
+
+      adapter.rows.set(`retry`, {
+        id: `retry`,
+        title: `Retry visible to both owners`,
+      })
+      failing.requestSnapshot({ optimizedOnly: false })
+      await flushAsyncWork()
+      expect(stripVirtualProps(collection.get(`retry`))).toEqual({
+        id: `retry`,
+        title: `Retry visible to both owners`,
+      })
+      expect(collection.status).toBe(`ready`)
+      expect(collection._lifecycle.getSyncError()).toBeUndefined()
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      failing.unsubscribe()
+      healthy.unsubscribe()
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`marks the collection errored and rejects later forced work after a hydration failure`, async () => {
+    const hydrationFailure = new Error(`later forced hydration failed`)
+    const adapter = createRecordingAdapter()
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `later-forced-hydration-failure`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        persistence: { adapter },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `forced-hydration collection initially ready`,
+      )
+      expect(collection.status).toBe(`ready`)
+      adapter.loadSubset = () => Promise.reject(hydrationFailure)
+
+      await expect(
+        atPersistedOracleCheckpoint(
+          Promise.resolve(collection.utils.forceReloadSubset!({ limit: 1 })),
+          `later forced hydration rejected`,
+        ),
+      ).rejects.toBe(hydrationFailure)
+
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure)
+      expect([...collection.values()]).toEqual([])
+      expect(adapter.rows.size).toBe(0)
+      expect(adapter.applyCommittedTxCalls).toEqual([])
+
+      let laterAdapterCalls = 0
+      adapter.loadSubset = () => {
+        laterAdapterCalls++
+        return Promise.resolve([
+          {
+            key: `late-forced`,
+            value: { id: `late-forced`, title: `must not be admitted` },
+          },
+        ])
+      }
+      await expect(
+        atPersistedOracleCheckpoint(
+          Promise.resolve(collection.utils.forceReloadSubset!({ limit: 2 })),
+          `later forced subset work settled`,
+        ),
+      ).rejects.toBe(hydrationFailure)
+      expect({
+        laterAdapterCalls,
+        visible: collection.get(`late-forced`),
+        durable: adapter.rows.get(`late-forced`),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        laterAdapterCalls: 0,
+        visible: undefined,
+        durable: undefined,
+        durabilityCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects subset work admitted after a terminal hydration failure`, async () => {
+    const hydrationFailure = new Error(`terminal hydration failed`)
+    const adapter = createRecordingAdapter()
+    const coordinator = createFailStopCoordinatorHarness(
+      `terminal-hydration-rejects-later-work`,
+    )
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-hydration-rejects-later-work`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `terminal hydration collection initially ready`,
+      )
+      adapter.loadSubset = () => Promise.reject(hydrationFailure)
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `terminal-hydration-rejects-later-work`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await vi.waitFor(() =>
+        expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure),
+      )
+      expect(collection.status).toBe(`error`)
+
+      let laterAdapterCalls = 0
+      adapter.loadSubset = () => {
+        laterAdapterCalls++
+        return Promise.resolve([
+          {
+            key: `late`,
+            value: { id: `late`, title: `must not be admitted` },
+          },
+        ])
+      }
+      const laterOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 2 })).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `later subset work settled`,
+      )
+
+      expect({
+        status: laterOutcome.status,
+        exactReason:
+          laterOutcome.status === `rejected` &&
+          laterOutcome.reason === hydrationFailure,
+        laterAdapterCalls,
+        visible: collection.get(`late`),
+        durable: adapter.rows.get(`late`),
+        durabilityCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        status: `rejected`,
+        exactReason: true,
+        laterAdapterCalls: 0,
+        visible: undefined,
+        durable: undefined,
+        durabilityCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects new source transactions after a terminal hydration failure`, async () => {
+    const hydrationFailure = new Error(`terminal source hydration failed`)
+    const adapter = createRecordingAdapter()
+    const coordinator = createFailStopCoordinatorHarness(
+      `terminal-hydration-rejects-new-source-work`,
+    )
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-hydration-rejects-new-source-work`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `terminal source hydration collection initially ready`,
+      )
+      adapter.loadSubset = () => Promise.reject(hydrationFailure)
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `terminal-hydration-rejects-new-source-work`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+        changedRows: [],
+        deletedKeys: [],
+      })
+      await vi.waitFor(() =>
+        expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure),
+      )
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(hydrationFailure)
+
+      remoteBegin!()
+      remoteWrite!({
+        type: `insert`,
+        value: { id: `late`, title: `must not be admitted` },
+      })
+      const lateOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(remoteCommit!()).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `late terminal hydration source receipt`,
+      )
+
+      expect({
+        receiptStatus: lateOutcome.status,
+        exactReceipt:
+          lateOutcome.status === `rejected` &&
+          lateOutcome.reason === hydrationFailure,
+        publicErrorIsHydration:
+          collection._lifecycle.getSyncError() === hydrationFailure,
+        status: collection.status,
+        lateVisible: collection.get(`late`),
+        lateDurable: adapter.rows.get(`late`),
+        applyCalls: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        receiptStatus: `rejected`,
+        exactReceipt: true,
+        publicErrorIsHydration: true,
+        status: `error`,
+        lateVisible: undefined,
+        lateDurable: undefined,
+        applyCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
     }
   })
 
@@ -3989,6 +14553,208 @@ describe(`persistedCollectionOptions`, () => {
     },
   )
 
+  it(`installs terminal state before synchronously reporting a local coordinator durability error`, async () => {
+    const coordinator = createCoordinatorHarness()
+    let requestCalls = 0
+    coordinator.requestApplyLocalMutations = async (
+      _collectionId,
+      mutations,
+    ) => {
+      requestCalls++
+      if (requestCalls === 1) {
+        return {
+          type: `rpc:applyLocalMutations:res`,
+          rpcId: `local-reentrant-failure`,
+          ok: false,
+          code: `PERSISTENCE_ERROR`,
+          error: `disk write failed`,
+          sourceCode: `SQLITE_IOERR_FSYNC`,
+          path: [`database`, `wal`],
+        }
+      }
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: `local-reentrant-success`,
+        ok: true,
+        term: 1,
+        seq: requestCalls,
+        latestRowVersion: requestCalls,
+        acceptedMutationIds: mutations.map((mutation) => mutation.mutationId),
+      }
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-terminal-before-report`,
+        getKey: (item) => item.id,
+        persistence: {
+          adapter: createRecordingAdapter(),
+          coordinator,
+        },
+      }),
+    )
+    const now = new Date()
+    const reentrantRow = {
+      id: `reentrant-local`,
+      title: `must not reach the coordinator`,
+    }
+    const reentrantMutation: PendingMutation<Todo, `insert`> = {
+      mutationId: `reentrant-local-mutation`,
+      original: {},
+      modified: reentrantRow,
+      changes: reentrantRow,
+      globalKey: `local-terminal-before-report:reentrant-local`,
+      key: reentrantRow.id,
+      type: `insert`,
+      metadata: undefined,
+      syncMetadata: {},
+      optimistic: true,
+      createdAt: now,
+      updatedAt: now,
+      collection,
+    }
+    let reentrantOutcome:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; reason: unknown }
+        >
+      | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const originalMarkError = collection._lifecycle.markError.bind(
+        collection._lifecycle,
+      )
+      vi.spyOn(collection._lifecycle, `markError`).mockImplementation(
+        (error) => {
+          reentrantOutcome = Promise.resolve(
+            collection.utils.acceptMutations({
+              mutations: [
+                reentrantMutation as unknown as PendingMutation<
+                  Record<string, unknown>
+                >,
+              ],
+            }),
+          ).then(
+            () => ({ status: `fulfilled` as const }),
+            (reason: unknown) => ({ status: `rejected` as const, reason }),
+          )
+          originalMarkError(error)
+        },
+      )
+
+      const primary = collection.insert({
+        id: `primary-local`,
+        title: `must install terminal state`,
+      })
+      const primaryOutcome = await primary.isPersisted.promise.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const reentrant = await atPersistedOracleCheckpoint(
+        reentrantOutcome!,
+        `reentrant local mutation after durability error`,
+      )
+      const terminalError =
+        primaryOutcome.status === `rejected` ? primaryOutcome.reason : undefined
+
+      expect({
+        primaryStatus: primaryOutcome.status,
+        reentrantStatus: reentrant.status,
+        sameTerminal:
+          reentrant.status === `rejected` && reentrant.reason === terminalError,
+        requestCalls,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+        reentrantVisible: collection.get(reentrantRow.id),
+      }).toEqual({
+        primaryStatus: `rejected`,
+        reentrantStatus: `rejected`,
+        sameTerminal: true,
+        requestCalls: 1,
+        exactPublicError: true,
+        reentrantVisible: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => reentrantOutcome, () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`preserves lifecycle abort classification when cleanup wins a local adapter race`, async () => {
+    const adapter = createRecordingAdapter()
+    const successfulApply = adapter.applyCommittedTx.bind(adapter)
+    const persistenceEntered = createEventGate()
+    const releasePersistence = createEventGate()
+    adapter.applyCommittedTx = async (...args) => {
+      persistenceEntered.resolve()
+      await releasePersistence.promise
+      await successfulApply(...args)
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `local-cleanup-durability-race`,
+        getKey: (item) => item.id,
+        persistence: { adapter },
+      }),
+    )
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const transaction = collection.insert({
+        id: `old-local`,
+        title: `durable only in the replaced lifecycle`,
+      })
+      const settlement = transaction.isPersisted.promise.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      await atPersistedOracleCheckpoint(
+        persistenceEntered.promise,
+        `local adapter entered before cleanup`,
+      )
+
+      await collection.cleanup()
+      cleanedUp = true
+      releasePersistence.resolve()
+      const outcome = await atPersistedOracleCheckpoint(
+        settlement,
+        `old local mutation settled after cleanup`,
+      )
+
+      expect({
+        status: outcome.status,
+        aborted:
+          outcome.status === `rejected` &&
+          outcome.reason instanceof SyncTransactionAbortedError,
+        durability:
+          outcome.status === `rejected` &&
+          outcome.reason instanceof PersistedCollectionDurabilityError,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        status: `rejected`,
+        aborted: true,
+        durability: false,
+        publicError: undefined,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releasePersistence.resolve()
+      await cleanupPersistedOracle(
+        [() => (cleanedUp ? undefined : collection.cleanup())],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`targeted update avoids full loadSubset call`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Original` }])
     const coordinator = createCoordinatorHarness()
@@ -4153,6 +14919,277 @@ describe(`persistedCollectionOptions`, () => {
       id: `1`,
       title: `Updated`,
     })
+  })
+
+  it(`fail-stops queued and later work when reset reload fails after truncation`, async () => {
+    const seed = { id: `seed`, title: `durable baseline` }
+    const adapter = createRecordingAdapter([seed])
+    const coordinator = createFailStopCoordinatorHarness(
+      `terminal-reset-reload-failure`,
+    )
+    const reloadEntered = createEventGate()
+    const reload = createEventGate()
+    const reloadError = new Error(`reset reload failed exactly`)
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `terminal-reset-reload-failure`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let queuedReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `reset reload collection ready`,
+      )
+      expect(stripVirtualProps(collection.get(seed.id))).toEqual(seed)
+      adapter.loadSubset = async () => {
+        reloadEntered.resolve()
+        await reload.promise
+        throw reloadError
+      }
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+      await atPersistedOracleCheckpoint(
+        reloadEntered.promise,
+        `reset reload entered after memory truncate`,
+      )
+      expect(collection.get(seed.id)).toBeUndefined()
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `queued`, title: `must reject with reset failure` },
+      })
+      queuedReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void queuedReceipt.catch(() => undefined)
+      const queuedSettlement = observeSettlement(queuedReceipt)
+      expect(queuedSettlement.read()).toEqual({ status: `pending` })
+
+      reload.reject(reloadError)
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `late`, title: `must not continue after reset failure` },
+      })
+      const lateOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(sourceParams.commit()).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `post-reset-reload-failure receipt`,
+      )
+      const queuedOutcome = queuedSettlement.read()
+
+      expect({
+        queuedStatus: queuedOutcome.status,
+        queuedExact:
+          queuedOutcome.status === `rejected` &&
+          queuedOutcome.reason === reloadError,
+        lateStatus: lateOutcome.status,
+        lateExact:
+          lateOutcome.status === `rejected` &&
+          lateOutcome.reason === reloadError,
+        status: collection.status,
+        exactPublicError: collection._lifecycle.getSyncError() === reloadError,
+        visibleSeed: collection.get(seed.id),
+        durableSeed: adapter.rows.get(seed.id),
+        visibleQueued: collection.get(`queued`),
+        durableQueued: adapter.rows.get(`queued`),
+        visibleLate: collection.get(`late`),
+        durableLate: adapter.rows.get(`late`),
+        applyCalls: adapter.applyCommittedTxCalls.length,
+        publishCalls: coordinator.publishCalls.length,
+      }).toEqual({
+        queuedStatus: `rejected`,
+        queuedExact: true,
+        lateStatus: `rejected`,
+        lateExact: true,
+        status: `error`,
+        exactPublicError: true,
+        visibleSeed: undefined,
+        durableSeed: seed,
+        visibleQueued: undefined,
+        durableQueued: undefined,
+        visibleLate: undefined,
+        durableLate: undefined,
+        applyCalls: 0,
+        publishCalls: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      reload.reject(reloadError)
+      warning.mockRestore()
+      await cleanupPersistedOracle(
+        [
+          () => collection.cleanup(),
+          () => queuedReceipt?.catch(() => undefined),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`fences coordinator delivery after terminal failure while allowing release and cleanup`, async () => {
+    const harness = await createTerminalFailureHarness(
+      `durability`,
+      `terminal-coordinator-delivery-fence`,
+    )
+    const {
+      adapter,
+      collection,
+      coordinator,
+      initialLease,
+      terminalError,
+      upstreamLoads,
+      upstreamUnloads,
+    } = harness
+    const adapterLoadsBefore = adapter.loadSubsetCalls.length
+    const ensureCallsBefore = coordinator.remoteEnsureCalls.length
+    const releaseCallsBefore = coordinator.remoteReleaseCalls.length
+    const upstreamLoadsBefore = upstreamLoads.length
+    const applyCallsBefore = adapter.applyCommittedTxCalls.length
+    const publishCallsBefore = coordinator.publishCalls.length
+    adapter.loadSubset = (collectionId, options, context) => {
+      adapter.loadSubsetCalls.push({
+        collectionId,
+        options,
+        requiredIndexSignatures: context?.requiredIndexSignatures ?? [],
+      })
+      return Promise.resolve([
+        {
+          key: `coordinator-late`,
+          value: { id: `coordinator-late`, title: `must not arrive` },
+        },
+      ])
+    }
+    let cleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `post-terminal-targeted`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [
+          {
+            key: `targeted-late`,
+            value: { id: `targeted-late`, title: `must not arrive` },
+          },
+        ],
+        deletedKeys: [],
+      })
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `post-terminal-full-reload`,
+        latestRowVersion: 2,
+        requiresFullReload: true,
+      })
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 2,
+      })
+      const remoteEnsureOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 9 })).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `post-terminal remote ensure delivery`,
+      )
+      await flushAsyncWork()
+      await flushAsyncWork()
+      await flushAsyncWork()
+
+      const beforeCleanup = {
+        targetedVisible: collection.get(`targeted-late`),
+        reloadVisible: collection.get(`coordinator-late`),
+        status: collection.status,
+        exactPublicError:
+          collection._lifecycle.getSyncError() === terminalError,
+      }
+
+      collection._sync.unloadSubset(initialLease)
+      await flushAsyncWork()
+      await flushAsyncWork()
+      const unloadCount = upstreamUnloads.length
+      await collection.cleanup()
+      cleanedUp = true
+
+      expect({
+        remoteEnsureStatus: remoteEnsureOutcome.status,
+        remoteEnsureExact:
+          remoteEnsureOutcome.status === `rejected` &&
+          remoteEnsureOutcome.reason === terminalError,
+        adapterLoads: adapter.loadSubsetCalls.length,
+        ensureCalls: coordinator.remoteEnsureCalls.length,
+        releaseCalls: coordinator.remoteReleaseCalls.length,
+        releasedExact: coordinator.remoteReleaseCalls.at(-1) === initialLease,
+        upstreamLoads: upstreamLoads.length,
+        unloadCount,
+        unsubscribeCalls: coordinator.unsubscribeCalls,
+        applyCalls: adapter.applyCommittedTxCalls.length,
+        publishCalls: coordinator.publishCalls.length,
+        targetedVisible: beforeCleanup.targetedVisible,
+        reloadVisible: beforeCleanup.reloadVisible,
+        targetedDurable: adapter.rows.get(`targeted-late`),
+        reloadDurable: adapter.rows.get(`coordinator-late`),
+        status: beforeCleanup.status,
+        exactPublicError: beforeCleanup.exactPublicError,
+      }).toEqual({
+        remoteEnsureStatus: `rejected`,
+        remoteEnsureExact: true,
+        adapterLoads: adapterLoadsBefore,
+        ensureCalls: ensureCallsBefore,
+        releaseCalls: releaseCallsBefore + 1,
+        releasedExact: true,
+        upstreamLoads: upstreamLoadsBefore,
+        unloadCount: 0,
+        unsubscribeCalls: 1,
+        applyCalls: applyCallsBefore,
+        publishCalls: publishCallsBefore,
+        targetedVisible: undefined,
+        reloadVisible: undefined,
+        targetedDurable: undefined,
+        reloadDurable: undefined,
+        status: `error`,
+        exactPublicError: true,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => (cleanedUp ? undefined : collection.cleanup())],
+        hasPrimaryFailure,
+      )
+    }
   })
 
   it(`keeps a hydrated resume baseline across narrow full reloads`, async () => {
@@ -4504,9 +15541,87 @@ describe(`persistedCollectionOptions`, () => {
     ).not.toThrow()
     expect(collection.has(`late`)).toBe(false)
   })
+
+  it(`keeps retired sync controls inert after cleanup and restart`, async () => {
+    const adapter = createRecordingAdapter()
+    const runs: Array<TodoSyncParams> = []
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `retired-controls-after-restart`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: (params) => {
+            runs.push(params)
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      await collection.preload()
+      expect(runs).toHaveLength(1)
+      const retired = runs[0]!
+
+      await collection.cleanup()
+      const replacementReady = createEventGate()
+      const unsubscribe = collection.on(`status:ready`, () =>
+        replacementReady.resolve(),
+      )
+      collection.startSyncImmediate()
+      await atPersistedOracleCheckpoint(
+        replacementReady.promise,
+        `replacement controls ready`,
+      )
+      unsubscribe()
+      expect(runs).toHaveLength(2)
+
+      retired.begin()
+      retired.write({
+        type: `insert`,
+        value: { id: `retired`, title: `must stay retired` },
+      })
+      const retiredReceipt = retired.commit()
+      if (retiredReceipt !== true) await retiredReceipt
+
+      const replacement = runs[1]!
+      replacement.begin()
+      replacement.write({
+        type: `insert`,
+        value: { id: `replacement`, title: `new controls own this row` },
+      })
+      const replacementReceipt = replacement.commit()
+      if (replacementReceipt !== true) await replacementReceipt
+
+      expect({
+        retiredPublic: collection.get(`retired`),
+        retiredDurable: adapter.rows.get(`retired`),
+        replacementPublic: stripVirtualProps(collection.get(`replacement`)),
+        replacementDurable: adapter.rows.get(`replacement`),
+        status: collection.status,
+        publicError: collection._lifecycle.getSyncError(),
+      }).toEqual({
+        retiredPublic: undefined,
+        retiredDurable: undefined,
+        replacementPublic: {
+          id: `replacement`,
+          title: `new controls own this row`,
+        },
+        replacementDurable: {
+          id: `replacement`,
+          title: `new controls own this row`,
+        },
+        status: `ready`,
+        publicError: undefined,
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  })
 })
 
-describe(`persisted key and identifier helpers`, () => {
+describeUnlessOracleReplay(`persisted key and identifier helpers`, () => {
   it(`encodes and decodes persisted storage keys without collisions`, () => {
     expect(encodePersistedStorageKey(1)).toBe(`n:1`)
     expect(encodePersistedStorageKey(`1`)).toBe(`s:1`)

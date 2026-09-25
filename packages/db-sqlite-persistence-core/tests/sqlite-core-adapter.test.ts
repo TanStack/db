@@ -6,14 +6,19 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
-import { IR } from '@tanstack/db'
-import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import { IR, createCollection } from '@tanstack/db'
+import {
+  SQLiteCorePersistenceAdapter,
+  createPersistedTableName,
+  persistedCollectionOptions,
+} from '../src'
 import { harnessScope } from './contracts/harness-scope'
 import type {
   PersistenceAdapter,
   SQLiteDriver,
   SQLitePullSinceResult,
 } from '../src'
+import type { SyncConfig } from '@tanstack/db'
 
 type Todo = {
   id: string
@@ -756,6 +761,272 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(tombstoneRows).toHaveLength(1)
       expect(tombstoneRows[0]?.row_version).toBe(3)
     })
+
+    it(`reconstructs a seeded baseline before releasing a partial source update after subset failure`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `partial-source-after-subset-failure`
+      const baseline: Todo = {
+        id: `1`,
+        title: `Persisted baseline`,
+        createdAt: `2026-01-01T00:00:00.000Z`,
+        score: 10,
+      }
+      const expected: Todo = { ...baseline, title: `Source update` }
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-partial-source-baseline`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: baseline.id, value: baseline }],
+      })
+
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      let enterLoad!: () => void
+      let rejectLoad!: () => void
+      const loadEntered = new Promise<void>((resolve) => {
+        enterLoad = resolve
+      })
+      const loadRejected = new Promise<void>((resolve) => {
+        rejectLoad = resolve
+      })
+      const subsetFailure = new Error(`controlled incremental subset failure`)
+      let loadCalls = 0
+      adapter.loadSubset = async (...args) => {
+        loadCalls++
+        if (loadCalls === 1) {
+          enterLoad()
+          await loadRejected
+          throw subsetFailure
+        }
+        return loadSubset(...args)
+      }
+
+      let source!: Parameters<SyncConfig<Todo, string>[`sync`]>[0]
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            rowUpdateMode: `partial`,
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const project = (row: Todo | undefined) =>
+        row && {
+          id: row.id,
+          title: row.title,
+          createdAt: row.createdAt,
+          score: row.score,
+        }
+
+      let load: Promise<void> | undefined
+      let receipt: Promise<void> | undefined
+      try {
+        await collection.stateWhenReady()
+        load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+          () => undefined,
+        )
+        void load.catch(() => undefined)
+        await loadEntered
+
+        source.begin()
+        source.write({
+          type: `update`,
+          value: { id: baseline.id, title: expected.title } as Todo,
+        })
+        receipt = Promise.resolve(source.commit()).then(() => undefined)
+        let receiptStatus: `pending` | `fulfilled` | `rejected` = `pending`
+        void receipt.then(
+          () => {
+            receiptStatus = `fulfilled`
+          },
+          () => {
+            receiptStatus = `rejected`
+          },
+        )
+        expect(receiptStatus).toBe(`pending`)
+
+        rejectLoad()
+        await expect(load).rejects.toBe(subsetFailure)
+        await receipt
+        const durableBeforeRetry = await loadSubset(collectionId, {})
+        expect({
+          receiptStatus,
+          status: collection.status,
+          publicError: collection._lifecycle.getSyncError(),
+          publicBeforeRetry: project(collection.get(baseline.id)),
+          durableBeforeRetry: durableBeforeRetry.map(({ value }) => value),
+        }).toEqual({
+          receiptStatus: `fulfilled`,
+          status: `ready`,
+          publicError: undefined,
+          publicBeforeRetry: expected,
+          durableBeforeRetry: [expected],
+        })
+
+        await collection._sync.loadSubset({ limit: 1 })
+        expect({
+          publicAfterRetry: project(collection.get(baseline.id)),
+          status: collection.status,
+          publicError: collection._lifecycle.getSyncError(),
+        }).toEqual({
+          publicAfterRetry: expected,
+          status: `ready`,
+          publicError: undefined,
+        })
+      } finally {
+        rejectLoad()
+        await load?.catch(() => undefined)
+        await receipt?.catch(() => undefined)
+        await collection.cleanup()
+      }
+    })
+
+    it.each([`delete`, `insert`] as const)(
+      `settles a buffered complete %s across subset failure and retry`,
+      async (operation) => {
+        const { adapter } = registerContractHarness()
+        const collectionId = `complete-${operation}-after-subset-failure`
+        const row: Todo = {
+          id: `1`,
+          title: `${operation} row`,
+          createdAt: `2026-01-02T00:00:00.000Z`,
+          score: 11,
+        }
+        if (operation === `delete`) {
+          await adapter.applyCommittedTx(collectionId, {
+            txId: `seed-delete-baseline`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [{ type: `insert`, key: row.id, value: row }],
+          })
+        }
+
+        const loadSubset = adapter.loadSubset.bind(adapter)
+        let enterLoad!: () => void
+        let rejectLoad!: () => void
+        const loadEntered = new Promise<void>((resolve) => {
+          enterLoad = resolve
+        })
+        const loadRejected = new Promise<void>((resolve) => {
+          rejectLoad = resolve
+        })
+        const subsetFailure = new Error(
+          `controlled ${operation} subset failure`,
+        )
+        let loadCalls = 0
+        adapter.loadSubset = async (...args) => {
+          loadCalls++
+          if (loadCalls === 1) {
+            enterLoad()
+            await loadRejected
+            throw subsetFailure
+          }
+          return loadSubset(...args)
+        }
+
+        let source!: Parameters<SyncConfig<Todo, string>[`sync`]>[0]
+        const collection = createCollection(
+          persistedCollectionOptions<Todo, string>({
+            id: collectionId,
+            getKey: (value) => value.id,
+            syncMode: `on-demand`,
+            sync: {
+              rowUpdateMode: `partial`,
+              sync: (params) => {
+                source = params
+                params.markReady()
+                return { loadSubset: () => true }
+              },
+            },
+            persistence: { adapter },
+          }),
+        )
+
+        let load: Promise<void> | undefined
+        let receipt: Promise<void> | undefined
+        try {
+          await collection.stateWhenReady()
+          load = Promise.resolve(
+            collection._sync.loadSubset({ limit: 1 }),
+          ).then(() => undefined)
+          void load.catch(() => undefined)
+          await loadEntered
+
+          source.begin()
+          source.write(
+            operation === `delete`
+              ? { type: `delete`, key: row.id }
+              : { type: `insert`, value: row },
+          )
+          receipt = Promise.resolve(source.commit()).then(() => undefined)
+          let receiptStatus: `pending` | `fulfilled` | `rejected` = `pending`
+          void receipt.then(
+            () => {
+              receiptStatus = `fulfilled`
+            },
+            () => {
+              receiptStatus = `rejected`
+            },
+          )
+          expect(receiptStatus).toBe(`pending`)
+
+          rejectLoad()
+          await expect(load).rejects.toBe(subsetFailure)
+          await receipt
+          const expectedRows = operation === `delete` ? [] : [row]
+          expect({
+            receiptStatus,
+            publicRows: [...collection.values()].map((value) => ({
+              id: value.id,
+              title: value.title,
+              createdAt: value.createdAt,
+              score: value.score,
+            })),
+            durableRows: (await loadSubset(collectionId, {})).map(
+              ({ value }) => value,
+            ),
+            status: collection.status,
+            publicError: collection._lifecycle.getSyncError(),
+          }).toEqual({
+            receiptStatus: `fulfilled`,
+            publicRows: expectedRows,
+            durableRows: expectedRows,
+            status: `ready`,
+            publicError: undefined,
+          })
+
+          await collection._sync.loadSubset({ limit: 1 })
+          expect({
+            publicRows: [...collection.values()].map((value) => ({
+              id: value.id,
+              title: value.title,
+              createdAt: value.createdAt,
+              score: value.score,
+            })),
+            status: collection.status,
+            publicError: collection._lifecycle.getSyncError(),
+          }).toEqual({
+            publicRows: expectedRows,
+            status: `ready`,
+            publicError: undefined,
+          })
+        } finally {
+          rejectLoad()
+          await load?.catch(() => undefined)
+          await receipt?.catch(() => undefined)
+          await collection.cleanup()
+        }
+      },
+    )
 
     it(`rolls back partially applied mutations when transaction fails`, async () => {
       const { adapter, driver } = registerContractHarness()

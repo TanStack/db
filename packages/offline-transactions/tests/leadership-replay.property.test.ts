@@ -17,13 +17,18 @@ import type { OfflineTransaction, OnlineDetector } from '../src/types'
  * Contract and source: OfflineExecutor leadership, TransactionExecutor serial
  * scheduling, and OutboxManager durability define this boundary. Only the
  * current leader may admit stored work. Issued work may settle after leadership
- * loss, but loss or disposal forbids new provider work. A durable row remains
- * owned until its acknowledgement or permanent rejection is durably removed.
+ * loss, but loss or disposal fences startup, stale reads, retry hooks, and new
+ * provider work. A durable row remains owned until its acknowledgement or
+ * permanent rejection is durably removed, and an ID already pending, running,
+ * completed, permanently rejected, or durably removed must not execute twice.
  *
  * Model: this file is a partial relational oracle, not a second executor. Each
  * history relates three independent projections: durable outbox IDs, scheduler
  * lifecycle, and caller settlement with optimistic rows. Expected relations
  * come from those contracts rather than production queues or classifiers.
+ * `foldReplayLedger` models stored and durably removed IDs without copying
+ * production revision counters, so stale captured reads cannot restore removed
+ * work in the model.
  *
  * History grammar: leadership may be acquired, lost, regained, or disposed at
  * construction, outbox read, retry hook, provider, acknowledgement, or retry
@@ -46,7 +51,6 @@ import type { OfflineTransaction, OnlineDetector } from '../src/types'
  * storage engine. Exactly-once network execution across independent leaders is
  * not promised. Provider side effects after an issued call remain provider-owned.
  */
-
 function gate() {
   let resolve!: () => void
   const promise = new Promise<void>((done) => {
@@ -68,6 +72,36 @@ const storedTransaction = (id: string): OfflineTransaction => ({
   nextAttemptAt: 0,
   version: 1,
 })
+
+type ReplayLedgerEvent =
+  | { type: `stored`; id: string }
+  | { type: `read-captured`; ids: Array<string> }
+  | { type: `durably-removed`; id: string }
+  | { type: `read-delivered` }
+
+// The model records durable facts instead of copying OutboxManager's version
+// fences. A stale captured value cannot undo a later durable removal. These
+// fixtures use FakeStorageAdapter and therefore establish executor/outbox
+// behavior, not IndexedDB, LocalStorage, or native transaction completion.
+function foldReplayLedger(events: ReadonlyArray<ReplayLedgerEvent>): {
+  unfinished: Array<string>
+  staleCapture: Array<string>
+} {
+  const stored = new Set<string>()
+  const removed = new Set<string>()
+  let staleCapture: Array<string> = []
+
+  for (const event of events) {
+    if (event.type === `stored`) stored.add(event.id)
+    else if (event.type === `durably-removed`) removed.add(event.id)
+    else if (event.type === `read-captured`) staleCapture = [...event.ids]
+  }
+
+  return {
+    unfinished: Array.from(stored).filter((id) => !removed.has(id)),
+    staleCapture,
+  }
+}
 
 // These campaigns share the package replay variables. Target this file and one
 // test name when replaying a shrink path, because paths are property-specific.
@@ -1376,6 +1410,105 @@ it(`does not readmit a permanently rejected row from a stale outbox read`, async
     executor.clear()
     warning.mockRestore()
   }
+})
+
+it.each([20260923, undefined])(
+  `filters every durably removed transaction from a generated stale replay read (seed %s)`,
+  async (seed) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          count: fc.integer({ min: 2, max: 6 }),
+          removedPrefix: fc.integer({ min: 1, max: 5 }),
+        }),
+        async ({ count, removedPrefix }) => {
+          const captured = gate()
+          const delivery = gate()
+          let hold = true
+          let capturedSnapshot: Array<string> = []
+          class Storage extends FakeStorageAdapter {
+            override async keys() {
+              const keys = await super.keys()
+              capturedSnapshot = [...keys]
+              return keys
+            }
+            override async get(key: string) {
+              const value = await super.get(key)
+              if (hold && key === `tx:stored-0`) {
+                captured.resolve()
+                await delivery.promise
+              }
+              return value
+            }
+          }
+          const storage = new Storage()
+          const outbox = new OutboxManager(storage, {})
+          const transactions = Array.from({ length: count }, (_, index) =>
+            storedTransaction(`stored-${index}`),
+          )
+          const ledger: Array<ReplayLedgerEvent> = []
+          for (const transaction of transactions) {
+            await outbox.add(transaction)
+            ledger.push({ type: `stored`, id: transaction.id })
+          }
+          const reading = outbox.getAll()
+          let hasPrimaryFailure = false
+          try {
+            await atOracleCheckpoint(captured.promise, `stale replay captured`)
+            ledger.push({
+              type: `read-captured`,
+              ids: capturedSnapshot.map((key) => key.slice(`tx:`.length)),
+            })
+            const removed = transactions.slice(
+              0,
+              Math.min(count - 1, removedPrefix),
+            )
+            await outbox.removeMany(removed.map(({ id }) => id))
+            for (const transaction of removed) {
+              ledger.push({ type: `durably-removed`, id: transaction.id })
+            }
+            hold = false
+            delivery.resolve()
+            ledger.push({ type: `read-delivered` })
+
+            const expected = foldReplayLedger(ledger)
+            const delivered = await atOracleCheckpoint(
+              reading,
+              `stale replay delivered`,
+            )
+            expect(delivered.map(({ id }) => id)).toEqual(expected.unfinished)
+            expect(expected.staleCapture).not.toEqual(expected.unfinished)
+          } catch (error) {
+            hasPrimaryFailure = true
+            throw error
+          } finally {
+            hold = false
+            delivery.resolve()
+            await cleanupOfflineOracle([() => reading], hasPrimaryFailure)
+          }
+        },
+      ),
+      {
+        seed,
+        numRuns: 20,
+        examples: [[{ count: 3, removedPrefix: 1 }]],
+      },
+    )
+  },
+)
+
+it(`append-only replay judgment rejects stale admission after durable removal`, () => {
+  const ledger: Array<ReplayLedgerEvent> = [
+    { type: `stored`, id: `removed` },
+    { type: `stored`, id: `peer` },
+    { type: `read-captured`, ids: [`removed`, `peer`] },
+    { type: `durably-removed`, id: `removed` },
+    { type: `read-delivered` },
+  ]
+  const expected = foldReplayLedger(ledger)
+
+  expect(expected.unfinished).toEqual([`peer`])
+  expect(expected.staleCapture).not.toEqual(expected.unfinished)
 })
 
 it.each([`remove`, `removeMany`, `clear`] as const)(

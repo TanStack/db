@@ -1162,9 +1162,12 @@ export function queryCollectionOptions(
         | undefined
     }
 
-    const getPersistedOwners = (rowKey: string | number) => {
-      const rowMetadata = getRowMetadata(rowKey)
-      const queryMetadata = rowMetadata?.queryCollection
+    const getOwnersFromMetadata = (rowMetadata: unknown) => {
+      if (!rowMetadata || typeof rowMetadata !== `object`) {
+        return new Set<string>()
+      }
+      const queryMetadata = (rowMetadata as Record<string, unknown>)
+        .queryCollection
       if (!queryMetadata || typeof queryMetadata !== `object`) {
         return new Set<string>()
       }
@@ -1176,6 +1179,9 @@ export function queryCollectionOptions(
 
       return new Set(Object.keys(owners as Record<string, true>))
     }
+
+    const getPersistedOwners = (rowKey: string | number) =>
+      getOwnersFromMetadata(getRowMetadata(rowKey))
 
     const setPersistedOwners = (
       rowKey: string | number,
@@ -1838,6 +1844,27 @@ export function queryCollectionOptions(
       const restoreOwnershipTracking = () => {
         // Core flips this at its no-cancel point before publication can reenter.
         if (resultTransaction?.applicationStarted) return
+        // A wrapped sync may reserve and apply its core transaction entirely
+        // inside commit(), so there is no pending transaction to capture above.
+        // In that case the collection's committed metadata is the publication
+        // boundary; pending wrapper metadata is intentionally not consulted.
+        if (
+          resultTransaction === undefined &&
+          Array.from(affectedRowKeys).every((key) => {
+            const trackedOwners = rowToQueries.get(key) ?? new Set<string>()
+            const publishedOwners = getOwnersFromMetadata(
+              collection._state.syncedMetadata.get(key),
+            )
+            return (
+              trackedOwners.size === publishedOwners.size &&
+              Array.from(trackedOwners).every((owner) =>
+                publishedOwners.has(owner),
+              )
+            )
+          })
+        ) {
+          return
+        }
         if (!state.observers.has(hashedQueryKey)) return
         if (
           resultApplicationControllers.get(hashedQueryKey) !== applicationToken

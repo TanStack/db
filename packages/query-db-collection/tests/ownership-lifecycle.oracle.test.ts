@@ -4472,9 +4472,9 @@ describe(`query collection ownership lifecycle`, () => {
           return originalSync.sync({
             ...params,
             metadata: recordMetadata(params.metadata!, metadata),
-            begin: () => {
+            begin: (options) => {
               writes = []
-              params.begin()
+              return params.begin(options)
             },
             write: (change) => {
               writes.push(change.type)

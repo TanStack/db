@@ -27,10 +27,10 @@ import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
  * Hydrated rows and resume metadata provide the last complete public snapshot.
  * A must-refetch starts a private replacement. Until that replacement is fully
  * applied, readers may see an earlier permitted snapshot but never a torn mix.
- * Failure keeps the old public rows and records repair debt; later success may
- * replace them atomically.
+ * Failure keeps the prior public rows and records repair debt; later success
+ * may replace them atomically.
  *
- * A plain persisted row Map and metadata Map form the reference snapshots. The
+ * Plain persisted row and metadata Maps form the reference snapshots. The
  * driver controls hydration, SDK callbacks, applied receipts, cleanup, restart,
  * and eager or progressive mode through the real persistence coordinator and
  * Electric adapter. It records every exposed cut, not only the final rows.
@@ -847,9 +847,9 @@ describe(`persisted Electric recovery laws`, () => {
       f.record(`before`)
       subscribers[0]!([change(`update`, { id: 1, name: `wrong` }), upToDate])
       subscribers[0]!([change(`update`, { id: 1, name: `correct` }), upToDate])
-      f.record(`repaired`)
       const correct = [{ ...oldRow, name: `correct` }]
-      expect(f.publicRows()).toEqual(correct)
+      await vi.waitFor(() => expect(f.publicRows()).toEqual(correct))
+      f.record(`repaired`)
       const entries = f.exposures.slice(cut)
       expect(entries[0]!.rows).toEqual([oldRow])
       expect(

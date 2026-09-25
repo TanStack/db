@@ -654,6 +654,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit,
   getCommitCursor,
   waitForCommitsAfter,
+  recordSnapshotRow,
   collectionId,
   encodeColumnName,
   signal,
@@ -670,6 +671,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit: (signal?: AbortSignal) => SyncAppliedReceipt
   getCommitCursor: () => number
   waitForCommitsAfter: (cursor: number) => Promise<void>
+  recordSnapshotRow?: (row: T, message: Message<T>) => void
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
@@ -731,7 +733,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               metadata: { ...row.headers },
             })
           }
-          await commit(opts.signal)
+          const applied = commit(opts.signal)
+          for (const row of rows) recordSnapshotRow?.(row.value, row)
+          if (applied !== true) await applied
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
@@ -1926,6 +1930,54 @@ function createElectricSync<T extends Row<unknown>>(
         !hasReceivedUpToDate &&
         !isResettingSnapshot
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
+      // Progressive subset rows are provisional: the initial atomic swap
+      // normally discards them. Retain one only when a later stream update
+      // needs that full row as its baseline.
+      const progressiveSnapshotRows = new Map<string | number, Message<T>>()
+
+      // Presence spans the open source transaction and persisted callbacks
+      // whose FIFO receipts have not applied yet. Later callbacks must see
+      // those staged writes even though persistence has not replayed them into
+      // core. Once the newest receipt applies, syncedData is authoritative.
+      const pendingPresence = new Map<string | number, boolean>()
+      let usesBaseline = true
+      let pendingPresenceRevision = 0
+
+      const recordPendingPresence = (
+        rowId: string | number,
+        present: boolean,
+      ) => {
+        pendingPresenceRevision++
+        pendingPresence.set(rowId, present)
+      }
+
+      const recordPendingTruncate = () => {
+        pendingPresenceRevision++
+        pendingPresence.clear()
+        progressiveSnapshotRows.clear()
+        usesBaseline = false
+      }
+
+      const commitSourceTransaction = (): SyncAppliedReceipt => {
+        const committedPresenceRevision = pendingPresenceRevision
+        const applied = commit()
+        if (metadata?.persistence) {
+          const retireAppliedPresence = () => {
+            if (pendingPresenceRevision === committedPresenceRevision) {
+              pendingPresence.clear()
+              usesBaseline = true
+            }
+          }
+          if (applied === true) retireAppliedPresence()
+          else void applied.then(retireAppliedPresence, () => undefined)
+        }
+        return applied
+      }
+
+      const beginSourceTransaction = () => {
+        if (metadata?.persistence) begin({ immediate: true })
+        else begin()
+      }
 
       // Track keys that have been synced to handle overlapping subset queries.
       // When multiple subset queries return the same row, the server sends `insert`
@@ -2053,6 +2105,10 @@ function createElectricSync<T extends Row<unknown>>(
         commit,
         getCommitCursor: () => commitSequence,
         waitForCommitsAfter,
+        recordSnapshotRow: (row, message) => {
+          recordPendingPresence(collection.getKeyFromItem(row), true)
+          progressiveSnapshotRows.set(collection.getKeyFromItem(row), message)
+        },
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
@@ -2121,35 +2177,40 @@ function createElectricSync<T extends Row<unknown>>(
 
         if (freshSnapshotPending) {
           freshSnapshotPending = false
-          begin()
+          beginSourceTransaction()
           transactionStarted = true
           truncate()
+          recordPendingTruncate()
           syncedKeys.clear()
           clearTagTrackingState()
           isResettingSnapshot = true
           resetGeneration++
         }
 
-        // Applied rows can also arrive through persistence invalidations.
-        // Overlay only unapplied writes, once per callback rather than once
-        // per message. A queued truncate fences off the previous snapshot.
-        const pendingPresence = new Map<string | number, boolean>()
-        let usesBaseline = true
-        for (const pending of collection._state.pendingSyncedTransactions) {
-          if (pending.truncate) {
-            pendingPresence.clear()
-            usesBaseline = false
+        // Without persistence, core owns pending source transactions and can
+        // rebuild this callback's presence overlay from them. Persistence owns
+        // queued source transactions until their FIFO turn, so retain the
+        // overlay across callbacks instead. A queued truncate still fences off
+        // the previous snapshot below.
+        if (!metadata?.persistence && !transactionStarted) {
+          pendingPresence.clear()
+          usesBaseline = true
+          for (const pending of collection._state.pendingSyncedTransactions) {
+            if (pending.truncate) {
+              pendingPresence.clear()
+              usesBaseline = false
+            }
+            for (const operation of pending.operations) {
+              pendingPresence.set(operation.key, operation.type !== `delete`)
+            }
           }
-          for (const operation of pending.operations) {
-            pendingPresence.set(operation.key, operation.type !== `delete`)
-          }
-        }
-        for (const message of bufferedMessages) {
-          if (isChangeMessage(message)) {
-            pendingPresence.set(
-              collection.getKeyFromItem(message.value),
-              message.headers.operation !== `delete`,
-            )
+          for (const message of bufferedMessages) {
+            if (isChangeMessage(message)) {
+              pendingPresence.set(
+                collection.getKeyFromItem(message.value),
+                message.headers.operation !== `delete`,
+              )
+            }
           }
         }
 
@@ -2191,7 +2252,10 @@ function createElectricSync<T extends Row<unknown>>(
               }
               if (!receivesCompleteRows) continue
             }
-            pendingPresence.set(rowId, operation !== `delete`)
+            recordPendingPresence(rowId, operation !== `delete`)
+            if (operation !== `update`) {
+              progressiveSnapshotRows.delete(rowId)
+            }
           }
 
           if (isChangeMessage(message)) {
@@ -2206,11 +2270,19 @@ function createElectricSync<T extends Row<unknown>>(
             // EXCEPTION: If a transaction is already started (e.g., from must-refetch), write
             // directly to it instead of buffering. This prevents orphan transactions.
             if (isBufferingInitialSync() && !transactionStarted) {
+              if (message.headers.operation === `update`) {
+                const rowId = collection.getKeyFromItem(message.value)
+                const snapshotRow = progressiveSnapshotRows.get(rowId)
+                if (snapshotRow) {
+                  bufferedMessages.push(snapshotRow)
+                  progressiveSnapshotRows.delete(rowId)
+                }
+              }
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
               if (!transactionStarted) {
-                begin()
+                beginSourceTransaction()
                 transactionStarted = true
               }
 
@@ -2242,11 +2314,11 @@ function createElectricSync<T extends Row<unknown>>(
               // Normal processing: process move-out immediately
               transactionStarted = processMoveOutEvent(
                 message.headers.patterns,
-                begin,
+                beginSourceTransaction,
                 write,
                 transactionStarted,
                 (rowId) => {
-                  pendingPresence.set(rowId, false)
+                  recordPendingPresence(rowId, false)
                   syncedKeys.delete(rowId)
                 },
               )
@@ -2268,7 +2340,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Start a transaction and truncate the collection
             if (!transactionStarted) {
-              begin()
+              beginSourceTransaction()
               transactionStarted = true
             }
 
@@ -2279,8 +2351,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Clear synced keys tracking since we're starting fresh
             syncedKeys.clear()
-            pendingPresence.clear()
-            usesBaseline = false
+            recordPendingTruncate()
             isResettingSnapshot = true
             resetGeneration++
 
@@ -2292,6 +2363,7 @@ function createElectricSync<T extends Row<unknown>>(
             commitPoint = null
             hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
             bufferedMessages.length = 0 // Clear buffered messages
+            progressiveSnapshotRows.clear()
           }
         }
 
@@ -2322,7 +2394,7 @@ function createElectricSync<T extends Row<unknown>>(
             )
 
             // Start atomic swap transaction
-            begin()
+            beginSourceTransaction()
 
             // Truncate to clear all snapshot data
             truncate()
@@ -2357,7 +2429,7 @@ function createElectricSync<T extends Row<unknown>>(
                   // normal-stream transactionStarted flag is still false.
                   true,
                   (rowId) => {
-                    pendingPresence.set(rowId, false)
+                    recordPendingPresence(rowId, false)
                     syncedKeys.delete(rowId)
                   },
                 )
@@ -2369,11 +2441,12 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Commit the atomic swap
             stageResumeMetadata()
-            applied = commit()
+            applied = commitSourceTransaction()
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
             bufferedMessages.length = 0
+            progressiveSnapshotRows.clear()
 
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`,
@@ -2385,12 +2458,12 @@ function createElectricSync<T extends Row<unknown>>(
               if (!isResettingSnapshot || finishesReset) {
                 stageResumeMetadata()
               }
-              applied = commit()
+              applied = commitSourceTransaction()
               transactionStarted = false
             } else if (commitPoint === `up-to-date` && metadata) {
-              begin()
+              beginSourceTransaction()
               stageResumeMetadata()
-              applied = commit()
+              applied = commitSourceTransaction()
             }
           }
           const readyErrorVersion = streamErrorVersion
@@ -2400,7 +2473,15 @@ function createElectricSync<T extends Row<unknown>>(
             void applied.then(
               () =>
                 wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
-              () => undefined,
+              (error: unknown) => {
+                if (!isActiveLifecycle() || abortController.signal.aborted) {
+                  return
+                }
+                streamErrorVersion++
+                unsubscribeStream()
+                abortController.abort()
+                if (collection.status !== `error`) markError(error)
+              },
             )
           }
 
