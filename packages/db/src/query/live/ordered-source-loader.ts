@@ -107,14 +107,14 @@ export class OrderedSourceLoader {
   }
 
   start(): void {
-    const { index, limit, offset, orderBy, requiresFullSource } = this.info
+    const { index, limit, offset, requiresFullSource } = this.info
     if (index) this.subscription.setOrderByIndex(index)
     if (limit === 0) return
     if (requiresFullSource) {
       this.loadFullSource()
       return
     }
-    if (!index || orderBy.length !== 1) {
+    if (!index) {
       this.loadPrefix(offset + limit)
       return
     }
@@ -173,7 +173,7 @@ export class OrderedSourceLoader {
       }
       return this.pending
     }
-    if (!this.info.index || this.info.orderBy.length !== 1) {
+    if (!this.info.index) {
       const shouldLoad =
         windowOperationGeneration !== undefined ||
         (this.info.dataNeeded?.() ?? 0) > 0 ||

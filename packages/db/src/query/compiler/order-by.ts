@@ -38,7 +38,7 @@ export type OrderByOptimizationInfo = {
     a: Record<string, unknown> | null | undefined,
     b: Record<string, unknown> | null | undefined,
   ) => number
-  /** Extracts all orderBy column values from a raw row (array for multi-column) */
+  /** Extracts the leading provider order value from a raw row. */
   valueExtractorForRawRow: (row: Record<string, unknown>) => unknown
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexReader<string | number>
