@@ -1927,15 +1927,44 @@ function createElectricSync<T extends Row<unknown>>(
         !isResettingSnapshot
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
-      // Presence belongs to the source transaction, which can span multiple
-      // ShapeStream callbacks. Rebuild it only when no transaction is open;
-      // otherwise later callbacks must see writes staged by earlier ones.
+      // Presence spans the open source transaction and persisted callbacks
+      // whose FIFO receipts have not applied yet. Later callbacks must see
+      // those staged writes even though persistence has not replayed them into
+      // core. Once the newest receipt applies, syncedData is authoritative.
       const pendingPresence = new Map<string | number, boolean>()
       let usesBaseline = true
+      let pendingPresenceRevision = 0
 
-      // Persistence decouples publication from its ordered durability suffix.
-      // Reserve that suffix at source admission while keeping the historical
-      // non-persisted Collection scheduling contract unchanged.
+      const recordPendingPresence = (
+        rowId: string | number,
+        present: boolean,
+      ) => {
+        pendingPresenceRevision++
+        pendingPresence.set(rowId, present)
+      }
+
+      const recordPendingTruncate = () => {
+        pendingPresenceRevision++
+        pendingPresence.clear()
+        usesBaseline = false
+      }
+
+      const commitSourceTransaction = (): SyncAppliedReceipt => {
+        const committedPresenceRevision = pendingPresenceRevision
+        const applied = commit()
+        if (metadata?.persistence) {
+          const retireAppliedPresence = () => {
+            if (pendingPresenceRevision === committedPresenceRevision) {
+              pendingPresence.clear()
+              usesBaseline = true
+            }
+          }
+          if (applied === true) retireAppliedPresence()
+          else void applied.then(retireAppliedPresence, () => undefined)
+        }
+        return applied
+      }
+
       const beginSourceTransaction = () => {
         if (metadata?.persistence) begin({ immediate: true })
         else begin()
@@ -2138,18 +2167,19 @@ function createElectricSync<T extends Row<unknown>>(
           beginSourceTransaction()
           transactionStarted = true
           truncate()
-          pendingPresence.clear()
-          usesBaseline = false
+          recordPendingTruncate()
           syncedKeys.clear()
           clearTagTrackingState()
           isResettingSnapshot = true
           resetGeneration++
         }
 
-        // Applied rows can also arrive through persistence invalidations.
-        // Overlay only unapplied writes, once per callback rather than once
-        // per message. A queued truncate fences off the previous snapshot.
-        if (!transactionStarted) {
+        // Without persistence, core owns pending source transactions and can
+        // rebuild this callback's presence overlay from them. Persistence owns
+        // queued source transactions until their FIFO turn, so retain the
+        // overlay across callbacks instead. A queued truncate still fences off
+        // the previous snapshot below.
+        if (!metadata?.persistence && !transactionStarted) {
           pendingPresence.clear()
           usesBaseline = true
           for (const pending of collection._state.pendingSyncedTransactions) {
@@ -2209,7 +2239,7 @@ function createElectricSync<T extends Row<unknown>>(
               }
               if (!receivesCompleteRows) continue
             }
-            pendingPresence.set(rowId, operation !== `delete`)
+            recordPendingPresence(rowId, operation !== `delete`)
           }
 
           if (isChangeMessage(message)) {
@@ -2264,7 +2294,7 @@ function createElectricSync<T extends Row<unknown>>(
                 write,
                 transactionStarted,
                 (rowId) => {
-                  pendingPresence.set(rowId, false)
+                  recordPendingPresence(rowId, false)
                   syncedKeys.delete(rowId)
                 },
               )
@@ -2297,8 +2327,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Clear synced keys tracking since we're starting fresh
             syncedKeys.clear()
-            pendingPresence.clear()
-            usesBaseline = false
+            recordPendingTruncate()
             isResettingSnapshot = true
             resetGeneration++
 
@@ -2375,7 +2404,7 @@ function createElectricSync<T extends Row<unknown>>(
                   // normal-stream transactionStarted flag is still false.
                   true,
                   (rowId) => {
-                    pendingPresence.set(rowId, false)
+                    recordPendingPresence(rowId, false)
                     syncedKeys.delete(rowId)
                   },
                 )
@@ -2387,7 +2416,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Commit the atomic swap
             stageResumeMetadata()
-            applied = commit()
+            applied = commitSourceTransaction()
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
@@ -2403,12 +2432,12 @@ function createElectricSync<T extends Row<unknown>>(
               if (!isResettingSnapshot || finishesReset) {
                 stageResumeMetadata()
               }
-              applied = commit()
+              applied = commitSourceTransaction()
               transactionStarted = false
             } else if (commitPoint === `up-to-date` && metadata) {
               beginSourceTransaction()
               stageResumeMetadata()
-              applied = commit()
+              applied = commitSourceTransaction()
             }
           }
           const readyErrorVersion = streamErrorVersion

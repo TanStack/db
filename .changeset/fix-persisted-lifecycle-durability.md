@@ -4,4 +4,4 @@
 '@tanstack/electric-db-collection': patch
 ---
 
-Fail-stop persisted collections when hydration or durability fails, while preserving lifecycle ownership across buffered and recovered sync work. Electric collections now surface these failures through the collection error state instead of continuing from an incomplete durable baseline.
+Fail-stop persisted collections when hydration or durability fails, and replay authoritative source transactions through one persistence-owned FIFO. Electric collections keep optimistic state immediate while surfacing durable failures through the collection error state instead of continuing from an incomplete baseline.

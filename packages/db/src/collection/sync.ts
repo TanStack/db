@@ -22,10 +22,8 @@ import type {
   LoadSubsetOptions,
   LoadSubsetRequestResult,
   OptimisticChangeMessage,
-  SyncAppliedReceipt,
   SyncConfigRes,
   SyncMetadataApi,
-  SyncTransactionHandle,
 } from '../types'
 import type { CollectionImpl } from './index.js'
 import type { CollectionStateManager } from './state'
@@ -47,13 +45,6 @@ type LoadSubsetOperation = {
   error?: unknown
   deferred?: Deferred<void>
 }
-
-// Internal cross-package hook used by the persistence wrapper to fold a
-// durable baseline into an already-reserved source transaction. A global
-// symbol keeps this capability off the public SyncTransactionHandle surface.
-const PREPEND_PERSISTED_HYDRATION_ROWS = Symbol.for(
-  `@tanstack/db/prepend-persisted-hydration-rows`,
-)
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -145,12 +136,156 @@ export class CollectionSyncManager<
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
           collection: this.collection,
-          begin: (options?: { immediate?: boolean }) =>
-            this.beginSyncTransaction(options, isCurrentSync),
-          write: (message) =>
-            this.writeSyncTransaction(message, undefined, isCurrentSync),
-          commit: (signal?: AbortSignal) =>
-            this.commitSyncTransaction(undefined, signal, isCurrentSync),
+          begin: (options?: { immediate?: boolean }) => {
+            if (!isCurrentSync()) return
+            const applied = createDeferred<void>()
+            // A source may ignore a stream receipt. Keep cancellation from
+            // becoming an unhandled rejection while preserving the original
+            // promise's rejection for callers that do await it.
+            void applied.promise.catch(() => undefined)
+            this.state.pendingSyncedTransactions.push({
+              committed: false,
+              applicationStarted: false,
+              layoutChanged: false,
+              operations: [],
+              deletedKeys: new Set(),
+              rowMetadataWrites: new Map(),
+              collectionMetadataWrites: new Map(),
+              immediate: options?.immediate,
+              applied,
+            })
+          },
+          write: (
+            messageWithOptionalKey: ChangeMessageOrDeleteKeyMessage<
+              TOutput,
+              TKey
+            >,
+          ) => {
+            if (!isCurrentSync()) return
+            const pendingTransaction =
+              this.state.pendingSyncedTransactions[
+                this.state.pendingSyncedTransactions.length - 1
+              ]
+            if (!pendingTransaction) {
+              throw new NoPendingSyncTransactionWriteError()
+            }
+            if (pendingTransaction.committed) {
+              throw new SyncTransactionAlreadyCommittedWriteError()
+            }
+
+            let key: TKey | undefined = undefined
+            if (`key` in messageWithOptionalKey) {
+              key = messageWithOptionalKey.key
+            } else {
+              key = this.config.getKey(messageWithOptionalKey.value)
+            }
+
+            let messageType = messageWithOptionalKey.type
+
+            // Check if an item with this key already exists when inserting
+            if (messageWithOptionalKey.type === `insert`) {
+              const insertingIntoExistingSynced = this.state.syncedData.has(key)
+              const hasPendingDeleteForKey =
+                pendingTransaction.deletedKeys.has(key)
+              const isTruncateTransaction = pendingTransaction.truncate === true
+              // Allow insert after truncate in the same transaction even if it existed in syncedData
+              if (
+                insertingIntoExistingSynced &&
+                !hasPendingDeleteForKey &&
+                !isTruncateTransaction
+              ) {
+                const existingValue = this.state.syncedData.get(key)
+                const valuesEqual =
+                  existingValue !== undefined &&
+                  deepEquals(existingValue, messageWithOptionalKey.value)
+                if (valuesEqual || this.state.hydrationSeedKeys.has(key)) {
+                  // The "insert" is an echo of a value we already have locally.
+                  // Hydration and initialData are also provisional base state, so
+                  // accept the adapter's first authoritative value as an update
+                  // using the configured rowUpdateMode semantics.
+                  messageType = `update`
+                } else {
+                  const utils = this.config.utils as
+                    | Partial<LiveQueryCollectionUtils>
+                    | undefined
+                  const internal = utils?.[LIVE_QUERY_INTERNAL]
+                  throw new DuplicateKeySyncError(key, this.id, {
+                    hasCustomGetKey: internal?.hasCustomGetKey ?? false,
+                    hasJoins: internal?.hasJoins ?? false,
+                    hasDistinct: internal?.hasDistinct ?? false,
+                  })
+                }
+              }
+            }
+
+            const message = {
+              ...messageWithOptionalKey,
+              type: messageType,
+              key,
+            } as OptimisticChangeMessage<TOutput, TKey>
+            pendingTransaction.operations.push(message)
+
+            if (messageType === `delete`) {
+              pendingTransaction.deletedKeys.add(key)
+              pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
+            } else if (messageType === `insert`) {
+              if (message.metadata !== undefined) {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `set`,
+                  value: message.metadata,
+                })
+              } else {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `delete`,
+                })
+              }
+            } else if (message.metadata !== undefined) {
+              pendingTransaction.rowMetadataWrites.set(key, {
+                type: `set`,
+                value: message.metadata,
+              })
+            }
+          },
+          commit: (signal?: AbortSignal) => {
+            if (!isCurrentSync()) return true
+            const pendingTransaction =
+              this.state.pendingSyncedTransactions[
+                this.state.pendingSyncedTransactions.length - 1
+              ]
+            if (!pendingTransaction) {
+              throw new NoPendingSyncTransactionCommitError()
+            }
+            if (pendingTransaction.committed) {
+              throw new SyncTransactionAlreadyCommittedError()
+            }
+
+            if (signal?.aborted) {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+              return pendingTransaction.applied.promise
+            }
+
+            pendingTransaction.committed = true
+
+            const cancel = () => {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+            }
+            signal?.addEventListener(`abort`, cancel, { once: true })
+
+            this.state.commitPendingTransactions()
+            if (!pendingTransaction.applied.isPending()) {
+              signal?.removeEventListener(`abort`, cancel)
+              return true
+            }
+
+            const receipt = pendingTransaction.applied.promise
+            if (signal) {
+              const removeAbortListener = () => {
+                signal.removeEventListener(`abort`, cancel)
+              }
+              void receipt.then(removeAbortListener, removeAbortListener)
+            }
+            return receipt
+          },
           markReady: () => {
             if (!isCurrentSync()) return
             if (syncEntryActive) {
@@ -162,8 +297,38 @@ export class CollectionSyncManager<
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
           },
-          truncate: () =>
-            this.truncateSyncTransaction(undefined, isCurrentSync),
+          truncate: () => {
+            if (!isCurrentSync()) return
+            const pendingTransaction =
+              this.state.pendingSyncedTransactions[
+                this.state.pendingSyncedTransactions.length - 1
+              ]
+            if (!pendingTransaction) {
+              throw new NoPendingSyncTransactionWriteError()
+            }
+            if (pendingTransaction.committed) {
+              throw new SyncTransactionAlreadyCommittedWriteError()
+            }
+
+            // Clear all operations from the current transaction
+            pendingTransaction.operations = []
+            pendingTransaction.deletedKeys.clear()
+            pendingTransaction.rowMetadataWrites.clear()
+            // Intentionally preserve collectionMetadataWrites across truncate.
+            // Collection-scoped metadata (for example persisted resume/reset
+            // state) can be staged before truncate and should commit atomically
+            // with the truncate transaction.
+
+            // Mark the transaction as a truncate operation. During commit, this triggers:
+            // - Delete events for all previously synced keys (excluding optimistic-deleted keys)
+            // - Clearing of syncedData/syncedMetadata
+            // - Subsequent synced ops applied on the fresh base
+            // - Finally, optimistic mutations re-applied on top (single batch)
+            pendingTransaction.truncate = true
+
+            pendingTransaction.optimisticSnapshot =
+              this.state.captureTruncateOptimisticSnapshot()
+          },
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
       )
@@ -265,246 +430,13 @@ export class CollectionSyncManager<
     }
   }
 
-  private beginSyncTransaction(
-    options: { immediate?: boolean } | undefined,
-    isCurrentSync: () => boolean,
-  ): SyncTransactionHandle<TOutput, TKey> | undefined {
-    if (!isCurrentSync()) return undefined
-    const applied = createDeferred<void>()
-    // A source may ignore a stream receipt. Keep cancellation from becoming an
-    // unhandled rejection while preserving the original promise for callers.
-    void applied.promise.catch(() => undefined)
-    const pendingTransaction = {
-      committed: false,
-      applicationStarted: false,
-      layoutChanged: false,
-      operations: [],
-      deletedKeys: new Set<string | number>(),
-      rowMetadataWrites: new Map(),
-      collectionMetadataWrites: new Map(),
-      immediate: options?.immediate,
-      applied,
-    }
-    this.state.pendingSyncedTransactions.push(pendingTransaction)
-
-    const handle: SyncTransactionHandle<TOutput, TKey> & {
-      [PREPEND_PERSISTED_HYDRATION_ROWS]: (
-        rows: Array<{ key: TKey; value: TOutput; metadata?: unknown }>,
-      ) => void
-    } = {
-      write: (message, knownKey) =>
-        this.writeSyncTransaction(
-          message,
-          pendingTransaction,
-          isCurrentSync,
-          knownKey,
-        ),
-      commit: (signal) =>
-        this.commitSyncTransaction(pendingTransaction, signal, isCurrentSync),
-      truncate: () =>
-        this.truncateSyncTransaction(pendingTransaction, isCurrentSync),
-      metadata: this.createSyncMetadataApi(isCurrentSync, pendingTransaction),
-      abort: () => {
-        if (!isCurrentSync()) return
-        this.state.cancelPendingSyncedTransaction(pendingTransaction)
-      },
-      [PREPEND_PERSISTED_HYDRATION_ROWS]: (
-        rows: Array<{ key: TKey; value: TOutput; metadata?: unknown }>,
-      ) => {
-        if (!isCurrentSync()) return
-        const active = this.getActivePendingSyncTransaction(pendingTransaction)
-        const baselineOperations = rows.map(
-          ({ key, value, metadata }) =>
-            ({
-              type: `update`,
-              key,
-              value,
-              metadata,
-            }) as OptimisticChangeMessage<TOutput, TKey>,
-        )
-        active.operations.unshift(...baselineOperations)
-        for (const { key, metadata } of rows) {
-          if (metadata !== undefined && !active.rowMetadataWrites.has(key)) {
-            active.rowMetadataWrites.set(key, {
-              type: `set`,
-              value: metadata,
-            })
-          }
-        }
-      },
-    }
-    return handle
-  }
-
-  private writeSyncTransaction(
-    messageWithOptionalKey: ChangeMessageOrDeleteKeyMessage<TOutput, TKey>,
-    transaction:
-      | CollectionStateManager<
-          TOutput,
-          TKey,
-          TSchema,
-          TInput
-        >[`pendingSyncedTransactions`][number]
-      | undefined,
-    isCurrentSync: () => boolean,
-    knownKey?: TKey,
-  ): void {
-    if (!isCurrentSync()) return
-    const pendingTransaction = this.getActivePendingSyncTransaction(transaction)
-
-    let key: TKey
-    if (knownKey !== undefined) {
-      key = knownKey
-    } else if (`key` in messageWithOptionalKey) {
-      key = messageWithOptionalKey.key
-    } else {
-      key = this.config.getKey(messageWithOptionalKey.value)
-    }
-
-    let messageType = messageWithOptionalKey.type
-    if (messageWithOptionalKey.type === `insert`) {
-      const insertingIntoExistingSynced = this.state.syncedData.has(key)
-      const hasPendingDeleteForKey = pendingTransaction.deletedKeys.has(key)
-      const isTruncateTransaction = pendingTransaction.truncate === true
-      if (
-        insertingIntoExistingSynced &&
-        !hasPendingDeleteForKey &&
-        !isTruncateTransaction
-      ) {
-        const existingValue = this.state.syncedData.get(key)
-        const valuesEqual =
-          existingValue !== undefined &&
-          deepEquals(existingValue, messageWithOptionalKey.value)
-        if (valuesEqual || this.state.hydrationSeedKeys.has(key)) {
-          messageType = `update`
-        } else {
-          const utils = this.config.utils as
-            | Partial<LiveQueryCollectionUtils>
-            | undefined
-          const internal = utils?.[LIVE_QUERY_INTERNAL]
-          throw new DuplicateKeySyncError(key, this.id, {
-            hasCustomGetKey: internal?.hasCustomGetKey ?? false,
-            hasJoins: internal?.hasJoins ?? false,
-            hasDistinct: internal?.hasDistinct ?? false,
-          })
-        }
-      }
-    }
-
-    const message = {
-      ...messageWithOptionalKey,
-      type: messageType,
-      key,
-    } as OptimisticChangeMessage<TOutput, TKey>
-    pendingTransaction.operations.push(message)
-
-    if (messageType === `delete`) {
-      pendingTransaction.deletedKeys.add(key)
-      pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
-    } else if (messageType === `insert`) {
-      pendingTransaction.rowMetadataWrites.set(
-        key,
-        message.metadata === undefined
-          ? { type: `delete` }
-          : { type: `set`, value: message.metadata },
-      )
-    } else if (message.metadata !== undefined) {
-      pendingTransaction.rowMetadataWrites.set(key, {
-        type: `set`,
-        value: message.metadata,
-      })
-    }
-  }
-
-  private commitSyncTransaction(
-    transaction:
-      | CollectionStateManager<
-          TOutput,
-          TKey,
-          TSchema,
-          TInput
-        >[`pendingSyncedTransactions`][number]
-      | undefined,
-    signal: AbortSignal | undefined,
-    isCurrentSync: () => boolean,
-  ): SyncAppliedReceipt {
-    if (!isCurrentSync()) return true
+  private getActivePendingSyncTransaction() {
     const pendingTransaction =
-      transaction ?? this.state.pendingSyncedTransactions.at(-1)
+      this.state.pendingSyncedTransactions[
+        this.state.pendingSyncedTransactions.length - 1
+      ]
+
     if (!pendingTransaction) {
-      throw new NoPendingSyncTransactionCommitError()
-    }
-    if (!this.state.pendingSyncedTransactions.includes(pendingTransaction)) {
-      throw new NoPendingSyncTransactionCommitError()
-    }
-    if (pendingTransaction.committed) {
-      throw new SyncTransactionAlreadyCommittedError()
-    }
-
-    if (signal?.aborted) {
-      this.state.cancelPendingSyncedTransaction(pendingTransaction)
-      return pendingTransaction.applied.promise
-    }
-
-    pendingTransaction.committed = true
-    const cancel = () => {
-      this.state.cancelPendingSyncedTransaction(pendingTransaction)
-    }
-    signal?.addEventListener(`abort`, cancel, { once: true })
-
-    this.state.commitPendingTransactions()
-    if (!pendingTransaction.applied.isPending()) {
-      signal?.removeEventListener(`abort`, cancel)
-      return true
-    }
-
-    const receipt = pendingTransaction.applied.promise
-    if (signal) {
-      const removeAbortListener = () => {
-        signal.removeEventListener(`abort`, cancel)
-      }
-      void receipt.then(removeAbortListener, removeAbortListener)
-    }
-    return receipt
-  }
-
-  private truncateSyncTransaction(
-    transaction:
-      | CollectionStateManager<
-          TOutput,
-          TKey,
-          TSchema,
-          TInput
-        >[`pendingSyncedTransactions`][number]
-      | undefined,
-    isCurrentSync: () => boolean,
-  ): void {
-    if (!isCurrentSync()) return
-    const pendingTransaction = this.getActivePendingSyncTransaction(transaction)
-    pendingTransaction.operations = []
-    pendingTransaction.deletedKeys.clear()
-    pendingTransaction.rowMetadataWrites.clear()
-    // Collection-scoped metadata intentionally survives truncate.
-    pendingTransaction.truncate = true
-    pendingTransaction.optimisticSnapshot =
-      this.state.captureTruncateOptimisticSnapshot()
-  }
-
-  private getActivePendingSyncTransaction(
-    transaction?: CollectionStateManager<
-      TOutput,
-      TKey,
-      TSchema,
-      TInput
-    >[`pendingSyncedTransactions`][number],
-  ) {
-    const pendingTransaction =
-      transaction ?? this.state.pendingSyncedTransactions.at(-1)
-
-    if (
-      !pendingTransaction ||
-      !this.state.pendingSyncedTransactions.includes(pendingTransaction)
-    ) {
       throw new NoPendingSyncTransactionWriteError()
     }
     if (pendingTransaction.committed) {
@@ -516,12 +448,6 @@ export class CollectionSyncManager<
 
   private createSyncMetadataApi(
     isCurrentSync: () => boolean,
-    transaction?: CollectionStateManager<
-      TOutput,
-      TKey,
-      TSchema,
-      TInput
-    >[`pendingSyncedTransactions`][number],
   ): SyncMetadataApi<TKey> {
     return {
       persistence: null,
@@ -529,7 +455,9 @@ export class CollectionSyncManager<
         get: (key) => {
           if (!isCurrentSync()) return undefined
           const pendingTransaction =
-            transaction ?? this.state.pendingSyncedTransactions.at(-1)
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
           const pendingWrite = pendingTransaction?.rowMetadataWrites.get(key)
           if (pendingWrite) {
             return pendingWrite.type === `delete`
@@ -543,8 +471,7 @@ export class CollectionSyncManager<
         },
         set: (key, metadata) => {
           if (!isCurrentSync()) return
-          const pendingTransaction =
-            this.getActivePendingSyncTransaction(transaction)
+          const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.rowMetadataWrites.set(key, {
             type: `set`,
             value: metadata,
@@ -552,8 +479,7 @@ export class CollectionSyncManager<
         },
         delete: (key) => {
           if (!isCurrentSync()) return
-          const pendingTransaction =
-            this.getActivePendingSyncTransaction(transaction)
+          const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.rowMetadataWrites.set(key, {
             type: `delete`,
           })
@@ -563,7 +489,9 @@ export class CollectionSyncManager<
         get: (key) => {
           if (!isCurrentSync()) return undefined
           const pendingTransaction =
-            transaction ?? this.state.pendingSyncedTransactions.at(-1)
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
           const pendingWrite =
             pendingTransaction?.collectionMetadataWrites.get(key)
           if (pendingWrite) {
@@ -575,8 +503,7 @@ export class CollectionSyncManager<
         },
         set: (key, value) => {
           if (!isCurrentSync()) return
-          const pendingTransaction =
-            this.getActivePendingSyncTransaction(transaction)
+          const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.collectionMetadataWrites.set(key, {
             type: `set`,
             value,
@@ -584,8 +511,7 @@ export class CollectionSyncManager<
         },
         delete: (key) => {
           if (!isCurrentSync()) return
-          const pendingTransaction =
-            this.getActivePendingSyncTransaction(transaction)
+          const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.collectionMetadataWrites.set(key, {
             type: `delete`,
           })
@@ -594,7 +520,9 @@ export class CollectionSyncManager<
           if (!isCurrentSync()) return []
           const merged = new Map(this.state.syncedCollectionMetadata)
           const pendingTransaction =
-            transaction ?? this.state.pendingSyncedTransactions.at(-1)
+            this.state.pendingSyncedTransactions[
+              this.state.pendingSyncedTransactions.length - 1
+            ]
           if (pendingTransaction) {
             for (const [
               key,

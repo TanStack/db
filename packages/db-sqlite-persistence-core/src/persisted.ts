@@ -49,23 +49,9 @@ import type {
   SyncPersistenceCapabilityV1,
   SyncPersistenceKeySetEvidence,
   SyncPersistenceScanOptions,
-  SyncTransactionHandle,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
-
-const PREPEND_PERSISTED_HYDRATION_ROWS = Symbol.for(
-  `@tanstack/db/prepend-persisted-hydration-rows`,
-)
-
-type PersistedHydrationPrependHandle<
-  T extends object,
-  TKey extends string | number,
-> = SyncTransactionHandle<T, TKey> & {
-  [PREPEND_PERSISTED_HYDRATION_ROWS]: (
-    rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
-  ) => void
-}
 
 export type PersistedMutationEnvelope =
   | {
@@ -893,6 +879,7 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   >
   deferredHydrationMetadataDeleteKeys: Set<TKey>
   hydrationContext?: { suppliedRowKeys: Set<TKey> }
+  hydrationSequence?: number
   truncate: boolean
   internal: boolean
   lifecycleGeneration: number
@@ -912,7 +899,6 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   BufferedSyncTransaction<T, TKey>,
   `applyToCollection` | `prependHydrationRows` | `shouldFailStopOnAbort`
 > & {
-  reservation?: SyncTransactionHandle<T, TKey>
   signal?: AbortSignal
   applicationReceipt?: SyncAppliedReceipt
   operationKeys: Set<TKey>
@@ -922,16 +908,6 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
 }
 
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
-  forwardMessage:
-    | {
-        type: `update`
-        value: T
-        metadata?: Record<string, unknown>
-      }
-    | {
-        type: `delete`
-        key: TKey
-      }
   operation: NormalizedSyncOperation<T, TKey>
 }
 
@@ -987,10 +963,6 @@ class ApplyMutex {
   run<T>(task: () => Promise<T> | T): Promise<T> {
     return this.reserve().run(task)
   }
-}
-
-class ClassifiedBufferedTransactionFailure {
-  constructor(readonly error: unknown) {}
 }
 
 function toStableSerializable(value: unknown): unknown {
@@ -1150,6 +1122,7 @@ class PersistedCollectionRuntime<
   private readonly applyMutex = new ApplyMutex()
   private readonly activeSubsets = new Map<string, LoadSubsetOptions>()
   private activeHydrationContext: { suppliedRowKeys: Set<TKey> } | undefined
+  private hydrationSequence = 0
   private readonly pendingRemoteSubsetEnsures = new Map<
     string,
     LoadSubsetOptions
@@ -1183,6 +1156,7 @@ class PersistedCollectionRuntime<
   private resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
+  private sourcePublicationWaitDepth = 0
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
@@ -1287,6 +1261,10 @@ class PersistedCollectionRuntime<
 
   getActiveHydrationContext(): { suppliedRowKeys: Set<TKey> } | undefined {
     return this.activeHydrationContext
+  }
+
+  getHydrationSequence(): number {
+    return this.hydrationSequence
   }
 
   getCurrentTerminalFailure(): { error: unknown } | undefined {
@@ -1683,66 +1661,19 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     const failure = this.getCurrentTerminalFailure()
     if (failure) return Promise.reject(failure.error)
-    if (transaction.beginOptions?.immediate) {
-      return this.applyImmediateBufferedSyncTransaction(transaction)
+    if (
+      transaction.beginOptions?.immediate &&
+      this.sourcePublicationWaitDepth > 0
+    ) {
+      return Promise.reject(
+        new InvalidPersistedCollectionConfigError(
+          `immediate persisted source replay cannot enter while an earlier source publication is waiting`,
+        ),
+      )
     }
     return this.applyMutex.run(async () => {
       await this.applyBufferedSyncTransactionUnsafe(transaction)
     })
-  }
-
-  private async applyImmediateBufferedSyncTransaction(
-    transaction: BufferedSyncTransaction<T, TKey>,
-  ): Promise<void> {
-    try {
-      this.throwIfTerminal()
-      this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
-      if (transaction.signal?.aborted) {
-        throw new SyncTransactionAbortedError()
-      }
-      const durabilityTurn = this.applyMutex.reserve()
-
-      // Immediate publication is allowed to escape a pending user mutation,
-      // but its durability turn must be reserved first. A normal source commit
-      // made by the publication callback then queues behind this transaction
-      // instead of overtaking it while the core receipt settles.
-      let applied: SyncAppliedReceipt | undefined
-      let publicationFailed = false
-      let publicationError: unknown
-      try {
-        applied = transaction.internal
-          ? this.withInternalApply(transaction.applyToCollection)
-          : transaction.applyToCollection()
-      } catch (error) {
-        publicationFailed = true
-        publicationError = error
-      }
-      await durabilityTurn.run(async () => {
-        try {
-          this.throwIfTerminal()
-          if (publicationFailed) throw publicationError
-          if (applied !== true) await applied
-          this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
-          if (!transaction.internal) {
-            await this.persistAndBroadcastExternalSyncTransactionUnsafe(
-              transaction,
-            )
-          }
-        } catch (error) {
-          throw new ClassifiedBufferedTransactionFailure(
-            this.classifyBufferedTransactionFailure(transaction, error),
-          )
-        }
-      })
-      transaction.resolveApplied?.()
-    } catch (error) {
-      const terminalError =
-        error instanceof ClassifiedBufferedTransactionFailure
-          ? error.error
-          : this.classifyBufferedTransactionFailure(transaction, error)
-      transaction.rejectApplied?.(terminalError)
-      throw terminalError
-    }
   }
 
   normalizeSyncWriteMessage(
@@ -1759,10 +1690,6 @@ class PersistedCollectionRuntime<
       const previousValue = this.collection.get(key) ?? ({} as T)
 
       return {
-        forwardMessage: {
-          type: `delete`,
-          key,
-        },
         operation: {
           type: `delete`,
           key,
@@ -1778,10 +1705,6 @@ class PersistedCollectionRuntime<
       const previousValue = this.collection.get(key) ?? message.value
 
       return {
-        forwardMessage: {
-          type: `delete`,
-          key,
-        },
         operation: {
           type: `delete`,
           key,
@@ -1792,11 +1715,6 @@ class PersistedCollectionRuntime<
 
     const key = this.collection.getKeyFromItem(message.value)
     return {
-      forwardMessage: {
-        type: `update`,
-        value: message.value,
-        metadata: message.metadata,
-      },
       operation: {
         type: `update`,
         key,
@@ -1979,6 +1897,7 @@ class PersistedCollectionRuntime<
     },
   ): Promise<void> {
     let rowsLoaded = false
+    this.hydrationSequence++
     const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
     this.activeHydrationContext = hydrationContext
     try {
@@ -2359,7 +2278,12 @@ class PersistedCollectionRuntime<
         ? this.withInternalApply(transaction.applyToCollection)
         : transaction.applyToCollection()
       if (applied !== true) {
-        await applied
+        this.sourcePublicationWaitDepth++
+        try {
+          await applied
+        } finally {
+          this.sourcePublicationWaitDepth--
+        }
       }
       this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
 
@@ -3208,6 +3132,7 @@ class PersistedCollectionRuntime<
         ? Array.from(this.activeSubsets.values())
         : [{}]
 
+    this.hydrationSequence++
     const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
     this.activeHydrationContext = hydrationContext
     this.hydratingGeneration = lifecycleGeneration
@@ -3367,8 +3292,30 @@ function createWrappedSyncConfig<
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
         if (transaction.internal || !runtime.isHydratingNow()) return
+        const hydrationSequence = runtime.getHydrationSequence()
+        if (
+          transaction.hydrationSequence !== undefined &&
+          transaction.hydrationSequence !== hydrationSequence
+        ) {
+          throw new InvalidPersistedCollectionConfigError(
+            `a persisted sync transaction cannot cross a hydration cycle`,
+          )
+        }
         transaction.queuedBecauseHydrating = true
-        transaction.hydrationContext ??= runtime.getActiveHydrationContext()
+        transaction.hydrationSequence = hydrationSequence
+        transaction.hydrationContext = runtime.getActiveHydrationContext()
+      }
+      const assertHydrationSequenceCurrent = (
+        transaction: OpenSyncTransaction<T, TKey>,
+      ) => {
+        if (
+          transaction.hydrationSequence !== undefined &&
+          transaction.hydrationSequence !== runtime.getHydrationSequence()
+        ) {
+          throw new InvalidPersistedCollectionConfigError(
+            `a persisted sync transaction cannot cross a hydration cycle`,
+          )
+        }
       }
       const markPendingMetadataDependency = (
         transaction: OpenSyncTransaction<T, TKey>,
@@ -3384,17 +3331,6 @@ function createWrappedSyncConfig<
         const index = pendingPublicationTransactions.indexOf(transaction)
         if (index !== -1) pendingPublicationTransactions.splice(index, 1)
       }
-      const reservePublicationTransaction = (
-        transaction: OpenSyncTransaction<T, TKey>,
-      ) => {
-        const reservation = params.begin(transaction.beginOptions)
-        if (!reservation) {
-          throw new InvalidPersistedCollectionConfigError(
-            `wrapped sync begin did not reserve a publication transaction`,
-          )
-        }
-        transaction.reservation = reservation
-      }
       const settlePendingTransaction = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
@@ -3407,7 +3343,6 @@ function createWrappedSyncConfig<
         void applied.then(
           () => settlePendingTransaction(transaction),
           () => {
-            transaction.reservation?.abort()
             settlePendingTransaction(transaction)
           },
         )
@@ -3471,32 +3406,44 @@ function createWrappedSyncConfig<
         if (transaction.applicationReceipt !== undefined) {
           return transaction.applicationReceipt
         }
-        const reservation = transaction.reservation
-        if (!reservation) {
-          throw new InvalidPersistedCollectionConfigError(
-            `wrapped sync transaction lost its publication reservation`,
-          )
-        }
         try {
-          if (transaction.beginOptions?.immediate) {
-            const index = pendingPublicationTransactions.indexOf(transaction)
-            const predecessors =
-              index === -1 ? [] : pendingPublicationTransactions.slice(0, index)
-            for (const predecessor of predecessors) {
-              applyTransactionToCollection(predecessor, predecessor.signal)
-            }
-          }
+          assertHydrationSequenceCurrent(transaction)
           for (const key of transaction.deferredHydrationMetadataDeleteKeys) {
             if (
               !transaction.hydrationContext?.suppliedRowKeys.has(key) &&
               !transaction.rowMetadataWrites.has(key)
             ) {
               transaction.rowMetadataWrites.set(key, { type: `delete` })
-              reservation.metadata.row.delete(key)
             }
           }
           transaction.deferredHydrationMetadataDeleteKeys.clear()
-          const applied = reservation.commit(signal)
+
+          params.begin(transaction.beginOptions)
+          if (transaction.truncate) params.truncate()
+          for (const operation of transaction.operations) {
+            if (operation.type === `delete`) {
+              params.write({ type: `delete`, key: operation.key })
+            } else {
+              params.write({
+                type: `update`,
+                value: operation.value,
+                metadata: operation.metadata,
+              })
+            }
+          }
+          if (params.metadata) {
+            for (const [key, write] of transaction.rowMetadataWrites) {
+              if (write.type === `delete`) params.metadata.row.delete(key)
+              else params.metadata.row.set(key, write.value)
+            }
+            for (const [key, write] of transaction.collectionMetadataWrites) {
+              if (write.type === `delete`)
+                params.metadata.collection.delete(key)
+              else params.metadata.collection.set(key, write.value)
+            }
+          }
+
+          const applied = params.commit(signal)
           transaction.applicationReceipt = applied
           if (applied === true) {
             removePendingPublicationTransaction(transaction)
@@ -3508,12 +3455,6 @@ function createWrappedSyncConfig<
           }
           return applied
         } catch (error) {
-          // Queued source transactions must remain publicly atomic, but later
-          // source work still needs their accepted metadata decisions while
-          // publication is pending. Once publication runs, the collection's
-          // metadata API becomes authoritative again. A prepublication failure
-          // removes the layer without exposing it.
-          reservation.abort()
           removePendingPublicationTransaction(transaction)
           throw error
         }
@@ -3609,6 +3550,10 @@ function createWrappedSyncConfig<
               terminalFailure === undefined &&
               !internal &&
               runtime.isHydratingNow(),
+            hydrationSequence:
+              terminalFailure === undefined && !internal
+                ? runtime.getHydrationSequence()
+                : undefined,
             hydrationContext:
               terminalFailure === undefined &&
               !internal &&
@@ -3617,14 +3562,7 @@ function createWrappedSyncConfig<
                 : undefined,
             ...(terminalFailure === undefined ? {} : { terminalFailure }),
           }
-          if (!terminalFailure) {
-            reservePublicationTransaction(transaction)
-          }
           transactionStack.push(transaction)
-          // The persisted wrapper owns the core reservation. Upstream source
-          // callbacks continue through the wrapped write/commit surface so
-          // publication and durability remain one transaction.
-          return undefined
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
           if (startupState.cleanedUp) return
@@ -3696,23 +3634,6 @@ function createWrappedSyncConfig<
               value: normalization.operation.metadata,
             })
           }
-          openTransaction.reservation?.write(
-            normalization.forwardMessage,
-            normalization.operation.key,
-          )
-          const stagedMetadata = openTransaction.rowMetadataWrites.get(
-            normalization.operation.key,
-          )
-          if (stagedMetadata?.type === `delete`) {
-            openTransaction.reservation?.metadata.row.delete(
-              normalization.operation.key,
-            )
-          } else if (stagedMetadata) {
-            openTransaction.reservation?.metadata.row.set(
-              normalization.operation.key,
-              stagedMetadata.value,
-            )
-          }
         },
         metadata: params.metadata
           ? {
@@ -3753,7 +3674,6 @@ function createWrappedSyncConfig<
                     type: `set`,
                     value,
                   })
-                  openTransaction.reservation?.metadata.row.set(key, value)
                 },
                 delete: (key: TKey) => {
                   if (startupState.cleanedUp) return
@@ -3768,7 +3688,6 @@ function createWrappedSyncConfig<
                   openTransaction.rowMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  openTransaction.reservation?.metadata.row.delete(key)
                 },
               },
               collection: {
@@ -3804,10 +3723,6 @@ function createWrappedSyncConfig<
                     type: `set`,
                     value,
                   })
-                  openTransaction.reservation?.metadata.collection.set(
-                    key,
-                    value,
-                  )
                 },
                 delete: (key: string) => {
                   if (startupState.cleanedUp) return
@@ -3822,7 +3737,6 @@ function createWrappedSyncConfig<
                   openTransaction.collectionMetadataWrites.set(key, {
                     type: `delete`,
                   })
-                  openTransaction.reservation?.metadata.collection.delete(key)
                 },
                 list: (prefix?: string) => {
                   if (startupState.cleanedUp) return []
@@ -3895,7 +3809,6 @@ function createWrappedSyncConfig<
           // collection-scoped metadata before truncating row data, and those
           // writes must commit atomically with the truncate transaction.
           openTransaction.truncate = true
-          openTransaction.reservation?.truncate()
         },
         commit: (signal?: AbortSignal) => {
           if (startupState.cleanedUp) return true
@@ -3904,7 +3817,6 @@ function createWrappedSyncConfig<
             openTransaction?.terminalFailure ?? getTerminalFailure()
           if (terminalFailure) {
             if (openTransaction) {
-              openTransaction.reservation?.abort()
               settlePendingTransaction(openTransaction)
             }
             return createHandledRejection(terminalFailure.error)
@@ -3914,15 +3826,15 @@ function createWrappedSyncConfig<
           }
 
           if (openTransaction.internal) {
-            return openTransaction.reservation?.commit(signal) ?? true
+            return applyTransactionToCollection(openTransaction, signal)
           }
 
           if (signal?.aborted) {
-            openTransaction.reservation?.abort()
             settlePendingTransaction(openTransaction)
             return createHandledRejection(new SyncTransactionAbortedError())
           }
           bindToCurrentHydration(openTransaction)
+          assertHydrationSequenceCurrent(openTransaction)
           const transaction = {
             operations: openTransaction.operations,
             partialUpdateOperationIndexes:
@@ -3932,6 +3844,7 @@ function createWrappedSyncConfig<
             deferredHydrationMetadataDeleteKeys:
               openTransaction.deferredHydrationMetadataDeleteKeys,
             hydrationContext: openTransaction.hydrationContext,
+            hydrationSequence: openTransaction.hydrationSequence,
             truncate: openTransaction.truncate,
             internal: false,
             lifecycleGeneration: openTransaction.lifecycleGeneration,
@@ -3942,16 +3855,28 @@ function createWrappedSyncConfig<
             prependHydrationRows: (
               rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
             ) => {
-              const reservation = openTransaction.reservation as
-                | PersistedHydrationPrependHandle<T, TKey>
-                | undefined
-              const prepend = reservation?.[PREPEND_PERSISTED_HYDRATION_ROWS]
-              if (!prepend) {
-                throw new InvalidPersistedCollectionConfigError(
-                  `wrapped sync transaction cannot reconstruct a persisted hydration baseline`,
-                )
+              const baselineOperations: Array<
+                NormalizedSyncOperation<T, TKey>
+              > = rows.map(({ key, value, metadata }) => ({
+                type: `update`,
+                key,
+                value,
+                metadata: metadata as Record<string, unknown> | undefined,
+              }))
+              openTransaction.operations = baselineOperations.concat(
+                openTransaction.operations,
+              )
+              for (const { key, metadata } of rows) {
+                if (
+                  metadata !== undefined &&
+                  !openTransaction.rowMetadataWrites.has(key)
+                ) {
+                  openTransaction.rowMetadataWrites.set(key, {
+                    type: `set`,
+                    value: metadata,
+                  })
+                }
               }
-              prepend(rows)
             },
             applyToCollection: () =>
               applyTransactionToCollection(openTransaction, signal),
@@ -4033,12 +3958,6 @@ function createWrappedSyncConfig<
         cleanup: () => {
           startupState.cleanedUp = true
           acquisitions.clear()
-          for (const transaction of new Set([
-            ...transactionStack,
-            ...pendingPublicationTransactions,
-          ])) {
-            transaction.reservation?.abort()
-          }
           pendingPublicationTransactions.length = 0
           transactionStack.length = 0
           sourceResult.cleanup?.()

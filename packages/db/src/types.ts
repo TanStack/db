@@ -377,25 +377,6 @@ export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 export type SyncAppliedReceipt = true | Promise<void>
 
 /**
- * Owns one sync transaction independently of the ambient adapter callback
- * stack. First-party wrappers use the handle when application may be deferred
- * beyond the callback that began the transaction.
- */
-export type SyncTransactionHandle<
-  T extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
-> = {
-  write: (
-    message: ChangeMessageOrDeleteKeyMessage<T, TKey>,
-    knownKey?: TKey,
-  ) => void
-  commit: (signal?: AbortSignal) => SyncAppliedReceipt
-  truncate: () => void
-  metadata: SyncMetadataApi<TKey>
-  abort: () => void
-}
-
-/**
  * Releases the exact acquisition created for `options`.
  *
  * Implementations must be idempotent and must not throw. An adapter owns any
@@ -423,9 +404,7 @@ export interface SyncConfig<
      * @param options.immediate - When true, the transaction will be processed immediately
      *   even if there are persisting user transactions. Used by manual write operations.
      */
-    begin: (options?: {
-      immediate?: boolean
-    }) => SyncTransactionHandle<T, TKey> | undefined
+    begin: (options?: { immediate?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
      * Commit the active sync transaction in FIFO order.

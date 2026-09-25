@@ -643,15 +643,20 @@ function expectedQueuedPresenceRows(
   return expectedRows
 }
 
-function expectQueuedPresenceObservation(
+function expectQueuedPresenceAtDurabilityHold(
   actual: Array<[string | number, string, string]>,
   history: QueuedPresenceHistory,
   gate: OracleRow,
-  laterName: string,
 ): void {
-  expect(actual).toEqual(
-    rowsFromMap(expectedQueuedPresenceRows(history, gate, laterName)),
-  )
+  const expectedRows = new Map<string | number, OracleRow>([[1, gate]])
+  if (history !== `insert-update`) {
+    expectedRows.set(2, {
+      id: 2,
+      name: `baseline`,
+      stable: `stable-2`,
+    })
+  }
+  expect(actual).toEqual(rowsFromMap(expectedRows))
 }
 
 async function runQueuedPresenceCampaign(
@@ -766,15 +771,12 @@ async function runQueuedPresenceHistory(
       laterName,
     )
 
-    // Public application is a source-order boundary, not a durability
-    // boundary. This held cut rejects an implementation that keeps later
-    // callbacks behind the first adapter write while still converging after
-    // the hold is released.
-    expectQueuedPresenceObservation(
+    // Persisted replay is one FIFO. Later source callbacks remain buffered
+    // until the transaction ahead of them has finished its durability turn.
+    expectQueuedPresenceAtDurabilityHold(
       rowsFromCollection(collection),
       history,
       gate.value,
-      laterName,
     )
 
     releaseFirstPersistence.resolve()
@@ -2682,10 +2684,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             cut === `event` && isDeepStrictEqual(rows, expected),
         ),
       }).toEqual({
-        publicRows: expected,
+        publicRows: rowsFromMap(new Map([[1, first.value]])),
         durableRows: [],
         noLaterDurabilityStarted: true,
-        published: true,
+        published: false,
       })
 
       releaseFirstPersistence.resolve()
@@ -2776,13 +2778,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     ).toThrow()
   })
 
-  it(`rejects named wrong answer: later callback stays hidden until durability`, () => {
+  it(`rejects named wrong answer: later callback publishes before durability`, () => {
     expect(() =>
-      expectQueuedPresenceObservation(
-        [[1, `holds persistence`, `stable-1`]],
+      expectQueuedPresenceAtDurabilityHold(
+        [
+          [1, `holds persistence`, `stable-1`],
+          [2, `later`, `stable-2`],
+        ],
         `insert-update`,
         { id: 1, name: `holds persistence`, stable: `stable-1` },
-        `later`,
       ),
     ).toThrow()
   })

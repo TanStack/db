@@ -14,7 +14,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db-sqlite-persistence-core/tests/persisted.test.ts`,
     `sqlite-persistence`,
-    `immediate-order abort-graph owner-isolation reservation-boundary`,
+    `source-fifo-order abort-graph owner-isolation open-transaction-boundary`,
   ],
   [
     `db/tests/optimistic-transaction-oracle.property.test.ts`,

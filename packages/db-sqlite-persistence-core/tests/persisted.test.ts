@@ -47,7 +47,6 @@ import type {
   Subscription,
   SyncConfig,
   SyncMetadataApi,
-  SyncTransactionHandle,
 } from '@tanstack/db'
 
 /**
@@ -65,8 +64,8 @@ import type {
  * `foldDurabilityLedger` is the independent model for append-only source
  * obligations. The recording adapter is a plain durable-state model: Maps for
  * rows and metadata plus ordered transaction, index, load, and reload calls.
- * Histories cross hydration, held adapters, immediate/normal ordering,
- * independent/dependent aborts, reservation failure boundaries, ambient owner
+ * Histories cross hydration, held adapters, source FIFO ordering,
+ * independent/dependent aborts, open-transaction failure boundaries, ambient owner
  * operations, applied-receipt rejection, remote subset demand, acquisition
  * release, retry, coordinator replay, cleanup, and restart. Tests drive the
  * real persisted wrapper, Collection, coordinator, adapter, transactions,
@@ -825,15 +824,15 @@ function sortedTodoRows(rows: Iterable<Todo>): Array<Todo> {
   return Array.from(rows).sort((left, right) => left.id.localeCompare(right.id))
 }
 
-type ImmediateOrderingObservation = {
+type SourceFifoOrderingObservation = {
   publicRows: Array<Todo>
   durableRows: Array<Todo>
   status: string
   pendingMarkers: number
 }
 
-function expectImmediateOrderingObservation(
-  actual: ImmediateOrderingObservation,
+function expectSourceFifoOrderingObservation(
+  actual: SourceFifoOrderingObservation,
   expectedRows: ReadonlyArray<Todo>,
 ): void {
   expect(actual).toEqual({
@@ -897,7 +896,7 @@ function expectOwnerIsolationAdmission(
   expect(actual).toEqual({ exactError: true, strayVisible: false })
 }
 
-type ReservationBoundaryObservation = {
+type OpenTransactionBoundaryObservation = {
   status: string
   pendingMarkers: number
 }
@@ -910,8 +909,8 @@ type RequestLocalFailureObservation = {
   publicError: unknown
 }
 
-function expectReservationBoundaryObservation(
-  actual: ReservationBoundaryObservation,
+function expectOpenTransactionBoundaryObservation(
+  actual: OpenTransactionBoundaryObservation,
   boundary: `abort` | `cleanup` | `terminal-failure`,
 ): void {
   expect(actual).toEqual({
@@ -938,7 +937,7 @@ function expectRequestLocalFailureObservation(
   })
 }
 
-async function runImmediateOrderingLaw(
+async function runSourceFifoOrderingLaw(
   relation: `same-key` | `disjoint`,
   olderTitle: string,
   newerTitle: string,
@@ -960,7 +959,7 @@ async function runImmediateOrderingLaw(
   let sourceParams!: TodoSyncParams
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
-      id: `generated-immediate-order-${historyId}`,
+      id: `generated-source-fifo-order-${historyId}`,
       getKey: (row) => row.id,
       sync: {
         sync: (params) => {
@@ -977,7 +976,7 @@ async function runImmediateOrderingLaw(
   try {
     await atPersistedOracleCheckpoint(
       collection.stateWhenReady(),
-      `generated immediate ordering ready`,
+      `generated source FIFO ordering ready`,
     )
     sourceParams.begin()
     sourceParams.write({
@@ -988,7 +987,7 @@ async function runImmediateOrderingLaw(
     receipts.forEach((receipt) => void receipt.catch(() => undefined))
     await atPersistedOracleCheckpoint(
       firstPersistenceEntered.promise,
-      `generated immediate ordering adapter hold`,
+      `generated source FIFO ordering adapter hold`,
     )
 
     const olderKey = relation === `same-key` ? `shared` : `older`
@@ -1009,7 +1008,7 @@ async function runImmediateOrderingLaw(
     receipts.push(olderReceipt)
     void olderReceipt.catch(() => undefined)
 
-    sourceParams.begin({ immediate: true })
+    sourceParams.begin()
     sourceParams.write({
       type: relation === `same-key` ? `update` : `insert`,
       value: { id: newerKey, title: newerTitle },
@@ -1023,16 +1022,16 @@ async function runImmediateOrderingLaw(
 
     expect(
       sortedTodoRows(Array.from(collection.values()).map(stripVirtualProps)),
-    ).toEqual(sortedTodoRows(expected.values()))
+    ).toEqual(sortedTodoRows([{ id: `gate`, title: `holds adapter` }]))
 
     releaseFirstPersistence.resolve()
     for (const [index, receipt] of receipts.entries()) {
       await atPersistedOracleCheckpoint(
         receipt,
-        `generated immediate receipt ${index}`,
+        `generated source FIFO receipt ${index}`,
       )
     }
-    expectImmediateOrderingObservation(
+    expectSourceFifoOrderingObservation(
       {
         publicRows: sortedTodoRows(
           Array.from(collection.values()).map(stripVirtualProps),
@@ -1326,7 +1325,7 @@ async function runBareOwnerOperationLaw(
   }
 }
 
-async function runInternalReservationBoundaryLaw(
+async function runInternalOpenTransactionBoundaryLaw(
   boundary: `abort` | `cleanup` | `terminal-failure`,
   hydratedTitle: string,
 ): Promise<void> {
@@ -1343,7 +1342,7 @@ async function runInternalReservationBoundaryLaw(
   let sourceParams!: TodoSyncParams
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
-      id: `generated-internal-reservation-${historyId}`,
+      id: `generated-internal-transaction-${historyId}`,
       getKey: (row) => row.id,
       sync: {
         sync: (params) => {
@@ -1379,7 +1378,7 @@ async function runInternalReservationBoundaryLaw(
     expect({
       internalReservationStarted,
       pendingMarkers: collection._state.pendingSyncedTransactions.length,
-    }).toEqual({ internalReservationStarted: true, pendingMarkers: 1 })
+    }).toEqual({ internalReservationStarted: true, pendingMarkers: 0 })
 
     if (boundary === `cleanup`) {
       await atPersistedOracleCheckpoint(
@@ -1387,7 +1386,7 @@ async function runInternalReservationBoundaryLaw(
         `generated internal cleanup`,
       )
       cleanedUp = true
-      expectReservationBoundaryObservation(
+      expectOpenTransactionBoundaryObservation(
         {
           status: collection.status,
           pendingMarkers: collection._state.pendingSyncedTransactions.length,
@@ -1408,7 +1407,7 @@ async function runInternalReservationBoundaryLaw(
       await expect(
         atPersistedOracleCheckpoint(receipt, `generated internal abort`),
       ).rejects.toMatchObject({ name: `AbortError` })
-      expectReservationBoundaryObservation(
+      expectOpenTransactionBoundaryObservation(
         {
           status: collection.status,
           pendingMarkers: collection._state.pendingSyncedTransactions.length,
@@ -1418,7 +1417,7 @@ async function runInternalReservationBoundaryLaw(
       return
     }
 
-    const terminalError = new Error(`generated terminal reservation failure`)
+    const terminalError = new Error(`generated terminal transaction failure`)
     adapter.applyCommittedTx = () => Promise.reject(terminalError)
     sourceParams.begin()
     sourceParams.write({
@@ -1451,7 +1450,7 @@ async function runInternalReservationBoundaryLaw(
         `generated terminal internal settlement`,
       ),
     ).rejects.toMatchObject({ name: `PersistedCollectionDurabilityError` })
-    expectReservationBoundaryObservation(
+    expectOpenTransactionBoundaryObservation(
       {
         status: collection.status,
         pendingMarkers: collection._state.pendingSyncedTransactions.length,
@@ -1633,10 +1632,10 @@ type GeneratedPersistenceGrammar = {
   witness: GeneratedPersistenceHistory
 }
 
-const immediateOrderingAxes = [`same-key`, `disjoint`] as const
+const sourceFifoOrderingAxes = [`same-key`, `disjoint`] as const
 const abortGraphAxes = [`independent`, `same-key`] as const
 const ownerIsolationAxes = [`write`, `commit`, `truncate`] as const
-const reservationBoundaryAxes = [
+const openTransactionBoundaryAxes = [
   `abort`,
   `cleanup`,
   `terminal-failure`,
@@ -1644,18 +1643,18 @@ const reservationBoundaryAxes = [
 const requestLocalFailureAxes = [`partial-update`, `delete`, `insert`] as const
 const generatedTitleMaxLength = 12
 const generatedPersistenceFixedSeeds = {
-  immediateOrdering: 18_530_101,
+  sourceFifoOrdering: 18_530_101,
   abortGraph: 18_530_102,
   ownerIsolation: 18_530_103,
-  reservationBoundary: 18_530_104,
+  openTransactionBoundary: 18_530_104,
   requestLocalFailure: 18_530_105,
 } as const
 
 const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGrammar> =
   [
     {
-      property: `sqlite-persistence.immediate-order`,
-      axes: immediateOrderingAxes,
+      property: `sqlite-persistence.source-fifo-order`,
+      axes: sourceFifoOrderingAxes,
       axisContribution: {
         [`same-key`]: `the later source value wins in source order`,
         disjoint: `both unrelated values and receipts survive`,
@@ -1694,12 +1693,12 @@ const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGrammar> =
       },
     },
     {
-      property: `sqlite-persistence.reservation-boundary`,
-      axes: reservationBoundaryAxes,
+      property: `sqlite-persistence.open-transaction-boundary`,
+      axes: openTransactionBoundaryAxes,
       axisContribution: {
-        abort: `explicit abort releases its reservation`,
-        cleanup: `cleanup releases its reservation`,
-        [`terminal-failure`]: `fail-stop releases its reservation`,
+        abort: `explicit abort leaves no core transaction`,
+        cleanup: `cleanup leaves no core transaction`,
+        [`terminal-failure`]: `fail-stop leaves no core transaction`,
       },
       titleCount: 1,
       witness: {
@@ -1759,7 +1758,7 @@ function fullAxisOrder<Axis extends string>(
 
 const generatedTitle = fc.string({ maxLength: generatedTitleMaxLength })
 
-type ImmediateOrderingHistory = {
+type SourceFifoOrderingHistory = {
   relations: Array<`same-key` | `disjoint`>
   titles: [string, string]
 }
@@ -1774,7 +1773,7 @@ type OwnerIsolationHistory = {
   queuedTitle: string
 }
 
-type ReservationBoundaryHistory = {
+type OpenTransactionBoundaryHistory = {
   boundaries: Array<`abort` | `cleanup` | `terminal-failure`>
   hydratedTitle: string
 }
@@ -1784,9 +1783,9 @@ type RequestLocalFailureHistory = {
   titles: [string, string]
 }
 
-const immediateOrderingHistory: fc.Arbitrary<ImmediateOrderingHistory> =
+const sourceFifoOrderingHistory: fc.Arbitrary<SourceFifoOrderingHistory> =
   fc.record({
-    relations: fullAxisOrder(immediateOrderingAxes),
+    relations: fullAxisOrder(sourceFifoOrderingAxes),
     titles: fc.tuple(generatedTitle, generatedTitle),
   })
 
@@ -1800,9 +1799,9 @@ const ownerIsolationHistory: fc.Arbitrary<OwnerIsolationHistory> = fc.record({
   queuedTitle: generatedTitle,
 })
 
-const reservationBoundaryHistory: fc.Arbitrary<ReservationBoundaryHistory> =
+const openTransactionBoundaryHistory: fc.Arbitrary<OpenTransactionBoundaryHistory> =
   fc.record({
-    boundaries: fullAxisOrder(reservationBoundaryAxes),
+    boundaries: fullAxisOrder(openTransactionBoundaryAxes),
     hydratedTitle: generatedTitle,
   })
 
@@ -1826,11 +1825,11 @@ function generatedPersistenceGrammarSamples(): ReadonlyArray<{
   const sampleOptions = (seed: number) => ({ seed, numRuns: 4 })
   return [
     {
-      grammar: grammar(`sqlite-persistence.immediate-order`),
+      grammar: grammar(`sqlite-persistence.source-fifo-order`),
       histories: fc
         .sample(
-          immediateOrderingHistory,
-          sampleOptions(generatedPersistenceFixedSeeds.immediateOrdering),
+          sourceFifoOrderingHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.sourceFifoOrdering),
         )
         .map((history) => ({
           axes: history.relations,
@@ -1862,11 +1861,11 @@ function generatedPersistenceGrammarSamples(): ReadonlyArray<{
         })),
     },
     {
-      grammar: grammar(`sqlite-persistence.reservation-boundary`),
+      grammar: grammar(`sqlite-persistence.open-transaction-boundary`),
       histories: fc
         .sample(
-          reservationBoundaryHistory,
-          sampleOptions(generatedPersistenceFixedSeeds.reservationBoundary),
+          openTransactionBoundaryHistory,
+          sampleOptions(generatedPersistenceFixedSeeds.openTransactionBoundary),
         )
         .map((history) => ({
           axes: history.boundaries,
@@ -1890,11 +1889,11 @@ function generatedPersistenceGrammarSamples(): ReadonlyArray<{
   ]
 }
 
-async function runGeneratedImmediateOrderingHistory(
-  history: ImmediateOrderingHistory,
+async function runGeneratedSourceFifoOrderingHistory(
+  history: SourceFifoOrderingHistory,
 ): Promise<void> {
   for (const relation of history.relations) {
-    await runImmediateOrderingLaw(
+    await runSourceFifoOrderingLaw(
       relation,
       history.titles[0],
       history.titles[1],
@@ -1922,11 +1921,11 @@ async function runGeneratedOwnerIsolationHistory(
   }
 }
 
-async function runGeneratedReservationBoundaryHistory(
-  history: ReservationBoundaryHistory,
+async function runGeneratedOpenTransactionBoundaryHistory(
+  history: OpenTransactionBoundaryHistory,
 ): Promise<void> {
   for (const boundary of history.boundaries) {
-    await runInternalReservationBoundaryLaw(boundary, history.hydratedTitle)
+    await runInternalOpenTransactionBoundaryLaw(boundary, history.hydratedTitle)
   }
 }
 
@@ -2050,9 +2049,9 @@ describe(`generated persistence durability oracles`, () => {
 
     it.each([
       {
-        name: `immediate-order older same-key value wins`,
+        name: `source-fifo-order older same-key value wins`,
         reject: () =>
-          expectImmediateOrderingObservation(
+          expectSourceFifoOrderingObservation(
             {
               publicRows: [{ id: `shared`, title: `older` }],
               durableRows: [{ id: `shared`, title: `older` }],
@@ -2090,9 +2089,9 @@ describe(`generated persistence durability oracles`, () => {
           }),
       },
       {
-        name: `reservation-boundary terminal failure leaks one marker`,
+        name: `open-transaction boundary leaks one core marker`,
         reject: () =>
-          expectReservationBoundaryObservation(
+          expectOpenTransactionBoundaryObservation(
             { status: `error`, pendingMarkers: 1 },
             `terminal-failure`,
           ),
@@ -2129,11 +2128,11 @@ describe(`generated persistence durability oracles`, () => {
   }
 
   registerGeneratedPersistenceProperty({
-    property: `sqlite-persistence.immediate-order`,
-    title: `immediate histories preserve source order and settle every receipt`,
-    arbitrary: immediateOrderingHistory,
-    fixedSeed: generatedPersistenceFixedSeeds.immediateOrdering,
-    run: runGeneratedImmediateOrderingHistory,
+    property: `sqlite-persistence.source-fifo-order`,
+    title: `serialized histories preserve source order and settle every receipt`,
+    arbitrary: sourceFifoOrderingHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.sourceFifoOrdering,
+    run: runGeneratedSourceFifoOrderingHistory,
   })
   registerGeneratedPersistenceProperty({
     property: `sqlite-persistence.abort-graph`,
@@ -2144,17 +2143,17 @@ describe(`generated persistence durability oracles`, () => {
   })
   registerGeneratedPersistenceProperty({
     property: `sqlite-persistence.owner-isolation`,
-    title: `bare operations cannot capture another owner's reservation`,
+    title: `bare operations cannot capture another owner's transaction`,
     arbitrary: ownerIsolationHistory,
     fixedSeed: generatedPersistenceFixedSeeds.ownerIsolation,
     run: runGeneratedOwnerIsolationHistory,
   })
   registerGeneratedPersistenceProperty({
-    property: `sqlite-persistence.reservation-boundary`,
-    title: `reservation boundaries release every internally owned marker`,
-    arbitrary: reservationBoundaryHistory,
-    fixedSeed: generatedPersistenceFixedSeeds.reservationBoundary,
-    run: runGeneratedReservationBoundaryHistory,
+    property: `sqlite-persistence.open-transaction-boundary`,
+    title: `open transaction boundaries leave no core marker`,
+    arbitrary: openTransactionBoundaryHistory,
+    fixedSeed: generatedPersistenceFixedSeeds.openTransactionBoundary,
+    run: runGeneratedOpenTransactionBoundaryHistory,
   })
   registerGeneratedPersistenceProperty({
     property: `sqlite-persistence.request-local-failure-buffered-source`,
@@ -9205,7 +9204,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
-  it(`lets an immediate source dependency release a persisting user transaction`, async () => {
+  it(`rejects immediate replay that would close a normal publication cycle`, async () => {
     const adapter = createRecordingAdapter()
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
@@ -9277,31 +9276,40 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         dependencySubmitted.promise,
         `immediate dependency submitted`,
       )
-      expect({
-        localState: localTransaction.state,
-        dependencyVisible: collection.has(`dependency`),
-      }).toEqual({
-        localState: `persisting`,
-        dependencyVisible: true,
-      })
-
-      await atPersistedOracleCheckpoint(
-        localTransaction.isPersisted.promise,
-        `user persistence released by immediate dependency`,
+      const dependencyOutcome = await atPersistedOracleCheckpoint(
+        Promise.resolve(dependencyReceipt).then(
+          () => ({ status: `fulfilled` as const }),
+          (reason: unknown) => ({ status: `rejected` as const, reason }),
+        ),
+        `immediate dependency rejected`,
       )
+      expect(dependencyOutcome).toMatchObject({
+        status: `rejected`,
+        reason: { name: `InvalidPersistedCollectionConfigError` },
+      })
+      await expect(
+        atPersistedOracleCheckpoint(
+          localTransaction.isPersisted.promise,
+          `user persistence rejects with unsupported reentry`,
+        ),
+      ).rejects.toMatchObject({ name: `InvalidPersistedCollectionConfigError` })
       await atPersistedOracleCheckpoint(
         normalReceipt,
-        `parked predecessor applied with immediate dependency`,
+        `parked predecessor applies after user rollback`,
       )
-      if (dependencyReceipt !== true) {
-        await atPersistedOracleCheckpoint(
-          Promise.resolve(dependencyReceipt),
-          `immediate dependency receipt settled`,
-        )
-      }
-      expect(adapter.rows.get(`dependency`)).toEqual({
-        id: `dependency`,
-        title: `releases user persistence`,
+      expect({
+        dependencyVisible: collection.has(`dependency`),
+        dependencyDurable: adapter.rows.get(`dependency`),
+        parkedDurable: adapter.rows.get(`parked`),
+        status: collection.status,
+      }).toEqual({
+        dependencyVisible: false,
+        dependencyDurable: undefined,
+        parkedDurable: {
+          id: `parked`,
+          title: `waits for user persistence`,
+        },
+        status: `ready`,
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -9324,7 +9332,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`preserves source order when an immediate commit overtakes a held predecessor`, async () => {
+  it(`replays source transactions one by one behind a held predecessor`, async () => {
     const adapter = createRecordingAdapter()
     const firstPersistenceEntered = createEventGate()
     const releaseFirstPersistence = createEventGate()
@@ -9347,7 +9355,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
-        id: `immediate-source-order`,
+        id: `source-fifo-order`,
         getKey: (row) => row.id,
         sync: {
           sync: (params) => {
@@ -9366,7 +9374,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     try {
       await atPersistedOracleCheckpoint(
         collection.stateWhenReady(),
-        `immediate ordering collection ready`,
+        `source FIFO ordering collection ready`,
       )
       sourceParams.begin()
       sourceParams.write({
@@ -9377,7 +9385,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       void gateReceipt.catch(() => undefined)
       await atPersistedOracleCheckpoint(
         firstPersistenceEntered.promise,
-        `immediate ordering predecessor persistence entered`,
+        `source FIFO ordering predecessor persistence entered`,
       )
 
       sourceParams.begin()
@@ -9390,20 +9398,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
       void olderReceipt.catch(() => undefined)
 
-      sourceParams.begin({ immediate: true })
+      sourceParams.begin()
       sourceParams.write({
         type: `update`,
-        value: { id: `shared`, title: `newer immediate` },
+        value: { id: `shared`, title: `newer source value` },
       })
       newerReceipt = Promise.resolve(sourceParams.commit()).then(
         () => undefined,
       )
       void newerReceipt.catch(() => undefined)
 
-      expect(stripVirtualProps(collection.get(`shared`))).toEqual({
-        id: `shared`,
-        title: `newer immediate`,
-      })
+      expect(collection.get(`shared`)).toBeUndefined()
 
       releaseFirstPersistence.resolve()
       await atPersistedOracleCheckpoint(gateReceipt, `ordering gate persisted`)
@@ -9413,7 +9418,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
       await atPersistedOracleCheckpoint(
         newerReceipt,
-        `newer immediate source receipt`,
+        `newer source FIFO receipt`,
       )
 
       expect({
@@ -9423,9 +9428,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         persistedTitles: persistedSharedTitles,
       }).toEqual({
         status: `ready`,
-        publicRow: { id: `shared`, title: `newer immediate` },
-        durableRow: { id: `shared`, title: `newer immediate` },
-        persistedTitles: [`older normal`, `newer immediate`],
+        publicRow: { id: `shared`, title: `newer source value` },
+        durableRow: { id: `shared`, title: `newer source value` },
+        persistedTitles: [`older normal`, `newer source value`],
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -9555,7 +9560,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`preserves immediate and normal durability order from a core publication`, async () => {
+  it(`queues reentrant immediate replay before its later normal sibling`, async () => {
     const adapter = createRecordingAdapter()
     const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
     const persistedTitles: Array<string> = []
@@ -9618,18 +9623,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         collection.stateWhenReady(),
         `core-publication ordering collection ready`,
       )
-      const coreSync = collection._sync as unknown as {
-        beginSyncTransaction: (
-          options: { immediate?: boolean } | undefined,
-          isCurrentSync: () => boolean,
-        ) => SyncTransactionHandle<Todo, string>
-      }
-      const trigger = coreSync.beginSyncTransaction(undefined, () => true)
-      trigger.write({
+      sourceParams.begin()
+      sourceParams.write({
         type: `insert`,
         value: { id: `trigger`, title: `Triggers source reentry` },
       })
-      await Promise.resolve(trigger.commit())
+      await Promise.resolve(sourceParams.commit())
       await vi.waitFor(() => expect(callbackCount).toBe(1))
       expect(immediateReceipt).toBeInstanceOf(Promise)
       expect(normalReceipt).toBeInstanceOf(Promise)
@@ -9669,7 +9668,217 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`fail-stops an already-published immediate suffix before its durability turn`, async () => {
+  it(`publishes a FIFO source turn beneath an optimistic mutation before demand reentry`, async () => {
+    const adapter = createRecordingAdapter()
+    const mutationEntered = createEventGate()
+    const allowDemand = createEventGate()
+    let upstreamLoads = 0
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `source-publication-before-mutation-demand`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return {
+              loadSubset: () => {
+                upstreamLoads++
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const subset = { limit: 1 }
+    let localReceipt: Promise<unknown> | undefined
+    let sourceReceipt: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const local = createTransaction({
+        mutationFn: async () => {
+          mutationEntered.resolve()
+          await allowDemand.promise
+          await Promise.resolve(collection._sync.loadSubset(subset))
+        },
+      })
+      local.mutate(() => {
+        collection.insert({ id: `local`, title: `optimistic local` })
+      })
+      localReceipt = local.isPersisted.promise
+      void localReceipt.catch(() => undefined)
+      await mutationEntered.promise
+
+      sourceParams.begin({ immediate: true })
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `remote`, title: `authoritative source` },
+      })
+      sourceReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      await atPersistedOracleCheckpoint(
+        sourceReceipt,
+        `source publication beneath optimistic mutation`,
+      )
+
+      expect({
+        local: stripVirtualProps(collection.get(`local`)),
+        remote: stripVirtualProps(collection.get(`remote`)),
+        durableRemote: adapter.rows.get(`remote`),
+        localState: local.state,
+      }).toEqual({
+        local: { id: `local`, title: `optimistic local` },
+        remote: { id: `remote`, title: `authoritative source` },
+        durableRemote: { id: `remote`, title: `authoritative source` },
+        localState: `persisting`,
+      })
+
+      allowDemand.resolve()
+      await atPersistedOracleCheckpoint(
+        localReceipt,
+        `mutation demand after source publication`,
+      )
+      expect({
+        status: collection.status,
+        upstreamLoads,
+      }).toEqual({
+        status: `ready`,
+        upstreamLoads: 1,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      allowDemand.resolve()
+      collection._sync.unloadSubset(subset)
+      await cleanupPersistedOracle(
+        [
+          () => sourceReceipt?.catch(() => undefined),
+          () => localReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`queues independent demand behind normal source publication without rejecting it`, async () => {
+    const adapter = createRecordingAdapter()
+    const mutationEntered = createEventGate()
+    const releaseMutation = createEventGate()
+    let upstreamLoads = 0
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `independent-demand-behind-source-publication`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return {
+              loadSubset: () => {
+                upstreamLoads++
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const subset = { limit: 1 }
+    let localReceipt: Promise<unknown> | undefined
+    let sourceReceipt: Promise<void> | undefined
+    let demand: Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const local = createTransaction({
+        mutationFn: async () => {
+          mutationEntered.resolve()
+          await releaseMutation.promise
+        },
+      })
+      local.mutate(() => {
+        collection.insert({ id: `local`, title: `optimistic local` })
+      })
+      localReceipt = local.isPersisted.promise
+      void localReceipt.catch(() => undefined)
+      await mutationEntered.promise
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `remote`, title: `normal source` },
+      })
+      sourceReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void sourceReceipt.catch(() => undefined)
+      demand = Promise.resolve(collection._sync.loadSubset(subset)).then(
+        () => undefined,
+      )
+      void demand.catch(() => undefined)
+      const sourceSettlement = observeSettlement(sourceReceipt)
+      const demandSettlement = observeSettlement(demand)
+      await Promise.resolve()
+      expect({
+        source: sourceSettlement.read(),
+        demand: demandSettlement.read(),
+        status: collection.status,
+      }).toEqual({
+        source: { status: `pending` },
+        demand: { status: `pending` },
+        status: `ready`,
+      })
+
+      releaseMutation.resolve()
+      await atPersistedOracleCheckpoint(
+        Promise.all([localReceipt, sourceReceipt, demand]),
+        `independent demand after normal source publication`,
+      )
+      expect({
+        status: collection.status,
+        source: sourceSettlement.read(),
+        demand: demandSettlement.read(),
+        upstreamLoads,
+        durableRemote: adapter.rows.get(`remote`),
+      }).toEqual({
+        status: `ready`,
+        source: { status: `fulfilled`, value: undefined },
+        demand: { status: `fulfilled`, value: undefined },
+        upstreamLoads: 1,
+        durableRemote: { id: `remote`, title: `normal source` },
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseMutation.resolve()
+      collection._sync.unloadSubset(subset)
+      await cleanupPersistedOracle(
+        [
+          () => demand?.catch(() => undefined),
+          () => sourceReceipt?.catch(() => undefined),
+          () => localReceipt?.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`queues an immediate suffix behind held durability and fails it with the prefix`, async () => {
     const adapter = createRecordingAdapter()
     const coordinator = createCoordinatorHarness()
     const firstDurabilityEntered = createEventGate()
@@ -9749,6 +9958,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       void suffixReceipt.catch(() => undefined)
       const prefixSettlement = observeSettlement(prefixReceipt)
       const suffixSettlement = observeSettlement(suffixReceipt)
+      await Promise.resolve()
 
       expect({
         prefixPublic: stripVirtualProps(collection.get(`prefix`)),
@@ -9760,7 +9970,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         suffixDurable: adapter.rows.get(`suffix`),
       }).toEqual({
         prefixPublic: { id: `prefix`, title: `fails durability` },
-        suffixPublic: { id: `suffix`, title: `must not become durable` },
+        suffixPublic: undefined,
         prefixReceipt: { status: `pending` },
         suffixReceipt: { status: `pending` },
         durabilityCalls: 1,
@@ -9776,16 +9986,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ),
         `failed immediate prefix receipt`,
       )
-      const terminalError =
-        prefixOutcome.status === `rejected` ? prefixOutcome.reason : undefined
       const suffixOutcome = await atPersistedOracleCheckpoint(
         suffixReceipt.then(
           () => ({ status: `fulfilled` as const }),
           (reason: unknown) => ({ status: `rejected` as const, reason }),
         ),
-        `already-published immediate suffix receipt`,
+        `failed immediate suffix receipt`,
       )
-
+      const terminalError =
+        prefixOutcome.status === `rejected` ? prefixOutcome.reason : undefined
       expect({
         prefixStatus: prefixOutcome.status,
         terminalName:
@@ -9793,7 +10002,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         terminalCause:
           terminalError instanceof Error ? terminalError.cause : undefined,
         suffixStatus: suffixOutcome.status,
-        suffixExact:
+        suffixName:
+          suffixOutcome.status === `rejected` &&
+          suffixOutcome.reason instanceof Error
+            ? suffixOutcome.reason.name
+            : undefined,
+        sameTerminal:
           suffixOutcome.status === `rejected` &&
           suffixOutcome.reason === terminalError,
         durabilityCalls,
@@ -9809,7 +10023,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           path: [`database`, `wal`],
         }),
         suffixStatus: `rejected`,
-        suffixExact: true,
+        suffixName: `PersistedCollectionDurabilityError`,
+        sameTerminal: true,
         durabilityCalls: 1,
         suffixDurable: undefined,
         status: `error`,
@@ -10117,9 +10332,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`releases a reentrant internal reservation after a terminal failure`, async () => {
+  it(`closes a reentrant internal transaction after a terminal failure`, async () => {
     const adapter = createRecordingAdapter([
-      { id: `hydrated`, title: `starts reentrant reservation` },
+      { id: `hydrated`, title: `starts reentrant transaction` },
     ])
     const hydrationEntered = createEventGate()
     const releaseHydration = createEventGate()
@@ -10129,14 +10344,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       return [
         {
           key: `hydrated`,
-          value: { id: `hydrated`, title: `starts reentrant reservation` },
+          value: { id: `hydrated`, title: `starts reentrant transaction` },
         },
       ]
     })
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
-        id: `terminal-internal-reservation`,
+        id: `terminal-internal-transaction`,
         getKey: (row) => row.id,
         sync: {
           sync: (params) => {
@@ -10157,7 +10372,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         sourceParams.begin()
       }
     })
-    const terminalError = new Error(`terminal reservation failure`)
+    const terminalError = new Error(`terminal transaction failure`)
     let externalReceipt: Promise<void> | undefined
     let internalReceipt: Promise<void> | undefined
     let hasPrimaryFailure = false
@@ -10166,17 +10381,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const ready = collection.stateWhenReady()
       await atPersistedOracleCheckpoint(
         hydrationEntered.promise,
-        `reentrant reservation hydration entered`,
+        `reentrant transaction hydration entered`,
       )
       await vi.waitFor(() => expect(sourceParams).toBeDefined())
       releaseHydration.resolve()
-      await atPersistedOracleCheckpoint(ready, `reentrant reservation ready`)
+      await atPersistedOracleCheckpoint(ready, `reentrant transaction ready`)
       expect({
         internalReservationStarted,
         pendingMarkers: collection._state.pendingSyncedTransactions.length,
       }).toEqual({
         internalReservationStarted: true,
-        pendingMarkers: 1,
+        pendingMarkers: 0,
       })
 
       adapter.applyCommittedTx = () => Promise.reject(terminalError)
@@ -10206,7 +10421,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await expect(
         atPersistedOracleCheckpoint(
           internalReceipt,
-          `terminal internal reservation rejected`,
+          `terminal internal transaction rejected`,
         ),
       ).rejects.toMatchObject({ name: `PersistedCollectionDurabilityError` })
       expect({
@@ -10679,6 +10894,176 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           () => receipt?.catch(() => undefined),
           () => collection.cleanup(),
         ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects a source transaction that crosses a hydration cycle`, async () => {
+    const adapter = createRecordingAdapter()
+    const firstEntered = createEventGate()
+    const releaseFirst = createEventGate()
+    const secondEntered = createEventGate()
+    const releaseSecond = createEventGate()
+    let loads = 0
+    adapter.loadSubset = async () => {
+      loads++
+      if (loads === 1) {
+        firstEntered.resolve()
+        await releaseFirst.promise
+        return []
+      }
+      secondEntered.resolve()
+      await releaseSecond.promise
+      const value = { id: `shared`, title: `second hydration` }
+      adapter.rows.set(value.id, value)
+      adapter.rowMetadata.set(value.id, { owner: `second hydration` })
+      return [
+        {
+          key: value.id,
+          value,
+          metadata: adapter.rowMetadata.get(value.id),
+        },
+      ]
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `bounded-cross-hydration-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const firstOptions = { limit: 1 }
+    const secondOptions = { limit: 2 }
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      const first = Promise.resolve(collection._sync.loadSubset(firstOptions))
+      await firstEntered.promise
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `shared`, title: `source value` },
+      })
+      releaseFirst.resolve()
+      await first
+
+      const second = Promise.resolve(collection._sync.loadSubset(secondOptions))
+      await secondEntered.promise
+      expect(() => sourceParams.commit()).toThrow(
+        `cannot cross a hydration cycle`,
+      )
+      releaseSecond.resolve()
+      await second
+
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+        status: collection.status,
+      }).toEqual({
+        publicRow: { id: `shared`, title: `second hydration` },
+        durableRow: { id: `shared`, title: `second hydration` },
+        durableMetadata: { owner: `second hydration` },
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseFirst.resolve()
+      releaseSecond.resolve()
+      collection._sync.unloadSubset(firstOptions)
+      collection._sync.unloadSubset(secondOptions)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`rejects a source transaction begun before hydration and committed after it`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrationEntered = createEventGate()
+    const releaseHydration = createEventGate()
+    adapter.loadSubset = async () => {
+      hydrationEntered.resolve()
+      await releaseHydration.promise
+      const value = { id: `shared`, title: `hydrated value` }
+      adapter.rows.set(value.id, value)
+      adapter.rowMetadata.set(value.id, { owner: `hydration` })
+      return [
+        {
+          key: value.id,
+          value,
+          metadata: adapter.rowMetadata.get(value.id),
+        },
+      ]
+    }
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `bounded-hydration-bracketing-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const options = { limit: 1 }
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `shared`, title: `source value` },
+      })
+
+      const hydration = Promise.resolve(collection._sync.loadSubset(options))
+      await hydrationEntered.promise
+      releaseHydration.resolve()
+      await hydration
+
+      expect(() => sourceParams.commit()).toThrow(
+        `cannot cross a hydration cycle`,
+      )
+      expect({
+        publicRow: stripVirtualProps(collection.get(`shared`)),
+        durableRow: adapter.rows.get(`shared`),
+        durableMetadata: adapter.rowMetadata.get(`shared`),
+        status: collection.status,
+      }).toEqual({
+        publicRow: { id: `shared`, title: `hydrated value` },
+        durableRow: { id: `shared`, title: `hydrated value` },
+        durableMetadata: { owner: `hydration` },
+        status: `ready`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseHydration.resolve()
+      collection._sync.unloadSubset(options)
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
         hasPrimaryFailure,
       )
     }
@@ -12157,7 +12542,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`binds a transaction begun before hydration at its write and commit cut`, async () => {
+  it(`rejects a transaction begun before hydration at its write cut`, async () => {
     const requestFailure = new Error(`incremental subset rejected`)
     const baseline: Todo = {
       id: `shared`,
@@ -12190,7 +12575,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     )
     let load: Promise<void> | undefined
-    let receipt: Promise<void> | undefined
     let hasPrimaryFailure = false
 
     try {
@@ -12202,19 +12586,19 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       void load.catch(() => undefined)
       await loadEntered.promise
 
-      sourceParams.write({
-        type: `update`,
-        value: { id: baseline.id, title: `Source update` },
-      })
-      receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
-      const settlement = observeSettlement(receipt)
-      expect(settlement.read()).toEqual({ status: `pending` })
+      expect(() =>
+        sourceParams.write({
+          type: `update`,
+          value: { id: baseline.id, title: `Source update` },
+        }),
+      ).toThrow(`cannot cross a hydration cycle`)
+      expect(() => sourceParams.commit()).toThrow(
+        `cannot cross a hydration cycle`,
+      )
       rejectLoad.resolve()
 
       await expect(load).rejects.toBe(requestFailure)
-      await receipt
       expect({
-        receipt: settlement.read(),
         status: collection.status,
         publicError: collection._lifecycle.getSyncError(),
         publicRow: stripVirtualProps(collection.get(baseline.id)),
@@ -12223,20 +12607,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           ({ includeRows }) => includeRows === true,
         ).length,
       }).toEqual({
-        receipt: { status: `fulfilled` },
         status: `ready`,
         publicError: undefined,
-        publicRow: {
-          id: baseline.id,
-          title: `Source update`,
-          detail: baseline.detail,
-        },
-        durableRow: {
-          id: baseline.id,
-          title: `Source update`,
-          detail: baseline.detail,
-        },
-        recoverySnapshotCalls: 1,
+        publicRow: undefined,
+        durableRow: baseline,
+        recoverySnapshotCalls: 0,
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -12244,11 +12619,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } finally {
       rejectLoad.resolve()
       await cleanupPersistedOracle(
-        [
-          () => load?.catch(() => undefined),
-          () => receipt?.catch(() => undefined),
-          () => collection.cleanup(),
-        ],
+        [() => load?.catch(() => undefined), () => collection.cleanup()],
         hasPrimaryFailure,
       )
     }

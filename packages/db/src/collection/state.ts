@@ -73,7 +73,6 @@ type InternalChangeMessage<
     previousValue?: VirtualRowProps<TKey>
   }
 }
-
 export class CollectionStateManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
