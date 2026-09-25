@@ -553,14 +553,14 @@ function createPowerSyncCollectionConfig<
       // Registers a diff trigger for the entire table.
       function runEagerSync() {
         let onUnload: CleanupFn | void | null = null
+        let onUnloadStarted = false
 
-        start(async () => {
+        const startup = start(async () => {
           const cleanup = await restConfig.onLoad?.()
+          onUnload = cleanup
           if (abortController.signal.aborted) {
-            cleanup?.()
             return
           }
-          onUnload = cleanup
 
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
@@ -599,13 +599,51 @@ function createPowerSyncCollectionConfig<
           }
         })
 
-        return () => {
+        const invokeOnUnload = (): void | Promise<void> => {
+          if (onUnloadStarted || !onUnload) return
+          onUnloadStarted = true
+          const cleanup = onUnload
+          onUnload = null
+          return cleanup()
+        }
+
+        return async () => {
           database.logger.log({
             level: LogLevels.info,
             message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
           })
           abortController.abort()
-          onUnload?.()
+
+          let firstFailure: { error: unknown } | undefined
+          const tasks: Array<Promise<void>> = []
+          const collectOnUnload = () => {
+            try {
+              const result = invokeOnUnload()
+              if (result !== undefined) {
+                const task = Promise.resolve(result)
+                tasks.push(task)
+                void task.catch(() => undefined)
+              }
+            } catch (error) {
+              firstFailure ??= { error }
+            }
+          }
+          const settleTasks = async () => {
+            const outcomes = await Promise.allSettled(tasks.splice(0))
+            const rejected = outcomes.find(
+              (outcome): outcome is PromiseRejectedResult =>
+                outcome.status === `rejected`,
+            )
+            if (rejected) firstFailure ??= { error: rejected.reason }
+          }
+
+          // Invoke an already-installed callback in this stack, but also wait
+          // for startup to publish a callback acquired concurrently with abort.
+          collectOnUnload()
+          await Promise.allSettled([startup, settleTasks()])
+          collectOnUnload()
+          await settleTasks()
+          if (firstFailure) throw firstFailure.error
         }
       }
 

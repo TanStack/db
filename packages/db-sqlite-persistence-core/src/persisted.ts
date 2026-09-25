@@ -3991,6 +3991,7 @@ function createWrappedSyncConfig<
       }
 
       let sourceResult: SyncConfigRes = {}
+      let activeSourceSyncEntry: Promise<void> | undefined
       fullStartPromise = runtime.ensureStarted()
       // Startup can fail before the source reaches markReady or loadSubset,
       // which are the two eventual consumers of this outer adopting promise.
@@ -4005,9 +4006,18 @@ function createWrappedSyncConfig<
           return sourceResult
         }
 
-        sourceResult = normalizeSyncFnResult(
-          sourceSyncConfig.sync(wrappedParams),
-        )
+        let settleSourceSyncEntry!: () => void
+        activeSourceSyncEntry = new Promise<void>((resolve) => {
+          settleSourceSyncEntry = resolve
+        })
+        try {
+          sourceResult = normalizeSyncFnResult(
+            sourceSyncConfig.sync(wrappedParams),
+          )
+        } finally {
+          activeSourceSyncEntry = undefined
+          settleSourceSyncEntry()
+        }
         if (sourceResult.loadSubset) {
           const loadSubset = async (options: TransportedLoadSubsetOptions) => {
             if (startupState.cleanedUp) {
@@ -4037,6 +4047,10 @@ function createWrappedSyncConfig<
       return {
         cleanup: async () => {
           startupState.cleanedUp = true
+          // The optional source starts behind persistence metadata. If it
+          // reenters cleanup before returning, wait for that exact synchronous
+          // entry to publish its cleanup callback before sampling the result.
+          const sourceSyncEntry = activeSourceSyncEntry
           const cleanupError = new SyncTransactionAbortedError()
           for (const acquisition of acquisitions.values()) {
             acquisition.cancelAdmissionWait?.()
@@ -4049,7 +4063,9 @@ function createWrappedSyncConfig<
           transactionStack.length = 0
           let sourceCleanup: Promise<void>
           try {
-            sourceCleanup = Promise.resolve(sourceResult.cleanup?.())
+            sourceCleanup = sourceSyncEntry
+              ? sourceSyncEntry.then(() => sourceResult.cleanup?.())
+              : Promise.resolve(sourceResult.cleanup?.())
           } catch (error) {
             sourceCleanup = Promise.reject(error)
           }

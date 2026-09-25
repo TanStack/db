@@ -399,9 +399,11 @@ export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
  * Collection cleanup waits for a returned promise before publishing the
  * `cleaned-up` status or admitting a replacement sync run.
  * TypeScript permits Promise-returning functions where `() => void` is
- * expected, so the Promise must be explicit here to preserve and await it.
+ * expected, so the Promise branch must be explicit here to preserve and await
+ * it. Keeping the callable types separate also preserves contextual-void
+ * callbacks that return an incidental value.
  */
-export type CleanupFn = () => void | Promise<void>
+export type CleanupFn = (() => void) | (() => Promise<void>)
 
 export type SyncConfigRes = {
   cleanup?: CleanupFn

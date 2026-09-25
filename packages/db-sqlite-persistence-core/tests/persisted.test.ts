@@ -6340,7 +6340,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         process.off(`unhandledRejection`, captureUnhandled)
         warnings.mockRestore()
         await cleanupPersistedOracle(
-          [() => readiness, () => peer.cleanup()],
+          [() => readiness, () => collection.cleanup(), () => peer.cleanup()],
           hasPrimaryFailure,
         )
       }
@@ -6418,11 +6418,105 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } finally {
       cleanupGate.resolve()
       await cleanupPersistedOracle(
-        [() => replacementReady, () => replacement?.cleanup()],
+        [
+          () => replacementReady,
+          () => oldCollection.cleanup(),
+          () => replacement?.cleanup(),
+        ],
         hasPrimaryFailure,
       )
     }
   })
+
+  it.each([`fulfill`, `reject`] as const)(
+    `awaits cleanup returned after reentrant persisted source retirement: %s`,
+    async (outcome) => {
+      const adapter = createRecordingAdapter()
+      const sourceEntered = createEventGate()
+      const cleanupGate = createEventGate()
+      const sourceError = new Error(`reentrant source cleanup failed`)
+      let cleanupCalls = 0
+      let cleanupFromReentry: Promise<void> | undefined
+      let reenterCleanup = true
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `reentrant-persisted-source-cleanup-${outcome}`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ collection: publicCollection, markReady }) => {
+              if (!reenterCleanup) {
+                markReady()
+                return
+              }
+              reenterCleanup = false
+              cleanupFromReentry = publicCollection.cleanup()
+              sourceEntered.resolve()
+              return {
+                cleanup: () => {
+                  cleanupCalls++
+                  return cleanupGate.promise.then(() => {
+                    if (outcome === `reject`) throw sourceError
+                  })
+                },
+              }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      let cleanupSettled = false
+      let hasPrimaryFailure = false
+
+      try {
+        collection.startSyncImmediate()
+        await atPersistedOracleCheckpoint(
+          sourceEntered.promise,
+          `reentrant persisted source entered`,
+        )
+        if (!cleanupFromReentry) {
+          throw new Error(`reentrant cleanup was not captured`)
+        }
+        void cleanupFromReentry.then(
+          () => {
+            cleanupSettled = true
+          },
+          () => {
+            cleanupSettled = true
+          },
+        )
+        await flushAsyncWork()
+
+        expect({ cleanupCalls, cleanupSettled }).toEqual({
+          cleanupCalls: 1,
+          cleanupSettled: false,
+        })
+
+        cleanupGate.resolve()
+        if (outcome === `reject`) {
+          await expect(cleanupFromReentry).rejects.toMatchObject({
+            name: `SyncCleanupError`,
+            cause: sourceError,
+          })
+        } else {
+          await expect(cleanupFromReentry).resolves.toBeUndefined()
+        }
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(cleanupCalls).toBe(1)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        cleanupGate.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => cleanupFromReentry?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   it(`marks a targeted invalidation commit-receipt rejection terminal`, async () => {
     const id = `targeted-invalidation-receipt`

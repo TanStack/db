@@ -103,6 +103,7 @@ describe(`Sync Streams`, () => {
 
     const onLoadMock = vi.fn()
     const onUnloadMock = vi.fn()
+    const unloaded: Array<string> = []
 
     const collection = createCollection(
       powerSyncCollectionOptions({
@@ -113,6 +114,7 @@ describe(`Sync Streams`, () => {
 
           return () => {
             onUnloadMock()
+            return unloaded.push(`done`)
           }
         },
       }),
@@ -124,10 +126,67 @@ describe(`Sync Streams`, () => {
       expect(onUnloadMock).not.toHaveBeenCalled()
       await collection.cleanup()
       expect(onUnloadMock).toHaveBeenCalledOnce()
+      expect(unloaded).toEqual([`done`])
     } finally {
       await collection.cleanup()
     }
   })
+
+  it.each([`fulfill`, `reject`] as const)(
+    `eager mode: awaits asynchronous hook cleanup: %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      const cleanupGate = pDefer<void>()
+      const cleanupError = new Error(`eager hook cleanup failed`)
+      const cleanupHook = vi.fn(() =>
+        cleanupGate.promise.then(() => {
+          if (outcome === `reject`) throw cleanupError
+        }),
+      )
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          onLoad: () => cleanupHook,
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        let cleanupSettled = false
+        const cleanupOutcome = collection.cleanup().then(
+          () => {
+            cleanupSettled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            cleanupSettled = true
+            return { status: `rejected` as const, error }
+          },
+        )
+        await Promise.resolve()
+
+        expect(cleanupHook).toHaveBeenCalledOnce()
+        expect(cleanupSettled).toBe(false)
+        expect(collection.status).toBe(`ready`)
+
+        cleanupGate.resolve()
+        const cleanupResult = await cleanupOutcome
+        if (outcome === `reject`) {
+          expect(cleanupResult).toMatchObject({
+            status: `rejected`,
+            error: { name: `SyncCleanupError`, cause: cleanupError },
+          })
+        } else {
+          expect(cleanupResult).toEqual({ status: `fulfilled` })
+        }
+        expect(collection.status).toBe(`cleaned-up`)
+      } finally {
+        cleanupGate.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`eager mode: reports an initial load failure`, async () => {
     const db = await createDatabase()
@@ -150,8 +209,9 @@ describe(`Sync Streams`, () => {
   it(`eager mode: releases a load hook that resolves after cleanup`, async () => {
     const db = await createDatabase()
     const releaseLoad = pDefer<void>()
+    const releaseCleanup = pDefer<void>()
     const loadStarted = pDefer<void>()
-    const cleanupLoad = vi.fn()
+    const cleanupLoad = vi.fn(() => releaseCleanup.promise)
     const createDiffTrigger = vi
       .spyOn(db.triggers, `createDiffTrigger`)
       .mockResolvedValue(async () => {})
@@ -171,18 +231,28 @@ describe(`Sync Streams`, () => {
       () => ({ status: `fulfilled` as const }),
       (error: unknown) => ({ status: `rejected` as const, error }),
     )
+    let cleanupSettled = false
     try {
       await loadStarted.promise
-      await collection.cleanup()
+      const cleanup = collection.cleanup().then(() => {
+        cleanupSettled = true
+      })
+      await Promise.resolve()
+      expect(cleanupSettled).toBe(false)
       expect(await outcome).toMatchObject({
         status: `rejected`,
         error: { name: `AbortError` },
       })
       releaseLoad.resolve()
       await vi.waitFor(() => expect(cleanupLoad).toHaveBeenCalledOnce())
+      expect(cleanupSettled).toBe(false)
       expect(createDiffTrigger).not.toHaveBeenCalled()
+      releaseCleanup.resolve()
+      await cleanup
+      expect(cleanupSettled).toBe(true)
     } finally {
       releaseLoad.resolve()
+      releaseCleanup.resolve()
       await collection.cleanup()
       await outcome
       await vi.waitFor(() => expect(cleanupLoad).toHaveBeenCalledOnce())

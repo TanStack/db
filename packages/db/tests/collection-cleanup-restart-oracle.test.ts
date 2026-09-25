@@ -6,14 +6,21 @@ import type { SyncConfig } from '../src/types'
 /**
  * Cleanup is a closed admission interval, not merely a final status value.
  *
+ * Authority comes from the public `Collection.cleanup()` contract and the
+ * cleanup term in the contributing glossary. This suite refines core
+ * cleanup/restart admission; it does not establish full demand/replay
+ * histories, provider transport shutdown, persistence-wrapper behavior, or
+ * general row-publication laws.
+ *
  * The history enters cleanup, re-enters start/preload from abort or release
  * callbacks, and may request nested cleanup. The model admits no replacement
- * owner until the first cleanup promise settles: every reentrant start must
- * fail, the original load and release occur once, and subscriber count reaches
- * zero. When adapter cleanup returns a promise, final status and replacement
- * admission wait for its settlement. Concurrent callers share that boundary.
- * Rejection still finalizes the old run once, then rejects every waiter. A
- * later ordinary preload is a new generation and must work.
+ * owner until adapter cleanup settles and the terminal status publishes: every
+ * earlier reentrant start must fail, the original load and release occur once,
+ * and subscriber count reaches zero. A status listener may restart from that
+ * terminal event before the public cleanup promise settles; awaiting cleanup
+ * is the ordinary external restart boundary. Concurrent callers share the
+ * promise. Rejection still finalizes the old run once, then rejects every
+ * waiter. A later ordinary preload is a new generation and must work.
  *
  * Counts, errors, status, rows, and ownership are all observed. Checking only
  * `cleaned-up` would miss leaked or duplicated physical resources.
@@ -38,6 +45,7 @@ describe(`Collection cleanup admission oracle`, () => {
     let cleanups = 0
     let sourceCleanupSettled = false
     const statuses: Array<string> = []
+    const settlementOrder: Array<string> = []
     const collection = createCollection<Row>({
       getKey: (row) => row.id,
       sync: {
@@ -49,6 +57,7 @@ describe(`Collection cleanup admission oracle`, () => {
               cleanups++
               return cleanupGate.promise.then(() => {
                 sourceCleanupSettled = true
+                settlementOrder.push(`adapter-cleanup-settled`)
               })
             },
           }
@@ -57,6 +66,9 @@ describe(`Collection cleanup admission oracle`, () => {
     })
     const off = collection.on(`status:change`, ({ status }) => {
       statuses.push(status)
+      if (status === `cleaned-up`) {
+        settlementOrder.push(`cleaned-up-event`)
+      }
     })
 
     try {
@@ -65,6 +77,9 @@ describe(`Collection cleanup admission oracle`, () => {
 
       const firstCleanup = collection.cleanup()
       const concurrentCleanup = collection.cleanup()
+      void firstCleanup.then(() => {
+        settlementOrder.push(`public-cleanup-promise-continuation`)
+      })
 
       expect(sourceCleanupSettled).toBe(false)
       expect(collection.status).toBe(`ready`)
@@ -81,6 +96,11 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(sourceCleanupSettled).toBe(true)
       expect(collection.status).toBe(`cleaned-up`)
       expect(statuses).toEqual([`cleaned-up`])
+      expect(settlementOrder).toEqual([
+        `adapter-cleanup-settled`,
+        `cleaned-up-event`,
+        `public-cleanup-promise-continuation`,
+      ])
 
       await expect(collection.cleanup()).resolves.toBeUndefined()
       expect(cleanups).toBe(1)
