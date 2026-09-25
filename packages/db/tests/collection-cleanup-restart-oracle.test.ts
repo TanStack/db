@@ -1,35 +1,100 @@
-import { describe, expect, it } from 'vitest'
-import { createCollection, createLiveQueryCollection } from '../src'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  createCollection,
+  createEffect,
+  createLiveQueryCollection,
+} from '../src'
 import { createDeferred } from '../src/deferred'
 import type { SyncConfig } from '../src/types'
 
 /**
- * Cleanup is a closed admission interval, not merely a final status value.
+ * # When does cleanup become observable?
  *
  * Authority comes from the public `Collection.cleanup()` contract and the
- * cleanup term in the contributing glossary. This suite refines core
- * cleanup/restart admission; it does not establish full demand/replay
- * histories, provider transport shutdown, persistence-wrapper behavior, or
- * general row-publication laws.
+ * cleanup and cleanup-start terms in the contributing glossary. Cleanup has
+ * two boundaries. Cleanup start synchronously closes restart admission and
+ * puts dependent live queries in terminal error while marking dependent Effects
+ * disposed. Cleanup settlement publishes `cleaned-up` and settles the public
+ * cleanup promise only after adapter cleanup settles. Cleanup start is internal;
+ * it is not a Collection status and does not prove that adapter resources have
+ * been released.
  *
- * The history enters cleanup, re-enters start/preload from abort or release
- * callbacks, and may request nested cleanup. The model admits no replacement
- * owner until adapter cleanup settles and the terminal status publishes: every
- * earlier reentrant start must fail, the original load and release occur once,
- * and subscriber count reaches zero. A status listener may restart from that
- * terminal event before the public cleanup promise settles; awaiting cleanup
- * is the ordinary external restart boundary. Concurrent callers share the
- * promise. Rejection still finalizes the old run once, then rejects every
- * waiter. A later ordinary preload is a new generation and must work.
+ * The two-phase history grammar starts with a ready source and either a live
+ * query or Effect dependent. It invokes cleanup, holds adapter cleanup, checks
+ * the cleanup-start observation, releases the adapter, and checks cleanup
+ * settlement. Adjacent histories re-enter start or preload from abort and
+ * release callbacks, request nested cleanup, or reject adapter cleanup.
  *
- * Counts, errors, status, rows, and ownership are all observed. Checking only
- * `cleaned-up` would miss leaked or duplicated physical resources.
+ * `expectedCleanupBoundary` is a small independent timeline model. Its
+ * `dependent` field combines the live query's terminal error and the Effect's
+ * disposed state because both observations mean the dependent can no longer
+ * use the discarded sync run. At cleanup start, status retains the prior public
+ * value while cleanup remains pending. At settlement, restart admission opens,
+ * status becomes `cleaned-up`, and cleanup is settled. The model does not
+ * reproduce manager callbacks or adapter machinery. The terminal status event
+ * precedes the public cleanup promise continuation; a status listener may
+ * restart at that event. Adjacent event-restart histories cover that smaller
+ * interval outside this two-checkpoint model.
+ *
+ * The production driver calls the real cleanup, live-query, and Effect entry
+ * points. Refinement checks run before releasing the controlled adapter gate
+ * and after the cleanup promise settles. Counts, exact errors, status, rows,
+ * ownership, and settlement are observed. This suite does not establish full
+ * demand/replay histories, transport shutdown, persistence-wrapper behavior,
+ * or general row-publication laws.
  */
 
 type Row = { id: number; rank: number }
 const cleanupError = {
   name: `CollectionStateError`,
   message: expect.stringContaining(`after cleanup() completes`),
+}
+
+type CleanupBoundary = `cleanup-start` | `cleanup-settlement`
+type CleanupBoundaryObservation<TStatus extends string> = {
+  restartAdmission: `closed` | `open`
+  collectionStatus: TStatus | `cleaned-up`
+  cleanup: `pending` | `settled`
+  dependent: `active` | `terminal`
+}
+
+/** Independent two-phase law for observations at each cleanup checkpoint. */
+function expectedCleanupBoundary<TStatus extends string>(
+  priorStatus: TStatus,
+  boundary: CleanupBoundary,
+): CleanupBoundaryObservation<TStatus> {
+  if (boundary === `cleanup-start`) {
+    return {
+      restartAdmission: `closed`,
+      collectionStatus: priorStatus,
+      cleanup: `pending`,
+      dependent: `terminal`,
+    }
+  }
+  return {
+    restartAdmission: `open`,
+    collectionStatus: `cleaned-up`,
+    cleanup: `settled`,
+    dependent: `terminal`,
+  }
+}
+
+function observeRestartAdmission(start: () => void): `closed` | `open` {
+  try {
+    start()
+    return `open`
+  } catch (error) {
+    expect(error).toMatchObject(cleanupError)
+    return `closed`
+  }
+}
+
+function observeCleanupSettlement(settled: boolean): `pending` | `settled` {
+  return settled ? `settled` : `pending`
+}
+
+function observeDependent(active: boolean): `active` | `terminal` {
+  return active ? `active` : `terminal`
 }
 
 const scenarios = ([`abort`, `release`] as const).flatMap((boundary) =>
@@ -81,20 +146,25 @@ describe(`Collection cleanup admission oracle`, () => {
         settlementOrder.push(`public-cleanup-promise-continuation`)
       })
 
+      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
       expect(sourceCleanupSettled).toBe(false)
-      expect(collection.status).toBe(`ready`)
+      expect(collection.status).toBe(atCleanupStart.collectionStatus)
       expect(statuses).toEqual([])
       expect(cleanups).toBe(1)
       expect(concurrentCleanup).toBe(firstCleanup)
-      expect(() => collection.startSyncImmediate()).toThrowError(
-        expect.objectContaining(cleanupError),
-      )
+      expect(
+        observeRestartAdmission(() => collection.startSyncImmediate()),
+      ).toBe(atCleanupStart.restartAdmission)
 
       cleanupGate.resolve()
       await Promise.all([firstCleanup, concurrentCleanup])
 
+      const atCleanupSettlement = expectedCleanupBoundary(
+        `ready`,
+        `cleanup-settlement`,
+      )
       expect(sourceCleanupSettled).toBe(true)
-      expect(collection.status).toBe(`cleaned-up`)
+      expect(collection.status).toBe(atCleanupSettlement.collectionStatus)
       expect(statuses).toEqual([`cleaned-up`])
       expect(settlementOrder).toEqual([
         `adapter-cleanup-settled`,
@@ -105,13 +175,147 @@ describe(`Collection cleanup admission oracle`, () => {
       await expect(collection.cleanup()).resolves.toBeUndefined()
       expect(cleanups).toBe(1)
 
-      collection.startSyncImmediate()
+      expect(
+        observeRestartAdmission(() => collection.startSyncImmediate()),
+      ).toBe(atCleanupSettlement.restartAdmission)
       expect(starts).toBe(2)
       expect(collection.status).toBe(`ready`)
     } finally {
       cleanupGate.resolve()
       off()
       await collection.cleanup()
+    }
+  })
+
+  it(`rejects dependent preload when cleanup starts before terminal settlement`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const loadGate = createDeferred<void>()
+    const loadEntered = createDeferred<void>()
+    const source = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              loadEntered.resolve()
+              return loadGate.promise
+            },
+            cleanup: () => cleanupGate.promise,
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) => q.from({ row: source }))
+    const message =
+      `Source collection '${source.id}' was manually cleaned up while live query '${live.id}' depends on it. ` +
+      `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const preload = live.preload().then(
+      () => ({ status: `fulfilled` as const }),
+      (error: unknown) => ({ status: `rejected` as const, error }),
+    )
+
+    try {
+      await loadEntered.promise
+      let cleanupSettled = false
+      const cleanup = source.cleanup().then(() => {
+        cleanupSettled = true
+      })
+
+      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
+      expect(source.status).toBe(atCleanupStart.collectionStatus)
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupStart.cleanup,
+      )
+      expect(observeDependent(live.status !== `error`)).toBe(
+        atCleanupStart.dependent,
+      )
+      expect(await preload).toMatchObject({
+        status: `rejected`,
+        error: { message },
+      })
+
+      cleanupGate.resolve()
+      await cleanup
+      expect(source.status).toBe(`cleaned-up`)
+      expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
+    } finally {
+      cleanupGate.resolve()
+      loadGate.resolve()
+      reports.mockRestore()
+      await live.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it(`disposes a dependent Effect when cleanup starts before terminal settlement`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const sourceErrors: Array<Error> = []
+    let adapterCleanupStarted = 0
+    const source = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            cleanup: () => {
+              adapterCleanupStarted++
+              return cleanupGate.promise
+            },
+          }
+        },
+      },
+    })
+    const effect = createEffect({
+      query: (q) => q.from({ row: source }),
+      onBatch: () => {},
+      onSourceError: (error) => sourceErrors.push(error),
+    })
+
+    try {
+      expect(effect.disposed).toBe(false)
+      expect(source.subscriberCount).toBe(1)
+
+      let cleanupSettled = false
+      const cleanup = source.cleanup().then(() => {
+        cleanupSettled = true
+      })
+      const atCleanupStart = expectedCleanupBoundary(`ready`, `cleanup-start`)
+
+      expect(adapterCleanupStarted).toBe(1)
+      expect(source.status).toBe(atCleanupStart.collectionStatus)
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupStart.cleanup,
+      )
+      expect(observeDependent(!effect.disposed)).toBe(atCleanupStart.dependent)
+      expect(source.subscriberCount).toBe(0)
+      expect(sourceErrors).toEqual([
+        expect.objectContaining({
+          message: `Source collection '${source.id}' was cleaned up while effect depends on it`,
+        }),
+      ])
+
+      cleanupGate.resolve()
+      await cleanup
+      const atCleanupSettlement = expectedCleanupBoundary(
+        `ready`,
+        `cleanup-settlement`,
+      )
+
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupSettlement.cleanup,
+      )
+      expect(source.status).toBe(atCleanupSettlement.collectionStatus)
+      expect(observeDependent(!effect.disposed)).toBe(
+        atCleanupSettlement.dependent,
+      )
+      expect(sourceErrors).toHaveLength(1)
+    } finally {
+      cleanupGate.resolve()
+      await effect.dispose()
+      await source.cleanup()
     }
   })
 

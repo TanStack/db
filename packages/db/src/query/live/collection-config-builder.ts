@@ -116,6 +116,7 @@ export class CollectionConfigBuilder<
   private isInErrorState = false
   private fatalQueryError = false
   private readonly erroredSourceIds = new Set<string>()
+  private readonly cleaningSourceIds = new Set<string>()
   private lastSubsetError: unknown | undefined
 
   // Reference to the live query collection for error state transitions
@@ -788,6 +789,7 @@ export class CollectionConfigBuilder<
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
+    this.cleaningSourceIds.clear()
     this.lastSubsetError = undefined
     // Store config and syncState as instance properties for the duration of this sync run
     this.currentSyncConfig = config
@@ -883,6 +885,7 @@ export class CollectionConfigBuilder<
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
+    this.cleaningSourceIds.clear()
 
     // Clear all pending graph runs to prevent memory leaks from in-flight transactions
     // that may flush after the sync run ends
@@ -1180,10 +1183,7 @@ export class CollectionConfigBuilder<
     // Handle manual cleanup - this should not happen due to GC prevention,
     // but could happen if user manually calls cleanup()
     if (status === `cleaned-up`) {
-      this.transitionToError(
-        `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
-          `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
-      )
+      this.handleSourceCleanupStart(sourceId, collectionId)
       return
     }
 
@@ -1201,6 +1201,15 @@ export class CollectionConfigBuilder<
 
     // Update ready status based on all source collections
     this.updateLiveQueryStatus(config)
+  }
+
+  private handleSourceCleanupStart(sourceId: string, collectionId: string) {
+    if (this.cleaningSourceIds.has(sourceId)) return
+    this.cleaningSourceIds.add(sourceId)
+    this.transitionToError(
+      `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
+        `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
+    )
   }
 
   /**
@@ -1299,6 +1308,11 @@ export class CollectionConfigBuilder<
         this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
       syncState.unsubscribeCallbacks.add(statusUnsubscribe)
+      syncState.unsubscribeCallbacks.add(
+        collection._onCleanupStart(() => {
+          this.handleSourceCleanupStart(sourceId, collectionId)
+        }),
+      )
 
       // The source may have failed before this live query subscribed. Register
       // the listener first, then reconcile that current state so no transition

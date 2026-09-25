@@ -54,6 +54,7 @@ export class CollectionLifecycleManager<
   private statusRevision = 0
   private cleaningUp = false
   private cleanupPromise: Promise<void> | null = null
+  private readonly cleanupStartCallbacks = new Set<() => void>()
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -233,6 +234,17 @@ export class CollectionLifecycleManager<
   }
 
   /**
+   * Observe the synchronous start of cleanup without treating it as terminal
+   * resource settlement. Internal dependents use this to retire work before
+   * an asynchronous adapter cleanup publishes `cleaned-up`.
+   */
+  public onCleanupStart(callback: () => void): () => void {
+    this.cleanupStartCallbacks.add(callback)
+    if (this.cleaningUp) callback()
+    return () => this.cleanupStartCallbacks.delete(callback)
+  }
+
+  /**
    * Start the garbage collection timer for a collection with no subscribers
    * Called when sync starts outside a subscription
    */
@@ -363,6 +375,10 @@ export class CollectionLifecycleManager<
         firstFailure ??= { error }
       }
     }
+
+    // Dependents must stop using the discarded sync run immediately, while
+    // the public status and cleanup promise still wait for adapter settlement.
+    attempt(() => runAllCallbacks([...this.cleanupStartCallbacks]))
 
     const finish = (syncFailure?: { error: unknown }) => {
       if (finished) return

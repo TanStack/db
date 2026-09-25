@@ -691,6 +691,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         }
       })
       this.unsubscribeCallbacks.add(statusUnsubscribe)
+      this.unsubscribeCallbacks.add(
+        collection._onCleanupStart(() => {
+          if (this.disposed) return
+          this.onSourceError(
+            new Error(
+              `Source collection '${collectionId}' was cleaned up while effect depends on it`,
+            ),
+          )
+        }),
+      )
     }
 
     // Mark as subscribed so the graph can start running

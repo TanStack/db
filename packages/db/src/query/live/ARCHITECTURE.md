@@ -640,6 +640,22 @@ source rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
 
+Collection cleanup has two boundaries. Cleanup start is an internal synchronous
+boundary. It closes restart admission, invalidates the current sync run, detaches
+its demand, puts dependent live queries in terminal error, and marks dependent
+Effects disposed. Both dependent transitions happen before adapter cleanup
+settles. This prevents either dependent from using work that belongs to the
+discarded sync run. The Effect becomes disposed and releases its source
+subscription synchronously. Its disposal promise may still wait for in-flight
+handlers; cleanup start does not prove those handlers settled.
+
+Cleanup start is not a Collection status or resource-settlement signal. The
+source Collection keeps its prior public status while adapter cleanup is
+pending. After adapter cleanup settles and local teardown finishes, the
+Collection publishes `cleaned-up` and settles its public cleanup promise. A
+cleanup-start observer therefore cannot infer that provider sessions,
+transports, or other adapter resources have been released.
+
 Restart is not allowed inside an active cleanup callback. `startSyncImmediate()`
 throws `CollectionStateError` and `preload()` rejects with it before acquiring
 new work. Nested cleanup does not open a new lifecycle turn. The Collection
@@ -1164,6 +1180,11 @@ create recursive Collection machinery.
     materialization cells, visible rows, the current private replay state, and
     required Collection facades—not with settled historical replay attempts or
     raw delta history.
+14. **Cleanup:** cleanup start synchronously closes restart admission, puts
+    dependent live queries in terminal error, and marks dependent Effects
+    disposed. The source Collection keeps its prior status until adapter cleanup
+    settles; only then does it publish `cleaned-up` and settle its cleanup
+    promise.
 
 ## Glossary
 
@@ -1216,6 +1237,7 @@ keep the meanings defined there.
 | Failed replay retention, peer isolation, and explicit consumer-only recovery        | `packages/db/tests/query/replay-failure-boundary.test.ts`                    |
 | Replay lease balance, reference-counted peers, and failed-start recovery            | `packages/db/tests/replay-adapter-ownership.test.ts`                         |
 | Reachable nested shape                                                              | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
+| Cleanup-start invalidation, settlement, and restart admission                       | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

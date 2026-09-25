@@ -671,12 +671,15 @@ function createPowerSyncCollectionConfig<
         }
         type DemandCleanupCollector = {
           tasks: Array<Promise<unknown>>
+          ownedTasks: Set<Promise<unknown>>
           failure?: { error: unknown }
         }
 
         const demands = new Map<LoadSubsetOptions, DemandRecord>()
         const releasedSubsets = new WeakSet<LoadSubsetOptions>()
         const pendingReleases: Array<PendingRelease> = []
+        const pendingDemandLoads = new Set<Promise<void>>()
+        const pendingDemandCleanups = new Set<Promise<unknown>>()
         let stopped = false
         let trackingRevision = 0
         let reconciledTrackingRevision = 0
@@ -833,14 +836,21 @@ function createPowerSyncCollectionConfig<
             options.signal?.aborted ||
             demands.get(options) !== demand
           ) {
-            demands.delete(options)
-            demand.cleanup?.()
+            cleanupDemand(demand)
             return
           }
 
           demand.active = true
           trackingRevision++
           await rebuildTracking()
+        }
+
+        const trackLoadSubset = (options: LoadSubsetOptions): Promise<void> => {
+          const task = loadSubset(options)
+          pendingDemandLoads.add(task)
+          const finish = () => pendingDemandLoads.delete(task)
+          void task.then(finish, finish)
+          return task
         }
 
         const toInlinedWhereClause = (compiled: {
@@ -866,15 +876,25 @@ function createPowerSyncCollectionConfig<
         const cleanupDemand = (demand: DemandRecord): void => {
           demands.delete(demand.options)
           try {
-            const result: unknown = demand.cleanup?.()
+            const cleanup = demand.cleanup
+            demand.cleanup = undefined
+            const result: unknown = cleanup?.()
             if (!isPromiseLike(result)) return
 
             const task = Promise.resolve(result)
+            pendingDemandCleanups.add(task)
+            const finish = () => pendingDemandCleanups.delete(task)
+            void task.then(finish, finish)
             if (demandCleanupCollector) {
               demandCleanupCollector.tasks.push(task)
+              demandCleanupCollector.ownedTasks.add(task)
               void task.catch(() => undefined)
             } else {
-              void task.catch(reportDemandCleanupFailure)
+              void task.catch((error) => {
+                if (!demandCleanupCollector?.ownedTasks.has(task)) {
+                  reportDemandCleanupFailure(error)
+                }
+              })
             }
           } catch (error) {
             if (demandCleanupCollector) {
@@ -1000,20 +1020,32 @@ function createPowerSyncCollectionConfig<
               message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             })
             abortController.abort()
-            const collector: DemandCleanupCollector = { tasks: [] }
+            const trackingDisposal = disposeTrackingAfterAbort()
+            const pendingLoads = [...pendingDemandLoads]
+            const collector: DemandCleanupCollector = {
+              tasks: [],
+              ownedTasks: new Set(),
+            }
             demandCleanupCollector = collector
+            collector.tasks.push(...pendingDemandCleanups)
+            for (const task of pendingDemandCleanups) {
+              collector.ownedTasks.add(task)
+            }
             for (const demand of demands.values()) {
               cleanupDemand(demand)
             }
             pendingReleases.length = 0
 
-            if (collector.tasks.length === 0) {
-              demandCleanupCollector = null
-              if (collector.failure) throw collector.failure.error
-              return
-            }
-
             return (async () => {
+              const ownershipSettlements = await Promise.allSettled([
+                trackingDisposal,
+                ...pendingLoads,
+              ])
+              const disposalSettlement = ownershipSettlements[0]
+              if (disposalSettlement.status === `rejected`) {
+                collector.failure ??= { error: disposalSettlement.reason }
+              }
+
               let settledTasks = 0
               while (settledTasks < collector.tasks.length) {
                 const tasks = collector.tasks.slice(settledTasks)
@@ -1034,7 +1066,7 @@ function createPowerSyncCollectionConfig<
               }
             })
           },
-          loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
+          loadSubset: trackLoadSubset,
           unloadSubset,
         }
       }

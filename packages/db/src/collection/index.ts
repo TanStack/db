@@ -604,6 +604,11 @@ export class CollectionImpl<
     this._sync.startSync()
   }
 
+  /** @internal Subscribe to the synchronous cleanup-start boundary. */
+  public _onCleanupStart(callback: () => void): () => void {
+    return this._lifecycle.onCleanupStart(callback)
+  }
+
   /** @internal */
   public _setTransactionScope(transactionScope: TransactionScope): void {
     this._mutations.setTransactionScope(transactionScope)

@@ -533,6 +533,88 @@ describe(`Sync Streams`, () => {
     },
   )
 
+  it.each([`fulfill`, `reject`] as const)(
+    `on-demand mode: settles already-released hook cleanup with collection cleanup: %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const cleanupGate = pDefer<void>()
+      const cleanupError = new Error(`released hook cleanup failed`)
+      const cleanupHook = vi.fn(() =>
+        cleanupGate.promise.then(() => {
+          if (outcome === `reject`) throw cleanupError
+        }),
+      )
+      const disposeTracking = vi.fn(async () => {})
+      const createDiffTrigger = vi
+        .spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValue(disposeTracking)
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset: () => cleanupHook,
+        }),
+      )
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`)),
+      })
+      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const unhandled: Array<unknown> = []
+      const onUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, onUnhandled)
+
+      try {
+        await query.preload()
+        await query.cleanup()
+        expect(cleanupHook).toHaveBeenCalledOnce()
+        await vi.waitFor(() => expect(disposeTracking).toHaveBeenCalledOnce())
+
+        let cleanupSettled = false
+        const cleanupOutcome = collection.cleanup().then(
+          () => {
+            cleanupSettled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            cleanupSettled = true
+            return { status: `rejected` as const, error }
+          },
+        )
+        await new Promise((resolve) => setImmediate(resolve))
+
+        expect(cleanupSettled).toBe(false)
+        expect(collection.status).toBe(`ready`)
+
+        cleanupGate.resolve()
+        const cleanupResult = await cleanupOutcome
+        if (outcome === `reject`) {
+          expect(cleanupResult).toMatchObject({
+            status: `rejected`,
+            error: { name: `SyncCleanupError`, cause: cleanupError },
+          })
+        } else {
+          expect(cleanupResult).toEqual({ status: `fulfilled` })
+        }
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(unhandled).toEqual([])
+        expect(cleanupHook).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`cleaned-up`)
+      } finally {
+        cleanupGate.resolve()
+        process.removeListener(`unhandledRejection`, onUnhandled)
+        reports.mockRestore()
+        createDiffTrigger.mockRestore()
+        await query.cleanup()
+        await collection.cleanup().catch(() => undefined)
+      }
+    },
+  )
+
   it(`on-demand mode: classifies acquired cleanup by its runtime promise shape`, async () => {
     const db = await createDatabase()
     await createTestProducts(db)
@@ -647,94 +729,208 @@ describe(`Sync Streams`, () => {
     }
   })
 
-  it(`disposes a subset hook that resolves after collection cleanup`, async () => {
-    const db = await createDatabase()
-    await createTestProducts(db)
-    const hook = pDefer<() => void>()
-    const hookEntered = pDefer<void>()
-    const cleanupHook = vi.fn()
-    const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
-
-    const collection = createCollection(
-      powerSyncCollectionOptions({
-        database: db,
-        table: APP_SCHEMA.props.products,
-        syncMode: `on-demand`,
-        onLoadSubset: () => {
-          hookEntered.resolve()
-          return hook.promise
-        },
-      }),
-    )
-    await collection.stateWhenReady().catch(async (error: unknown) => {
-      await collection.cleanup()
-      createDiffTrigger.mockRestore()
-      throw error
-    })
-    const query = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ product: collection })
-          .where(({ product }) => eq(product.category, `electronics`))
-          .select(({ product }) => ({
-            id: product.id,
-            name: product.name,
-            price: product.price,
-            category: product.category,
-          })),
-    })
-    const publications: Array<unknown> = []
-    const subscription = query.subscribeChanges((changes) => {
-      publications.push(
-        changes.map(({ type, key, value }) => ({
-          type,
-          key,
-          value: { ...value },
-        })),
+  it.each([`fulfill`, `reject`] as const)(
+    `on-demand mode: awaits asynchronous trigger disposal: %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      const disposeGate = pDefer<void>()
+      const disposeError = new Error(`on-demand trigger disposal failed`)
+      const disposeTracking = vi.fn(() =>
+        disposeGate.promise.then(() => {
+          if (outcome === `reject`) throw disposeError
+        }),
       )
-    })
-    const preload = query.preload().then(
-      () => ({ status: `fulfilled` as const }),
-      (error: unknown) => ({ status: `rejected` as const, error }),
-    )
-    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const unexpected: Array<unknown> = []
-    const recordUnhandled = (error: unknown) => unexpected.push(error)
-    process.on(`unhandledRejection`, recordUnhandled)
-    const message =
-      `Source collection '${collection.id}' was manually cleaned up while live query '${query.id}' depends on it. ` +
-      `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
-    await withTestCleanup(async () => {
-      await hookEntered.promise
-      expect(cleanupHook).not.toHaveBeenCalled()
-      expect(createDiffTrigger).not.toHaveBeenCalled()
-      expect(query.status).toBe(`loading`)
-      await collection.cleanup()
-      const expected = { status: `rejected`, error: new Error(message) }
-      expect(await preload).toEqual(expected)
-      hook.resolve(cleanupHook)
-      await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
-      expect(createDiffTrigger).not.toHaveBeenCalled()
-      expect(collection.status).toBe(`cleaned-up`)
-      expect(query.status).toBe(`error`)
-      expect(query.toArray).toEqual([])
-      expect(collection.size).toBe(0)
-      expect(publications.flat()).toEqual([])
-      expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
-    }, [
-      () => hook.resolve(cleanupHook),
-      () => subscription.unsubscribe(),
-      () => query.cleanup(),
-      () => collection.cleanup(),
-      () => preload,
-      () => vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce()),
-      () => new Promise((resolve) => setTimeout(resolve, 0)),
-      () =>
-        expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]]),
-      () => expect(unexpected).toEqual([]),
-      () => process.off(`unhandledRejection`, recordUnhandled),
-      () => reports.mockRestore(),
-      () => createDiffTrigger.mockRestore(),
-    ])
-  })
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(
+        disposeTracking,
+      )
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+        }),
+      )
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`)),
+      })
+      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+      try {
+        await query.preload()
+        expect(disposeTracking).not.toHaveBeenCalled()
+
+        let cleanupSettled = false
+        const cleanupOutcome = collection.cleanup().then(
+          () => {
+            cleanupSettled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            cleanupSettled = true
+            return { status: `rejected` as const, error }
+          },
+        )
+
+        expect(disposeTracking).toHaveBeenCalledOnce()
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(cleanupSettled).toBe(false)
+        expect(collection.status).toBe(`ready`)
+        expect(query.status).toBe(`error`)
+
+        disposeGate.resolve()
+        const cleanupResult = await cleanupOutcome
+        if (outcome === `reject`) {
+          expect(cleanupResult).toMatchObject({
+            status: `rejected`,
+            error: { name: `SyncCleanupError`, cause: disposeError },
+          })
+        } else {
+          expect(cleanupResult).toEqual({ status: `fulfilled` })
+        }
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(disposeTracking).toHaveBeenCalledOnce()
+      } finally {
+        disposeGate.resolve()
+        reports.mockRestore()
+        await query.cleanup()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`fulfill`, `reject`] as const)(
+    `settles a subset hook that resolves after collection cleanup: %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const hook = pDefer<() => Promise<void>>()
+      const hookEntered = pDefer<void>()
+      const cleanupGate = pDefer<void>()
+      const cleanupError = new Error(`late subset cleanup failed`)
+      const cleanupHook = vi.fn(() =>
+        cleanupGate.promise.then(() => {
+          if (outcome === `reject`) throw cleanupError
+        }),
+      )
+      const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
+
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset: () => {
+            hookEntered.resolve()
+            return hook.promise
+          },
+        }),
+      )
+      await collection.stateWhenReady().catch(async (error: unknown) => {
+        await collection.cleanup()
+        createDiffTrigger.mockRestore()
+        throw error
+      })
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`))
+            .select(({ product }) => ({
+              id: product.id,
+              name: product.name,
+              price: product.price,
+              category: product.category,
+            })),
+      })
+      const publications: Array<unknown> = []
+      const subscription = query.subscribeChanges((changes) => {
+        publications.push(
+          changes.map(({ type, key, value }) => ({
+            type,
+            key,
+            value: { ...value },
+          })),
+        )
+      })
+      const preload = query.preload().then(
+        () => ({ status: `fulfilled` as const }),
+        (error: unknown) => ({ status: `rejected` as const, error }),
+      )
+      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const unexpected: Array<unknown> = []
+      const recordUnhandled = (error: unknown) => unexpected.push(error)
+      process.on(`unhandledRejection`, recordUnhandled)
+      const message =
+        `Source collection '${collection.id}' was manually cleaned up while live query '${query.id}' depends on it. ` +
+        `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+      await withTestCleanup(async () => {
+        await hookEntered.promise
+        expect(cleanupHook).not.toHaveBeenCalled()
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+        expect(query.status).toBe(`loading`)
+        let cleanupSettled = false
+        const cleanupOutcome = collection.cleanup().then(
+          () => {
+            cleanupSettled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            cleanupSettled = true
+            return { status: `rejected` as const, error }
+          },
+        )
+
+        expect(collection.status).toBe(`ready`)
+        expect(cleanupSettled).toBe(false)
+        expect(query.status).toBe(`error`)
+        const expected = { status: `rejected`, error: new Error(message) }
+        expect(await preload).toEqual(expected)
+        hook.resolve(cleanupHook)
+        await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
+        expect(cleanupSettled).toBe(false)
+        expect(collection.status).toBe(`ready`)
+        expect(createDiffTrigger).not.toHaveBeenCalled()
+
+        cleanupGate.resolve()
+        const cleanupResult = await cleanupOutcome
+        if (outcome === `reject`) {
+          expect(cleanupResult).toMatchObject({
+            status: `rejected`,
+            error: { name: `SyncCleanupError`, cause: cleanupError },
+          })
+        } else {
+          expect(cleanupResult).toEqual({ status: `fulfilled` })
+        }
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(unexpected).toEqual([])
+        expect(cleanupHook).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(query.status).toBe(`error`)
+        expect(query.toArray).toEqual([])
+        expect(collection.size).toBe(0)
+        expect(publications.flat()).toEqual([])
+        expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
+      }, [
+        () => hook.resolve(cleanupHook),
+        () => cleanupGate.resolve(),
+        () => subscription.unsubscribe(),
+        () => query.cleanup(),
+        () => collection.cleanup().catch(() => undefined),
+        () => preload,
+        () => vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce()),
+        () => new Promise((resolve) => setTimeout(resolve, 0)),
+        () =>
+          expect(reports.mock.calls).toEqual([
+            [`[Live Query Error] ${message}`],
+          ]),
+        () => expect(unexpected).toEqual([]),
+        () => process.off(`unhandledRejection`, recordUnhandled),
+        () => reports.mockRestore(),
+        () => createDiffTrigger.mockRestore(),
+      ])
+    },
+  )
 })

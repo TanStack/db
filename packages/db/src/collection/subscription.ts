@@ -248,7 +248,7 @@ export class CollectionSubscription
     this.truncateCleanup = this.collection.on(`truncate`, () => {
       this.handleTruncate()
     })
-    this.collectionCleanup = this.collection.on(`status:cleaned-up`, () => {
+    this.collectionCleanup = this.collection._onCleanupStart(() => {
       this.handleCollectionCleanup()
     })
     this.collectionRestartCleanup = this.collection.on(
