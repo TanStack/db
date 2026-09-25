@@ -2151,7 +2151,7 @@ describe(`QueryCollection`, () => {
       expect(options.onDelete).toBeDefined()
     })
 
-    it(`should call handlers with a scoped refetch collection view`, async () => {
+    it(`should preserve handler parameter identity`, async () => {
       const queryKey = [`handlerTest`]
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
@@ -2235,8 +2235,8 @@ describe(`QueryCollection`, () => {
       await options.onUpdate!(updateMockParams)
       await options.onDelete!(deleteMockParams)
 
-      // The scoped view preserves the transaction and Collection behavior while
-      // giving handler-local refetch calls their non-circular fetch boundary.
+      // Phase tracking gives handler-local refetch calls their non-circular
+      // fetch boundary without replacing public objects.
       for (const [handler, expected] of [
         [onInsert, insertMockParams],
         [onUpdate, updateMockParams],
@@ -2245,8 +2245,8 @@ describe(`QueryCollection`, () => {
         expect(handler).toHaveBeenCalledOnce()
         const actual = handler.mock.calls[0]![0]
         expect(actual.transaction).toBe(expected.transaction)
-        expect(actual.collection).not.toBe(expected.collection)
-        expect(actual.collection.utils).not.toBe(expected.collection.utils)
+        expect(actual.collection).toBe(expected.collection)
+        expect(actual.collection.utils).toBe(expected.collection.utils)
       }
     })
 

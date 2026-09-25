@@ -131,15 +131,16 @@ async function runCleanups(): Promise<void> {
  * is blocked by a persisting mutation or active handler, every call uses the
  * Query fetch boundary, including an overlapping external call.
  *
- * The handler receives a scoped Collection view whose refetch also keeps the
- * Query fetch boundary so it cannot await the transaction that invoked it.
- * The handler parameter and every matching mutation alias share that scoped
- * view. They are not identity-equal to the external Collection. Code can use
- * either scoped path, but an identity-keyed external registry does not match
- * them. The same acyclic fetch boundary applies when a manual transaction,
+ * The handler parameter and every matching mutation alias preserve the real
+ * external Collection identity. This keeps strict equality and identity-keyed
+ * registries valid inside shared persistence handlers. Handler activity keeps
+ * refetch at the Query fetch boundary without replacing those public objects.
+ * The same acyclic fetch boundary applies when a manual transaction,
  * `createOptimisticAction`, or a direct handler awaits a captured Collection:
- * those documented forms do not receive the scoped handler parameter but
- * still cannot wait on publication blocked by their own transaction.
+ * those documented forms still cannot wait on publication blocked by their
+ * own transaction. The phase law applies in both start orders. A refresh that
+ * begins first must change to the fetch boundary if a mutation starts before
+ * its result application can publish.
  *
  * Model mapping:
  * - `callId` and `resultId` are model-only identities for one public call and
@@ -154,9 +155,9 @@ async function runCleanups(): Promise<void> {
  *   separate source even when it occurs while that fetch is active.
  * - `HandlerRefetchBoundaryModel` excludes the causally queued Collection
  *   application from the handler call while retaining its later error record.
- * - `HandlerCollectionScopeObservation` is a model-only projection of strict
- *   identity and identity-keyed registry results. It does not reproduce Proxy
- *   construction. Its bounded grammar exhausts insert, update, and delete;
+ * - `HandlerIdentityObservation` is a model-only projection of strict
+ *   transaction, mutation, and Collection identity plus identity-keyed
+ *   registry results. Its bounded grammar exhausts insert, update, and delete;
  *   handler parameter and mutation-alias access; and refetch and clearError.
  * - `MutationRefreshLivenessModel` is a wait-for graph. Its mutation, fetch,
  *   and application nodes map to the user transaction, Query promise, and
@@ -177,9 +178,10 @@ async function runCleanups(): Promise<void> {
  * result identity and causal source control call settlement; accepted values
  * control publication; `throwOnError` distinguishes rejection from suppressed
  * failure; separate calls retain the outcome of a superseded caller. Handler
- * scope identity is observed only within one invocation. Identity across
- * invocations is not promised. Direct Collection handlers own one Collection,
- * so unrelated multi-Collection mutation aliases are outside this driver.
+ * Collection identity is observed through the parameter, matching mutation
+ * aliases, and identity-keyed registries. Direct Collection handlers own one
+ * Collection, so unrelated multi-Collection mutation aliases are outside this
+ * driver.
  *
  * Embedded ORC-012 review record for this extension: ORC-001 through 006 and
  * ORC-008 through 010 apply and are evidenced by this prose, independent
@@ -486,7 +488,7 @@ function observeRefetchCallSettlement(model: RefetchCallSettlementModel): {
 }
 
 /**
- * A handler-scoped refetch has one Query fetch obligation. Its accepted
+ * A handler-phase refetch has one Query fetch obligation. Its accepted
  * Collection application remains outside the handler boundary because that
  * application is queued behind the invoking mutation transaction. A later
  * application failure is recorded by Collection error utilities; it cannot
@@ -562,10 +564,17 @@ type MutationRefreshInvocation =
   | `optimistic-action`
   | `captured-handler-collection`
   | `external-handler-overlap`
+  | `external-persisted-application-overlap`
+
+type MutationRefreshSchedule =
+  | `mutation-first`
+  | `refresh-first-during-fetch`
+  | `refresh-first-during-application`
 
 type MutationRefreshHistory = {
   invocation: MutationRefreshInvocation
   operation: MutationRefreshOperation
+  schedule: MutationRefreshSchedule
 }
 
 const mutationRefreshInvocations = [
@@ -573,12 +582,38 @@ const mutationRefreshInvocations = [
   `optimistic-action`,
   `captured-handler-collection`,
   `external-handler-overlap`,
+  `external-persisted-application-overlap`,
 ] as const
 const mutationRefreshOperations = [`refetch`, `clearError`] as const
-const mutationRefreshHistoryGrammar: ReadonlyArray<MutationRefreshHistory> =
-  mutationRefreshInvocations.flatMap((invocation) =>
-    mutationRefreshOperations.map((operation) => ({ invocation, operation })),
-  )
+const mutationRefreshHistoryGrammar: ReadonlyArray<MutationRefreshHistory> = [
+  ...mutationRefreshInvocations
+    .filter(
+      (invocation) =>
+        invocation !== `external-handler-overlap` &&
+        invocation !== `external-persisted-application-overlap`,
+    )
+    .flatMap((invocation) =>
+      mutationRefreshOperations.map((operation) => ({
+        invocation,
+        operation,
+        schedule: `mutation-first` as const,
+      })),
+    ),
+  ...mutationRefreshOperations.flatMap((operation) =>
+    ([`mutation-first`, `refresh-first-during-fetch`] as const).map(
+      (schedule) => ({
+        invocation: `external-handler-overlap` as const,
+        operation,
+        schedule,
+      }),
+    ),
+  ),
+  ...mutationRefreshOperations.map((operation) => ({
+    invocation: `external-persisted-application-overlap` as const,
+    operation,
+    schedule: `refresh-first-during-application` as const,
+  })),
+]
 
 type MutationRefreshLivenessModel = {
   fetch: `pending` | `fulfilled` | `rejected`
@@ -674,15 +709,17 @@ type HandlerCollectionHistory = {
   operation: HandlerCollectionOperation
 }
 
-type HandlerCollectionScopeObservation = HandlerCollectionHistory & {
+type HandlerIdentityObservation = HandlerCollectionHistory & {
   matchingAliasCount: number
+  transactionIsExternal: boolean
+  allMutationsPreserveIdentity: boolean
   parameterIsExternal: boolean
   allAliasesMatchParameter: boolean
   anyAliasMatchesExternal: boolean
   externalMapMatchesAnyAlias: boolean
-  scopedMapMatchesAllAliases: boolean
+  parameterMapMatchesAllAliases: boolean
   externalWeakMapMatchesAnyAlias: boolean
-  scopedWeakMapMatchesAllAliases: boolean
+  parameterWeakMapMatchesAllAliases: boolean
 }
 
 const mutationHandlerKinds = [`insert`, `update`, `delete`] as const
@@ -701,34 +738,36 @@ const handlerCollectionHistoryGrammar: ReadonlyArray<HandlerCollectionHistory> =
   )
 
 /**
- * A direct mutation handler receives one scoped Collection capability. Every
- * matching mutation alias has that same identity. The external Collection has
- * a different identity, so registries keyed by either object follow the same
- * partition. The model records only this public equality relation.
+ * A direct mutation handler receives the real Collection. Every matching
+ * mutation alias preserves that identity. Strict equality and registries keyed
+ * by the external or parameter reference therefore select the same mutations.
+ * The model records only this public equality relation.
  */
-function observeHandlerCollectionScope(
+function observeHandlerIdentity(
   history: HandlerCollectionHistory,
   matchingAliasCount: number,
-): HandlerCollectionScopeObservation {
+): HandlerIdentityObservation {
   if (matchingAliasCount < 1) {
     throw new Error(`A direct handler requires a matching mutation alias`)
   }
   return {
     ...history,
     matchingAliasCount,
-    parameterIsExternal: false,
+    transactionIsExternal: true,
+    allMutationsPreserveIdentity: true,
+    parameterIsExternal: true,
     allAliasesMatchParameter: true,
-    anyAliasMatchesExternal: false,
-    externalMapMatchesAnyAlias: false,
-    scopedMapMatchesAllAliases: true,
-    externalWeakMapMatchesAnyAlias: false,
-    scopedWeakMapMatchesAllAliases: true,
+    anyAliasMatchesExternal: true,
+    externalMapMatchesAnyAlias: true,
+    parameterMapMatchesAllAliases: true,
+    externalWeakMapMatchesAnyAlias: true,
+    parameterWeakMapMatchesAllAliases: true,
   }
 }
 
-function expectHandlerCollectionScopeObservation(
-  actual: HandlerCollectionScopeObservation,
-  expected: HandlerCollectionScopeObservation,
+function expectHandlerIdentityObservation(
+  actual: HandlerIdentityObservation,
+  expected: HandlerIdentityObservation,
 ): void {
   expect(actual).toEqual(expected)
 }
@@ -1541,7 +1580,7 @@ describe(`query collection ownership lifecycle`, () => {
     })
   })
 
-  it(`enumerates every direct handler scope history exactly once`, () => {
+  it(`enumerates every direct handler identity history exactly once`, () => {
     const historyKeys = handlerCollectionHistoryGrammar.map(
       ({ handlerKind, accessPath, operation }) =>
         `${handlerKind}:${accessPath}:${operation}`,
@@ -1563,28 +1602,28 @@ describe(`query collection ownership lifecycle`, () => {
     expect(new Set(historyKeys).size).toBe(historyKeys.length)
   })
 
-  it(`rejects handler scope identity wrong-result controls`, () => {
+  it(`rejects handler identity wrong-result controls`, () => {
     const history = handlerCollectionHistoryGrammar[0]!
-    const expected = observeHandlerCollectionScope(history, 2)
-    const mutants: Array<HandlerCollectionScopeObservation> = [
-      { ...expected, parameterIsExternal: true },
+    const expected = observeHandlerIdentity(history, 2)
+    const mutants: Array<HandlerIdentityObservation> = [
+      { ...expected, transactionIsExternal: false },
+      { ...expected, allMutationsPreserveIdentity: false },
+      { ...expected, parameterIsExternal: false },
       { ...expected, allAliasesMatchParameter: false },
-      { ...expected, anyAliasMatchesExternal: true },
-      { ...expected, externalMapMatchesAnyAlias: true },
-      { ...expected, scopedMapMatchesAllAliases: false },
-      { ...expected, externalWeakMapMatchesAnyAlias: true },
-      { ...expected, scopedWeakMapMatchesAllAliases: false },
+      { ...expected, anyAliasMatchesExternal: false },
+      { ...expected, externalMapMatchesAnyAlias: false },
+      { ...expected, parameterMapMatchesAllAliases: false },
+      { ...expected, externalWeakMapMatchesAnyAlias: false },
+      { ...expected, parameterWeakMapMatchesAllAliases: false },
     ]
 
     for (const mutant of mutants) {
-      expect(() =>
-        expectHandlerCollectionScopeObservation(mutant, expected),
-      ).toThrow()
+      expect(() => expectHandlerIdentityObservation(mutant, expected)).toThrow()
     }
     expect(() =>
-      expectHandlerCollectionScopeObservation(expected, expected),
+      expectHandlerIdentityObservation(expected, expected),
     ).not.toThrow()
-    expect(() => observeHandlerCollectionScope(history, 0)).toThrow(
+    expect(() => observeHandlerIdentity(history, 0)).toThrow(
       `requires a matching mutation alias`,
     )
   })
@@ -2333,22 +2372,23 @@ describe(`query collection ownership lifecycle`, () => {
       ({ invocation }) => invocation === `external-handler-overlap`,
     ),
   )(
-    `settles an external $operation at fetch during a mutation handler`,
-    async ({ operation }) => {
+    `settles an external $operation at fetch with $schedule overlap`,
+    async ({ operation, schedule }) => {
       const initial = { ...shared, name: `Initial` }
       const authoritative = { ...shared, name: `Authoritative` }
+      const refreshResult = createDeferred<Array<Item>>()
       const handlerStarted = createDeferred<void>()
       const releaseHandler = createDeferred<void>()
       const queryClient = createQueryClient()
       const queryFn = vi
         .fn<() => Promise<Array<Item>>>()
         .mockResolvedValueOnce([initial])
-        .mockResolvedValueOnce([authoritative])
+        .mockReturnValueOnce(refreshResult.promise)
       const collection = createCollection(
         queryCollectionOptions<Item>({
-          id: `external-${operation}-overlaps-handler`,
+          id: `external-${operation}-${schedule}-overlaps-handler`,
           queryClient,
-          queryKey: [`external-${operation}-overlaps-handler`],
+          queryKey: [`external-${operation}-${schedule}-overlaps-handler`],
           queryFn,
           getKey: (item) => item.id,
           startSync: true,
@@ -2360,16 +2400,13 @@ describe(`query collection ownership lifecycle`, () => {
         }),
       )
       cleanups.push(async () => {
+        refreshResult.resolve([authoritative])
         releaseHandler.resolve()
         await collection.cleanup()
         queryClient.clear()
       })
       await collection.stateWhenReady()
 
-      const mutation = collection.update(shared.id, (draft) => {
-        draft.name = `Optimistic`
-      })
-      await handlerStarted.promise
       let model: MutationRefreshLivenessModel = {
         fetch: `pending`,
         application: `unaccepted`,
@@ -2377,21 +2414,42 @@ describe(`query collection ownership lifecycle`, () => {
         throwOnError: true,
       }
       let refetchOutcome: RefetchApplicationOutcome = `pending`
-      const refresh = (
-        operation === `refetch`
-          ? collection.utils.refetch({ throwOnError: true })
-          : collection.utils.clearError()
-      ).then(
-        (result) => {
-          refetchOutcome = `resolved`
-          return result
-        },
-        (error: unknown) => {
-          refetchOutcome = `rejected`
-          throw error
-        },
-      )
-      void refresh.catch(() => {})
+      const startRefresh = () => {
+        const refresh = (
+          operation === `refetch`
+            ? collection.utils.refetch({ throwOnError: true })
+            : collection.utils.clearError()
+        ).then(
+          (result) => {
+            refetchOutcome = `resolved`
+            return result
+          },
+          (error: unknown) => {
+            refetchOutcome = `rejected`
+            throw error
+          },
+        )
+        void refresh.catch(() => {})
+        return refresh
+      }
+      const startMutation = () =>
+        collection.update(shared.id, (draft) => {
+          draft.name = `Optimistic`
+        })
+
+      let mutation: ReturnType<typeof startMutation>
+      let refresh: ReturnType<typeof startRefresh>
+      if (schedule === `mutation-first`) {
+        mutation = startMutation()
+        await handlerStarted.promise
+        refresh = startRefresh()
+      } else {
+        refresh = startRefresh()
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        mutation = startMutation()
+        await handlerStarted.promise
+      }
+      refreshResult.resolve([authoritative])
       await vi.waitFor(() => {
         expect(queryFn).toHaveBeenCalledTimes(2)
         expect(collection.utils.isFetching).toBe(false)
@@ -2427,7 +2485,134 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
-  it(`rejects an application-boundary mutant for a mutation-owned refresh`, () => {
+  it.each(
+    mutationRefreshHistoryGrammar.filter(
+      ({ invocation }) =>
+        invocation === `external-persisted-application-overlap`,
+    ),
+  )(
+    `settles an external $operation when mutation starts during persisted application preparation`,
+    async ({ operation }) => {
+      const id = `external-${operation}-persisted-application-overlap`
+      const queryHash = hashKey([id])
+      const initial = { ...shared, name: `Initial` }
+      const authoritative = { ...shared, name: `Authoritative` }
+      const optimistic = {
+        id: `optimistic`,
+        category: `mutation`,
+        name: `Optimistic`,
+      }
+      const initialScan =
+        createDeferred<
+          Array<{ key: string | number; value: Item; metadata?: unknown }>
+        >()
+      const applicationScan =
+        createDeferred<
+          Array<{ key: string | number; value: Item; metadata?: unknown }>
+        >()
+      const refreshResult = createDeferred<Array<Item>>()
+      const persistence = createDeferred<void>()
+      const scanPersistedRows = vi
+        .fn()
+        .mockReturnValueOnce(initialScan.promise)
+        .mockReturnValueOnce(applicationScan.promise)
+      const { collection, queryFn } = createOwnershipFixture({
+        id,
+        syncMode: `eager`,
+        results: [[initial], refreshResult.promise],
+        scanPersistedRows,
+        setupMetadata: (metadata) =>
+          metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+            queryHash,
+            mode: `until-revalidated`,
+          }),
+      })
+      cleanups.push(() => {
+        initialScan.resolve([])
+        applicationScan.resolve([])
+        refreshResult.resolve([authoritative])
+        persistence.resolve()
+        return Promise.resolve()
+      })
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledOnce()
+        expect(scanPersistedRows).toHaveBeenCalledOnce()
+      })
+
+      let model: MutationRefreshLivenessModel = {
+        fetch: `pending`,
+        application: `unaccepted`,
+        boundary: `fetch`,
+        throwOnError: true,
+      }
+      let refetchOutcome: RefetchApplicationOutcome = `pending`
+      const refresh = (
+        operation === `refetch`
+          ? collection.utils.refetch({ throwOnError: true })
+          : collection.utils.clearError()
+      ).then(
+        (result) => {
+          refetchOutcome = `resolved`
+          return result
+        },
+        (error: unknown) => {
+          refetchOutcome = `rejected`
+          throw error
+        },
+      )
+      void refresh.catch(() => undefined)
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      refreshResult.resolve([authoritative])
+      await vi.waitFor(() => {
+        expect(collection.utils.isFetching).toBe(false)
+        expect(scanPersistedRows).toHaveBeenCalledTimes(2)
+      })
+
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() => collection.insert(optimistic))
+      void transaction.isPersisted.promise.catch(() => undefined)
+      applicationScan.resolve([])
+      model = reduceMutationRefreshLiveness(model, {
+        type: `accept-application`,
+      })
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-fetch`,
+        outcome: `fulfilled`,
+      })
+      await vi.waitFor(() =>
+        expect(refetchOutcome).toBe(
+          observeMutationRefreshLiveness(model).refresh,
+        ),
+      )
+      expect(collection.get(shared.id)?.name).not.toBe(authoritative.name)
+
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await refresh
+      model = reduceMutationRefreshLiveness(model, {
+        type: `settle-application`,
+        outcome: `fulfilled`,
+      })
+      await vi.waitFor(() =>
+        expect(collection.get(shared.id)?.name).toBe(authoritative.name),
+      )
+      expect({ refresh: refetchOutcome, application: `resolved` }).toEqual(
+        observeMutationRefreshLiveness(model),
+      )
+    },
+  )
+
+  it(`rejects a call-entry-only boundary mutant for refresh-first overlap`, () => {
+    const history = mutationRefreshHistoryGrammar.find(
+      ({ invocation, operation, schedule }) =>
+        invocation === `external-handler-overlap` &&
+        operation === `refetch` &&
+        schedule === `refresh-first-during-fetch`,
+    )
+    expect(history).toBeDefined()
     let model: MutationRefreshLivenessModel = {
       fetch: `pending`,
       application: `unaccepted`,
@@ -2443,21 +2628,22 @@ describe(`query collection ownership lifecycle`, () => {
     })
 
     const expected = observeMutationRefreshLiveness(model)
-    const applicationBoundaryMutant = observeMutationRefreshLiveness({
+    const callEntryOnlyMutant = observeMutationRefreshLiveness({
       ...model,
       boundary: `application`,
     })
 
     expect(expected).toEqual({ refresh: `resolved`, application: `pending` })
-    expect(applicationBoundaryMutant).not.toEqual(expected)
+    expect(callEntryOnlyMutant).not.toEqual(expected)
   })
 
-  it(`enumerates every mutation-owned refresh history exactly once`, () => {
-    expect(mutationRefreshHistoryGrammar).toHaveLength(8)
+  it(`enumerates every mutation refresh history exactly once`, () => {
+    expect(mutationRefreshHistoryGrammar).toHaveLength(12)
     expect(
       new Set(
         mutationRefreshHistoryGrammar.map(
-          ({ invocation, operation }) => `${invocation}:${operation}`,
+          ({ invocation, operation, schedule }) =>
+            `${invocation}:${operation}:${schedule}`,
         ),
       ).size,
     ).toBe(mutationRefreshHistoryGrammar.length)
@@ -2746,7 +2932,7 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   it.each(handlerCollectionHistoryGrammar)(
-    `scopes $handlerKind handler $accessPath $operation`,
+    `preserves $handlerKind handler identity through $accessPath $operation`,
     async (history) => {
       const { handlerKind, accessPath, operation } = history
       const initial = [
@@ -2777,7 +2963,9 @@ describe(`query collection ownership lifecycle`, () => {
         .mockResolvedValueOnce(initial)
         .mockReturnValueOnce(refresh.promise)
       const externalCollectionReference: { current?: object } = {}
-      let scopeObservation: HandlerCollectionScopeObservation | undefined
+      const inspectIdentity = createDeferred<void>()
+      const externalTransactionReference: { current?: object } = {}
+      let identityObservation: HandlerIdentityObservation | undefined
       let handlerOutcome: RefetchApplicationOutcome = `pending`
       const handleMutation = async (
         actualHandlerKind: MutationHandlerKind,
@@ -2791,30 +2979,41 @@ describe(`query collection ownership lifecycle`, () => {
           mutations: ReadonlyArray<{ collection: unknown }>
         },
       ): Promise<{ refetch: false }> => {
+        await inspectIdentity.promise
         const externalCollection = externalCollectionReference.current
         if (!externalCollection) {
           throw new Error(`The external Collection is not available`)
         }
+        const externalTransaction = externalTransactionReference.current
+        if (!externalTransaction) {
+          throw new Error(`The external transaction is not available`)
+        }
+        const externalMutations = (externalTransaction as typeof transaction)
+          .mutations
         const aliases = transaction.mutations.map(
           ({ collection: mutationCollection }) => mutationCollection as object,
         )
         const externalMap = new Map<object, string>([
           [externalCollection, `external`],
         ])
-        const scopedMap = new Map<object, string>([
-          [handlerCollection, `scoped`],
+        const parameterMap = new Map<object, string>([
+          [handlerCollection, `parameter`],
         ])
         const externalWeakMap = new WeakMap<object, string>([
           [externalCollection, `external`],
         ])
-        const scopedWeakMap = new WeakMap<object, string>([
-          [handlerCollection, `scoped`],
+        const parameterWeakMap = new WeakMap<object, string>([
+          [handlerCollection, `parameter`],
         ])
-        scopeObservation = {
+        identityObservation = {
           handlerKind: actualHandlerKind,
           accessPath,
           operation,
           matchingAliasCount: aliases.length,
+          transactionIsExternal: transaction === externalTransaction,
+          allMutationsPreserveIdentity: transaction.mutations.every(
+            (mutation, index) => mutation === externalMutations[index],
+          ),
           parameterIsExternal: handlerCollection === externalCollection,
           allAliasesMatchParameter: aliases.every(
             (alias) => alias === handlerCollection,
@@ -2825,14 +3024,14 @@ describe(`query collection ownership lifecycle`, () => {
           externalMapMatchesAnyAlias: aliases.some((alias) =>
             externalMap.has(alias),
           ),
-          scopedMapMatchesAllAliases: aliases.every((alias) =>
-            scopedMap.has(alias),
+          parameterMapMatchesAllAliases: aliases.every((alias) =>
+            parameterMap.has(alias),
           ),
           externalWeakMapMatchesAnyAlias: aliases.some((alias) =>
             externalWeakMap.has(alias),
           ),
-          scopedWeakMapMatchesAllAliases: aliases.every((alias) =>
-            scopedWeakMap.has(alias),
+          parameterWeakMapMatchesAllAliases: aliases.every((alias) =>
+            parameterWeakMap.has(alias),
           ),
         }
         const refetchCollection =
@@ -2872,6 +3071,7 @@ describe(`query collection ownership lifecycle`, () => {
       )
       externalCollectionReference.current = collection
       cleanups.push(async () => {
+        inspectIdentity.resolve()
         refresh.resolve(authoritative)
         await collection.cleanup()
         queryClient.clear()
@@ -2895,15 +3095,19 @@ describe(`query collection ownership lifecycle`, () => {
                 },
               )
             : collection.delete(initial.map(({ id }) => id))
+      externalTransactionReference.current = mutation
+      inspectIdentity.resolve()
       void mutation.isPersisted.promise.catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
       expect(handlerOutcome).toBe(observeHandlerRefetchBoundary(model).refetch)
-      if (!scopeObservation) {
-        throw new Error(`The mutation handler did not record its scoped view`)
+      if (!identityObservation) {
+        throw new Error(
+          `The mutation handler did not record Collection identity`,
+        )
       }
-      expectHandlerCollectionScopeObservation(
-        scopeObservation,
-        observeHandlerCollectionScope(history, 2),
+      expectHandlerIdentityObservation(
+        identityObservation,
+        observeHandlerIdentity(history, 2),
       )
 
       refresh.resolve(authoritative)
@@ -3017,7 +3221,7 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
-  it(`records a handler-scoped application failure after fetch settlement`, async () => {
+  it(`records a handler-phase application failure after fetch settlement`, async () => {
     const initial = { ...shared, name: `Initial` }
     const invalid = { ...shared, name: `Invalid` }
     const applicationError = new Error(`Handler application failed`)

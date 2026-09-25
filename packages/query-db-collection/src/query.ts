@@ -815,7 +815,7 @@ export function queryCollectionOptions(
   // obligation merely because it happened before the call returned.
   type FetchApplicationRecord = {
     result?: QueryObserverResult<any, any>
-    application?: Promise<void>
+    settlement?: Promise<void>
   }
   const resultApplicationSettlements = new WeakMap<
     QueryObserverResult<any, any>,
@@ -877,7 +877,7 @@ export function queryCollectionOptions(
     return record
   }
 
-  const getResultApplication = (
+  const getRecordedResultApplicationSettlement = (
     hashedQueryKey: string,
     result: QueryObserverResult<any, any>,
   ): Promise<void> | undefined =>
@@ -894,8 +894,11 @@ export function queryCollectionOptions(
         hashedQueryKey,
       )
       record.result = result
-      const application = getResultApplication(hashedQueryKey, result)
-      if (application) record.application = application
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        result,
+      )
+      if (settlement) record.settlement = settlement
     }
   }
 
@@ -907,8 +910,11 @@ export function queryCollectionOptions(
     if (!recordsByHash) return
     for (const [hashedQueryKey, record] of recordsByHash) {
       if (!record.result) continue
-      const application = getResultApplication(hashedQueryKey, record.result)
-      if (application) record.application = application
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        record.result,
+      )
+      if (settlement) record.settlement = settlement
     }
   }
 
@@ -1088,6 +1094,7 @@ export function queryCollectionOptions(
     const failedResultApplications = new Map<string, unknown>()
     type ResultApplicationController = AbortController & {
       rollback?: () => void
+      settleRefetchAtFetchBoundary?: () => void
     }
     const resultApplicationControllers = new Map<
       string,
@@ -1722,6 +1729,10 @@ export function queryCollectionOptions(
         throw new LoadSubsetOperationAbortedError()
       }
 
+      if (isMutationPublicationBlocked()) {
+        applicationToken.settleRefetchAtFetchBoundary?.()
+      }
+
       const rawData = result.data
       const newItemsArray = select ? select(rawData) : rawData
 
@@ -1850,6 +1861,13 @@ export function queryCollectionOptions(
         })
 
         resultTransaction = collection._state.pendingSyncedTransactions.at(-1)
+        // No asynchronous work occurs between this check and commit. If a
+        // mutation started during fetch or baseline loading, explicit refetch
+        // callers stop at the Query fetch boundary while the application stays
+        // in the normal publication queue.
+        if (isMutationPublicationBlocked()) {
+          applicationToken.settleRefetchAtFetchBoundary?.()
+        }
         const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -1942,11 +1960,22 @@ export function queryCollectionOptions(
     ): void => {
       invalidatePendingResultApplication(hashedQueryKey)
       const controller: ResultApplicationController = new AbortController()
+      let settleRefetchAtFetchBoundary = () => {}
+      const fetchBoundary = new Promise<void>((resolve) => {
+        settleRefetchAtFetchBoundary = resolve
+      })
+      controller.settleRefetchAtFetchBoundary = settleRefetchAtFetchBoundary
       resultApplicationControllers.set(hashedQueryKey, controller)
       const application = apply(controller.signal, controller)
+      const refetchSettlement = Promise.race([application, fetchBoundary])
+      // Most applications are observer-driven and have no explicit refetch
+      // caller. Keep their derived settlement from becoming an unhandled
+      // rejection; a refetch that captures this promise still observes the
+      // original rejection when throwOnError is enabled.
+      void refetchSettlement.catch(() => undefined)
       const applicationsByHash =
         resultApplicationSettlements.get(result) ?? new Map()
-      applicationsByHash.set(hashedQueryKey, application)
+      applicationsByHash.set(hashedQueryKey, refetchSettlement)
       resultApplicationSettlements.set(result, applicationsByHash)
       const cleanupController = () => {
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
@@ -2595,7 +2624,7 @@ export function queryCollectionOptions(
           : (fetchRecord?.result ?? currentResult)
         if (fetchRecord) {
           fetchRecord.result = causalResult
-          fetchRecord.application ??= getResultApplication(
+          fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
             hashedQueryKey,
             causalResult,
           )
@@ -2612,21 +2641,21 @@ export function queryCollectionOptions(
         : (fetchRecord?.result ?? result)
       if (fetchRecord) {
         fetchRecord.result = causalResult
-        fetchRecord.application ??= getResultApplication(
+        fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
           hashedQueryKey,
           causalResult,
         )
       }
 
-      const application =
-        fetchRecord?.application ??
-        getResultApplication(hashedQueryKey, result) ??
-        getResultApplication(hashedQueryKey, startingResult)
-      if (awaitApplications && application) {
+      const settlement =
+        fetchRecord?.settlement ??
+        getRecordedResultApplicationSettlement(hashedQueryKey, result) ??
+        getRecordedResultApplicationSettlement(hashedQueryKey, startingResult)
+      if (awaitApplications && !isMutationPublicationBlocked() && settlement) {
         if (opts?.throwOnError) {
-          await application
+          await settlement
         } else {
-          await application.catch(() => undefined)
+          await settlement.catch(() => undefined)
         }
       }
       return causalResult
@@ -3011,87 +3040,13 @@ export function queryCollectionOptions(
     }
   }
 
-  const handlerRefetch: RefetchFn = (opts) => refetchQueryResults(opts, false)
-
-  const createMutationHandlerCollection = <
-    TCollection extends { utils: object },
-  >(
-    handlerCollection: TCollection,
-  ): TCollection => {
-    const handlerUtils = new Proxy(handlerCollection.utils, {
-      get: (target, property, receiver) =>
-        property === `refetch`
-          ? handlerRefetch
-          : Reflect.get(target, property, receiver),
-    })
-
-    return new Proxy(handlerCollection, {
-      get: (target, property, receiver) =>
-        property === `utils`
-          ? handlerUtils
-          : Reflect.get(target, property, receiver),
-    })
-  }
-
-  const createMutationHandlerTransaction = <
-    TCollection extends { utils: object },
-    TTransaction extends {
-      mutations: ReadonlyArray<{ collection: unknown }>
-    },
-  >(
-    transaction: TTransaction,
-    collection: TCollection,
-    handlerCollection: TCollection,
-  ): TTransaction => {
-    // Matching mutation aliases share the handler's scoped capability view.
-    // The Proxy intentionally does not preserve external Collection identity.
-    const hasScopedMutation = transaction.mutations.some(
-      (mutation) => mutation.collection === collection,
-    )
-    if (!hasScopedMutation) return transaction
-
-    const mutations = transaction.mutations.map((mutation) => {
-      if (mutation.collection !== collection) return mutation
-      return new Proxy(mutation, {
-        get: (target, property, receiver) =>
-          property === `collection`
-            ? handlerCollection
-            : Reflect.get(target, property, receiver),
-      })
-    })
-
-    return new Proxy(transaction, {
-      get: (target, property, receiver) =>
-        property === `mutations`
-          ? mutations
-          : Reflect.get(target, property, receiver),
-    })
-  }
-
-  const runMutationHandler = async <
-    TParams extends {
-      collection: { utils: object }
-      transaction: {
-        mutations: ReadonlyArray<{ collection: unknown }>
-      }
-    },
-  >(
+  const runMutationHandler = async <TParams>(
     handler: (params: TParams) => unknown,
     params: TParams,
   ): Promise<unknown> => {
-    const collection = createMutationHandlerCollection(params.collection)
-    const handlerParams = {
-      ...params,
-      collection,
-      transaction: createMutationHandlerTransaction(
-        params.transaction,
-        params.collection,
-        collection,
-      ),
-    } as TParams
     activeMutationHandlerCount++
     try {
-      return await handler(handlerParams)
+      return await handler(params)
     } finally {
       activeMutationHandlerCount--
     }

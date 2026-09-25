@@ -610,20 +610,19 @@ independent work remains pending.
 While a user mutation is persisting or a Collection mutation handler is active,
 normal application is queued behind that transaction. To avoid a circular wait
 or an unrelated persistence delay, all overlapping `refetch()` calls resolve at
-the Query fetch boundary. This includes calls through the handler parameter,
-captured or external Collection references, manual transaction mutation
-functions, and `createOptimisticAction` mutation functions. Code can await the
-mutation's `isPersisted.promise` when it needs the complete transaction and its
-queued Collection application. Utilities that refetch, including `clearError()`,
+the Query fetch boundary. This rule applies whether the mutation or the refetch
+starts first. It includes calls through the handler parameter, captured or
+external Collection references, manual transaction mutation functions, and
+`createOptimisticAction` mutation functions. Code can await the mutation's
+`isPersisted.promise` when it needs the complete transaction and its queued
+Collection application. Utilities that refetch, including `clearError()`,
 inherit the same phase boundary.
 
 The handler's `collection` parameter and every matching
-`transaction.mutations[n].collection` alias use the same scoped view. That view
-is not identity-equal to the external Collection. A `Map` or `WeakMap` entry
-keyed by the external Collection does not match the scoped view. Compare a
-mutation alias with the handler parameter when identity is needed inside one
-handler invocation. Identity across separate handler invocations is not part of
-the contract.
+`transaction.mutations[n].collection` alias preserve the external Collection
+identity. Strict equality, `Map`, and `WeakMap` lookups therefore continue to
+work in shared persistence handlers. Phase tracking changes the refetch wait
+boundary without replacing the Collection, transaction, or mutation objects.
 
 At the application boundary, `throwOnError` applies to both Query fetch errors
 and errors applying an accepted result to Collection rows. With
