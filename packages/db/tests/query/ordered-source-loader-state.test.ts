@@ -98,6 +98,132 @@ function fakeSubscription(
 }
 
 describe(`Ordered source request ownership`, () => {
+  it.each([
+    { name: `indexed page`, indexed: true },
+    { name: `unindexed prefix`, indexed: false },
+  ] as const)(
+    `finishes a repeated $name repair continuation and permits the next repair`,
+    async ({ indexed }) => {
+      type Row = { id: number; rank: number }
+      let rows: Array<Row> = [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+        { id: 3, rank: 3 },
+      ]
+      const requests: Array<Observed> = []
+      const releases: Array<LoadSubsetOptions> = []
+      const subscription = fakeSubscription(requests, releases) as unknown as {
+        readOrderedSnapshot: () => Array<{ value: Row }>
+      }
+      subscription.readOrderedSnapshot = () =>
+        rows
+          .slice()
+          .sort((left, right) => left.rank - right.rank)
+          .map((value) => ({ value }))
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({
+          index: indexed
+            ? ({} as NonNullable<OrderByOptimizationInfo[`index`]>)
+            : undefined,
+          limit: 10,
+          dataNeeded: () => (indexed ? 10 - rows.length : 0),
+        }),
+        subscription as unknown as CollectionSubscription,
+        `row`,
+      )
+      let nextRequest = 0
+      const settleThrough = async (finalCount: number) => {
+        while (nextRequest < finalCount) {
+          const pending = (
+            loader as unknown as { pending: Promise<unknown> | undefined }
+          ).pending
+          requests[nextRequest]!.deferred.resolve()
+          nextRequest++
+          await pending
+        }
+      }
+
+      try {
+        loader.start()
+        await settleThrough(indexed ? 3 : 2)
+
+        rows = rows.filter(({ id }) => id !== 2)
+        loader.invalidateSourceOrdering()
+        loader.loadMore(indexed ? undefined : 7)
+        const repairEnd = indexed ? 6 : 4
+        await settleThrough(repairEnd)
+
+        expect(releases).toEqual(
+          requests
+            .slice(0, indexed ? 3 : 2)
+            .map(({ acquisition }) => acquisition),
+        )
+
+        loader.invalidateSourceOrdering()
+        loader.loadMore(8)
+        expect(requests).toHaveLength(repairEnd + 1)
+      } finally {
+        loader.dispose()
+        for (const request of requests) request.deferred.resolve()
+      }
+    },
+  )
+
+  it(`starts a replacement repair before continuing a stale repair chain`, async () => {
+    const requests: Array<Observed> = []
+    const releases: Array<LoadSubsetOptions> = []
+    let needed = 0
+    const subscription = fakeSubscription(requests, releases) as unknown as {
+      readOrderedSnapshot: () => Array<{
+        value: { id: number; rank: number }
+      }>
+    }
+    subscription.readOrderedSnapshot = () => [{ value: { id: 1, rank: 1 } }]
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ dataNeeded: () => needed }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+    )
+    let nextRequest = 0
+    const settle = async () => {
+      const pending = (
+        loader as unknown as { pending: Promise<unknown> | undefined }
+      ).pending
+      requests[nextRequest]!.deferred.resolve()
+      nextRequest++
+      await pending
+    }
+
+    try {
+      loader.start()
+      await settle()
+      await settle()
+
+      loader.invalidateSourceOrdering()
+      loader.loadMore()
+      await settle()
+      expect(requests).toHaveLength(4)
+
+      // A second mutation invalidates the chain while its tie request is held.
+      // Its settlement may apply rows, but it must not start stale refill work.
+      needed = 1
+      loader.invalidateSourceOrdering()
+      await settle()
+
+      expect(requests).toHaveLength(5)
+      expect(requests[4]!.method).toBe(`snapshot`)
+      expect(requests[4]!.options).toMatchObject({
+        refetch: true,
+        limit: 1,
+      })
+      expect(requests[4]!.options.orderBy).toBeDefined()
+      expect(requests[4]!.options.cursor).toBeUndefined()
+    } finally {
+      loader.dispose()
+      for (const request of requests) request.deferred.resolve()
+    }
+  })
+
   it(`reissues a bounded prefix when settled source ordering is invalidated`, async () => {
     const requests: Array<Observed> = []
     const releases: Array<LoadSubsetOptions> = []

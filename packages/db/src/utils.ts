@@ -115,9 +115,39 @@ export function deepEqualsInternal(
       return aValues.every((val) => b.has(val))
     }
 
-    // For objects in sets, we need to do a more complex comparison
-    // This is a simplified approach and may not work for all cases
-    const result = aValues.length === bValues.length
+    // Object-valued Sets are unordered. Match each value once, carrying a
+    // branch-local cycle map so a failed candidate cannot poison the next.
+    const matchValues = (
+      index: number,
+      remaining: ReadonlyArray<number>,
+      branchVisited: Map<object, object>,
+    ): boolean => {
+      if (index === aValues.length) return true
+      const value = aValues[index]
+      for (const [remainingIndex, candidateIndex] of remaining.entries()) {
+        const candidateVisited = new Map(branchVisited)
+        if (
+          deepEqualsInternal(
+            value,
+            bValues[candidateIndex],
+            candidateVisited,
+          ) &&
+          matchValues(
+            index + 1,
+            remaining.filter((_, otherIndex) => otherIndex !== remainingIndex),
+            candidateVisited,
+          )
+        ) {
+          return true
+        }
+      }
+      return false
+    }
+    const result = matchValues(
+      0,
+      bValues.map((_, index) => index),
+      visited,
+    )
     visited.delete(a)
     return result
   }

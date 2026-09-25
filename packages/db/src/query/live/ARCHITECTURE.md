@@ -587,8 +587,12 @@ must not cancel work or remove rows still owned by another.
 `LoadSubsetOptions.refetch` starts a new acquisition attempt for the same exact
 demand even when an adapter has completed or cached it. It is operation
 control, not request data: exact-demand identity, Query cache identity, and
-unload identity ignore it. The new attempt still establishes its own
-acquisition lease.
+unload identity ignore it, and adapters must not expose it as user query
+metadata. The new attempt still establishes its own acquisition lease. Its
+settlement and release follow the same rules as every other acquisition: the
+returned promise waits for authoritative applied rows and rejects if its final
+logical owner releases it first. A shared transport may be replaced to satisfy
+the fresh attempt, but peer logical owners remain attached to the replacement.
 
 Request data is immutable from submission onward, including the options,
 expression trees, comparison options, and constant payloads such as Dates,
@@ -800,7 +804,10 @@ new repair acquisitions remain. Every acquisition in this chain uses
 `refetch: true`, so an adapter must revalidate the exact demand instead of
 reusing completed or in-flight work. A source-order invalidation generation
 fences the chain. If another qualifying mutation arrives before it finishes,
-core starts a replacement repair before releasing the publication barrier.
+core starts a replacement repair before releasing the publication barrier and
+before the obsolete chain can issue another tie or refill. A repeated prefix or
+page fixed point ends the repair when no more data is needed; it cannot leave a
+held repair without pending work.
 The finite prefix and tie acquisitions they replace retire after the whole
 replacement chain succeeds.
 An invalidation that overlaps unfinished non-repair source work, a failed
@@ -951,10 +958,14 @@ A synchronous adapter result still contributes the loader's wrapped repair
 participant. At flush, equal insert/delete counts are classified against the
 last callback-visible membership and value: absent-to-absent produces no event,
 while present-to-present produces an update only when the value changed.
-A failed participant never exposes the private intermediate state: source-error
-handling disposes the Effect and clears the retained delta and participants.
-Ordinary initial/refinement requests that do not claim the repair publication
-gate keep their existing callback timing.
+If truncate replay aborts an obsolete repair participant, its replacement
+completion inherits the same callback hold; the abort alone does not freeze or
+dispose the still-live Effect. Any unhandled participant failure never exposes
+the private intermediate state: source-error handling disposes the Effect and
+clears the retained delta and participants. With `skipInitial`, an asynchronous
+initial ordered chain also stays behind the gate until all initial participants
+settle, so its rows do not become later `enter` callbacks. Other ordinary
+initial/refinement requests keep their existing callback timing.
 
 ### Replay participants and failure
 

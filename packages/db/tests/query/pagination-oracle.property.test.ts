@@ -42,8 +42,9 @@ import type {
  * nodes track requested windows, authoritative coverage, pending acquisition,
  * and public batches. The production drivers cross scan and indexed routes,
  * direct and joined queries, synchronous and asynchronous delivery, reentry,
- * restart, rejection, and abort. They compare exact request options, visible
- * rows, readiness, errors, and every publication cut.
+ * restart, rejection, and abort. They compare exact request options,
+ * acquisition releases, visible rows, readiness, errors, and every
+ * publication cut.
  *
  * Finite products pin boundary cells; fixed and random fast-check histories
  * explore adjacent legal actions. Fault probes establish that wrong order,
@@ -166,6 +167,7 @@ type PendingMutationScenario = {
 
 type PendingMutationResult = {
   mutationRepairRequests: Array<LoadSubsetOptions>
+  releasedBeforeCleanup: Array<LoadSubsetOptions>
 }
 
 function orderSignature(options: LoadSubsetOptions) {
@@ -1616,6 +1618,7 @@ async function runPendingMutationScenario(
   const pending: Array<PendingCursorLoad> = []
   let mutationRequestStart: number | undefined
   const physicallySettled = new Set<PendingCursorLoad>()
+  const released: Array<LoadSubsetOptions> = []
   const deliveredIds = new Set<number>([firstDelivered.id])
   // A rejected initial subset load is fatal. Establish a ready baseline first
   // so reject scenarios exercise subscription-scoped window recovery.
@@ -1654,6 +1657,9 @@ async function runPendingMutationScenario(
               () => physicallySettled.add(request),
             )
             return deferred.promise
+          },
+          unloadSubset: (options: LoadSubsetOptions) => {
+            released.push(options)
           },
         }
       },
@@ -2072,6 +2078,7 @@ async function runPendingMutationScenario(
           mutationRequestStart === undefined
             ? []
             : pending.slice(mutationRequestStart).map(({ options }) => options),
+        releasedBeforeCleanup: [...released],
       }
     },
     () => [
@@ -3490,6 +3497,34 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it(`finishes bounded repair when a visible delete leaves the source underfilled`, async () => {
+    const result = await runPendingMutationScenario(
+      {
+        ranks: [0, 1, 2],
+        direction: `asc`,
+        limit: 10,
+        mutation: { type: `delete`, id: 1 },
+        responseOutcome: `resolve`,
+      },
+      `after-response`,
+      undefined,
+      false,
+    )
+
+    expectPendingMutationRequestWork(
+      result,
+      {
+        ranks: [0, 1, 2],
+        direction: `asc`,
+        limit: 10,
+        mutation: { type: `delete`, id: 1 },
+        responseOutcome: `resolve`,
+      },
+      false,
+    )
+    expect(result.releasedBeforeCleanup).toHaveLength(3)
+  })
+
   it(`rejects a malformed bounded-repair request trace`, () => {
     const malformed: PendingMutationResult = {
       mutationRepairRequests: [
@@ -3510,6 +3545,7 @@ describe(`pagination recomputation oracle`, () => {
         },
         { refetch: true },
       ],
+      releasedBeforeCleanup: [],
     }
 
     expect(() =>

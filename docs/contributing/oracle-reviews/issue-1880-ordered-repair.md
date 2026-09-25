@@ -11,6 +11,8 @@
   `ordered-work-oracle.property.test.ts`,
   `ordered-source-loader-state.test.ts`, `ordered-default-work.test.ts`, and
   `ordered-demand-retirement.test.ts`.
+- Query-backed application owner:
+  `packages/query-db-collection/tests/load-subset-lifecycle-oracle.test.ts`.
 
 This state description is intentional: a file cannot contain the hash of a
 commit that already contains that file. The eventual commit or pull request
@@ -24,26 +26,46 @@ normalized-order, zero-transport-offset prefix followed by the required tie and
 refill requests. It also checks row recomputation, publication, failure upgrade,
 and acquisition ownership around that path.
 
+It also checks two termination boundaries that the original grammar missed. An
+underfilled indexed repair must retire superseded finite leases when its next
+page repeats the last count and boundary. An unindexed repair started by a
+window operation must do the same when its prefix count repeats and no more
+data is needed. A Query-backed refetch must remain pending while
+`deferDataRefresh` prevents its result from being applied, for both existing
+and newly observed cached demands.
+
+The follow-up review also extends the boundary around that repair. A mutation
+that supersedes an in-flight repair must start its replacement before the old
+chain issues more tie or refill work. Effect callbacks must survive an obsolete
+repair abort during truncate replay, suppress asynchronous initial ordered rows
+under `skipInitial`, and preserve real updates that contain object-valued Sets.
+Query-backed refetches must wait for post-write authority, hide the internal
+`refetch` control from query-function metadata, and reject the released caller.
+An authoritative refetch still replaces an in-flight shared Query attempt; that
+is required to revalidate the demand rather than reuse stale work.
+
 The authority is the Ordered loading and Atomic window publication contract in
-`packages/db/src/query/live/ARCHITECTURE.md`. The evidence is bounded to the
-test grammar and in-memory on-demand adapter seam. It does not certify backend
-query plans, network volume, latency, complete SQL predicate semantics, or every
+`packages/db/src/query/live/ARCHITECTURE.md`, plus the applied-settlement and
+acquisition-release contract in `docs/guides/collection-options-creator.md`.
+The evidence is bounded to the test grammar, in-memory on-demand adapter seam,
+and real QueryClient test boundary. It does not certify backend query plans,
+network volume, latency, complete SQL predicate semantics, or every
 `requiresFullSource` compiler branch.
 
 ## ORC-001 through ORC-011
 
 | Requirement | Outcome | Evidence |
 | --- | --- | --- |
-| ORC-001: contract authority and limits | Pass | The pagination-oracle header names the architecture authority and its limits. This record narrows the repair claim to the tested grammar and adapter seam. |
+| ORC-001: contract authority and limits | Pass | The pagination-oracle header names the architecture authority and its limits. The collection-options guide defines applied settlement and acquisition release. This record narrows the repair claim to the tested grammar, adapter seam, and QueryClient boundary. |
 | ORC-002: independent judgment | Pass | `referenceWindowRows` filters/sorts/slices plain arrays independently of the ordered loader. Exact request checks use literal normalized paths, directions, field absence, and reference predicate evaluation rather than the production request classifier. |
 | ORC-003: distinguishable responsibilities | Pass | The file keeps scenario arbitraries, array recomputation, the real Collection driver, request/publication recorders, and refinement helpers separate. `PendingMutationResult` carries the work observation from the driver to both generated campaigns. |
 | ORC-004: generated-history grammar controls | Pass | The bounded grammar crosses insert/update/delete, resolve/reject, before/after settlement, ranks, directions, and limits. Named products reconstruct every mutation/outcome/timing cell; the `[0,1,1,2]` case pins tie plus refill, and missing-row deletion is rejected. Existing fault/ablation cases show the contribution of publication, window, settlement, callback, delete-value, and final-value observations. |
-| ORC-005: production path and observation | Pass | The driver uses `createLiveQueryCollection` over a real on-demand Collection. It compares visible rows and callback cuts, and now records the complete post-mutation adapter request sequence, including inherited predicate behavior, normalized order term order/direction, cursor, limit, and transport offset. |
-| ORC-006: checker calibration | Pass | `rejects a malformed bounded-repair request trace` supplies the old checker's plausible survivor: missing predicate, wrong same-length order terms, `offset: 99`, and an extra request. The exact trace checker rejects it. Existing captured-history faults calibrate value/publication checks. |
+| ORC-005: production path and observation | Pass | The pagination driver uses `createLiveQueryCollection` over a real on-demand Collection. It compares visible rows and callback cuts, records the complete post-mutation adapter request sequence, and observes acquisition releases before cleanup. The Query DB driver uses a real QueryClient and observes transport calls, promise settlement, and applied Collection rows for existing and cached demands. |
+| ORC-006: checker calibration | Pass | `rejects a malformed bounded-repair request trace` supplies the old checker's plausible survivor: missing predicate, wrong same-length order terms, `offset: 99`, and an extra request. The exact trace checker rejects it. The preserved RED runs show that the former implementation produced correct final rows while releasing zero superseded leases, and settled both deferred refetch forms before application. Existing captured-history faults calibrate value/publication checks. |
 | ORC-007: fixed/random campaigns and replay | Pass | The fixed-seed and random/replayed `pagination.pending-mutation` properties invoke the same arbitrary, `runPendingMutationScenario`, `PendingMutationResult` recorder, request-work checker, and run budget. `oracleRandomParameters` accepts the configured seed and shrink path for direct replay. |
 | ORC-008: stateful-model minimality | Not applicable | The repair adds a request-trace result, not new reference-model state, and does not merge or remove model states. |
 | ORC-009: vocabulary mapping | Pass | In this record, a repair prefix is an ordered request without a cursor or transport offset; a tie is a predicate-only request for the first provider term; a refill is an ordered cursor request. Full-source recovery omits `orderBy`, `limit`, `cursor`, and `offset`, but still inherits the subscription `where` predicate. The work checker distinguishes a filtered full-source predicate from a tie by evaluating it over distant ranks. `mutationRepairRequests` means adapter requests started after the modeled source mutation, not rows delivered locally. |
-| ORC-010: failure fidelity and cleanup | Pass | `PendingMutationTraceAssertionError` retains the violated checkpoint and delivered-row trace. `withHistoryCleanup` preserves the primary failure while settling subscriptions, outstanding requests, the live query, and source cleanup. Partial-write rejection has a direct-loader ownership witness. |
+| ORC-010: failure fidelity and cleanup | Pass | `PendingMutationTraceAssertionError` retains the violated checkpoint and delivered-row trace. `withHistoryCleanup` preserves the primary failure while settling subscriptions, outstanding requests, the live query, and source cleanup. Partial-write rejection and repeated-continuation termination have direct-loader ownership witnesses. The Query DB cases release their barrier and settle refetch before cleanup. |
 | ORC-011: independent second formulation | Pass | The public pagination history and direct `OrderedSourceLoader` state test distinguish the shared-fault risk that correct final rows could hide a malformed or over-broad provider request. Ordered-work parity separately compares Collection and Effect publication behavior. |
 
 ORC-012 is satisfied by this versioned, base-identified closeout record and its
@@ -59,6 +81,18 @@ filtered full-source fallback. The partial-write integration witness proves the
 next request is exactly full-source; the direct-loader ownership test proves
 that lease releases occur in order `[3, 0, 1, 2]` after bounded repair fails.
 
+The underfilled integration witness proves that a three-row source under a
+ten-row limit releases all three superseded finite acquisitions before cleanup.
+Direct loader witnesses separately cover repeated indexed-page and unindexed-
+prefix continuations, then start another repair to prove the loader is usable.
+The Query DB witness holds result application after refetch transport succeeds;
+both an existing observer and a cached observer must remain pending. Additional
+Query DB witnesses cover post-write authority, metadata isolation, and final-
+owner release. Ordered-work witnesses cover repair replacement before stale
+continuation, truncate replay handoff for Effects, and asynchronous
+`skipInitial`. The Effect and utility owners pin object-valued Set updates and
+Set equality independently.
+
 The complete `requiresFullSource` classifier is documented in architecture but
 is not enumerated here branch by branch. Adapter-specific transfer and query
 execution remain adapter conformance concerns. Effect failure publication is
@@ -68,7 +102,7 @@ review adds the previously missing held-success callback witness.
 ## Verification
 
 Closeout requires the focused changed owners, both pending-mutation campaigns,
-the complete `@tanstack/db` test suite, the package build, changed-file lint and
-format checks, and `git diff --check`. Exact final counts belong in the pull
-request or issue receipt because they describe the immutable execution, not the
-oracle contract.
+the complete `@tanstack/db` and `@tanstack/query-db-collection` test suites, both
+package builds, changed-file lint and format checks, and `git diff --check`.
+Exact final counts belong in the pull request or issue receipt because they
+describe the immutable execution, not the oracle contract.

@@ -272,6 +272,8 @@ export class OrderedSourceLoader {
       if ((this.info.dataNeeded?.() ?? 0) > 0) {
         if (continuesOrderedPrefixRepair) this.abandonOrderedPrefixRepair()
         this.loadFullSource(windowOperationGeneration)
+      } else if (continuesOrderedPrefixRepair) {
+        this.finishOrderedPrefixRepair(windowOperationGeneration)
       }
       return
     }
@@ -484,6 +486,9 @@ export class OrderedSourceLoader {
       this.lastPage?.count === count &&
       Object.is(this.lastPage.boundary, boundary)
     ) {
+      if (continuesOrderedPrefixRepair) {
+        this.finishOrderedPrefixRepair(windowOperationGeneration)
+      }
       return
     }
     this.lastPage = { count, boundary }
@@ -600,6 +605,17 @@ export class OrderedSourceLoader {
                 fail(error)
               }
             }
+          }
+          if (
+            (isOrderedRepair || continuesOrderedPrefixRepair) &&
+            this.orderedPrefixRepairGeneration !==
+              this.orderingInvalidationGeneration
+          ) {
+            // The settled request may apply its rows, but a later mutation has
+            // already invalidated this chain. Replace it before issuing stale
+            // tie or refill work.
+            this.finishOrderedPrefixRepair(windowOperationGeneration)
+            return
           }
           if (isFullSource) {
             this.cancelRepairRetry()
