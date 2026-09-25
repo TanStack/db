@@ -319,6 +319,12 @@ export type CursorExpressions = {
  * live: aborting the signal or releasing the subscription is supported.
  */
 export type LoadSubsetOptions = {
+  /**
+   * Revalidate this exact semantic demand even when an adapter has already
+   * completed or cached it. This controls the acquisition attempt; it does
+   * not change demand identity or the matching unload operation.
+   */
+  refetch?: boolean
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
   /** The order by clause to sort the data */
