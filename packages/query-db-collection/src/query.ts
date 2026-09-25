@@ -1732,7 +1732,9 @@ export function queryCollectionOptions(
 
       if (
         !Array.isArray(newItemsArray) ||
-        newItemsArray.some((item) => typeof item !== `object`)
+        newItemsArray.some(
+          (item) => item === null || typeof item !== `object`,
+        )
       ) {
         const errorMessage = select
           ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`

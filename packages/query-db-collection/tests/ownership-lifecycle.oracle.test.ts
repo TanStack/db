@@ -751,16 +751,20 @@ describe(`query collection ownership lifecycle`, () => {
     })
   })
 
-  it.each([false, true])(
-    `rejects a public refetch whose successful Query result has an invalid shape, throwOnError=%s`,
-    async (throwOnError) => {
+  it.each([
+    [`non-array`, false, 42],
+    [`non-array`, true, 42],
+    [`null array member`, false, [null]],
+    [`null array member`, true, [null]],
+  ] as const)(
+    `rejects a public refetch whose successful Query result has an invalid %s shape, throwOnError=%s`,
+    async (_invalidShape, throwOnError, invalidResult) => {
       const id = `invalid-result-settlement`
-      const invalidResult = 42 as unknown as Array<Item>
       const queryClient = createQueryClient()
       const queryFn = vi
         .fn<() => Promise<Array<Item>>>()
         .mockResolvedValueOnce([shared])
-        .mockResolvedValueOnce(invalidResult)
+        .mockResolvedValueOnce(invalidResult as unknown as Array<Item>)
       const consoleError = vi
         .spyOn(console, `error`)
         .mockImplementation(() => {})
