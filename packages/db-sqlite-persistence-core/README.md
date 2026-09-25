@@ -246,11 +246,8 @@ consumer can resume or query against uncertified durable state.
 - `InvalidPersistedStorageKeyError`
 - `InvalidPersistedStorageKeyEncodingError`
 - `PersistenceUnavailableError`
-- `PersistenceDurabilityError`
 
-`PersistenceDurabilityError` remains exported for compatibility with earlier
-PR-preview integrations, but the current runtime does not construct it. Current
-adapter and coordinator commit failures reject the applied receipt and become
+Adapter and coordinator commit failures reject the applied receipt and become
 the collection's terminal sync error as `PersistedCollectionDurabilityError`.
 That error preserves its original `cause`, `code`, and `path`. Hydration and
 source errors remain distinct and are not wrapped as durability errors.

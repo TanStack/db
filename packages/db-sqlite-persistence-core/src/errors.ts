@@ -182,31 +182,3 @@ export class PersistenceUnavailableError extends PersistedCollectionCoreError {
     this.name = `PersistenceUnavailableError`
   }
 }
-
-/**
- * @deprecated Retained for compatibility with earlier PR-preview builds.
- * Current persistence failures use `PersistedCollectionDurabilityError`.
- */
-export class PersistenceDurabilityError extends PersistedCollectionCoreError {
-  readonly code: string | undefined
-  readonly path: string
-
-  constructor(cause: unknown, fallbackPath: string) {
-    const causeMessage =
-      cause instanceof Error ? cause.message : `Unknown persistence failure`
-    const causeRecord =
-      typeof cause === `object` && cause !== null
-        ? (cause as Record<string, unknown>)
-        : undefined
-    const code =
-      typeof causeRecord?.code === `string` ? causeRecord.code : undefined
-    const path =
-      typeof causeRecord?.path === `string` ? causeRecord.path : fallbackPath
-
-    super(`Persistence durability failed at ${path}: ${causeMessage}`)
-    this.name = `PersistenceDurabilityError`
-    this.cause = cause
-    this.code = code
-    this.path = path
-  }
-}
