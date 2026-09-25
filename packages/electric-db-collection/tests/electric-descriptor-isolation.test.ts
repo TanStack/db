@@ -10,8 +10,40 @@ import type { Message } from '@electric-sql/client'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
 
+/**
+ * # Can reused Electric descriptors keep independent owners and tag state?
+ *
+ * One descriptor may create several Collections, but each Collection must own
+ * its sync run, acknowledgement waiters, persisted tag membership, and cleanup.
+ * A compatible resume restores selected tags; a fresh snapshot replaces them.
+ * A `move-out` removes a row only after its modeled tag membership is empty.
+ *
+ * Plain Maps and tag sets form the independent model. Generated histories vary
+ * descriptor form, sync mode, warm and cold restart, interrupted recovery,
+ * edits, and tag removals. The driver uses the real Collection, Electric
+ * adapter, persisted wrapper, and a controlled ShapeStream SDK boundary.
+ * Checkpoints compare coherent public snapshots, durable rows, recovery traces,
+ * acknowledgement ownership, and unsubscribe calls.
+ *
+ * Fixed and random campaigns retain replay inputs through the shared oracle
+ * configuration. The controlled stream does not establish live Electric HTTP
+ * framing or service behavior; those have separate owners.
+ */
+
 type TestRow = { id: number; name: string; stable: string }
 type TagExposure = { cut: string; rows: Array<TestRow> }
+
+function expectMoveOutCheckpoint(observation: {
+  status: string
+  publicRowPresent: boolean
+  durableRowPresent: boolean
+}) {
+  expect(observation).toEqual({
+    status: `ready`,
+    publicRowPresent: false,
+    durableRowPresent: false,
+  })
+}
 
 function expectWholeTagRecovery(
   entries: Array<TagExposure>,
@@ -243,8 +275,12 @@ async function runTagHistory(history: {
         }))
       const durableRows = () => [...rows.values()].map((entry) => entry.value)
       const check = async () => {
-        expect(publicRows(), `cold=${cold}, fresh=${fresh}`).toEqual(
-          expectedRows(),
+        await vi.waitFor(
+          () =>
+            expect(publicRows(), `cold=${cold}, fresh=${fresh}`).toEqual(
+              expectedRows(),
+            ),
+          { interval: 1 },
         )
         await vi.waitFor(() => expect(durableRows()).toEqual(expectedRows()), {
           interval: 1,
@@ -641,6 +677,21 @@ it(`keeps insert acknowledgements on the owner of a reused persisted descriptor`
   }
 })
 
+it(`rejects a descriptor move-out checkpoint that deletes rows by fail-stopping`, () => {
+  expectMoveOutCheckpoint({
+    status: `ready`,
+    publicRowPresent: false,
+    durableRowPresent: false,
+  })
+  expect(() =>
+    expectMoveOutCheckpoint({
+      status: `error`,
+      publicRowPresent: false,
+      durableRowPresent: false,
+    }),
+  ).toThrow()
+})
+
 it.each([`resume`, `fresh`] as const)(
   `restores compatible tags and discards obsolete tags on persisted $0 restart`,
   async (restart) => {
@@ -685,9 +736,14 @@ it.each([`resume`, `fresh`] as const)(
       if (restart === `fresh`)
         streams[1]!.send([insert(1, currentTag), upToDate])
       streams[1]!.send([moveOut(currentTag), upToDate])
-      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
-      expect(collection.has(1)).toBe(false)
+      await vi.waitFor(() => expect(collection.has(1)).toBe(false))
       await vi.waitFor(() => expect(rows.has(1)).toBe(false))
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      expectMoveOutCheckpoint({
+        status: collection.status,
+        publicRowPresent: collection.has(1),
+        durableRowPresent: rows.has(1),
+      })
     } finally {
       await collection.cleanup()
     }

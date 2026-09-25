@@ -259,12 +259,17 @@ export interface QueryCollectionConfig<
 
 /**
  * Type for the refetch utility function
- * Returns the QueryObserverResult from TanStack Query
- *
- * `throwOnError` controls Query transport errors. A successful Query result
- * that the adapter cannot apply rejects with `InvalidQueryResultError`
- * regardless of that option. If application is deferred, the promise waits
- * for the replacement result to apply.
+ * Returns QueryObserverResults from TanStack Query after the applicable
+ * boundary. Normally this waits until each accepted result has been applied to
+ * the Collection. While a user mutation is persisting or its handler is
+ * active, refetch retains the Query fetch boundary because normal application
+ * is queued behind that transaction. At the application boundary,
+ * `throwOnError` applies to both Query fetch and Collection application
+ * failures. At the fetch boundary it applies only to Query fetch failure; a
+ * later application failure is recorded by the Collection error utilities.
+ * A successful Query result that the adapter cannot apply rejects with
+ * `InvalidQueryResultError` regardless of `throwOnError`. If application is
+ * deferred, the promise waits for the replacement result to apply.
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
@@ -287,7 +292,7 @@ export interface QueryCollectionUtils<
 > {
   // Keep this interface closed: extending UtilsRecord would make every
   // nonexistent adapter utility appear as `any`.
-  /** Manually trigger a refetch of the query */
+  /** Manually refetch and await the applicable fetch or application boundary. */
   refetch: RefetchFn
   /** Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
   writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
@@ -322,8 +327,11 @@ export interface QueryCollectionUtils<
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
-   * Clear the error state and trigger a refetch of the query
-   * @returns Promise that resolves when the refetch completes successfully
+   * Clear the error state and trigger a refetch of the query. While a user
+   * mutation is persisting or its handler is active, this retains the Query
+   * fetch boundary so it cannot wait on publication blocked by that
+   * transaction.
+   * @returns Promise that resolves when the applicable refetch boundary completes
    * @throws Error if the refetch fails
    */
   clearError: () => Promise<void>
@@ -370,7 +378,6 @@ const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
  */
 class QueryCollectionUtilsImpl {
   private state: QueryCollectionState
-  private refetchFn: RefetchFn
 
   // Write methods
   public refetch: RefetchFn
@@ -386,7 +393,6 @@ class QueryCollectionUtilsImpl {
     writeUtils: ReturnType<typeof createWriteUtils>,
   ) {
     this.state = state
-    this.refetchFn = refetch
 
     // Initialize methods to use passed dependencies
     this.refetch = refetch
@@ -401,7 +407,7 @@ class QueryCollectionUtilsImpl {
     this.state.lastError = undefined
     this.state.errorCount = 0
     this.state.lastErrorUpdatedAt = 0
-    await this.refetchFn({ throwOnError: true })
+    await this.refetch({ throwOnError: true })
   }
 
   // Getters for error state
@@ -458,8 +464,12 @@ class QueryCollectionUtilsImpl {
 
 function getLoadSubsetOptionsForMeta(
   opts: LoadSubsetOptions,
-): Omit<LoadSubsetOptions, `subscription`> {
-  const { subscription: _subscription, ...serializableOptions } = opts
+): Omit<LoadSubsetOptions, `subscription` | `refetch`> {
+  const {
+    subscription: _subscription,
+    refetch: _refetch,
+    ...serializableOptions
+  } = opts
   return serializableOptions
 }
 
@@ -810,7 +820,24 @@ export function queryCollectionOptions(
       QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
     >(),
   }
+  let activeMutationHandlerCount = 0
 
+  // Query Cache fetch actions give each request a stable identity. Observer
+  // results and their exact Collection applications are attached to that
+  // identity so unrelated same-key cache work cannot become a refetch
+  // obligation merely because it happened before the call returned.
+  type FetchApplicationRecord = {
+    result?: QueryObserverResult<any, any>
+    settlement?: Promise<void>
+  }
+  const resultApplicationSettlements = new WeakMap<
+    QueryObserverResult<any, any>,
+    Map<string, Promise<void>>
+  >()
+  const fetchApplicationRecords = new WeakMap<
+    AnyQuery,
+    Map<number, Map<string, FetchApplicationRecord>>
+  >()
   // Query-cache ownership is scoped to this sync run and keyed by the
   // actual Query object. Weak membership survives subset unload without
   // retaining entries after Query Core garbage-collects them.
@@ -844,6 +871,75 @@ export function queryCollectionOptions(
 
   const getLogicalHashes = (query: AnyQuery): Set<string> =>
     logicalHashesByQuery.get(query) ?? new Set([hashKey(query.queryKey)])
+
+  const getFetchApplicationRecord = (
+    query: AnyQuery,
+    fetchStart: number,
+    hashedQueryKey: string,
+  ): FetchApplicationRecord => {
+    const recordsByStart =
+      fetchApplicationRecords.get(query) ??
+      new Map<number, Map<string, FetchApplicationRecord>>()
+    fetchApplicationRecords.set(query, recordsByStart)
+    const recordsByHash =
+      recordsByStart.get(fetchStart) ??
+      new Map<string, FetchApplicationRecord>()
+    recordsByStart.set(fetchStart, recordsByHash)
+    const record = recordsByHash.get(hashedQueryKey) ?? {}
+    recordsByHash.set(hashedQueryKey, record)
+    return record
+  }
+
+  const getRecordedResultApplicationSettlement = (
+    hashedQueryKey: string,
+    result: QueryObserverResult<any, any>,
+  ): Promise<void> | undefined =>
+    resultApplicationSettlements.get(result)?.get(hashedQueryKey)
+
+  const captureFetchResult = (query: AnyQuery, fetchStart: number): void => {
+    for (const hashedQueryKey of getLogicalHashes(query)) {
+      const observer = state.observers.get(hashedQueryKey)
+      if (!observer || observer.getCurrentQuery() !== query) continue
+      const result = observer.getCurrentResult()
+      const record = getFetchApplicationRecord(
+        query,
+        fetchStart,
+        hashedQueryKey,
+      )
+      record.result = result
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        result,
+      )
+      if (settlement) record.settlement = settlement
+    }
+  }
+
+  const captureFetchApplications = (
+    query: AnyQuery,
+    fetchStart: number,
+  ): void => {
+    const recordsByHash = fetchApplicationRecords.get(query)?.get(fetchStart)
+    if (!recordsByHash) return
+    for (const [hashedQueryKey, record] of recordsByHash) {
+      if (!record.result) continue
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        record.result,
+      )
+      if (settlement) record.settlement = settlement
+    }
+  }
+
+  const retireFetchApplicationRecords = (
+    query: AnyQuery,
+    fetchStarts: ReadonlyArray<number>,
+  ): void => {
+    const recordsByStart = fetchApplicationRecords.get(query)
+    if (!recordsByStart) return
+    for (const fetchStart of fetchStarts) recordsByStart.delete(fetchStart)
+    if (recordsByStart.size === 0) fetchApplicationRecords.delete(query)
+  }
 
   const hasPostWriteAuthority = (
     hashedQueryKey: string,
@@ -926,6 +1022,10 @@ export function queryCollectionOptions(
   // Eager startup holds one reference until cleanup. Cache removal detaches
   // observation, not that ownership or its rows.
   let ensureEagerSubscription = () => {}
+  let applyRefetchResultWhenUnsubscribed = (
+    _hashedQueryKey: string,
+    _result: QueryObserverResult<any, any>,
+  ): boolean => false
 
   type ExceptionalResultSettlement =
     | {
@@ -1042,6 +1142,7 @@ export function queryCollectionOptions(
     getExceptionalResultSettlement = readExceptionalResultSettlement
     type ResultApplicationController = AbortController & {
       rollback?: () => void
+      settleRefetchAtFetchBoundary?: () => void
     }
     const resultApplicationControllers = new Map<
       string,
@@ -1183,9 +1284,12 @@ export function queryCollectionOptions(
         | undefined
     }
 
-    const getPersistedOwners = (rowKey: string | number) => {
-      const rowMetadata = getRowMetadata(rowKey)
-      const queryMetadata = rowMetadata?.queryCollection
+    const getOwnersFromMetadata = (rowMetadata: unknown) => {
+      if (!rowMetadata || typeof rowMetadata !== `object`) {
+        return new Set<string>()
+      }
+      const queryMetadata = (rowMetadata as Record<string, unknown>)
+        .queryCollection
       if (!queryMetadata || typeof queryMetadata !== `object`) {
         return new Set<string>()
       }
@@ -1197,6 +1301,9 @@ export function queryCollectionOptions(
 
       return new Set(Object.keys(owners as Record<string, true>))
     }
+
+    const getPersistedOwners = (rowKey: string | number) =>
+      getOwnersFromMetadata(getRowMetadata(rowKey))
 
     const setPersistedOwners = (
       rowKey: string | number,
@@ -1487,8 +1594,10 @@ export function queryCollectionOptions(
      */
     const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
-        // Function-based queryKey: use it to build the key from opts
-        return queryKey(opts)
+        // Refetch starts another acquisition for the same semantic demand. It
+        // must not create a second Query cache or unload identity.
+        const { refetch: _refetch, ...queryKeyOptions } = opts
+        return queryKey(queryKeyOptions)
       } else if (syncMode === `on-demand`) {
         // A static on-demand key is extended by exact semantic demand so
         // equivalent predicates share one entry while distinct windows do not.
@@ -1566,6 +1675,48 @@ export function queryCollectionOptions(
         return settlement === true ? undefined : settlement
       })
 
+    const refetchAndWaitForApplication = async (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+    ): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        let active = true
+        const pending =
+          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+        const finish = (settle: () => void) => {
+          if (!active) return
+          active = false
+          pending.delete(cancel)
+          if (pending.size === 0) {
+            pendingReadyUnsubscribes.delete(hashedQueryKey)
+          }
+          settle()
+        }
+        const cancel = () => {
+          finish(() => reject(new LoadSubsetOperationAbortedError()))
+        }
+        pending.add(cancel)
+        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+
+        const refetch = async () => {
+          const waitsForDeferredApplication = !!collection.deferDataRefresh
+          await observer.refetch({ throwOnError: true })
+          if (
+            waitsForDeferredApplication ||
+            !hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
+          ) {
+            await waitForQueryReadyAndApplied(observer, hashedQueryKey)
+            return
+          }
+          const settlement = getResultApplicationSettlement(hashedQueryKey)
+          if (settlement !== true) await settlement
+        }
+        void refetch().then(
+          () => finish(resolve),
+          (error: unknown) => finish(() => reject(error)),
+        )
+      })
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
@@ -1617,6 +1768,10 @@ export function queryCollectionOptions(
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
         const currentResult = observer.getCurrentResult()
+
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(observer, hashedQueryKey)
+        }
 
         if (
           currentResult.isSuccess &&
@@ -1700,6 +1855,9 @@ export function queryCollectionOptions(
           subscribeToQuery(localObserver, hashedQueryKey)
         }
         const currentResult = localObserver.getCurrentResult()
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(localObserver, hashedQueryKey)
+        }
         if (currentResult.isError && !currentResult.isFetching) {
           return Promise.reject(currentResult.error)
         }
@@ -1778,7 +1936,11 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(queryKey)
 
       if (collection.status === `cleaned-up` || signal?.aborted) {
-        return
+        throw new LoadSubsetOperationAbortedError()
+      }
+
+      if (isMutationPublicationBlocked()) {
+        applicationToken.settleRefetchAtFetchBoundary?.()
       }
 
       const newItemsArray =
@@ -1819,6 +1981,27 @@ export function queryCollectionOptions(
       const restoreOwnershipTracking = () => {
         // Core flips this at its no-cancel point before publication can reenter.
         if (resultTransaction?.applicationStarted) return
+        // A wrapped sync may reserve and apply its core transaction entirely
+        // inside commit(), so there is no pending transaction to capture above.
+        // In that case the collection's committed metadata is the publication
+        // boundary; pending wrapper metadata is intentionally not consulted.
+        if (
+          resultTransaction === undefined &&
+          Array.from(affectedRowKeys).every((key) => {
+            const trackedOwners = rowToQueries.get(key) ?? new Set<string>()
+            const publishedOwners = getOwnersFromMetadata(
+              collection._state.syncedMetadata.get(key),
+            )
+            return (
+              trackedOwners.size === publishedOwners.size &&
+              Array.from(trackedOwners).every((owner) =>
+                publishedOwners.has(owner),
+              )
+            )
+          })
+        ) {
+          return
+        }
         if (!state.observers.has(hashedQueryKey)) return
         if (
           resultApplicationControllers.get(hashedQueryKey) !== applicationToken
@@ -1897,6 +2080,13 @@ export function queryCollectionOptions(
         })
 
         resultTransaction = collection._state.pendingSyncedTransactions.at(-1)
+        // No asynchronous work occurs between this check and commit. If a
+        // mutation started during fetch or baseline loading, explicit refetch
+        // callers stop at the Query fetch boundary while the application stays
+        // in the normal publication queue.
+        if (isMutationPublicationBlocked()) {
+          applicationToken.settleRefetchAtFetchBoundary?.()
+        }
         const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
@@ -1938,7 +2128,7 @@ export function queryCollectionOptions(
         collection.status === `cleaned-up` ||
         resultApplicationControllers.get(hashedQueryKey) !== applicationToken
       ) {
-        return
+        throw new LoadSubsetOperationAbortedError()
       }
       await applySuccessfulResult(
         queryKey,
@@ -1985,6 +2175,7 @@ export function queryCollectionOptions(
 
     const enqueueResultApplication = (
       hashedQueryKey: string,
+      result: QueryObserverResult<any, any>,
       apply: (
         signal: AbortSignal,
         applicationToken: ResultApplicationController,
@@ -1992,8 +2183,23 @@ export function queryCollectionOptions(
     ): void => {
       invalidatePendingResultApplication(hashedQueryKey)
       const controller: ResultApplicationController = new AbortController()
+      let settleRefetchAtFetchBoundary = () => {}
+      const fetchBoundary = new Promise<void>((resolve) => {
+        settleRefetchAtFetchBoundary = resolve
+      })
+      controller.settleRefetchAtFetchBoundary = settleRefetchAtFetchBoundary
       resultApplicationControllers.set(hashedQueryKey, controller)
       const application = apply(controller.signal, controller)
+      const refetchSettlement = Promise.race([application, fetchBoundary])
+      // Most applications are observer-driven and have no explicit refetch
+      // caller. Keep their derived settlement from becoming an unhandled
+      // rejection; a refetch that captures this promise still observes the
+      // original rejection when throwOnError is enabled.
+      void refetchSettlement.catch(() => undefined)
+      const applicationsByHash =
+        resultApplicationSettlements.get(result) ?? new Map()
+      applicationsByHash.set(hashedQueryKey, refetchSettlement)
+      resultApplicationSettlements.set(result, applicationsByHash)
       const cleanupController = () => {
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
@@ -2088,11 +2294,11 @@ export function queryCollectionOptions(
             }
             if (result.isFetching) return
 
-            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
               reconcileSuccessfulResult(queryKey, result, token, signal),
             )
           } else {
-            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
               applySuccessfulResult(queryKey, result, token, undefined, signal),
             )
           }
@@ -2131,6 +2337,14 @@ export function queryCollectionOptions(
 
     const isSubscribed = (hashedQueryKey: string) => {
       return unsubscribes.has(hashedQueryKey)
+    }
+
+    applyRefetchResultWhenUnsubscribed = (hashedQueryKey, result) => {
+      if (isSubscribed(hashedQueryKey)) return false
+      const trackedQueryKey = hashToQueryKey.get(hashedQueryKey)
+      if (!trackedQueryKey) return false
+      makeQueryResultHandler(trackedQueryKey)(result)
+      return true
     }
 
     const subscribeToQuery = (
@@ -2387,6 +2601,8 @@ export function queryCollectionOptions(
           trackCacheQuery(event.query)
         }
 
+        if (!trackedCacheQueries.has(event.query)) return
+
         if (event.type === `updated`) {
           if (event.action.type === `fetch`) {
             let fetchStart = queryCollectionFetchActionStarts.get(event.action)
@@ -2395,12 +2611,55 @@ export function queryCollectionOptions(
               queryCollectionFetchActionStarts.set(event.action, fetchStart)
             }
             queryCollectionCurrentFetchStarts.set(event.query, fetchStart)
+            const obsoleteFetchStarts = [
+              ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
+            ].filter((start) => start !== fetchStart)
+            if (obsoleteFetchStarts.length > 0) {
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, obsoleteFetchStarts),
+              )
+            }
+            captureFetchResult(event.query, fetchStart)
           } else if (event.action.type === `success` && !event.action.manual) {
             const fetchStart = queryCollectionCurrentFetchStarts.get(
               event.query,
             )
             if (fetchStart !== undefined) {
               queryCollectionSuccessfulFetchStarts.set(event.query, fetchStart)
+              captureFetchResult(event.query, fetchStart)
+              // An authority-gated observer schedules its result handler before
+              // this cache listener records the successful fetch. Capture once
+              // more after that handler has attached the application promise.
+              queueMicrotask(() => {
+                captureFetchApplications(event.query, fetchStart)
+                retireFetchApplicationRecords(event.query, [fetchStart])
+              })
+            }
+          } else if (event.action.type === `error`) {
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              captureFetchResult(event.query, fetchStart)
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, [fetchStart]),
+              )
+            }
+          } else if (
+            event.action.type === `setState` &&
+            event.action.state.fetchStatus === `idle`
+          ) {
+            // Query Core uses a setState action, not an error action, when a
+            // reverted cancellation restores the pre-fetch state. Reset also
+            // reaches this terminal state. Neither path should retain causal
+            // fetch records until another fetch happens.
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, [fetchStart]),
+              )
             }
           }
         }
@@ -2430,6 +2689,7 @@ export function queryCollectionOptions(
       if (activeSyncSession === syncSession) activeSyncSession = undefined
       pendingStartupLoads.clear()
       ensureEagerSubscription = () => {}
+      applyRefetchResultWhenUnsubscribed = () => false
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2500,9 +2760,10 @@ export function queryCollectionOptions(
      * - But observer.hasListeners() is still true (TanStack Query's internal listeners)
      * - We skip cleanup and reset refcount, allowing resubscribe to succeed
      *
-     * We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
-     * to prevent late-arriving data from being processed. The request completes and is cached
-     * by TanStack Query, allowing quick remounts to restore data without refetching.
+     * Ordinary in-flight requests may continue after this observer unsubscribes and remain
+     * cached by TanStack Query. A pending explicit refetch is acquisition-scoped: releasing
+     * its final owner rejects that caller and unsubscribes this observer, which lets Query
+     * cancel the transport when no peer observer still owns it.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
       // No observer lease exists until startup maintenance has finished.
@@ -2559,39 +2820,130 @@ export function queryCollectionOptions(
    * - utils.refetch() - for explicit user-triggered refetches
    * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
    *
-   * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
+   * Calls wait for each accepted Query result to be applied to Collection rows
+   * unless a user mutation is persisting or its handler is active. Normal
+   * publication is blocked behind that transaction, so those calls retain the
+   * Query fetch boundary.
+   *
+   * @returns Promise that resolves with each QueryObserverResult
    */
-  const refetch: RefetchFn = async (opts) => {
-    // An idle eager observer still owns rows; refetch must deliver its result.
+  const refetchQueryResults = async (
+    opts: Parameters<RefetchFn>[0],
+    awaitApplications: boolean,
+  ): ReturnType<RefetchFn> => {
+    const allQueryKeys = [...hashToQueryKey.values()]
+
+    // A replaced eager Query must reattach before refetch. An idle observer
+    // on the same Query is applied explicitly below to avoid an extra fetch.
     ensureEagerSubscription()
     const syncSession = activeSyncSession
-    const allQueryKeys = [...hashToQueryKey.values()]
-    const refetchPromises = allQueryKeys.map(async (qKey) => {
-      const queryObserver = state.observers.get(hashKey(qKey))!
+    const refetchPromises = allQueryKeys.map(async (trackedQueryKey) => {
+      const hashedQueryKey = hashKey(trackedQueryKey)
+      const queryObserver = state.observers.get(hashedQueryKey)
+      if (!queryObserver) return undefined
       const readExceptionalSettlement = getExceptionalResultSettlement
-      const result = await queryObserver.refetch({
-        throwOnError: opts?.throwOnError,
-      })
-      if (!result.isSuccess) return result
+
+      let query = queryObserver.getCurrentQuery()
+      let startingResult: QueryObserverResult<any, any>
+      let fetchRecord: FetchApplicationRecord | undefined
+      let result: QueryObserverResult<any, any>
+      try {
+        const fetch = queryObserver.refetch({
+          throwOnError: opts?.throwOnError,
+        })
+        query = queryObserver.getCurrentQuery()
+        startingResult = queryObserver.getCurrentResult()
+        const fetchStart = queryCollectionCurrentFetchStarts.get(query)
+        if (fetchStart !== undefined) {
+          fetchRecord = getFetchApplicationRecord(
+            query,
+            fetchStart,
+            hashedQueryKey,
+          )
+        }
+        result = await fetch
+      } catch (error) {
+        const currentResult = queryObserver.getCurrentResult()
+        const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
+          hashedQueryKey,
+          currentResult,
+        )
+        const causalResult = appliedUnsubscribed
+          ? currentResult
+          : (fetchRecord?.result ?? currentResult)
+        if (fetchRecord) {
+          fetchRecord.result = causalResult
+          fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
+            hashedQueryKey,
+            causalResult,
+          )
+        }
+        throw error
+      }
+
+      const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
+        hashedQueryKey,
+        result,
+      )
+      const causalResult = appliedUnsubscribed
+        ? result
+        : (fetchRecord?.result ?? result)
+      if (fetchRecord) {
+        fetchRecord.result = causalResult
+        fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
+          hashedQueryKey,
+          causalResult,
+        )
+      }
 
       // Query observers can report success before the Query cache records the
       // fetch authority used by the result handler. Let that queued handler
       // classify this result before reading its exceptional settlement.
       await new Promise<void>((resolve) => queueMicrotask(resolve))
       if (activeSyncSession !== syncSession) throw new CancelledError()
-      const settlement = readExceptionalSettlement(result)
-      if (settlement?.type === `rejected`) throw settlement.error
-      if (settlement?.type !== `pending`) return result
-
-      const replacement = await settlement.promise
-      if (!replacement.isSuccess && opts?.throwOnError) {
-        throw replacement.error
+      const exceptionalSettlement =
+        readExceptionalSettlement(causalResult) ??
+        readExceptionalSettlement(result) ??
+        readExceptionalSettlement(startingResult)
+      if (exceptionalSettlement?.type === `rejected`) {
+        throw exceptionalSettlement.error
       }
-      return replacement
+      if (exceptionalSettlement?.type === `pending`) {
+        const replacement = await exceptionalSettlement.promise
+        if (!replacement.isSuccess && opts?.throwOnError) {
+          throw replacement.error
+        }
+        return replacement
+      }
+
+      const settlement =
+        fetchRecord?.settlement ??
+        getRecordedResultApplicationSettlement(hashedQueryKey, result) ??
+        getRecordedResultApplicationSettlement(hashedQueryKey, startingResult)
+      if (awaitApplications && !isMutationPublicationBlocked() && settlement) {
+        if (opts?.throwOnError) {
+          await settlement
+        } else {
+          await settlement.catch(() => undefined)
+        }
+      }
+      return causalResult
     })
 
-    return Promise.all(refetchPromises)
+    return await Promise.all(refetchPromises)
   }
+
+  const isMutationPublicationBlocked = (): boolean => {
+    if (activeMutationHandlerCount > 0) return true
+    for (const transaction of writeContext?.collection._state.transactions.values() ??
+      []) {
+      if (transaction.state === `persisting`) return true
+    }
+    return false
+  }
+
+  const refetch: RefetchFn = (opts) =>
+    refetchQueryResults(opts, !isMutationPublicationBlocked())
 
   /**
    * Updates a single query key in the cache with new items, handling both direct arrays
@@ -2953,7 +3305,19 @@ export function queryCollectionOptions(
           "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
           'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
       )
-      await refetch()
+      await refetchQueryResults(undefined, false)
+    }
+  }
+
+  const runMutationHandler = async <TParams>(
+    handler: (params: TParams) => unknown,
+    params: TParams,
+  ): Promise<unknown> => {
+    activeMutationHandlerCount++
+    try {
+      return await handler(params)
+    } finally {
+      activeMutationHandlerCount--
     }
   }
 
@@ -2963,7 +3327,7 @@ export function queryCollectionOptions(
     ? async (
         params: Parameters<NonNullable<typeof onInsert>>[0],
       ): Promise<void> => {
-        const handlerResult = (await onInsert(params)) ?? {}
+        const handlerResult = (await runMutationHandler(onInsert, params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
@@ -2972,7 +3336,7 @@ export function queryCollectionOptions(
     ? async (
         params: Parameters<NonNullable<typeof onUpdate>>[0],
       ): Promise<void> => {
-        const handlerResult = (await onUpdate(params)) ?? {}
+        const handlerResult = (await runMutationHandler(onUpdate, params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
@@ -2981,7 +3345,7 @@ export function queryCollectionOptions(
     ? async (
         params: Parameters<NonNullable<typeof onDelete>>[0],
       ): Promise<void> => {
-        const handlerResult = (await onDelete(params)) ?? {}
+        const handlerResult = (await runMutationHandler(onDelete, params)) ?? {}
         await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined

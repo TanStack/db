@@ -2248,7 +2248,7 @@ describe(`QueryCollection`, () => {
       expect(options.onDelete).toBeDefined()
     })
 
-    it(`should wrap handlers and call the original handler`, async () => {
+    it(`should preserve handler parameter identity`, async () => {
       const queryKey = [`handlerTest`]
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
@@ -2332,10 +2332,19 @@ describe(`QueryCollection`, () => {
       await options.onUpdate!(updateMockParams)
       await options.onDelete!(deleteMockParams)
 
-      // Verify the original handlers were called
-      expect(onInsert).toHaveBeenCalledWith(insertMockParams)
-      expect(onUpdate).toHaveBeenCalledWith(updateMockParams)
-      expect(onDelete).toHaveBeenCalledWith(deleteMockParams)
+      // Phase tracking gives handler-local refetch calls their non-circular
+      // fetch boundary without replacing public objects.
+      for (const [handler, expected] of [
+        [onInsert, insertMockParams],
+        [onUpdate, updateMockParams],
+        [onDelete, deleteMockParams],
+      ] as const) {
+        expect(handler).toHaveBeenCalledOnce()
+        const actual = handler.mock.calls[0]![0]
+        expect(actual.transaction).toBe(expected.transaction)
+        expect(actual.collection).toBe(expected.collection)
+        expect(actual.collection.utils).toBe(expected.collection.utils)
+      }
     })
 
     it(`should call refetch based on handler return value`, async () => {
@@ -2415,7 +2424,10 @@ describe(`QueryCollection`, () => {
       await optionsDefault.onInsert!(insertParamsDefault)
 
       // Verify handler was called and refetch was triggered (queryFn called again)
-      expect(onInsertDefault).toHaveBeenCalledWith(insertParamsDefault)
+      expect(onInsertDefault).toHaveBeenCalledOnce()
+      expect(onInsertDefault.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       await vi.waitFor(() => {
         expect(queryFnDefault).toHaveBeenCalledTimes(1)
       })
@@ -2444,7 +2456,10 @@ describe(`QueryCollection`, () => {
       await optionsFalse.onInsert!(insertParamsFalse)
 
       // Verify handler was called but refetch was NOT triggered (queryFn not called)
-      expect(onInsertFalse).toHaveBeenCalledWith(insertParamsFalse)
+      expect(onInsertFalse).toHaveBeenCalledOnce()
+      expect(onInsertFalse.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       // Wait a bit to ensure no refetch happens
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(queryFnFalse).not.toHaveBeenCalled()
@@ -2470,7 +2485,10 @@ describe(`QueryCollection`, () => {
 
       await optionsPrimitive.onInsert!(insertParamsPrimitive)
 
-      expect(onInsertPrimitive).toHaveBeenCalledWith(insertParamsPrimitive)
+      expect(onInsertPrimitive).toHaveBeenCalledOnce()
+      expect(onInsertPrimitive.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       await vi.waitFor(() => {
         expect(queryFnPrimitive).toHaveBeenCalledTimes(1)
       })
@@ -2506,13 +2524,8 @@ describe(`QueryCollection`, () => {
         })
         queryFn.mockClear()
 
-        await options.onInsert!({
-          transaction: {
-            id: `explicit-refetch-transaction`,
-            mutations: [],
-          } as unknown as TransactionWithMutations<TestItem, `insert`>,
-          collection,
-        })
+        const mutation = collection.insert({ id: `2`, name: `Item 2` })
+        await mutation.isPersisted.promise
 
         expect(queryFn).toHaveBeenCalledTimes(1)
         expect(warning).not.toHaveBeenCalled()

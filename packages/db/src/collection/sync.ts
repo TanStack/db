@@ -326,12 +326,8 @@ export class CollectionSyncManager<
             // - Finally, optimistic mutations re-applied on top (single batch)
             pendingTransaction.truncate = true
 
-            // Capture optimistic state NOW to preserve it even if transactions complete
-            // before this truncate transaction is committed
-            pendingTransaction.optimisticSnapshot = {
-              upserts: new Map(this.state.optimisticUpserts),
-              deletes: new Set(this.state.optimisticDeletes),
-            }
+            pendingTransaction.optimisticSnapshot =
+              this.state.captureTruncateOptimisticSnapshot()
           },
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
