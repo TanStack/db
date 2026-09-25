@@ -1086,15 +1086,18 @@ async function runPersistedTrace(
         const exported = collection.config.sync.exportSyncMeta?.() as
           | { resume?: unknown }
           | undefined
+        const resume = observableResume(exported?.resume)
+        const durableResume = observableResume(
+          persistedMetadata.get(`electric:resume`),
+        )
+        expect(durableResume).toEqual(resume)
         return {
           rows,
           snapshots,
           status: collection.status,
-          resume: observableResume(exported?.resume),
+          resume,
           durableRows,
-          durableResume: observableResume(
-            persistedMetadata.get(`electric:resume`),
-          ),
+          durableResume,
           persistenceCommits,
         }
       },
