@@ -292,8 +292,9 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
 export type CursorExpressions = {
   /**
    * Expression for rows greater than (after) the cursor value.
-   * Core emits cursors for a single order column. Multi-column queries use
-   * prefix-and-tie loading instead of constructing a composite cursor.
+   * Core emits this predicate from the leading order column. Multi-column
+   * queries load the complete leading-value tie separately instead of
+   * constructing a composite cursor.
    */
   whereFrom: BasicExpression<boolean>
   /**

@@ -737,12 +737,14 @@ behind the active replay barrier.
 
 ### Ordered requests, continuation, and recovery
 
-Core constructs cursors only for one order column. A direct
+Core constructs cursors only from the leading order column. A direct
 `requestLimitedSnapshot()` call with a nonempty `minValues` must supply one
-value and one order term; composite or partial-composite inputs throw before
-local delivery or source acquisition. Multi-column queries remain supported
-through the ordered loader's prefix-and-tie fallback. Its first-column equality
-request closes a tie group; it is not a composite continuation cursor.
+leading value and at least one order term; multiple boundary values throw
+before local delivery or source acquisition. For a multi-column query, the
+provider still receives the complete order, while the continuation predicate
+selects rows after the leading value. A separate first-column equality request
+loads that complete tie before local ordering applies the trailing terms. This
+is a leading-column continuation plus tie expansion, not a composite cursor.
 
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
@@ -862,11 +864,11 @@ cannot advance it merely by entering D2. This relies on the adapter fulfilling
 the exact ordered request, not just resolving after an arbitrary partial write.
 An empty range does not invent a boundary or prove source exhaustion.
 
-For no-index and multi-column prefix loading, an unrelated new key does not
-reacquire an already full window. An explicit window move, an underfilled
-window, or a settled prefix smaller than a window widened during that request
-still requires acquisition. A full local window alone does not prove that the
-provider fulfilled a concurrent window change.
+For no-index prefix loading, an unrelated new key does not reacquire an already
+full window. An explicit window move, an underfilled window, or a settled
+prefix smaller than a window widened during that request still requires
+acquisition. A full local window alone does not prove that the provider
+fulfilled a concurrent window change.
 
 A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not

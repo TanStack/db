@@ -3577,66 +3577,69 @@ describe(`pagination recomputation oracle`, () => {
     ).toBe(`tie`)
   })
 
-  it(`repairs a capped prefix through its first-column tie and cursor refill`, async () => {
-    const result = await runPendingMutationScenario(
-      {
-        ranks: [0, 1, 1, 2],
-        direction: `asc`,
-        limit: 3,
-        mutation: { type: `delete`, id: 1 },
-        responseOutcome: `resolve`,
-        orderedResponseLimit: 1,
-      },
-      `after-response`,
-      undefined,
-      false,
-    )
-    const requests = result.mutationRepairRequests
+  it.each([false, true])(
+    `repairs a capped prefix through its first-column tie and cursor refill (explicit key=%s)`,
+    async (explicitPublicKeyOrder) => {
+      const result = await runPendingMutationScenario(
+        {
+          ranks: [0, 1, 1, 2],
+          direction: `asc`,
+          limit: 3,
+          mutation: { type: `delete`, id: 1 },
+          responseOutcome: `resolve`,
+          orderedResponseLimit: 1,
+        },
+        `after-response`,
+        undefined,
+        explicitPublicKeyOrder,
+      )
+      const requests = result.mutationRepairRequests
 
-    expect(
-      requests.map((request) =>
-        request.orderBy ? (request.cursor ? `refill` : `prefix`) : `tie`,
-      ),
-    ).toEqual([`prefix`, `tie`, `refill`, `tie`])
-    const [prefix, firstTie, refill, secondTie] = requests
-    expect(orderSignature(prefix!)).toStrictEqual(
-      expectedOrderSignature(`asc`, false),
-    )
-    expect(prefix!.where).toBeUndefined()
-    expect(prefix!.limit).toBe(3)
-    expect(prefix!.refetch).toBe(true)
-    expect(prefix!.cursor).toBeUndefined()
-    expect(prefix!.offset).toBeUndefined()
-    expectPredicateBehavior(
-      firstTie!.where,
-      [{ id: 2, rank: 1 }],
-      [
-        { id: 1, rank: 0 },
-        { id: 4, rank: 2 },
-      ],
-    )
-    expect(firstTie!.orderBy).toBeUndefined()
-    expect(firstTie!.limit).toBeUndefined()
-    expect(firstTie!.refetch).toBe(true)
-    expect(firstTie!.cursor).toBeUndefined()
-    expect(firstTie!.offset).toBeUndefined()
-    expect(orderSignature(refill!)).toStrictEqual(
-      expectedOrderSignature(`asc`, false),
-    )
-    expect(refill?.limit).toBe(1)
-    expect(refill?.refetch).toBe(true)
-    expect(refill?.cursor).toBeDefined()
-    expectPredicateBehavior(
-      secondTie!.where,
-      [{ id: 4, rank: 2 }],
-      [{ id: 2, rank: 1 }],
-    )
-    expect(secondTie!.orderBy).toBeUndefined()
-    expect(secondTie!.limit).toBeUndefined()
-    expect(secondTie!.refetch).toBe(true)
-    expect(secondTie!.cursor).toBeUndefined()
-    expect(secondTie!.offset).toBeUndefined()
-  })
+      expect(
+        requests.map((request) =>
+          request.orderBy ? (request.cursor ? `refill` : `prefix`) : `tie`,
+        ),
+      ).toEqual([`prefix`, `tie`, `refill`, `tie`])
+      const [prefix, firstTie, refill, secondTie] = requests
+      expect(orderSignature(prefix!)).toStrictEqual(
+        expectedOrderSignature(`asc`, explicitPublicKeyOrder),
+      )
+      expect(prefix!.where).toBeUndefined()
+      expect(prefix!.limit).toBe(3)
+      expect(prefix!.refetch).toBe(true)
+      expect(prefix!.cursor).toBeUndefined()
+      expect(prefix!.offset).toBeUndefined()
+      expectPredicateBehavior(
+        firstTie!.where,
+        [{ id: 2, rank: 1 }],
+        [
+          { id: 1, rank: 0 },
+          { id: 4, rank: 2 },
+        ],
+      )
+      expect(firstTie!.orderBy).toBeUndefined()
+      expect(firstTie!.limit).toBeUndefined()
+      expect(firstTie!.refetch).toBe(true)
+      expect(firstTie!.cursor).toBeUndefined()
+      expect(firstTie!.offset).toBeUndefined()
+      expect(orderSignature(refill!)).toStrictEqual(
+        expectedOrderSignature(`asc`, explicitPublicKeyOrder),
+      )
+      expect(refill?.limit).toBe(1)
+      expect(refill?.refetch).toBe(true)
+      expect(refill?.cursor).toBeDefined()
+      expectPredicateBehavior(
+        secondTie!.where,
+        [{ id: 4, rank: 2 }],
+        [{ id: 2, rank: 1 }],
+      )
+      expect(secondTie!.orderBy).toBeUndefined()
+      expect(secondTie!.limit).toBeUndefined()
+      expect(secondTie!.refetch).toBe(true)
+      expect(secondTie!.cursor).toBeUndefined()
+      expect(secondTie!.offset).toBeUndefined()
+    },
+  )
 
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
@@ -4163,7 +4166,7 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
+  it(`tracks an asynchronous cursor continuation after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
       { id: 2, rank: 2 },
@@ -4234,10 +4237,11 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests.length).toBeGreaterThan(initialRequestCount)
       const widenedRequest = requests
         .slice(initialRequestCount)
-        .find(({ limit }) => limit === 2)
+        .find(({ cursor }) => cursor !== undefined)
       expect(widenedRequest).toBeDefined()
-      expect(widenedRequest?.offset).toBeUndefined()
-      expect(widenedRequest?.cursor).toBeUndefined()
+      expect(widenedRequest).toMatchObject({ limit: 1, offset: 1 })
+      expect(widenedRequest?.cursor?.whereFrom).toBeDefined()
+      expect(widenedRequest?.cursor?.whereCurrent).toBeDefined()
       const settledBeforeRefinement = await Promise.race([
         Promise.resolve(widened).then(() => true),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), 10)),
@@ -4452,6 +4456,53 @@ describe(`pagination recomputation oracle`, () => {
     `matches multi-column nullable ordering for a random or replayed seed`,
     runMultiOrderScenario,
   )
+
+  it(`continues an indexed multi-column window from its leading boundary`, async () => {
+    const rows: Array<MultiOrderRow> = [
+      { id: 3, primary: 0, secondary: 2 },
+      { id: 2, primary: 0, secondary: 1 },
+      { id: 1, primary: 0, secondary: 0 },
+      { id: 5, primary: 1, secondary: 1 },
+      { id: 4, primary: 1, secondary: 0 },
+      { id: 6, primary: 2, secondary: 0 },
+    ]
+    const { requests, source } = createConformingOrderedSource(
+      `pagination-multi-order-cursor-${collectionSequence++}`,
+      rows,
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.primary, `asc`)
+        .orderBy(({ row }) => row.secondary, `desc`)
+        .limit(2)
+        .select(({ row }) => ({ id: row.id })),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 2])
+
+      const initialRequestCount = requests.length
+      const widened = live.utils.setWindow({ offset: 0, limit: 5 })
+      if (widened instanceof Promise) await widened
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 2, 1, 5, 4])
+      const continuation = requests
+        .slice(initialRequestCount)
+        .find(({ cursor }) => cursor !== undefined)
+      expect(continuation).toMatchObject({
+        limit: 2,
+        offset: 3,
+        orderBy: expect.any(Array),
+      })
+      expect(continuation?.orderBy).toHaveLength(2)
+      expect(continuation?.cursor?.whereFrom).toBeDefined()
+      expect(continuation?.cursor?.whereCurrent).toBeDefined()
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
 
   fcTest.prop([nullableCursorScenarioArbitrary], {
     numRuns: transitionScenarioRuns,
@@ -4866,14 +4917,7 @@ describe(`pagination recomputation oracle`, () => {
         const pendingBeforeWiden = pending.length
         const widened = live.utils.setWindow({ offset: 0, limit: 3 })
         await flushPromises()
-        if (mutation.type === `insert`) {
-          expect(pending.length).toBeGreaterThan(pendingBeforeWiden)
-          expect(
-            pending
-              .slice(pendingBeforeWiden)
-              .some(({ options }) => options.limit === 3),
-          ).toBe(true)
-        } else {
+        if (mutation.type !== `insert`) {
           expect(
             pending.some(
               ({ options }) =>
@@ -4882,13 +4926,9 @@ describe(`pagination recomputation oracle`, () => {
                 options.cursor === undefined,
             ),
           ).toBe(true)
-          expect(widened).toBe(true)
-          expect(pending).toHaveLength(pendingBeforeWiden)
         }
-        for (let index = pendingBeforeWiden; index < pending.length; index++) {
-          await settle(pending[index]!)
-        }
-        if (widened instanceof Promise) await widened
+        expect(widened).toBe(true)
+        expect(pending).toHaveLength(pendingBeforeWiden)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual(
           expectedWideIds,
         )
@@ -5239,12 +5279,19 @@ describe(`pagination recomputation oracle`, () => {
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
       ([`pages`, `widen`] as const).flatMap((mode) =>
-        [3, 10].map((pageSize) => ({ direction, mode, pageSize })),
+        [false, true].flatMap((explicitPublicKeyOrder) =>
+          [3, 10].map((pageSize) => ({
+            direction,
+            mode,
+            explicitPublicKeyOrder,
+            pageSize,
+          })),
+        ),
       ),
     ),
   )(
     `fetches linear row volume while traversing settled pages: %j`,
-    async ({ direction, mode, pageSize }) => {
+    async ({ direction, mode, explicitPublicKeyOrder, pageSize }) => {
       const pageCount = 10
       const rows = Array.from({ length: pageCount * pageSize }, (_, rank) => ({
         id: rank + 1,
@@ -5255,12 +5302,16 @@ describe(`pagination recomputation oracle`, () => {
         `pagination-transfer-${collectionSequence++}`,
         ordered,
       )
-      const live = createLiveQueryCollection((q) =>
-        q
+      const live = createLiveQueryCollection((q) => {
+        const orderedQuery = q
           .from({ row: source })
           .orderBy(({ row }) => row.rank, direction)
-          .limit(pageSize),
-      )
+        return (
+          explicitPublicKeyOrder
+            ? orderedQuery.orderBy(({ row }) => row.id, direction)
+            : orderedQuery
+        ).limit(pageSize)
+      })
       try {
         await live.preload()
         for (let page = 0; page < pageCount; page++) {

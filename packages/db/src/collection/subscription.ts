@@ -1352,8 +1352,9 @@ export class CollectionSubscription
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
    *
-   * Cursor requests support one order term and one minValue. Multi-column
-   * queries use the ordered loader's prefix-and-tie fallback instead.
+   * Cursor requests use one minValue for the leading order term. For a
+   * multi-column order, a separate equality request loads the complete
+   * leading-value tie before local ordering applies the trailing terms.
    *
    * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.

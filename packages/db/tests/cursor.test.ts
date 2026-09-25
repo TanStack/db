@@ -53,17 +53,16 @@ describe(`buildCursor`, () => {
     const order = orderBy([`group`, `asc`, `first`], [`rank`, `desc`, `last`])
 
     expect(() => buildCursor(order, [1, 10])).toThrow(
-      `Only single-column cursors are supported`,
+      `Only leading-column cursors are supported`,
     )
     expect(canExpressCursorOrder(order, [1, 10])).toBe(false)
   })
 
-  it(`rejects partial composite cursors instead of silently dropping terms`, () => {
+  it(`uses the leading term for a partial composite cursor`, () => {
     const order = orderBy([`first`, `asc`, `first`], [`second`, `asc`, `first`])
-    expect(() => buildCursor(order, [1])).toThrow(
-      `Only single-column cursors are supported`,
-    )
-    expect(canExpressCursorOrder(order, [1])).toBe(false)
+    expect(matches(order, [1], { first: 2, second: 0 })).toBe(true)
+    expect(matches(order, [1], { first: 0, second: 2 })).toBe(false)
+    expect(canExpressCursorOrder(order, [1])).toBe(true)
   })
 
   it(`rejects cursor pushdown when predicates cannot express the order`, () => {

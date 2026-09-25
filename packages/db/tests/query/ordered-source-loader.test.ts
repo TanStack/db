@@ -63,6 +63,76 @@ function createOrderByInfo(
 }
 
 describe(`OrderedSourceLoader`, () => {
+  it(`pages an indexed multi-column order from its leading term`, async () => {
+    const requests: Array<{ method: string; options: RequestOptions }> = []
+    let dataNeeded = 0
+    const request = (method: string, options: RequestOptions) => {
+      requests.push({ method, options })
+      options.onLoadSubsetResult?.(true, options, () => {})
+    }
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 1, id: 2 } }],
+      requestLimitedSnapshot: (options: RequestOptions) =>
+        request(`limited`, options),
+      requestSnapshot: (options: RequestOptions) =>
+        request(`snapshot`, options),
+    }
+    const orderBy = [
+      ...createOrderByInfo().orderBy,
+      {
+        expression: new PropRef([`row`, `id`]),
+        compareOptions: {
+          direction: `desc` as const,
+          nulls: `last` as const,
+          stringSort: `lexical` as const,
+        },
+      },
+    ]
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({
+        orderBy,
+        dataNeeded: () => dataNeeded,
+      }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+    )
+
+    try {
+      loader.start()
+      await pendingPromise(loader)
+      await pendingPromise(loader)
+
+      expect(requests[0]?.method).toBe(`limited`)
+      expect(requests[0]?.options).toMatchObject({
+        limit: 1,
+        offset: 0,
+      })
+      expect(requests[0]?.options.orderBy).toHaveLength(2)
+      expect(
+        requests[0]?.options.orderBy?.map(({ expression }) => expression),
+      ).toEqual([new PropRef([`rank`]), new PropRef([`id`])])
+      expect(requests[1]?.method).toBe(`snapshot`)
+      expect(requests[1]?.options.where).toBeDefined()
+
+      dataNeeded = 2
+      loader.loadMore(1)
+      await pendingPromise(loader)
+
+      const continuation = requests.find(
+        ({ method, options }) =>
+          method === `limited` && options.minValues !== undefined,
+      )
+      expect(continuation?.options).toMatchObject({
+        limit: 2,
+        minValues: [1],
+      })
+      expect(continuation?.options.orderBy).toHaveLength(2)
+    } finally {
+      loader.dispose()
+    }
+  })
+
   it(`settles a larger prefix after an older lease release throws`, async () => {
     const failure = new Error(`old prefix release failed`)
     const requests: Array<LoadSubsetOptions> = []
