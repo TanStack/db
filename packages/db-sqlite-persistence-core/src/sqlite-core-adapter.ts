@@ -44,10 +44,7 @@ type CompiledSqlFragment = {
   valueKind?: CompiledValueKind
 }
 
-type SqlExpressionCompilationContext =
-  | `predicate`
-  | `index-expression`
-  | `comparison-target`
+type SqlExpressionCompilationContext = `predicate` | `index-expression`
 
 type StoredSqliteRow = {
   key: string
@@ -239,7 +236,7 @@ function decodePersistedJsonValue(value: unknown): unknown {
   if (isPersistedTaggedValue(value)) {
     switch (value[PERSISTED_TYPE_TAG]) {
       case `bigint`:
-        return assertSQLiteBigIntInRange(BigInt(value[PERSISTED_VALUE_TAG]))
+        return BigInt(value[PERSISTED_VALUE_TAG])
       case `date`: {
         const parsedDate = new Date(value[PERSISTED_VALUE_TAG])
         return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
@@ -331,29 +328,6 @@ function toSqliteExpressionLiteral(value: unknown): string {
   return toSqliteLiteral(toSqliteParameterValue(value))
 }
 
-function inlineSqlParams(
-  sql: string,
-  params: ReadonlyArray<SqliteSupportedValue>,
-): string {
-  // Every question mark in this compiler-owned SQL is a placeholder. Ref-path
-  // literals cannot contain one because createJsonPath rejects such segments.
-  // Callers must bypass this helper when SQL already contains other literals.
-  let index = 0
-  const inlinedSql = sql.replace(/\?/g, () => {
-    const paramValue = params[index]
-    index++
-    return toSqliteLiteral(paramValue ?? null)
-  })
-
-  if (index !== params.length) {
-    throw new InvalidPersistedCollectionConfigError(
-      `Unable to inline SQL params; placeholder count did not match provided params`,
-    )
-  }
-
-  return inlinedSql
-}
-
 type CompiledRowExpressionEvaluator = (row: Record<string, unknown>) => unknown
 
 function compileRowExpressionEvaluator(
@@ -367,7 +341,7 @@ function compileRowExpressionEvaluator(
       `Unsupported expression for SQLite adapter fallback evaluator: ${(error as Error).message}`,
     )
   }
-  return (row) => baseEvaluator(row)
+  return baseEvaluator
 }
 
 function getOrderByObjectId(value: object): number {
@@ -640,7 +614,7 @@ function argumentCompilationContext(
     case `ilike`:
       if (argument.type !== `val`) return `index-expression`
       return typeof argument.value === `bigint`
-        ? `comparison-target`
+        ? `index-expression`
         : `predicate`
     case `in`:
       return argumentIndex === 0 ? `index-expression` : `predicate`
@@ -658,16 +632,16 @@ function compileSqlExpression(
 ): CompiledSqlFragment {
   if (expression.type === `val`) {
     const valueKind = getLiteralValueKind(expression.value)
-    const value = toSqliteParameterValue(expression.value)
     return {
       supported: true,
       sql:
         context === `index-expression`
           ? toSqliteExpressionLiteral(expression.value)
-          : context === `comparison-target`
-            ? expression.value.toString()
-            : `?`,
-      params: context === `predicate` ? [value] : [],
+          : `?`,
+      params:
+        context === `predicate`
+          ? [toSqliteParameterValue(expression.value)]
+          : [],
       valueKind,
     }
   }
@@ -1021,9 +995,12 @@ function normalizeIndexSqlFragment(fragment: string): string {
         `Persisted index expression is not supported by the SQLite compiler`,
       )
     }
-    return compiled.params.length === 0
-      ? compiled.sql
-      : inlineSqlParams(compiled.sql, compiled.params)
+    if (compiled.params.length !== 0) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted index expression cannot contain bound parameters`,
+      )
+    }
+    return compiled.sql
   }
 
   return sanitizeExpressionSqlFragment(fragment)

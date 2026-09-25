@@ -3063,6 +3063,52 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`preserves an explicit source alias through remote subset projection`, async () => {
+    const coordinator = new SingleProcessCoordinator(`single-wire-alias`)
+    const owner = Object.assign(vi.fn(), {
+      unloadSubset: vi.fn(),
+      onError: vi.fn(),
+    })
+    const unregisterOwner = coordinator.registerRemoteSubsetOwner(
+      `todos`,
+      owner,
+    )
+    const options: LoadSubsetOptions = {
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`todos`, `status`], `todos`),
+        new IR.Value(`kept`),
+      ]),
+    }
+
+    try {
+      await coordinator.requestEnsureRemoteSubset(`todos`, options)
+      expect(owner).toHaveBeenCalledWith({
+        where: {
+          type: `func`,
+          name: `eq`,
+          args: [
+            { type: `ref`, path: [`todos`, `status`], sourceAlias: `todos` },
+            { type: `val`, value: `kept` },
+          ],
+        },
+      })
+    } finally {
+      await coordinator.requestReleaseRemoteSubset(`todos`, options)
+      unregisterOwner()
+    }
+  })
+
+  it(`rejects a remote subset source alias that disagrees with its path`, () => {
+    expect(() =>
+      toTransportedLoadSubsetOptions({
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`todos`, `status`], `other`),
+          new IR.Value(`kept`),
+        ]),
+      }),
+    ).toThrowError(/options\.where\.args\[0\]\.sourceAlias/)
+  })
+
   it(`projects lexical comparison options without locale-only wire fields`, () => {
     const projected = toTransportedLoadSubsetOptions({
       orderBy: [

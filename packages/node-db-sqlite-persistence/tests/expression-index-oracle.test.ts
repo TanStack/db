@@ -15,7 +15,8 @@
  * persisted Date ranges, and BigInt ranges/IN within SQLite's signed-integer
  * domain. Explicitly qualified refs lower to the same JSON field expression
  * without reinterpreting legacy nested paths. Known omissions: null, arbitrary
- * raw SQL, native-host planning, and BigInts outside SQLite's signed range.
+ * raw SQL, and native-host planning. Generated BigInts stay inside SQLite's
+ * signed range. A fixed legacy-byte case checks read compatibility beyond it.
  *
  * Independent model: fixed keys encode the result of each generated relation;
  * the equality witness also uses a full adapter scan, a small path walker, and
@@ -1584,6 +1585,56 @@ describe(`SQLite expression-index oracle`, () => {
       if (adapter.scanRows) {
         expect(await adapter.scanRows(`bigint-write-range`)).toEqual([])
       }
+    }, [() => driver.close()])
+  })
+
+  it(`reads a legacy persisted BigInt beyond the new write range`, async () => {
+    const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+    const adapter = createSQLiteCorePersistenceAdapter({ driver })
+    const collectionId = `legacy-bigint-read`
+    const tableName = createPersistedTableName(collectionId, `c`)
+    const legacyValue = 10n ** 30n
+
+    await withFailurePreservingCleanup(async () => {
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-legacy-bigint-read`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          { type: `insert`, key: `legacy`, value: { id: `legacy`, count: 1n } },
+        ],
+      })
+      driver
+        .getDatabase()
+        .prepare(`UPDATE "${tableName}" SET value = ?`)
+        .run(
+          JSON.stringify({
+            id: `legacy`,
+            count: {
+              [PERSISTED_TYPE_TAG]: `bigint`,
+              [PERSISTED_VALUE_TAG]: legacyValue.toString(),
+            },
+          }),
+        )
+
+      if (!adapter.scanRows) {
+        throw new Error(`real SQLite adapter did not expose scanRows`)
+      }
+      const scanned = await adapter.scanRows(collectionId)
+      expect(scanned.map((row) => row.value)).toEqual([
+        { id: `legacy`, count: legacyValue },
+      ])
+
+      const subset = await adapter.loadSubset(collectionId, {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`id`]),
+          new IR.Value(`legacy`),
+        ]),
+      })
+      expect(subset.map((row) => row.value)).toEqual([
+        { id: `legacy`, count: legacyValue },
+      ])
     }, [() => driver.close()])
   })
 
