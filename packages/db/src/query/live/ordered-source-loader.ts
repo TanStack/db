@@ -31,9 +31,13 @@ type OrderedContinuation = {
   continuesOrderedPrefixRepair: boolean
 }
 
+class OrderedPostSettlementError {
+  constructor(readonly cause: unknown) {}
+}
+
 /** Owns the conservative provider-loading policy for one ordered source. */
 export class OrderedSourceLoader {
-  private pending: Promise<unknown> | undefined
+  private pending: Promise<void> | undefined
   // Exact request settlement is not provider extent. This latch only records
   // that some request once completed; reset may discard the boundary, and an
   // empty page retains it. A failure never reads it before a full-source
@@ -136,7 +140,7 @@ export class OrderedSourceLoader {
   loadMore(
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
-  ): Promise<unknown> | undefined {
+  ): Promise<void> | undefined {
     if (!this.active || this.info.limit === 0 || this.requesting) return
     if (this.stagedContinuation) {
       this.consumeStagedContinuation(windowOperationGeneration)
@@ -556,6 +560,7 @@ export class OrderedSourceLoader {
       windowOperationGeneration === undefined &&
       !isAuthoritativeRepair &&
       requestGraphInputRevision !== undefined
+    let synchronousCompletionFailure: { error: unknown } | undefined
     const continuation = (
       continuationKind: OrderedContinuation[`kind`],
     ): OrderedContinuation => ({
@@ -652,7 +657,10 @@ export class OrderedSourceLoader {
                   this.subscription.readOrderedSnapshot(options).at(-1)
                     ?.value ?? this.settledSourceBoundary
               } catch (error) {
-                if (canSettleSynchronously) throw error
+                if (canSettleSynchronously) {
+                  synchronousCompletionFailure = { error }
+                  throw error
+                }
                 fail(error)
               }
             }
@@ -678,11 +686,7 @@ export class OrderedSourceLoader {
             this.orderedPrefixRepairGeneration = undefined
             this.retireSettledFiniteAcquisitions()
           }
-          if (isOrderedRepair) {
-            continueOrStage(continuation(`boundary`), deferContinuation)
-            return
-          }
-          if (kind === `ordered`) {
+          if (isOrderedRepair || kind === `ordered`) {
             continueOrStage(continuation(`boundary`), deferContinuation)
             return
           }
@@ -721,15 +725,33 @@ export class OrderedSourceLoader {
       throw error
     }
     if (canSettleSynchronously) {
-      complete(undefined, true)
-      this.onResult(true, false, false)
-      if (this.getGraphInputRevision!() === requestGraphInputRevision) {
-        this.drainNoInputContinuations(requestGraphInputRevision)
+      try {
+        runAllCallbacks([
+          () => complete(undefined, true),
+          () => {
+            if (!synchronousCompletionFailure) {
+              this.onResult(true, false, false)
+            }
+          },
+          () => {
+            if (
+              !synchronousCompletionFailure &&
+              this.getGraphInputRevision?.() === requestGraphInputRevision
+            ) {
+              this.drainNoInputContinuations(requestGraphInputRevision)
+            }
+          },
+        ])
+      } catch (error) {
+        if (synchronousCompletionFailure) {
+          throw synchronousCompletionFailure.error
+        }
+        throw new OrderedPostSettlementError(error)
       }
-      return this.pending as Promise<void> | undefined
+      return this.pending
     }
-    const request = settlesAsync ? result : Promise.resolve()
-    const tracked = request.then(
+    const request: Promise<void> = settlesAsync ? result : Promise.resolve()
+    const tracked: Promise<void> = request.then(
       () => complete(tracked),
       (error) => fail(error, tracked),
     )
@@ -797,7 +819,7 @@ export class OrderedSourceLoader {
   private loadBoundary(
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
-  ): Promise<unknown> | undefined {
+  ): Promise<void> | undefined {
     const biggest = this.settledSourceBoundary
     if (biggest === undefined) {
       return continuesOrderedPrefixRepair
@@ -998,6 +1020,7 @@ export class OrderedSourceLoader {
         graphInputRevision,
       )
     } catch (error) {
+      if (error instanceof OrderedPostSettlementError) throw error.cause
       // Both request and settlement callbacks may reenter through cleanup.
       // Keep refinement blocked until failure and release finish unwinding.
       this.requesting = true

@@ -8269,6 +8269,9 @@ describe(`QueryCollection`, () => {
         expect(remounted.toArray.map(({ id }) => id)).toEqual([`1`, `2`])
         expect(remounted.status).toBe(`ready`)
         await preload
+        expect(queryFn).toHaveBeenCalledTimes(0)
+        await Promise.resolve()
+        expect(queryFn).toHaveBeenCalledTimes(0)
       } finally {
         await Promise.all([
           warm.cleanup(),

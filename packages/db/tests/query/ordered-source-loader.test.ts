@@ -200,6 +200,144 @@ describe(`OrderedSourceLoader`, () => {
     }
   })
 
+  it(`keeps a literal-true replacement when retiring the older prefix throws`, () => {
+    const failure = new Error(`old prefix release failed`)
+    const requests: Array<{
+      options: RequestOptions
+      acquisition: LoadSubsetOptions
+      release: ReleaseLoadSubset
+    }> = []
+    const released: Array<LoadSubsetOptions> = []
+    const request = (options: RequestOptions) => {
+      const acquisition: LoadSubsetOptions = {
+        orderBy: options.orderBy,
+        limit: options.limit,
+        where: options.where,
+      }
+      const requestIndex = requests.length
+      const release = () => {
+        released.push(acquisition)
+        if (requestIndex === 0) throw failure
+      }
+      requests.push({ options, acquisition, release })
+      options.onLoadSubsetResult?.(true, acquisition, release)
+    }
+    const subscription = {
+      readOrderedSnapshot: (options: LoadSubsetOptions) => [
+        { value: { rank: options.limit ?? 1 } },
+      ],
+      requestSnapshot: request,
+    }
+    const info = createOrderByInfo({ index: undefined, dataNeeded: () => 0 })
+    const loader = new OrderedSourceLoader(
+      info,
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => 0,
+    )
+
+    try {
+      loader.start()
+      info.limit = 2
+
+      expect(() => loader.loadMore()).toThrow(failure)
+
+      expect(requests.map(({ options }) => options.limit)).toEqual([
+        1,
+        undefined,
+        2,
+        undefined,
+      ])
+      expect(released).toEqual([requests[0]!.acquisition])
+      expect(
+        (
+          loader as unknown as {
+            settledFiniteAcquisitions: Map<
+              ReleaseLoadSubset,
+              number | undefined
+            >
+          }
+        ).settledFiniteAcquisitions.has(requests[2]!.release),
+      ).toBe(true)
+      expect(
+        (loader as unknown as { failedRequest?: unknown }).failedRequest,
+      ).toBeUndefined()
+      expect(
+        (loader as unknown as { needsOrderingRepair: boolean })
+          .needsOrderingRepair,
+      ).toBe(false)
+      expect(
+        (loader as unknown as { stagedContinuation?: unknown })
+          .stagedContinuation,
+      ).toBeUndefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
+  it(`does not fail a literal-true parent when its drained continuation throws`, () => {
+    const failure = new Error(`continuation request failed`)
+    const requests: Array<{
+      options: RequestOptions
+      acquisition?: LoadSubsetOptions
+      release?: ReleaseLoadSubset
+    }> = []
+    const released: Array<LoadSubsetOptions> = []
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+      requestLimitedSnapshot: (options: RequestOptions) => {
+        const acquisition: LoadSubsetOptions = {
+          orderBy: options.orderBy,
+          limit: options.limit,
+        }
+        const release = () => released.push(acquisition)
+        requests.push({ options, acquisition, release })
+        options.onLoadSubsetResult?.(true, acquisition, release)
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        requests.push({ options })
+        throw failure
+      },
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ dataNeeded: () => 0 }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => 0,
+    )
+
+    try {
+      expect(() => loader.start()).toThrow(failure)
+
+      expect(requests).toHaveLength(2)
+      expect(released).toEqual([])
+      expect(
+        (
+          loader as unknown as {
+            settledFiniteAcquisitions: Map<
+              ReleaseLoadSubset,
+              number | undefined
+            >
+          }
+        ).settledFiniteAcquisitions.has(requests[0]!.release!),
+      ).toBe(true)
+      expect(
+        (loader as unknown as { orderedLoadGeneration: number })
+          .orderedLoadGeneration,
+      ).toBe(0)
+      expect(
+        (loader as unknown as { failedRequest?: unknown }).failedRequest,
+      ).toBeDefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
   const syncRouteCells = (
     [`page`, `prefix`, `boundary`, `full-source`] as const
   ).flatMap((route) =>

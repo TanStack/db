@@ -1041,6 +1041,16 @@ has no child demand, but its root demand must still settle. Later readiness
 transitions follow the existing Collection contract until an executable test
 defines another public behavior.
 
+An ordinary initial ordered request also has a synchronous observation cut.
+When every acquisition needed for its completed initial window returns literal
+`true` after its establishing applied receipts are visible, core drains the
+remaining synchronous ordered continuations and graph work before the
+initiating call stack returns. The live-query Collection rows and initial-query
+readiness are observable at that cut. A Promise result keeps that acquisition
+asynchronous. This cut does not apply to explicit window moves, repair,
+truncate replay, or framework render timing, and it proves neither source
+exhaustion nor broader source coverage.
+
 Pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce
 the current partial materialization when the source supports progressive

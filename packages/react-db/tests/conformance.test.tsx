@@ -34,7 +34,6 @@ import type {
   DeferredSourceHandle,
   LiveQueryDriver,
   QueryBuild,
-  SourceHandle,
 } from '../../db/tests/conformance/contract'
 
 let sourceSeq = 0
@@ -47,9 +46,7 @@ function writer<T extends { id: string }>(collection: any) {
   }
 }
 
-function makeSource<T extends { id: string }>(
-  initialData: ReadonlyArray<T>,
-): SourceHandle<T> {
+function makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       id: `conformance-react-${sourceSeq++}`,
@@ -60,9 +57,9 @@ function makeSource<T extends { id: string }>(
   const write = writer<T>(collection)
   return {
     collection,
-    insert: (row) => write(`insert`, row),
-    update: (row) => write(`update`, row),
-    remove: (row) => write(`delete`, row),
+    insert: (row: T) => write(`insert`, row),
+    update: (row: T) => write(`update`, row),
+    remove: (row: T) => write(`delete`, row),
   }
 }
 

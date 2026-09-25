@@ -25,16 +25,11 @@ import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
 } from '../../db/tests/conformance/infinite-contract'
-import type {
-  QueryBuild,
-  SourceHandle,
-} from '../../db/tests/conformance/contract'
+import type { QueryBuild } from '../../db/tests/conformance/contract'
 
 let sourceSequence = 0
 
-function makeSource<T extends { id: string }>(
-  initialData: ReadonlyArray<T>,
-): SourceHandle<T> {
+function makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
@@ -50,9 +45,9 @@ function makeSource<T extends { id: string }>(
   }
   return {
     collection,
-    insert: (row) => write(`insert`, row),
-    update: (row) => write(`update`, row),
-    remove: (row) => write(`delete`, row),
+    insert: (row: T) => write(`insert`, row),
+    update: (row: T) => write(`update`, row),
+    remove: (row: T) => write(`delete`, row),
   }
 }
 
@@ -212,7 +207,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
 
 runInfiniteQuerySuite(reactInfiniteDriver)
 
-it(`publishes query-function pages in the first layout commit after mount and dependency replacement`, async () => {
+it(`publishes query-function pages in the first non-idle layout commit after mount and dependency replacement`, async () => {
   const source = makeSource(
     Array.from({ length: 10 }, (_, index) => ({
       id: String(index + 1),
@@ -233,6 +228,9 @@ it(`publishes query-function pages in the first layout commit after mount and de
         [minimum],
       )
       useLayoutEffect(() => {
+        if (!result.collection) {
+          throw new Error(`Expected an enabled infinite-query collection`)
+        }
         liveQueryCollections.add(result.collection)
         commits.push({
           ranks: result.data.map(({ rank }) => rank),

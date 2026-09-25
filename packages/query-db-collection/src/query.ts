@@ -906,6 +906,17 @@ export function queryCollectionOptions(
   ): Promise<void> | undefined =>
     resultApplicationSettlements.get(result)?.get(hashedQueryKey)
 
+  const recordResultApplicationSettlement = (
+    hashedQueryKey: string,
+    result: QueryObserverResult<any, any>,
+    settlement: Promise<void>,
+  ): void => {
+    const settlementsByHash =
+      resultApplicationSettlements.get(result) ?? new Map()
+    settlementsByHash.set(hashedQueryKey, settlement)
+    resultApplicationSettlements.set(result, settlementsByHash)
+  }
+
   const captureFetchResult = (query: AnyQuery, fetchStart: number): void => {
     for (const hashedQueryKey of getLogicalHashes(query)) {
       const observer = state.observers.get(hashedQueryKey)
@@ -2276,12 +2287,13 @@ export function queryCollectionOptions(
         application = Promise.reject(error)
       }
       if (application === true) {
-        const applicationsByHash =
-          resultApplicationSettlements.get(result) ?? new Map()
         // Keep a causal witness for refetch callers without turning the
         // Collection's synchronous readiness signal back into a Promise.
-        applicationsByHash.set(hashedQueryKey, Promise.resolve())
-        resultApplicationSettlements.set(result, applicationsByHash)
+        recordResultApplicationSettlement(
+          hashedQueryKey,
+          result,
+          Promise.resolve(),
+        )
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
         }
@@ -2294,10 +2306,11 @@ export function queryCollectionOptions(
       // rejection; a refetch that captures this promise still observes the
       // original rejection when throwOnError is enabled.
       void refetchSettlement.catch(() => undefined)
-      const applicationsByHash =
-        resultApplicationSettlements.get(result) ?? new Map()
-      applicationsByHash.set(hashedQueryKey, refetchSettlement)
-      resultApplicationSettlements.set(result, applicationsByHash)
+      recordResultApplicationSettlement(
+        hashedQueryKey,
+        result,
+        refetchSettlement,
+      )
       const cleanupController = () => {
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)

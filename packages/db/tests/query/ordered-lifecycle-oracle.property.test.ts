@@ -664,6 +664,8 @@ type InitialSettlementObservation = {
   status: string
 }
 
+type InitialAcquisitionPath = `page` | `prefix`
+
 function expectedInitialSettlementObservation(
   settlement: InitialSettlementShape,
 ): InitialSettlementObservation {
@@ -681,6 +683,34 @@ function assertInitialSettlementObservation(
     throw new Error(
       `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(observed)}`,
     )
+  }
+}
+
+function observeInitialAcquisitionPath(
+  requests: ReadonlyArray<LoadSubsetOptions>,
+): InitialAcquisitionPath {
+  const initial = requests[0]
+  if (initial?.orderBy?.length !== 1 || initial.limit !== 2) {
+    throw new Error(`Expected one ordered initial request with limit 2`)
+  }
+  if (initial.offset === 0) return `page`
+  if (initial.offset === undefined) return `prefix`
+  throw new Error(`Unexpected initial ordered offset: ${initial.offset}`)
+}
+
+function assertInitialBoundaryContinuation(
+  requests: ReadonlyArray<LoadSubsetOptions>,
+): void {
+  const continuation = requests[1]
+  if (
+    requests.length !== 2 ||
+    continuation?.where === undefined ||
+    continuation.orderBy !== undefined ||
+    continuation.limit !== undefined ||
+    continuation.cursor !== undefined ||
+    continuation.offset !== undefined
+  ) {
+    throw new Error(`Expected one predicate-only boundary continuation`)
   }
 }
 
@@ -737,19 +767,16 @@ async function observeInitialSettlement(
   const subscription = live.subscribeChanges(() => {}, {
     includeInitialState: false,
   })
+  const observeCurrent = (): InitialSettlementObservation => ({
+    rows: live.toArray.map(({ id }) => id),
+    status: live.status,
+  })
 
   try {
     const preload = live.preload()
-    const immediate: InitialSettlementObservation = {
-      rows: live.toArray.map(({ id }) => id),
-      status: live.status,
-    }
+    const immediate = observeCurrent()
     await preload
-    const settled: InitialSettlementObservation = {
-      rows: live.toArray.map(({ id }) => id),
-      status: live.status,
-    }
-    return { immediate, settled, requests, releases }
+    return { immediate, settled: observeCurrent(), requests, releases }
   } finally {
     subscription.unsubscribe()
     await Promise.all([live.cleanup(), source.cleanup()])
@@ -773,7 +800,10 @@ describe(`synchronous initial settlement refinement`, () => {
         rows: [1, 2],
         status: `ready`,
       })
-      expect(observed.requests.length).toBeGreaterThan(0)
+      expect(observeInitialAcquisitionPath(observed.requests)).toBe(
+        autoIndex === `eager` ? `page` : `prefix`,
+      )
+      assertInitialBoundaryContinuation(observed.requests)
       expect(observed.releases).toHaveLength(observed.requests.length)
       observed.requests.forEach((request, index) => {
         expect(observed.releases[index]).toBe(request)
@@ -964,14 +994,7 @@ describe(`nullable multi-term lifecycle product`, () => {
     expect(sample.some((scenario) => scenario.syncRun === `restart`)).toBe(true)
   })
   const { multiplier, ...replay } = readOracleRunConfig()
-  fcTest.prop(
-    [arbitrary],
-    oracleRandomParameters(
-      20 * multiplier,
-      replay,
-      `ordered-work.nullable-lifecycle`,
-    ),
-  )(`matches nullable multi-term lifecycle histories`, async (scenario) => {
+  const assertNullableHistory = async (scenario: Scenario) => {
     const result = await assertHistory(scenario)
     expect(result.orderedRequests).toBeGreaterThan(0)
     expect(result.repaired).toBe(scenario.repair)
@@ -980,5 +1003,24 @@ describe(`nullable multi-term lifecycle product`, () => {
         ? result.fullSourceRequests
         : result.tieRequests,
     ).toBeGreaterThan(0)
-  })
+  }
+  const nullableRunBudget = 20 * multiplier
+  const nullableTimeout = Math.max(10000, multiplier * 1500)
+  fcTest.prop([arbitrary], { numRuns: nullableRunBudget, seed: 93472 })(
+    `matches nullable multi-term lifecycle histories for a fixed seed`,
+    assertNullableHistory,
+    nullableTimeout,
+  )
+  fcTest.prop(
+    [arbitrary],
+    oracleRandomParameters(
+      nullableRunBudget,
+      replay,
+      `ordered-work.nullable-lifecycle`,
+    ),
+  )(
+    `matches nullable multi-term lifecycle histories for a random or replayed seed`,
+    assertNullableHistory,
+    nullableTimeout,
+  )
 })
