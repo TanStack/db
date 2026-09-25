@@ -127,6 +127,10 @@ async function runCleanups(): Promise<void> {
  * diff. Rejection is fail-fast and may leave independent obligations pending.
  * The handler receives a scoped Collection view whose refetch keeps the Query
  * fetch boundary so it cannot await the transaction that invoked the handler.
+ * The handler parameter and every matching mutation alias share that scoped
+ * view. They are not identity-equal to the external Collection. Code can use
+ * either scoped path, but an identity-keyed external registry does not match
+ * them.
  *
  * Model mapping:
  * - `callId` and `resultId` are model-only identities for one public call and
@@ -141,6 +145,10 @@ async function runCleanups(): Promise<void> {
  *   separate source even when it occurs while that fetch is active.
  * - `HandlerRefetchBoundaryModel` excludes the causally queued Collection
  *   application from the handler call while retaining its later error record.
+ * - `HandlerCollectionScopeObservation` is a model-only projection of strict
+ *   identity and identity-keyed registry results. It does not reproduce Proxy
+ *   construction. Its bounded grammar exhausts insert, update, and delete;
+ *   handler parameter and mutation-alias access; and refetch and clearError.
  *
  * Results skipped before application because refresh is deferred, or because a
  * manual-write snapshot is unchanged, are outside this accepted-result model.
@@ -152,15 +160,20 @@ async function runCleanups(): Promise<void> {
  * State minimality: result order is observable in the returned array; pending
  * result identity and causal source control call settlement; accepted values
  * control publication; `throwOnError` distinguishes rejection from suppressed
- * failure; separate calls retain the outcome of a superseded caller.
+ * failure; separate calls retain the outcome of a superseded caller. Handler
+ * scope identity is observed only within one invocation. Identity across
+ * invocations is not promised. Direct Collection handlers own one Collection,
+ * so unrelated multi-Collection mutation aliases are outside this driver.
  *
- * ORC review record for this extension: ORC-001, 002, 003, 005, 006, 008, 009,
- * 010, and 012 apply and are evidenced by this prose, independent reducer,
- * fixed action histories, real drivers, observation helper, wrong-result
- * control, state explanation, mapping, and aggregate cleanup. ORC-004 and 007
- * do not apply because these are bounded fixed histories, not generated-property
- * coverage. ORC-011 does not apply because no shared production/model semantic
- * fault requiring a second formulation is claimed.
+ * Embedded ORC-012 review record for this extension: ORC-001, 002, 003, 005,
+ * 006, 008, 009, and 010 apply and are evidenced by this prose, independent
+ * reducer, fixed action histories, real drivers, observation helper,
+ * wrong-result controls, state explanation, vocabulary mapping, and aggregate
+ * cleanup. ORC-004 and 007 do not apply because these are bounded fixed
+ * histories, not generated-property coverage. ORC-011 does not apply because
+ * no shared production/model semantic fault requiring a second formulation is
+ * claimed. This executable comment records every ORC-001 through ORC-011
+ * outcome; no verdict-critical evidence lives only in the PR description.
  */
 type RefetchApplicationOutcome = `pending` | `resolved` | `rejected`
 
@@ -508,6 +521,75 @@ function observeHandlerRefetchBoundary(model: HandlerRefetchBoundaryModel): {
           : `resolved`,
     applicationErrorRecorded: model.application === `rejected`,
   }
+}
+
+type MutationHandlerKind = `insert` | `update` | `delete`
+type HandlerCollectionAccessPath = `parameter` | `mutation-alias`
+type HandlerCollectionOperation = `refetch` | `clearError`
+
+type HandlerCollectionHistory = {
+  handlerKind: MutationHandlerKind
+  accessPath: HandlerCollectionAccessPath
+  operation: HandlerCollectionOperation
+}
+
+type HandlerCollectionScopeObservation = HandlerCollectionHistory & {
+  matchingAliasCount: number
+  parameterIsExternal: boolean
+  allAliasesMatchParameter: boolean
+  anyAliasMatchesExternal: boolean
+  externalMapMatchesAnyAlias: boolean
+  scopedMapMatchesAllAliases: boolean
+  externalWeakMapMatchesAnyAlias: boolean
+  scopedWeakMapMatchesAllAliases: boolean
+}
+
+const mutationHandlerKinds = [`insert`, `update`, `delete`] as const
+const handlerCollectionAccessPaths = [`parameter`, `mutation-alias`] as const
+const handlerCollectionOperations = [`refetch`, `clearError`] as const
+
+const handlerCollectionHistoryGrammar: ReadonlyArray<HandlerCollectionHistory> =
+  mutationHandlerKinds.flatMap((handlerKind) =>
+    handlerCollectionAccessPaths.flatMap((accessPath) =>
+      handlerCollectionOperations.map((operation) => ({
+        handlerKind,
+        accessPath,
+        operation,
+      })),
+    ),
+  )
+
+/**
+ * A direct mutation handler receives one scoped Collection capability. Every
+ * matching mutation alias has that same identity. The external Collection has
+ * a different identity, so registries keyed by either object follow the same
+ * partition. The model records only this public equality relation.
+ */
+function observeHandlerCollectionScope(
+  history: HandlerCollectionHistory,
+  matchingAliasCount: number,
+): HandlerCollectionScopeObservation {
+  if (matchingAliasCount < 1) {
+    throw new Error(`A direct handler requires a matching mutation alias`)
+  }
+  return {
+    ...history,
+    matchingAliasCount,
+    parameterIsExternal: false,
+    allAliasesMatchParameter: true,
+    anyAliasMatchesExternal: false,
+    externalMapMatchesAnyAlias: false,
+    scopedMapMatchesAllAliases: true,
+    externalWeakMapMatchesAnyAlias: false,
+    scopedWeakMapMatchesAllAliases: true,
+  }
+}
+
+function expectHandlerCollectionScopeObservation(
+  actual: HandlerCollectionScopeObservation,
+  expected: HandlerCollectionScopeObservation,
+): void {
+  expect(actual).toEqual(expected)
 }
 
 function createQueryClient(
@@ -1316,6 +1398,54 @@ describe(`query collection ownership lifecycle`, () => {
       refetch: `pending`,
       applicationErrorRecorded: false,
     })
+  })
+
+  it(`enumerates every direct handler scope history exactly once`, () => {
+    const historyKeys = handlerCollectionHistoryGrammar.map(
+      ({ handlerKind, accessPath, operation }) =>
+        `${handlerKind}:${accessPath}:${operation}`,
+    )
+    expect(historyKeys).toEqual([
+      `insert:parameter:refetch`,
+      `insert:parameter:clearError`,
+      `insert:mutation-alias:refetch`,
+      `insert:mutation-alias:clearError`,
+      `update:parameter:refetch`,
+      `update:parameter:clearError`,
+      `update:mutation-alias:refetch`,
+      `update:mutation-alias:clearError`,
+      `delete:parameter:refetch`,
+      `delete:parameter:clearError`,
+      `delete:mutation-alias:refetch`,
+      `delete:mutation-alias:clearError`,
+    ])
+    expect(new Set(historyKeys).size).toBe(historyKeys.length)
+  })
+
+  it(`rejects handler scope identity wrong-result controls`, () => {
+    const history = handlerCollectionHistoryGrammar[0]!
+    const expected = observeHandlerCollectionScope(history, 2)
+    const mutants: Array<HandlerCollectionScopeObservation> = [
+      { ...expected, parameterIsExternal: true },
+      { ...expected, allAliasesMatchParameter: false },
+      { ...expected, anyAliasMatchesExternal: true },
+      { ...expected, externalMapMatchesAnyAlias: true },
+      { ...expected, scopedMapMatchesAllAliases: false },
+      { ...expected, externalWeakMapMatchesAnyAlias: true },
+      { ...expected, scopedWeakMapMatchesAllAliases: false },
+    ]
+
+    for (const mutant of mutants) {
+      expect(() =>
+        expectHandlerCollectionScopeObservation(mutant, expected),
+      ).toThrow()
+    }
+    expect(() =>
+      expectHandlerCollectionScopeObservation(expected, expected),
+    ).not.toThrow()
+    expect(() => observeHandlerCollectionScope(history, 0)).toThrow(
+      `requires a matching mutation alias`,
+    )
   })
 
   it(`resolves a refetch with no tracked Query results`, async () => {
@@ -2163,61 +2293,134 @@ describe(`query collection ownership lifecycle`, () => {
     )
   })
 
-  it.each(
-    ([`parameter`, `mutation-alias`] as const).flatMap((accessPath) =>
-      ([`refetch`, `clearError`] as const).map((operation) => ({
-        accessPath,
-        operation,
-      })),
-    ),
-  )(
-    `keeps the Query fetch boundary through handler $accessPath $operation`,
-    async ({ accessPath, operation }) => {
-      const initial = { ...shared, name: `Initial` }
-      const inserted = { id: `inserted`, category: `shared`, name: `Client` }
-      const authoritative = { ...inserted, name: `Server` }
+  it.each(handlerCollectionHistoryGrammar)(
+    `scopes $handlerKind handler $accessPath $operation`,
+    async (history) => {
+      const { handlerKind, accessPath, operation } = history
+      const initial = [
+        { id: `first`, category: `shared`, name: `First` },
+        { id: `second`, category: `shared`, name: `Second` },
+      ]
+      const inserted = [
+        { id: `inserted-first`, category: `shared`, name: `Client first` },
+        { id: `inserted-second`, category: `shared`, name: `Client second` },
+      ]
+      const authoritative =
+        handlerKind === `insert`
+          ? [
+              ...initial,
+              { ...inserted[0]!, name: `Server inserted first` },
+              { ...inserted[1]!, name: `Server inserted second` },
+            ]
+          : handlerKind === `update`
+            ? [
+                { ...initial[0]!, name: `Server updated first` },
+                { ...initial[1]!, name: `Server updated second` },
+              ]
+            : []
       const refresh = createDeferred<Array<Item>>()
       const queryClient = createQueryClient()
       const queryFn = vi
         .fn<() => Promise<Array<Item>>>()
-        .mockResolvedValueOnce([initial])
+        .mockResolvedValueOnce(initial)
         .mockReturnValueOnce(refresh.promise)
-      let aliasesMatch = false
+      const externalCollectionReference: { current?: object } = {}
+      let scopeObservation: HandlerCollectionScopeObservation | undefined
       let handlerOutcome: RefetchApplicationOutcome = `pending`
+      const handleMutation = async (
+        actualHandlerKind: MutationHandlerKind,
+        handlerCollection: {
+          utils: Pick<
+            QueryCollectionUtils<Item, string | number, Item, unknown>,
+            `refetch` | `clearError`
+          >
+        },
+        transaction: {
+          mutations: ReadonlyArray<{ collection: unknown }>
+        },
+      ): Promise<{ refetch: false }> => {
+        const externalCollection = externalCollectionReference.current
+        if (!externalCollection) {
+          throw new Error(`The external Collection is not available`)
+        }
+        const aliases = transaction.mutations.map(
+          ({ collection: mutationCollection }) => mutationCollection as object,
+        )
+        const externalMap = new Map<object, string>([
+          [externalCollection, `external`],
+        ])
+        const scopedMap = new Map<object, string>([
+          [handlerCollection, `scoped`],
+        ])
+        const externalWeakMap = new WeakMap<object, string>([
+          [externalCollection, `external`],
+        ])
+        const scopedWeakMap = new WeakMap<object, string>([
+          [handlerCollection, `scoped`],
+        ])
+        scopeObservation = {
+          handlerKind: actualHandlerKind,
+          accessPath,
+          operation,
+          matchingAliasCount: aliases.length,
+          parameterIsExternal: handlerCollection === externalCollection,
+          allAliasesMatchParameter: aliases.every(
+            (alias) => alias === handlerCollection,
+          ),
+          anyAliasMatchesExternal: aliases.some(
+            (alias) => alias === externalCollection,
+          ),
+          externalMapMatchesAnyAlias: aliases.some((alias) =>
+            externalMap.has(alias),
+          ),
+          scopedMapMatchesAllAliases: aliases.every((alias) =>
+            scopedMap.has(alias),
+          ),
+          externalWeakMapMatchesAnyAlias: aliases.some((alias) =>
+            externalWeakMap.has(alias),
+          ),
+          scopedWeakMapMatchesAllAliases: aliases.every((alias) =>
+            scopedWeakMap.has(alias),
+          ),
+        }
+        const refetchCollection =
+          accessPath === `parameter`
+            ? handlerCollection
+            : (aliases[0] as typeof handlerCollection)
+        const boundary =
+          operation === `refetch`
+            ? refetchCollection.utils.refetch({ throwOnError: true })
+            : refetchCollection.utils.clearError()
+        await boundary.then(
+          () => {
+            handlerOutcome = `resolved`
+          },
+          (error: unknown) => {
+            handlerOutcome = `rejected`
+            throw error
+          },
+        )
+        return { refetch: false }
+      }
       const collection = createCollection(
         queryCollectionOptions<Item>({
-          id: `handler-refetch-boundary-${accessPath}-${operation}`,
+          id: `handler-scope-${handlerKind}-${accessPath}-${operation}`,
           queryClient,
-          queryKey: [`handler-refetch-boundary`, accessPath, operation],
+          queryKey: [`handler-scope`, handlerKind, accessPath, operation],
           queryFn,
           getKey: (item) => item.id,
           startSync: true,
-          onInsert: async ({ transaction, collection: handlerCollection }) => {
-            const mutationCollection = transaction.mutations[0].collection
-            aliasesMatch = mutationCollection === handlerCollection
-            const refetchCollection =
-              accessPath === `parameter`
-                ? handlerCollection
-                : mutationCollection
-            const boundary =
-              operation === `refetch`
-                ? refetchCollection.utils.refetch({ throwOnError: true })
-                : refetchCollection.utils.clearError()
-            await boundary.then(
-              () => {
-                handlerOutcome = `resolved`
-              },
-              (error: unknown) => {
-                handlerOutcome = `rejected`
-                throw error
-              },
-            )
-            return { refetch: false }
-          },
+          onInsert: ({ transaction, collection: handlerCollection }) =>
+            handleMutation(`insert`, handlerCollection, transaction),
+          onUpdate: ({ transaction, collection: handlerCollection }) =>
+            handleMutation(`update`, handlerCollection, transaction),
+          onDelete: ({ transaction, collection: handlerCollection }) =>
+            handleMutation(`delete`, handlerCollection, transaction),
         }),
       )
+      externalCollectionReference.current = collection
       cleanups.push(async () => {
-        refresh.resolve([initial, authoritative])
+        refresh.resolve(authoritative)
         await collection.cleanup()
         queryClient.clear()
       })
@@ -2228,12 +2431,30 @@ describe(`query collection ownership lifecycle`, () => {
         application: `unaccepted`,
         throwOnError: true,
       }
-      const mutation = collection.insert(inserted)
+      const mutation =
+        handlerKind === `insert`
+          ? collection.insert(inserted)
+          : handlerKind === `update`
+            ? collection.update(
+                initial.map(({ id }) => id),
+                (drafts) => {
+                  drafts[0]!.name = `Client updated first`
+                  drafts[1]!.name = `Client updated second`
+                },
+              )
+            : collection.delete(initial.map(({ id }) => id))
       void mutation.isPersisted.promise.catch(() => undefined)
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
       expect(handlerOutcome).toBe(observeHandlerRefetchBoundary(model).refetch)
+      if (!scopeObservation) {
+        throw new Error(`The mutation handler did not record its scoped view`)
+      }
+      expectHandlerCollectionScopeObservation(
+        scopeObservation,
+        observeHandlerCollectionScope(history, 2),
+      )
 
-      refresh.resolve([initial, authoritative])
+      refresh.resolve(authoritative)
       model = reduceHandlerRefetchBoundary(model, {
         type: `accept-application`,
       })
@@ -2246,7 +2467,6 @@ describe(`query collection ownership lifecycle`, () => {
           observeHandlerRefetchBoundary(model).refetch,
         )
       })
-      expect(aliasesMatch).toBe(true)
 
       await mutation.isPersisted.promise
       model = reduceHandlerRefetchBoundary(model, {
@@ -2257,7 +2477,9 @@ describe(`query collection ownership lifecycle`, () => {
         refetch: `resolved`,
         applicationErrorRecorded: false,
       })
-      expect(collection.get(inserted.id)?.name).toBe(authoritative.name)
+      expect([...collection.values()].map(({ name }) => name).sort()).toEqual(
+        authoritative.map(({ name }) => name).sort(),
+      )
     },
   )
 

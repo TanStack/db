@@ -3027,6 +3027,8 @@ export function queryCollectionOptions(
     collection: TCollection,
     handlerCollection: TCollection,
   ): TTransaction => {
+    // Matching mutation aliases share the handler's scoped capability view.
+    // The Proxy intentionally does not preserve external Collection identity.
     const hasScopedMutation = transaction.mutations.some(
       (mutation) => mutation.collection === collection,
     )

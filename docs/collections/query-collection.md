@@ -615,6 +615,14 @@ mutation's `isPersisted.promise` when it needs the complete transaction and its
 queued Collection application. Utilities that refetch through the scoped view,
 including `clearError()`, inherit the same fetch boundary.
 
+The handler's `collection` parameter and every matching
+`transaction.mutations[n].collection` alias use the same scoped view. That view
+is not identity-equal to the external Collection. A `Map` or `WeakMap` entry
+keyed by the external Collection does not match the scoped view. Compare a
+mutation alias with the handler parameter when identity is needed inside one
+handler invocation. Identity across separate handler invocations is not part of
+the contract.
+
 Outside a mutation handler, `throwOnError` applies to both Query fetch errors and
 errors applying an accepted result to Collection rows. With `throwOnError: true`,
 application failure or cancellation rejects the call; cancellation uses an
