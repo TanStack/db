@@ -8,6 +8,7 @@
  * All registered laws must pass; the driver has no whole-test waivers.
  */
 import { act, renderHook } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
 import {
   coalesce,
   count,
@@ -217,6 +218,39 @@ const reactDriver: LiveQueryDriver = {
 }
 
 runSuite(reactDriver)
+it(`publishes a synchronous ordered limit in the first layout commit`, async () => {
+  const source = makeSource([
+    { id: `1`, rank: 1 },
+    { id: `2`, rank: 2 },
+    { id: `3`, rank: 3 },
+  ])
+  const commits: Array<{ ids: Array<string>; status: string }> = []
+  const hook = renderHook(() => {
+    const result = useLiveQuery((q) =>
+      q
+        .from({ row: source.collection })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+    useLayoutEffect(() => {
+      commits.push({
+        ids: result.data.map(({ id }) => id),
+        status: result.status,
+      })
+    })
+    return result
+  })
+
+  try {
+    expect(commits[0]).toEqual({ ids: [`1`, `2`], status: `ready` })
+  } finally {
+    const liveQueryCollection = hook.result.current.collection
+    hook.unmount()
+    await liveQueryCollection.cleanup()
+    await source.collection.cleanup()
+  }
+})
+
 it(`preserves raw result types through the actual driver reader`, () => {
   const raw: Record<string, unknown> = {
     data: [{ id: `a`, value: undefined }],

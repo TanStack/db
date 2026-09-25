@@ -891,5 +891,8 @@ describe(`Query collection type resolution tests`, () => {
     expectTypeOf(collection.utils.writeDelete).toBeFunction()
     expectTypeOf(collection.utils.isFetching).toBeBoolean()
     expectTypeOf(collection.utils.isLoading).toBeBoolean()
+    expectTypeOf(collection.utils.fetchStatus).toEqualTypeOf<
+      `fetching` | `paused` | `idle`
+    >()
   })
 })

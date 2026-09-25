@@ -16,17 +16,34 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 /**
  * # Which ordered request histories are distinct?
  *
+ * The live-query architecture owns applied settlement, ordered continuation,
+ * and atomic window publication. This refinement covers one narrower initial
+ * query-readiness cut: an ordinary ordered request whose adapter returns
+ * literal `true`, after synchronously applying every establishing receipt,
+ * installs its completed window before the initiating call stack returns.
+ * Promise settlement remains asynchronous. This does not make a successful
+ * request prove source exhaustion or broader coverage, and it does not change
+ * explicit window, repair, replay, or framework render-time contracts.
+ *
  * Ordered acquisition has six independent control dimensions: acquisition
  * path, delivery time, window change, acquisition outcome, sync run, and
- * initial-versus-replay barrier. Their 192-cell product is small enough to enumerate. A
- * second product adds nullable multi-term ordering, including direction and
- * null placement for both terms.
+ * initial-versus-replay barrier. Their 192-cell product is small enough to
+ * enumerate. A constrained initial-success grammar separately crosses
+ * synchronous versus Promise settlement with indexed versus prefix loading.
+ * A second product adds nullable multi-term ordering, including direction and
+ * null placement for both terms. The initial-settlement cells are a bounded
+ * deterministic grammar; they do not extend the generated-history campaign.
  *
  * For each cell, a plain finite source supplies the reference order and window.
  * The driver records physical acquisitions, application, readiness, errors,
- * cleanup, and final rows from a real live query. Reach assertions prove every
- * declared cell performs work and reaches terminal cleanup. Deliberate
- * secondary-order and null-placement faults calibrate the comparator checks.
+ * cleanup, same-call-stack snapshot installation, and final rows from a real
+ * live query.
+ * Reach assertions prove every declared cell performs work and reaches
+ * terminal cleanup. Deliberate secondary-order, null-placement, and
+ * Promise-wrapped synchronous-result faults calibrate the checks.
+ * `expectedInitialSettlementObservation` is the independent finite reference,
+ * `observeInitialSettlement` is the production driver, and
+ * `assertInitialSettlementObservation` is the refinement check.
  *
  * `AcquisitionPath` is a model projection over production request kinds. A
  * `page` is an indexed ordered request. A `prefix` is an unindexed ordered
@@ -41,6 +58,7 @@ type Row = {
 }
 type OrderTerm = { direction: `asc` | `desc`; nulls: `first` | `last` }
 type AcquisitionPath = `page` | `prefix` | `boundary` | `full-source`
+type InitialSettlementShape = `synchronous` | `promise`
 type Scenario = {
   acquisitionPath: AcquisitionPath
   delivery: `before-settlement` | `after-success`
@@ -640,6 +658,138 @@ async function assertHistory(
   expect(result.mismatches).toEqual([])
   return result
 }
+
+type InitialSettlementObservation = {
+  rows: Array<number>
+  status: string
+}
+
+function expectedInitialSettlementObservation(
+  settlement: InitialSettlementShape,
+): InitialSettlementObservation {
+  return settlement === `synchronous`
+    ? { rows: [1, 2], status: `ready` }
+    : { rows: [], status: `loading` }
+}
+
+function assertInitialSettlementObservation(
+  observed: InitialSettlementObservation,
+  settlement: InitialSettlementShape,
+): void {
+  const expected = expectedInitialSettlementObservation(settlement)
+  if (!isDeepStrictEqual(observed, expected)) {
+    throw new Error(
+      `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(observed)}`,
+    )
+  }
+}
+
+async function observeInitialSettlement(
+  settlement: InitialSettlementShape,
+  autoIndex: `eager` | `off`,
+) {
+  type InitialRow = { id: number; rank: number }
+  const rows: Array<InitialRow> = [
+    { id: 1, rank: 1 },
+    { id: 2, rank: 2 },
+  ]
+  const delivered = new Set<number>()
+  const requests: Array<LoadSubsetOptions> = []
+  const releases: Array<LoadSubsetOptions> = []
+  let sync!: Parameters<SyncConfig<InitialRow, number>[`sync`]>[0]
+  const source = createCollection<InitialRow, number>({
+    id: `ordered-initial-settlement-${settlement}-${autoIndex}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    autoIndex,
+    defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: (options) => {
+            requests.push(options)
+            const fresh = rows.filter(({ id }) => !delivered.has(id))
+            if (fresh.length > 0) {
+              sync.begin()
+              for (const value of fresh) {
+                delivered.add(value.id)
+                sync.write({ type: `insert`, value })
+              }
+              expect(sync.commit()).toBe(true)
+            }
+            return settlement === `synchronous` ? true : Promise.resolve()
+          },
+          unloadSubset: (options) => releases.push(options),
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    startSync: false,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+  })
+  const subscription = live.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+
+  try {
+    const preload = live.preload()
+    const immediate: InitialSettlementObservation = {
+      rows: live.toArray.map(({ id }) => id),
+      status: live.status,
+    }
+    await preload
+    const settled: InitialSettlementObservation = {
+      rows: live.toArray.map(({ id }) => id),
+      status: live.status,
+    }
+    return { immediate, settled, requests, releases }
+  } finally {
+    subscription.unsubscribe()
+    await Promise.all([live.cleanup(), source.cleanup()])
+  }
+}
+
+describe(`synchronous initial settlement refinement`, () => {
+  const cells = ([`eager`, `off`] as const).flatMap((autoIndex) =>
+    ([`synchronous`, `promise`] as const).map((settlement) => ({
+      autoIndex,
+      settlement,
+    })),
+  )
+
+  it.each(cells)(
+    `publishes the complete initial window at the $settlement checkpoint with $autoIndex indexing`,
+    async ({ settlement, autoIndex }) => {
+      const observed = await observeInitialSettlement(settlement, autoIndex)
+      assertInitialSettlementObservation(observed.immediate, settlement)
+      expect(observed.settled).toEqual({
+        rows: [1, 2],
+        status: `ready`,
+      })
+      expect(observed.requests.length).toBeGreaterThan(0)
+      expect(observed.releases).toHaveLength(observed.requests.length)
+      observed.requests.forEach((request, index) => {
+        expect(observed.releases[index]).toBe(request)
+      })
+    },
+  )
+
+  it(`rejects the old Promise-wrapped observation at the synchronous checkpoint`, () => {
+    expect(() =>
+      assertInitialSettlementObservation(
+        expectedInitialSettlementObservation(`promise`),
+        `synchronous`,
+      ),
+    ).toThrow()
+  })
+})
 
 describe(`ordered lifecycle product`, () => {
   const observed = new Set<string>()

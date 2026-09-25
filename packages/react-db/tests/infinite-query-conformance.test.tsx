@@ -6,7 +6,9 @@
  * suite owns the page model and histories; this driver defines when React has
  * committed enough work for those public observations to be read.
  */
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
+import { expect, it } from 'vitest'
 import {
   BTreeIndex,
   createCollection,
@@ -209,3 +211,59 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
 }
 
 runInfiniteQuerySuite(reactInfiniteDriver)
+
+it(`publishes query-function pages in the first layout commit after mount and dependency replacement`, async () => {
+  const source = makeSource(
+    Array.from({ length: 10 }, (_, index) => ({
+      id: String(index + 1),
+      rank: index + 1,
+    })),
+  )
+  const commits: Array<{ ranks: Array<number>; status: string }> = []
+  const liveQueryCollections = new Set<{ cleanup: () => Promise<void> }>()
+  const hook = renderHook(
+    ({ minimum }: { minimum: number }) => {
+      const result = useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ row: source.collection })
+            .where(({ row }) => gt(row.rank, minimum))
+            .orderBy(({ row }) => row.rank, `desc`),
+        { pageSize: 3 },
+        [minimum],
+      )
+      useLayoutEffect(() => {
+        liveQueryCollections.add(result.collection)
+        commits.push({
+          ranks: result.data.map(({ rank }) => rank),
+          status: result.status,
+        })
+      })
+      return result
+    },
+    { initialProps: { minimum: 0 } },
+  )
+
+  try {
+    await waitFor(() => expect(hook.result.current.status).toBe(`ready`))
+    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+      ranks: [10, 9, 8],
+      status: `ready`,
+    })
+    commits.length = 0
+    act(() => hook.rerender({ minimum: 8 }))
+    await waitFor(() =>
+      expect(hook.result.current.data.map(({ rank }) => rank)).toEqual([10, 9]),
+    )
+    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+      ranks: [10, 9],
+      status: `ready`,
+    })
+  } finally {
+    hook.unmount()
+    await Promise.all(
+      Array.from(liveQueryCollections, (collection) => collection.cleanup()),
+    )
+    await source.collection.cleanup()
+  }
+})

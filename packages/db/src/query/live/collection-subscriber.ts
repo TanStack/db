@@ -47,6 +47,7 @@ export class CollectionSubscriber<
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoader: OrderedSourceLoader | undefined
   private readonly demand = new SubsetDemandController()
+  private graphInputRevision = 0
 
   constructor(
     private sourceId: string,
@@ -221,7 +222,7 @@ export class CollectionSubscriber<
   private sendChangesToPipeline(
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => void,
-  ) {
+  ): number {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
     const reconciledChanges = reconcileChangesForD2(
       changesArray,
@@ -232,6 +233,7 @@ export class CollectionSubscriber<
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
     const sentChanges = sendChangesToInput(input, reconciledChanges)
+    if (sentChanges > 0) this.graphInputRevision++
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -242,6 +244,7 @@ export class CollectionSubscriber<
     // because we need to mark the collection as ready if it's not already
     // and that's only done in `scheduleGraphRun`
     this.collectionConfigBuilder.scheduleGraphRun(dataLoader)
+    return sentChanges
   }
 
   private subscribeToMatchingChanges(
@@ -358,6 +361,7 @@ export class CollectionSubscriber<
       () =>
         this.collectionConfigBuilder.liveQueryCollection?.status === `ready` &&
         !this.collectionConfigBuilder.hasActiveWindowOperation(),
+      () => this.graphInputRevision,
     )
     this.orderedLoader.start()
 
