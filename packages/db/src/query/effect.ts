@@ -7,6 +7,7 @@ import {
 import { getActiveTransaction } from '../transactions.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
+import { deepEquals } from '../utils.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -398,6 +399,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Ordered subscription state for cursor-based loading
   private readonly orderedLoaders = new Map<string, OrderedSourceLoader>()
+  // An asynchronous authoritative repair may update the private D2 state in
+  // several prefix/tie/refill steps. Keep their net Effect delta private until
+  // the final participant settles, matching live-query Collection publication.
+  private readonly pendingOrderedPublications = new Set<Promise<unknown>>()
+  private orderedPublicationFailed = false
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
@@ -409,6 +415,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Output accumulator
   private pendingChanges: Map<unknown, EffectChanges<TRow>> = new Map()
+  // Callback-visible result. Held repair deltas are classified against this
+  // last coherent membership rather than their net multiplicity alone.
+  private readonly publishedRows = new Map<unknown, TRow>()
+  private tracksPublishedRows = false
+  private classifyPendingChangesAgainstPublishedRows = false
 
   // skipInitial state
   private readonly skipInitial: boolean
@@ -550,6 +561,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
       // Check if this alias has orderBy optimization (cursor-based loading)
       const orderByInfo = this.getOrderByInfoForSource(sourceId)
+      if (orderByInfo) this.tracksPublishedRows = true
 
       // Build the change callback — for ordered aliases, split updates into
       // delete+insert and invalidate loading state from changed contributions.
@@ -624,7 +636,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // For ordered aliases with an index, trigger the initial limited snapshot.
       // This loads only the top N rows rather than the entire collection.
       if (orderByInfo) {
-        const loader = new OrderedSourceLoader(orderByInfo, subscription, alias)
+        const loader = new OrderedSourceLoader(
+          orderByInfo,
+          subscription,
+          alias,
+          (result, holdPublication) => {
+            const holdsInitialPublication =
+              this.skipInitial && !this.initialLoadComplete
+            if (holdPublication || holdsInitialPublication) {
+              this.trackOrderedPublication(
+                Promise.resolve(result),
+                () => subscription.pendingTruncateReplacement,
+              )
+            }
+          },
+        )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
       }
@@ -659,7 +685,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (
           this.skipInitial &&
           !this.initialLoadComplete &&
-          this.checkAllCollectionsReady()
+          this.canCompleteInitialLoad()
         ) {
           this.initialLoadComplete = true
         }
@@ -705,10 +731,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     // After the initial graph run, if all sources are ready,
     // mark initial load as complete so future events are processed.
-    if (this.skipInitial && !this.initialLoadComplete) {
-      if (this.checkAllCollectionsReady()) {
-        this.initialLoadComplete = true
-      }
+    if (
+      this.skipInitial &&
+      !this.initialLoadComplete &&
+      this.canCompleteInitialLoad()
+    ) {
+      this.initialLoadComplete = true
     }
     this.starting = false
   }
@@ -795,6 +823,51 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.runGraph()
   }
 
+  /** Hold Effect callback publication across one authoritative repair chain. */
+  private trackOrderedPublication(
+    promise: Promise<unknown>,
+    replacementAfterFailure: () => Promise<void> | undefined,
+  ): void {
+    if (this.disposed) return
+    this.classifyPendingChangesAgainstPublishedRows = true
+    if (this.pendingOrderedPublications.size === 0) {
+      this.orderedPublicationFailed = false
+    }
+    this.pendingOrderedPublications.add(promise)
+    const finish = (succeeded: boolean) => {
+      if (!this.pendingOrderedPublications.delete(promise)) return
+      if (!succeeded) this.orderedPublicationFailed = true
+      if (
+        succeeded &&
+        !this.orderedPublicationFailed &&
+        this.pendingOrderedPublications.size === 0 &&
+        !this.disposed
+      ) {
+        // The repair chain already drove its private D2 state to quiescence.
+        // Run once more to publish the accumulated net delta.
+        this.scheduleGraphRun()
+      }
+    }
+    void promise.then(
+      () => finish(true),
+      () => {
+        const replacement = replacementAfterFailure()
+        if (
+          replacement &&
+          this.pendingOrderedPublications.delete(promise) &&
+          !this.disposed
+        ) {
+          // Truncate replay aborted an obsolete acquisition. Its replacement
+          // now owns the same publication hold and settles after replay rows
+          // have reached this Effect's private D2 state.
+          this.trackOrderedPublication(replacement, replacementAfterFailure)
+          return
+        }
+        finish(false)
+      },
+    )
+  }
+
   /**
    * Send changes to the D2 input for the given lexical source.
    * Returns the number of multiset entries sent.
@@ -842,6 +915,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       }
       // Emit all accumulated events once the graph reaches quiescence
       this.flushPendingChanges()
+      if (
+        this.skipInitial &&
+        !this.initialLoadComplete &&
+        this.canCompleteInitialLoad()
+      ) {
+        this.initialLoadComplete = true
+      }
     } finally {
       this.isGraphRunning = false
     }
@@ -851,22 +931,36 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private flushPendingChanges(): void {
     if (this.pendingChanges.size === 0) return
 
-    // If skipInitial and initial load isn't complete yet, discard
-    if (this.skipInitial && !this.initialLoadComplete) {
-      this.pendingChanges = new Map()
+    if (
+      this.orderedPublicationFailed ||
+      this.pendingOrderedPublications.size > 0
+    ) {
       return
     }
+
+    const shouldPublish = !this.skipInitial || this.initialLoadComplete
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
     for (const [key, changes] of this.pendingChanges) {
-      const event = classifyDelta<TRow, TKey>(key as TKey, changes)
+      const event = this.classifyPendingChangesAgainstPublishedRows
+        ? classifyHeldDelta<TRow, TKey>(
+            key as TKey,
+            changes,
+            this.publishedRows,
+          )
+        : classifyImmediateDelta<TRow, TKey>(key as TKey, changes)
       if (event) {
-        events.push(event)
+        if (this.tracksPublishedRows) {
+          if (event.type === `exit`) this.publishedRows.delete(key)
+          else this.publishedRows.set(key, event.value)
+        }
+        if (shouldPublish) events.push(event)
       }
     }
 
     this.pendingChanges = new Map()
+    this.classifyPendingChangesAgainstPublishedRows = false
 
     if (events.length > 0) {
       this.onBatchProcessed(events)
@@ -877,6 +971,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private checkAllCollectionsReady(): boolean {
     return Object.values(this.collections).every((collection) =>
       collection.isReady(),
+    )
+  }
+
+  /** Initial callbacks start only after source readiness and ordered loading. */
+  private canCompleteInitialLoad(): boolean {
+    return (
+      !this.orderedPublicationFailed &&
+      this.pendingOrderedPublications.size === 0 &&
+      this.checkAllCollectionsReady()
     )
   }
 
@@ -970,6 +1073,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private clearPipelineState(): void {
     this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
+    this.publishedRows.clear()
+    this.pendingOrderedPublications.clear()
+    this.orderedPublicationFailed = false
+    this.tracksPublishedRows = false
+    this.classifyPendingChangesAgainstPublishedRows = false
     this.lazySources.clear()
     this.demand.clear()
     this.builderDependencies.clear()
@@ -1045,25 +1153,21 @@ function accumulateEffectChanges<T>(
 }
 
 /** Classify accumulated per-key changes into a DeltaEvent */
-function classifyDelta<TRow extends object, TKey extends string | number>(
-  key: TKey,
-  changes: EffectChanges<TRow>,
-): DeltaEvent<TRow, TKey> | undefined {
+function classifyImmediateDelta<
+  TRow extends object,
+  TKey extends string | number,
+>(key: TKey, changes: EffectChanges<TRow>): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
 
   if (inserts > 0 && deletes === 0) {
-    // Row entered the query result
     return { type: `enter`, key, value: insertValue! }
   }
 
   if (deletes > 0 && inserts === 0) {
-    // Row exited the query result — value is the exiting value,
-    // previousValue is omitted (it would be identical to value)
     return { type: `exit`, key, value: deleteValue! }
   }
 
   if (inserts > 0 && deletes > 0) {
-    // Row updated within the query result
     return {
       type: `update`,
       key,
@@ -1072,7 +1176,48 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     }
   }
 
-  // inserts === 0 && deletes === 0 — no net change (should not happen)
+  return undefined
+}
+
+function classifyHeldDelta<TRow extends object, TKey extends string | number>(
+  key: TKey,
+  changes: EffectChanges<TRow>,
+  publishedRows: ReadonlyMap<unknown, TRow>,
+): DeltaEvent<TRow, TKey> | undefined {
+  const { inserts, deletes, insertValue, deleteValue } = changes
+  const wasPresent = publishedRows.has(key)
+  const previousValue = publishedRows.get(key)
+  const nextMultiplicity = Number(wasPresent) + inserts - deletes
+  const isPresent = nextMultiplicity > 0
+
+  if (!wasPresent && isPresent) {
+    // Row entered the query result
+    return { type: `enter`, key, value: insertValue! }
+  }
+
+  if (wasPresent && !isPresent) {
+    // Row exited the query result — value is the exiting value,
+    // previousValue is omitted (it would be identical to value)
+    return { type: `exit`, key, value: previousValue ?? deleteValue! }
+  }
+
+  if (
+    wasPresent &&
+    isPresent &&
+    insertValue !== undefined &&
+    !deepEquals(previousValue, insertValue)
+  ) {
+    // Row updated within the query result
+    return {
+      type: `update`,
+      key,
+      value: insertValue,
+      previousValue: previousValue!,
+    }
+  }
+
+  // The row was absent both before and after the held delta, or its final
+  // value is equal to the last callback-visible value.
   return undefined
 }
 

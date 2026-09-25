@@ -29,6 +29,7 @@ import type { CollectionImpl } from './index.js'
 import type { Deferred } from '../deferred.js'
 
 type RequestSnapshotOptions = {
+  refetch?: boolean
   where?: BasicExpression<boolean>
   signal?: AbortSignal
   optimizedOnly?: boolean
@@ -44,6 +45,7 @@ type RequestSnapshotOptions = {
 }
 
 type RequestLimitedSnapshotOptions = {
+  refetch?: boolean
   orderBy: OrderBy
   limit: number
   /** A single cursor value; composite cursor inputs are rejected. */
@@ -1159,6 +1161,7 @@ export class CollectionSubscription
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
     const loadOptions: LoadSubsetOptions = {
+      ...(opts?.refetch ? { refetch: true } : {}),
       where: stateOpts.where,
       signal: opts?.signal,
       subscription: this,
@@ -1357,6 +1360,7 @@ export class CollectionSubscription
    * Note 2: it does not send keys that have already been sent before.
    */
   requestLimitedSnapshot({
+    refetch,
     orderBy,
     limit,
     minValues,
@@ -1524,6 +1528,7 @@ export class CollectionSubscription
     // Note: `where` does NOT include cursor expressions - they are passed separately
     // The sync layer can choose to use cursor-based or offset-based pagination
     const loadOptions: LoadSubsetOptions = {
+      ...(refetch ? { refetch: true } : {}),
       where, // Main filter only, no cursor
       limit,
       orderBy,

@@ -447,8 +447,12 @@ class QueryCollectionUtilsImpl {
 
 function getLoadSubsetOptionsForMeta(
   opts: LoadSubsetOptions,
-): Omit<LoadSubsetOptions, `subscription`> {
-  const { subscription: _subscription, ...serializableOptions } = opts
+): Omit<LoadSubsetOptions, `subscription` | `refetch`> {
+  const {
+    subscription: _subscription,
+    refetch: _refetch,
+    ...serializableOptions
+  } = opts
   return serializableOptions
 }
 
@@ -1363,8 +1367,10 @@ export function queryCollectionOptions(
      */
     const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
-        // Function-based queryKey: use it to build the key from opts
-        return queryKey(opts)
+        // Refetch starts another acquisition for the same semantic demand. It
+        // must not create a second Query cache or unload identity.
+        const { refetch: _refetch, ...queryKeyOptions } = opts
+        return queryKey(queryKeyOptions)
       } else if (syncMode === `on-demand`) {
         // A static on-demand key is extended by exact semantic demand so
         // equivalent predicates share one entry while distinct windows do not.
@@ -1442,6 +1448,48 @@ export function queryCollectionOptions(
         return settlement === true ? undefined : settlement
       })
 
+    const refetchAndWaitForApplication = async (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+    ): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        let active = true
+        const pending =
+          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+        const finish = (settle: () => void) => {
+          if (!active) return
+          active = false
+          pending.delete(cancel)
+          if (pending.size === 0) {
+            pendingReadyUnsubscribes.delete(hashedQueryKey)
+          }
+          settle()
+        }
+        const cancel = () => {
+          finish(() => reject(new LoadSubsetOperationAbortedError()))
+        }
+        pending.add(cancel)
+        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+
+        const refetch = async () => {
+          const waitsForDeferredApplication = !!collection.deferDataRefresh
+          await observer.refetch({ throwOnError: true })
+          if (
+            waitsForDeferredApplication ||
+            !hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
+          ) {
+            await waitForQueryReadyAndApplied(observer, hashedQueryKey)
+            return
+          }
+          const settlement = getResultApplicationSettlement(hashedQueryKey)
+          if (settlement !== true) await settlement
+        }
+        void refetch().then(
+          () => finish(resolve),
+          (error: unknown) => finish(() => reject(error)),
+        )
+      })
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
@@ -1493,6 +1541,10 @@ export function queryCollectionOptions(
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
         const currentResult = observer.getCurrentResult()
+
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(observer, hashedQueryKey)
+        }
 
         if (
           currentResult.isSuccess &&
@@ -1576,6 +1628,9 @@ export function queryCollectionOptions(
           subscribeToQuery(localObserver, hashedQueryKey)
         }
         const currentResult = localObserver.getCurrentResult()
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(localObserver, hashedQueryKey)
+        }
         if (currentResult.isError && !currentResult.isFetching) {
           return Promise.reject(currentResult.error)
         }
@@ -2350,9 +2405,10 @@ export function queryCollectionOptions(
      * - But observer.hasListeners() is still true (TanStack Query's internal listeners)
      * - We skip cleanup and reset refcount, allowing resubscribe to succeed
      *
-     * We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
-     * to prevent late-arriving data from being processed. The request completes and is cached
-     * by TanStack Query, allowing quick remounts to restore data without refetching.
+     * Ordinary in-flight requests may continue after this observer unsubscribes and remain
+     * cached by TanStack Query. A pending explicit refetch is acquisition-scoped: releasing
+     * its final owner rejects that caller and unsubscribes this observer, which lets Query
+     * cancel the transport when no peer observer still owns it.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
       // No observer lease exists until startup maintenance has finished.
