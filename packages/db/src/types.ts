@@ -393,7 +393,15 @@ export type SyncAppliedReceipt = true | Promise<void>
  */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 
-export type CleanupFn = () => void
+/**
+ * Ends one sync run and releases its adapter-owned resources.
+ *
+ * Collection cleanup waits for a returned promise before publishing the
+ * `cleaned-up` status or admitting a replacement sync run.
+ * TypeScript permits Promise-returning functions where `() => void` is
+ * expected, so the Promise must be explicit here to preserve and await it.
+ */
+export type CleanupFn = () => void | Promise<void>
 
 export type SyncConfigRes = {
   cleanup?: CleanupFn

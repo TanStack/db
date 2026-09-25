@@ -8,6 +8,7 @@ import {
   safeRequestIdleCallback,
 } from '../utils/browser-polyfills'
 import { runAllCallbacks } from '../utils/callbacks'
+import { createDeferred } from '../deferred'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -52,6 +53,7 @@ export class CollectionLifecycleManager<
   private cleanupConfig: () => void
   private statusRevision = 0
   private cleaningUp = false
+  private cleanupPromise: Promise<void> | null = null
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -330,36 +332,11 @@ export class CollectionLifecycleManager<
       !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
 
     if (hasTime) {
-      this.cleaningUp = true
-      try {
-        // Perform all cleanup operations except events
-        this.cleanupConfig()
-        this.sync.cleanup()
-        this.state.cleanup()
-        this.changes.cleanup()
-        this.indexes.cleanup()
-
-        CleanupQueue.getInstance().cancel(this)
-
-        this.hasBeenReady = false
-        this.syncError = undefined
-
-        // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
-        // first-ready listeners belong to the discarded run.
-        this.onFirstReadyCallbacks = []
-      } finally {
-        this.cleaningUp = false
-      }
-
-      // Set status to cleaned-up after everything is cleaned up
-      // This fires the status:change event to notify listeners
-      this.setStatus(`cleaned-up`)
-
-      // Active collection subscriptions still depend on lifecycle events.
-      // Once the last subscriber leaves, its GC cleanup clears the handlers.
-      if (this.changes.activeSubscribersCount === 0) {
-        this.events.cleanup()
-      }
+      const cleanup = this.beginCleanup()
+      // Automatic GC has no caller to receive cleanup rejection. Core still
+      // finalizes the lifecycle; adapter diagnostics remain observable through
+      // the returned promise for explicit cleanup.
+      void cleanup.catch(() => undefined)
 
       return true
     } else {
@@ -367,6 +344,77 @@ export class CollectionLifecycleManager<
       this.scheduleIdleCleanup()
       return false
     }
+  }
+
+  private beginCleanup(): Promise<void> {
+    if (this.cleanupPromise) return this.cleanupPromise
+
+    const completion = createDeferred<void>()
+    this.cleanupPromise = completion.promise
+    this.cleaningUp = true
+    let firstFailure: { error: unknown } | undefined
+    let syncCleanupComplete = true
+    let finished = false
+
+    const attempt = (callback: () => void): void => {
+      try {
+        callback()
+      } catch (error) {
+        firstFailure ??= { error }
+      }
+    }
+
+    const finish = (syncFailure?: { error: unknown }) => {
+      if (finished) return
+      finished = true
+      firstFailure ??= syncFailure
+      this.cleaningUp = false
+      // Clear this operation before emitting the terminal status. A listener
+      // may start and then clean up the replacement sync run synchronously.
+      this.cleanupPromise = null
+      attempt(() => this.setStatus(`cleaned-up`))
+
+      // Active collection subscriptions still depend on lifecycle events.
+      // Once the last subscriber leaves, its GC cleanup clears the handlers.
+      if (this.changes.activeSubscribersCount === 0) {
+        attempt(() => this.events.cleanup())
+      }
+
+      // Keep cleanup observably asynchronous even when every release is
+      // synchronous. Existing callers may use this turn to let optimistic
+      // settlement finish before starting the next operation.
+      const failure = firstFailure
+      void Promise.resolve()
+        .then(() => Promise.resolve())
+        .then(() => {
+          if (failure) completion.reject(failure.error)
+          else completion.resolve()
+        })
+    }
+
+    // Sync cleanup invalidates the sync run before invoking the adapter. The
+    // remaining managers retire their local state synchronously while the
+    // adapter's resource-release promise is pending.
+    attempt(() => this.cleanupConfig())
+    try {
+      syncCleanupComplete = this.sync.cleanup(finish)
+    } catch (error) {
+      firstFailure ??= { error }
+    }
+
+    attempt(() => this.state.cleanup())
+    attempt(() => this.changes.cleanup())
+    attempt(() => this.indexes.cleanup())
+    CleanupQueue.getInstance().cancel(this)
+
+    this.hasBeenReady = false
+    this.syncError = undefined
+    // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
+    // first-ready listeners belong to the discarded run.
+    this.onFirstReadyCallbacks = []
+
+    if (syncCleanupComplete) finish()
+    return completion.promise
   }
 
   /**
@@ -390,14 +438,15 @@ export class CollectionLifecycleManager<
     }
   }
 
-  public cleanup(): void {
+  public cleanup(): Promise<void> {
     // Cancel any pending idle cleanup
     if (this.idleCallbackId !== null) {
       safeCancelIdleCallback(this.idleCallbackId)
       this.idleCallbackId = null
     }
 
-    // Perform cleanup immediately (used when explicitly called)
-    this.performCleanup()
+    // Return this exact retirement operation even if synchronous finalization
+    // clears the manager field or an event listener starts a replacement run.
+    return this.beginCleanup()
   }
 }

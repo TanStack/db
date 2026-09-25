@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection, createLiveQueryCollection } from '../src'
+import { createDeferred } from '../src/deferred'
 import type { SyncConfig } from '../src/types'
 
 /**
@@ -9,7 +10,10 @@ import type { SyncConfig } from '../src/types'
  * callbacks, and may request nested cleanup. The model admits no replacement
  * owner until the first cleanup promise settles: every reentrant start must
  * fail, the original load and release occur once, and subscriber count reaches
- * zero. A later ordinary preload is a new generation and must work.
+ * zero. When adapter cleanup returns a promise, final status and replacement
+ * admission wait for its settlement. Concurrent callers share that boundary.
+ * Rejection still finalizes the old run once, then rejects every waiter. A
+ * later ordinary preload is a new generation and must work.
  *
  * Counts, errors, status, rows, and ownership are all observed. Checking only
  * `cleaned-up` would miss leaked or duplicated physical resources.
@@ -28,6 +32,138 @@ const scenarios = ([`abort`, `release`] as const).flatMap((boundary) =>
 )
 
 describe(`Collection cleanup admission oracle`, () => {
+  it(`waits for source cleanup before publishing the restart boundary`, async () => {
+    const cleanupGate = createDeferred<void>()
+    let starts = 0
+    let cleanups = 0
+    let sourceCleanupSettled = false
+    const statuses: Array<string> = []
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return {
+            cleanup: () => {
+              cleanups++
+              return cleanupGate.promise.then(() => {
+                sourceCleanupSettled = true
+              })
+            },
+          }
+        },
+      },
+    })
+    const off = collection.on(`status:change`, ({ status }) => {
+      statuses.push(status)
+    })
+
+    try {
+      await collection.preload()
+      statuses.length = 0
+
+      const firstCleanup = collection.cleanup()
+      const concurrentCleanup = collection.cleanup()
+
+      expect(sourceCleanupSettled).toBe(false)
+      expect(collection.status).toBe(`ready`)
+      expect(statuses).toEqual([])
+      expect(cleanups).toBe(1)
+      expect(concurrentCleanup).toBe(firstCleanup)
+      expect(() => collection.startSyncImmediate()).toThrowError(
+        expect.objectContaining(cleanupError),
+      )
+
+      cleanupGate.resolve()
+      await Promise.all([firstCleanup, concurrentCleanup])
+
+      expect(sourceCleanupSettled).toBe(true)
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(statuses).toEqual([`cleaned-up`])
+
+      await expect(collection.cleanup()).resolves.toBeUndefined()
+      expect(cleanups).toBe(1)
+
+      collection.startSyncImmediate()
+      expect(starts).toBe(2)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      cleanupGate.resolve()
+      off()
+      await collection.cleanup()
+    }
+  })
+
+  it(`finishes teardown once and rejects every waiter when source cleanup rejects`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const sourceError = new Error(`source cleanup failed exactly`)
+    let starts = 0
+    let cleanups = 0
+    const statuses: Array<string> = []
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return {
+            cleanup: () => {
+              cleanups++
+              return cleanups === 1
+                ? cleanupGate.promise.then(() => Promise.reject(sourceError))
+                : undefined
+            },
+          }
+        },
+      },
+    })
+    const off = collection.on(`status:change`, ({ status }) => {
+      statuses.push(status)
+    })
+
+    try {
+      await collection.preload()
+      statuses.length = 0
+      const firstCleanup = collection.cleanup()
+      const concurrentCleanup = collection.cleanup()
+      const firstOutcome = firstCleanup.catch((error: unknown) => error)
+      const concurrentOutcome = concurrentCleanup.catch(
+        (error: unknown) => error,
+      )
+
+      expect(collection.status).toBe(`ready`)
+      expect(cleanups).toBe(1)
+      expect(concurrentCleanup).toBe(firstCleanup)
+      cleanupGate.resolve()
+
+      const [firstError, concurrentError] = await Promise.all([
+        firstOutcome,
+        concurrentOutcome,
+      ])
+      expect(concurrentError).toBe(firstError)
+      expect(firstError).toMatchObject({
+        name: `SyncCleanupError`,
+        cause: sourceError,
+      })
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(statuses).toEqual([`cleaned-up`])
+      expect(cleanups).toBe(1)
+
+      // Rejection ends the old sync run. A later run is allowed, and a
+      // repeated cleanup does not retry the failed callback from that run.
+      await expect(collection.cleanup()).resolves.toBeUndefined()
+      expect(cleanups).toBe(1)
+      collection.startSyncImmediate()
+      expect(starts).toBe(2)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      cleanupGate.resolve()
+      off()
+      await collection.cleanup()
+    }
+  })
+
   it.each(scenarios)(
     `rejects restart without creating replacement ownership: %j`,
     async ({ boundary, nestedCleanup, attempts }) => {

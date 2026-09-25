@@ -6248,6 +6248,182 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
+  it.each([`fulfill`, `reject`] as const)(
+    `keeps retired loopback startup inert after cleanup: %s`,
+    async (outcome) => {
+      const adapter = createRecordingAdapter()
+      const hydrationEntered = createEventGate()
+      const hydrationGate = createEventGate()
+      const startupError = new Error(`retired loopback startup failed`)
+      const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+        hydrationEntered.resolve()
+        await hydrationGate.promise
+        if (outcome === `reject`) throw startupError
+        return []
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `retired-loopback-startup-${outcome}`,
+          getKey: (row) => row.id,
+          persistence: { adapter },
+        }),
+      )
+      const readiness = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const unhandled: Array<unknown> = []
+      const captureUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, captureUnhandled)
+      const peer = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `retired-loopback-peer-${outcome}`,
+          getKey: (row) => row.id,
+          persistence: { adapter: createRecordingAdapter() },
+        }),
+      )
+      let hasPrimaryFailure = false
+
+      try {
+        await atPersistedOracleCheckpoint(
+          hydrationEntered.promise,
+          `retired loopback hydration entered`,
+        )
+        await collection.cleanup()
+        const retiredStatus = collection.status
+
+        hydrationGate.resolve()
+        await flushAsyncWork()
+        await flushAsyncWork()
+        const readinessOutcome = await readiness
+        await atPersistedOracleCheckpoint(
+          peer.stateWhenReady(),
+          `independent loopback peer ready`,
+        )
+
+        expect({
+          retiredStatus,
+          finalStatus: collection.status,
+          readinessStatus: readinessOutcome.status,
+          readinessErrorName:
+            readinessOutcome.status === `rejected` &&
+            readinessOutcome.reason instanceof Error
+              ? readinessOutcome.reason.name
+              : undefined,
+          publicError: collection._lifecycle.getSyncError(),
+          warnings: warnings.mock.calls,
+          unhandled,
+          peerStatus: peer.status,
+        }).toEqual({
+          retiredStatus: `cleaned-up`,
+          finalStatus: `cleaned-up`,
+          readinessStatus: `rejected`,
+          readinessErrorName: `AbortError`,
+          publicError: undefined,
+          warnings: [],
+          unhandled: [],
+          peerStatus: `ready`,
+        })
+
+        // This hostile control bypasses the sync-run-owned callback. It proves
+        // the status observation above would reject an unfenced late ready.
+        expect(() => collection._lifecycle.markReady()).toThrowError(
+          expect.objectContaining({ name: `CollectionStateError` }),
+        )
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        restoreBaselineRows()
+        hydrationGate.resolve()
+        process.off(`unhandledRejection`, captureUnhandled)
+        warnings.mockRestore()
+        await cleanupPersistedOracle(
+          [() => readiness, () => peer.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`settles old source cleanup before hydrating a same-resource replacement`, async () => {
+    const id = `same-resource-cleanup-settlement`
+    const adapter = createRecordingAdapter()
+    adapter.rows.set(`retired`, {
+      id: `retired`,
+      title: `must not survive old cleanup`,
+    })
+    const cleanupGate = createEventGate()
+    let sourceCleanupSettled = false
+    const create = (withCleanup: boolean) =>
+      createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return withCleanup
+                ? {
+                    cleanup: () =>
+                      cleanupGate.promise.then(() => {
+                        adapter.rows.delete(`retired`)
+                        sourceCleanupSettled = true
+                      }),
+                  }
+                : undefined
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+    const oldCollection = create(true)
+    let replacement: ReturnType<typeof create> | undefined
+    let replacementReady: Promise<unknown> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        oldCollection.stateWhenReady(),
+        `old same-resource owner ready`,
+      )
+      expect(stripVirtualProps(oldCollection.get(`retired`))).toEqual({
+        id: `retired`,
+        title: `must not survive old cleanup`,
+      })
+
+      const replacementStarted = oldCollection.cleanup().then(() => {
+        replacement = create(false)
+        replacementReady = replacement.stateWhenReady()
+        return replacementReady
+      })
+      await flushAsyncWork()
+
+      expect(sourceCleanupSettled).toBe(false)
+      expect(replacement).toBeUndefined()
+
+      cleanupGate.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementStarted,
+        `same-resource replacement ready after cleanup`,
+      )
+
+      expect(sourceCleanupSettled).toBe(true)
+      expect(adapter.rows.has(`retired`)).toBe(false)
+      expect(replacement?.get(`retired`)).toBeUndefined()
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      cleanupGate.resolve()
+      await cleanupPersistedOracle(
+        [() => replacementReady, () => replacement?.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`marks a targeted invalidation commit-receipt rejection terminal`, async () => {
     const id = `targeted-invalidation-receipt`
     const adapter = createRecordingAdapter()

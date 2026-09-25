@@ -1791,16 +1791,19 @@ class PersistedCollectionRuntime<
     await this.persistAndConfirmCollectionMutations(collectionMutations)
   }
 
-  cleanup(): void {
+  cleanup(): Promise<void> {
     this.advanceLifecycle()
+    const remoteReleases: Array<Promise<void>> = []
 
     if (this.mode === `sync-present`) {
       for (const options of this.activeSubsets.values()) {
-        void this.persistence.coordinator
-          .requestReleaseRemoteSubset(this.collectionId, options)
-          .catch((error) => {
-            this.reportSyncError(error)
-          })
+        remoteReleases.push(
+          this.persistence.coordinator
+            .requestReleaseRemoteSubset(this.collectionId, options)
+            .catch((error) => {
+              this.reportSyncError(error)
+            }),
+        )
       }
     }
 
@@ -1830,6 +1833,7 @@ class PersistedCollectionRuntime<
     this.queuedTxCommitted.length = 0
     this.clearSyncControls()
     this.collection = null
+    return Promise.all(remoteReleases).then(() => undefined)
   }
 
   private advanceLifecycle(): void {
@@ -4031,7 +4035,7 @@ function createWrappedSyncConfig<
       })
 
       return {
-        cleanup: () => {
+        cleanup: async () => {
           startupState.cleanedUp = true
           const cleanupError = new SyncTransactionAbortedError()
           for (const acquisition of acquisitions.values()) {
@@ -4043,8 +4047,19 @@ function createWrappedSyncConfig<
             settlePublicationAdmissionWaiters(transaction, cleanupError)
           }
           transactionStack.length = 0
-          sourceResult.cleanup?.()
-          runtime.cleanup()
+          let sourceCleanup: Promise<void>
+          try {
+            sourceCleanup = Promise.resolve(sourceResult.cleanup?.())
+          } catch (error) {
+            sourceCleanup = Promise.reject(error)
+          }
+          const runtimeCleanup = runtime.cleanup()
+          const [sourceOutcome, runtimeOutcome] = await Promise.allSettled([
+            sourceCleanup,
+            runtimeCleanup,
+          ])
+          if (sourceOutcome.status === `rejected`) throw sourceOutcome.reason
+          if (runtimeOutcome.status === `rejected`) throw runtimeOutcome.reason
         },
         loadSubset: async (options: LoadSubsetOptions) => {
           const acquisition = { forwarded: false }
@@ -4140,9 +4155,7 @@ function createLoopbackSyncConfig<
         .catch(() => undefined)
 
       return {
-        cleanup: () => {
-          runtime.cleanup()
-        },
+        cleanup: () => runtime.cleanup(),
         loadSubset: (options: LoadSubsetOptions) => runtime.loadSubset(options),
         unloadSubset: (options: LoadSubsetOptions) =>
           runtime.unloadSubset(options),
