@@ -1794,29 +1794,39 @@ class PersistedCollectionRuntime<
   cleanup(): Promise<void> {
     this.advanceLifecycle()
     const remoteReleases: Array<Promise<void>> = []
-
-    if (this.mode === `sync-present`) {
-      for (const options of this.activeSubsets.values()) {
-        remoteReleases.push(
-          this.persistence.coordinator
-            .requestReleaseRemoteSubset(this.collectionId, options)
-            .catch((error) => {
-              this.reportSyncError(error)
-            }),
-        )
+    let firstFailure: { error: unknown } | undefined
+    const attempt = (callback: () => void): void => {
+      try {
+        callback()
+      } catch (error) {
+        firstFailure ??= { error }
       }
     }
 
-    this.coordinatorUnsubscribe?.()
+    if (this.mode === `sync-present`) {
+      for (const options of this.activeSubsets.values()) {
+        attempt(() => {
+          remoteReleases.push(
+            this.persistence.coordinator
+              .requestReleaseRemoteSubset(this.collectionId, options)
+              .catch((error) => {
+                this.reportSyncError(error)
+              }),
+          )
+        })
+      }
+    }
+
+    attempt(() => this.coordinatorUnsubscribe?.())
     this.coordinatorUnsubscribe = null
 
-    this.remoteSubsetOwnerUnsubscribe?.()
+    attempt(() => this.remoteSubsetOwnerUnsubscribe?.())
     this.remoteSubsetOwnerUnsubscribe = null
 
-    this.indexAddedUnsubscribe?.()
+    attempt(() => this.indexAddedUnsubscribe?.())
     this.indexAddedUnsubscribe = null
 
-    this.indexRemovedUnsubscribe?.()
+    attempt(() => this.indexRemovedUnsubscribe?.())
     this.indexRemovedUnsubscribe = null
 
     if (this.remoteEnsureRetryTimer !== null) {
@@ -1833,7 +1843,9 @@ class PersistedCollectionRuntime<
     this.queuedTxCommitted.length = 0
     this.clearSyncControls()
     this.collection = null
-    return Promise.all(remoteReleases).then(() => undefined)
+    return Promise.all(remoteReleases).then(() => {
+      if (firstFailure) throw firstFailure.error
+    })
   }
 
   private advanceLifecycle(): void {
@@ -4018,7 +4030,9 @@ function createWrappedSyncConfig<
           activeSourceSyncEntry = undefined
           settleSourceSyncEntry()
         }
-        if (sourceResult.loadSubset) {
+        // Cleanup can reenter while the source sync function is still active.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (!startupState.cleanedUp && sourceResult.loadSubset) {
           const loadSubset = async (options: TransportedLoadSubsetOptions) => {
             if (startupState.cleanedUp) {
               throw new Error(`persisted sync source is no longer active`)
@@ -4069,7 +4083,12 @@ function createWrappedSyncConfig<
           } catch (error) {
             sourceCleanup = Promise.reject(error)
           }
-          const runtimeCleanup = runtime.cleanup()
+          let runtimeCleanup: Promise<void>
+          try {
+            runtimeCleanup = runtime.cleanup()
+          } catch (error) {
+            runtimeCleanup = Promise.reject(error)
+          }
           const [sourceOutcome, runtimeOutcome] = await Promise.allSettled([
             sourceCleanup,
             runtimeCleanup,

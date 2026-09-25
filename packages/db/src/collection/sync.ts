@@ -12,6 +12,7 @@ import {
 } from '../errors'
 import { createDeferred } from '../deferred'
 import { deepEquals } from '../utils'
+import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -911,10 +912,13 @@ export class CollectionSyncManager<
 
     try {
       const result = cleanup()
-      if (result === undefined) return true
-      return Promise.resolve(result).catch((error: unknown) => {
-        throw this.wrapCleanupError(error)
-      })
+      if (!isPromiseLike(result)) return true
+      return Promise.resolve(result).then(
+        () => undefined,
+        (error: unknown) => {
+          throw this.wrapCleanupError(error)
+        },
+      )
     } catch (error) {
       throw this.wrapCleanupError(error)
     }

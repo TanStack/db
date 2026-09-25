@@ -188,6 +188,72 @@ describe(`Sync Streams`, () => {
     },
   )
 
+  it.each([`fulfill`, `reject`] as const)(
+    `eager mode: awaits asynchronous trigger disposal: %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      const disposeGate = pDefer<void>()
+      const disposeError = new Error(`eager trigger disposal failed`)
+      const disposeTracking = vi.fn(() =>
+        disposeGate.promise.then(() => {
+          if (outcome === `reject`) throw disposeError
+        }),
+      )
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(
+        disposeTracking,
+      )
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+        }),
+      )
+      const unhandled: Array<unknown> = []
+      const onUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, onUnhandled)
+
+      try {
+        await collection.stateWhenReady()
+        let cleanupSettled = false
+        const cleanupOutcome = collection.cleanup().then(
+          () => {
+            cleanupSettled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            cleanupSettled = true
+            return { status: `rejected` as const, error }
+          },
+        )
+
+        // Abort and local disposer ownership transfer remain same-stack.
+        expect(disposeTracking).toHaveBeenCalledOnce()
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(cleanupSettled).toBe(false)
+        expect(collection.status).toBe(`ready`)
+
+        disposeGate.resolve()
+        const cleanupResult = await cleanupOutcome
+        if (outcome === `reject`) {
+          expect(cleanupResult).toMatchObject({
+            status: `rejected`,
+            error: { name: `SyncCleanupError`, cause: disposeError },
+          })
+        } else {
+          expect(cleanupResult).toEqual({ status: `fulfilled` })
+        }
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(unhandled).toEqual([])
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(disposeTracking).toHaveBeenCalledOnce()
+      } finally {
+        disposeGate.resolve()
+        process.removeListener(`unhandledRejection`, onUnhandled)
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`eager mode: reports an initial load failure`, async () => {
     const db = await createDatabase()
     const initialError = new Error(`initial PowerSync load failed`)
@@ -384,6 +450,199 @@ describe(`Sync Streams`, () => {
       )
     } finally {
       for (const cleanup of cleanups.reverse()) await cleanup()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`fulfill`, `reject`, `throw`] as const)(
+    `on-demand mode: settles acquired hook cleanup with collection cleanup: %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const cleanupGate = pDefer<void>()
+      const cleanupError = new Error(`on-demand hook cleanup failed`)
+      const cleanupHook = vi.fn(() => {
+        if (outcome === `throw`) throw cleanupError
+        return cleanupGate.promise.then(() => {
+          if (outcome === `reject`) throw cleanupError
+        })
+      })
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset: () => cleanupHook,
+        }),
+      )
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`)),
+      })
+      const unhandled: Array<unknown> = []
+      const onUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, onUnhandled)
+
+      try {
+        await query.preload()
+        let cleanupSettled = false
+        const cleanupOutcome = collection.cleanup().then(
+          () => {
+            cleanupSettled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            cleanupSettled = true
+            return { status: `rejected` as const, error }
+          },
+        )
+
+        expect(cleanupHook).toHaveBeenCalledOnce()
+        if (outcome !== `throw`) {
+          await new Promise((resolve) => setImmediate(resolve))
+          const settledBeforeRelease = cleanupSettled
+          cleanupGate.resolve()
+          const cleanupResult = await cleanupOutcome
+          expect(settledBeforeRelease).toBe(false)
+          if (outcome === `reject`) {
+            expect(cleanupResult).toMatchObject({
+              status: `rejected`,
+              error: { name: `SyncCleanupError`, cause: cleanupError },
+            })
+          } else {
+            expect(cleanupResult).toEqual({ status: `fulfilled` })
+          }
+        } else {
+          expect(await cleanupOutcome).toMatchObject({
+            status: `rejected`,
+            error: { name: `SyncCleanupError`, cause: cleanupError },
+          })
+        }
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(unhandled).toEqual([])
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(cleanupHook).toHaveBeenCalledOnce()
+      } finally {
+        cleanupGate.resolve()
+        process.removeListener(`unhandledRejection`, onUnhandled)
+        await query.cleanup()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`on-demand mode: classifies acquired cleanup by its runtime promise shape`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const hiddenPromiseGate = pDefer<void>()
+    const calls: Array<string> = []
+    const incidentalCleanup = () => calls.push(`incidental`)
+    const hiddenPromiseCleanup: () => void = async () => {
+      calls.push(`hidden-promise`)
+      await hiddenPromiseGate.promise
+    }
+    let acquisition = 0
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: () =>
+          acquisition++ === 0 ? incidentalCleanup : hiddenPromiseCleanup,
+      }),
+    )
+    const categoryQuery = (category: string) =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, category)),
+      })
+    const firstQuery = categoryQuery(`electronics`)
+    const secondQuery = categoryQuery(`clothing`)
+
+    try {
+      await firstQuery.preload()
+      await secondQuery.preload()
+      let settled = false
+      const cleanup = collection.cleanup().then(() => {
+        settled = true
+      })
+
+      expect(calls).toEqual([`incidental`, `hidden-promise`])
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(settled).toBe(false)
+
+      hiddenPromiseGate.resolve()
+      await cleanup
+      expect(settled).toBe(true)
+    } finally {
+      hiddenPromiseGate.resolve()
+      await firstQuery.cleanup()
+      await secondQuery.cleanup()
+      await collection.cleanup()
+    }
+  })
+
+  it(`on-demand mode: awaits every acquired hook once during reentrant cleanup`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const firstGate = pDefer<void>()
+    const secondGate = pDefer<void>()
+    let nestedCleanup: Promise<void> | undefined
+    const firstCleanup = vi.fn(() => {
+      nestedCleanup = collection.cleanup()
+      return firstGate.promise
+    })
+    const secondCleanup = vi.fn(() => secondGate.promise)
+    let acquisition = 0
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: () =>
+          acquisition++ === 0 ? firstCleanup : secondCleanup,
+      }),
+    )
+    const categoryQuery = (category: string) =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, category)),
+      })
+    const firstQuery = categoryQuery(`electronics`)
+    const secondQuery = categoryQuery(`clothing`)
+
+    try {
+      await firstQuery.preload()
+      await secondQuery.preload()
+      const cleanup = collection.cleanup()
+
+      expect(nestedCleanup).toBe(cleanup)
+      expect(firstCleanup).toHaveBeenCalledOnce()
+      expect(secondCleanup).toHaveBeenCalledOnce()
+      let settled = false
+      void cleanup.then(() => {
+        settled = true
+      })
+      secondGate.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(settled).toBe(false)
+
+      firstGate.resolve()
+      await cleanup
+      expect(settled).toBe(true)
+      expect(firstCleanup).toHaveBeenCalledOnce()
+      expect(secondCleanup).toHaveBeenCalledOnce()
+    } finally {
+      firstGate.resolve()
+      secondGate.resolve()
+      await firstQuery.cleanup()
+      await secondQuery.cleanup()
       await collection.cleanup()
     }
   })

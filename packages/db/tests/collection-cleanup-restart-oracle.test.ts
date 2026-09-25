@@ -115,6 +115,72 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
+  it(`treats an incidental contextual-void return as synchronous cleanup`, async () => {
+    let starts = 0
+    const released: Array<number> = []
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return () => released.push(starts)
+        },
+      },
+    })
+
+    try {
+      await collection.preload()
+
+      const cleanup = collection.cleanup()
+
+      expect(released).toEqual([1])
+      expect(collection.status).toBe(`cleaned-up`)
+      collection.startSyncImmediate()
+      expect(starts).toBe(2)
+      await cleanup
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`awaits a runtime Promise from cleanup typed to return void`, async () => {
+    const cleanupGate = createDeferred<void>()
+    let cleanupCalls = 0
+    const cleanup: () => void = () => {
+      cleanupCalls++
+      return cleanupGate.promise
+    }
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return cleanup
+        },
+      },
+    })
+
+    try {
+      await collection.preload()
+
+      const retirement = collection.cleanup()
+
+      expect(cleanupCalls).toBe(1)
+      expect(collection.status).toBe(`ready`)
+      expect(() => collection.startSyncImmediate()).toThrowError(
+        expect.objectContaining(cleanupError),
+      )
+
+      cleanupGate.resolve()
+      await retirement
+      expect(collection.status).toBe(`cleaned-up`)
+    } finally {
+      cleanupGate.resolve()
+      await collection.cleanup()
+    }
+  })
+
   it(`finishes teardown once and rejects every waiter when source cleanup rejects`, async () => {
     const cleanupGate = createDeferred<void>()
     const sourceError = new Error(`source cleanup failed exactly`)

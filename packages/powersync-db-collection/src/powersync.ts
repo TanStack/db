@@ -33,6 +33,14 @@ import type { PendingOperation } from './PendingOperationStore'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { LockContext, Table, TriggerDiffRecord } from '@powersync/common'
 
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    !!value &&
+    (typeof value === `object` || typeof value === `function`) &&
+    typeof (value as { then?: unknown }).then === `function`
+  )
+}
+
 /**
  * Creates PowerSync collection options for use with a standard Collection.
  *
@@ -324,6 +332,7 @@ function createPowerSyncCollectionConfig<
         | ((options?: { context?: LockContext }) => Promise<void>)
         | null = null
       let trackingSetup: Promise<void> | null = null
+      let abortTrackingDisposal: Promise<void> | null = null
 
       if (syncMode === `eager`) {
         return runEagerSync()
@@ -352,6 +361,14 @@ function createPowerSyncCollectionConfig<
 
         disposeTracking = null
         await dispose(context ? { context } : undefined)
+      }
+
+      function disposeTrackingAfterAbort(): Promise<void> {
+        const disposal = (abortTrackingDisposal ??= safelyDisposeTracking())
+        // Abort event dispatch does not observe a listener's returned promise.
+        // The eager cleanup callback awaits this same promise below.
+        void disposal.catch(() => undefined)
+        return disposal
       }
 
       async function establishTracking(
@@ -537,12 +554,12 @@ function createPowerSyncCollectionConfig<
 
         // If the abort controller was aborted while processing the request above
         if (abortController.signal.aborted) {
-          await safelyDisposeTracking()
+          await disposeTrackingAfterAbort()
         } else {
           abortController.signal.addEventListener(
             `abort`,
-            async () => {
-              await safelyDisposeTracking()
+            () => {
+              void disposeTrackingAfterAbort()
             },
             { once: true },
           )
@@ -613,36 +630,29 @@ function createPowerSyncCollectionConfig<
             message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
           })
           abortController.abort()
+          const trackingDisposal = disposeTrackingAfterAbort()
 
           let firstFailure: { error: unknown } | undefined
-          const tasks: Array<Promise<void>> = []
-          const collectOnUnload = () => {
+          const settleOnUnload = async () => {
             try {
-              const result = invokeOnUnload()
-              if (result !== undefined) {
-                const task = Promise.resolve(result)
-                tasks.push(task)
-                void task.catch(() => undefined)
-              }
+              await invokeOnUnload()
             } catch (error) {
               firstFailure ??= { error }
             }
           }
-          const settleTasks = async () => {
-            const outcomes = await Promise.allSettled(tasks.splice(0))
-            const rejected = outcomes.find(
-              (outcome): outcome is PromiseRejectedResult =>
-                outcome.status === `rejected`,
-            )
-            if (rejected) firstFailure ??= { error: rejected.reason }
-          }
 
           // Invoke an already-installed callback in this stack, but also wait
           // for startup to publish a callback acquired concurrently with abort.
-          collectOnUnload()
-          await Promise.allSettled([startup, settleTasks()])
-          collectOnUnload()
-          await settleTasks()
+          const settlements = await Promise.allSettled([
+            startup,
+            trackingDisposal,
+            settleOnUnload(),
+          ])
+          const disposalSettlement = settlements[1]
+          if (disposalSettlement.status === `rejected`) {
+            firstFailure ??= { error: disposalSettlement.reason }
+          }
+          await settleOnUnload()
           if (firstFailure) throw firstFailure.error
         }
       }
@@ -659,6 +669,10 @@ function createPowerSyncCollectionConfig<
           options: LoadSubsetOptions
           failures: number
         }
+        type DemandCleanupCollector = {
+          tasks: Array<Promise<unknown>>
+          failure?: { error: unknown }
+        }
 
         const demands = new Map<LoadSubsetOptions, DemandRecord>()
         const releasedSubsets = new WeakSet<LoadSubsetOptions>()
@@ -669,6 +683,7 @@ function createPowerSyncCollectionConfig<
         let rebuildPromise: Promise<void> | null = null
         let drainingReleases = false
         let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
+        let demandCleanupCollector: DemandCleanupCollector | null = null
         const startup = start()
         void startup.catch((error) =>
           database.logger.log({
@@ -840,16 +855,33 @@ function createPowerSyncCollectionConfig<
           )
         }
 
+        const reportDemandCleanupFailure = (error: unknown): void => {
+          database.logger.log({
+            level: LogLevels.error,
+            message: `Could not clean up subset hook for ${viewName}`,
+            error,
+          })
+        }
+
         const cleanupDemand = (demand: DemandRecord): void => {
           demands.delete(demand.options)
           try {
-            demand.cleanup?.()
+            const result: unknown = demand.cleanup?.()
+            if (!isPromiseLike(result)) return
+
+            const task = Promise.resolve(result)
+            if (demandCleanupCollector) {
+              demandCleanupCollector.tasks.push(task)
+              void task.catch(() => undefined)
+            } else {
+              void task.catch(reportDemandCleanupFailure)
+            }
           } catch (error) {
-            database.logger.log({
-              level: LogLevels.error,
-              message: `Could not clean up subset hook for ${viewName}`,
-              error,
-            })
+            if (demandCleanupCollector) {
+              demandCleanupCollector.failure ??= { error }
+            } else {
+              reportDemandCleanupFailure(error)
+            }
           }
         }
 
@@ -968,10 +1000,39 @@ function createPowerSyncCollectionConfig<
               message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             })
             abortController.abort()
+            const collector: DemandCleanupCollector = { tasks: [] }
+            demandCleanupCollector = collector
             for (const demand of demands.values()) {
               cleanupDemand(demand)
             }
             pendingReleases.length = 0
+
+            if (collector.tasks.length === 0) {
+              demandCleanupCollector = null
+              if (collector.failure) throw collector.failure.error
+              return
+            }
+
+            return (async () => {
+              let settledTasks = 0
+              while (settledTasks < collector.tasks.length) {
+                const tasks = collector.tasks.slice(settledTasks)
+                settledTasks = collector.tasks.length
+                const outcomes = await Promise.allSettled(tasks)
+                const rejected = outcomes.find(
+                  (outcome): outcome is PromiseRejectedResult =>
+                    outcome.status === `rejected`,
+                )
+                if (rejected) {
+                  collector.failure ??= { error: rejected.reason }
+                }
+              }
+              if (collector.failure) throw collector.failure.error
+            })().finally(() => {
+              if (demandCleanupCollector === collector) {
+                demandCleanupCollector = null
+              }
+            })
           },
           loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
           unloadSubset,
