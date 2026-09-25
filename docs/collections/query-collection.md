@@ -612,7 +612,8 @@ parameter passed to the handler resolves at the Query fetch boundary. This is a
 scoped Collection view: an external `refetch()` still waits for application,
 even when it overlaps the handler. Code that starts the mutation can await the
 mutation's `isPersisted.promise` when it needs the complete transaction and its
-queued Collection application.
+queued Collection application. Utilities that refetch through the scoped view,
+including `clearError()`, inherit the same fetch boundary.
 
 Outside a mutation handler, `throwOnError` applies to both Query fetch errors and
 errors applying an accepted result to Collection rows. With `throwOnError: true`,
@@ -649,6 +650,9 @@ The collection provides these utility methods via `collection.utils`:
   - `opts.throwOnError`: Whether Query fetch or Collection application errors reject an external call (default: `false`); handler-scoped calls cover fetch errors only
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
+  - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
+- `clearError()`: Clear recorded Query error state and refetch with errors enabled
+  - Uses the same application boundary as `refetch()` outside handlers and the same fetch boundary on a handler-scoped Collection
 
 ## Direct Writes
 

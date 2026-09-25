@@ -317,8 +317,10 @@ export interface QueryCollectionUtils<
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
-   * Clear the error state and trigger a refetch of the query
-   * @returns Promise that resolves when the refetch completes successfully
+   * Clear the error state and trigger a refetch of the query. On the scoped
+   * Collection passed to a mutation handler, this retains the Query fetch
+   * boundary so it cannot wait on its own transaction.
+   * @returns Promise that resolves when the applicable refetch boundary completes
    * @throws Error if the refetch fails
    */
   clearError: () => Promise<void>
@@ -804,16 +806,21 @@ export function queryCollectionOptions(
     >(),
   }
 
-  // Public refetch calls register a collector for each tracked Query while its
-  // fetch is active. Result application records its exact promise in every
-  // current collector, including an intermediate cached success followed by a
-  // terminal fetch error.
-  type RefetchApplicationCollector = {
+  // Query Cache fetch actions give each request a stable identity. Observer
+  // results and their exact Collection applications are attached to that
+  // identity so unrelated same-key cache work cannot become a refetch
+  // obligation merely because it happened before the call returned.
+  type FetchApplicationRecord = {
+    result?: QueryObserverResult<any, any>
     application?: Promise<void>
   }
-  const refetchApplicationCollectors = new Map<
-    string,
-    Set<RefetchApplicationCollector>
+  const resultApplicationSettlements = new WeakMap<
+    QueryObserverResult<any, any>,
+    Map<string, Promise<void>>
+  >()
+  const fetchApplicationRecords = new WeakMap<
+    AnyQuery,
+    Map<number, Map<string, FetchApplicationRecord>>
   >()
   // Query-cache ownership is scoped to this sync run and keyed by the
   // actual Query object. Weak membership survives subset unload without
@@ -848,6 +855,69 @@ export function queryCollectionOptions(
 
   const getLogicalHashes = (query: AnyQuery): Set<string> =>
     logicalHashesByQuery.get(query) ?? new Set([hashKey(query.queryKey)])
+
+  const getFetchApplicationRecord = (
+    query: AnyQuery,
+    fetchStart: number,
+    hashedQueryKey: string,
+  ): FetchApplicationRecord => {
+    const recordsByStart =
+      fetchApplicationRecords.get(query) ??
+      new Map<number, Map<string, FetchApplicationRecord>>()
+    fetchApplicationRecords.set(query, recordsByStart)
+    const recordsByHash =
+      recordsByStart.get(fetchStart) ??
+      new Map<string, FetchApplicationRecord>()
+    recordsByStart.set(fetchStart, recordsByHash)
+    const record = recordsByHash.get(hashedQueryKey) ?? {}
+    recordsByHash.set(hashedQueryKey, record)
+    return record
+  }
+
+  const getResultApplication = (
+    hashedQueryKey: string,
+    result: QueryObserverResult<any, any>,
+  ): Promise<void> | undefined =>
+    resultApplicationSettlements.get(result)?.get(hashedQueryKey)
+
+  const captureFetchResult = (query: AnyQuery, fetchStart: number): void => {
+    for (const hashedQueryKey of getLogicalHashes(query)) {
+      const observer = state.observers.get(hashedQueryKey)
+      if (!observer || observer.getCurrentQuery() !== query) continue
+      const result = observer.getCurrentResult()
+      const record = getFetchApplicationRecord(
+        query,
+        fetchStart,
+        hashedQueryKey,
+      )
+      record.result = result
+      const application = getResultApplication(hashedQueryKey, result)
+      if (application) record.application = application
+    }
+  }
+
+  const captureFetchApplications = (
+    query: AnyQuery,
+    fetchStart: number,
+  ): void => {
+    const recordsByHash = fetchApplicationRecords.get(query)?.get(fetchStart)
+    if (!recordsByHash) return
+    for (const [hashedQueryKey, record] of recordsByHash) {
+      if (!record.result) continue
+      const application = getResultApplication(hashedQueryKey, record.result)
+      if (application) record.application = application
+    }
+  }
+
+  const retireFetchApplicationRecords = (
+    query: AnyQuery,
+    fetchStarts: ReadonlyArray<number>,
+  ): void => {
+    const recordsByStart = fetchApplicationRecords.get(query)
+    if (!recordsByStart) return
+    for (const fetchStart of fetchStarts) recordsByStart.delete(fetchStart)
+    if (recordsByStart.size === 0) fetchApplicationRecords.delete(query)
+  }
 
   const hasPostWriteAuthority = (
     hashedQueryKey: string,
@@ -933,7 +1003,7 @@ export function queryCollectionOptions(
   let applyRefetchResultWhenUnsubscribed = (
     _hashedQueryKey: string,
     _result: QueryObserverResult<any, any>,
-  ): void => {}
+  ): boolean => false
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
@@ -1861,6 +1931,7 @@ export function queryCollectionOptions(
 
     const enqueueResultApplication = (
       hashedQueryKey: string,
+      result: QueryObserverResult<any, any>,
       apply: (
         signal: AbortSignal,
         applicationToken: ResultApplicationController,
@@ -1870,9 +1941,10 @@ export function queryCollectionOptions(
       const controller: ResultApplicationController = new AbortController()
       resultApplicationControllers.set(hashedQueryKey, controller)
       const application = apply(controller.signal, controller)
-      refetchApplicationCollectors.get(hashedQueryKey)?.forEach((collector) => {
-        collector.application = application
-      })
+      const applicationsByHash =
+        resultApplicationSettlements.get(result) ?? new Map()
+      applicationsByHash.set(hashedQueryKey, application)
+      resultApplicationSettlements.set(result, applicationsByHash)
       const cleanupController = () => {
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
@@ -1969,11 +2041,11 @@ export function queryCollectionOptions(
             }
             if (result.isFetching) return
 
-            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
               reconcileSuccessfulResult(queryKey, result, token, signal),
             )
           } else {
-            enqueueResultApplication(hashedQueryKey, (signal, token) =>
+            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
               applySuccessfulResult(queryKey, result, token, undefined, signal),
             )
           }
@@ -2015,9 +2087,11 @@ export function queryCollectionOptions(
     }
 
     applyRefetchResultWhenUnsubscribed = (hashedQueryKey, result) => {
-      if (syncMode !== `eager` || isSubscribed(hashedQueryKey)) return
+      if (isSubscribed(hashedQueryKey)) return false
       const trackedQueryKey = hashToQueryKey.get(hashedQueryKey)
-      if (trackedQueryKey) makeQueryResultHandler(trackedQueryKey)(result)
+      if (!trackedQueryKey) return false
+      makeQueryResultHandler(trackedQueryKey)(result)
+      return true
     }
 
     const subscribeToQuery = (
@@ -2282,12 +2356,39 @@ export function queryCollectionOptions(
               queryCollectionFetchActionStarts.set(event.action, fetchStart)
             }
             queryCollectionCurrentFetchStarts.set(event.query, fetchStart)
+            const obsoleteFetchStarts = [
+              ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
+            ].filter((start) => start !== fetchStart)
+            if (obsoleteFetchStarts.length > 0) {
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, obsoleteFetchStarts),
+              )
+            }
+            captureFetchResult(event.query, fetchStart)
           } else if (event.action.type === `success` && !event.action.manual) {
             const fetchStart = queryCollectionCurrentFetchStarts.get(
               event.query,
             )
             if (fetchStart !== undefined) {
               queryCollectionSuccessfulFetchStarts.set(event.query, fetchStart)
+              captureFetchResult(event.query, fetchStart)
+              // An authority-gated observer schedules its result handler before
+              // this cache listener records the successful fetch. Capture once
+              // more after that handler has attached the application promise.
+              queueMicrotask(() => {
+                captureFetchApplications(event.query, fetchStart)
+                retireFetchApplicationRecords(event.query, [fetchStart])
+              })
+            }
+          } else if (event.action.type === `error`) {
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              captureFetchResult(event.query, fetchStart)
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, [fetchStart]),
+              )
             }
           }
         }
@@ -2316,7 +2417,7 @@ export function queryCollectionOptions(
     const cleanup = () => {
       pendingStartupLoads.clear()
       ensureEagerSubscription = () => {}
-      applyRefetchResultWhenUnsubscribed = () => {}
+      applyRefetchResultWhenUnsubscribed = () => false
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
@@ -2449,70 +2550,83 @@ export function queryCollectionOptions(
     awaitApplications: boolean,
   ): ReturnType<RefetchFn> => {
     const allQueryKeys = [...hashToQueryKey.values()]
-    const applicationCollectors = new Map<string, RefetchApplicationCollector>()
-    const detachApplicationCollector = (hashedQueryKey: string): void => {
-      const collector = applicationCollectors.get(hashedQueryKey)
-      if (!collector) return
-      const currentCollectors = refetchApplicationCollectors.get(hashedQueryKey)
-      currentCollectors?.delete(collector)
-      if (currentCollectors?.size === 0) {
-        refetchApplicationCollectors.delete(hashedQueryKey)
-      }
-    }
 
-    if (awaitApplications) {
-      for (const trackedQueryKey of allQueryKeys) {
-        const hashedQueryKey = hashKey(trackedQueryKey)
-        const collector: RefetchApplicationCollector = {}
-        applicationCollectors.set(hashedQueryKey, collector)
-        const currentCollectors =
-          refetchApplicationCollectors.get(hashedQueryKey) ?? new Set()
-        currentCollectors.add(collector)
-        refetchApplicationCollectors.set(hashedQueryKey, currentCollectors)
-      }
-    }
+    // A replaced eager Query must reattach before refetch. An idle observer
+    // on the same Query is applied explicitly below to avoid an extra fetch.
+    ensureEagerSubscription()
+    const refetchPromises = allQueryKeys.map(async (trackedQueryKey) => {
+      const hashedQueryKey = hashKey(trackedQueryKey)
+      const queryObserver = state.observers.get(hashedQueryKey)
+      if (!queryObserver) return undefined
 
-    try {
-      // A replaced eager Query must reattach before refetch. An idle observer
-      // on the same Query is applied explicitly below to avoid an extra fetch.
-      ensureEagerSubscription()
-      const refetchPromises = allQueryKeys.map(async (trackedQueryKey) => {
-        const hashedQueryKey = hashKey(trackedQueryKey)
-        const queryObserver = state.observers.get(hashedQueryKey)!
-        let result: QueryObserverResult<any, any>
-        try {
-          result = await queryObserver.refetch({
-            throwOnError: opts?.throwOnError,
-          })
-          applyRefetchResultWhenUnsubscribed(hashedQueryKey, result)
-        } catch (error) {
-          applyRefetchResultWhenUnsubscribed(
+      let query = queryObserver.getCurrentQuery()
+      let startingResult: QueryObserverResult<any, any>
+      let fetchRecord: FetchApplicationRecord | undefined
+      let result: QueryObserverResult<any, any>
+      try {
+        const fetch = queryObserver.refetch({
+          throwOnError: opts?.throwOnError,
+        })
+        query = queryObserver.getCurrentQuery()
+        startingResult = queryObserver.getCurrentResult()
+        const fetchStart = queryCollectionCurrentFetchStarts.get(query)
+        if (fetchStart !== undefined) {
+          fetchRecord = getFetchApplicationRecord(
+            query,
+            fetchStart,
             hashedQueryKey,
-            queryObserver.getCurrentResult(),
           )
-          throw error
-        } finally {
-          detachApplicationCollector(hashedQueryKey)
         }
-
-        const application =
-          applicationCollectors.get(hashedQueryKey)?.application
-        if (application) {
-          if (opts?.throwOnError) {
-            await application
-          } else {
-            await application.catch(() => undefined)
-          }
+        result = await fetch
+      } catch (error) {
+        const currentResult = queryObserver.getCurrentResult()
+        const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
+          hashedQueryKey,
+          currentResult,
+        )
+        const causalResult = appliedUnsubscribed
+          ? currentResult
+          : (fetchRecord?.result ?? currentResult)
+        if (fetchRecord) {
+          fetchRecord.result = causalResult
+          fetchRecord.application ??= getResultApplication(
+            hashedQueryKey,
+            causalResult,
+          )
         }
-        return result
-      })
+        throw error
+      }
 
-      return await Promise.all(refetchPromises)
-    } finally {
-      applicationCollectors.forEach((_collector, hashedQueryKey) => {
-        detachApplicationCollector(hashedQueryKey)
-      })
-    }
+      const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
+        hashedQueryKey,
+        result,
+      )
+      const causalResult = appliedUnsubscribed
+        ? result
+        : (fetchRecord?.result ?? result)
+      if (fetchRecord) {
+        fetchRecord.result = causalResult
+        fetchRecord.application ??= getResultApplication(
+          hashedQueryKey,
+          causalResult,
+        )
+      }
+
+      const application =
+        fetchRecord?.application ??
+        getResultApplication(hashedQueryKey, result) ??
+        getResultApplication(hashedQueryKey, startingResult)
+      if (awaitApplications && application) {
+        if (opts?.throwOnError) {
+          await application
+        } else {
+          await application.catch(() => undefined)
+        }
+      }
+      return causalResult
+    })
+
+    return await Promise.all(refetchPromises)
   }
 
   const refetch: RefetchFn = (opts) => refetchQueryResults(opts, true)

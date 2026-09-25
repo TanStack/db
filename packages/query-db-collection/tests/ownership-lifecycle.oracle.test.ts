@@ -137,18 +137,22 @@ async function runCleanups(): Promise<void> {
  *   application no-cancel point and therefore rejects that exact obligation.
  * - `publicValues` represents Collection rows at the public checkpoint.
  * - `RefetchCallSettlementModel` splits each tracked Query fetch from the zero
- *   or more Collection applications it accepts while that fetch is active.
+ *   or more Collection applications it causes. Same-key background work is a
+ *   separate source even when it occurs while that fetch is active.
  * - `HandlerRefetchBoundaryModel` excludes the causally queued Collection
  *   application from the handler call while retaining its later error record.
  *
  * Results skipped before application because refresh is deferred, or because a
  * manual-write snapshot is unchanged, are outside this accepted-result model.
  * Invalid query shapes remain the input-validation contract in `query.test.ts`.
+ * A successful tracked result is otherwise admitted even when its on-demand
+ * Query has no listeners. A Query removed after the call snapshot retains an
+ * `undefined` result slot rather than turning lifecycle churn into a TypeError.
  *
  * State minimality: result order is observable in the returned array; pending
- * result identity controls call settlement; accepted values control publication;
- * `throwOnError` distinguishes rejection from suppressed failure; separate calls
- * retain the outcome of a superseded caller.
+ * result identity and causal source control call settlement; accepted values
+ * control publication; `throwOnError` distinguishes rejection from suppressed
+ * failure; separate calls retain the outcome of a superseded caller.
  *
  * ORC review record for this extension: ORC-001, 002, 003, 005, 006, 008, 009,
  * 010, and 012 apply and are evidenced by this prose, independent reducer,
@@ -310,33 +314,41 @@ function expectExplicitRefetchObservation(
 }
 
 /**
- * This model-only call ledger separates Query fetch settlement from every
- * accepted Collection application. One tracked Query may accept several
- * results while its fetch is active. A successful call waits for every fetch
- * and application obligation. A throwing call rejects at its first failure;
- * its other obligations may remain pending. This is the `Promise.all`
- * aggregate promised by the public utility, not an all-settled barrier.
+ * This model-only call ledger separates Query fetch settlement from each
+ * causally owned Collection application. Same-key background applications stay
+ * observable to the model but do not become call obligations. A successful
+ * call waits for every owned fetch and application obligation. A throwing call
+ * rejects at its first owned failure; other obligations may remain pending.
+ * This is the `Promise.all` aggregate promised by the public utility, not an
+ * all-settled barrier.
  */
 type RefetchCallSettlementModel = {
   queryOrder: Array<string>
-  fetches: Map<string, `pending` | `fulfilled` | `rejected`>
+  fetches: Map<string, `pending` | `fulfilled` | `rejected` | `removed`>
   applications: Map<
     string,
     {
       queryId: string
       outcome: `pending` | `fulfilled` | `rejected`
+      source: `call` | `background`
     }
   >
   throwOnError: boolean
 }
 
 type RefetchCallSettlementAction =
-  | { type: `accept-application`; queryId: string; applicationId: string }
+  | {
+      type: `accept-application`
+      queryId: string
+      applicationId: string
+      source?: `call` | `background`
+    }
   | {
       type: `settle-fetch`
       queryId: string
       outcome: `fulfilled` | `rejected`
     }
+  | { type: `remove-query`; queryId: string }
   | {
       type: `settle-application`
       applicationId: string
@@ -374,7 +386,18 @@ function reduceRefetchCallSettlement(
       applications: new Map(model.applications).set(action.applicationId, {
         queryId: action.queryId,
         outcome: `pending`,
+        source: action.source ?? `call`,
       }),
+    }
+  }
+
+  if (action.type === `remove-query`) {
+    if (model.fetches.get(action.queryId) !== `pending`) {
+      throw new Error(`Query ${action.queryId} is not pending removal`)
+    }
+    return {
+      ...model,
+      fetches: new Map(model.fetches).set(action.queryId, `removed`),
     }
   }
 
@@ -406,12 +429,12 @@ function reduceRefetchCallSettlement(
 
 function observeRefetchCallSettlement(model: RefetchCallSettlementModel): {
   refetch: RefetchApplicationOutcome
-  resultOrder?: Array<string>
+  resultOrder?: Array<string | undefined>
 } {
   const fetchOutcomes = [...model.fetches.values()]
-  const applicationOutcomes = [...model.applications.values()].map(
-    ({ outcome }) => outcome,
-  )
+  const applicationOutcomes = [...model.applications.values()]
+    .filter(({ source }) => source === `call`)
+    .map(({ outcome }) => outcome)
   if (
     model.throwOnError &&
     [...fetchOutcomes, ...applicationOutcomes].includes(`rejected`)
@@ -424,7 +447,12 @@ function observeRefetchCallSettlement(model: RefetchCallSettlementModel): {
   ) {
     return { refetch: `pending` }
   }
-  return { refetch: `resolved`, resultOrder: model.queryOrder }
+  return {
+    refetch: `resolved`,
+    resultOrder: model.queryOrder.map((queryId) =>
+      model.fetches.get(queryId) === `removed` ? undefined : queryId,
+    ),
+  }
 }
 
 /**
@@ -1177,6 +1205,69 @@ describe(`query collection ownership lifecycle`, () => {
     })
   })
 
+  it(`excludes unrelated background applications from a refetch call`, () => {
+    let model = createRefetchCallSettlementModel([`query`], true)
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `query`,
+      applicationId: `own-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `query`,
+      applicationId: `background-result`,
+      source: `background`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `own-result`,
+      outcome: `fulfilled`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-fetch`,
+      queryId: `query`,
+      outcome: `fulfilled`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `background-result`,
+      outcome: `rejected`,
+    })
+
+    expect(observeRefetchCallSettlement(model)).toEqual({
+      refetch: `resolved`,
+      resultOrder: [`query`],
+    })
+  })
+
+  it(`preserves the result slot of a Query removed during refetch startup`, () => {
+    let model = createRefetchCallSettlementModel([`first`, `second`], true)
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `first`,
+      applicationId: `first-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `remove-query`,
+      queryId: `second`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-fetch`,
+      queryId: `first`,
+      outcome: `fulfilled`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `first-result`,
+      outcome: `fulfilled`,
+    })
+
+    expect(observeRefetchCallSettlement(model)).toEqual({
+      refetch: `resolved`,
+      resultOrder: [`first`, undefined],
+    })
+  })
+
   it(`rejects fail-fast while an independent application remains pending`, () => {
     let model = createRefetchCallSettlementModel([`detail`, `list`], true)
     model = reduceRefetchCallSettlement(model, {
@@ -1251,6 +1342,115 @@ describe(`query collection ownership lifecycle`, () => {
       observeExplicitRefetchApplication(model, 1),
     )
     expect(results).toEqual([])
+  })
+
+  it(`applies a successful on-demand refetch without Query listeners`, async () => {
+    const before = { ...shared, name: `Before` }
+    const after = { ...shared, name: `After` }
+    const { collection } = createOwnershipFixture({
+      id: `explicit-refetch-unsubscribed-on-demand`,
+      results: [[before], [after]],
+      syncMode: `on-demand`,
+    })
+    await collection._sync.loadSubset({})
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.unsubscribe()
+
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, before.name]]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+
+    const results = await collection.utils.refetch({ throwOnError: true })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: after.name,
+    })
+    model = reduceExplicitRefetchApplication(model, {
+      type: `fulfill-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: collection.get(shared.id)?.name },
+        refetch: `resolved`,
+        resultOrder: [`query`],
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+    expect((results[0]?.data as Array<Item>)[0]?.name).toBe(after.name)
+  })
+
+  it(`skips a snapshotted Query removed while an earlier refetch starts`, async () => {
+    const queryClient = createQueryClient()
+    const first = { limit: 1 }
+    const second = { limit: 2 }
+    let unloadSecond = () => {}
+    let call = 0
+    const queryFn = vi.fn(() => {
+      call++
+      if (call === 3) unloadSecond()
+      return Promise.resolve([
+        { id: String(call), category: `query`, name: `Call ${call}` },
+      ])
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id: `refetch-removes-later-query`,
+        queryClient,
+        queryKey: [`refetch-removes-later-query`],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    unloadSecond = () => collection._sync.unloadSubset(second)
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    await collection._sync.loadSubset(first)
+    await collection._sync.loadSubset(second)
+
+    let model = createRefetchCallSettlementModel([`first`, `second`], true)
+    const results = await collection.utils.refetch({ throwOnError: true })
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `first`,
+      applicationId: `first-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `remove-query`,
+      queryId: `second`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-fetch`,
+      queryId: `first`,
+      outcome: `fulfilled`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `first-result`,
+      outcome: `fulfilled`,
+    })
+
+    expect({
+      refetch: `resolved`,
+      resultOrder: results.map((result, index) =>
+        result === undefined ? undefined : index === 0 ? `first` : `second`,
+      ),
+    }).toEqual(observeRefetchCallSettlement(model))
   })
 
   it(`waits for an accepted fetching result after a suppressed fetch failure`, async () => {
@@ -1440,6 +1640,117 @@ describe(`query collection ownership lifecycle`, () => {
       },
       observeExplicitRefetchApplication(model, 1),
     )
+  })
+
+  it(`does not adopt a background application from the same Query`, async () => {
+    const id = `explicit-refetch-excludes-background-application`
+    const queryKey = [id] as const
+    const initial = { ...shared, name: `Initial` }
+    const ownResult = { ...shared, name: `Own result` }
+    const background = { ...shared, name: `Background` }
+    const successor = { ...shared, name: `Successor` }
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn<() => Promise<Array<Item>>>()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([ownResult])
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      }),
+    )
+    const persistence = createDeferred<void>()
+    let transaction: ReturnType<typeof createTransaction> | undefined
+    let armed = false
+    let backgroundInjected = false
+    let nameBeforeBackground: string | undefined
+    const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        armed &&
+        event.type === `updated` &&
+        event.action.type === `success` &&
+        !event.action.manual
+      ) {
+        armed = false
+        nameBeforeBackground = collection.get(shared.id)?.name
+        transaction = createTransaction({
+          mutationFn: () => persistence.promise,
+        })
+        transaction.mutate(() => {
+          collection.update(shared.id, (draft) => {
+            draft.name = `Optimistic`
+          })
+        })
+        queryClient.setQueryData(queryKey, [background])
+        backgroundInjected = true
+      }
+    })
+    cleanups.push(async () => {
+      unsubscribeCache()
+      persistence.resolve()
+      await transaction?.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    await collection.stateWhenReady()
+
+    let model = createRefetchCallSettlementModel([`query`], true)
+    armed = true
+    let actualOutcome: RefetchApplicationOutcome = `pending`
+    const refetch = collection.utils.refetch({ throwOnError: true }).then(
+      (results) => {
+        actualOutcome = `resolved`
+        return results
+      },
+      (error: unknown) => {
+        actualOutcome = `rejected`
+        throw error
+      },
+    )
+    void refetch.catch(() => undefined)
+    await vi.waitFor(() => expect(backgroundInjected).toBe(true))
+    expect(nameBeforeBackground).toBe(ownResult.name)
+
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `query`,
+      applicationId: `own-result`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `accept-application`,
+      queryId: `query`,
+      applicationId: `background-result`,
+      source: `background`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `own-result`,
+      outcome: `fulfilled`,
+    })
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-fetch`,
+      queryId: `query`,
+      outcome: `fulfilled`,
+    })
+
+    queryClient.setQueryData(queryKey, [successor])
+    model = reduceRefetchCallSettlement(model, {
+      type: `settle-application`,
+      applicationId: `background-result`,
+      outcome: `rejected`,
+    })
+    persistence.resolve()
+    await transaction?.isPersisted.promise
+    const results = await refetch
+
+    expect(actualOutcome).toBe(observeRefetchCallSettlement(model).refetch)
+    expect(results).toHaveLength(1)
+    expect(collection.get(shared.id)?.name).toBe(successor.name)
   })
 
   it(`rejects before an independent accepted application settles`, async () => {
@@ -1635,6 +1946,127 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
+  it(`keeps an authority-gated eager refetch pending until application`, async () => {
+    const queryClient = createQueryClient()
+    const automaticResult = createDeferred<Array<Item>>()
+    const explicitResult = createDeferred<Array<Item>>()
+    const persistence = createDeferred<void>()
+    const initial = { ...shared, name: `Initial` }
+    const authoritative = { ...shared, name: `Authoritative` }
+    let call = 0
+    const queryFn = vi.fn(() => {
+      call++
+      if (call === 1) return Promise.resolve([initial])
+      if (call === 2) return automaticResult.promise
+      return explicitResult.promise
+    })
+    const eager = createCollection(
+      queryCollectionOptions<Item>({
+        id: `authority-gated-eager-refetch`,
+        queryClient,
+        queryKey: [`shared-refetch-authority`],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `eager`,
+        startSync: true,
+      }),
+    )
+    const onDemand = createCollection(
+      queryCollectionOptions<Item>({
+        id: `authority-gated-on-demand-writer`,
+        queryClient,
+        queryKey: [`shared-refetch-authority`],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    let transactionStarted = false
+    cleanups.push(async () => {
+      automaticResult.resolve([authoritative])
+      explicitResult.resolve([authoritative])
+      persistence.resolve()
+      if (transactionStarted) {
+        await transaction.isPersisted.promise.catch(() => undefined)
+      }
+      await Promise.allSettled([eager.cleanup(), onDemand.cleanup()])
+      queryClient.clear()
+    })
+    await eager.stateWhenReady()
+    await onDemand._sync.loadSubset({})
+
+    transactionStarted = true
+    transaction.mutate(() => {
+      eager.update(shared.id, (draft) => {
+        draft.name = `Optimistic`
+      })
+    })
+    onDemand.utils.writeUpdate({ ...shared, name: `Manual` })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, `Optimistic`]]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    let refetchOutcome: RefetchApplicationOutcome = `pending`
+    const refetch = eager.utils.refetch({ throwOnError: true }).then(
+      (results) => {
+        refetchOutcome = `resolved`
+        return results
+      },
+      (error: unknown) => {
+        refetchOutcome = `rejected`
+        throw error
+      },
+    )
+    void refetch.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+
+    explicitResult.resolve([authoritative])
+    await vi.waitFor(() => expect(eager.utils.isFetching).toBe(false))
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: authoritative.name,
+    })
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: eager.get(shared.id)?.name },
+        refetch: refetchOutcome,
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+
+    persistence.resolve()
+    await transaction.isPersisted.promise
+    const results = await refetch
+    model = reduceExplicitRefetchApplication(model, {
+      type: `fulfill-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: eager.get(shared.id)?.name },
+        refetch: refetchOutcome,
+        resultOrder: results.map(() => `query`),
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+  })
+
   it(`keeps an external refetch at the application boundary during a mutation handler`, async () => {
     const initial = { ...shared, name: `Initial` }
     const authoritative = { ...shared, name: `Authoritative` }
@@ -1731,9 +2163,16 @@ describe(`query collection ownership lifecycle`, () => {
     )
   })
 
-  it.each([`parameter`, `mutation-alias`] as const)(
-    `keeps the Query fetch boundary through the handler %s collection`,
-    async (accessPath) => {
+  it.each(
+    ([`parameter`, `mutation-alias`] as const).flatMap((accessPath) =>
+      ([`refetch`, `clearError`] as const).map((operation) => ({
+        accessPath,
+        operation,
+      })),
+    ),
+  )(
+    `keeps the Query fetch boundary through handler $accessPath $operation`,
+    async ({ accessPath, operation }) => {
       const initial = { ...shared, name: `Initial` }
       const inserted = { id: `inserted`, category: `shared`, name: `Client` }
       const authoritative = { ...inserted, name: `Server` }
@@ -1747,9 +2186,9 @@ describe(`query collection ownership lifecycle`, () => {
       let handlerOutcome: RefetchApplicationOutcome = `pending`
       const collection = createCollection(
         queryCollectionOptions<Item>({
-          id: `handler-refetch-boundary-${accessPath}`,
+          id: `handler-refetch-boundary-${accessPath}-${operation}`,
           queryClient,
-          queryKey: [`handler-refetch-boundary`, accessPath],
+          queryKey: [`handler-refetch-boundary`, accessPath, operation],
           queryFn,
           getKey: (item) => item.id,
           startSync: true,
@@ -1760,7 +2199,11 @@ describe(`query collection ownership lifecycle`, () => {
               accessPath === `parameter`
                 ? handlerCollection
                 : mutationCollection
-            await refetchCollection.utils.refetch({ throwOnError: true }).then(
+            const boundary =
+              operation === `refetch`
+                ? refetchCollection.utils.refetch({ throwOnError: true })
+                : refetchCollection.utils.clearError()
+            await boundary.then(
               () => {
                 handlerOutcome = `resolved`
               },
