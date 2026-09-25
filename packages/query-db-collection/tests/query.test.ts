@@ -1475,12 +1475,16 @@ describe(`QueryCollection`, () => {
 
     // Verify the validation error was logged
     await vi.waitFor(() => {
-      const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
-        call[0].includes(
-          `@tanstack/query-db-collection: queryFn must return an array of objects`,
-        ),
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`[QueryCollection] Error applying query`),
+        expect.objectContaining({
+          name: `InvalidQueryResultError`,
+          message: expect.stringContaining(
+            `@tanstack/query-db-collection: queryFn must return an array of objects`,
+          ),
+        }),
       )
-      expect(errorCallArgs).toBeDefined()
     })
 
     // The collection state should remain empty or unchanged
@@ -1864,12 +1868,16 @@ describe(`QueryCollection`, () => {
 
       // Verify the validation error was logged
       await vi.waitFor(() => {
-        const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
-          call[0].includes(
-            `@tanstack/query-db-collection: select() must return an array of objects`,
-          ),
+        expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`[QueryCollection] Error applying query`),
+          expect.objectContaining({
+            name: `InvalidQueryResultError`,
+            message: expect.stringContaining(
+              `@tanstack/query-db-collection: select() must return an array of objects`,
+            ),
+          }),
         )
-        expect(errorCallArgs).toBeDefined()
       })
 
       expect(collection.size).toBe(0)

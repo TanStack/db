@@ -935,8 +935,9 @@ export function queryCollectionOptions(
       }
     | { type: `rejected`; error: unknown }
   let getExceptionalResultSettlement = (
-    _hashedQueryKey: string,
+    _result: QueryObserverResult<unknown, unknown>,
   ): ExceptionalResultSettlement | undefined => undefined
+  let activeSyncSession: object | undefined
 
   const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
     const owners = rowToQueries.get(rowKey) || new Set<string>()
@@ -998,6 +999,8 @@ export function queryCollectionOptions(
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
+    const syncSession = {}
+    activeSyncSession = syncSession
     // Rebuild on every start so caches created while sync was stopped are owned.
     trackedCacheQueries = new Set(
       queryClient.getQueryCache().findAll({ queryKey: baseKey }),
@@ -1016,12 +1019,26 @@ export function queryCollectionOptions(
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
     const failedResultApplications = new Map<string, unknown>()
-    const exceptionalResultSettlements = new Map<
-      string,
+    const exceptionalResultSettlements = new WeakMap<
+      QueryObserverResult<unknown, unknown>,
       ExceptionalResultSettlement
     >()
-    const readExceptionalResultSettlement = (hashedQueryKey: string) =>
-      exceptionalResultSettlements.get(hashedQueryKey)
+    const pendingExceptionalResultSettlements = new Set<
+      ExceptionalResultSettlement & { type: `pending` }
+    >()
+    const deferredRefreshes = new Map<
+      Promise<void>,
+      Map<string, Promise<QueryObserverResult<unknown, unknown>>>
+    >()
+    const readExceptionalResultSettlement = (
+      result: QueryObserverResult<unknown, unknown>,
+    ) => exceptionalResultSettlements.get(result)
+    const writeExceptionalResultSettlement = (
+      result: QueryObserverResult<unknown, unknown>,
+      settlement: ExceptionalResultSettlement,
+    ) => {
+      exceptionalResultSettlements.set(result, settlement)
+    }
     getExceptionalResultSettlement = readExceptionalResultSettlement
     type ResultApplicationController = AbortController & {
       rollback?: () => void
@@ -1066,21 +1083,57 @@ export function queryCollectionOptions(
       }
     }
 
-    const scheduleDeferredResultSettlement = (
+    const getDeferredRefresh = (
       hashedQueryKey: string,
       barrier: Promise<void>,
+    ): Promise<QueryObserverResult<unknown, unknown>> => {
+      const barrierRefreshes = deferredRefreshes.get(barrier) ?? new Map()
+      const existing = barrierRefreshes.get(hashedQueryKey)
+      if (existing) return existing
+
+      const refresh = barrier.then(async () => {
+        const observer = state.observers.get(hashedQueryKey)
+        if (!observer) throw new CancelledError()
+
+        const replacement = await observer.refetch({ throwOnError: true })
+        const replacementSettlement =
+          readExceptionalResultSettlement(replacement)
+        if (replacementSettlement?.type === `rejected`) {
+          throw replacementSettlement.error
+        }
+        if (replacementSettlement?.type === `pending`) {
+          return replacementSettlement.promise
+        }
+        const application = getResultApplicationSettlement(hashedQueryKey)
+        if (application !== true) await application
+        return replacement
+      })
+
+      barrierRefreshes.set(hashedQueryKey, refresh)
+      deferredRefreshes.set(barrier, barrierRefreshes)
+      const removeRefresh = () => {
+        if (barrierRefreshes.get(hashedQueryKey) !== refresh) return
+        barrierRefreshes.delete(hashedQueryKey)
+        if (barrierRefreshes.size === 0) deferredRefreshes.delete(barrier)
+      }
+      void refresh.then(removeRefresh, removeRefresh)
+      return refresh
+    }
+
+    const scheduleDeferredResultSettlement = (
+      hashedQueryKey: string,
+      result: QueryObserverResult<unknown, unknown>,
+      barrier: Promise<void>,
     ): ExceptionalResultSettlement & { type: `pending` } => {
-      const existing = exceptionalResultSettlements.get(hashedQueryKey)
+      const existing = readExceptionalResultSettlement(result)
       if (existing?.type === `pending`) return existing
 
-      let resolveSettlement!: (
-        result: QueryObserverResult<unknown, unknown>,
-      ) => void
       let rejectSettlement!: (error: unknown) => void
+      const refresh = getDeferredRefresh(hashedQueryKey, barrier)
       const promise = new Promise<QueryObserverResult<unknown, unknown>>(
         (resolve, reject) => {
-          resolveSettlement = resolve
           rejectSettlement = reject
+          void refresh.then(resolve, reject)
         },
       )
       // Automatic refreshes may have no public waiter. Their Query and
@@ -1092,36 +1145,15 @@ export function queryCollectionOptions(
         promise,
         reject: rejectSettlement,
       }
-      exceptionalResultSettlements.set(hashedQueryKey, settlement)
-
-      void barrier
-        .then(async () => {
-          if (exceptionalResultSettlements.get(hashedQueryKey) !== settlement) {
-            throw new CancelledError()
-          }
-          const observer = state.observers.get(hashedQueryKey)
-          if (!observer) throw new CancelledError()
-
-          const result = await observer.refetch({ throwOnError: true })
-          const application = getResultApplicationSettlement(hashedQueryKey)
-          if (application !== true) await application
-          return result
-        })
-        .then(resolveSettlement, rejectSettlement)
+      writeExceptionalResultSettlement(result, settlement)
+      pendingExceptionalResultSettlements.add(settlement)
 
       void promise.then(
         () => {
-          if (exceptionalResultSettlements.get(hashedQueryKey) === settlement) {
-            exceptionalResultSettlements.delete(hashedQueryKey)
-          }
+          pendingExceptionalResultSettlements.delete(settlement)
         },
-        (error) => {
-          if (exceptionalResultSettlements.get(hashedQueryKey) === settlement) {
-            exceptionalResultSettlements.set(hashedQueryKey, {
-              type: `rejected`,
-              error,
-            })
-          }
+        () => {
+          pendingExceptionalResultSettlements.delete(settlement)
         },
       )
 
@@ -1724,12 +1756,6 @@ export function queryCollectionOptions(
       const rawData = result.data
       const newItemsArray = select ? select(rawData) : rawData
 
-      const previousExceptionalSettlement =
-        exceptionalResultSettlements.get(hashedQueryKey)
-      if (previousExceptionalSettlement?.type === `rejected`) {
-        exceptionalResultSettlements.delete(hashedQueryKey)
-      }
-
       if (
         !Array.isArray(newItemsArray) ||
         newItemsArray.some(
@@ -1741,11 +1767,10 @@ export function queryCollectionOptions(
           : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
 
         const error = new InvalidQueryResultError(errorMessage)
-        exceptionalResultSettlements.set(hashedQueryKey, {
+        writeExceptionalResultSettlement(result, {
           type: `rejected`,
           error,
         })
-        console.error(errorMessage)
         throw error
       }
 
@@ -2005,8 +2030,10 @@ export function queryCollectionOptions(
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
           if (collection.deferDataRefresh) {
+            if (result.isFetching) return
             scheduleDeferredResultSettlement(
               hashedQueryKey,
+              result,
               collection.deferDataRefresh,
             )
             return
@@ -2386,6 +2413,7 @@ export function queryCollectionOptions(
       })
 
     const cleanup = () => {
+      if (activeSyncSession === syncSession) activeSyncSession = undefined
       pendingStartupLoads.clear()
       ensureEagerSubscription = () => {}
       unsubscribeFromCollectionEvents()
@@ -2394,16 +2422,11 @@ export function queryCollectionOptions(
         clearTimeout(timer)
       })
       persistedRetentionTimers.clear()
-      exceptionalResultSettlements.forEach((settlement, hashedQueryKey) => {
-        if (settlement.type === `pending`) {
-          const error = new CancelledError()
-          settlement.reject(error)
-          exceptionalResultSettlements.set(hashedQueryKey, {
-            type: `rejected`,
-            error,
-          })
-        }
+      pendingExceptionalResultSettlements.forEach((settlement) => {
+        settlement.reject(new CancelledError())
       })
+      pendingExceptionalResultSettlements.clear()
+      deferredRefreshes.clear()
       if (getExceptionalResultSettlement === readExceptionalResultSettlement) {
         getExceptionalResultSettlement = () => undefined
       }
@@ -2527,6 +2550,7 @@ export function queryCollectionOptions(
   const refetch: RefetchFn = async (opts) => {
     // An idle eager observer still owns rows; refetch must deliver its result.
     ensureEagerSubscription()
+    const syncSession = activeSyncSession
     const allQueryKeys = [...hashToQueryKey.values()]
     const refetchPromises = allQueryKeys.map(async (qKey) => {
       const queryObserver = state.observers.get(hashKey(qKey))!
@@ -2536,7 +2560,12 @@ export function queryCollectionOptions(
       })
       if (!result.isSuccess) return result
 
-      const settlement = readExceptionalSettlement(hashKey(qKey))
+      // Query observers can report success before the Query cache records the
+      // fetch authority used by the result handler. Let that queued handler
+      // classify this result before reading its exceptional settlement.
+      await new Promise<void>((resolve) => queueMicrotask(resolve))
+      if (activeSyncSession !== syncSession) throw new CancelledError()
+      const settlement = readExceptionalSettlement(result)
       if (settlement?.type === `rejected`) throw settlement.error
       return settlement?.type === `pending` ? settlement.promise : result
     })
