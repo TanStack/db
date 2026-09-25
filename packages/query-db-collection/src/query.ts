@@ -2424,6 +2424,22 @@ export function queryCollectionOptions(
                 retireFetchApplicationRecords(event.query, [fetchStart]),
               )
             }
+          } else if (
+            event.action.type === `setState` &&
+            event.action.state.fetchStatus === `idle`
+          ) {
+            // Query Core uses a setState action, not an error action, when a
+            // reverted cancellation restores the pre-fetch state. Reset also
+            // reaches this terminal state. Neither path should retain causal
+            // fetch records until another fetch happens.
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, [fetchStart]),
+              )
+            }
           }
         }
 

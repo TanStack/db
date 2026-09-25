@@ -166,6 +166,9 @@ async function runCleanups(): Promise<void> {
  * - `QueryCacheWorkModel` treats Query ownership as the only edge authorizing
  *   Collection cache-listener work. The driver subtracts Query Core's own
  *   microtask baseline before comparing that bounded diagnostic.
+ * - `FetchRecordLifecycleModel` gives a terminally cancelled fetch no live
+ *   causal record. The driver observes retained state as extra cleanup work at
+ *   the next fetch without using production record classification.
  *
  * Results skipped before application because refresh is deferred, or because a
  * manual-write snapshot is unchanged, are outside this accepted-result model.
@@ -696,6 +699,18 @@ function observeQueryCacheWork(model: QueryCacheWorkModel): {
   return {
     collectionMicrotasks:
       model.queryOwnership === `owned` ? model.collectionCount : 0,
+  }
+}
+
+type FetchRecordLifecycleModel = {
+  state: `active` | `cancelled`
+}
+
+function observeFetchRecordSuccessorWork(model: FetchRecordLifecycleModel): {
+  extraCleanupMicrotasks: number
+} {
+  return {
+    extraCleanupMicrotasks: model.state === `active` ? 1 : 0,
   }
 }
 
@@ -2929,6 +2944,78 @@ describe(`query collection ownership lifecycle`, () => {
 
     expect({ collectionMicrotasks: withCollections - baseline }).toEqual(model)
     expect(ownedQueryMutant).not.toEqual(model)
+  })
+
+  it(`does not defer reverted fetch record retirement to a successor fetch`, async () => {
+    const measureSuccessorFetchMicrotasks = async (
+      cancelFirst: boolean,
+    ): Promise<number> => {
+      const id = `cancelled-fetch-record-${cancelFirst}`
+      const initial = { ...shared, name: `Initial` }
+      const authoritative = { ...shared, name: `Authoritative` }
+      const cancelledResult = createDeferred<Array<Item>>()
+      const queryClient = createQueryClient()
+      const queryFn = vi.fn<() => Promise<Array<Item>>>()
+      queryFn.mockResolvedValueOnce([initial])
+      if (cancelFirst) queryFn.mockReturnValueOnce(cancelledResult.promise)
+      queryFn.mockResolvedValue([authoritative])
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `eager`,
+          startSync: true,
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        if (cancelFirst) {
+          const cancelledRefetch = collection.utils.refetch({
+            throwOnError: true,
+          })
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+          await queryClient.cancelQueries({ queryKey: [id], exact: true })
+          await cancelledRefetch
+          for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+        }
+
+        const nativeQueueMicrotask = globalThis.queueMicrotask
+        let scheduledMicrotasks = 0
+        const queueMicrotaskSpy = vi
+          .spyOn(globalThis, `queueMicrotask`)
+          .mockImplementation((callback) => {
+            scheduledMicrotasks++
+            nativeQueueMicrotask(callback)
+          })
+        try {
+          await collection.utils.refetch({ throwOnError: true })
+          for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+          return scheduledMicrotasks
+        } finally {
+          queueMicrotaskSpy.mockRestore()
+        }
+      } finally {
+        cancelledResult.resolve([authoritative])
+        await collection.cleanup()
+        queryClient.clear()
+      }
+    }
+
+    const baseline = await measureSuccessorFetchMicrotasks(false)
+    const afterCancellation = await measureSuccessorFetchMicrotasks(true)
+    const expected = observeFetchRecordSuccessorWork({ state: `cancelled` })
+    const retainedRecordMutant = observeFetchRecordSuccessorWork({
+      state: `active`,
+    })
+
+    expect({
+      extraCleanupMicrotasks: afterCancellation - baseline,
+    }).toEqual(expected)
+    expect(retainedRecordMutant).not.toEqual(expected)
   })
 
   it.each(handlerCollectionHistoryGrammar)(
