@@ -29,6 +29,7 @@ const staticOracleProperties = [
   `electric.persisted-tag-history`,
   `electric.match-reentry`,
   `electric.publication-epoch-convergence`,
+  `electric.persistence-interleaving`,
   `electric.sdk-snapshot-delivery`,
   `electric.sdk-dnf-membership`,
   `electric-recovery.publication-stream-convergence`,

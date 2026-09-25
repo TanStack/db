@@ -654,6 +654,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit,
   getCommitCursor,
   waitForCommitsAfter,
+  recordSnapshotRow,
   collectionId,
   encodeColumnName,
   signal,
@@ -670,6 +671,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit: (signal?: AbortSignal) => SyncAppliedReceipt
   getCommitCursor: () => number
   waitForCommitsAfter: (cursor: number) => Promise<void>
+  recordSnapshotRow?: (row: T, message: Message<T>) => void
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
@@ -731,7 +733,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
               metadata: { ...row.headers },
             })
           }
-          await commit(opts.signal)
+          const applied = commit(opts.signal)
+          for (const row of rows) recordSnapshotRow?.(row.value, row)
+          if (applied !== true) await applied
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
@@ -1926,6 +1930,10 @@ function createElectricSync<T extends Row<unknown>>(
         !hasReceivedUpToDate &&
         !isResettingSnapshot
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
+      // Progressive subset rows are provisional: the initial atomic swap
+      // normally discards them. Retain one only when a later stream update
+      // needs that full row as its baseline.
+      const progressiveSnapshotRows = new Map<string | number, Message<T>>()
 
       // Presence spans the open source transaction and persisted callbacks
       // whose FIFO receipts have not applied yet. Later callbacks must see
@@ -1946,6 +1954,7 @@ function createElectricSync<T extends Row<unknown>>(
       const recordPendingTruncate = () => {
         pendingPresenceRevision++
         pendingPresence.clear()
+        progressiveSnapshotRows.clear()
         usesBaseline = false
       }
 
@@ -2096,6 +2105,10 @@ function createElectricSync<T extends Row<unknown>>(
         commit,
         getCommitCursor: () => commitSequence,
         waitForCommitsAfter,
+        recordSnapshotRow: (row, message) => {
+          recordPendingPresence(collection.getKeyFromItem(row), true)
+          progressiveSnapshotRows.set(collection.getKeyFromItem(row), message)
+        },
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
@@ -2240,6 +2253,9 @@ function createElectricSync<T extends Row<unknown>>(
               if (!receivesCompleteRows) continue
             }
             recordPendingPresence(rowId, operation !== `delete`)
+            if (operation !== `update`) {
+              progressiveSnapshotRows.delete(rowId)
+            }
           }
 
           if (isChangeMessage(message)) {
@@ -2254,6 +2270,14 @@ function createElectricSync<T extends Row<unknown>>(
             // EXCEPTION: If a transaction is already started (e.g., from must-refetch), write
             // directly to it instead of buffering. This prevents orphan transactions.
             if (isBufferingInitialSync() && !transactionStarted) {
+              if (message.headers.operation === `update`) {
+                const rowId = collection.getKeyFromItem(message.value)
+                const snapshotRow = progressiveSnapshotRows.get(rowId)
+                if (snapshotRow) {
+                  bufferedMessages.push(snapshotRow)
+                  progressiveSnapshotRows.delete(rowId)
+                }
+              }
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
@@ -2339,6 +2363,7 @@ function createElectricSync<T extends Row<unknown>>(
             commitPoint = null
             hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
             bufferedMessages.length = 0 // Clear buffered messages
+            progressiveSnapshotRows.clear()
           }
         }
 
@@ -2421,6 +2446,7 @@ function createElectricSync<T extends Row<unknown>>(
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
             bufferedMessages.length = 0
+            progressiveSnapshotRows.clear()
 
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`,

@@ -904,6 +904,10 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   operationKeys: Set<TKey>
   queuedBecauseHydrating: boolean
   hasDependentSuccessor: boolean
+  publicationAdmissionWaiters?: Set<{
+    resolve: () => void
+    reject: (error: unknown) => void
+  }>
   terminalFailure?: { error: unknown }
 }
 
@@ -3288,6 +3292,18 @@ function createWrappedSyncConfig<
       > = []
       const getOpenTransaction = () =>
         transactionStack[transactionStack.length - 1]
+      const settlePublicationAdmissionWaiters = (
+        transaction: OpenSyncTransaction<T, TKey>,
+        error?: unknown,
+      ) => {
+        const waiters = transaction.publicationAdmissionWaiters
+        transaction.publicationAdmissionWaiters = undefined
+        if (!waiters) return
+        for (const waiter of waiters) {
+          if (error === undefined) waiter.resolve()
+          else waiter.reject(error)
+        }
+      }
       const bindToCurrentHydration = (
         transaction: OpenSyncTransaction<T, TKey>,
       ) => {
@@ -3392,7 +3408,47 @@ function createWrappedSyncConfig<
       })
       const startupState = { cleanedUp: false }
       const isCleanedUp = () => startupState.cleanedUp
-      const acquisitions = new Map<LoadSubsetOptions, { forwarded: boolean }>()
+      type SubsetAcquisition = {
+        forwarded: boolean
+        cancelAdmissionWait?: () => void
+      }
+      const acquisitions = new Map<LoadSubsetOptions, SubsetAcquisition>()
+      const waitForPublicationAdmission = (
+        transaction: OpenSyncTransaction<T, TKey>,
+        options: LoadSubsetOptions,
+        acquisition: SubsetAcquisition,
+      ): Promise<void> => {
+        if (options.signal?.aborted) {
+          return Promise.reject(
+            options.signal.reason ?? new SyncTransactionAbortedError(),
+          )
+        }
+        return new Promise<void>((resolve, reject) => {
+          const waiters =
+            transaction.publicationAdmissionWaiters ??
+            (transaction.publicationAdmissionWaiters = new Set())
+          let settled = false
+          const settle = (action: () => void) => {
+            if (settled) return
+            settled = true
+            waiters.delete(waiter)
+            options.signal?.removeEventListener(`abort`, abort)
+            acquisition.cancelAdmissionWait = undefined
+            action()
+          }
+          const waiter = {
+            resolve: () => settle(resolve),
+            reject: (error: unknown) => settle(() => reject(error)),
+          }
+          const abort = () =>
+            waiter.reject(
+              options.signal?.reason ?? new SyncTransactionAbortedError(),
+            )
+          waiters.add(waiter)
+          options.signal?.addEventListener(`abort`, abort, { once: true })
+          acquisition.cancelAdmissionWait = waiter.resolve
+        })
+      }
       const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
       const createHandledRejection = (error: unknown): Promise<never> => {
         const rejected = Promise.reject(error)
@@ -3818,6 +3874,10 @@ function createWrappedSyncConfig<
           if (terminalFailure) {
             if (openTransaction) {
               settlePendingTransaction(openTransaction)
+              settlePublicationAdmissionWaiters(
+                openTransaction,
+                terminalFailure.error,
+              )
             }
             return createHandledRejection(terminalFailure.error)
           }
@@ -3831,10 +3891,17 @@ function createWrappedSyncConfig<
 
           if (signal?.aborted) {
             settlePendingTransaction(openTransaction)
-            return createHandledRejection(new SyncTransactionAbortedError())
+            const error = new SyncTransactionAbortedError()
+            settlePublicationAdmissionWaiters(openTransaction, error)
+            return createHandledRejection(error)
           }
-          bindToCurrentHydration(openTransaction)
-          assertHydrationSequenceCurrent(openTransaction)
+          try {
+            bindToCurrentHydration(openTransaction)
+            assertHydrationSequenceCurrent(openTransaction)
+          } catch (error) {
+            settlePublicationAdmissionWaiters(openTransaction, error)
+            throw error
+          }
           const transaction = {
             operations: openTransaction.operations,
             partialUpdateOperationIndexes:
@@ -3900,11 +3967,19 @@ function createWrappedSyncConfig<
               resolveApplied,
               rejectApplied,
             })
+            settlePublicationAdmissionWaiters(openTransaction)
             settleRuntimeTransaction(openTransaction, applied)
             return applied
           }
 
-          const applied = runtime.applyHydrationBufferedTransaction(transaction)
+          let applied: Promise<void>
+          try {
+            applied = runtime.applyHydrationBufferedTransaction(transaction)
+          } catch (error) {
+            settlePublicationAdmissionWaiters(openTransaction, error)
+            throw error
+          }
+          settlePublicationAdmissionWaiters(openTransaction)
           settleRuntimeTransaction(openTransaction, applied)
           return applied
         },
@@ -3957,8 +4032,15 @@ function createWrappedSyncConfig<
       return {
         cleanup: () => {
           startupState.cleanedUp = true
+          const cleanupError = new SyncTransactionAbortedError()
+          for (const acquisition of acquisitions.values()) {
+            acquisition.cancelAdmissionWait?.()
+          }
           acquisitions.clear()
           pendingPublicationTransactions.length = 0
+          for (const transaction of transactionStack) {
+            settlePublicationAdmissionWaiters(transaction, cleanupError)
+          }
           transactionStack.length = 0
           sourceResult.cleanup?.()
           runtime.cleanup()
@@ -3970,6 +4052,27 @@ function createWrappedSyncConfig<
           const resolvedSourceResult = await sourceResultPromise
           if (
             startupState.cleanedUp ||
+            acquisitions.get(options) !== acquisition
+          ) {
+            return
+          }
+          const openTransaction = getOpenTransaction()
+          // Electric can keep one immediate source transaction open across
+          // callbacks. Let that transaction reserve its FIFO turn before a
+          // subset hydration advances the generation it was built against.
+          if (
+            openTransaction &&
+            !openTransaction.internal &&
+            openTransaction.beginOptions?.immediate
+          ) {
+            await waitForPublicationAdmission(
+              openTransaction,
+              options,
+              acquisition,
+            )
+          }
+          if (
+            options.signal?.aborted ||
             acquisitions.get(options) !== acquisition
           ) {
             return
@@ -3997,6 +4100,7 @@ function createWrappedSyncConfig<
         },
         unloadSubset: (options: LoadSubsetOptions) => {
           const acquisition = acquisitions.get(options)
+          acquisition?.cancelAdmissionWait?.()
           acquisitions.delete(options)
           runtime.unloadSubset(
             options,

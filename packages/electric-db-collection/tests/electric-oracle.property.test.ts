@@ -10,7 +10,11 @@ import {
 } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../../query-db-collection/src/query'
 import { electricCollectionOptions } from '../src/electric'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 import type { Collection, SyncMetadataApi } from '@tanstack/db'
 import type { ChangeMessage, Message, Offset, Row } from '@electric-sql/client'
@@ -556,6 +560,9 @@ const queuedPresenceArbitraries: [
 ]
 const requestedQueuedPresenceProperty =
   process.env.TANSTACK_DB_ELECTRIC_ORACLE_PROPERTY
+const persistenceInterleavingProperty = `electric.persistence-interleaving`
+const requestedPersistenceInterleavingProperty =
+  readOracleRunConfig().replayProperty
 
 if (
   requestedQueuedPresenceProperty !== undefined &&
@@ -791,6 +798,320 @@ async function runQueuedPresenceHistory(
     })
     expect(rowsFromCollection(collection)).toEqual(rowsFromMap(expectedRows))
   }, [() => releaseFirstPersistence.resolve(), () => collection.cleanup()])
+}
+
+type PersistenceInterleavingKind =
+  | `open-transaction-hydration`
+  | `subset-supersedes-absence`
+
+type PersistenceInterleavingCampaign = {
+  histories: Array<PersistenceInterleavingKind>
+  names: [string, string]
+}
+
+type PersistenceInterleavingObservation =
+  | {
+      kind: `open-transaction-hydration`
+      hydrationStartedBeforeCommit: boolean
+      deliveryErrors: Array<string>
+      publicRows: Array<[string | number, string, string]>
+      durableRows: Array<[string | number, string, string]>
+      status: string
+      publicError: string | undefined
+    }
+  | {
+      kind: `subset-supersedes-absence`
+      publicRows: Array<[string | number, string, string]>
+      durableRows: Array<[string | number, string, string]>
+      status: string
+      publicError: string | undefined
+    }
+
+const persistenceInterleavingKinds: ReadonlyArray<PersistenceInterleavingKind> =
+  [`open-transaction-hydration`, `subset-supersedes-absence`]
+
+const persistenceInterleavingCampaignArbitrary: fc.Arbitrary<PersistenceInterleavingCampaign> =
+  fc.record({
+    histories: fc.uniqueArray(
+      fc.constantFrom(...persistenceInterleavingKinds),
+      {
+        minLength: persistenceInterleavingKinds.length,
+        maxLength: persistenceInterleavingKinds.length,
+      },
+    ),
+    names: fc.tuple(
+      fc.string({ minLength: 1, maxLength: 12 }),
+      fc.string({ minLength: 1, maxLength: 12 }),
+    ),
+  })
+
+function reconstructPersistenceInterleavingCampaign(
+  value: unknown,
+): PersistenceInterleavingCampaign {
+  if (typeof value !== `object` || value === null) {
+    throw new Error(`persistence-interleaving campaign must be an object`)
+  }
+  const campaign = value as { histories?: unknown; names?: unknown }
+  if (
+    !Array.isArray(campaign.histories) ||
+    campaign.histories.length !== persistenceInterleavingKinds.length ||
+    new Set(campaign.histories).size !== persistenceInterleavingKinds.length ||
+    !campaign.histories.every((history) =>
+      persistenceInterleavingKinds.includes(history),
+    )
+  ) {
+    throw new Error(
+      `persistence-interleaving histories must contain every supported schedule exactly once`,
+    )
+  }
+  if (
+    !Array.isArray(campaign.names) ||
+    campaign.names.length !== 2 ||
+    !campaign.names.every(
+      (name) =>
+        typeof name === `string` && name.length >= 1 && name.length <= 12,
+    )
+  ) {
+    throw new Error(`persistence-interleaving names are outside the grammar`)
+  }
+  return campaign as PersistenceInterleavingCampaign
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error
+}
+
+function publicErrorName(
+  collection: Collection<OracleRow, string | number>,
+): string | undefined {
+  const error = collection._lifecycle.getSyncError()
+  return error instanceof Error ? error.name : undefined
+}
+
+let persistenceInterleavingRunId = 0
+
+async function observeOpenTransactionHydration(
+  names: [string, string],
+): Promise<PersistenceInterleavingObservation> {
+  const runId = ++persistenceInterleavingRunId
+  let subscriber!: (messages: Array<Message<OracleRow>>) => void
+  mockSubscribe.mockImplementationOnce((callback) => {
+    subscriber = callback
+    return vi.fn()
+  })
+  const persistedRows = new Map<string | number, OracleRow>()
+  const persistedMetadata = new Map<string, unknown>()
+  const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
+  const hydrationEntered = createDeferred<void>()
+  const releaseHydration = createDeferred<void>()
+  let hydrationStarted = false
+  adapter.loadSubset = async () => {
+    hydrationStarted = true
+    hydrationEntered.resolve()
+    await releaseHydration.promise
+    return []
+  }
+  const collection = createCollection(
+    persistedCollectionOptions<
+      OracleRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<OracleRow>
+    >({
+      ...electricCollectionOptions<OracleRow>({
+        id: `generated-open-transaction-hydration-${runId}`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        startSync: true,
+      }),
+      persistence: { adapter },
+    }),
+  )
+  const abortHydration = new AbortController()
+  let hydration: Promise<void> | undefined
+  const deliveryErrors: Array<string> = []
+
+  try {
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
+      interval: 1,
+      timeout: 250,
+    })
+    subscriber([upToDate])
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
+      interval: 1,
+      timeout: 250,
+    })
+
+    subscriber([change(`insert`, 1, names[0])])
+    hydration = Promise.resolve(
+      collection._sync.loadSubset({
+        limit: 1,
+        signal: abortHydration.signal,
+      }),
+    ).then(() => undefined)
+    await Promise.resolve()
+    await Promise.resolve()
+    const hydrationStartedBeforeCommit = hydrationStarted
+
+    try {
+      subscriber([change(`update`, 1, names[1])])
+    } catch (error) {
+      deliveryErrors.push(errorName(error))
+    }
+
+    try {
+      subscriber([upToDate])
+    } catch (error) {
+      deliveryErrors.push(errorName(error))
+    }
+    await atCheckpoint(
+      hydrationEntered.promise,
+      `open-transaction hydration entered after commit`,
+    )
+    abortHydration.abort()
+    releaseHydration.resolve()
+    await hydration
+
+    if (deliveryErrors.length === 0) {
+      await vi.waitFor(
+        () =>
+          expect(rowsFromMap(persistedRows)).toEqual([
+            [1, names[1], `stable-1`],
+          ]),
+        { interval: 1, timeout: 250 },
+      )
+    }
+
+    return {
+      kind: `open-transaction-hydration`,
+      hydrationStartedBeforeCommit,
+      deliveryErrors,
+      publicRows: rowsFromCollection(collection),
+      durableRows: rowsFromMap(persistedRows),
+      status: collection.status,
+      publicError: publicErrorName(collection),
+    }
+  } finally {
+    abortHydration.abort()
+    releaseHydration.resolve()
+    await Promise.allSettled([hydration, collection.cleanup()])
+  }
+}
+
+async function observeSubsetSupersedesAbsence(
+  names: [string, string],
+): Promise<PersistenceInterleavingObservation> {
+  const runId = ++persistenceInterleavingRunId
+  let subscriber!: (messages: Array<Message<OracleRow>>) => void
+  mockSubscribe.mockImplementationOnce((callback) => {
+    subscriber = callback
+    return vi.fn()
+  })
+  const persistedRows = new Map<string | number, OracleRow>()
+  const persistedMetadata = new Map<string, unknown>()
+  const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
+  const snapshotRow = change(`insert`, 1, names[0])
+  snapshotRow.value = { id: 1, name: names[0], stable: `stable-1` }
+  mockStream.fetchSnapshot.mockReset().mockResolvedValue({
+    metadata: {},
+    data: [snapshotRow],
+  })
+  const collection = createCollection(
+    persistedCollectionOptions<
+      OracleRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<OracleRow>
+    >({
+      ...electricCollectionOptions<OracleRow>({
+        id: `generated-subset-supersedes-absence-${runId}`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive`,
+        getKey: (row) => row.id,
+        startSync: true,
+      }),
+      persistence: { adapter },
+    }),
+  )
+
+  try {
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`), {
+      interval: 1,
+      timeout: 250,
+    })
+
+    subscriber([change(`delete`, 1, `older absence`)])
+    await collection._sync.loadSubset({ limit: 1 })
+    subscriber([change(`update`, 1, names[1]), upToDate])
+    await vi.waitFor(() => expect(collection.status).toBe(`ready`), {
+      interval: 1,
+      timeout: 250,
+    })
+
+    return {
+      kind: `subset-supersedes-absence`,
+      publicRows: rowsFromCollection(collection),
+      durableRows: rowsFromMap(persistedRows),
+      status: collection.status,
+      publicError: publicErrorName(collection),
+    }
+  } finally {
+    await collection.cleanup()
+    mockStream.fetchSnapshot.mockReset().mockResolvedValue({
+      metadata: {},
+      data: [],
+    })
+  }
+}
+
+function expectPersistenceInterleavingObservation(
+  observation: PersistenceInterleavingObservation,
+  names: [string, string],
+): void {
+  const rows: Array<[string | number, string, string]> = [
+    [1, names[1], `stable-1`],
+  ]
+  if (observation.kind === `open-transaction-hydration`) {
+    expect(observation, JSON.stringify(observation)).toEqual({
+      kind: `open-transaction-hydration`,
+      hydrationStartedBeforeCommit: false,
+      deliveryErrors: [],
+      publicRows: rows,
+      durableRows: rows,
+      status: `ready`,
+      publicError: undefined,
+    })
+    return
+  }
+  expect(observation, JSON.stringify(observation)).toEqual({
+    kind: `subset-supersedes-absence`,
+    publicRows: rows,
+    durableRows: rows,
+    status: `ready`,
+    publicError: undefined,
+  })
+}
+
+async function runPersistenceInterleavingCampaign(
+  campaign: PersistenceInterleavingCampaign,
+): Promise<void> {
+  const reconstructed = reconstructPersistenceInterleavingCampaign(campaign)
+  for (const history of reconstructed.histories) {
+    const observation =
+      history === `open-transaction-hydration`
+        ? await observeOpenTransactionHydration(reconstructed.names)
+        : await observeSubsetSupersedesAbsence(reconstructed.names)
+    expectPersistenceInterleavingObservation(observation, reconstructed.names)
+  }
 }
 
 function applyReferenceBatch(
@@ -2338,9 +2659,11 @@ async function runSchedulerPermutation(
   }
 }
 
-const describeUnlessQueuedPresenceReplay = requestedQueuedPresenceProperty
-  ? describe.skip
-  : describe
+const describeUnlessQueuedPresenceReplay =
+  requestedQueuedPresenceProperty ||
+  requestedPersistenceInterleavingProperty === persistenceInterleavingProperty
+    ? describe.skip
+    : describe
 
 function resetElectricOracleMocks(): void {
   vi.clearAllMocks()
@@ -5719,7 +6042,103 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     expect(trace.collection.has(808)).toBe(false)
     await trace.collection.cleanup()
   })
+
+  it(`reconstructs persistence-interleaving campaigns and rejects ablated, out-of-range, and foreign histories`, () => {
+    const campaigns = fc.sample(persistenceInterleavingCampaignArbitrary, {
+      seed: 18_530_601,
+      numRuns: 20,
+    })
+    for (const campaign of campaigns) {
+      expect(reconstructPersistenceInterleavingCampaign(campaign)).toEqual(
+        campaign,
+      )
+      expect(() =>
+        reconstructPersistenceInterleavingCampaign({
+          names: campaign.names,
+        }),
+      ).toThrow()
+      expect(() =>
+        reconstructPersistenceInterleavingCampaign({
+          histories: campaign.histories,
+        }),
+      ).toThrow()
+      expect(() =>
+        reconstructPersistenceInterleavingCampaign({
+          ...campaign,
+          histories: [`open-transaction-hydration`, `foreign`],
+        }),
+      ).toThrow()
+      expect(() =>
+        reconstructPersistenceInterleavingCampaign({
+          ...campaign,
+          names: [``, campaign.names[1]],
+        }),
+      ).toThrow()
+    }
+  })
+
+  it(`rejects named wrong answers for persistence interleavings`, () => {
+    const names: [string, string] = [`before`, `after`]
+    expect(() =>
+      expectPersistenceInterleavingObservation(
+        {
+          kind: `open-transaction-hydration`,
+          hydrationStartedBeforeCommit: true,
+          deliveryErrors: [`InvalidPersistedCollectionConfigError`],
+          publicRows: [],
+          durableRows: [],
+          status: `ready`,
+          publicError: undefined,
+        },
+        names,
+      ),
+    ).toThrow()
+    expect(() =>
+      expectPersistenceInterleavingObservation(
+        {
+          kind: `subset-supersedes-absence`,
+          publicRows: [],
+          durableRows: [],
+          status: `ready`,
+          publicError: undefined,
+        },
+        names,
+      ),
+    ).toThrow()
+  })
+
+  fcTest.prop([persistenceInterleavingCampaignArbitrary], {
+    seed: 18_530_601,
+    numRuns: oracleRuns(4),
+  })(
+    `preserves persisted Electric interleavings (fixed)`,
+    runPersistenceInterleavingCampaign,
+  )
+
+  fcTest.prop(
+    [persistenceInterleavingCampaignArbitrary],
+    oraclePropertyOptions(4, persistenceInterleavingProperty),
+  )(
+    `preserves persisted Electric interleavings (random)`,
+    runPersistenceInterleavingCampaign,
+  )
 })
+
+if (
+  requestedPersistenceInterleavingProperty === persistenceInterleavingProperty
+) {
+  describe(`persisted Electric interleaving replay`, () => {
+    beforeEach(resetElectricOracleMocks)
+
+    fcTest.prop(
+      [persistenceInterleavingCampaignArbitrary],
+      oraclePropertyOptions(4, persistenceInterleavingProperty),
+    )(
+      `preserves persisted Electric interleavings (replay)`,
+      runPersistenceInterleavingCampaign,
+    )
+  })
+}
 
 if (requestedQueuedPresenceProperty === queuedPresenceProperty) {
   describe(`Electric queued-presence replay`, () => {

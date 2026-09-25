@@ -44,7 +44,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `electric-db-collection/tests/electric-oracle.property.test.ts`,
     `electric`,
-    `match-reentry publication-epoch-convergence`,
+    `match-reentry publication-epoch-convergence persistence-interleaving`,
   ],
   [
     `electric-db-collection/tests/electric-recovery-oracle.test.ts`,
