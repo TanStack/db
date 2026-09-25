@@ -1204,6 +1204,8 @@ class PersistedCollectionRuntime<
   private readonly activeSubsets = new Map<string, LoadSubsetOptions>()
   private activeHydrationContext: { suppliedRowKeys: Set<TKey> } | undefined
   private hydrationSequence = 0
+  // An unscheduled startup read may finish after a coordinator reset publishes.
+  private resetSequence = 0
   private readonly pendingRemoteSubsetEnsures = new Map<
     string,
     LoadSubsetOptions
@@ -1756,21 +1758,27 @@ class PersistedCollectionRuntime<
     const appliedCursor = this.appliedReceiptSequence
     try {
       await this.applyMutex.run(async () => {
-        await this.runInHydrationScope((adapter) =>
-          this.hydrateSubsetUnsafe(
-            options,
-            {
-              requestRemoteEnsure:
-                this.mode === `sync-present` &&
-                !routeRemoteDemandDuringHydration,
-              lifecycleGeneration,
-              requestLocalLoadFailure: true,
-            },
-            adapter,
-          ),
-        )
-        if (lifecycleGeneration === this.lifecycleGeneration) {
-          await this.flushQueuedTxCommittedUnsafe()
+        try {
+          await this.runInHydrationScope((adapter) =>
+            this.hydrateSubsetUnsafe(
+              options,
+              {
+                requestRemoteEnsure:
+                  this.mode === `sync-present` &&
+                  !routeRemoteDemandDuringHydration,
+                lifecycleGeneration,
+                requestLocalLoadFailure: true,
+              },
+              adapter,
+            ),
+          )
+        } finally {
+          if (
+            lifecycleGeneration === this.lifecycleGeneration &&
+            !this.getCurrentTerminalFailure()
+          ) {
+            await this.flushQueuedTxCommittedUnsafe()
+          }
         }
       })
       if (lifecycleGeneration !== this.lifecycleGeneration) return
@@ -2143,6 +2151,7 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     let rowsLoaded = false
     let replayFailure: { reason: unknown } | undefined
+    const resetSequence = this.resetSequence
     this.hydrationSequence++
     const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
     this.activeHydrationContext = hydrationContext
@@ -2162,12 +2171,14 @@ class PersistedCollectionRuntime<
             metadata?: unknown
           }>
           if (config.lifecycleGeneration !== this.lifecycleGeneration) return
+          if (resetSequence !== this.resetSequence) return
           this.bindResumeSnapshotEvidence(snapshot)
         } else {
           rows = await this.loadSubsetRowsUnsafe(options, adapter)
         }
         rowsLoaded = true
         if (config.lifecycleGeneration !== this.lifecycleGeneration) return
+        if (resetSequence !== this.resetSequence) return
 
         if (
           !config.bindKeySetEvidence ||
@@ -2180,7 +2191,10 @@ class PersistedCollectionRuntime<
           if (applied !== true) await applied
         }
       } finally {
-        if (this.hydratingGeneration === config.lifecycleGeneration) {
+        if (
+          this.activeHydrationContext === hydrationContext &&
+          this.hydratingGeneration === config.lifecycleGeneration
+        ) {
           this.hydratingGeneration = null
         }
       }
@@ -2188,7 +2202,6 @@ class PersistedCollectionRuntime<
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
       replayFailure = await this.flushQueuedHydrationTransactionsUnsafe(adapter)
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
-      await this.flushQueuedTxCommittedUnsafe()
 
       if (config.requestRemoteEnsure && !replayFailure) {
         this.queueRemoteSubsetEnsure(options)
@@ -2216,9 +2229,6 @@ class PersistedCollectionRuntime<
           if (this.hydratingGeneration === config.lifecycleGeneration) {
             this.hydratingGeneration = null
           }
-        }
-        if (config.lifecycleGeneration === this.lifecycleGeneration) {
-          await this.flushQueuedTxCommittedUnsafe()
         }
         throw error
       }
@@ -3336,6 +3346,7 @@ class PersistedCollectionRuntime<
     lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
+    this.resetSequence++
     if (this.syncControls.begin && this.syncControls.commit) {
       const applied = this.withInternalApply(() => {
         this.syncControls.begin?.({ immediate: true })
@@ -3485,7 +3496,10 @@ class PersistedCollectionRuntime<
       )
       if (applied !== true) await applied
     } finally {
-      if (this.hydratingGeneration === lifecycleGeneration) {
+      if (
+        this.activeHydrationContext === hydrationContext &&
+        this.hydratingGeneration === lifecycleGeneration
+      ) {
         this.hydratingGeneration = null
       }
       if (this.activeHydrationContext === hydrationContext) {

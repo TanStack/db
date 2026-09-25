@@ -68,7 +68,8 @@ import type {
  * Histories cross hydration, held adapters, source FIFO ordering,
  * independent/dependent aborts, open-transaction failure boundaries, ambient owner
  * operations, applied-receipt rejection, remote subset demand, acquisition
- * release, retry, coordinator replay, cleanup, and restart. Tests drive the
+ * release, retry, coordinator replay, queued startup reloads, unscheduled
+ * startup/reset overlap, cleanup, and restart. Tests drive the
  * real persisted wrapper, Collection, coordinator, adapter, transactions,
  * indexes, and local mutation path.
  *
@@ -15756,6 +15757,205 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     expect(collection.get(`1`)?.title).toBe(`v1 row`)
     await collection.cleanup()
   })
+
+  // A remote commit queued during startup must run after the local hydration
+  // scope releases the shared driver. A reset racing an unscheduled startup
+  // baseline may publish before or after that baseline, but must own the final
+  // public snapshot and may never be overwritten by an older baseline.
+  it(`does not let an unscheduled startup baseline overwrite a newer collection reset`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `old` }])
+    const coordinator = createCoordinatorHarness()
+    const baselineEntered = createEventGate()
+    const releaseBaseline = createEventGate()
+    const resetReloadEntered = createEventGate()
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    let heldBaseline = false
+    adapter.loadResumeSnapshot = async (...args) => {
+      const snapshot = await loadResumeSnapshot(...args)
+      if (args[1]?.includeRows && !heldBaseline) {
+        heldBaseline = true
+        baselineEntered.resolve()
+        await releaseBaseline.promise
+      }
+      return snapshot
+    }
+    adapter.loadSubset = (...args) => {
+      resetReloadEntered.resolve()
+      return loadSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: { sync: ({ markReady }) => markReady() },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const preload = collection.preload()
+    void preload.catch(() => undefined)
+    const publishedTitles: Array<string | undefined> = []
+    const subscription = collection.subscribeChanges(
+      () => publishedTitles.push(collection.get(`1`)?.title),
+      { includeInitialState: false },
+    )
+
+    try {
+      await atPersistedOracleCheckpoint(
+        baselineEntered.promise,
+        `unscheduled baseline entered`,
+      )
+      adapter.rows.set(`1`, { id: `1`, title: `new` })
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+      // Give a concurrent reset its event-loop turn. Serialization may instead
+      // hold it behind the baseline; both orders must converge without a
+      // public new -> old reversion.
+      await flushAsyncWork()
+      expect([undefined, `new`]).toContain(collection.get(`1`)?.title)
+      releaseBaseline.resolve()
+      await atPersistedOracleCheckpoint(preload, `startup after reset`)
+      await atPersistedOracleCheckpoint(
+        resetReloadEntered.promise,
+        `reset reload after startup`,
+      )
+      await vi.waitFor(() => expect(collection.get(`1`)?.title).toBe(`new`))
+      const firstNew = publishedTitles.indexOf(`new`)
+      expect(firstNew).toBeGreaterThanOrEqual(0)
+      expect(publishedTitles.slice(firstNew)).not.toContain(`old`)
+    } finally {
+      releaseBaseline.resolve()
+      await preload.catch(() => undefined)
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`contiguous-reload`, `sequence-gap`] as const)(
+    `finishes queued %s after scheduled startup hydration releases its scope`,
+    async (route) => {
+      const adapter = createRecordingAdapter([{ id: `1`, title: `old` }])
+      const coordinator = createCoordinatorHarness()
+      const baselineEntered = createEventGate()
+      const releaseBaseline = createEventGate()
+      const nestedScopeRequested = createEventGate()
+      const queuedScopes: Array<() => void> = []
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      let heldBaseline = false
+      let scopeActive = false
+
+      adapter.loadResumeSnapshot = async (...args) => {
+        const snapshot = await loadResumeSnapshot(...args)
+        if (args[1]?.includeRows && !heldBaseline) {
+          heldBaseline = true
+          baselineEntered.resolve()
+          await releaseBaseline.promise
+        }
+        return snapshot
+      }
+
+      const scopedAdapter: RecordingAdapter = { ...adapter }
+      scopedAdapter.runInHydrationScope = (task) => task(scopedAdapter)
+      adapter.runInHydrationScope = (task) => {
+        if (scopeActive) {
+          nestedScopeRequested.resolve()
+          return new Promise((resolve, reject) => {
+            queuedScopes.push(() => {
+              void task(scopedAdapter).then(resolve, reject)
+            })
+          })
+        }
+        scopeActive = true
+        return Promise.resolve()
+          .then(() => task(scopedAdapter))
+          .finally(() => {
+            scopeActive = false
+            while (queuedScopes.length > 0) queuedScopes.shift()?.()
+          })
+      }
+
+      if (route === `sequence-gap`) {
+        coordinator.setPullSinceResponse({
+          type: `rpc:pullSince:res`,
+          rpcId: `review-gap`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: 2,
+          latestRowVersion: 2,
+          requiresFullReload: true,
+        })
+      }
+      const pullSince = coordinator.pullSince!.bind(coordinator)
+      let coordinatorEnteredDuringScope: boolean | undefined
+      coordinator.pullSince = (...args) => {
+        coordinatorEnteredDuringScope = scopeActive
+        return pullSince(...args)
+      }
+
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `sync-present`,
+          getKey: (item) => item.id,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const preload = collection.preload()
+      void preload.catch(() => undefined)
+
+      try {
+        await atPersistedOracleCheckpoint(
+          baselineEntered.promise,
+          `${route} baseline entered`,
+        )
+        adapter.rows.set(`1`, { id: `1`, title: `new` })
+        const committed: TxCommitted =
+          route === `sequence-gap`
+            ? {
+                type: `tx:committed`,
+                term: 1,
+                seq: 2,
+                txId: `review-sequence-gap`,
+                latestRowVersion: 2,
+                requiresFullReload: false,
+                changedRows: [],
+                deletedKeys: [],
+              }
+            : {
+                type: `tx:committed`,
+                term: 1,
+                seq: 1,
+                txId: `review-contiguous-reload`,
+                latestRowVersion: 1,
+                requiresFullReload: true,
+              }
+        coordinator.emit(committed)
+        releaseBaseline.resolve()
+        const first = await atPersistedOracleCheckpoint(
+          Promise.race([
+            preload.then(() => `startup-settled` as const),
+            nestedScopeRequested.promise.then(() => `nested-scope` as const),
+          ]),
+          `${route} startup or nested scope`,
+        )
+        expect(first).toBe(`startup-settled`)
+        expect(collection.get(`1`)?.title).toBe(`new`)
+        if (route === `sequence-gap`) {
+          expect(coordinator.pullSinceCalls).toBe(1)
+          expect(coordinatorEnteredDuringScope).toBe(false)
+        }
+      } finally {
+        releaseBaseline.resolve()
+        while (queuedScopes.length > 0) queuedScopes.shift()?.()
+        await preload.catch(() => undefined)
+        await collection.cleanup()
+      }
+    },
+  )
 
   // Focused receipt-ownership refinements. A source receipt created by the
   // hydration operation belongs to its waiter even if it rejects before the
