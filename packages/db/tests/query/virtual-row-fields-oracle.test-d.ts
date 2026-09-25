@@ -10,12 +10,14 @@
  * The local type relations classify row roots and unprojected whole-row
  * children as rows. Projected children, nested refs, nested values, and opaque
  * values are values. Discriminated row unions must survive virtual-field
- * removal.
+ * removal. A directly selected unmatched nullable row is an empty object, so
+ * its known row fields must remain available as optional values.
  *
  * Legal forms include required, optional, and nullable nested `Ref` and
  * `SingleRowRefProxy` helpers; virtual-field-specific root helpers; and inline
  * `toArray` or `materialize` queries with unprojected or directly selected
- * whole rows, object, nested-object, array, `findOne`, and Date results.
+ * whole rows, an unmatched left-joined whole row, object, nested-object, array,
+ * `findOne`, and Date results.
  *
  * The production type paths are `RefsForContext`, `SingleRowRefProxy`, and
  * `GetInlineResult`. The checkpoint is the inferred callback or published
@@ -207,6 +209,14 @@ describe(`virtual row field type boundary`, () => {
               return child
             }),
         ),
+        unmatchedRows: toArray(
+          q
+            .from({ child: rows })
+            .leftJoin({ missing: rows }, ({ child, missing }) =>
+              eq(child.id, missing.id),
+            )
+            .select(({ missing }) => missing),
+        ),
         objects: toArray(
           q
             .from({ child: rows })
@@ -253,6 +263,12 @@ describe(`virtual row field type boundary`, () => {
     ).toEqualTypeOf<string>()
     expectTypeOf(result.selectedWholeRows[0]!).toEqualTypeOf<
       PublishedValueFor<Row, `whole-row-child`>
+    >()
+    expectTypeOf(result.unmatchedRows[0]!.id).toEqualTypeOf<
+      string | undefined
+    >()
+    expectTypeOf(result.unmatchedRows[0]!.$key).toEqualTypeOf<
+      string | number | undefined
     >()
     expectTypeOf(result.objects[0]!).toEqualTypeOf<
       PublishedValueFor<{ label: string }, `projected-child`>

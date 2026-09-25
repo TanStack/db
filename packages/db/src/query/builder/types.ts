@@ -415,7 +415,7 @@ export type ResultTypeFromSelect<TSelectObject> =
   IsAny<TSelectObject> extends true
     ? any
     : IsTrueRef<TSelectObject> extends true
-      ? ExtractRef<TSelectObject>
+      ? ExtractDirectSelectRef<TSelectObject>
       : WithoutRefBrand<
           Prettify<{
             [K in keyof TSelectObject]: NeedsExtraction<
@@ -514,6 +514,17 @@ type ExtractRef<T> = T extends unknown
       : never
     : Prettify<ResultTypeFromSelect<WithoutRefBrand<T>>>
   : never
+
+// A direct selection merges a row ref into a new result object. An unmatched
+// nullable join therefore produces an empty object instead of `undefined`.
+// Keep the row's keys available while making every value optional for that
+// unmatched branch.
+type ExtractDirectSelectRef<T> =
+  IsNullableRef<T> extends true
+    ? NonNullable<ExtractRef<T>> | EmptySelectedRef<NonNullable<ExtractRef<T>>>
+    : ExtractRef<T>
+
+type EmptySelectedRef<T> = T extends object ? { [K in keyof T]?: never } : never
 
 // A "true" Ref is one that is structurally equivalent to the canonical
 // `Ref<U>` shape the query builder produces for its underlying user type
