@@ -4483,6 +4483,16 @@ function createWrappedSyncConfig<
             sourceCleanup,
             runtimeCleanup,
           ])
+          if (
+            sourceOutcome.status === `rejected` &&
+            runtimeOutcome.status === `rejected`
+          ) {
+            throw new AggregateError(
+              [sourceOutcome.reason, runtimeOutcome.reason],
+              `Source cleanup and persistence runtime teardown both failed`,
+              { cause: sourceOutcome.reason },
+            )
+          }
           if (sourceOutcome.status === `rejected`) throw sourceOutcome.reason
           if (runtimeOutcome.status === `rejected`) throw runtimeOutcome.reason
         },

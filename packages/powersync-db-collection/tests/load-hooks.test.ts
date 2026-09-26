@@ -254,6 +254,75 @@ describe(`Sync Streams`, () => {
     },
   )
 
+  it.each([`hook-first`, `disposal-first`] as const)(
+    `eager mode: preserves hook and trigger cleanup failures: %s`,
+    async (firstFailure) => {
+      const db = await createDatabase()
+      const hookGate = pDefer<void>()
+      const disposalGate = pDefer<void>()
+      const hookFailureReached = pDefer<void>()
+      const disposalFailureReached = pDefer<void>()
+      const hookError = new Error(`eager hook cleanup failed exactly`)
+      const disposalError = new Error(`eager trigger disposal failed exactly`)
+      const disposeTracking = vi.fn(async () => {
+        await disposalGate.promise
+        disposalFailureReached.resolve()
+        throw disposalError
+      })
+      vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(
+        disposeTracking,
+      )
+      const cleanupHook = vi.fn(async () => {
+        await hookGate.promise
+        hookFailureReached.resolve()
+        throw hookError
+      })
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          onLoad: () => cleanupHook,
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        const cleanupOutcome = collection.cleanup().then(
+          () => ({ status: `fulfilled` as const }),
+          (error: unknown) => ({ status: `rejected` as const, error }),
+        )
+
+        if (firstFailure === `hook-first`) {
+          hookGate.resolve()
+          await hookFailureReached.promise
+          disposalGate.resolve()
+        } else {
+          disposalGate.resolve()
+          await disposalFailureReached.promise
+          hookGate.resolve()
+        }
+
+        const outcome = await cleanupOutcome
+        expect(outcome.status).toBe(`rejected`)
+        if (outcome.status !== `rejected`) {
+          throw new Error(`expected eager cleanup to reject`)
+        }
+        expect(outcome.error).toMatchObject({ name: `SyncCleanupError` })
+        const syncCleanupError = outcome.error as { cause?: unknown }
+        expect(syncCleanupError.cause).toBeInstanceOf(AggregateError)
+        const aggregate = syncCleanupError.cause as AggregateError
+        expect(aggregate.cause).toBe(disposalError)
+        expect(aggregate.errors).toEqual([disposalError, hookError])
+        expect(disposeTracking).toHaveBeenCalledOnce()
+        expect(cleanupHook).toHaveBeenCalledOnce()
+      } finally {
+        hookGate.resolve()
+        disposalGate.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`eager mode: reports an initial load failure`, async () => {
     const db = await createDatabase()
     const initialError = new Error(`initial PowerSync load failed`)
