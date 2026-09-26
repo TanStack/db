@@ -262,7 +262,7 @@ describe(`Collection cleanup admission oracle`, () => {
 
   it(`puts a live query in terminal error once when one source has two aliases`, async () => {
     const cleanupGate = createDeferred<void>()
-    const source = createCollection<Row>({
+    const source = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -310,7 +310,7 @@ describe(`Collection cleanup admission oracle`, () => {
     const handlerEntered = createDeferred<void>()
     const sourceErrors: Array<Error> = []
     let adapterCleanupStarted = 0
-    const source = createCollection<Row>({
+    const source = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -398,7 +398,7 @@ describe(`Collection cleanup admission oracle`, () => {
     const observerError = new Error(`cleanup-start observer failed exactly`)
     let starts = 0
     let adapterCleanupStarted = 0
-    const source = createCollection<Row>({
+    const source = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
@@ -444,7 +444,7 @@ describe(`Collection cleanup admission oracle`, () => {
 
   it(`releases an Effect cleanup-start observer registered during active cleanup`, async () => {
     const cleanupGate = createDeferred<void>()
-    const source = createCollection<Row>({
+    const source = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
@@ -497,7 +497,7 @@ describe(`Collection cleanup admission oracle`, () => {
       `late cleanup-start observer failed exactly`,
     )
     let observerCalls = 0
-    const source = createCollection<Row>({
+    const source = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
