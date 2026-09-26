@@ -655,6 +655,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         loader.start()
       }
 
+      const handleSourceCleanup = () => {
+        if (this.disposed) return
+        this.onSourceError(
+          new Error(
+            `Source collection '${collectionId}' was cleaned up while effect depends on it`,
+          ),
+        )
+      }
+
       // Listen for status changes on source collections
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         if (this.disposed) return
@@ -673,11 +682,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
         // Source was manually cleaned up — effect can no longer function
         if (status === `cleaned-up`) {
-          this.onSourceError(
-            new Error(
-              `Source collection '${collectionId}' was cleaned up while effect depends on it`,
-            ),
-          )
+          handleSourceCleanup()
           return
         }
 
@@ -691,14 +696,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         }
       })
       this.unsubscribeCallbacks.add(statusUnsubscribe)
-      const cleanupStartUnsubscribe = collection._onCleanupStart(() => {
-        if (this.disposed) return
-        this.onSourceError(
-          new Error(
-            `Source collection '${collectionId}' was cleaned up while effect depends on it`,
-          ),
-        )
-      })
+      const cleanupStartUnsubscribe =
+        collection._onCleanupStart(handleSourceCleanup)
       // Registration reports an already-active cleanup synchronously. That
       // callback can dispose this runner before the unsubscribe handle exists.
       if (this.isDisposed()) {
