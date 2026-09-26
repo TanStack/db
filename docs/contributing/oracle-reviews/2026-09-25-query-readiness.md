@@ -234,6 +234,7 @@ format plus diff checks passed.
 
 - Base: `93169bd295a628d157e26858eed6a489a75fb44f`
 - Reviewed semantic head: `9cf8ebec9d6ce7d5610cc698bcd571d3bea17734`
+- Reviewed oracle/test head: `94cdc79df0876d941c08c2452d709027b466b292`
 - Runtime: Node `24.19.0`, pnpm `11.1.0`, Vitest `3.2.4`
 - Finding: CodeRabbit review `5325930839`, inline comment `4111391073`
 
@@ -242,16 +243,27 @@ missing prefix. It now states the adjacent continuation rule directly: a
 staged boundary with no boundary row starts no acquisition, so consuming it
 cannot settle the enlarged window operation.
 
-The controlled regression reaches the production loader path without timing:
+The bounded design grammar crosses two independent axes:
+
+- settled source boundary: absent or present;
+- remaining explicit-window demand: satisfied or widened.
+
+`expectedStagedWindowTrace` is a stateless immediate-work model. Every history
+starts with the finite page that creates the staged continuation. A present
+boundary then requires its tie acquisition. A widened window then requires a
+page acquisition; with no boundary, that page starts at the source prefix. The
+four-cell calibration proves that every declared combination appears once.
+
+The production driver reaches the loader path without timing:
 
 1. An indexed finite acquisition returns literal `true` with no rows while the
    graph-input revision changes.
 2. The loader retains an ordinary staged boundary continuation but no settled
    source boundary.
-3. The driver enlarges the window and calls `loadMore(1)` while `dataNeeded()`
-   reports two missing rows.
-4. The refinement check requires a pending window result and a new source-prefix
-   acquisition with `limit: 2`, `offset: 0`, and no cursor boundary.
+3. The driver varies boundary presence, either satisfies or enlarges the
+   window, and calls `loadMore(1)`.
+4. The refinement check compares the complete page/boundary/page request trace,
+   synchronous versus pending settlement, and exact widened request shape.
 
 At the base, the same-path RED failed because `loadMore(1)` returned `undefined`
 after consuming the empty continuation and started no second acquisition. The
@@ -259,32 +271,35 @@ fix returns only when continuation consumption starts pending work. Otherwise,
 normal demand selection handles the enlarged window. The active-state check
 also preserves synchronous disposal reentry.
 
-The prior suites missed the defect because they covered synchronous
+The earlier grammar was incomplete. It covered synchronous
 multi-continuation draining, staged-continuation repair precedence, and public
 window settlement separately. They did not cross graph-input change, an empty
 finite result, the resulting staged boundary, and a wider explicit window in
-one history. This deterministic internal-boundary regression is the smallest
-owner because the disputed observation is whether `OrderedSourceLoader`
-starts an acquisition. The public ordered lifecycle owner remains the broader
-window-settlement authority and passed unchanged.
+one history. The new overlay owns that intersection without multiplying the
+192-cell public lifecycle product. Removing the boundary axis loses the tie
+versus prefix distinction. Removing the demand axis loses the difference
+between an absent boundary that is finished and one that remains underfilled.
+The nearby invalid histories are a phantom request for the satisfied absent
+cell and a widened prefix that skips the required present-boundary tie. The
+public ordered lifecycle owner remains the broader window-settlement authority.
 
 | Requirement | Outcome |
 | --- | --- |
 | ORC-001 | Pass. The architecture owns the empty-boundary continuation law and limits it to an explicit window whose consumed continuation starts no acquisition. It does not claim source exhaustion or revise replay, repair, or framework scheduling. |
 | ORC-002 | Pass. The expected request follows from the independently stated window and demand law: an empty boundary proves no prefix, and an enlarged underfilled window requires acquisition from offset zero. The test imports no production continuation classifier. |
-| ORC-003 | Pass. This record states the contract and one controlled history; the test drives the production loader and checks the pending result plus exact acquisition shape. No reusable reference state or generated grammar is introduced. |
-| ORC-004 | Not applicable. The repair adds one deterministic regression and makes no generated-history coverage claim. |
-| ORC-005 | Pass. The driver invokes the real `OrderedSourceLoader.start()` and `loadMore(1)` entry points, proves the staged continuation exists, and observes the exact second acquisition and pending operation at the post-`loadMore` checkpoint. |
-| ORC-006 | Pass. Unchanged production at the base reached every stated precondition and failed by assertion: the pending result was `undefined`, and the second acquisition was absent. The semantic head passes the same test. |
+| ORC-003 | Pass. The architecture states the law; `expectedStagedWindowTrace` is the stateless model; the two-axis product is the history grammar; the fixture drives the real loader; and exact work plus settlement form the refinement check. |
+| ORC-004 | Pass. The four-cell product reconstructs present and absent boundary histories with satisfied and widened demand. Removing either axis loses a distinct legal result. The range is the minimal Boolean product; phantom satisfied work and skipped tie work are the nearby invalid states. |
+| ORC-005 | Pass. The driver invokes the real `OrderedSourceLoader.start()` and `loadMore(1)` entry points, proves the staged continuation exists, and observes the complete acquisition trace, exact widened request, and settlement at the post-`loadMore` and completed-chain checkpoints. |
+| ORC-006 | Pass. Unchanged production at the base reached every absent/widened precondition and failed by assertion: the pending result was `undefined`, and the second acquisition was absent. The semantic and oracle/test heads pass the strengthened refinement. |
 | ORC-007 | Not applicable. No important generated property or campaign changed. |
-| ORC-008 | Not applicable. The regression adds no stateful reference-model state. |
-| ORC-009 | Pass. Window, boundary, graph-input revision, acquisition, and settlement retain their project glossary and architecture meanings. The test introduces no model-only state term. |
-| ORC-010 | Not applicable. The regression performs no shrinking or normalized capture. Its deferred acquisition is resolved in `finally`, and loader disposal cannot replace the recorded assertion. |
+| ORC-008 | Not applicable. The trace model is stateless. |
+| ORC-009 | Pass. Window, boundary, graph-input revision, acquisition, and settlement retain their project glossary and architecture meanings. `expectedStagedWindowTrace` is explicitly an immediate-work projection, not a production lifecycle state. |
+| ORC-010 | Pass. Every deferred acquisition is resolved in `finally`, loader disposal still runs, and cleanup cannot replace the recorded refinement mismatch. |
 | ORC-011 | Not applicable. The exact pending result and acquisition trace directly distinguish the one disputed control-flow fault; no plausible shared semantic classifier requires a second formulation. |
-| ORC-012 | Pass. This versioned follow-up records every ORC-001 through ORC-011 outcome against the exact base and reviewed semantic head. |
+| ORC-012 | Pass. This versioned follow-up records every ORC-001 through ORC-011 outcome against the exact base, semantic head, and oracle/test head. |
 
-Verification at the semantic head: the focused RED/GREEN regression passed
-1/1; the complete ordered-loader suite passed 63/63; the six ordered loader,
+Verification at the oracle/test head: the complete four-cell grammar and its
+calibration passed 5/5; the complete ordered-loader suite passed 67/67; the six ordered loader,
 state, lifecycle, work, default-work, and demand-retirement owners passed
-433/433. All runs reported no type errors. Package TypeScript, DB build and
+437/437. All runs reported no type errors. Package TypeScript, DB build and
 declaration generation, changed-file lint, Prettier, and diff checks passed.
