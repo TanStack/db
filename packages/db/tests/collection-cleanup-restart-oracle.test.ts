@@ -205,7 +205,7 @@ describe(`Collection cleanup admission oracle`, () => {
       statuses.push(status)
       if (status === `cleaned-up`) {
         atTerminalPublication = {
-          collectionStatus: collection.status,
+          collectionStatus: status,
           cleanup: observeCleanupSettlement(publicCleanupSettled),
         }
         settlementOrder.push(`cleaned-up-event`)
