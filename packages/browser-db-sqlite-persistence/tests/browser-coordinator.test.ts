@@ -5728,6 +5728,51 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
+    it(`re-registers the collection adapter after cleanup and restart`, async () => {
+      const defaultAdapter = createStubAdapter()
+      const collectionAdapter = createStubAdapter()
+      const defaultEnsure = vi.fn().mockResolvedValue(undefined)
+      const collectionEnsure = vi.fn().mockResolvedValue(undefined)
+      defaultAdapter.ensureIndex = defaultEnsure
+      collectionAdapter.ensureIndex = collectionEnsure
+      const coordinator = createCoordinator(defaultAdapter)
+      const collection = createCollection(
+        persistedCollectionOptions<{ id: string; title: string }, string>({
+          id: `todos`,
+          getKey: (row) => row.id,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter: collectionAdapter, coordinator },
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        await vi.waitFor(() => expect(coordinator.isLeader(`todos`)).toBe(true))
+        await coordinator.requestEnsurePersistedIndex(`todos`, `before`, {
+          expressionSql: [`title`],
+        })
+
+        await collection.cleanup()
+        expect(
+          inspectCoordinator(coordinator).collectionAdapters.has(`todos`),
+        ).toBe(false)
+        await collection.stateWhenReady()
+        await vi.waitFor(() => expect(coordinator.isLeader(`todos`)).toBe(true))
+        await coordinator.requestEnsurePersistedIndex(`todos`, `after`, {
+          expressionSql: [`title`],
+        })
+
+        expect(collectionEnsure.mock.calls.map((call) => call[1])).toEqual([
+          `before`,
+          `after`,
+        ])
+        expect(defaultEnsure).not.toHaveBeenCalled()
+      } finally {
+        await collection.cleanup()
+        coordinator.dispose()
+      }
+    })
+
     it(`replaces a cached default adapter with its collection registration`, async () => {
       const defaultAdapter = createStubAdapter()
       const replacementAdapter = createStubAdapter()

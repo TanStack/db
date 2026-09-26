@@ -493,6 +493,10 @@ export function forwardSQLiteDriverSharedLogicalScheduling<
 
 export interface PersistedCollectionCoordinator {
   getNodeId: () => string
+  setAdapterForCollection?: (
+    collectionId: string,
+    adapter: PersistenceAdapter,
+  ) => void
   subscribe: (
     collectionId: string,
     onMessage: (message: ProtocolEnvelope<unknown>) => void,
@@ -1768,6 +1772,7 @@ class PersistedCollectionRuntime<
                   !routeRemoteDemandDuringHydration,
                 lifecycleGeneration,
                 requestLocalLoadFailure: true,
+                rejectBufferedReplayFailure: true,
               },
               adapter,
             ),
@@ -1884,6 +1889,7 @@ class PersistedCollectionRuntime<
           {
             requestRemoteEnsure: false,
             lifecycleGeneration,
+            rejectBufferedReplayFailure: true,
           },
           adapter,
         ),
@@ -2146,6 +2152,7 @@ class PersistedCollectionRuntime<
       lifecycleGeneration: number
       bindKeySetEvidence?: boolean
       requestLocalLoadFailure?: boolean
+      rejectBufferedReplayFailure?: boolean
     },
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
@@ -2238,7 +2245,9 @@ class PersistedCollectionRuntime<
         this.activeHydrationContext = undefined
       }
     }
-    if (replayFailure) throw replayFailure.reason
+    if (replayFailure && config.rejectBufferedReplayFailure) {
+      throw replayFailure.reason
+    }
   }
 
   private async recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
@@ -3140,6 +3149,10 @@ class PersistedCollectionRuntime<
       return
     }
 
+    this.persistence.coordinator.setAdapterForCollection?.(
+      this.collectionId,
+      this.persistence.adapter,
+    )
     this.coordinatorUnsubscribe = this.persistence.coordinator.subscribe(
       this.collectionId,
       (message) => {

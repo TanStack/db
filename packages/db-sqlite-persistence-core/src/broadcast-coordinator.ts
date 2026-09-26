@@ -268,11 +268,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   }
 
   private requireAdapter(collectionId: string): CoordinatorAdapter {
-    let adapter = this.collectionAdapters.get(collectionId)
-    if (!adapter && this.defaultAdapter) {
-      adapter = this.defaultAdapter
-      this.collectionAdapters.set(collectionId, adapter)
-    }
+    const adapter =
+      this.collectionAdapters.get(collectionId) ?? this.defaultAdapter
     if (!adapter) {
       throw new Error(
         `${this.coordinatorName}: adapter not set for collection "${collectionId}". Call setAdapterForCollection() before using leader-side operations.`,

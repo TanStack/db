@@ -72,6 +72,9 @@ import type {
  * startup/reset overlap, cleanup, and restart. Tests drive the
  * real persisted wrapper, Collection, coordinator, adapter, transactions,
  * indexes, and local mutation path.
+ * A source abort before core application rejects that transaction's receipt.
+ * It does not invalidate the durable baseline or an independent queued source
+ * transaction when the failed transaction made no public or durable change.
  *
  * Refinement checkpoints compare public rows, durable state, metadata, request
  * data, sequence evidence, exact errors, and late-work fencing. Fixed hostile
@@ -8746,6 +8749,188 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
     }
   })
+
+  it.each([`startup`, `resume`, `reset`] as const)(
+    `keeps the %s hydration ready after a buffered pre-application abort`,
+    async (entry) => {
+      const adapter = createRecordingAdapter()
+      const hydrationEntered = createEventGate()
+      const releaseHydration = createEventGate()
+      const coordinator =
+        entry === `reset` ? createCoordinatorHarness() : undefined
+      if (coordinator) {
+        coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+          await adapter.applyCommittedTx(collectionId, tx)
+          return {
+            type: `rpc:applyCommittedTx:res`,
+            rpcId: tx.txId,
+            ok: true,
+            term: tx.term,
+            seq: tx.seq,
+            latestRowVersion: tx.rowVersion,
+          }
+        }
+      } else {
+        overrideBaselineRows(adapter, async () => {
+          hydrationEntered.resolve()
+          await releaseHydration.promise
+          return []
+        })
+      }
+      let sourceParams!: TodoSyncParams
+      let hydrateResumeBaseline: (() => Promise<void>) | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: coordinator ? `sync-present` : `buffered-abort-${entry}`,
+          getKey: (row) => row.id,
+          syncMode: entry === `resume` ? `on-demand` : `eager`,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              hydrateResumeBaseline =
+                params.metadata?.persistence?.hydrateBaseline
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const aborted = new AbortController()
+      let keyReads = 0
+      let hydration: Promise<unknown> | undefined
+      let abortedReceipt: Promise<void> | undefined
+      let independentReceipt: Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        if (entry === `resume`) {
+          collection.startSyncImmediate()
+          await atPersistedOracleCheckpoint(
+            collection.stateWhenReady(),
+            `resume collection ready before baseline`,
+          )
+          expect(hydrateResumeBaseline).toBeTypeOf(`function`)
+          hydration = hydrateResumeBaseline!()
+        } else if (coordinator) {
+          await atPersistedOracleCheckpoint(
+            collection.stateWhenReady(),
+            `reset collection ready before reload`,
+          )
+          const loadSubset = adapter.loadSubset.bind(adapter)
+          adapter.loadSubset = async (...args) => {
+            hydrationEntered.resolve()
+            await releaseHydration.promise
+            return loadSubset(...args)
+          }
+          coordinator.emit({
+            type: `collection:reset`,
+            schemaVersion: 1,
+            resetEpoch: 1,
+          })
+          hydration = Promise.resolve()
+        } else {
+          hydration = collection.stateWhenReady()
+        }
+        void hydration.catch(() => undefined)
+        await atPersistedOracleCheckpoint(
+          hydrationEntered.promise,
+          `${entry} hydration entered`,
+        )
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `prefix`, title: `staged before abort` },
+        })
+        sourceParams.write({
+          type: `insert`,
+          value: {
+            get id() {
+              keyReads++
+              if (keyReads === 2) aborted.abort()
+              return `aborting`
+            },
+            title: `cancel before core application`,
+          },
+        })
+        abortedReceipt = Promise.resolve(
+          sourceParams.commit(aborted.signal),
+        ).then(() => undefined)
+        void abortedReceipt.catch(() => undefined)
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `independent`, title: `survives abort` },
+        })
+        independentReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void independentReceipt.catch(() => undefined)
+
+        releaseHydration.resolve()
+        const outcomes = await atPersistedOracleCheckpoint(
+          Promise.allSettled([hydration, abortedReceipt, independentReceipt]),
+          `${entry} buffered abort settled`,
+        )
+        const expected = foldDurabilityLedger([
+          { type: `begin`, transactionId: `aborted` },
+          {
+            type: `write`,
+            transactionId: `aborted`,
+            row: { id: `prefix`, title: `staged before abort` },
+          },
+          { type: `abort`, transactionId: `aborted` },
+          { type: `begin`, transactionId: `independent` },
+          {
+            type: `write`,
+            transactionId: `independent`,
+            row: { id: `independent`, title: `survives abort` },
+          },
+          { type: `commit`, transactionId: `independent` },
+        ])
+
+        expect(keyReads).toBeGreaterThanOrEqual(2)
+        expect(outcomes.map((outcome) => outcome.status)).toEqual([
+          `fulfilled`,
+          `rejected`,
+          `fulfilled`,
+        ])
+        if (outcomes[1].status === `rejected`) {
+          expect(outcomes[1].reason).toBeInstanceOf(SyncTransactionAbortedError)
+        }
+        expect(collection.status).toBe(`ready`)
+        expect(collection._lifecycle.getSyncError()).toBeUndefined()
+        expect(collection.get(`prefix`)).toBeUndefined()
+        expect(collection.get(`aborting`)).toBeUndefined()
+        expect(stripVirtualProps(collection.get(`independent`))).toEqual(
+          expected.committedRows.get(`independent`),
+        )
+        expect(adapter.rows).toEqual(expected.committedRows)
+        expect(
+          adapter.applyCommittedTxCalls.map(({ tx }) =>
+            tx.mutations.map(({ key }) => key),
+          ),
+        ).toEqual([[`independent`]])
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releaseHydration.resolve()
+        aborted.abort()
+        await cleanupPersistedOracle(
+          [
+            () => hydration?.catch(() => undefined),
+            () => abortedReceipt?.catch(() => undefined),
+            () => independentReceipt?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   it(`rejects every hydration-buffered receipt when replay fails`, async () => {
     const adapter = createRecordingAdapter()
