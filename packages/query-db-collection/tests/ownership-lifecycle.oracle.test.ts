@@ -59,7 +59,8 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * result; it does not classify arrays, select wrappers, Query states, or sync
  * transactions. The action grammar covers multiple public refetch operations,
  * immediate results, valid empty results, invalid shapes, eager recovery,
- * overlapping defer generations, replacement results, and cleanup retirement.
+ * overlapping defer generations, replacement results, cleanup retirement, and
+ * same-result subscriber reentry with a controlled nested applied receipt.
  * The production driver crosses eager and on-demand ownership, including
  * post-write fetch authority, and observes only public promise settlement plus
  * public rows at the settlement checkpoint.
@@ -3671,6 +3672,159 @@ describe(`query collection ownership lifecycle`, () => {
       rowCount: collection.size,
     })
   })
+
+  it.each([`fulfilled`, `rejected`] as const)(
+    `keeps a same-result reentrant $receiptOutcome receipt attached to its refetch`,
+    async (receiptOutcome) => {
+      const id = `same-result-reentrant-application`
+      const initial = { ...shared, name: `Initial` }
+      const updated = { ...shared, name: `Updated` }
+      const applicationFailure = new Error(`Reentrant application failed`)
+      const reentrantApplication = createDeferred<void>()
+      const reentrantApplicationStarted = createDeferred<void>()
+      const queryClient = createQueryClient()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([initial])
+        .mockResolvedValueOnce([updated])
+      const baseOptions = queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+      })
+      const originalSync = baseOptions.sync
+      let commitDepth = 0
+      let holdReentrantApplication = false
+      let reentrantCommitCount = 0
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({
+              ...params,
+              commit: (signal) => {
+                commitDepth++
+                try {
+                  const applied = params.commit(signal)
+                  if (holdReentrantApplication && commitDepth > 1) {
+                    reentrantCommitCount++
+                    reentrantApplicationStarted.resolve(undefined)
+                    return Promise.resolve(
+                      applied === true ? undefined : applied,
+                    ).then(() => reentrantApplication.promise)
+                  }
+                  return applied
+                } finally {
+                  commitDepth--
+                }
+              },
+            }),
+        },
+      })
+      const consoleError =
+        receiptOutcome === `rejected`
+          ? vi.spyOn(console, `error`).mockImplementation(() => {})
+          : undefined
+      let subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: false,
+      })
+      cleanups.push(async () => {
+        consoleError?.mockRestore()
+        reentrantApplication.resolve(undefined)
+        subscription.unsubscribe()
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      await collection.stateWhenReady()
+      let reentered = false
+      const publications: Array<
+        Array<{ type: string; name: string; previousName?: string }>
+      > = []
+      subscription.unsubscribe()
+      subscription = collection.subscribeChanges(
+        (batch) => {
+          if (batch.length > 0) {
+            publications.push(
+              batch.map((change) => ({
+                type: change.type,
+                name: change.value.name,
+                ...(change.type === `update`
+                  ? { previousName: change.previousValue?.name }
+                  : {}),
+              })),
+            )
+          }
+          if (reentered || collection.get(shared.id)?.name !== updated.name)
+            return
+          reentered = true
+          // Dropping the last subscriber and immediately adding another makes
+          // Query DB apply this observer's exact current result again while the
+          // outer synchronous commit is still delivering its change.
+          subscription.unsubscribe()
+          subscription = collection.subscribeChanges(() => {}, {
+            includeInitialState: false,
+          })
+        },
+        { includeInitialState: false },
+      )
+      holdReentrantApplication = true
+      let model = createRefetchCallSettlementModel([`query`], true)
+      model = reduceRefetchCallSettlement(model, {
+        type: `accept-application`,
+        queryId: `query`,
+        applicationId: `reentrant-application`,
+      })
+      model = reduceRefetchCallSettlement(model, {
+        type: `settle-fetch`,
+        queryId: `query`,
+        outcome: `fulfilled`,
+      })
+      let refetchOutcome: RefetchApplicationOutcome = `pending`
+      const refetch = collection.utils.refetch({ throwOnError: true }).then(
+        (result) => {
+          refetchOutcome = `resolved`
+          return result
+        },
+        (error: unknown) => {
+          refetchOutcome = `rejected`
+          throw error
+        },
+      )
+      void refetch.catch(() => undefined)
+
+      await reentrantApplicationStarted.promise
+      for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+      expect(reentered).toBe(true)
+      expect(reentrantCommitCount).toBe(1)
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(refetchOutcome).toBe(observeRefetchCallSettlement(model).refetch)
+      expect(publications).toEqual([
+        [{ type: `update`, name: `Updated`, previousName: `Initial` }],
+      ])
+
+      if (receiptOutcome === `fulfilled`) {
+        reentrantApplication.resolve(undefined)
+        await expect(refetch).resolves.toHaveLength(1)
+      } else {
+        reentrantApplication.reject(applicationFailure)
+        await expect(refetch).rejects.toBe(applicationFailure)
+      }
+      model = reduceRefetchCallSettlement(model, {
+        type: `settle-application`,
+        applicationId: `reentrant-application`,
+        outcome: receiptOutcome,
+      })
+      expect(refetchOutcome).toBe(observeRefetchCallSettlement(model).refetch)
+      expect(collection.get(shared.id)?.name).toBe(updated.name)
+      expect(publications).toEqual([
+        [{ type: `update`, name: `Updated`, previousName: `Initial` }],
+      ])
+    },
+  )
 
   it.each([
     {

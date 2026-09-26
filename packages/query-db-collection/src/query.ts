@@ -326,7 +326,11 @@ export interface QueryCollectionUtils<
   isLoading: boolean
   /** Get timestamp of last successful data update (in milliseconds) */
   dataUpdatedAt: number
-  /** Get current fetch status */
+  /**
+   * Get the aggregate observer fetch status. Returns `fetching` if any
+   * observer is fetching, otherwise `paused` if any observer is paused, and
+   * `idle` when every observer is idle or no observers exist.
+   */
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
@@ -379,7 +383,7 @@ const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
  * Implementation class for QueryCollectionUtils with explicit dependency injection
  * for better testability and architectural clarity
  */
-class QueryCollectionUtilsImpl {
+class QueryCollectionUtilsImpl implements QueryCollectionUtils {
   private state: QueryCollectionState
 
   // Write methods
@@ -458,10 +462,14 @@ class QueryCollectionUtilsImpl {
     )
   }
 
-  public get fetchStatus(): Array<FetchStatus> {
-    return Array.from(this.state.observers.values()).map(
-      (observer) => observer.getCurrentResult().fetchStatus,
-    )
+  public get fetchStatus(): FetchStatus {
+    let aggregate: FetchStatus = `idle`
+    for (const observer of this.state.observers.values()) {
+      const fetchStatus = observer.getCurrentResult().fetchStatus
+      if (fetchStatus === `fetching`) return `fetching`
+      if (fetchStatus === `paused`) aggregate = `paused`
+    }
+    return aggregate
   }
 }
 
@@ -898,6 +906,17 @@ export function queryCollectionOptions(
     result: QueryObserverResult<any, any>,
   ): Promise<void> | undefined =>
     resultApplicationSettlements.get(result)?.get(hashedQueryKey)
+
+  const recordResultApplicationSettlement = (
+    hashedQueryKey: string,
+    result: QueryObserverResult<any, any>,
+    settlement: Promise<void>,
+  ): void => {
+    const settlementsByHash =
+      resultApplicationSettlements.get(result) ?? new Map()
+    settlementsByHash.set(hashedQueryKey, settlement)
+    resultApplicationSettlements.set(result, settlementsByHash)
+  }
 
   const captureFetchResult = (query: AnyQuery, fetchStart: number): void => {
     for (const hashedQueryKey of getLogicalHashes(query)) {
@@ -1978,7 +1997,7 @@ export function queryCollectionOptions(
       return validation.items
     }
 
-    const applySuccessfulResult = async (
+    const applySuccessfulResult = (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
       applicationToken: ResultApplicationController,
@@ -1991,7 +2010,7 @@ export function queryCollectionOptions(
       >,
       signal?: AbortSignal,
       validatedItems?: Array<any>,
-    ): Promise<void> => {
+    ): true | Promise<void> => {
       const hashedQueryKey = hashKey(queryKey)
 
       if (collection.status === `cleaned-up` || signal?.aborted) {
@@ -2084,6 +2103,21 @@ export function queryCollectionOptions(
       }
       applicationToken.rollback = restoreOwnershipTracking
 
+      const failApplication = (error: unknown): never => {
+        restoreOwnershipTracking()
+
+        if (transactionActive) {
+          const cancellation = new AbortController()
+          cancellation.abort()
+          try {
+            commit(cancellation.signal)
+          } catch {
+            // Preserve the application error that caused the rollback.
+          }
+        }
+        throw error
+      }
+
       try {
         // From this point onward the result, including an empty result, is the
         // authoritative ownership baseline until this query is cleaned up.
@@ -2154,21 +2188,16 @@ export function queryCollectionOptions(
 
         // Readiness is publication: do not expose it until the establishing
         // transaction's rows and events are visible.
-        if (applied !== true) await applied
-        if (!signal?.aborted) markReady()
-      } catch (error) {
-        restoreOwnershipTracking()
-
-        if (transactionActive) {
-          const cancellation = new AbortController()
-          cancellation.abort()
-          try {
-            commit(cancellation.signal)
-          } catch {
-            // Preserve the application error that caused the rollback.
-          }
+        const finishApplication = () => {
+          if (!signal?.aborted) markReady()
         }
-        throw error
+        if (applied !== true) {
+          return applied.then(finishApplication, failApplication)
+        }
+        finishApplication()
+        return true
+      } catch (error) {
+        return failApplication(error)
       }
     }
 
@@ -2242,7 +2271,7 @@ export function queryCollectionOptions(
       apply: (
         signal: AbortSignal,
         applicationToken: ResultApplicationController,
-      ) => Promise<void>,
+      ) => true | Promise<void>,
     ): void => {
       invalidatePendingResultApplication(hashedQueryKey)
       const controller: ResultApplicationController = new AbortController()
@@ -2252,17 +2281,37 @@ export function queryCollectionOptions(
       })
       controller.settleRefetchAtFetchBoundary = settleRefetchAtFetchBoundary
       resultApplicationControllers.set(hashedQueryKey, controller)
-      const application = apply(controller.signal, controller)
+      let application: true | Promise<void>
+      try {
+        application = apply(controller.signal, controller)
+      } catch (error) {
+        application = Promise.reject(error)
+      }
+      if (application === true) {
+        // Keep a causal witness for refetch callers without turning the
+        // Collection's synchronous readiness signal back into a Promise.
+        if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+          recordResultApplicationSettlement(
+            hashedQueryKey,
+            result,
+            Promise.resolve(),
+          )
+          resultApplicationControllers.delete(hashedQueryKey)
+          failedResultApplications.delete(hashedQueryKey)
+        }
+        return
+      }
       const refetchSettlement = Promise.race([application, fetchBoundary])
       // Most applications are observer-driven and have no explicit refetch
       // caller. Keep their derived settlement from becoming an unhandled
       // rejection; a refetch that captures this promise still observes the
       // original rejection when throwOnError is enabled.
       void refetchSettlement.catch(() => undefined)
-      const applicationsByHash =
-        resultApplicationSettlements.get(result) ?? new Map()
-      applicationsByHash.set(hashedQueryKey, refetchSettlement)
-      resultApplicationSettlements.set(result, applicationsByHash)
+      recordResultApplicationSettlement(
+        hashedQueryKey,
+        result,
+        refetchSettlement,
+      )
       const cleanupController = () => {
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
           resultApplicationControllers.delete(hashedQueryKey)
@@ -3422,7 +3471,11 @@ export function queryCollectionOptions(
     : undefined
 
   // Create utils instance with state and dependencies passed explicitly
-  const utils: any = new QueryCollectionUtilsImpl(state, refetch, writeUtils)
+  const utils: QueryCollectionUtils = new QueryCollectionUtilsImpl(
+    state,
+    refetch,
+    writeUtils,
+  )
 
   const sync = withCollectionSyncConfigFactory(
     { sync: enhancedInternalSync },

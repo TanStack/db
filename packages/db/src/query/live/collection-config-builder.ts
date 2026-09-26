@@ -104,6 +104,7 @@ export class CollectionConfigBuilder<
   private readonly compareOptions?: StringCollationConfig
 
   private isGraphRunning = false
+  private graphInputRevision = 0
 
   // Current sync run state (set when sync starts, cleared when it stops)
   // Public for testing purposes (CollectionConfigBuilder is internal, not public API)
@@ -528,6 +529,14 @@ export class CollectionConfigBuilder<
 
   getSyncRunGeneration(): number {
     return this.syncRunGeneration
+  }
+
+  advanceGraphInputRevision(): void {
+    this.graphInputRevision++
+  }
+
+  getGraphInputRevision(): number {
+    return this.graphInputRevision
   }
 
   // The callback function is called after the graph has run.
