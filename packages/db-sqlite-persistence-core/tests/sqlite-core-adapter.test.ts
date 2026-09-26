@@ -67,7 +67,7 @@ function interpolateSql(sql: string, params: ReadonlyArray<unknown>): string {
   return renderedSql
 }
 
-class SqliteCliDriver implements SQLiteDriver {
+export class SqliteCliDriver implements SQLiteDriver {
   private readonly transactionDbPath = new AsyncLocalStorage<string>()
   private queue: Promise<void> = Promise.resolve()
 
@@ -639,6 +639,47 @@ export type SQLiteCoreAdapterHarnessFactory = (
   >,
 ) => SQLiteCoreAdapterContractHarness
 
+function holdAndRejectFirstSubsetLoad(
+  adapter: PersistenceAdapter,
+  failure: Error,
+): { entered: Promise<void>; release: () => void } {
+  let enter!: () => void
+  let release!: () => void
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let loadCalls = 0
+  const intercept =
+    (loadSubset: PersistenceAdapter[`loadSubset`]) =>
+    async (...args: Parameters<PersistenceAdapter[`loadSubset`]>) => {
+      loadCalls++
+      if (loadCalls === 1) {
+        enter()
+        await held
+        throw failure
+      }
+      return loadSubset(...args)
+    }
+
+  const runInHydrationScope = adapter.runInHydrationScope?.bind(adapter)
+  if (runInHydrationScope) {
+    adapter.runInHydrationScope = (task) =>
+      runInHydrationScope((scopedAdapter) =>
+        task({
+          ...scopedAdapter,
+          loadSubset: intercept(scopedAdapter.loadSubset),
+        }),
+      )
+  } else {
+    adapter.loadSubset = intercept(adapter.loadSubset.bind(adapter))
+  }
+
+  return { entered, release }
+}
+
 export function runSQLiteCoreAdapterContractSuite(
   suiteName: string = `SQLiteCorePersistenceAdapter`,
   harnessFactory: SQLiteCoreAdapterHarnessFactory = createHarness,
@@ -781,25 +822,8 @@ export function runSQLiteCoreAdapterContractSuite(
       })
 
       const loadSubset = adapter.loadSubset.bind(adapter)
-      let enterLoad!: () => void
-      let rejectLoad!: () => void
-      const loadEntered = new Promise<void>((resolve) => {
-        enterLoad = resolve
-      })
-      const loadRejected = new Promise<void>((resolve) => {
-        rejectLoad = resolve
-      })
       const subsetFailure = new Error(`controlled incremental subset failure`)
-      let loadCalls = 0
-      adapter.loadSubset = async (...args) => {
-        loadCalls++
-        if (loadCalls === 1) {
-          enterLoad()
-          await loadRejected
-          throw subsetFailure
-        }
-        return loadSubset(...args)
-      }
+      const subsetLoad = holdAndRejectFirstSubsetLoad(adapter, subsetFailure)
 
       let source!: Parameters<SyncConfig<Todo, string>[`sync`]>[0]
       const collection = createCollection(
@@ -834,7 +858,7 @@ export function runSQLiteCoreAdapterContractSuite(
           () => undefined,
         )
         void load.catch(() => undefined)
-        await loadEntered
+        await subsetLoad.entered
 
         source.begin()
         source.write({
@@ -853,7 +877,7 @@ export function runSQLiteCoreAdapterContractSuite(
         )
         expect(receiptStatus).toBe(`pending`)
 
-        rejectLoad()
+        subsetLoad.release()
         await expect(load).rejects.toBe(subsetFailure)
         await receipt
         const durableBeforeRetry = await loadSubset(collectionId, {})
@@ -882,7 +906,7 @@ export function runSQLiteCoreAdapterContractSuite(
           publicError: undefined,
         })
       } finally {
-        rejectLoad()
+        subsetLoad.release()
         await load?.catch(() => undefined)
         await receipt?.catch(() => undefined)
         await collection.cleanup()
@@ -911,27 +935,10 @@ export function runSQLiteCoreAdapterContractSuite(
         }
 
         const loadSubset = adapter.loadSubset.bind(adapter)
-        let enterLoad!: () => void
-        let rejectLoad!: () => void
-        const loadEntered = new Promise<void>((resolve) => {
-          enterLoad = resolve
-        })
-        const loadRejected = new Promise<void>((resolve) => {
-          rejectLoad = resolve
-        })
         const subsetFailure = new Error(
           `controlled ${operation} subset failure`,
         )
-        let loadCalls = 0
-        adapter.loadSubset = async (...args) => {
-          loadCalls++
-          if (loadCalls === 1) {
-            enterLoad()
-            await loadRejected
-            throw subsetFailure
-          }
-          return loadSubset(...args)
-        }
+        const subsetLoad = holdAndRejectFirstSubsetLoad(adapter, subsetFailure)
 
         let source!: Parameters<SyncConfig<Todo, string>[`sync`]>[0]
         const collection = createCollection(
@@ -959,7 +966,7 @@ export function runSQLiteCoreAdapterContractSuite(
             collection._sync.loadSubset({ limit: 1 }),
           ).then(() => undefined)
           void load.catch(() => undefined)
-          await loadEntered
+          await subsetLoad.entered
 
           source.begin()
           source.write(
@@ -979,7 +986,7 @@ export function runSQLiteCoreAdapterContractSuite(
           )
           expect(receiptStatus).toBe(`pending`)
 
-          rejectLoad()
+          subsetLoad.release()
           await expect(load).rejects.toBe(subsetFailure)
           await receipt
           const expectedRows = operation === `delete` ? [] : [row]
@@ -1020,7 +1027,7 @@ export function runSQLiteCoreAdapterContractSuite(
             publicError: undefined,
           })
         } finally {
-          rejectLoad()
+          subsetLoad.release()
           await load?.catch(() => undefined)
           await receipt?.catch(() => undefined)
           await collection.cleanup()

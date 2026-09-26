@@ -8,6 +8,7 @@ import {
   InvalidPersistedStorageKeyEncodingError,
 } from './errors'
 import {
+  SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   createPersistedTableName,
   decodePersistedStorageKey,
   encodePersistedStorageKey,
@@ -20,6 +21,7 @@ import {
 } from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  HydrationPersistenceAdapter,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
   PersistedRowScanOptions,
@@ -79,6 +81,159 @@ export type SQLitePullSinceResult<TKey extends string | number> =
       deletedKeys: Array<TKey>
       deltas: Array<ReplayableTxDelta<Record<string, unknown>, TKey>>
     }
+
+type ScheduledOperationKind = `regular` | `hydrate`
+
+type ScheduledOperation<T> = {
+  kind: ScheduledOperationKind
+  task: () => Promise<T>
+  resolve: (value: T) => void
+  reject: (error: unknown) => void
+}
+
+class SharedPersistenceScheduler {
+  private readonly regularQueue: Array<ScheduledOperation<unknown>> = []
+  private readonly hydrateQueue: Array<ScheduledOperation<unknown>> = []
+  private running = false
+  private lastCompletedKind: ScheduledOperationKind | undefined
+
+  runRegular<T>(task: () => Promise<T>): Promise<T> {
+    return this.enqueue(`regular`, task)
+  }
+
+  runHydrate<T>(task: () => Promise<T>): Promise<T> {
+    return this.enqueue(`hydrate`, task)
+  }
+
+  adoptRunningHydrate(completion: Promise<unknown>): void {
+    if (this.running) return
+    this.running = true
+    const finish = () => {
+      this.lastCompletedKind = `hydrate`
+      this.running = false
+      this.drain()
+    }
+    void completion.then(finish, finish)
+  }
+
+  private enqueue<T>(
+    kind: ScheduledOperationKind,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const result = new Promise<T>((resolve, reject) => {
+      const operation: ScheduledOperation<T> = {
+        kind,
+        task,
+        resolve,
+        reject,
+      }
+      const queue = kind === `hydrate` ? this.hydrateQueue : this.regularQueue
+      queue.push(operation as ScheduledOperation<unknown>)
+    })
+    this.drain()
+    return result
+  }
+
+  private drain(): void {
+    if (this.running) return
+
+    const operation = this.takeNext()
+    if (!operation) return
+
+    this.running = true
+    void this.execute(operation)
+  }
+
+  private async execute(operation: ScheduledOperation<unknown>): Promise<void> {
+    try {
+      operation.resolve(await operation.task())
+    } catch (error) {
+      operation.reject(error)
+    } finally {
+      this.lastCompletedKind = operation.kind
+      this.running = false
+      this.drain()
+    }
+  }
+
+  private takeNext(): ScheduledOperation<unknown> | undefined {
+    // Hydrates get priority after the currently running non-preemptible unit.
+    // While both lanes remain queued, alternate one regular operation after
+    // each hydrate (K=1), preserving FIFO order within each lane.
+    if (this.hydrateQueue.length > 0) {
+      if (
+        this.regularQueue.length > 0 &&
+        this.lastCompletedKind === `hydrate`
+      ) {
+        return this.regularQueue.shift()
+      }
+      return this.hydrateQueue.shift()
+    }
+    return this.regularQueue.shift()
+  }
+}
+
+const sharedPersistenceSchedulers = new WeakMap<
+  object,
+  SharedPersistenceScheduler
+>()
+const observedDriverSchedulingKeys = new WeakMap<object, object>()
+
+function getSharedPersistenceScheduler(
+  key: object,
+): SharedPersistenceScheduler {
+  let scheduler = sharedPersistenceSchedulers.get(key)
+  if (!scheduler) {
+    scheduler = new SharedPersistenceScheduler()
+    sharedPersistenceSchedulers.set(key, scheduler)
+  }
+  return scheduler
+}
+
+function getSharedLogicalSchedulingKey(value: unknown): object | undefined {
+  if ((typeof value !== `object` && typeof value !== `function`) || !value) {
+    return undefined
+  }
+  const key = (
+    value as {
+      [SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY]?: unknown
+    }
+  )[SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY]
+  return key !== null && (typeof key === `object` || typeof key === `function`)
+    ? key
+    : undefined
+}
+
+function observeSharedLogicalSchedulingSupport(
+  driver: SQLiteDriver,
+  onSupport: (key: object) => void,
+): SQLiteDriver {
+  let observationPending = true
+  const observe = <T>(promise: Promise<T>): Promise<T> => {
+    if (!observationPending) return promise
+    observationPending = false
+    const key = getSharedLogicalSchedulingKey(promise)
+    if (key) onSupport(key)
+    return promise
+  }
+
+  return {
+    exec: (sql) => observe(driver.exec(sql)),
+    query: <T>(sql: string, params: ReadonlyArray<unknown> = []) =>
+      observe(driver.query<T>(sql, params)),
+    run: (sql, params = []) => observe(driver.run(sql, params)),
+    transaction: <T>(fn: (transactionDriver: SQLiteDriver) => Promise<T>) =>
+      observe(driver.transaction(fn)),
+    transactionWithDriver: <T>(
+      fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+    ) =>
+      observe(
+        driver.transactionWithDriver
+          ? driver.transactionWithDriver(fn)
+          : driver.transaction(fn),
+      ),
+  }
+}
 
 const DEFAULT_SCHEMA_VERSION = 1
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
@@ -1027,6 +1182,10 @@ function buildIndexName(collectionId: string, signature: string): string {
 
 export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly driver: SQLiteDriver
+  private readonly schedulingIdentitySource: SQLiteDriver
+  private scheduler: SharedPersistenceScheduler | undefined
+  private activeUnscheduledHydration: Promise<unknown> | undefined
+  private readonly hydrationAdapter: HydrationPersistenceAdapter
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
   private readonly appliedTxPruneMaxRows: number | undefined
@@ -1082,13 +1241,87 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )
     }
 
-    this.driver = options.driver
+    this.schedulingIdentitySource = options.driver
+    const schedulingKey =
+      getSharedLogicalSchedulingKey(options.driver) ??
+      observedDriverSchedulingKeys.get(options.driver)
+    this.scheduler = schedulingKey
+      ? getSharedPersistenceScheduler(schedulingKey)
+      : undefined
+    this.driver = schedulingKey
+      ? options.driver
+      : observeSharedLogicalSchedulingSupport(options.driver, (key) => {
+          observedDriverSchedulingKeys.set(options.driver, key)
+          const scheduler = getSharedPersistenceScheduler(key)
+          this.scheduler ??= scheduler
+          if (this.activeUnscheduledHydration) {
+            scheduler.adoptRunningHydrate(this.activeUnscheduledHydration)
+          }
+        })
     this.schemaVersion = schemaVersion
     this.schemaMismatchPolicy =
       options.schemaMismatchPolicy ?? `sync-present-reset`
     this.appliedTxPruneMaxRows = options.appliedTxPruneMaxRows
     this.appliedTxPruneMaxAgeSeconds = options.appliedTxPruneMaxAgeSeconds
     this.pullSinceReloadThreshold = pullSinceReloadThreshold
+    this.hydrationAdapter = {
+      loadSubset: (collectionId, loadOptions, context) =>
+        this.loadSubsetUnscheduled(collectionId, loadOptions, context),
+      loadResumeSnapshot: (collectionId, context) =>
+        this.loadResumeSnapshotUnscheduled(collectionId, context),
+      applyCommittedTx: (collectionId, tx) =>
+        this.applyCommittedTxUnscheduled(collectionId, tx),
+      loadCollectionMetadata: (collectionId) =>
+        this.loadCollectionMetadataUnscheduled(collectionId),
+      scanRows: (collectionId, scanOptions) =>
+        this.scanRowsUnscheduled(collectionId, scanOptions),
+      ensureIndex: (collectionId, signature, spec) =>
+        this.ensureIndexUnscheduled(collectionId, signature, spec),
+      markIndexRemoved: (collectionId, signature) =>
+        this.markIndexRemovedUnscheduled(collectionId, signature),
+      getStreamPosition: (collectionId) =>
+        this.getStreamPositionUnscheduled(collectionId),
+      pullSince: (collectionId, fromRowVersion) =>
+        this.pullSinceUnscheduled(collectionId, fromRowVersion),
+      runInHydrationScope: async (task) => task(this.hydrationAdapter),
+    }
+  }
+
+  runInHydrationScope<T>(
+    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+  ): Promise<T> {
+    const scheduler = this.resolveScheduler()
+    if (scheduler) {
+      return scheduler.runHydrate(() => task(this.hydrationAdapter))
+    }
+
+    const hydration = Promise.resolve().then(() => task(this.hydrationAdapter))
+    this.activeUnscheduledHydration = hydration
+    const clear = () => {
+      if (this.activeUnscheduledHydration === hydration) {
+        this.activeUnscheduledHydration = undefined
+      }
+    }
+    void hydration.then(clear, clear)
+    return hydration
+  }
+
+  isHydrationScopeScheduled(): boolean {
+    return this.resolveScheduler() !== undefined
+  }
+
+  private runRegular<T>(task: () => Promise<T>): Promise<T> {
+    const scheduler = this.resolveScheduler()
+    return scheduler ? scheduler.runRegular(task) : task()
+  }
+
+  private resolveScheduler(): SharedPersistenceScheduler | undefined {
+    if (this.scheduler) return this.scheduler
+    const key = observedDriverSchedulingKeys.get(this.schedulingIdentitySource)
+    if (key) {
+      this.scheduler = getSharedPersistenceScheduler(key)
+    }
+    return this.scheduler
   }
 
   private runInTransaction<TResult>(
@@ -1123,7 +1356,23 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
-  async loadSubset(
+  loadSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+  ): Promise<
+    Array<{
+      key: string | number
+      value: Record<string, unknown>
+      metadata?: unknown
+    }>
+  > {
+    return this.runRegular(() =>
+      this.loadSubsetUnscheduled(collectionId, options, ctx),
+    )
+  }
+
+  private async loadSubsetUnscheduled(
     collectionId: string,
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
@@ -1208,7 +1457,19 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async loadResumeSnapshot(
+  loadResumeSnapshot(
+    collectionId: string,
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      includeRows?: boolean
+    },
+  ) {
+    return this.runRegular(() =>
+      this.loadResumeSnapshotUnscheduled(collectionId, ctx),
+    )
+  }
+
+  private async loadResumeSnapshotUnscheduled(
     collectionId: string,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
@@ -1291,7 +1552,16 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
+  applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
+    return this.runRegular(() =>
+      this.applyCommittedTxUnscheduled(collectionId, tx),
+    )
+  }
+
+  private async applyCommittedTxUnscheduled(
+    collectionId: string,
+    tx: PersistedTx,
+  ): Promise<void> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
@@ -1569,7 +1839,15 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async loadCollectionMetadata(
+  loadCollectionMetadata(
+    collectionId: string,
+  ): Promise<Array<{ key: string; value: unknown }>> {
+    return this.runRegular(() =>
+      this.loadCollectionMetadataUnscheduled(collectionId),
+    )
+  }
+
+  private async loadCollectionMetadataUnscheduled(
     collectionId: string,
   ): Promise<Array<{ key: string; value: unknown }>> {
     await this.ensureCollectionReady(collectionId)
@@ -1596,7 +1874,16 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async scanRows(
+  scanRows(
+    collectionId: string,
+    options?: PersistedRowScanOptions,
+  ): Promise<Array<PersistedScannedRow>> {
+    return this.runRegular(() =>
+      this.scanRowsUnscheduled(collectionId, options),
+    )
+  }
+
+  private async scanRowsUnscheduled(
     collectionId: string,
     options?: PersistedRowScanOptions,
   ): Promise<Array<PersistedScannedRow>> {
@@ -1625,7 +1912,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async ensureIndex(
+  ensureIndex(
+    collectionId: string,
+    signature: string,
+    spec: PersistedIndexSpec,
+  ): Promise<void> {
+    return this.runRegular(() =>
+      this.ensureIndexUnscheduled(collectionId, signature, spec),
+    )
+  }
+
+  private async ensureIndexUnscheduled(
     collectionId: string,
     signature: string,
     spec: PersistedIndexSpec,
@@ -1718,7 +2015,13 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async markIndexRemoved(
+  markIndexRemoved(collectionId: string, signature: string): Promise<void> {
+    return this.runRegular(() =>
+      this.markIndexRemovedUnscheduled(collectionId, signature),
+    )
+  }
+
+  private async markIndexRemovedUnscheduled(
     collectionId: string,
     signature: string,
   ): Promise<void> {
@@ -1755,7 +2058,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async getStreamPosition(collectionId: string): Promise<{
+  getStreamPosition(collectionId: string): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    return this.runRegular(() =>
+      this.getStreamPositionUnscheduled(collectionId),
+    )
+  }
+
+  private async getStreamPositionUnscheduled(collectionId: string): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -1857,7 +2170,16 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
-  async pullSince(
+  pullSince(
+    collectionId: string,
+    fromRowVersion: number,
+  ): Promise<SQLitePullSinceResult<string | number>> {
+    return this.runRegular(() =>
+      this.pullSinceUnscheduled(collectionId, fromRowVersion),
+    )
+  }
+
+  private async pullSinceUnscheduled(
     collectionId: string,
     fromRowVersion: number,
   ): Promise<SQLitePullSinceResult<string | number>> {
