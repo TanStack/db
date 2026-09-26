@@ -118,3 +118,35 @@ pending or late hooks and on-demand trigger disposal without allowing a staged
 dependent preload to fulfill during cleanup. That destination must be designed
 with the pending/late on-demand hook history; this review does not claim it is
 implemented.
+
+## Dual-failure reconciliation
+
+Reviewed semantic head: `228b68f7`
+
+A later review found two sibling cleanup paths that awaited every teardown but
+reported only one rejection. The persisted wrapper preferred source cleanup and
+dropped runtime teardown. Eager PowerSync preferred the load-hook cleanup and
+dropped trigger disposal. The PowerSync loss was deterministic once both
+resources existed; callback completion order did not change the winner.
+
+Controlled pre-fix probes reached both production paths. The persisted probe
+observed only the exact source error. The PowerSync probe observed only the
+exact load-hook error in both controlled completion orders. The repaired paths
+keep source cleanup and trigger disposal primary, respectively. Each now uses
+an `AggregateError` to retain the secondary diagnostic. Lone failures keep their
+prior identity.
+
+The coverage gap was a missing dual-rejection history. Existing tests exercised
+each cleanup source separately. The persisted-history owner now crosses source
+and runtime rejection in one public cleanup. The PowerSync load-hook refinement
+crosses hook and trigger rejection in both completion orders. Both tests assert
+the public `SyncCleanupError`, aggregate cause, ordered error identities,
+once-only callbacks, and terminal status where applicable.
+
+This reconciliation adds focused histories, not a generated-history or new
+state-model claim. ORC-001, ORC-002, ORC-005, ORC-006, and ORC-010 are satisfied
+by the established cleanup contract, independent sentinel errors, public
+Collection drivers, recorded pre-fix assertion failures, exact error identity,
+and bounded resource cleanup. ORC-003, ORC-004, ORC-007, ORC-008, ORC-009, and
+ORC-011 are not triggered by these focused refinements. This versioned section
+satisfies ORC-012 for the reconciliation.
