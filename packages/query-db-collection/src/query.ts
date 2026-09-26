@@ -2289,15 +2289,15 @@ export function queryCollectionOptions(
       if (application === true) {
         // Keep a causal witness for refetch callers without turning the
         // Collection's synchronous readiness signal back into a Promise.
-        recordResultApplicationSettlement(
-          hashedQueryKey,
-          result,
-          Promise.resolve(),
-        )
         if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+          recordResultApplicationSettlement(
+            hashedQueryKey,
+            result,
+            Promise.resolve(),
+          )
           resultApplicationControllers.delete(hashedQueryKey)
+          failedResultApplications.delete(hashedQueryKey)
         }
-        failedResultApplications.delete(hashedQueryKey)
         return
       }
       const refetchSettlement = Promise.race([application, fetchBoundary])
