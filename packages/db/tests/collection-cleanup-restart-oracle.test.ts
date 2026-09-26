@@ -274,7 +274,7 @@ describe(`Collection cleanup admission oracle`, () => {
               })
             }
           },
-        },
+        } satisfies SyncConfig<Row, number>,
         () => {
           throw localFailure
         },
