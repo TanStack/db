@@ -632,12 +632,12 @@ function createPowerSyncCollectionConfig<
           abortController.abort()
           const trackingDisposal = disposeTrackingAfterAbort()
 
-          let firstFailure: { error: unknown } | undefined
+          let onUnloadFailure: { error: unknown } | undefined
           const settleOnUnload = async () => {
             try {
               await invokeOnUnload()
             } catch (error) {
-              firstFailure ??= { error }
+              onUnloadFailure ??= { error }
             }
           }
 
@@ -649,11 +649,21 @@ function createPowerSyncCollectionConfig<
             settleOnUnload(),
           ])
           const disposalSettlement = settlements[1]
-          if (disposalSettlement.status === `rejected`) {
-            firstFailure ??= { error: disposalSettlement.reason }
-          }
           await settleOnUnload()
-          if (firstFailure) throw firstFailure.error
+          if (
+            disposalSettlement.status === `rejected` &&
+            onUnloadFailure
+          ) {
+            throw new AggregateError(
+              [disposalSettlement.reason, onUnloadFailure.error],
+              `PowerSync tracking disposal and load-hook cleanup both failed`,
+              { cause: disposalSettlement.reason },
+            )
+          }
+          if (disposalSettlement.status === `rejected`) {
+            throw disposalSettlement.reason
+          }
+          if (onUnloadFailure) throw onUnloadFailure.error
         }
       }
 

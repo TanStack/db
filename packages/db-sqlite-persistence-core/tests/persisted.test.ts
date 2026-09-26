@@ -6754,6 +6754,93 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
+  it(`preserves source and runtime failures when persisted cleanup has both`, async () => {
+    const id = `source-and-runtime-cleanup-failures`
+    const adapter = createRecordingAdapter()
+    const coordinator = new SingleProcessCoordinator()
+    const sourceCleanupGate = createEventGate()
+    const sourceError = new Error(`source cleanup failed exactly`)
+    const runtimeError = new Error(`runtime cleanup failed exactly`)
+    let sourceCleanupCalls = 0
+    let runtimeCleanupCalls = 0
+    const subscribe = coordinator.subscribe.bind(coordinator)
+    coordinator.subscribe = () => {
+      const unsubscribe = subscribe()
+      return () => {
+        unsubscribe()
+        runtimeCleanupCalls++
+        throw runtimeError
+      }
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              cleanup: () => {
+                sourceCleanupCalls++
+                return sourceCleanupGate.promise
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let cleanupOutcome:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; error: unknown }
+        >
+      | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `dual-failure persisted collection ready`,
+      )
+      cleanupOutcome = collection.cleanup().then(
+        () => ({ status: `fulfilled` as const }),
+        (error: unknown) => ({ status: `rejected` as const, error }),
+      )
+      await flushAsyncWork()
+
+      expect({ sourceCleanupCalls, runtimeCleanupCalls }).toEqual({
+        sourceCleanupCalls: 1,
+        runtimeCleanupCalls: 1,
+      })
+
+      sourceCleanupGate.reject(sourceError)
+      const outcome = await atPersistedOracleCheckpoint(
+        cleanupOutcome,
+        `source and runtime cleanup failures settled`,
+      )
+      expect(outcome.status).toBe(`rejected`)
+      if (outcome.status !== `rejected`) {
+        throw new Error(`expected persisted cleanup to reject`)
+      }
+      expect(outcome.error).toMatchObject({ name: `SyncCleanupError` })
+      const syncCleanupError = outcome.error as { cause?: unknown }
+      expect(syncCleanupError.cause).toBeInstanceOf(AggregateError)
+      const aggregate = syncCleanupError.cause as AggregateError
+      expect(aggregate.cause).toBe(sourceError)
+      expect(aggregate.errors).toEqual([sourceError, runtimeError])
+      expect(collection.status).toBe(`cleaned-up`)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      sourceCleanupGate.resolve()
+      await cleanupPersistedOracle(
+        [() => cleanupOutcome, () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`marks a targeted invalidation commit-receipt rejection terminal`, async () => {
     const id = `targeted-invalidation-receipt`
     const adapter = createRecordingAdapter()
