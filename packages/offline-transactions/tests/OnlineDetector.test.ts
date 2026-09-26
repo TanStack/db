@@ -61,6 +61,7 @@ describe(`WebOnlineDetector`, () => {
     })
 
     afterEach(() => {
+      vi.unstubAllGlobals()
       // Restore originals
       Object.defineProperty(globalThis, `window`, {
         value: originalWindow,
@@ -72,6 +73,48 @@ describe(`WebOnlineDetector`, () => {
         writable: true,
         configurable: true,
       })
+    })
+
+    it.each([
+      [`visible`, false, true],
+      [`visible`, true, true],
+      [`hidden`, false, false],
+      [`hidden`, true, true],
+    ] as const)(
+      `should report %s with navigator.onLine=%s as %s`,
+      (visibilityState, onLine, expected) => {
+        vi.stubGlobal(`navigator`, { onLine })
+        Object.defineProperty(document, `visibilityState`, {
+          value: visibilityState,
+        })
+        const detector = new WebOnlineDetector()
+
+        expect(detector.isOnline()).toBe(expected)
+
+        detector.dispose()
+      },
+    )
+
+    it(`should allow retries after returning to a visible tab despite an offline hint`, () => {
+      vi.stubGlobal(`navigator`, { onLine: false })
+      const detector = new WebOnlineDetector()
+      const callback = vi.fn(() => detector.isOnline())
+      detector.subscribe(callback)
+      expect(detector.isOnline()).toBe(false)
+
+      Object.defineProperty(document, `visibilityState`, { value: `visible` })
+      for (const handler of documentEventListeners.get(`visibilitychange`)!) {
+        handler(new Event(`visibilitychange`))
+      }
+
+      expect(callback).toHaveReturnedWith(true)
+      callback.mockClear()
+      detector.notifyOnline()
+      expect(callback).toHaveReturnedWith(true)
+
+      Object.defineProperty(document, `visibilityState`, { value: `hidden` })
+      expect(detector.isOnline()).toBe(false)
+      detector.dispose()
     })
 
     it(`should notify subscribers when online event fires`, () => {

@@ -31,7 +31,7 @@ The React Native implementation requires the `@react-native-community/netinfo` p
 
 This package provides platform-specific implementations for web and React Native environments:
 
-- **Web**: Uses browser APIs (`window.online/offline` events, `document.visibilitychange`)
+- **Web**: Uses browser APIs (`window.online` and `document.visibilitychange` events). Visible tabs allow sync attempts even when `navigator.onLine` is false; hidden tabs follow that hint. Request failures still use the configured retry policy. Visibility is local to each tab and does not transfer leadership from a hidden tab.
 - **React Native**: Uses React Native primitives (`@react-native-community/netinfo` for network status, `AppState` for foreground/background detection)
 
 ## Quick Start
