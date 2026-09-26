@@ -11,7 +11,9 @@ import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import type { LoadSubsetOptions, Subscription } from '@tanstack/db'
 import type {
   ApplyCommittedTxRequest,
+  ApplyCommittedTxResponse,
   ApplyLocalMutationsRequest,
+  ApplyLocalMutationsResponse,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   PersistedTx,
@@ -31,9 +33,17 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * request types. Remote subset request data must be clone-safe, and each
  * accepted physical acquisition creates one exact acquisition lease. A
  * passive heartbeat can update a route, but only a local participant may join
- * that collection's leadership. Durable stream positions advance after the
- * adapter accepts the write, and failed release transport retains its retry
- * route.
+ * that collection's leadership. A mutation requested before the first leader
+ * is known waits for a route up to the RPC deadline. The sole participant
+ * applies it locally if elected; an unsuccessful election cannot hold it forever.
+ * A late follower requests the leader route without sending a mutation. A
+ * current leader answers before its next periodic heartbeat is due.
+ * Election must still finish when scheduled hydration awaits that first
+ * source commit, even when a different collection has a queued write. Regular
+ * work must enter the shared scheduler before taking the database-wide writer
+ * lock. A queued write must recheck ownership before persistence if leadership
+ * changes while it waits. Durable stream positions advance after the adapter
+ * accepts the write, and failed release transport retains its retry route.
  *
  * The adapter call logs, transport controls, owner callbacks, and internal-map
  * snapshots are focused reference ledgers. Histories vary local and follower
@@ -624,6 +634,85 @@ describe(`BrowserCollectionCoordinator`, () => {
       coord.dispose()
     })
 
+    it.each([{ kind: `source commit` }, { kind: `local mutation` }] as const)(
+      `does not persist a queued $kind after leadership transfers`,
+      async ({ kind }) => {
+        const queued = createDeferred()
+        const releaseQueued = createDeferred()
+        const formerAdapter = createStubAdapter()
+        formerAdapter.runInRegularScope = async (task) => {
+          queued.resolve()
+          await releaseQueued.promise
+          return task(formerAdapter)
+        }
+        const newAdapter = createStubAdapter()
+        const formerLeader = createCoordinator(formerAdapter)
+        const newLeader = createCoordinator(newAdapter)
+        const unsubscribeFormer = formerLeader.subscribe(`todos`, () => {})
+        const unsubscribeNew = newLeader.subscribe(`todos`, () => {})
+        let write:
+          | Promise<ApplyCommittedTxResponse | ApplyLocalMutationsResponse>
+          | undefined
+        let publications = 0
+
+        try {
+          await vi.waitFor(() =>
+            expect(formerLeader.isLeader(`todos`)).toBe(true),
+          )
+          observeBroadcastMessage = (data) => {
+            if (
+              (data as { payload?: { type?: string } }).payload?.type ===
+              `tx:committed`
+            ) {
+              publications++
+            }
+          }
+          write =
+            kind === `source commit`
+              ? formerLeader.requestApplyCommittedTx(`todos`, {
+                  txId: `queued-source-commit`,
+                  term: 0,
+                  seq: 0,
+                  rowVersion: 0,
+                  mutations: [
+                    { type: `insert`, key: `queued`, value: { id: `queued` } },
+                  ],
+                })
+              : formerLeader.requestApplyLocalMutations(`todos`, [
+                  {
+                    mutationId: `queued-local-mutation`,
+                    type: `insert`,
+                    key: `queued`,
+                    value: { id: `queued` },
+                  },
+                ])
+          void write.catch(() => undefined)
+          await queued.promise
+          expect(formerAdapter.appliedTxs).toEqual([])
+
+          unsubscribeFormer()
+          await vi.waitFor(() => expect(newLeader.isLeader(`todos`)).toBe(true))
+          releaseQueued.resolve()
+
+          await expect(write).resolves.toMatchObject({
+            ok: false,
+            code: `NOT_LEADER`,
+          })
+          expect(formerAdapter.appliedTxs).toEqual([])
+          expect(newAdapter.appliedTxs).toEqual([])
+          expect(publications).toBe(0)
+        } finally {
+          releaseQueued.resolve()
+          await write?.catch(() => undefined)
+          observeBroadcastMessage = undefined
+          unsubscribeFormer()
+          unsubscribeNew()
+          formerLeader.dispose()
+          newLeader.dispose()
+        }
+      },
+    )
+
     it(`paces leadership retry after stream-position failure`, async () => {
       vi.useFakeTimers()
       const streamError = new Error(`stream position unavailable`)
@@ -997,6 +1086,232 @@ describe(`BrowserCollectionCoordinator`, () => {
   })
 
   describe(`RPC - applyLocalMutations`, () => {
+    it.each([{ kind: `source commit` }, { kind: `local mutation` }] as const)(
+      `waits for initial leadership before routing a $kind`,
+      async ({ kind }) => {
+        const adapter = createStubAdapter()
+        const readStarted = createDeferred()
+        const releaseRead = createDeferred()
+        adapter.getStreamPosition = async () => {
+          readStarted.resolve()
+          await releaseRead.promise
+          return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+        }
+        const coordinator = createCoordinator(adapter)
+        const mutationPosts: Array<string> = []
+        observePostedMessage = (data) => {
+          const type = (data as { payload?: { type?: string } }).payload?.type
+          if (
+            type === `rpc:applyCommittedTx:req` ||
+            type === `rpc:applyLocalMutations:req`
+          ) {
+            mutationPosts.push(type)
+          }
+        }
+
+        coordinator.subscribe(`todos`, () => {})
+        await readStarted.promise
+        const request =
+          kind === `source commit`
+            ? coordinator.requestApplyCommittedTx(`todos`, {
+                txId: `first-source-commit`,
+                term: 0,
+                seq: 0,
+                rowVersion: 0,
+                mutations: [
+                  {
+                    type: `insert`,
+                    key: `first`,
+                    value: { id: `first` },
+                  },
+                ],
+              })
+            : coordinator.requestApplyLocalMutations(`todos`, [
+                {
+                  mutationId: `first-local-mutation`,
+                  type: `insert`,
+                  key: `first`,
+                  value: { id: `first` },
+                },
+              ])
+        void request.catch(() => undefined)
+
+        try {
+          // The single participating tab has not yet read its durable stream
+          // position. No owner is known, so no mutation may enter transport.
+          expect(coordinator.isLeader(`todos`)).toBe(false)
+          expect(mutationPosts).toEqual([])
+
+          releaseRead.resolve()
+          await expect(request).resolves.toMatchObject({ ok: true })
+          expect(mutationPosts).toEqual([])
+          expect(adapter.appliedTxs).toHaveLength(1)
+          expect(adapter.appliedTxs[0]?.collectionId).toBe(`todos`)
+        } finally {
+          releaseRead.resolve()
+          coordinator.dispose()
+          await request.catch(() => undefined)
+          observePostedMessage = undefined
+        }
+      },
+    )
+
+    it.each([{ kind: `source commit` }, { kind: `local mutation` }] as const)(
+      `discovers a late follower route before the next heartbeat for a $kind`,
+      async ({ kind }) => {
+        vi.useFakeTimers()
+        const leaderAdapter = createStubAdapter()
+        const leader = createCoordinator(leaderAdapter)
+        let follower: BrowserCollectionCoordinator | undefined
+        let observed: Promise<void> | undefined
+        let settled = false
+        let response:
+          | ApplyCommittedTxResponse
+          | ApplyLocalMutationsResponse
+          | undefined
+        let failure: unknown
+        const posted: Array<string> = []
+
+        try {
+          leader.subscribe(`todos`, () => {})
+          await vi.advanceTimersByTimeAsync(0)
+          expect(leader.isLeader(`todos`)).toBe(true)
+
+          // The follower joins after the initial heartbeat. Stop periodic
+          // heartbeats so only an explicit route reply can settle its write.
+          const leaderState = inspectCoordinator(leader).collections.get(
+            `todos`,
+          ) as { heartbeatTimer: ReturnType<typeof setInterval> | null }
+          if (leaderState.heartbeatTimer !== null) {
+            clearInterval(leaderState.heartbeatTimer)
+            leaderState.heartbeatTimer = null
+          }
+          observePostedMessage = (data) => {
+            const envelope = data as {
+              collectionId?: string
+              payload?: { type?: string }
+            }
+            const type = envelope.payload?.type
+            if (
+              envelope.collectionId === `todos` &&
+              (type === `leader:routeRequest` ||
+                type === `leader:heartbeat` ||
+                type === `rpc:applyCommittedTx:req` ||
+                type === `rpc:applyLocalMutations:req`)
+            ) {
+              posted.push(type)
+            }
+          }
+
+          follower = createCoordinator()
+          follower.subscribe(`todos`, () => {})
+          expect(follower.isLeader(`todos`)).toBe(false)
+
+          const write =
+            kind === `source commit`
+              ? follower.requestApplyCommittedTx(`todos`, {
+                  txId: `late-follower-source`,
+                  term: 0,
+                  seq: 0,
+                  rowVersion: 0,
+                  mutations: [
+                    { type: `insert`, key: `first`, value: { id: `first` } },
+                  ],
+                })
+              : follower.requestApplyLocalMutations(`todos`, [
+                  {
+                    mutationId: `late-follower-local`,
+                    type: `insert`,
+                    key: `first`,
+                    value: { id: `first` },
+                  },
+                ])
+          observed = write.then(
+            (result) => {
+              settled = true
+              response = result
+            },
+            (error: unknown) => {
+              settled = true
+              failure = error
+            },
+          )
+          await vi.advanceTimersByTimeAsync(0)
+
+          expect({
+            settled,
+            failure,
+            responseOk: response?.ok,
+            posted,
+          }).toEqual({
+            settled: true,
+            failure: undefined,
+            responseOk: true,
+            posted: [
+              `leader:routeRequest`,
+              `leader:heartbeat`,
+              kind === `source commit`
+                ? `rpc:applyCommittedTx:req`
+                : `rpc:applyLocalMutations:req`,
+            ],
+          })
+          expect(leaderAdapter.appliedTxs).toHaveLength(1)
+        } finally {
+          observePostedMessage = undefined
+          follower?.dispose()
+          leader.dispose()
+          await vi.advanceTimersByTimeAsync(0)
+          await observed
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it(`rejects a first source commit when election cannot establish a route`, async () => {
+      vi.useFakeTimers()
+      const adapter = createStubAdapter()
+      const readPosition = vi
+        .fn()
+        .mockRejectedValue(new Error(`stream position unavailable`))
+      adapter.getStreamPosition = readPosition
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const coordinator = createCoordinator(adapter)
+      coordinator.subscribe(`todos`, () => {})
+      const request = coordinator.requestApplyCommittedTx(`todos`, {
+        txId: `first-source-commit`,
+        term: 0,
+        seq: 0,
+        rowVersion: 0,
+        mutations: [],
+      })
+      let settled = false
+      const outcome = request.then(
+        () => {
+          settled = true
+          return undefined
+        },
+        (error: unknown) => {
+          settled = true
+          return error
+        },
+      )
+
+      try {
+        await vi.advanceTimersByTimeAsync(10_001)
+        expect(readPosition.mock.calls.length).toBeGreaterThan(1)
+        expect(settled).toBe(true)
+        expect(await outcome).toMatchObject({
+          message: expect.stringContaining(`leadership route`),
+        })
+        expect(adapter.appliedTxs).toEqual([])
+      } finally {
+        coordinator.dispose()
+        await outcome
+        warning.mockRestore()
+        vi.useRealTimers()
+      }
+    })
+
     it(`leader applies mutations and returns accepted ids`, async () => {
       const adapter = createStubAdapter()
       const coord = createCoordinator(adapter)
@@ -1951,6 +2266,207 @@ describe(`BrowserCollectionCoordinator`, () => {
   })
 
   describe(`RPC - applyCommittedTx`, () => {
+    it(`completes the first source commit when leader election overlaps scheduled hydration`, async () => {
+      const database = createWASQLiteTestDatabase({ filename: `:memory:` })
+      const coordinator = createCoordinator()
+      const persistence = createBrowserWASQLitePersistence({
+        database,
+        coordinator,
+      }).resolvePersistenceForCollection?.({
+        collectionId: `first-commit`,
+        mode: `sync-present`,
+      })
+      if (!persistence?.adapter.runInHydrationScope) {
+        coordinator.dispose()
+        await database.close?.()
+        throw new Error(`scheduled hydration adapter not available`)
+      }
+
+      let unsubscribe: (() => void) | undefined
+      const hydration = persistence.adapter.runInHydrationScope(
+        async (adapter) => {
+          unsubscribe = coordinator.subscribe(`first-commit`, () => {})
+          return coordinator.requestApplyCommittedTx(
+            `first-commit`,
+            {
+              txId: `first-source-commit`,
+              term: 0,
+              seq: 0,
+              rowVersion: 0,
+              mutations: [
+                { type: `insert`, key: `first`, value: { id: `first` } },
+              ],
+            },
+            adapter,
+          )
+        },
+      )
+      void hydration.catch(() => undefined)
+      let timeout: ReturnType<typeof setTimeout> | undefined
+
+      try {
+        const response = await Promise.race([
+          hydration,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error(`first commit stalled during election`)),
+              2_000,
+            )
+          }),
+        ])
+        expect(response.ok).toBe(true)
+        expect(
+          (await persistence.adapter.loadResumeSnapshot(`first-commit`)).rows,
+        ).toEqual([{ key: `first`, value: { id: `first` } }])
+        expect(
+          await database.execute<{ count: number }>(
+            `SELECT COUNT(*) AS count FROM applied_tx`,
+          ),
+        ).toEqual([{ count: 1 }])
+      } finally {
+        if (timeout) clearTimeout(timeout)
+        coordinator.dispose()
+        await Promise.race([hydration.catch(() => undefined), flush(0)])
+        unsubscribe?.()
+        await flush(0)
+        await database.close?.()
+      }
+    })
+
+    it(`settles a cold source commit and another collection's write without a writer-lock cycle`, async () => {
+      const database = createWASQLiteTestDatabase({ filename: `:memory:` })
+      const coordinator = createCoordinator()
+      const persistence = createBrowserWASQLitePersistence({
+        database,
+        coordinator,
+      })
+      const active = persistence.resolvePersistenceForCollection?.({
+        collectionId: `active`,
+        mode: `sync-present`,
+      })
+      const cold = persistence.resolvePersistenceForCollection?.({
+        collectionId: `cold`,
+        mode: `sync-present`,
+      })
+      const adapter = cold?.adapter
+      if (
+        !active ||
+        !adapter?.runInHydrationScope ||
+        !adapter.getStreamPosition
+      ) {
+        coordinator.dispose()
+        await database.close?.()
+        throw new Error(`shared scheduled adapter not available`)
+      }
+
+      const releaseElectionRead = createDeferred()
+      const electionReadStarted = createDeferred()
+      const releaseHydration = createDeferred()
+      const sourceCommitStarted = createDeferred()
+      const getStreamPosition = adapter.getStreamPosition.bind(adapter)
+      adapter.getStreamPosition = async (collectionId) => {
+        if (collectionId === `cold`) {
+          electionReadStarted.resolve()
+          await releaseElectionRead.promise
+        }
+        return getStreamPosition(collectionId)
+      }
+
+      const unsubscribeActive = coordinator.subscribe(`active`, () => {})
+      let unsubscribeCold: (() => void) | undefined
+      let sourceCommit: Promise<ApplyCommittedTxResponse> | undefined
+      let otherWrite: Promise<ApplyLocalMutationsResponse> | undefined
+      let hydration: Promise<void> | undefined
+      let timeout: ReturnType<typeof setTimeout> | undefined
+
+      try {
+        await vi.waitFor(() =>
+          expect(coordinator.isLeader(`active`)).toBe(true),
+        )
+
+        hydration = adapter.runInHydrationScope(async (scopedAdapter) => {
+          unsubscribeCold = coordinator.subscribe(`cold`, () => {})
+          sourceCommit = coordinator.requestApplyCommittedTx(
+            `cold`,
+            {
+              txId: `first-cold-commit`,
+              term: 0,
+              seq: 0,
+              rowVersion: 0,
+              mutations: [
+                { type: `insert`, key: `cold`, value: { id: `cold` } },
+              ],
+            },
+            scopedAdapter,
+          )
+          void sourceCommit.catch(() => undefined)
+          sourceCommitStarted.resolve()
+          await Promise.race([sourceCommit, releaseHydration.promise])
+        })
+        void hydration.catch(() => undefined)
+        await Promise.all([
+          electionReadStarted.promise,
+          sourceCommitStarted.promise,
+        ])
+        expect(coordinator.isLeader(`cold`)).toBe(false)
+
+        otherWrite = coordinator.requestApplyLocalMutations(`active`, [
+          {
+            mutationId: `active-write`,
+            type: `insert`,
+            key: `active`,
+            value: { id: `active` },
+          },
+        ])
+        void otherWrite.catch(() => undefined)
+        // Let the other collection reach its writer-lock/scheduler boundary
+        // before the held election read establishes the cold route.
+        await flush(0)
+        releaseElectionRead.resolve()
+
+        const [sourceResponse, otherResponse] = await Promise.race([
+          Promise.all([sourceCommit!, otherWrite, hydration]).then(
+            ([source, other]) => [source, other] as const,
+          ),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `cross-collection writer-lock cycle; writer held=${heldLocks.has(`tsdb:writer:test-db`)}`,
+                  ),
+                ),
+              2_000,
+            )
+          }),
+        ])
+        expect(sourceResponse.ok).toBe(true)
+        expect(otherResponse.ok).toBe(true)
+        expect((await adapter.loadResumeSnapshot(`cold`)).rows).toEqual([
+          { key: `cold`, value: { id: `cold` } },
+        ])
+        expect(
+          (await active.adapter.loadResumeSnapshot(`active`)).rows,
+        ).toEqual([{ key: `active`, value: { id: `active` } }])
+      } finally {
+        if (timeout) clearTimeout(timeout)
+        releaseElectionRead.resolve()
+        releaseHydration.resolve()
+        await Promise.race([
+          Promise.allSettled([
+            hydration ?? Promise.resolve(),
+            sourceCommit ?? Promise.resolve(),
+            otherWrite ?? Promise.resolve(),
+          ]),
+          flush(500),
+        ])
+        unsubscribeCold?.()
+        unsubscribeActive()
+        coordinator.dispose()
+        await database.close?.()
+      }
+    })
+
     it(`routes a complete source transaction to the leader-owned adapter`, async () => {
       const leaderAdapter = createStubAdapter()
       const followerAdapter = createStubAdapter()
