@@ -534,6 +534,70 @@ describe(`Sync Streams`, () => {
     },
   )
 
+  it.each([`fulfill`, `reject`] as const)(
+    `on-demand mode: waits for hook cleanup started by subset release: %s`,
+    async (outcome) => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const cleanupGate = pDefer<void>()
+      const cleanupError = new Error(`released subset cleanup failed`)
+      const cleanupHook = vi.fn(() =>
+        cleanupGate.promise.then(() => {
+          if (outcome === `reject`) throw cleanupError
+        }),
+      )
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset: () => cleanupHook,
+        }),
+      )
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, `electronics`)),
+      })
+
+      try {
+        await query.preload()
+        await query.cleanup()
+        expect(cleanupHook).toHaveBeenCalledOnce()
+
+        let cleanupSettled = false
+        const cleanupOutcome = collection.cleanup().then(
+          () => {
+            cleanupSettled = true
+            return { status: `fulfilled` as const }
+          },
+          (error: unknown) => {
+            cleanupSettled = true
+            return { status: `rejected` as const, error }
+          },
+        )
+        await new Promise((resolve) => setImmediate(resolve))
+        expect(cleanupSettled).toBe(false)
+
+        cleanupGate.resolve()
+        const cleanupResult = await cleanupOutcome
+        if (outcome === `reject`) {
+          expect(cleanupResult).toMatchObject({
+            status: `rejected`,
+            error: { name: `SyncCleanupError`, cause: cleanupError },
+          })
+        } else {
+          expect(cleanupResult).toEqual({ status: `fulfilled` })
+        }
+      } finally {
+        cleanupGate.resolve()
+        await query.cleanup()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`on-demand mode: classifies acquired cleanup by its runtime promise shape`, async () => {
     const db = await createDatabase()
     await createTestProducts(db)

@@ -683,6 +683,7 @@ function createPowerSyncCollectionConfig<
         let rebuildPromise: Promise<void> | null = null
         let drainingReleases = false
         let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
+        const pendingDemandCleanupTasks = new Set<Promise<unknown>>()
         let demandCleanupCollector: DemandCleanupCollector | null = null
         const startup = start()
         void startup.catch((error) =>
@@ -873,7 +874,14 @@ function createPowerSyncCollectionConfig<
               demandCleanupCollector.tasks.push(task)
               void task.catch(() => undefined)
             } else {
-              void task.catch(reportDemandCleanupFailure)
+              pendingDemandCleanupTasks.add(task)
+              void task.then(
+                () => pendingDemandCleanupTasks.delete(task),
+                (error) => {
+                  pendingDemandCleanupTasks.delete(task)
+                  reportDemandCleanupFailure(error)
+                },
+              )
             }
           } catch (error) {
             if (demandCleanupCollector) {
@@ -999,7 +1007,9 @@ function createPowerSyncCollectionConfig<
               message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             })
             abortController.abort()
-            const collector: DemandCleanupCollector = { tasks: [] }
+            const collector: DemandCleanupCollector = {
+              tasks: [...pendingDemandCleanupTasks],
+            }
             demandCleanupCollector = collector
             for (const demand of demands.values()) {
               cleanupDemand(demand)
