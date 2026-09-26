@@ -502,6 +502,63 @@ describe(`OrderedSourceLoader`, () => {
     }
   })
 
+  it(`continues an explicit window after a staged empty boundary starts no request`, async () => {
+    const requests: Array<RequestOptions> = []
+    const secondRequest = createDeferred()
+    let graphInputRevision = 0
+    let dataNeeded = 1
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [],
+      requestLimitedSnapshot: (options: RequestOptions) => {
+        requests.push(options)
+        if (requests.length === 1) graphInputRevision++
+        options.onLoadSubsetResult?.(
+          requests.length === 1 ? true : secondRequest.promise,
+          options,
+          () => {},
+        )
+      },
+      requestSnapshot: () => {
+        throw new Error(`an empty boundary must not start a tie request`)
+      },
+    }
+    const info = createOrderByInfo({ dataNeeded: () => dataNeeded })
+    const loader = new OrderedSourceLoader(
+      info,
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => graphInputRevision,
+    )
+
+    try {
+      loader.start()
+
+      expect(requests).toHaveLength(1)
+      expect(
+        (loader as unknown as { stagedContinuation?: unknown })
+          .stagedContinuation,
+      ).toBeDefined()
+
+      info.limit = 2
+      dataNeeded = 2
+      const window = loader.loadMore(1)
+
+      expect(window).toBeInstanceOf(Promise)
+      expect(requests).toHaveLength(2)
+      expect(requests[1]).toMatchObject({ limit: 2, offset: 0 })
+      expect(requests[1]?.minValues).toBeUndefined()
+
+      secondRequest.resolve()
+      await window
+    } finally {
+      secondRequest.resolve()
+      loader.dispose()
+    }
+  })
+
   const syncRouteCells = (
     [`page`, `prefix`, `boundary`, `full-source`] as const
   ).flatMap((route) =>

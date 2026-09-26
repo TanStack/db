@@ -153,7 +153,9 @@ export class OrderedSourceLoader {
         this.stagedContinuation = undefined
       } else {
         this.consumeStagedContinuation(windowOperationGeneration)
-        return this.pending
+        // The consumed continuation can synchronously dispose this loader.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (!this.active || this.pending) return this.pending
       }
     }
     const mayRetryFailure =

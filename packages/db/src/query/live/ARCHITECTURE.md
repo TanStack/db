@@ -863,6 +863,10 @@ range's last available row can advance the boundary; an unrelated live outlier
 cannot advance it merely by entering D2. This relies on the adapter fulfilling
 the exact ordered request, not just resolving after an arbitrary partial write.
 An empty range does not invent a boundary or prove source exhaustion.
+If an explicit window operation consumes a staged boundary continuation and
+that continuation has no boundary row, it starts no acquisition. The operation
+must continue normal demand selection for the enlarged window; consuming the
+empty continuation does not settle that window operation.
 
 For no-index prefix loading, an unrelated new key does not reacquire an already
 full window. An explicit window move, an underfilled window, or a settled
