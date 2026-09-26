@@ -8,9 +8,21 @@ export function runCleanupWithLocalTeardown(
   cleanup: CleanupFn | undefined,
   teardown: () => void,
 ): void | Promise<void> {
+  let result: void | Promise<void>
   try {
-    return cleanup?.()
-  } finally {
+    result = cleanup?.()
+  } catch (cleanupError) {
     teardown()
+    throw cleanupError
   }
+
+  try {
+    teardown()
+  } catch (teardownError) {
+    if (!result) throw teardownError
+    return result.finally(() => {
+      throw teardownError
+    })
+  }
+  return result
 }

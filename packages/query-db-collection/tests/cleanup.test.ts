@@ -26,4 +26,37 @@ describe(`Query cleanup composition`, () => {
       }
     },
   )
+
+  it.each([`fulfill`, `reject`] as const)(
+    `waits for adapter cleanup before reporting a local teardown failure: %s`,
+    async (outcome) => {
+      const gate = createDeferred<void>()
+      const adapterFailure = new Error(`query cleanup failed`)
+      const teardownFailure = new Error(`query teardown failed`)
+      const cleanup = vi.fn(() => gate.promise)
+      const teardown = vi.fn(() => {
+        throw teardownFailure
+      })
+
+      const result = runCleanupWithLocalTeardown(cleanup, teardown)
+      let settled = false
+      void Promise.resolve(result).then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        },
+      )
+
+      expect(cleanup).toHaveBeenCalledOnce()
+      expect(teardown).toHaveBeenCalledOnce()
+      await Promise.resolve()
+      expect(settled).toBe(false)
+
+      if (outcome === `fulfill`) gate.resolve()
+      else gate.reject(adapterFailure)
+      await expect(result).rejects.toBe(teardownFailure)
+    },
+  )
 })

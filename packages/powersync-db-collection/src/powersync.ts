@@ -833,8 +833,7 @@ function createPowerSyncCollectionConfig<
             options.signal?.aborted ||
             demands.get(options) !== demand
           ) {
-            demands.delete(options)
-            demand.cleanup?.()
+            cleanupDemand(demand)
             return
           }
 
