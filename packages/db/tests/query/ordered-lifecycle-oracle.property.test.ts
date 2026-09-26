@@ -4,7 +4,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
 import {
@@ -30,6 +30,9 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * initial-versus-replay barrier. Their 192-cell product is small enough to
  * enumerate. A constrained initial-success grammar separately crosses
  * synchronous versus Promise settlement with indexed versus prefix loading.
+ * One composed fixed regression injects sibling-source input during a
+ * synchronous ordered continuation. It requires graph processing before the
+ * loader decides whether another acquisition is needed.
  * A second product adds nullable multi-term ordering, including direction and
  * null placement for both terms. The initial-settlement cells are a bounded
  * deterministic grammar; they do not extend the generated-history campaign.
@@ -818,6 +821,132 @@ describe(`synchronous initial settlement refinement`, () => {
         `synchronous`,
       ),
     ).toThrow()
+  })
+
+  it(`processes sibling source input before draining an ordered continuation`, async () => {
+    type LeftRow = { id: number; group: string; rank: number }
+    type RightRow = { id: number; group: string }
+
+    let rightSync!: Parameters<SyncConfig<RightRow, number>[`sync`]>[0]
+    const right = createCollection<RightRow, number>({
+      id: `ordered-initial-cross-source-right`,
+      getKey: ({ id }) => id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rightSync = operations
+          operations.markReady()
+        },
+      },
+    })
+
+    const requests: Array<LoadSubsetOptions> = []
+    let wroteSiblingInput = false
+    const left = createCollection<LeftRow, number>({
+      id: `ordered-initial-cross-source-left`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: (options) => {
+              requests.push(options)
+              if (requests.length === 1) {
+                begin()
+                write({
+                  type: `insert`,
+                  value: { id: 1, group: `shared`, rank: 1 },
+                })
+                expect(commit()).toBe(true)
+              } else if (!wroteSiblingInput) {
+                wroteSiblingInput = true
+                rightSync.begin()
+                rightSync.write({
+                  type: `insert`,
+                  value: { id: 10, group: `shared` },
+                })
+                rightSync.write({
+                  type: `insert`,
+                  value: { id: 11, group: `shared` },
+                })
+                expect(rightSync.commit()).toBe(true)
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+
+    const live = createLiveQueryCollection({
+      id: `ordered-initial-cross-source-live`,
+      startSync: false,
+      query: (q) =>
+        q
+          .from({ left })
+          .leftJoin({ right }, ({ left: leftRow, right: rightRow }) =>
+            eq(leftRow.group, rightRow.group),
+          )
+          .orderBy(({ left: leftRow }) => leftRow.rank)
+          .limit(2)
+          .select(({ left: leftRow, right: rightRow }) => ({
+            id: leftRow.id,
+            rightId: rightRow.id,
+          })),
+    })
+    const readyRows: Array<Array<number | undefined>> = []
+    const unsubscribeStatus = live.on(`status:ready`, () => {
+      readyRows.push(live.toArray.map(({ rightId }) => rightId))
+    })
+
+    try {
+      const preload = live.preload()
+      const immediate = {
+        rows: live.toArray.map(({ rightId }) => rightId),
+        status: live.status,
+      }
+      await preload
+
+      expect(wroteSiblingInput).toBe(true)
+      expect(
+        requests.map(({ orderBy, limit, offset, where, cursor }) => ({
+          orderTerms: orderBy?.length ?? 0,
+          limit,
+          offset,
+          hasWhere: where !== undefined,
+          hasCursor: cursor !== undefined,
+        })),
+      ).toEqual([
+        {
+          orderTerms: 1,
+          limit: 2,
+          offset: 0,
+          hasWhere: false,
+          hasCursor: false,
+        },
+        {
+          orderTerms: 0,
+          limit: undefined,
+          offset: undefined,
+          hasWhere: true,
+          hasCursor: false,
+        },
+      ])
+      expect(readyRows).toEqual([[10, 11]])
+      expect(immediate).toEqual({ rows: [10, 11], status: `ready` })
+      expect({
+        rows: live.toArray.map(({ rightId }) => rightId),
+        status: live.status,
+      }).toEqual({ rows: [10, 11], status: `ready` })
+    } finally {
+      unsubscribeStatus()
+      await Promise.all([live.cleanup(), left.cleanup(), right.cleanup()])
+    }
   })
 })
 

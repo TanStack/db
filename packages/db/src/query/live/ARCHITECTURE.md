@@ -1051,6 +1051,11 @@ asynchronous. This cut does not apply to explicit window moves, repair,
 truncate replay, or framework render timing, and it proves neither source
 exhaustion nor broader source coverage.
 
+If any source subscriber adds input to the graph during a synchronous ordered
+continuation, core returns to graph work before deciding whether that ordered
+source needs another acquisition. Input progress is graph-wide: a quiet
+ordered source cannot drain its continuation around pending sibling input.
+
 Pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce
 the current partial materialization when the source supports progressive

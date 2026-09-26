@@ -47,7 +47,6 @@ export class CollectionSubscriber<
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoader: OrderedSourceLoader | undefined
   private readonly demand = new SubsetDemandController()
-  private graphInputRevision = 0
 
   constructor(
     private sourceId: string,
@@ -233,7 +232,9 @@ export class CollectionSubscriber<
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
     const sentChanges = sendChangesToInput(input, reconciledChanges)
-    if (sentChanges > 0) this.graphInputRevision++
+    if (sentChanges > 0) {
+      this.collectionConfigBuilder.advanceGraphInputRevision()
+    }
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -360,7 +361,7 @@ export class CollectionSubscriber<
       () =>
         this.collectionConfigBuilder.liveQueryCollection?.status === `ready` &&
         !this.collectionConfigBuilder.hasActiveWindowOperation(),
-      () => this.graphInputRevision,
+      () => this.collectionConfigBuilder.getGraphInputRevision(),
     )
     this.orderedLoader.start()
 
