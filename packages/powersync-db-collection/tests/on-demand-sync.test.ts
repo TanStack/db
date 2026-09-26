@@ -3068,6 +3068,7 @@ describe(`On-Demand Sync Mode`, () => {
         for (let turn = 0; turn < 20; turn++) await Promise.resolve()
         expect(secondWriteLockExited).toBe(true)
         await Promise.all([second, cleanup])
+        expect(firstDispose).toHaveBeenCalledOnce()
         expect(firstDispose).toHaveBeenCalledWith({
           context: expect.anything(),
         })
