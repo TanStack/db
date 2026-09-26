@@ -3010,6 +3010,79 @@ describe(`On-Demand Sync Mode`, () => {
       expect(createDiffTrigger).not.toHaveBeenCalled()
     })
 
+    it(`keeps trigger disposal in the held lock context when cleanup races setup`, async () => {
+      const db = await createDatabase()
+      const secondTriggerStarted = pDefer<void>()
+      const publishSecondTrigger = pDefer<void>()
+      const outerLockReleased = pDefer<void>()
+      let writeLockCalls = 0
+      let secondWriteLockExited = false
+
+      vi.spyOn(db, `writeLock`).mockImplementation(async (callback) => {
+        writeLockCalls++
+        const call = writeLockCalls
+        try {
+          return await callback({
+            getAll: () => Promise.resolve([]),
+            execute: () => Promise.resolve({}),
+          } as never)
+        } finally {
+          if (call === 2) {
+            secondWriteLockExited = true
+            outerLockReleased.resolve()
+          }
+        }
+      })
+      const firstDispose = vi.fn(async () => {})
+      const secondDispose = vi.fn(async (options?: { context?: unknown }) => {
+        // An uncontextualized PowerSync trigger disposer acquires the write
+        // lock. Model that dependency without a wall-clock delay.
+        if (!options?.context) await outerLockReleased.promise
+      })
+      vi.spyOn(db.triggers, `createDiffTrigger`)
+        .mockResolvedValueOnce(firstDispose)
+        .mockImplementationOnce(async () => {
+          secondTriggerStarted.resolve()
+          await publishSecondTrigger.promise
+          return secondDispose as never
+        })
+      const { sync, loadSubset } = startOnDemandSync(db)
+      const first = Promise.resolve(
+        loadSubset({ where: categoryEquals(`electronics`) }),
+      )
+      let second: Promise<unknown> | undefined
+      let cleanup: Promise<unknown> | undefined
+
+      try {
+        await first
+        second = Promise.resolve(
+          loadSubset({ where: categoryEquals(`clothing`) }),
+        )
+        await secondTriggerStarted.promise
+
+        cleanup = Promise.resolve(sync.cleanup?.())
+        publishSecondTrigger.resolve()
+
+        // All relevant work is Promise-driven. Twenty turns are ample for the
+        // setup and lock callback to settle without using a timer as evidence.
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+        expect(secondWriteLockExited).toBe(true)
+        await Promise.all([second, cleanup])
+        expect(firstDispose).toHaveBeenCalledOnce()
+        expect(firstDispose).toHaveBeenCalledWith({
+          context: expect.anything(),
+        })
+        expect(secondDispose).toHaveBeenCalledOnce()
+        expect(secondDispose).toHaveBeenCalledWith({
+          context: expect.anything(),
+        })
+      } finally {
+        publishSecondTrigger.resolve()
+        outerLockReleased.resolve()
+        await Promise.allSettled([first, second, cleanup])
+      }
+    })
+
     it(`cleans each acquired subset at most once during reentrant cleanup`, async () => {
       const db = await createDatabase()
       vi.spyOn(db.triggers, `createDiffTrigger`).mockResolvedValue(vi.fn())

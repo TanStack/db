@@ -54,6 +54,7 @@ export class CollectionLifecycleManager<
   private statusRevision = 0
   private cleaningUp = false
   private cleanupPromise: Promise<void> | null = null
+  private readonly cleanupStartCallbacks = new Set<() => void>()
 
   /**
    * Creates a new CollectionLifecycleManager instance
@@ -236,6 +237,26 @@ export class CollectionLifecycleManager<
   }
 
   /**
+   * Observe the synchronous start of cleanup without treating it as terminal
+   * resource settlement. Internal dependents use this to retire work before
+   * an asynchronous adapter cleanup publishes `cleaned-up`.
+   */
+  public onCleanupStart(callback: () => void): () => void {
+    this.cleanupStartCallbacks.add(callback)
+    if (this.cleaningUp) {
+      try {
+        callback()
+      } catch (error) {
+        // Registration did not return its ownership handle. Do not retain an
+        // observer that its caller has no way to unsubscribe.
+        this.cleanupStartCallbacks.delete(callback)
+        throw error
+      }
+    }
+    return () => this.cleanupStartCallbacks.delete(callback)
+  }
+
+  /**
    * Start the garbage collection timer for a collection with no subscribers
    * Called when sync starts outside a subscription
    */
@@ -355,7 +376,7 @@ export class CollectionLifecycleManager<
     const completion = createDeferred<void>()
     this.cleanupPromise = completion.promise
     this.cleaningUp = true
-    let localFailure: { error: unknown } | undefined
+    const localFailures: Array<unknown> = []
     let synchronousSyncFailure: { error: unknown } | undefined
     let syncCleanupComplete = true
     let finished = false
@@ -364,8 +385,14 @@ export class CollectionLifecycleManager<
       try {
         callback()
       } catch (error) {
-        localFailure ??= { error }
+        localFailures.push(error)
       }
+    }
+
+    // Dependents must stop using the discarded sync run immediately, while
+    // the public status and cleanup promise still wait for adapter settlement.
+    for (const callback of [...this.cleanupStartCallbacks]) {
+      attempt(callback)
     }
 
     const finish = (syncFailure?: { error: unknown }) => {
@@ -383,16 +410,28 @@ export class CollectionLifecycleManager<
       // Keep cleanup observably asynchronous even when every release is
       // synchronous. Existing callers may use this turn to let optimistic
       // settlement finish before starting the next operation.
-      const failure =
-        syncFailure && localFailure
-          ? {
-              error: new AggregateError(
-                [syncFailure.error, localFailure.error],
-                `Adapter cleanup and local teardown both failed`,
-                { cause: syncFailure.error },
-              ),
-            }
-          : (syncFailure ?? localFailure)
+      let failure: { error: unknown } | undefined
+      if (syncFailure && localFailures.length > 0) {
+        failure = {
+          error: new AggregateError(
+            [syncFailure.error, ...localFailures],
+            `Adapter cleanup and local teardown both failed`,
+            { cause: syncFailure.error },
+          ),
+        }
+      } else if (syncFailure) {
+        failure = syncFailure
+      } else if (localFailures.length === 1) {
+        failure = { error: localFailures[0] }
+      } else if (localFailures.length > 1) {
+        failure = {
+          error: new AggregateError(
+            localFailures,
+            `Multiple local teardown steps failed`,
+            { cause: localFailures[0] },
+          ),
+        }
+      }
       void Promise.resolve()
         .then(() => Promise.resolve())
         .then(() => {

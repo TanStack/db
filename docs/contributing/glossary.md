@@ -32,6 +32,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | sync run | One invocation of a Collection's sync function, plus the callbacks and resources installed by that invocation, until cleanup invalidates them. A run may own zero or more provider requests and may outlive any one request. Component-owned `syncRunGeneration` counters fence this lifetime in Collection state, sync ownership, and live-query graph work. | Provider session, replay, generation, or request. |
 | provider session | A provider-defined remote stream, connection, or SDK lifetime. Always qualify it with the provider. | Sync run. |
 | cleanup | The transition that ends the current sync run and releases its resources. Callback invalidation and local teardown begin synchronously. The public cleanup promise and final `cleaned-up` status settle after adapter cleanup settles. The Collection object remains available for cleanup or restart. | Collection destruction, restart, or replay. |
+| cleanup start | The internal boundary at which cleanup synchronously closes restart admission, invalidates the current sync run, puts dependent live queries in terminal error, and marks dependent Effects disposed. The public Collection status keeps its prior value while adapter cleanup is pending. | A Collection status, cleanup settlement, or proof that adapter resources or Effect handlers settled. |
 | restart | Starting a new sync run after the prior sync run has ended. | Same-run recovery or replay. |
 | truncate replay | An authoritative source replacement after a truncate, inside the current sync run. The Collection subscription remains active; any dependent live-query graph remains active behind its publication barrier. | Restart, reload, retry, or repair. |
 | source snapshot | The source rows established by one snapshot operation within its declared predicate and window. It proves full-source state only when the provider says that scope is authoritative and exhausted. | Public snapshot or proof of full-source coverage. |
@@ -157,7 +158,9 @@ Use nouns for state and verbs for transitions:
 - A promise **settles**; it **fulfills** or **rejects**.
 - A sync transaction **applies** when its writes and events become visible.
 - A replay or repair **publishes** one coherent public snapshot.
-- Cleanup **ends** a sync run. Restart **starts** a new sync run.
+- Cleanup start **invalidates** a sync run and **closes** restart admission.
+  Cleanup **settles** after adapter cleanup settles and the Collection publishes
+  `cleaned-up`. Restart then **starts** a new sync run.
 - Truncate replay **replaces** source state inside the current sync run and
   any current dependent graph.
 

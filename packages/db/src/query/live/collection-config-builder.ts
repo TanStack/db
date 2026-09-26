@@ -1189,10 +1189,7 @@ export class CollectionConfigBuilder<
     // Handle manual cleanup - this should not happen due to GC prevention,
     // but could happen if user manually calls cleanup()
     if (status === `cleaned-up`) {
-      this.transitionToError(
-        `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
-          `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
-      )
+      this.handleSourceCleanupStart(collectionId)
       return
     }
 
@@ -1210,6 +1207,16 @@ export class CollectionConfigBuilder<
 
     // Update ready status based on all source collections
     this.updateLiveQueryStatus(config)
+  }
+
+  private handleSourceCleanupStart(collectionId: string): Error | undefined {
+    if (this.fatalQueryError) return
+    const error = new Error(
+      `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
+        `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
+    )
+    this.transitionToError(error.message, error)
+    return error
   }
 
   /**
@@ -1307,7 +1314,20 @@ export class CollectionConfigBuilder<
       const statusUnsubscribe = collection.on(`status:change`, (event) => {
         this.handleSourceStatusChange(config, sourceId, collectionId, event)
       })
+      let cleanupStartError: Error | undefined
+      const cleanupStartUnsubscribe = collection._onCleanupStart(() => {
+        cleanupStartError = this.handleSourceCleanupStart(collectionId)
+      })
+      // Registration reports an already-active cleanup synchronously. That
+      // terminal transition must roll back earlier source ownership and stop
+      // this source and later aliases from acquiring any.
+      if (cleanupStartError) {
+        cleanupStartUnsubscribe()
+        statusUnsubscribe()
+        throw cleanupStartError
+      }
       syncState.unsubscribeCallbacks.add(statusUnsubscribe)
+      syncState.unsubscribeCallbacks.add(cleanupStartUnsubscribe)
 
       // The source may have failed before this live query subscribed. Register
       // the listener first, then reconcile that current state so no transition
