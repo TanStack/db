@@ -582,6 +582,56 @@ async function cleanupPersistedOracle(
   }
 }
 
+it.each([false, true])(
+  `persisted oracle cleanup attempts every action without hiding a primary failure: %s`,
+  async (hasPrimaryFailure) => {
+    const firstFailure = new Error(`first oracle cleanup failure`)
+    const secondFailure = new Error(`second oracle cleanup failure`)
+    const attempts: Array<string> = []
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    try {
+      const outcome = await cleanupPersistedOracle(
+        [
+          () => {
+            attempts.push(`first`)
+            throw firstFailure
+          },
+          () => {
+            attempts.push(`second`)
+            return Promise.reject(secondFailure)
+          },
+          () => {
+            attempts.push(`last`)
+          },
+        ],
+        hasPrimaryFailure,
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+
+      expect(attempts).toEqual([`first`, `second`, `last`])
+      if (hasPrimaryFailure) {
+        expect(outcome).toBeUndefined()
+        expect(warning).toHaveBeenCalledWith(
+          `Persisted oracle cleanup failed after the primary failure:`,
+          [firstFailure, secondFailure],
+        )
+      } else {
+        expect(outcome).toBeInstanceOf(AggregateError)
+        expect((outcome as AggregateError).errors).toEqual([
+          firstFailure,
+          secondFailure,
+        ])
+        expect(warning).not.toHaveBeenCalled()
+      }
+    } finally {
+      warning.mockRestore()
+    }
+  },
+)
+
 type DurabilityLedgerEvent =
   | { type: `begin`; transactionId: string }
   | { type: `write`; transactionId: string; row: Todo }
@@ -6709,13 +6759,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         cleanupOutcome,
         `runtime cleanup tasks settled`,
       )
-      expect(outcome).toEqual({
-        status: `rejected`,
-        error: expect.objectContaining({
-          name: `SyncCleanupError`,
-          cause: firstRuntimeError,
-        }),
-      })
+      expect(outcome.status).toBe(`rejected`)
+      if (outcome.status !== `rejected`) {
+        throw new Error(`expected runtime cleanup to reject`)
+      }
+      expect(outcome.error).toMatchObject({ name: `SyncCleanupError` })
+      const syncCleanupError = outcome.error as { cause?: unknown }
+      expect(syncCleanupError.cause).toBeInstanceOf(AggregateError)
+      const aggregate = syncCleanupError.cause as AggregateError
+      expect(aggregate.cause).toBe(firstRuntimeError)
+      expect(aggregate.errors).toEqual([firstRuntimeError, laterRuntimeError])
       expect(cleanupEvents).toEqual([`coordinator`, `remote-owner`])
 
       replacement = createCollection(

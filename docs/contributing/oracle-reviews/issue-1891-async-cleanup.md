@@ -150,3 +150,148 @@ Collection drivers, recorded pre-fix assertion failures, exact error identity,
 and bounded resource cleanup. ORC-003, ORC-004, ORC-007, ORC-008, ORC-009, and
 ORC-011 are not triggered by these focused refinements. This versioned section
 satisfies ORC-012 for the reconciliation.
+
+## Design-grammar and loss-audit closeout
+
+Reviewed semantic head: `ccef1e2ea6f6ea04740a27d7de6efde3424ecca6`
+
+This closeout adds the Query DB cleanup helper and public Query-backed
+Collection witness to the reviewed scope. It also re-audits the core cleanup
+oracle, persisted wrapper, and PowerSync wrapper after the failure-retention
+repairs. A later documentation-only receipt commit does not change this
+semantic tree.
+
+### Intended law and minimal grammar
+
+The retained model has five primitives:
+
+1. An active sync run owns cleanup obligations.
+2. Same-stack cleanup invalidation creates one shared retirement ticket.
+3. An ordered obligation ledger waits for every acquired cleanup obligation.
+4. A deterministic failure algebra preserves every failure, its role, and its
+   ownership order; a lone failure keeps its identity.
+5. The public observation trace is invalidation, obligation settlement,
+   terminal `cleaned-up` publication, public retirement Promise continuation,
+   and only then an ordinary replacement run.
+
+The wrappers refine that grammar rather than adding unrelated Cartesian axes:
+
+| Refinement | Primary role | Later retained roles |
+| --- | --- | --- |
+| Core | adapter cleanup | local teardown |
+| Persistence | source cleanup | runtime releases in release order |
+| PowerSync eager | trigger disposal | load-hook cleanup |
+| PowerSync on-demand | first acquired cleanup obligation | later obligations in ledger order |
+| Query DB | adapter cleanup | QueryClient unmount |
+
+A contextual-void callback may return an incidental non-Promise value; that is
+synchronous completion. A native Promise or structural thenable is an
+obligation and must settle. Fulfillment and rejection both close the old run;
+rejection remains observable after terminal publication. Completion timing
+never chooses the primary failure.
+
+### Loss-audit retention decisions
+
+The audit retained the distinctions that can change a promised observation:
+
+- active run, retirement pending, terminal publication, public Promise
+  settlement, and replacement run remain separate cuts;
+- zero, one, and multiple obligations remain distinguishable;
+- incidental values, native Promises, and structural thenables remain separate
+  runtime return classes;
+- synchronous throw, asynchronous rejection, and multiple failures remain
+  separate settlement shapes;
+- abort and release reentry, nested cleanup, and repeated restart attempts
+  remain explicit grammar coordinates;
+- one and multiple wrapper-owned resources remain separate because the latter
+  exposes dropped diagnostics and order-dependent precedence;
+- wrapper priority is a named refinement mapping, not an implicit scheduling
+  accident.
+
+The audit deliberately did not import demand replay, row publication, provider
+transport, or adapter-specific startup into the cleanup grammar. A pending
+PowerSync hook discovered after cleanup starts belongs to the cleanup-start
+signal design in PR #1897. Those behaviors may share code paths, but no cleanup
+observation here can judge their full contracts.
+
+### Grammar reconstruction, ablation, range, and exclusion
+
+**Reconstruction.** Every known valid cleanup witness in scope maps to the five
+primitives: synchronous and asynchronous cleanup, structural thenables,
+fulfillment and rejection, concurrent and nested cleanup callers, terminal
+event and awaited restart, and each wrapper's resource roles. No known witness
+requires a sixth lifecycle state or a wrapper-specific copy of the model.
+
+**Ablation.** Each declared coordinate has a named contribution. Removing
+abort or release loses one reentry boundary. Removing nested cleanup loses the
+shared-ticket check. Removing the second attempt loses repeated early-admission
+pressure. Collapsing return classes recreates the truthy-number or hidden-
+thenable bugs. Collapsing settlement shapes loses rejection ordering and lone-
+error identity. Collapsing ownership count loses later failures. Removing a
+wrapper row loses its public resource mapping and precedence law. The
+executable `2 × 2 × 2` admission calibration proves eight unique cells and one
+execution coordinate per declared cell.
+
+**Range.** The bounded admission axes are abort or release, nested cleanup on
+or off, and one or two restart attempts. Focused margins cover zero/one/many
+obligations, incidental/native/structural returns, synchronous/asynchronous
+failure, both completion orders, and one/two wrapper failures. No independently
+supplied held-out marginal case was available after construction, so formal
+external range validation remains untested. A later range evaluation should
+supply a behavior-preserving witness without changing the grammar first; the
+model succeeds only if that witness reconstructs from the existing primitives
+and the checker reaches its named public checkpoint.
+
+**Exclusion and negative controls.** The grammar rejects restart before
+terminal publication, duplicated physical release, a dropped secondary
+failure, treating a truthy non-Promise as a Promise, and ownership published by
+a retired run. Pre-fix production reached and failed the intended checkpoints:
+Query DB threw `TypeError: result.then is not a function`; persistence exposed
+only the first runtime release error; PowerSync exposed only the first acquired
+hook rejection in both controlled completion orders. These were assertion
+failures, not timeouts, setup failures, or unreached paths.
+
+### ORC-001 through ORC-012 reconciliation
+
+| Requirement | Outcome at the reviewed semantic head |
+| --- | --- |
+| ORC-001: contract authority and limits | Pass. The public cleanup contract and glossary authorize settlement, terminal publication, and restart. The oracle opening and this record exclude replay, publication, provider transport, and late-acquisition design. |
+| ORC-002: independent judgment | Pass. Held gates, structural thenables, sentinel identities, ordered public observations, and a role table derive expectations without importing production cleanup classifiers or failure selectors. |
+| ORC-003: distinguishable responsibilities | Pass. Contract and model are in the oracle opening; named axes form the grammar; public Collections and wrappers are the drivers; exact status, order, identity, count, and ownership assertions are the refinement checks. |
+| ORC-004: generated-history grammar controls | Not triggered because this remains bounded enumeration, not a generated-property claim. Reconstruction, ablation, range, and exclusion are nevertheless recorded above, and unique-cell calibration is executable. |
+| ORC-005: production path and observation | Pass. Core, persistence, and PowerSync drive public Collections. Query DB directly checks helper composition and separately proves the real public wrapper mounts and unmounts QueryClient exactly once. A supported public seam for injecting arbitrary async internal Query cleanup does not exist; no private seam was added. |
+| ORC-006: checker calibration | Pass. The prior R4 ordering mutant remains killed. New pre-fix controls separately killed truthy non-Promise classification and both same-role failure-dropping designs at their intended assertions. |
+| ORC-007: fixed/random campaigns and replay | Not triggered. No important randomized property was added or claimed. |
+| ORC-008: stateful-model minimality | Not triggered by a state-model shape change. The audit still retained five observable cuts because restart legality and Promise ordering distinguish each adjacent pair. |
+| ORC-009: vocabulary mapping | Pass. Active sync run, cleanup, restart, logical owner, physical acquisition, and Promise settlement retain glossary meanings. `Retirement ticket`, `obligation ledger`, and `terminal publication` are model descriptions mapped above to the public cleanup Promise, acquired cleanup work, and the `cleaned-up` status event. |
+| ORC-010: failure fidelity and cleanup | Pass. Core and PowerSync hostile harness controls retain a primary mismatch plus every cleanup failure. Persistence now calibrates both modes: it aggregates cleanup failures when there is no primary and records all secondary diagnostics without replacing an existing primary. All actions are attempted. |
+| ORC-011: independent second formulation | Pass within scope. The core public lifecycle uses a structural thenable; Query's direct helper isolates wrapper composition while the public QueryClient witness proves real mount/unmount wiring; persisted ownership replacement and real PowerSync SQLite hooks independently test wrapper refinement. Query's public witness does not claim arbitrary async adapter injection. |
+| ORC-012: review evidence | Pass. This exact-head record accounts for ORC-001 through ORC-011, including non-triggered requirements and the unresolved held-out-range limitation. |
+
+### Exact-head receipts
+
+Environment: Node `v24.19.0`, pnpm `11.1.0`, Vitest `3.2.4`, Darwin
+`arm64`.
+
+At baseline head `efa90005248c7274795e489aa08e494914215483`, the new RED
+controls produced one Query failure, one persistence failure, and two
+PowerSync failures. At semantic head
+`ccef1e2ea6f6ea04740a27d7de6efde3424ecca6`:
+
+- the core cleanup oracle passed 25 of 25 tests;
+- Query cleanup composition passed 8 of 8 tests, including the public wrapper
+  witness;
+- the selected persisted cleanup and harness histories passed 8 of 8 tests
+  with 240 unrelated tests skipped by the name filter;
+- the PowerSync load-hook file passed 25 of 25 tests;
+- TypeScript checks passed for DB, SQLite persistence, and PowerSync;
+- Query DB's package build, including declaration generation, passed. Its broad
+  TypeScript configuration also traverses DB collection E2E suites and failed
+  only because `@tanstack/electric-db-collection` was not resolvable in this
+  checkout; no changed Query file produced a diagnostic;
+- DB, SQLite persistence, and PowerSync package builds also passed, and the
+  documentation link check found no broken links;
+- targeted ESLint reported zero errors. Its 22 warnings are pre-existing
+  `require-await` warnings in the persisted test file outside the changed
+  lines;
+- Prettier and `git diff --check` passed.

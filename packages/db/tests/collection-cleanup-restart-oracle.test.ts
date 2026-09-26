@@ -36,6 +36,9 @@ import type { SyncConfig } from '../src/types'
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
  * adapter error primary and the local error as a secondary diagnostic. A lone
  * error keeps its identity.
+ * No replacement owner is admitted until terminal publication. Concurrent
+ * callers share the cleanup promise. Rejection still finalizes the old run and
+ * rejects every waiter. A later ordinary preload starts a new sync run.
  *
  * `expectedCleanupBoundary` is a small independent three-cut timeline model. Its
  * `dependent` field combines the live query's terminal error and the Effect's
@@ -149,6 +152,62 @@ function expectExactCaseIds(
   expect(new Set(ids).size).toBe(ids.length)
 }
 
+async function withOracleCleanup<T>(
+  body: () => T | Promise<T>,
+  cleanups: Array<() => void | Promise<unknown>>,
+): Promise<T> {
+  let value: T | undefined
+  const failures: Array<unknown> = []
+  try {
+    value = await body()
+  } catch (error) {
+    failures.push(error)
+  }
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(failures, `Cleanup oracle and teardown failed`, {
+      cause: failures[0],
+    })
+  }
+  return value as T
+}
+
+describe(`Collection cleanup oracle calibration`, () => {
+  it(`retains a primary mismatch and every teardown failure`, async () => {
+    const primary = new Error(`oracle mismatch`)
+    const firstCleanup = new Error(`first cleanup failed`)
+    const secondCleanup = new Error(`second cleanup failed`)
+    const attempts: Array<string> = []
+
+    const failure = await withOracleCleanup(() => {
+      throw primary
+    }, [
+      () => {
+        attempts.push(`first`)
+        throw firstCleanup
+      },
+      () => {
+        attempts.push(`second`)
+        return Promise.reject(secondCleanup)
+      },
+    ]).catch((error: unknown) => error)
+
+    expect(attempts).toEqual([`first`, `second`])
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure).toMatchObject({
+      cause: primary,
+      errors: [primary, firstCleanup, secondCleanup],
+    })
+  })
+})
+
 describe(`Collection cleanup admission oracle`, () => {
   it(`calibrates every declared bounded-product cell exactly once`, () => {
     expectExactCaseIds(reentryScenarios, [
@@ -167,6 +226,47 @@ describe(`Collection cleanup admission oracle`, () => {
       `await:source`,
       `await:live-query`,
     ])
+  })
+
+  it(`awaits a structural thenable returned from contextual-void cleanup`, async () => {
+    const cleanupGate = createDeferred<void>()
+    let cleanupCalls = 0
+    const thenable = {
+      then: cleanupGate.promise.then.bind(cleanupGate.promise),
+    }
+    const cleanup: () => void = () => {
+      cleanupCalls++
+      return thenable
+    }
+    const collection = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return cleanup
+        },
+      },
+    })
+
+    await withOracleCleanup(async () => {
+      await collection.preload()
+      let settled = false
+      const retirement = collection.cleanup().then(() => {
+        settled = true
+      })
+
+      expect(cleanupCalls).toBe(1)
+      expect(collection.status).toBe(`ready`)
+      expect(() => collection.startSyncImmediate()).toThrowError(
+        expect.objectContaining(cleanupError),
+      )
+      await Promise.resolve()
+      expect(settled).toBe(false)
+
+      cleanupGate.resolve()
+      await retirement
+      expect(collection.status).toBe(`cleaned-up`)
+    }, [() => cleanupGate.resolve(), () => collection.cleanup()])
   })
 
   it(`waits for source cleanup before publishing the restart boundary`, async () => {
@@ -952,6 +1052,7 @@ describe(`Collection cleanup admission oracle`, () => {
     let starts = 0
     let cleanups = 0
     const statuses: Array<string> = []
+    const settlementOrder: Array<string> = []
     const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
@@ -962,7 +1063,10 @@ describe(`Collection cleanup admission oracle`, () => {
             cleanup: () => {
               cleanups++
               return cleanups === 1
-                ? cleanupGate.promise.then(() => Promise.reject(sourceError))
+                ? cleanupGate.promise.then(() => {
+                    settlementOrder.push(`adapter-cleanup-rejected`)
+                    throw sourceError
+                  })
                 : undefined
             },
           }
@@ -971,6 +1075,9 @@ describe(`Collection cleanup admission oracle`, () => {
     })
     const off = collection.on(`status:change`, ({ status }) => {
       statuses.push(status)
+      if (status === `cleaned-up`) {
+        settlementOrder.push(`cleaned-up-event`)
+      }
     })
 
     try {
@@ -978,6 +1085,9 @@ describe(`Collection cleanup admission oracle`, () => {
       statuses.length = 0
       const firstCleanup = collection.cleanup()
       const concurrentCleanup = collection.cleanup()
+      void firstCleanup.catch(() => {
+        settlementOrder.push(`public-cleanup-rejection-continuation`)
+      })
       const firstOutcome = firstCleanup.catch((error: unknown) => error)
       const concurrentOutcome = concurrentCleanup.catch(
         (error: unknown) => error,
@@ -999,6 +1109,11 @@ describe(`Collection cleanup admission oracle`, () => {
       })
       expect(collection.status).toBe(`cleaned-up`)
       expect(statuses).toEqual([`cleaned-up`])
+      expect(settlementOrder).toEqual([
+        `adapter-cleanup-rejected`,
+        `cleaned-up-event`,
+        `public-cleanup-rejection-continuation`,
+      ])
       expect(cleanups).toBe(1)
 
       // Rejection ends the old sync run. A later run is allowed, and a
