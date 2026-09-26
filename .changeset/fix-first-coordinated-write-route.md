@@ -4,4 +4,4 @@
 '@tanstack/electron-db-sqlite-persistence': patch
 ---
 
-Wait for an initial leader route before a coordinated write. Let leader election finish during scheduled hydration, and reject writes queued under a former leader before persistence.
+Request an existing leader's route before the first coordinated write, without sending the mutation. Let leader election finish during scheduled hydration, and reject writes queued under a former leader before persistence.

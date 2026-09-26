@@ -36,6 +36,8 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * that collection's leadership. A mutation requested before the first leader
  * is known waits for a route up to the RPC deadline. The sole participant
  * applies it locally if elected; an unsuccessful election cannot hold it forever.
+ * A late follower requests the leader route without sending a mutation. A
+ * current leader answers before its next periodic heartbeat is due.
  * Election must still finish when scheduled hydration awaits that first
  * source commit, even when a different collection has a queued write. Regular
  * work must enter the shared scheduler before taking the database-wide writer
@@ -1150,6 +1152,117 @@ describe(`BrowserCollectionCoordinator`, () => {
           coordinator.dispose()
           await request.catch(() => undefined)
           observePostedMessage = undefined
+        }
+      },
+    )
+
+    it.each([{ kind: `source commit` }, { kind: `local mutation` }] as const)(
+      `discovers a late follower route before the next heartbeat for a $kind`,
+      async ({ kind }) => {
+        vi.useFakeTimers()
+        const leaderAdapter = createStubAdapter()
+        const leader = createCoordinator(leaderAdapter)
+        let follower: BrowserCollectionCoordinator | undefined
+        let observed: Promise<void> | undefined
+        let settled = false
+        let response:
+          | ApplyCommittedTxResponse
+          | ApplyLocalMutationsResponse
+          | undefined
+        let failure: unknown
+        const posted: Array<string> = []
+
+        try {
+          leader.subscribe(`todos`, () => {})
+          await vi.advanceTimersByTimeAsync(0)
+          expect(leader.isLeader(`todos`)).toBe(true)
+
+          // The follower joins after the initial heartbeat. Stop periodic
+          // heartbeats so only an explicit route reply can settle its write.
+          const leaderState = inspectCoordinator(leader).collections.get(
+            `todos`,
+          ) as { heartbeatTimer: ReturnType<typeof setInterval> | null }
+          if (leaderState.heartbeatTimer !== null) {
+            clearInterval(leaderState.heartbeatTimer)
+            leaderState.heartbeatTimer = null
+          }
+          observePostedMessage = (data) => {
+            const envelope = data as {
+              collectionId?: string
+              payload?: { type?: string }
+            }
+            const type = envelope.payload?.type
+            if (
+              envelope.collectionId === `todos` &&
+              (type === `leader:routeRequest` ||
+                type === `leader:heartbeat` ||
+                type === `rpc:applyCommittedTx:req` ||
+                type === `rpc:applyLocalMutations:req`)
+            ) {
+              posted.push(type)
+            }
+          }
+
+          follower = createCoordinator()
+          follower.subscribe(`todos`, () => {})
+          expect(follower.isLeader(`todos`)).toBe(false)
+
+          const write =
+            kind === `source commit`
+              ? follower.requestApplyCommittedTx(`todos`, {
+                  txId: `late-follower-source`,
+                  term: 0,
+                  seq: 0,
+                  rowVersion: 0,
+                  mutations: [
+                    { type: `insert`, key: `first`, value: { id: `first` } },
+                  ],
+                })
+              : follower.requestApplyLocalMutations(`todos`, [
+                  {
+                    mutationId: `late-follower-local`,
+                    type: `insert`,
+                    key: `first`,
+                    value: { id: `first` },
+                  },
+                ])
+          observed = write.then(
+            (result) => {
+              settled = true
+              response = result
+            },
+            (error: unknown) => {
+              settled = true
+              failure = error
+            },
+          )
+          await vi.advanceTimersByTimeAsync(0)
+
+          expect({
+            settled,
+            failure,
+            responseOk: response?.ok,
+            posted,
+          }).toEqual({
+            settled: true,
+            failure: undefined,
+            responseOk: true,
+            posted: [
+              `leader:routeRequest`,
+              `leader:heartbeat`,
+              kind === `source commit`
+                ? `rpc:applyCommittedTx:req`
+                : `rpc:applyLocalMutations:req`,
+            ],
+          })
+          expect(leaderAdapter.appliedTxs).toHaveLength(1)
+        } finally {
+          observePostedMessage = undefined
+          follower?.dispose()
+          leader.dispose()
+          await vi.advanceTimersByTimeAsync(0)
+          await observed
+          vi.useRealTimers()
         }
       },
     )

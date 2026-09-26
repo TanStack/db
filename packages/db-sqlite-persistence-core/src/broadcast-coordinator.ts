@@ -895,6 +895,14 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       !state.isLeader &&
       state.leaderId === null
     ) {
+      this.channel.postMessage({
+        v: 1,
+        dbName: this.dbName,
+        collectionId,
+        senderId: this.nodeId,
+        ts: Date.now(),
+        payload: { type: `leader:routeRequest` },
+      } satisfies ProtocolEnvelope<{ type: `leader:routeRequest` }>)
       return this.waitForLeadershipRoute(
         collectionId,
         state,
@@ -1146,6 +1154,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     if (!payload || typeof payload !== `object`) return
 
     const type = (payload as Record<string, unknown>).type as string | undefined
+
+    if (type === `leader:routeRequest`) {
+      const state = this.collections.get(envelope.collectionId)
+      if (state?.isLeader) this.emitHeartbeat(envelope.collectionId, state)
+      return
+    }
 
     if (type === `leader:heartbeat`) {
       const heartbeat = payload as {
