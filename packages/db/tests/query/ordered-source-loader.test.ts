@@ -338,6 +338,72 @@ describe(`OrderedSourceLoader`, () => {
     }
   })
 
+  it(`repairs ordering before an explicit window consumes a staged ordinary continuation`, () => {
+    const requests: Array<{ method: string; options: RequestOptions }> = []
+    let graphInputRevision = 0
+    const sentRows = new Map([[1, { rank: 1 }]])
+    const request = (method: string, options: RequestOptions) => {
+      requests.push({ method, options })
+      if (requests.length === 1) {
+        graphInputRevision++
+        loader.onSourceChanges(
+          [{ type: `update`, key: 1, value: { rank: 2 } }],
+          sentRows,
+        )
+      }
+      options.onLoadSubsetResult?.(true, options, () => {})
+    }
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 2 } }],
+      requestLimitedSnapshot: (options: RequestOptions) =>
+        request(`limited`, options),
+      requestSnapshot: (options: RequestOptions) =>
+        request(`snapshot`, options),
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo(),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => graphInputRevision,
+    )
+
+    try {
+      loader.start()
+
+      const stagedContinuation = (
+        loader as unknown as {
+          stagedContinuation?: {
+            isAuthoritativeRepair: boolean
+            windowOperationGeneration?: number
+          }
+        }
+      ).stagedContinuation
+      expect(stagedContinuation).toMatchObject({
+        isAuthoritativeRepair: false,
+      })
+      expect(stagedContinuation?.windowOperationGeneration).toBeUndefined()
+      expect(
+        (loader as unknown as { needsOrderingRepair: boolean })
+          .needsOrderingRepair,
+      ).toBe(true)
+
+      loader.loadMore(1)
+
+      expect(requests).toHaveLength(2)
+      expect(requests[1]?.method).toBe(`snapshot`)
+      expect(requests[1]?.options).toMatchObject({ refetch: true })
+      expect(requests[1]?.options.orderBy).toBeUndefined()
+      expect(requests[1]?.options.limit).toBeUndefined()
+      expect(requests[1]?.options.cursor).toBeUndefined()
+      expect(requests[1]?.options.where).toBeUndefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
   const syncRouteCells = (
     [`page`, `prefix`, `boundary`, `full-source`] as const
   ).flatMap((route) =>

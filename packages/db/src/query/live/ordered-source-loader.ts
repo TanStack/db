@@ -143,8 +143,18 @@ export class OrderedSourceLoader {
   ): Promise<void> | undefined {
     if (!this.active || this.info.limit === 0 || this.requesting) return
     if (this.stagedContinuation) {
-      this.consumeStagedContinuation(windowOperationGeneration)
-      return this.pending
+      // A synchronous finite request can deliver an order-changing mutation.
+      // Its continuation is staged after that mutation invalidates ordering,
+      // so authoritative repair must supersede the stale finite chain.
+      if (
+        this.needsOrderingRepair &&
+        !this.stagedContinuation.isAuthoritativeRepair
+      ) {
+        this.stagedContinuation = undefined
+      } else {
+        this.consumeStagedContinuation(windowOperationGeneration)
+        return this.pending
+      }
     }
     const mayRetryFailure =
       this.failedRequest === undefined ||
