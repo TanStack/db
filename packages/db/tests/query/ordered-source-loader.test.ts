@@ -338,6 +338,104 @@ describe(`OrderedSourceLoader`, () => {
     }
   })
 
+  it(`drains more than one literal-true continuation before returning`, () => {
+    const methods: Array<`page` | `boundary`> = []
+    let pageCount = 0
+    let boundary = 0
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: boundary } }],
+      requestLimitedSnapshot: (options: RequestOptions) => {
+        methods.push(`page`)
+        pageCount++
+        boundary = pageCount
+        options.onLoadSubsetResult?.(true, options, () => {})
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        methods.push(`boundary`)
+        options.onLoadSubsetResult?.(true, options, () => {})
+      },
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ dataNeeded: () => (pageCount < 2 ? 1 : 0) }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => 0,
+    )
+
+    try {
+      loader.start()
+
+      expect(methods).toEqual([`page`, `boundary`, `page`, `boundary`])
+      expect(pendingPromise(loader)).toBeUndefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
+  it(`does not release a fulfilled Promise parent when its continuation throws`, async () => {
+    const failure = new Error(`continuation request failed`)
+    const requests: Array<{
+      options: RequestOptions
+      acquisition?: LoadSubsetOptions
+      release?: ReleaseLoadSubset
+    }> = []
+    const released: Array<LoadSubsetOptions> = []
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+      requestLimitedSnapshot: (options: RequestOptions) => {
+        const acquisition: LoadSubsetOptions = {
+          orderBy: options.orderBy,
+          limit: options.limit,
+        }
+        const release = () => released.push(acquisition)
+        requests.push({ options, acquisition, release })
+        options.onLoadSubsetResult?.(Promise.resolve(), acquisition, release)
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        requests.push({ options })
+        throw failure
+      },
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ dataNeeded: () => 0 }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+    )
+
+    try {
+      loader.start()
+      const parent = pendingPromise(loader)
+      expect(parent).toBeInstanceOf(Promise)
+      await expect(parent).rejects.toBe(failure)
+
+      expect(requests).toHaveLength(2)
+      expect(released).toEqual([])
+      expect(
+        (
+          loader as unknown as {
+            settledFiniteAcquisitions: Map<
+              ReleaseLoadSubset,
+              number | undefined
+            >
+          }
+        ).settledFiniteAcquisitions.has(requests[0]!.release!),
+      ).toBe(true)
+      expect(
+        (loader as unknown as { orderedLoadGeneration: number })
+          .orderedLoadGeneration,
+      ).toBe(0)
+      expect(
+        (loader as unknown as { failedRequest?: unknown }).failedRequest,
+      ).toBeDefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
   it(`repairs ordering before an explicit window consumes a staged ordinary continuation`, () => {
     const requests: Array<{ method: string; options: RequestOptions }> = []
     let graphInputRevision = 0

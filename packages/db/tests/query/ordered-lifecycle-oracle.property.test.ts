@@ -33,9 +33,11 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * One composed fixed regression injects sibling-source input during a
  * synchronous ordered continuation. It requires graph processing before the
  * loader decides whether another acquisition is needed.
- * A second product adds nullable multi-term ordering, including direction and
- * null placement for both terms. The initial-settlement cells are a bounded
- * deterministic grammar; they do not extend the generated-history campaign.
+ * A second product adds nullable multi-term ordering, including null placement
+ * for both terms. A four-cell overlay varies both directions independently
+ * without multiplying that lifecycle product. The initial-settlement cells are
+ * a bounded deterministic grammar; they do not extend the generated-history
+ * campaign.
  *
  * For each cell, a plain finite source supplies the reference order and window.
  * The driver records physical acquisitions, application, readiness, errors,
@@ -73,6 +75,35 @@ type Scenario = {
   rankStep?: number
   nullable?: { primary: OrderTerm; secondary: OrderTerm }
   repair?: boolean
+}
+
+type CapturedOracleFailure = { error: unknown }
+
+async function finishOracleCleanup(
+  primaryFailure: CapturedOracleFailure | undefined,
+  cleanups: ReadonlyArray<() => unknown | Promise<unknown>>,
+  message: string,
+): Promise<void> {
+  const results = await Promise.allSettled(
+    cleanups.map((cleanup) => Promise.resolve().then(cleanup)),
+  )
+  const cleanupFailures = results.flatMap((result) =>
+    result.status === `rejected` ? [result.reason] : [],
+  )
+  if (!primaryFailure) {
+    if (cleanupFailures.length === 0) return
+    throw new AggregateError(cleanupFailures, message, {
+      cause: cleanupFailures[0],
+    })
+  }
+  if (cleanupFailures.length === 0) throw primaryFailure.error
+  throw new AggregateError(
+    [primaryFailure.error, ...cleanupFailures],
+    message,
+    {
+      cause: primaryFailure.error,
+    },
+  )
 }
 
 function compareNullable(
@@ -366,6 +397,7 @@ async function observeHistory(
   const preload = observe(live.preload())
   let move: ReturnType<typeof observe> | undefined
   let baseline: Array<Row> = []
+  let primaryFailure: CapturedOracleFailure | undefined
   try {
     if (scenario.barrier === `replay`) {
       await preload.done
@@ -593,15 +625,22 @@ async function observeHistory(
         repaired = true
       }
     }
-  } finally {
-    allowTarget = false
-    gate.resolve()
-    subscription.unsubscribe()
-    await live.cleanup()
-    await source.cleanup()
-    await preload.done
-    if (move) await move.done
+  } catch (error) {
+    primaryFailure = { error }
   }
+  allowTarget = false
+  await finishOracleCleanup(
+    primaryFailure,
+    [
+      () => gate.resolve(),
+      () => subscription.unsubscribe(),
+      () => live.cleanup(),
+      () => source.cleanup(),
+      () => preload.done,
+      ...(move ? [() => move.done] : []),
+    ],
+    `Ordered lifecycle oracle cleanup failed`,
+  )
   expect(new Set(released).size).toBe(released.length)
   for (const { options } of requests)
     expect(released.filter((release) => release === options)).toHaveLength(1)
@@ -775,16 +814,72 @@ async function observeInitialSettlement(
     status: live.status,
   })
 
+  let observation:
+    | {
+        immediate: InitialSettlementObservation
+        settled: InitialSettlementObservation
+        requests: Array<LoadSubsetOptions>
+        releases: Array<LoadSubsetOptions>
+      }
+    | undefined
+  let primaryFailure: CapturedOracleFailure | undefined
   try {
     const preload = live.preload()
     const immediate = observeCurrent()
     await preload
-    return { immediate, settled: observeCurrent(), requests, releases }
-  } finally {
-    subscription.unsubscribe()
-    await Promise.all([live.cleanup(), source.cleanup()])
+    observation = { immediate, settled: observeCurrent(), requests, releases }
+  } catch (error) {
+    primaryFailure = { error }
   }
+  await finishOracleCleanup(
+    primaryFailure,
+    [
+      () => subscription.unsubscribe(),
+      () => live.cleanup(),
+      () => source.cleanup(),
+    ],
+    `Initial-settlement oracle cleanup failed`,
+  )
+  return observation!
 }
+
+describe(`oracle harness failure fidelity`, () => {
+  it(`preserves the primary mismatch and every cleanup diagnostic`, async () => {
+    const primary = new Error(`primary mismatch`)
+    const firstCleanup = new Error(`first cleanup failed`)
+    const secondCleanup = new Error(`second cleanup failed`)
+    const attempted: Array<string> = []
+    let observed: unknown
+
+    try {
+      await finishOracleCleanup(
+        { error: primary },
+        [
+          () => {
+            attempted.push(`first`)
+            throw firstCleanup
+          },
+          () => {
+            attempted.push(`second`)
+            throw secondCleanup
+          },
+        ],
+        `Hostile cleanup control`,
+      )
+    } catch (error) {
+      observed = error
+    }
+
+    expect(attempted).toEqual([`first`, `second`])
+    expect(observed).toBeInstanceOf(AggregateError)
+    expect((observed as AggregateError).cause).toBe(primary)
+    expect((observed as AggregateError).errors).toEqual([
+      primary,
+      firstCleanup,
+      secondCleanup,
+    ])
+  })
+})
 
 describe(`synchronous initial settlement refinement`, () => {
   const cells = ([`eager`, `off`] as const).flatMap((autoIndex) =>
@@ -793,6 +888,11 @@ describe(`synchronous initial settlement refinement`, () => {
       settlement,
     })),
   )
+
+  it(`enumerates every initial path and settlement cell exactly once`, () => {
+    expect(cells).toHaveLength(4)
+    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(4)
+  })
 
   it.each(cells)(
     `publishes the complete initial window at the $settlement checkpoint with $autoIndex indexing`,
@@ -1058,6 +1158,21 @@ describe(`nullable multi-term lifecycle product`, () => {
           scenario.repair
         ),
     )
+  const directionCells = ([`asc`, `desc`] as const).flatMap(
+    (primaryDirection) =>
+      ([`asc`, `desc`] as const).map((secondaryDirection) => ({
+        primaryDirection,
+        secondaryDirection,
+      })),
+  )
+  it(`enumerates every nullable lifecycle and direction-overlay cell exactly once`, () => {
+    expect(cells).toHaveLength(22)
+    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(22)
+    expect(directionCells).toHaveLength(4)
+    expect(
+      new Set(directionCells.map((cell) => JSON.stringify(cell))).size,
+    ).toBe(4)
+  })
   it.each(cells)(
     `observes nullable tie and lifecycle coordinates: %j`,
     async (scenario) => {
@@ -1069,6 +1184,25 @@ describe(`nullable multi-term lifecycle product`, () => {
           : result.tieRequests,
       ).toBeGreaterThan(0)
       expect(result.repaired).toBe(scenario.repair)
+    },
+  )
+  it.each(directionCells)(
+    `keeps primary $primaryDirection and secondary $secondaryDirection direction independent`,
+    async ({ primaryDirection, secondaryDirection }) => {
+      const representative = cells[0]!
+      await assertHistory({
+        ...representative,
+        nullable: {
+          primary: {
+            ...representative.nullable!.primary,
+            direction: primaryDirection,
+          },
+          secondary: {
+            ...representative.nullable!.secondary,
+            direction: secondaryDirection,
+          },
+        },
+      })
     },
   )
   it.each([`secondary-order`, `null-placement`] as const)(
@@ -1084,23 +1218,30 @@ describe(`nullable multi-term lifecycle product`, () => {
   const arbitrary = fc
     .record({
       scenario: fc.constantFrom(...cells),
-      reverse: fc.boolean(),
+      primaryDirection: fc.constantFrom(`asc` as const, `desc` as const),
+      secondaryDirection: fc.constantFrom(`asc` as const, `desc` as const),
       rankOffset: fc.integer({ min: -20, max: 20 }),
       rankStep: fc.integer({ min: 1, max: 5 }),
     })
     .map(
-      ({ scenario, reverse, rankOffset, rankStep }): Scenario => ({
+      ({
+        scenario,
+        primaryDirection,
+        secondaryDirection,
+        rankOffset,
+        rankStep,
+      }): Scenario => ({
         ...scenario,
         rankOffset,
         rankStep,
         nullable: {
           primary: {
             ...scenario.nullable!.primary,
-            direction: reverse ? `desc` : `asc`,
+            direction: primaryDirection,
           },
           secondary: {
             ...scenario.nullable!.secondary,
-            direction: reverse ? `asc` : `desc`,
+            direction: secondaryDirection,
           },
         },
       }),
@@ -1119,6 +1260,17 @@ describe(`nullable multi-term lifecycle product`, () => {
     expect(
       new Set(sample.map((scenario) => scenario.nullable!.primary.direction)),
     ).toEqual(new Set([`asc`, `desc`]))
+    expect(
+      new Set(sample.map((scenario) => scenario.nullable!.secondary.direction)),
+    ).toEqual(new Set([`asc`, `desc`]))
+    expect(
+      new Set(
+        sample.map(
+          (scenario) =>
+            `${scenario.nullable!.primary.direction}/${scenario.nullable!.secondary.direction}`,
+        ),
+      ),
+    ).toEqual(new Set([`asc/asc`, `asc/desc`, `desc/asc`, `desc/desc`]))
     expect(sample.some((scenario) => scenario.repair)).toBe(true)
     expect(sample.some((scenario) => scenario.syncRun === `restart`)).toBe(true)
   })
