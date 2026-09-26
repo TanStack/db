@@ -31,6 +31,7 @@ import {
   toTransportedLoadSubsetOptions,
 } from '../src'
 import type {
+  CollectionReset,
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
   PersistedSyncWrappedOptions,
@@ -67,9 +68,13 @@ import type {
  * Histories cross hydration, held adapters, source FIFO ordering,
  * independent/dependent aborts, open-transaction failure boundaries, ambient owner
  * operations, applied-receipt rejection, remote subset demand, acquisition
- * release, retry, coordinator replay, cleanup, and restart. Tests drive the
+ * release, retry, coordinator replay, queued startup reloads, unscheduled
+ * startup/reset overlap, cleanup, and restart. Tests drive the
  * real persisted wrapper, Collection, coordinator, adapter, transactions,
  * indexes, and local mutation path.
+ * A source abort before core application rejects that transaction's receipt.
+ * It does not invalidate the durable baseline or an independent queued source
+ * transaction when the failed transaction made no public or durable change.
  *
  * Refinement checkpoints compare public rows, durable state, metadata, request
  * data, sequence evidence, exact errors, and late-work fencing. Fixed hostile
@@ -351,7 +356,7 @@ function createNoopAdapter(): PersistenceAdapter {
 }
 
 type CoordinatorHarness = PersistedCollectionCoordinator & {
-  emit: (payload: TxCommitted, senderId?: string) => void
+  emit: (payload: TxCommitted | CollectionReset, senderId?: string) => void
   pullSinceCalls: number
   setPullSinceResponse: (response: PullSinceResponse) => void
 }
@@ -496,6 +501,17 @@ const stripVirtualProps = <T extends Record<string, any> | undefined>(
 
 async function flushAsyncWork(delayMs: number = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs))
+}
+
+function createDeferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
 }
 
 function createEventGate(): {
@@ -8589,6 +8605,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const adapter = createRecordingAdapter()
     const hydrationEntered = createEventGate()
     const hydration = createEventGate()
+    const prefixPersistenceEntered = createEventGate()
+    const releasePrefixPersistence = createEventGate()
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    adapter.applyCommittedTx = async (...args) => {
+      if (args[1].mutations.some((mutation) => mutation.key === `prefix`)) {
+        prefixPersistenceEntered.resolve()
+        await releasePrefixPersistence.promise
+      }
+      return applyCommittedTx(...args)
+    }
     overrideBaselineRows(adapter, async () => {
       hydrationEntered.resolve()
       await hydration.promise
@@ -8608,11 +8634,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         persistence: { adapter },
       }),
     )
-    const localPersistence = createEventGate()
-    const localTransaction = createTransaction({
-      mutationFn: () => localPersistence.promise,
-    })
     const aborted = new AbortController()
+    let prefixReceipt: Promise<void> | undefined
     let abortedReceipt: Promise<void> | undefined
     let independentReceipt: Promise<void> | undefined
     const ready = collection.stateWhenReady()
@@ -8624,10 +8647,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         hydrationEntered.promise,
         `independent abort hydration entered`,
       )
-      localTransaction.mutate(() => {
-        collection.insert({ id: `local-gate`, title: `local pending` })
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `prefix`, title: `durability held` },
       })
-      expect(localTransaction.state).toBe(`persisting`)
+      prefixReceipt = Promise.resolve(sourceParams.commit()).then(
+        () => undefined,
+      )
+      void prefixReceipt.catch(() => undefined)
 
       sourceParams.begin()
       sourceParams.write({
@@ -8650,21 +8678,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       void independentReceipt.catch(() => undefined)
 
       hydration.resolve()
-      await vi.waitFor(() =>
-        expect(
-          collection._state.pendingSyncedTransactions.some(
-            (transaction) => transaction.committed,
-          ),
-        ).toBe(true),
+      await atPersistedOracleCheckpoint(
+        prefixPersistenceEntered.promise,
+        `in-flight hydration prefix entered durability`,
       )
       aborted.abort()
-      await expect(
-        atPersistedOracleCheckpoint(
-          abortedReceipt,
-          `in-flight hydration sibling aborted`,
-        ),
-      ).rejects.toMatchObject({ name: `AbortError` })
-
       const independentSettlement = observeSettlement(independentReceipt)
       await Promise.resolve()
       expect({
@@ -8677,11 +8695,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         publicError: undefined,
       })
 
-      localPersistence.resolve()
+      releasePrefixPersistence.resolve()
       await atPersistedOracleCheckpoint(
-        localTransaction.isPersisted.promise,
-        `independent abort local gate settled`,
+        prefixReceipt,
+        `independent abort prefix settled`,
       )
+      await expect(
+        atPersistedOracleCheckpoint(
+          abortedReceipt,
+          `in-flight hydration sibling aborted`,
+        ),
+      ).rejects.toMatchObject({ name: `AbortError` })
       await atPersistedOracleCheckpoint(
         independentReceipt,
         `independent hydration sibling applied`,
@@ -8689,10 +8713,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await atPersistedOracleCheckpoint(ready, `independent abort ready`)
       expect({
         status: collection.status,
+        prefix: stripVirtualProps(collection.get(`prefix`)),
+        aborted: collection.get(`aborted`),
         independent: stripVirtualProps(collection.get(`independent`)),
         durable: adapter.rows.get(`independent`),
       }).toEqual({
         status: `ready`,
+        prefix: { id: `prefix`, title: `durability held` },
+        aborted: undefined,
         independent: {
           id: `independent`,
           title: `must survive sibling abort`,
@@ -8708,10 +8736,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     } finally {
       hydration.resolve()
       aborted.abort()
-      localPersistence.resolve()
-      await localTransaction.isPersisted.promise.catch(() => undefined)
+      releasePrefixPersistence.resolve()
       await cleanupPersistedOracle(
         [
+          () => prefixReceipt?.catch(() => undefined),
           () => abortedReceipt?.catch(() => undefined),
           () => independentReceipt?.catch(() => undefined),
           () => ready.catch(() => undefined),
@@ -8721,6 +8749,188 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
     }
   })
+
+  it.each([`startup`, `resume`, `reset`] as const)(
+    `keeps the %s hydration ready after a buffered pre-application abort`,
+    async (entry) => {
+      const adapter = createRecordingAdapter()
+      const hydrationEntered = createEventGate()
+      const releaseHydration = createEventGate()
+      const coordinator =
+        entry === `reset` ? createCoordinatorHarness() : undefined
+      if (coordinator) {
+        coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+          await adapter.applyCommittedTx(collectionId, tx)
+          return {
+            type: `rpc:applyCommittedTx:res`,
+            rpcId: tx.txId,
+            ok: true,
+            term: tx.term,
+            seq: tx.seq,
+            latestRowVersion: tx.rowVersion,
+          }
+        }
+      } else {
+        overrideBaselineRows(adapter, async () => {
+          hydrationEntered.resolve()
+          await releaseHydration.promise
+          return []
+        })
+      }
+      let sourceParams!: TodoSyncParams
+      let hydrateResumeBaseline: (() => Promise<void>) | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: coordinator ? `sync-present` : `buffered-abort-${entry}`,
+          getKey: (row) => row.id,
+          syncMode: entry === `resume` ? `on-demand` : `eager`,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              hydrateResumeBaseline =
+                params.metadata?.persistence?.hydrateBaseline
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const aborted = new AbortController()
+      let keyReads = 0
+      let hydration: Promise<unknown> | undefined
+      let abortedReceipt: Promise<void> | undefined
+      let independentReceipt: Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        if (entry === `resume`) {
+          collection.startSyncImmediate()
+          await atPersistedOracleCheckpoint(
+            collection.stateWhenReady(),
+            `resume collection ready before baseline`,
+          )
+          expect(hydrateResumeBaseline).toBeTypeOf(`function`)
+          hydration = hydrateResumeBaseline!()
+        } else if (coordinator) {
+          await atPersistedOracleCheckpoint(
+            collection.stateWhenReady(),
+            `reset collection ready before reload`,
+          )
+          const loadSubset = adapter.loadSubset.bind(adapter)
+          adapter.loadSubset = async (...args) => {
+            hydrationEntered.resolve()
+            await releaseHydration.promise
+            return loadSubset(...args)
+          }
+          coordinator.emit({
+            type: `collection:reset`,
+            schemaVersion: 1,
+            resetEpoch: 1,
+          })
+          hydration = Promise.resolve()
+        } else {
+          hydration = collection.stateWhenReady()
+        }
+        void hydration.catch(() => undefined)
+        await atPersistedOracleCheckpoint(
+          hydrationEntered.promise,
+          `${entry} hydration entered`,
+        )
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `prefix`, title: `staged before abort` },
+        })
+        sourceParams.write({
+          type: `insert`,
+          value: {
+            get id() {
+              keyReads++
+              if (keyReads === 2) aborted.abort()
+              return `aborting`
+            },
+            title: `cancel before core application`,
+          },
+        })
+        abortedReceipt = Promise.resolve(
+          sourceParams.commit(aborted.signal),
+        ).then(() => undefined)
+        void abortedReceipt.catch(() => undefined)
+
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `independent`, title: `survives abort` },
+        })
+        independentReceipt = Promise.resolve(sourceParams.commit()).then(
+          () => undefined,
+        )
+        void independentReceipt.catch(() => undefined)
+
+        releaseHydration.resolve()
+        const outcomes = await atPersistedOracleCheckpoint(
+          Promise.allSettled([hydration, abortedReceipt, independentReceipt]),
+          `${entry} buffered abort settled`,
+        )
+        const expected = foldDurabilityLedger([
+          { type: `begin`, transactionId: `aborted` },
+          {
+            type: `write`,
+            transactionId: `aborted`,
+            row: { id: `prefix`, title: `staged before abort` },
+          },
+          { type: `abort`, transactionId: `aborted` },
+          { type: `begin`, transactionId: `independent` },
+          {
+            type: `write`,
+            transactionId: `independent`,
+            row: { id: `independent`, title: `survives abort` },
+          },
+          { type: `commit`, transactionId: `independent` },
+        ])
+
+        expect(keyReads).toBeGreaterThanOrEqual(2)
+        expect(outcomes.map((outcome) => outcome.status)).toEqual([
+          `fulfilled`,
+          `rejected`,
+          `fulfilled`,
+        ])
+        if (outcomes[1].status === `rejected`) {
+          expect(outcomes[1].reason).toBeInstanceOf(SyncTransactionAbortedError)
+        }
+        expect(collection.status).toBe(`ready`)
+        expect(collection._lifecycle.getSyncError()).toBeUndefined()
+        expect(collection.get(`prefix`)).toBeUndefined()
+        expect(collection.get(`aborting`)).toBeUndefined()
+        expect(stripVirtualProps(collection.get(`independent`))).toEqual(
+          expected.committedRows.get(`independent`),
+        )
+        expect(adapter.rows).toEqual(expected.committedRows)
+        expect(
+          adapter.applyCommittedTxCalls.map(({ tx }) =>
+            tx.mutations.map(({ key }) => key),
+          ),
+        ).toEqual([[`independent`]])
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releaseHydration.resolve()
+        aborted.abort()
+        await cleanupPersistedOracle(
+          [
+            () => hydration?.catch(() => undefined),
+            () => abortedReceipt?.catch(() => undefined),
+            () => independentReceipt?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   it(`rejects every hydration-buffered receipt when replay fails`, async () => {
     const adapter = createRecordingAdapter()
@@ -15662,6 +15872,1274 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         publicError: undefined,
       })
     } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Focused collection-reset refinement: metadata and rows must come from one
+  // hydration scope. The adapter makes an interleaved v2 write possible only
+  // outside that scope, so the public v1 metadata and row are the independent
+  // coherence checkpoint. This fixed history does not model arbitrary resets.
+  it(`keeps a collection-reset reload inside one hydration scope`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
+    adapter.collectionMetadata.set(`snapshot`, `initial`)
+    const coordinator = createCoordinatorHarness()
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    let inHydrationScope = false
+    let interleaveArmed = false
+    let interleaveRan = false
+
+    const runInterleavedWrite = () => {
+      interleaveRan = true
+      adapter.collectionMetadata.set(`snapshot`, `v2`)
+      adapter.rows.set(`1`, { id: `1`, title: `v2 row` })
+    }
+
+    adapter.loadSubset = async (...args) => {
+      if (interleaveArmed && !inHydrationScope && !interleaveRan) {
+        runInterleavedWrite()
+      }
+      return loadSubset(...args)
+    }
+    adapter.runInHydrationScope = async (task) => {
+      inHydrationScope = true
+      try {
+        return await task(adapter)
+      } finally {
+        inHydrationScope = false
+        if (interleaveArmed && !interleaveRan) runInterleavedWrite()
+      }
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    adapter.collectionMetadata.set(`snapshot`, `v1`)
+    adapter.rows.set(`1`, { id: `1`, title: `v1 row` })
+    interleaveArmed = true
+
+    coordinator.emit({
+      type: `collection:reset`,
+      schemaVersion: 1,
+      resetEpoch: 1,
+    })
+
+    await vi.waitFor(() => expect(interleaveRan).toBe(true))
+    expect(collection._state.syncedCollectionMetadata.get(`snapshot`)).toBe(
+      `v1`,
+    )
+    expect(collection.get(`1`)?.title).toBe(`v1 row`)
+    await collection.cleanup()
+  })
+
+  // A remote commit queued during startup must run after the local hydration
+  // scope releases the shared driver. A reset racing an unscheduled startup
+  // baseline may publish before or after that baseline, but must own the final
+  // public snapshot and may never be overwritten by an older baseline.
+  it(`does not let an unscheduled startup baseline overwrite a newer collection reset`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `old` }])
+    const coordinator = createCoordinatorHarness()
+    const baselineEntered = createEventGate()
+    const releaseBaseline = createEventGate()
+    const resetReloadEntered = createEventGate()
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    let heldBaseline = false
+    adapter.loadResumeSnapshot = async (...args) => {
+      const snapshot = await loadResumeSnapshot(...args)
+      if (args[1]?.includeRows && !heldBaseline) {
+        heldBaseline = true
+        baselineEntered.resolve()
+        await releaseBaseline.promise
+      }
+      return snapshot
+    }
+    adapter.loadSubset = (...args) => {
+      resetReloadEntered.resolve()
+      return loadSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: { sync: ({ markReady }) => markReady() },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const preload = collection.preload()
+    void preload.catch(() => undefined)
+    const publishedTitles: Array<string | undefined> = []
+    const subscription = collection.subscribeChanges(
+      () => publishedTitles.push(collection.get(`1`)?.title),
+      { includeInitialState: false },
+    )
+
+    try {
+      await atPersistedOracleCheckpoint(
+        baselineEntered.promise,
+        `unscheduled baseline entered`,
+      )
+      adapter.rows.set(`1`, { id: `1`, title: `new` })
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+      // Give a concurrent reset its event-loop turn. Serialization may instead
+      // hold it behind the baseline; both orders must converge without a
+      // public new -> old reversion.
+      await flushAsyncWork()
+      expect([undefined, `new`]).toContain(collection.get(`1`)?.title)
+      releaseBaseline.resolve()
+      await atPersistedOracleCheckpoint(preload, `startup after reset`)
+      await atPersistedOracleCheckpoint(
+        resetReloadEntered.promise,
+        `reset reload after startup`,
+      )
+      await vi.waitFor(() => expect(collection.get(`1`)?.title).toBe(`new`))
+      const firstNew = publishedTitles.indexOf(`new`)
+      expect(firstNew).toBeGreaterThanOrEqual(0)
+      expect(publishedTitles.slice(firstNew)).not.toContain(`old`)
+    } finally {
+      releaseBaseline.resolve()
+      await preload.catch(() => undefined)
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  it.each([`contiguous-reload`, `sequence-gap`] as const)(
+    `finishes queued %s after scheduled startup hydration releases its scope`,
+    async (route) => {
+      const adapter = createRecordingAdapter([{ id: `1`, title: `old` }])
+      const coordinator = createCoordinatorHarness()
+      const baselineEntered = createEventGate()
+      const releaseBaseline = createEventGate()
+      const nestedScopeRequested = createEventGate()
+      const queuedScopes: Array<() => void> = []
+      const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+      let heldBaseline = false
+      let scopeActive = false
+
+      adapter.loadResumeSnapshot = async (...args) => {
+        const snapshot = await loadResumeSnapshot(...args)
+        if (args[1]?.includeRows && !heldBaseline) {
+          heldBaseline = true
+          baselineEntered.resolve()
+          await releaseBaseline.promise
+        }
+        return snapshot
+      }
+
+      const scopedAdapter: RecordingAdapter = { ...adapter }
+      scopedAdapter.runInHydrationScope = (task) => task(scopedAdapter)
+      adapter.runInHydrationScope = (task) => {
+        if (scopeActive) {
+          nestedScopeRequested.resolve()
+          return new Promise((resolve, reject) => {
+            queuedScopes.push(() => {
+              void task(scopedAdapter).then(resolve, reject)
+            })
+          })
+        }
+        scopeActive = true
+        return Promise.resolve()
+          .then(() => task(scopedAdapter))
+          .finally(() => {
+            scopeActive = false
+            while (queuedScopes.length > 0) queuedScopes.shift()?.()
+          })
+      }
+
+      if (route === `sequence-gap`) {
+        coordinator.setPullSinceResponse({
+          type: `rpc:pullSince:res`,
+          rpcId: `review-gap`,
+          ok: true,
+          latestTerm: 1,
+          latestSeq: 2,
+          latestRowVersion: 2,
+          requiresFullReload: true,
+        })
+      }
+      const pullSince = coordinator.pullSince!.bind(coordinator)
+      let coordinatorEnteredDuringScope: boolean | undefined
+      coordinator.pullSince = (...args) => {
+        coordinatorEnteredDuringScope = scopeActive
+        return pullSince(...args)
+      }
+
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `sync-present`,
+          getKey: (item) => item.id,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const preload = collection.preload()
+      void preload.catch(() => undefined)
+
+      try {
+        await atPersistedOracleCheckpoint(
+          baselineEntered.promise,
+          `${route} baseline entered`,
+        )
+        adapter.rows.set(`1`, { id: `1`, title: `new` })
+        const committed: TxCommitted =
+          route === `sequence-gap`
+            ? {
+                type: `tx:committed`,
+                term: 1,
+                seq: 2,
+                txId: `review-sequence-gap`,
+                latestRowVersion: 2,
+                requiresFullReload: false,
+                changedRows: [],
+                deletedKeys: [],
+              }
+            : {
+                type: `tx:committed`,
+                term: 1,
+                seq: 1,
+                txId: `review-contiguous-reload`,
+                latestRowVersion: 1,
+                requiresFullReload: true,
+              }
+        coordinator.emit(committed)
+        releaseBaseline.resolve()
+        const first = await atPersistedOracleCheckpoint(
+          Promise.race([
+            preload.then(() => `startup-settled` as const),
+            nestedScopeRequested.promise.then(() => `nested-scope` as const),
+          ]),
+          `${route} startup or nested scope`,
+        )
+        expect(first).toBe(`startup-settled`)
+        expect(collection.get(`1`)?.title).toBe(`new`)
+        if (route === `sequence-gap`) {
+          expect(coordinator.pullSinceCalls).toBe(1)
+          expect(coordinatorEnteredDuringScope).toBe(false)
+        }
+      } finally {
+        releaseBaseline.resolve()
+        while (queuedScopes.length > 0) queuedScopes.shift()?.()
+        await preload.catch(() => undefined)
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // Focused receipt-ownership refinements. A source receipt created by the
+  // hydration operation belongs to its waiter even if it rejects before the
+  // waiter snapshots; a receipt created after hydration work returns does not.
+  // The public load result and exact rejection identity distinguish those two
+  // boundaries without treating every pending source receipt as related.
+  it(`propagates an operation-owned receipt rejection that settles before the hydration waiter snapshots`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrateLoadEntered = createDeferred()
+    const allowHydrateLoad = createDeferred()
+    let gateHydrationLoad = true
+    adapter.loadSubset = async () => {
+      if (gateHydrationLoad) {
+        gateHydrationLoad = false
+        hydrateLoadEntered.resolve()
+        await allowHydrateLoad.promise
+      }
+      return []
+    }
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-settled-receipt-boundary`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<unknown> | undefined
+    let receipt: Promise<void> | undefined
+    const abortController = new AbortController()
+
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      await hydrateLoadEntered.promise
+
+      let keyReads = 0
+      const establishingRow = {
+        get id() {
+          keyReads++
+          if (keyReads === 2) abortController.abort()
+          return `establishing`
+        },
+        title: `Abort during buffered replay`,
+      }
+      remoteBegin?.()
+      remoteWrite?.({ type: `insert`, value: establishingRow })
+      const applied = remoteCommit?.(abortController.signal)
+      if (!(applied instanceof Promise)) {
+        throw new Error(`expected a buffered establishing receipt`)
+      }
+      receipt = applied
+      void receipt.catch(() => undefined)
+
+      allowHydrateLoad.resolve()
+      const [loadResult, receiptResult] = await Promise.allSettled([
+        load,
+        receipt,
+      ])
+
+      expect(keyReads).toBeGreaterThanOrEqual(2)
+      expect(abortController.signal.aborted).toBe(true)
+      expect(receiptResult.status).toBe(`rejected`)
+      expect(loadResult.status).toBe(`rejected`)
+      if (
+        loadResult.status === `rejected` &&
+        receiptResult.status === `rejected`
+      ) {
+        expect(loadResult.reason).toBe(receiptResult.reason)
+      }
+    } finally {
+      abortController.abort()
+      allowHydrateLoad.resolve()
+      await receipt?.catch(() => undefined)
+      await load?.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not adopt an unrelated source receipt created after hydration work returns`, async () => {
+    const adapter = createRecordingAdapter()
+    const mutationEntered = createDeferred()
+    const releaseMutation = createDeferred()
+    const unrelatedStarted = createDeferred<{
+      abortController: AbortController
+      receipt: Promise<void>
+    }>()
+    const trace: Array<string> = []
+    let probeActive = false
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
+    let remoteCommit:
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
+
+    adapter.runInHydrationScope = async (task) => {
+      if (!probeActive) return task(adapter)
+      probeActive = false
+
+      const result = await task(adapter)
+      trace.push(`hydrate-task-returned`)
+
+      const abortController = new AbortController()
+      remoteBegin?.()
+      remoteWrite?.({
+        type: `insert`,
+        value: { id: `unrelated`, title: `Outside hydrate boundary` },
+      })
+      const receipt = remoteCommit?.(abortController.signal)
+      if (!(receipt instanceof Promise)) {
+        throw new Error(`expected a pending unrelated receipt`)
+      }
+      trace.push(`unrelated-receipt-created`)
+      unrelatedStarted.resolve({ abortController, receipt })
+      return result
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-unrelated-receipt-boundary`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+        onInsert: async () => {
+          mutationEntered.resolve()
+          await releaseMutation.promise
+        },
+      }),
+    )
+    let mutation: ReturnType<typeof collection.insert> | undefined
+    let load: Promise<unknown> | undefined
+    let unrelated:
+      | { abortController: AbortController; receipt: Promise<void> }
+      | undefined
+
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      mutation = collection.insert({ id: `local`, title: `Persisting gate` })
+      await mutationEntered.promise
+
+      probeActive = true
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      unrelated = await unrelatedStarted.promise
+      expect(trace).toEqual([
+        `hydrate-task-returned`,
+        `unrelated-receipt-created`,
+      ])
+
+      // Give the public load continuation the opportunity to snapshot receipts.
+      await flushAsyncWork()
+      unrelated.abortController.abort()
+      await unrelated.receipt.catch(() => undefined)
+
+      await expect(load).resolves.toBeUndefined()
+    } finally {
+      unrelated?.abortController.abort()
+      releaseMutation.resolve()
+      await mutation?.isPersisted.promise.catch(() => undefined)
+      await load?.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`only signals completed leader-local index work after local success`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const localFailure = new Error(`local index creation failed`)
+    const completedLocalMarkers: Array<boolean> = []
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    adapter.ensureIndex = async (collectionId, signature) => {
+      adapter.ensureIndexCalls.push({ collectionId, signature })
+      throw localFailure
+    }
+    coordinator.requestEnsurePersistedIndex = async (
+      _collectionId,
+      _signature,
+      _spec,
+      completedLocalAdapter,
+      localEnsureCompleted,
+    ) => {
+      completedLocalMarkers.push(
+        completedLocalAdapter !== undefined && localEnsureCompleted === true,
+      )
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `failed-local-index-bootstrap`,
+        getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.createIndex((row) => row.title, { name: `startup-title` })
+
+    try {
+      await collection.preload()
+      expect(completedLocalMarkers).toEqual([false])
+    } finally {
+      await collection.cleanup()
+      warn.mockRestore()
+    }
+  })
+
+  it(`releases the hydration scope before invoking a coordinator that uses its own adapter`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinatorEntered = createDeferred()
+    const breakSchedulerCycle = createDeferred()
+    let hydrationScopeActive = false
+    let coordinatorEnteredDuringHydration: boolean | undefined
+
+    const publicEnsureIndex = adapter.ensureIndex.bind(adapter)
+    const scopedAdapter: PersistenceAdapter = {
+      ...adapter,
+      ensureIndex: publicEnsureIndex,
+    }
+    adapter.runInHydrationScope = async (task) => {
+      hydrationScopeActive = true
+      try {
+        return await task(scopedAdapter)
+      } finally {
+        hydrationScopeActive = false
+      }
+    }
+    adapter.ensureIndex = async (...args) => {
+      if (hydrationScopeActive) {
+        // A public core-adapter call queues behind the active hydrate. The
+        // hydrate cannot release until this coordinator call returns.
+        await breakSchedulerCycle.promise
+      }
+      await publicEnsureIndex(...args)
+    }
+
+    const coordinator = createCoordinatorHarness()
+    coordinator.requestEnsurePersistedIndex = async (
+      collectionId,
+      signature,
+      spec,
+    ) => {
+      coordinatorEnteredDuringHydration = hydrationScopeActive
+      coordinatorEntered.resolve()
+      // Deliberately ignore the optional scoped adapter, as existing public
+      // coordinator implementations are allowed to do.
+      await adapter.ensureIndex(collectionId, signature, spec)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `custom-coordinator-hydration-scope`,
+        getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.createIndex((row) => row.title, {
+      name: `startup-title`,
+    })
+    const preload = Promise.resolve(collection.preload())
+    void preload.catch(() => undefined)
+
+    try {
+      await coordinatorEntered.promise
+      expect(coordinatorEnteredDuringHydration).toBe(false)
+    } finally {
+      breakSchedulerCycle.resolve()
+      await preload.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`releases crossed follower hydration scopes before leader index RPC work`, async () => {
+    const bothLocalIndexesEntered = createDeferred()
+    const bothCoordinatorRequestsEntered = createDeferred()
+    let localIndexEntries = 0
+    let coordinatorEntries = 0
+
+    const createTabAdapter = () => {
+      const adapter = createRecordingAdapter()
+      const breakSchedulerCycle = createDeferred()
+      let hydrationScopeActive = false
+      const remoteScopeObservations: Array<boolean> = []
+      const publicEnsureIndex = adapter.ensureIndex.bind(adapter)
+      const scopedAdapter: PersistenceAdapter = {
+        ...adapter,
+        ensureIndex: async (...args) => {
+          localIndexEntries++
+          if (localIndexEntries === 2) bothLocalIndexesEntered.resolve()
+          await bothLocalIndexesEntered.promise
+          await publicEnsureIndex(...args)
+        },
+      }
+      adapter.runInHydrationScope = async (task) => {
+        hydrationScopeActive = true
+        try {
+          return await task(scopedAdapter)
+        } finally {
+          hydrationScopeActive = false
+        }
+      }
+      adapter.ensureIndex = async (...args) => {
+        remoteScopeObservations.push(hydrationScopeActive)
+        coordinatorEntries++
+        if (coordinatorEntries === 2) bothCoordinatorRequestsEntered.resolve()
+        if (hydrationScopeActive) await breakSchedulerCycle.promise
+        await publicEnsureIndex(...args)
+      }
+      return {
+        adapter,
+        breakSchedulerCycle,
+        remoteScopeObservations,
+      }
+    }
+
+    const tab1 = createTabAdapter()
+    const tab2 = createTabAdapter()
+    const coordinator1 = createCoordinatorHarness()
+    const coordinator2 = createCoordinatorHarness()
+    coordinator1.isLeader = () => false
+    coordinator2.isLeader = () => false
+    coordinator1.requestEnsurePersistedIndex = (
+      collectionId,
+      signature,
+      spec,
+    ) => tab2.adapter.ensureIndex(collectionId, signature, spec)
+    coordinator2.requestEnsurePersistedIndex = (
+      collectionId,
+      signature,
+      spec,
+    ) => tab1.adapter.ensureIndex(collectionId, signature, spec)
+
+    const createFollowerCollection = (
+      id: string,
+      persistence: PersistedCollectionPersistence,
+    ) => {
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          getKey: (item) => item.id,
+          defaultIndexType: BasicIndex,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+            },
+          },
+          persistence,
+        }),
+      )
+      collection.createIndex((row) => row.title, { name: `${id}-title` })
+      return collection
+    }
+    const followerA = createFollowerCollection(`follower-a`, {
+      adapter: tab1.adapter,
+      coordinator: coordinator1,
+    })
+    const followerB = createFollowerCollection(`follower-b`, {
+      adapter: tab2.adapter,
+      coordinator: coordinator2,
+    })
+    const preloadA = Promise.resolve(followerA.preload())
+    const preloadB = Promise.resolve(followerB.preload())
+    void preloadA.catch(() => undefined)
+    void preloadB.catch(() => undefined)
+
+    try {
+      await bothCoordinatorRequestsEntered.promise
+      expect({
+        tab1: tab1.remoteScopeObservations,
+        tab2: tab2.remoteScopeObservations,
+      }).toEqual({ tab1: [false], tab2: [false] })
+    } finally {
+      tab1.breakSchedulerCycle.resolve()
+      tab2.breakSchedulerCycle.resolve()
+      await Promise.all([preloadA, preloadB]).catch(() => undefined)
+      await Promise.all([followerA.cleanup(), followerB.cleanup()])
+    }
+  })
+
+  it(`keeps generated crossed-leadership index RPC histories outside local hydration scopes`, async () => {
+    let run = 0
+    await fc.assert(
+      fc.asyncProperty(
+        fc.record({
+          tabCount: fc.integer({ min: 2, max: 4 }),
+          indexCount: fc.integer({ min: 1, max: 2 }),
+          direction: fc.constantFrom(-1, 1),
+        }),
+        async ({ tabCount, indexCount, direction }) => {
+          run++
+          const allTabsAtLocalIndex = createDeferred()
+          let tabsAtLocalIndex = 0
+          const tabs = Array.from({ length: tabCount }, () => {
+            const adapter = createRecordingAdapter()
+            let hydrationScopeActive = false
+            let localIndexCalls = 0
+            const remoteScopeObservations: Array<boolean> = []
+            const publicEnsureIndex = adapter.ensureIndex.bind(adapter)
+            const scopedAdapter: PersistenceAdapter = {
+              ...adapter,
+              ensureIndex: async (...args) => {
+                localIndexCalls++
+                if (localIndexCalls === 1) {
+                  tabsAtLocalIndex++
+                  if (tabsAtLocalIndex === tabCount) {
+                    allTabsAtLocalIndex.resolve()
+                  }
+                  await allTabsAtLocalIndex.promise
+                }
+                await publicEnsureIndex(...args)
+              },
+            }
+            adapter.runInHydrationScope = async (task) => {
+              hydrationScopeActive = true
+              try {
+                return await task(scopedAdapter)
+              } finally {
+                hydrationScopeActive = false
+              }
+            }
+            adapter.ensureIndex = async (...args) => {
+              remoteScopeObservations.push(hydrationScopeActive)
+              await publicEnsureIndex(...args)
+            }
+            return { adapter, remoteScopeObservations }
+          })
+
+          const collections = tabs.map((tab, index) => {
+            const remoteIndex = (index + direction + tabCount) % tabCount
+            const coordinator = createCoordinatorHarness()
+            coordinator.isLeader = () => false
+            coordinator.requestEnsurePersistedIndex = (
+              collectionId,
+              signature,
+              spec,
+            ) =>
+              tabs[remoteIndex]!.adapter.ensureIndex(
+                collectionId,
+                signature,
+                spec,
+              )
+            const collection = createCollection(
+              persistedCollectionOptions<Todo, string>({
+                id: `generated-crossed-${run}-${index}`,
+                getKey: (item) => item.id,
+                defaultIndexType: BasicIndex,
+                sync: {
+                  sync: ({ markReady }) => {
+                    markReady()
+                  },
+                },
+                persistence: { adapter: tab.adapter, coordinator },
+              }),
+            )
+            for (
+              let indexOrdinal = 0;
+              indexOrdinal < indexCount;
+              indexOrdinal++
+            ) {
+              collection.createIndex(
+                indexOrdinal % 2 === 0 ? (row) => row.title : (row) => row.id,
+                { name: `idx-${indexOrdinal}` },
+              )
+            }
+            return collection
+          })
+
+          try {
+            await Promise.all(
+              collections.map((collection) => collection.preload()),
+            )
+            for (const tab of tabs) {
+              expect(tab.remoteScopeObservations).toEqual(
+                Array.from({ length: indexCount }, () => false),
+              )
+            }
+          } finally {
+            await Promise.all(
+              collections.map((collection) => collection.cleanup()),
+            )
+          }
+        },
+      ),
+      { seed: 1868, numRuns: 8, endOnFailure: true },
+    )
+  })
+
+  // Focused R7 causal-replay witness: after hydration releases its buffer, the
+  // source receipt must replay without awaiting the persisting operation whose
+  // callback is itself awaiting that receipt. Persistence reach, both public
+  // settlements, and the final source row expose the otherwise hidden cycle.
+  it(`replays a buffered source receipt without blocking its persisting predecessor`, async () => {
+    const adapter = createRecordingAdapter()
+    const hydrateLoadEntered = createDeferred()
+    const allowHydrateLoad = createDeferred()
+    let gateHydrationLoad = true
+    const replayState = { persisted: false }
+
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === true && gateHydrationLoad) {
+        gateHydrationLoad = false
+        hydrateLoadEntered.resolve()
+        await allowHydrateLoad.promise
+      }
+      return loadResumeSnapshot(...args)
+    }
+    const applyCommittedTx = adapter.applyCommittedTx
+    adapter.applyCommittedTx = async (...args) => {
+      replayState.persisted = true
+      await applyCommittedTx(...args)
+    }
+    adapter.runInHydrationScope = (task) => task(adapter)
+
+    let remoteBegin: (() => void) | undefined
+    let remoteWrite:
+      | ((message: { type: `update`; value: Todo }) => void)
+      | undefined
+    let remoteCommit: (() => true | Promise<void>) | undefined
+    const sourceReady = createDeferred()
+    const bufferedCommitReturned = createDeferred<{
+      receipt: Promise<void>
+    }>()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-buffered-causal-replay`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            remoteBegin = begin
+            remoteWrite = write as (message: {
+              type: `update`
+              value: Todo
+            }) => void
+            remoteCommit = commit
+            sourceReady.resolve()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+        onInsert: async () => {
+          if (!remoteBegin || !remoteWrite || !remoteCommit) {
+            throw new Error(`source sync is not ready`)
+          }
+          remoteBegin()
+          remoteWrite({
+            type: `update`,
+            value: { id: `source-row`, title: `Buffered during hydrate` },
+          })
+          const applied = remoteCommit()
+          if (applied === true) {
+            throw new Error(`source commit was not buffered during hydration`)
+          }
+          bufferedCommitReturned.resolve({ receipt: applied })
+          await applied
+        },
+      }),
+    )
+
+    const preload = Promise.resolve(collection.preload())
+    void preload.catch(() => undefined)
+    let mutationPersisted: Promise<unknown> | undefined
+    let bufferedReceipt: Promise<void> | undefined
+
+    try {
+      await atPersistedOracleCheckpoint(
+        hydrateLoadEntered.promise,
+        `buffered causal replay hydration entered`,
+      )
+      await atPersistedOracleCheckpoint(
+        sourceReady.promise,
+        `buffered causal replay source ready`,
+      )
+
+      const mutation = collection.insert({ id: `local`, title: `Pending` })
+      mutationPersisted = mutation.isPersisted.promise
+      void mutationPersisted.catch(() => undefined)
+      const bufferedCommit = await atPersistedOracleCheckpoint(
+        bufferedCommitReturned.promise,
+        `buffered causal replay commit returned`,
+      )
+      bufferedReceipt = bufferedCommit.receipt
+      void bufferedReceipt.catch(() => undefined)
+
+      allowHydrateLoad.resolve()
+
+      let causalCycleObserved = false
+      for (
+        let attempt = 0;
+        attempt < 100 && !replayState.persisted;
+        attempt++
+      ) {
+        causalCycleObserved = collection._state.pendingSyncedTransactions.some(
+          (transaction) =>
+            transaction.committed && transaction.applied.isPending(),
+        )
+        if (causalCycleObserved) break
+        await Promise.resolve()
+      }
+
+      expect(causalCycleObserved).toBe(false)
+      expect(replayState.persisted).toBe(true)
+      await expect(
+        atPersistedOracleCheckpoint(
+          bufferedReceipt,
+          `buffered causal replay source receipt`,
+        ),
+      ).resolves.toBeUndefined()
+      await expect(
+        atPersistedOracleCheckpoint(
+          mutationPersisted,
+          `buffered causal replay mutation persisted`,
+        ),
+      ).resolves.toBeDefined()
+      await expect(
+        atPersistedOracleCheckpoint(
+          preload,
+          `buffered causal replay preload settled`,
+        ),
+      ).resolves.toBeUndefined()
+      expect(stripVirtualProps(collection.get(`source-row`))).toEqual({
+        id: `source-row`,
+        title: `Buffered during hydrate`,
+      })
+    } finally {
+      allowHydrateLoad.resolve()
+      await collection.cleanup()
+    }
+  })
+
+  it(`releases the hydration scope before a gap coordinator uses its own adapter`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const coordinatorEntered = createDeferred()
+    const breakSchedulerCycle = createDeferred()
+    let hydrationScopeActive = false
+    let coordinatorEnteredDuringHydration: boolean | undefined
+
+    const pullSince = async () => ({
+      latestRowVersion: 0,
+      requiresFullReload: false as const,
+      changedKeys: [],
+      deletedKeys: [],
+      deltas: [],
+    })
+    const publicAdapter = adapter as RecordingAdapter & {
+      pullSince: typeof pullSince
+    }
+    const scopedAdapter = {
+      ...adapter,
+      pullSince,
+    }
+    publicAdapter.pullSince = async () => {
+      if (hydrationScopeActive) await breakSchedulerCycle.promise
+      return pullSince()
+    }
+    adapter.runInHydrationScope = async (task) => {
+      hydrationScopeActive = true
+      try {
+        return await task(scopedAdapter)
+      } finally {
+        hydrationScopeActive = false
+      }
+    }
+    coordinator.pullSince = async (_collectionId, _fromRowVersion) => {
+      coordinatorEnteredDuringHydration = hydrationScopeActive
+      coordinatorEntered.resolve()
+      const result = await publicAdapter.pullSince()
+      return {
+        type: `rpc:pullSince:res`,
+        rpcId: `legacy-gap-coordinator`,
+        ok: true,
+        latestTerm: 1,
+        latestSeq: 2,
+        latestRowVersion: result.latestRowVersion,
+        requiresFullReload: result.requiresFullReload,
+        changedKeys: result.changedKeys,
+        deletedKeys: result.deletedKeys,
+        deltas: result.deltas,
+      }
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    await collection.preload()
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 2,
+      txId: `tx-gap-legacy-coordinator`,
+      latestRowVersion: 2,
+      requiresFullReload: false,
+      changedRows: [],
+      deletedKeys: [],
+    })
+
+    try {
+      await coordinatorEntered.promise
+      expect(coordinatorEnteredDuringHydration).toBe(false)
+    } finally {
+      breakSchedulerCycle.resolve()
+      await flushAsyncWork()
+      await collection.cleanup()
+    }
+  })
+
+  // Focused invalidation-reload refinements. Whether recovery follows a
+  // sequence gap or a contiguous committed notification, metadata and rows
+  // must be read inside one hydration scope. The adapter schedules v2 only
+  // outside the scope; coherent public v1 state is the checkpoint.
+  it(`keeps sequence-gap recovery inside one hydration scope`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
+    adapter.collectionMetadata.set(`snapshot`, `initial`)
+    const coordinator = createCoordinatorHarness()
+    coordinator.setPullSinceResponse({
+      type: `rpc:pullSince:res`,
+      rpcId: `pull-gap-scope`,
+      ok: true,
+      latestTerm: 1,
+      latestSeq: 1,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    let inHydrationScope = false
+    let interleaveArmed = false
+    let interleaveRan = false
+
+    const runInterleavedWrite = () => {
+      interleaveRan = true
+      adapter.collectionMetadata.set(`snapshot`, `v2`)
+      adapter.rows.set(`1`, { id: `1`, title: `v2 row` })
+    }
+
+    adapter.loadSubset = async (...args) => {
+      if (interleaveArmed && !inHydrationScope && !interleaveRan) {
+        runInterleavedWrite()
+      }
+      return loadSubset(...args)
+    }
+    adapter.runInHydrationScope = async (task) => {
+      inHydrationScope = true
+      try {
+        return await task(adapter)
+      } finally {
+        inHydrationScope = false
+        if (interleaveArmed && !interleaveRan) runInterleavedWrite()
+      }
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    adapter.collectionMetadata.set(`snapshot`, `v1`)
+    adapter.rows.set(`1`, { id: `1`, title: `v1 row` })
+    interleaveArmed = true
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 2,
+      txId: `tx-gap-scope`,
+      latestRowVersion: 2,
+      requiresFullReload: false,
+      changedRows: [],
+      deletedKeys: [],
+    })
+
+    await vi.waitFor(() => expect(interleaveRan).toBe(true))
+    expect(collection._state.syncedCollectionMetadata.get(`snapshot`)).toBe(
+      `v1`,
+    )
+    expect(collection.get(`1`)?.title).toBe(`v1 row`)
+    await collection.cleanup()
+  })
+
+  it(`keeps contiguous committed reload inside one hydration scope`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Initial row` }])
+    adapter.collectionMetadata.set(`snapshot`, `initial`)
+    const coordinator = createCoordinatorHarness()
+    const loadSubset = adapter.loadSubset.bind(adapter)
+    let inHydrationScope = false
+    let interleaveArmed = false
+    let interleaveRan = false
+
+    const runInterleavedWrite = () => {
+      interleaveRan = true
+      adapter.collectionMetadata.set(`snapshot`, `v2`)
+      adapter.rows.set(`1`, { id: `1`, title: `v2 row` })
+    }
+
+    adapter.loadSubset = async (...args) => {
+      if (interleaveArmed && !inHydrationScope && !interleaveRan) {
+        runInterleavedWrite()
+      }
+      return loadSubset(...args)
+    }
+    adapter.runInHydrationScope = async (task) => {
+      inHydrationScope = true
+      try {
+        return await task(adapter)
+      } finally {
+        inHydrationScope = false
+        if (interleaveArmed && !interleaveRan) runInterleavedWrite()
+      }
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    await collection.preload()
+    adapter.collectionMetadata.set(`snapshot`, `v1`)
+    adapter.rows.set(`1`, { id: `1`, title: `v1 row` })
+    interleaveArmed = true
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-contiguous-reload-scope`,
+      latestRowVersion: 1,
+      requiresFullReload: true,
+    })
+
+    await vi.waitFor(() => expect(interleaveRan).toBe(true))
+    expect(collection._state.syncedCollectionMetadata.get(`snapshot`)).toBe(
+      `v1`,
+    )
+    expect(collection.get(`1`)?.title).toBe(`v1 row`)
+    await collection.cleanup()
+  })
+
+  // Focused lifecycle-fencing witness: generation-zero startup is held across
+  // cleanup and rebound, then released while generation one is still loading.
+  // Zero ensure-index calls for the rebound signatures prove stale bootstrap
+  // and listener work did not cross the public lifecycle boundary.
+  it(`does not let stale startup install index work on a rebound lifecycle`, async () => {
+    const adapter = createRecordingAdapter()
+    const g0MetadataEntered = createDeferred()
+    const allowG0Metadata = createDeferred()
+    const g1MetadataEntered = createDeferred()
+    const allowG1Metadata = createDeferred()
+    let metadataCalls = 0
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => {
+      if (args[1]?.includeRows === false) {
+        metadataCalls++
+        if (metadataCalls === 1) {
+          g0MetadataEntered.resolve()
+          await allowG0Metadata.promise
+        } else if (metadataCalls === 2) {
+          g1MetadataEntered.resolve()
+          await allowG1Metadata.promise
+        }
+      }
+      return loadResumeSnapshot(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-startup-index-generation`,
+        getKey: (item) => item.id,
+        defaultIndexType: BasicIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const stalePreload = Promise.resolve(collection.preload())
+    void stalePreload.catch(() => undefined)
+    let freshReady: Promise<unknown> | undefined
+
+    try {
+      await g0MetadataEntered.promise
+      await collection.cleanup()
+
+      const reboundIndex = collection.createIndex((row) => row.title, {
+        name: `rebound-bootstrap`,
+      })
+      const reboundSignature = collection
+        .getIndexMetadata()
+        .find((metadata) => metadata.indexId === reboundIndex.id)?.signature
+      expect(reboundSignature).toBeDefined()
+      freshReady = collection.stateWhenReady()
+
+      allowG0Metadata.resolve()
+      await g1MetadataEntered.promise
+
+      const staleBootstrapCalls = adapter.ensureIndexCalls.filter(
+        (call) => call.signature === reboundSignature,
+      )
+      const listenerIndex = collection.createIndex((row) => row.id, {
+        name: `rebound-listener`,
+      })
+      const listenerSignature = collection
+        .getIndexMetadata()
+        .find((metadata) => metadata.indexId === listenerIndex.id)?.signature
+      expect(listenerSignature).toBeDefined()
+      const staleListenerCalls = adapter.ensureIndexCalls.filter(
+        (call) => call.signature === listenerSignature,
+      )
+
+      expect({
+        staleBootstrapCalls: staleBootstrapCalls.length,
+        staleListenerCalls: staleListenerCalls.length,
+      }).toEqual({
+        staleBootstrapCalls: 0,
+        staleListenerCalls: 0,
+      })
+
+      allowG1Metadata.resolve()
+      await freshReady
+    } finally {
+      allowG0Metadata.resolve()
+      allowG1Metadata.resolve()
+      await stalePreload.catch(() => undefined)
+      await freshReady?.catch(() => undefined)
       await collection.cleanup()
     }
   })
