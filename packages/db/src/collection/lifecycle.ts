@@ -240,7 +240,16 @@ export class CollectionLifecycleManager<
    */
   public onCleanupStart(callback: () => void): () => void {
     this.cleanupStartCallbacks.add(callback)
-    if (this.cleaningUp) callback()
+    if (this.cleaningUp) {
+      try {
+        callback()
+      } catch (error) {
+        // Registration did not return its ownership handle. Do not retain an
+        // observer that its caller has no way to unsubscribe.
+        this.cleanupStartCallbacks.delete(callback)
+        throw error
+      }
+    }
     return () => this.cleanupStartCallbacks.delete(callback)
   }
 

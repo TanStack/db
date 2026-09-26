@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  BasicIndex,
   createCollection,
   createEffect,
   createLiveQueryCollection,
+  eq,
 } from '../src'
 import { createDeferred } from '../src/deferred'
 import type { SyncConfig } from '../src/types'
@@ -23,7 +25,10 @@ import type { SyncConfig } from '../src/types'
  * query or Effect dependent. It invokes cleanup, holds adapter cleanup, checks
  * the cleanup-start observation, releases the adapter, and checks cleanup
  * settlement. Adjacent histories re-enter start or preload from abort and
- * release callbacks, request nested cleanup, or reject adapter cleanup.
+ * release callbacks, request nested cleanup, reject adapter cleanup, throw
+ * from cleanup-start observers, or register observers during active cleanup.
+ * A repeated-source history also proves one live query enters terminal error
+ * once when two lexical aliases depend on the same Collection.
  *
  * `expectedCleanupBoundary` is a small independent timeline model. Its
  * `dependent` field combines the live query's terminal error and the Effect's
@@ -39,9 +44,10 @@ import type { SyncConfig } from '../src/types'
  * The production driver calls the real cleanup, live-query, and Effect entry
  * points. Refinement checks run before releasing the controlled adapter gate
  * and after the cleanup promise settles. Counts, exact errors, status, rows,
- * ownership, and settlement are observed. This suite does not establish full
- * demand/replay histories, transport shutdown, persistence-wrapper behavior,
- * or general row-publication laws.
+ * subscription and observer ownership, and settlement are observed. The alias
+ * and late-registration cases are pinned refinements outside the two-checkpoint
+ * model. This suite does not establish full demand/replay histories, transport
+ * shutdown, persistence-wrapper behavior, or general row-publication laws.
  */
 
 type Row = { id: number; rank: number }
@@ -250,14 +256,63 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
+  it(`puts a live query in terminal error once when one source has two aliases`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const source = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, rank: 1 } })
+          commit()
+          markReady()
+          return { cleanup: () => cleanupGate.promise }
+        },
+      },
+    })
+    source.createIndex((row) => row.id, { indexType: BasicIndex })
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ left: source })
+        .join(
+          { right: source },
+          ({ left, right }) => eq(left.id, right.id),
+          `inner`,
+        ),
+    )
+    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    try {
+      await live.preload()
+
+      const cleanup = source.cleanup()
+
+      expect(live.status).toBe(`error`)
+      expect(reports).toHaveBeenCalledTimes(1)
+
+      cleanupGate.resolve()
+      await cleanup
+    } finally {
+      cleanupGate.resolve()
+      reports.mockRestore()
+      await live.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`disposes a dependent Effect when cleanup starts before terminal settlement`, async () => {
     const cleanupGate = createDeferred<void>()
+    const handlerGate = createDeferred<void>()
+    const handlerEntered = createDeferred<void>()
     const sourceErrors: Array<Error> = []
     let adapterCleanupStarted = 0
     const source = createCollection<Row>({
       getKey: (row) => row.id,
       sync: {
-        sync: ({ markReady }) => {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, rank: 1 } })
+          commit()
           markReady()
           return {
             cleanup: () => {
@@ -270,11 +325,15 @@ describe(`Collection cleanup admission oracle`, () => {
     })
     const effect = createEffect({
       query: (q) => q.from({ row: source }),
-      onBatch: () => {},
+      onEnter: () => {
+        handlerEntered.resolve()
+        return handlerGate.promise
+      },
       onSourceError: (error) => sourceErrors.push(error),
     })
 
     try {
+      await handlerEntered.promise
       expect(effect.disposed).toBe(false)
       expect(source.subscriberCount).toBe(1)
 
@@ -296,6 +355,16 @@ describe(`Collection cleanup admission oracle`, () => {
           message: `Source collection '${source.id}' was cleaned up while effect depends on it`,
         }),
       ])
+      let effectDisposalSettled = false
+      const effectDisposal = effect.dispose().then(() => {
+        effectDisposalSettled = true
+      })
+      expect(effectDisposalSettled).toBe(false)
+
+      handlerGate.resolve()
+      await effectDisposal
+      expect(effectDisposalSettled).toBe(true)
+      expect(cleanupSettled).toBe(false)
 
       cleanupGate.resolve()
       await cleanup
@@ -314,8 +383,145 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(sourceErrors).toHaveLength(1)
     } finally {
       cleanupGate.resolve()
+      handlerGate.resolve()
       await effect.dispose()
       await source.cleanup()
+    }
+  })
+
+  it(`continues teardown when a cleanup-start observer throws`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const observerError = new Error(`cleanup-start observer failed exactly`)
+    let starts = 0
+    let adapterCleanupStarted = 0
+    const source = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return {
+            cleanup: () => {
+              adapterCleanupStarted++
+              return cleanupGate.promise
+            },
+          }
+        },
+      },
+    })
+    const off = source._onCleanupStart(() => {
+      throw observerError
+    })
+
+    try {
+      await source.preload()
+      const cleanupOutcome = source.cleanup().then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+
+      expect(adapterCleanupStarted).toBe(1)
+      expect(source.status).toBe(`ready`)
+
+      cleanupGate.resolve()
+      expect(await cleanupOutcome).toBe(observerError)
+      expect(source.status).toBe(`cleaned-up`)
+
+      off()
+      source.startSyncImmediate()
+      expect(starts).toBe(2)
+      expect(source.status).toBe(`ready`)
+    } finally {
+      off()
+      cleanupGate.resolve()
+      await source.cleanup().catch(() => undefined)
+    }
+  })
+
+  it(`releases an Effect cleanup-start observer registered during active cleanup`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const source = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { cleanup: () => cleanupGate.promise }
+        },
+      },
+    })
+    const registerCleanupStart = source._onCleanupStart.bind(source)
+    let activeCleanupStartObservers = 0
+    source._onCleanupStart = (callback) => {
+      activeCleanupStartObservers++
+      const unsubscribe = registerCleanupStart(callback)
+      let active = true
+      return () => {
+        if (!active) return
+        active = false
+        activeCleanupStartObservers--
+        unsubscribe()
+      }
+    }
+
+    let effect: ReturnType<typeof createEffect> | undefined
+    try {
+      await source.preload()
+      const cleanup = source.cleanup()
+
+      effect = createEffect({
+        query: (q) => q.from({ row: source }),
+        onBatch: () => {},
+        onSourceError: () => {},
+      })
+
+      expect(effect.disposed).toBe(true)
+      expect(source.subscriberCount).toBe(0)
+      expect(activeCleanupStartObservers).toBe(0)
+
+      cleanupGate.resolve()
+      await cleanup
+    } finally {
+      cleanupGate.resolve()
+      await effect?.dispose()
+      await source.cleanup()
+    }
+  })
+
+  it(`does not retain a late cleanup-start observer that throws`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const observerError = new Error(
+      `late cleanup-start observer failed exactly`,
+    )
+    let observerCalls = 0
+    const source = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { cleanup: () => cleanupGate.promise }
+        },
+      },
+    })
+
+    try {
+      await source.preload()
+      const firstCleanup = source.cleanup()
+
+      expect(() =>
+        source._onCleanupStart(() => {
+          observerCalls++
+          throw observerError
+        }),
+      ).toThrow(observerError)
+
+      cleanupGate.resolve()
+      await firstCleanup
+      source.startSyncImmediate()
+      await expect(source.cleanup()).resolves.toBeUndefined()
+      expect(observerCalls).toBe(1)
+    } finally {
+      cleanupGate.resolve()
+      await source.cleanup().catch(() => undefined)
     }
   })
 

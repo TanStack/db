@@ -691,16 +691,22 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         }
       })
       this.unsubscribeCallbacks.add(statusUnsubscribe)
-      this.unsubscribeCallbacks.add(
-        collection._onCleanupStart(() => {
-          if (this.disposed) return
-          this.onSourceError(
-            new Error(
-              `Source collection '${collectionId}' was cleaned up while effect depends on it`,
-            ),
-          )
-        }),
-      )
+      const cleanupStartUnsubscribe = collection._onCleanupStart(() => {
+        if (this.disposed) return
+        this.onSourceError(
+          new Error(
+            `Source collection '${collectionId}' was cleaned up while effect depends on it`,
+          ),
+        )
+      })
+      // Registration reports an already-active cleanup synchronously. That
+      // callback can dispose this runner before the unsubscribe handle exists.
+      if (this.isDisposed()) {
+        cleanupStartUnsubscribe()
+        this.starting = false
+        return
+      }
+      this.unsubscribeCallbacks.add(cleanupStartUnsubscribe)
     }
 
     // Mark as subscribed so the graph can start running

@@ -332,6 +332,7 @@ function createPowerSyncCollectionConfig<
         | ((options?: { context?: LockContext }) => Promise<void>)
         | null = null
       let trackingSetup: Promise<void> | null = null
+      let activeTrackingDisposal: Promise<void> | null = null
       let abortTrackingDisposal: Promise<void> | null = null
 
       if (syncMode === `eager`) {
@@ -356,11 +357,27 @@ function createPowerSyncCollectionConfig<
 
         const dispose = disposeTracking
         if (!dispose) {
+          // Reconciliation may have claimed the disposer after this caller
+          // observed setup. Join that invocation instead of settling early.
+          await activeTrackingDisposal
           return
         }
 
         disposeTracking = null
-        await dispose(context ? { context } : undefined)
+        let disposal: Promise<void>
+        try {
+          disposal = Promise.resolve(dispose(context ? { context } : undefined))
+        } catch (error) {
+          disposal = Promise.reject(error)
+        }
+        activeTrackingDisposal = disposal
+        try {
+          await disposal
+        } finally {
+          if (activeTrackingDisposal === disposal) {
+            activeTrackingDisposal = null
+          }
+        }
       }
 
       function disposeTrackingAfterAbort(): Promise<void> {
@@ -825,6 +842,9 @@ function createPowerSyncCollectionConfig<
             if (cleanup) demand.cleanup = cleanup
           } catch (error) {
             demands.delete(options)
+            if (demandCleanupCollector) {
+              demandCleanupCollector.failure ??= { error }
+            }
             throw error
           }
 

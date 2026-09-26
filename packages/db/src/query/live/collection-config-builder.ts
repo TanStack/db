@@ -1204,7 +1204,7 @@ export class CollectionConfigBuilder<
   }
 
   private handleSourceCleanupStart(sourceId: string, collectionId: string) {
-    if (this.cleaningSourceIds.has(sourceId)) return
+    if (this.fatalQueryError || this.cleaningSourceIds.has(sourceId)) return
     this.cleaningSourceIds.add(sourceId)
     this.transitionToError(
       `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
