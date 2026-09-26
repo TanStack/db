@@ -53,7 +53,7 @@ describe(`Collection cleanup admission oracle`, () => {
     let sourceCleanupSettled = false
     const statuses: Array<string> = []
     const settlementOrder: Array<string> = []
-    const collection = createCollection<Row>({
+    const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
@@ -125,7 +125,7 @@ describe(`Collection cleanup admission oracle`, () => {
   it(`treats an incidental contextual-void return as synchronous cleanup`, async () => {
     let starts = 0
     const released: Array<number> = []
-    const collection = createCollection<Row>({
+    const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
@@ -167,7 +167,7 @@ describe(`Collection cleanup admission oracle`, () => {
         localCleanups++
       },
     )
-    const collection = createCollection<Row>({
+    const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync,
     })
@@ -198,7 +198,7 @@ describe(`Collection cleanup admission oracle`, () => {
     let adapterCleanups = 0
     let armed = false
     let replacementCleanup: Promise<void> | undefined
-    const collection = createCollection<Row>({
+    const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
@@ -243,7 +243,7 @@ describe(`Collection cleanup admission oracle`, () => {
       cleanupCalls++
       return cleanupGate.promise
     }
-    const collection = createCollection<Row>({
+    const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
@@ -279,7 +279,7 @@ describe(`Collection cleanup admission oracle`, () => {
     let starts = 0
     let cleanups = 0
     const statuses: Array<string> = []
-    const collection = createCollection<Row>({
+    const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
         sync: ({ markReady }) => {
@@ -475,11 +475,11 @@ describe(`Collection cleanup admission oracle`, () => {
       let starts = 0
       let armed = false
       let observed: Promise<unknown> | undefined
-      const peer = createCollection<Row>({
+      const peer = createCollection<Row, number>({
         getKey: (row) => row.id,
         sync: { sync: ({ markReady }) => markReady() },
       })
-      const source = createCollection<Row>({
+      const source = createCollection<Row, number>({
         getKey: (row) => row.id,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
