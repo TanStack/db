@@ -28,6 +28,8 @@ import type { SyncConfig } from '../src/types'
  * settlement. Adjacent histories re-enter start or preload from abort and
  * release callbacks, request nested cleanup, reject adapter cleanup, throw
  * from cleanup-start observers, or register observers during active cleanup.
+ * The late live-query history places the cleaning source before and after a
+ * healthy source. Terminal setup must retain no partial source ownership.
  * A repeated-source history also proves one live query enters terminal error
  * once when two lexical aliases depend on the same Collection.
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
@@ -490,6 +492,71 @@ describe(`Collection cleanup admission oracle`, () => {
       await source.cleanup()
     }
   })
+
+  it.each([`first`, `second`] as const)(
+    `does not acquire live-query source subscriptions during active cleanup: %s source`,
+    async (cleaningPosition) => {
+      const cleanupGate = createDeferred<void>()
+      const cleaningSource = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { cleanup: () => cleanupGate.promise }
+          },
+        },
+      })
+      const healthySource = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        sync: { sync: ({ markReady }) => markReady() },
+      })
+      cleaningSource.createIndex((row) => row.id, { indexType: BasicIndex })
+      healthySource.createIndex((row) => row.id, { indexType: BasicIndex })
+      let live: ReturnType<typeof createLiveQueryCollection> | undefined
+      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+      try {
+        await cleaningSource.preload()
+        const cleaning = cleaningSource.cleanup()
+        expect(cleaningSource.status).toBe(`ready`)
+
+        const firstSource =
+          cleaningPosition === `first` ? cleaningSource : healthySource
+        const secondSource =
+          cleaningPosition === `second` ? cleaningSource : healthySource
+        live = createLiveQueryCollection((q) =>
+          q
+            .from({ first: firstSource })
+            .join(
+              { second: secondSource },
+              ({ first, second }) => eq(first.id, second.id),
+              `inner`,
+            ),
+        )
+        const message =
+          `Source collection '${cleaningSource.id}' was manually cleaned up while live query '${live.id}' depends on it. ` +
+          `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`
+
+        await expect(live.preload()).rejects.toThrow(message)
+
+        expect(live.status).toBe(`error`)
+        expect({
+          cleaning: cleaningSource.subscriberCount,
+          healthy: healthySource.subscriberCount,
+        }).toEqual({ cleaning: 0, healthy: 0 })
+        expect(reports.mock.calls).toEqual([[`[Live Query Error] ${message}`]])
+
+        cleanupGate.resolve()
+        await cleaning
+      } finally {
+        cleanupGate.resolve()
+        reports.mockRestore()
+        await live?.cleanup()
+        await cleaningSource.cleanup()
+        await healthySource.cleanup()
+      }
+    },
+  )
 
   it(`does not retain a late cleanup-start observer that throws`, async () => {
     const cleanupGate = createDeferred<void>()
