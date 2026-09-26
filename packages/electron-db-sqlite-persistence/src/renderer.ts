@@ -397,6 +397,9 @@ export function createElectronSQLitePersistence(
     `sync-absent`,
     undefined,
   )
+  if (coordinator instanceof ElectronCollectionCoordinator) {
+    coordinator.setAdapter(defaultPersistence.adapter)
+  }
 
   return {
     ...defaultPersistence,
