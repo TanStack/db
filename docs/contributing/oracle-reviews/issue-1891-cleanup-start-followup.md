@@ -236,6 +236,52 @@ format, and diff checks. One earlier PowerSync package run at that stage raced
 its build and could not resolve `dist/esm/index.d.ts`; that was a setup-order
 failure, and the post-build 165-test rerun was green.
 
+## Late live-query registration reconciliation
+
+Reviewed semantic head:
+`889b930170c7c23b75f020297d96fa92f3c31142`
+
+Review baseline: `9cc05782a035ca737e2c3dc360ae4ed417be2045`
+
+A later review found that a live query could start while one source's adapter
+cleanup was pending. Cleanup-start observer registration correctly delivered
+the active boundary synchronously and put the live query in terminal error, but
+the builder continued its setup loop. At the baseline, the controlled
+first-source history observed one subscription on both the cleaning source and
+the later healthy source. An intermediate guard stopped later acquisition but
+left one earlier healthy-source subscription when the cleaning source occupied
+the second position. The final repair throws the exact terminal setup error
+after unregistering the current observers. The existing sync-entry rollback
+then releases all earlier source ownership and prevents later acquisition.
+
+The coverage gap was an inverted lifecycle history. Existing tests created a
+dependent before cleanup began or registered an Effect during active cleanup.
+They did not start a live query after cleanup start, nor vary the cleaning
+source's position in a multi-source query. The permanent two-cell refinement
+holds adapter cleanup, places the cleaning source first and second, calls the
+public live-query preload path, and checks the exact terminal error, one report,
+and zero retained subscriptions on both sources.
+
+| Requirement | Outcome |
+| --- | --- |
+| ORC-001: contract authority and limits | Pass. The glossary and live-query architecture require cleanup start to put dependent live queries in terminal error. This focused refinement adds the setup-order consequence: setup that observes that terminal boundary retains no partial source ownership. It does not expand the oracle's transport, row-publication, or full demand-history claims. |
+| ORC-002: independent judgment | Pass. A held adapter-cleanup gate creates the boundary. Exact public status, error text, report count, and source subscriber counts supply the expected observations without importing builder state or transition helpers. |
+| ORC-003: distinguishable responsibilities | Pass. The existing oracle opening retains its contract, two-checkpoint model, fixed history grammar, public driver, and refinement checks. The new fixed source-position matrix is named as an adjacent ownership refinement outside the small timeline model. |
+| ORC-004: generated-history grammar controls | Not applicable. The first/second source product is a bounded two-cell enumeration, not a generated-history coverage claim. |
+| ORC-005: production path and observation | Pass. The driver calls real source `preload()` and `cleanup()`, creates a real joined live-query Collection, and calls its public `preload()`. Both cells reach synchronous cleanup-start delivery while adapter cleanup remains held. The checkpoint observes terminal status and exact subscriber ownership before cleanup settlement. |
+| ORC-006: checker calibration | Pass. At the baseline, the first-source cell failed with `{ cleaning: 1, healthy: 1 }` instead of zeros. The intermediate stop-only guard made that cell pass but the second-source cell failed with `{ cleaning: 0, healthy: 1 }`. Neither result was a timeout, setup failure, or unreached path. The final rollback repair passes both cells. |
+| ORC-007: fixed and random campaigns with direct replay | Not applicable. No important generated property, seed, budget, shrink path, or replay interface changed. |
+| ORC-008: stateful-model minimality | Not applicable. No stateful reference-model state was added, removed, combined, or split. Source position is a fixed driver dimension. |
+| ORC-009: vocabulary mapping | Pass. Cleanup start, cleanup settlement, live-query Collection, source Collection, subscription, and sync run retain their glossary meanings. Partial source ownership means subscriptions acquired before terminal setup rollback; it is an observation, not a new lifecycle state. |
+| ORC-010: failure fidelity and cleanup | Pass. The test preserves exact status, error, log, and subscriber-count observations. `finally` releases the adapter gate, cleans the live query and both sources, and cannot replace the primary assertion failure. |
+| ORC-011: independent second formulation | Pass. The existing late-Effect-registration refinement independently proves immediate disposal and observer release. The new live-query path instead exercises joined-source setup rollback and subscription ownership. Both refine cleanup-start invalidation without equating their teardown machinery. |
+
+ORC-012 is satisfied by this versioned section for semantic head
+`889b930170c7c23b75f020297d96fa92f3c31142`. Focused verification passed the
+30-test cleanup/restart oracle, the 12-test Effect-disposal oracle, and the
+199-test Collection subscription-lifecycle oracle. The DB build, DB TypeScript
+check, targeted ESLint and Prettier checks, and `git diff --check` also passed.
+
 The ancestor record
 [`issue-1891-async-cleanup.md`](issue-1891-async-cleanup.md) reviewed semantic
 head `21ed924352e91e47f0643de6d2542051ddd12d20` and was versioned by
