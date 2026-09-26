@@ -72,6 +72,8 @@ import type {
  * startup/reset overlap, cleanup, and restart. Tests drive the
  * real persisted wrapper, Collection, coordinator, adapter, transactions,
  * indexes, and local mutation path.
+ * Cleanup waits for source and persistence release work after any teardown
+ * failure. A retired source sync cannot publish new remote subset ownership.
  * A source abort before core application rejects that transaction's receipt.
  * It does not invalidate the durable baseline or an independent queued source
  * transaction when the failed transaction made no public or durable change.
@@ -579,6 +581,56 @@ async function cleanupPersistedOracle(
     }
   }
 }
+
+it.each([false, true])(
+  `persisted oracle cleanup attempts every action without hiding a primary failure: %s`,
+  async (hasPrimaryFailure) => {
+    const firstFailure = new Error(`first oracle cleanup failure`)
+    const secondFailure = new Error(`second oracle cleanup failure`)
+    const attempts: Array<string> = []
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+    try {
+      const outcome = await cleanupPersistedOracle(
+        [
+          () => {
+            attempts.push(`first`)
+            throw firstFailure
+          },
+          () => {
+            attempts.push(`second`)
+            return Promise.reject(secondFailure)
+          },
+          () => {
+            attempts.push(`last`)
+          },
+        ],
+        hasPrimaryFailure,
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+
+      expect(attempts).toEqual([`first`, `second`, `last`])
+      if (hasPrimaryFailure) {
+        expect(outcome).toBeUndefined()
+        expect(warning).toHaveBeenCalledWith(
+          `Persisted oracle cleanup failed after the primary failure:`,
+          [firstFailure, secondFailure],
+        )
+      } else {
+        expect(outcome).toBeInstanceOf(AggregateError)
+        expect((outcome as AggregateError).errors).toEqual([
+          firstFailure,
+          secondFailure,
+        ])
+        expect(warning).not.toHaveBeenCalled()
+      }
+    } finally {
+      warning.mockRestore()
+    }
+  },
+)
 
 type DurabilityLedgerEvent =
   | { type: `begin`; transactionId: string }
@@ -6259,6 +6311,584 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           () => replacementReady,
           () => (cleanedUp ? undefined : collection.cleanup()),
         ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it.each([`fulfill`, `reject`] as const)(
+    `keeps retired loopback startup inert after cleanup: %s`,
+    async (outcome) => {
+      const adapter = createRecordingAdapter()
+      const hydrationEntered = createEventGate()
+      const hydrationGate = createEventGate()
+      const startupError = new Error(`retired loopback startup failed`)
+      const restoreBaselineRows = overrideBaselineRows(adapter, async () => {
+        hydrationEntered.resolve()
+        await hydrationGate.promise
+        if (outcome === `reject`) throw startupError
+        return []
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `retired-loopback-startup-${outcome}`,
+          getKey: (row) => row.id,
+          persistence: { adapter },
+        }),
+      )
+      const readiness = collection.stateWhenReady().then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const unhandled: Array<unknown> = []
+      const captureUnhandled = (error: unknown) => unhandled.push(error)
+      process.on(`unhandledRejection`, captureUnhandled)
+      const peer = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `retired-loopback-peer-${outcome}`,
+          getKey: (row) => row.id,
+          persistence: { adapter: createRecordingAdapter() },
+        }),
+      )
+      let hasPrimaryFailure = false
+
+      try {
+        await atPersistedOracleCheckpoint(
+          hydrationEntered.promise,
+          `retired loopback hydration entered`,
+        )
+        await collection.cleanup()
+        const retiredStatus = collection.status
+
+        hydrationGate.resolve()
+        await flushAsyncWork()
+        await flushAsyncWork()
+        const readinessOutcome = await readiness
+        await atPersistedOracleCheckpoint(
+          peer.stateWhenReady(),
+          `independent loopback peer ready`,
+        )
+
+        expect({
+          retiredStatus,
+          finalStatus: collection.status,
+          readinessStatus: readinessOutcome.status,
+          readinessErrorName:
+            readinessOutcome.status === `rejected` &&
+            readinessOutcome.reason instanceof Error
+              ? readinessOutcome.reason.name
+              : undefined,
+          publicError: collection._lifecycle.getSyncError(),
+          warnings: warnings.mock.calls,
+          unhandled,
+          peerStatus: peer.status,
+        }).toEqual({
+          retiredStatus: `cleaned-up`,
+          finalStatus: `cleaned-up`,
+          readinessStatus: `rejected`,
+          readinessErrorName: `AbortError`,
+          publicError: undefined,
+          warnings: [],
+          unhandled: [],
+          peerStatus: `ready`,
+        })
+
+        // This hostile control bypasses the sync-run-owned callback. It proves
+        // the status observation above would reject an unfenced late ready.
+        expect(() => collection._lifecycle.markReady()).toThrowError(
+          expect.objectContaining({ name: `CollectionStateError` }),
+        )
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        restoreBaselineRows()
+        hydrationGate.resolve()
+        process.off(`unhandledRejection`, captureUnhandled)
+        warnings.mockRestore()
+        await cleanupPersistedOracle(
+          [() => readiness, () => collection.cleanup(), () => peer.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`settles old source cleanup before hydrating a same-resource replacement`, async () => {
+    const id = `same-resource-cleanup-settlement`
+    const adapter = createRecordingAdapter()
+    adapter.rows.set(`retired`, {
+      id: `retired`,
+      title: `must not survive old cleanup`,
+    })
+    const cleanupGate = createEventGate()
+    let sourceCleanupSettled = false
+    const create = (withCleanup: boolean) =>
+      createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return withCleanup
+                ? {
+                    cleanup: () =>
+                      cleanupGate.promise.then(() => {
+                        adapter.rows.delete(`retired`)
+                        sourceCleanupSettled = true
+                      }),
+                  }
+                : undefined
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+    const oldCollection = create(true)
+    let replacement: ReturnType<typeof create> | undefined
+    let replacementReady: Promise<unknown> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        oldCollection.stateWhenReady(),
+        `old same-resource owner ready`,
+      )
+      expect(stripVirtualProps(oldCollection.get(`retired`))).toEqual({
+        id: `retired`,
+        title: `must not survive old cleanup`,
+      })
+
+      const replacementStarted = oldCollection.cleanup().then(() => {
+        replacement = create(false)
+        replacementReady = replacement.stateWhenReady()
+        return replacementReady
+      })
+      await flushAsyncWork()
+
+      expect(sourceCleanupSettled).toBe(false)
+      expect(replacement).toBeUndefined()
+
+      cleanupGate.resolve()
+      await atPersistedOracleCheckpoint(
+        replacementStarted,
+        `same-resource replacement ready after cleanup`,
+      )
+
+      expect(sourceCleanupSettled).toBe(true)
+      expect(adapter.rows.has(`retired`)).toBe(false)
+      expect(replacement?.get(`retired`)).toBeUndefined()
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      cleanupGate.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => replacementReady,
+          () => oldCollection.cleanup(),
+          () => replacement?.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it.each([`fulfill`, `reject`] as const)(
+    `awaits cleanup returned after reentrant persisted source retirement: %s`,
+    async (outcome) => {
+      const adapter = createRecordingAdapter()
+      const sourceEntered = createEventGate()
+      const cleanupGate = createEventGate()
+      const sourceError = new Error(`reentrant source cleanup failed`)
+      let cleanupCalls = 0
+      let cleanupFromReentry: Promise<void> | undefined
+      let reenterCleanup = true
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `reentrant-persisted-source-cleanup-${outcome}`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ collection: publicCollection, markReady }) => {
+              if (!reenterCleanup) {
+                markReady()
+                return
+              }
+              reenterCleanup = false
+              cleanupFromReentry = publicCollection.cleanup()
+              sourceEntered.resolve()
+              return {
+                cleanup: () => {
+                  cleanupCalls++
+                  return cleanupGate.promise.then(() => {
+                    if (outcome === `reject`) throw sourceError
+                  })
+                },
+              }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      let cleanupSettled = false
+      let hasPrimaryFailure = false
+
+      try {
+        collection.startSyncImmediate()
+        await atPersistedOracleCheckpoint(
+          sourceEntered.promise,
+          `reentrant persisted source entered`,
+        )
+        if (!cleanupFromReentry) {
+          throw new Error(`reentrant cleanup was not captured`)
+        }
+        void cleanupFromReentry.then(
+          () => {
+            cleanupSettled = true
+          },
+          () => {
+            cleanupSettled = true
+          },
+        )
+        await flushAsyncWork()
+
+        expect({ cleanupCalls, cleanupSettled }).toEqual({
+          cleanupCalls: 1,
+          cleanupSettled: false,
+        })
+
+        cleanupGate.resolve()
+        if (outcome === `reject`) {
+          await expect(cleanupFromReentry).rejects.toMatchObject({
+            name: `SyncCleanupError`,
+            cause: sourceError,
+          })
+        } else {
+          await expect(cleanupFromReentry).resolves.toBeUndefined()
+        }
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(cleanupCalls).toBe(1)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        cleanupGate.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => cleanupFromReentry?.catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`does not register remote ownership returned by a retired source sync`, async () => {
+    const id = `reentrant-retired-remote-owner`
+    const adapter = createRecordingAdapter()
+    const coordinator = new SingleProcessCoordinator()
+    const sourceEntered = createEventGate()
+    let cleanupFromReentry: Promise<void> | undefined
+    let retiredSourceLoads = 0
+    const oldCollection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ collection: publicCollection }) => {
+            cleanupFromReentry = publicCollection.cleanup()
+            sourceEntered.resolve()
+            return {
+              loadSubset: () => {
+                retiredSourceLoads++
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let replacement: Collection<Todo, string> | undefined
+    let replacementReady: Promise<unknown> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      oldCollection.startSyncImmediate()
+      await atPersistedOracleCheckpoint(
+        sourceEntered.promise,
+        `retired remote-owner source entered`,
+      )
+      if (!cleanupFromReentry) {
+        throw new Error(`reentrant cleanup was not captured`)
+      }
+      await atPersistedOracleCheckpoint(
+        cleanupFromReentry,
+        `retired remote-owner cleanup settled`,
+      )
+
+      replacement = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      replacementReady = replacement.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        replacementReady,
+        `same-id replacement ready after retired source entry`,
+      )
+
+      expect({
+        oldStatus: oldCollection.status,
+        replacementStatus: replacement.status,
+        retiredSourceLoads,
+      }).toEqual({
+        oldStatus: `cleaned-up`,
+        replacementStatus: `ready`,
+        retiredSourceLoads: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [
+          () => cleanupFromReentry,
+          () => replacementReady,
+          () => oldCollection.cleanup(),
+          () => replacement?.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`settles every cleanup task after synchronous runtime teardown failures`, async () => {
+    const id = `synchronous-runtime-cleanup-failure`
+    const adapter = createRecordingAdapter()
+    const coordinator = new SingleProcessCoordinator()
+    const sourceCleanupGate = createEventGate()
+    const firstRuntimeError = new Error(`coordinator unsubscribe failed`)
+    const laterRuntimeError = new Error(`remote owner unsubscribe failed`)
+    const cleanupEvents: Array<string> = []
+    let subscriptionCount = 0
+    let ownerCount = 0
+    const subscribe = coordinator.subscribe.bind(coordinator)
+    coordinator.subscribe = () => {
+      const unsubscribe = subscribe()
+      const fail = subscriptionCount++ === 0
+      return () => {
+        unsubscribe()
+        cleanupEvents.push(`coordinator`)
+        if (fail) throw firstRuntimeError
+      }
+    }
+    const registerRemoteSubsetOwner =
+      coordinator.registerRemoteSubsetOwner.bind(coordinator)
+    coordinator.registerRemoteSubsetOwner = (collectionId, owner) => {
+      const unregister = registerRemoteSubsetOwner(collectionId, owner)
+      const fail = ownerCount++ === 0
+      return () => {
+        unregister()
+        cleanupEvents.push(`remote-owner`)
+        if (fail) throw laterRuntimeError
+      }
+    }
+    let sourceCleanupCalls = 0
+    const oldCollection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              cleanup: () => {
+                sourceCleanupCalls++
+                return sourceCleanupGate.promise
+              },
+              loadSubset: () => true,
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let replacement: Collection<Todo, string> | undefined
+    let replacementReady: Promise<unknown> | undefined
+    let cleanupSettled = false
+    let cleanupOutcome:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; error: unknown }
+        >
+      | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        oldCollection.stateWhenReady(),
+        `runtime-cleanup source ready`,
+      )
+      cleanupOutcome = oldCollection.cleanup().then(
+        () => ({ status: `fulfilled` as const }),
+        (error: unknown) => ({ status: `rejected` as const, error }),
+      )
+      void cleanupOutcome.then(() => {
+        cleanupSettled = true
+      })
+      await flushAsyncWork()
+
+      expect({ sourceCleanupCalls, cleanupSettled }).toEqual({
+        sourceCleanupCalls: 1,
+        cleanupSettled: false,
+      })
+
+      sourceCleanupGate.resolve()
+      const outcome = await atPersistedOracleCheckpoint(
+        cleanupOutcome,
+        `runtime cleanup tasks settled`,
+      )
+      expect(outcome.status).toBe(`rejected`)
+      if (outcome.status !== `rejected`) {
+        throw new Error(`expected runtime cleanup to reject`)
+      }
+      expect(outcome.error).toMatchObject({ name: `SyncCleanupError` })
+      const syncCleanupError = outcome.error as { cause?: unknown }
+      expect(syncCleanupError.cause).toBeInstanceOf(AggregateError)
+      const aggregate = syncCleanupError.cause as AggregateError
+      expect(aggregate.cause).toBe(firstRuntimeError)
+      expect(aggregate.errors).toEqual([firstRuntimeError, laterRuntimeError])
+      expect(cleanupEvents).toEqual([`coordinator`, `remote-owner`])
+
+      replacement = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      replacementReady = replacement.stateWhenReady()
+      await atPersistedOracleCheckpoint(
+        replacementReady,
+        `replacement ready after failed runtime cleanup`,
+      )
+      expect(replacement.status).toBe(`ready`)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      sourceCleanupGate.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => cleanupOutcome,
+          () => replacementReady,
+          () => oldCollection.cleanup(),
+          () => replacement?.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  it(`preserves source and runtime failures when persisted cleanup has both`, async () => {
+    const id = `source-and-runtime-cleanup-failures`
+    const adapter = createRecordingAdapter()
+    const coordinator = new SingleProcessCoordinator()
+    const sourceCleanupGate = createEventGate()
+    const sourceError = new Error(`source cleanup failed exactly`)
+    const runtimeError = new Error(`runtime cleanup failed exactly`)
+    let sourceCleanupCalls = 0
+    let runtimeCleanupCalls = 0
+    const subscribe = coordinator.subscribe.bind(coordinator)
+    coordinator.subscribe = () => {
+      const unsubscribe = subscribe()
+      return () => {
+        unsubscribe()
+        runtimeCleanupCalls++
+        throw runtimeError
+      }
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              cleanup: () => {
+                sourceCleanupCalls++
+                return sourceCleanupGate.promise
+              },
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let cleanupOutcome:
+      | Promise<
+          { status: `fulfilled` } | { status: `rejected`; error: unknown }
+        >
+      | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `dual-failure persisted collection ready`,
+      )
+      cleanupOutcome = collection.cleanup().then(
+        () => ({ status: `fulfilled` as const }),
+        (error: unknown) => ({ status: `rejected` as const, error }),
+      )
+      await flushAsyncWork()
+
+      expect({ sourceCleanupCalls, runtimeCleanupCalls }).toEqual({
+        sourceCleanupCalls: 1,
+        runtimeCleanupCalls: 1,
+      })
+
+      sourceCleanupGate.reject(sourceError)
+      const outcome = await atPersistedOracleCheckpoint(
+        cleanupOutcome,
+        `source and runtime cleanup failures settled`,
+      )
+      expect(outcome.status).toBe(`rejected`)
+      if (outcome.status !== `rejected`) {
+        throw new Error(`expected persisted cleanup to reject`)
+      }
+      expect(outcome.error).toMatchObject({ name: `SyncCleanupError` })
+      const syncCleanupError = outcome.error as { cause?: unknown }
+      expect(syncCleanupError.cause).toBeInstanceOf(AggregateError)
+      const aggregate = syncCleanupError.cause as AggregateError
+      expect(aggregate.cause).toBe(sourceError)
+      expect(aggregate.errors).toEqual([sourceError, runtimeError])
+      expect(collection.status).toBe(`cleaned-up`)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      sourceCleanupGate.resolve()
+      await cleanupPersistedOracle(
+        [() => cleanupOutcome, () => collection.cleanup()],
         hasPrimaryFailure,
       )
     }

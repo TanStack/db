@@ -2044,29 +2044,42 @@ class PersistedCollectionRuntime<
     await this.persistAndConfirmCollectionMutations(collectionMutations)
   }
 
-  cleanup(): void {
+  cleanup(): Promise<void> {
     this.advanceLifecycle()
-
-    if (this.mode === `sync-present`) {
-      for (const options of this.activeSubsets.values()) {
-        void this.persistence.coordinator
-          .requestReleaseRemoteSubset(this.collectionId, options)
-          .catch((error) => {
-            this.reportSyncError(error)
-          })
+    const remoteReleases: Array<Promise<void>> = []
+    const failures: Array<unknown> = []
+    const attempt = (callback: () => void): void => {
+      try {
+        callback()
+      } catch (error) {
+        failures.push(error)
       }
     }
 
-    this.coordinatorUnsubscribe?.()
+    if (this.mode === `sync-present`) {
+      for (const options of this.activeSubsets.values()) {
+        attempt(() => {
+          remoteReleases.push(
+            this.persistence.coordinator
+              .requestReleaseRemoteSubset(this.collectionId, options)
+              .catch((error) => {
+                this.reportSyncError(error)
+              }),
+          )
+        })
+      }
+    }
+
+    attempt(() => this.coordinatorUnsubscribe?.())
     this.coordinatorUnsubscribe = null
 
-    this.remoteSubsetOwnerUnsubscribe?.()
+    attempt(() => this.remoteSubsetOwnerUnsubscribe?.())
     this.remoteSubsetOwnerUnsubscribe = null
 
-    this.indexAddedUnsubscribe?.()
+    attempt(() => this.indexAddedUnsubscribe?.())
     this.indexAddedUnsubscribe = null
 
-    this.indexRemovedUnsubscribe?.()
+    attempt(() => this.indexRemovedUnsubscribe?.())
     this.indexRemovedUnsubscribe = null
 
     if (this.remoteEnsureRetryTimer !== null) {
@@ -2083,6 +2096,14 @@ class PersistedCollectionRuntime<
     this.queuedTxCommitted.length = 0
     this.clearSyncControls()
     this.collection = null
+    return Promise.all(remoteReleases).then(() => {
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) {
+        throw new AggregateError(failures, `Persistence cleanup failed`, {
+          cause: failures[0],
+        })
+      }
+    })
   }
 
   private advanceLifecycle(): void {
@@ -4377,6 +4398,7 @@ function createWrappedSyncConfig<
       }
 
       let sourceResult: SyncConfigRes = {}
+      let activeSourceSyncEntry: Promise<void> | undefined
       fullStartPromise = runtime.ensureStarted()
       // Startup can fail before the source reaches markReady or loadSubset,
       // which are the two eventual consumers of this outer adopting promise.
@@ -4391,10 +4413,21 @@ function createWrappedSyncConfig<
           return sourceResult
         }
 
-        sourceResult = normalizeSyncFnResult(
-          sourceSyncConfig.sync(wrappedParams),
-        )
-        if (sourceResult.loadSubset) {
+        let settleSourceSyncEntry!: () => void
+        activeSourceSyncEntry = new Promise<void>((resolve) => {
+          settleSourceSyncEntry = resolve
+        })
+        try {
+          sourceResult = normalizeSyncFnResult(
+            sourceSyncConfig.sync(wrappedParams),
+          )
+        } finally {
+          activeSourceSyncEntry = undefined
+          settleSourceSyncEntry()
+        }
+        // Cleanup can reenter while the source sync function is still active.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (!startupState.cleanedUp && sourceResult.loadSubset) {
           const loadSubset = async (options: TransportedLoadSubsetOptions) => {
             if (startupState.cleanedUp) {
               throw new Error(`persisted sync source is no longer active`)
@@ -4421,8 +4454,12 @@ function createWrappedSyncConfig<
       })
 
       return {
-        cleanup: () => {
+        cleanup: async () => {
           startupState.cleanedUp = true
+          // The optional source starts behind persistence metadata. If it
+          // reenters cleanup before returning, wait for that exact synchronous
+          // entry to publish its cleanup callback before sampling the result.
+          const sourceSyncEntry = activeSourceSyncEntry
           const cleanupError = new SyncTransactionAbortedError()
           for (const acquisition of acquisitions.values()) {
             acquisition.cancelAdmissionWait?.()
@@ -4433,8 +4470,36 @@ function createWrappedSyncConfig<
             settlePublicationAdmissionWaiters(transaction, cleanupError)
           }
           transactionStack.length = 0
-          sourceResult.cleanup?.()
-          runtime.cleanup()
+          let sourceCleanup: Promise<void>
+          try {
+            sourceCleanup = sourceSyncEntry
+              ? sourceSyncEntry.then(() => sourceResult.cleanup?.())
+              : Promise.resolve(sourceResult.cleanup?.())
+          } catch (error) {
+            sourceCleanup = Promise.reject(error)
+          }
+          let runtimeCleanup: Promise<void>
+          try {
+            runtimeCleanup = runtime.cleanup()
+          } catch (error) {
+            runtimeCleanup = Promise.reject(error)
+          }
+          const [sourceOutcome, runtimeOutcome] = await Promise.allSettled([
+            sourceCleanup,
+            runtimeCleanup,
+          ])
+          if (
+            sourceOutcome.status === `rejected` &&
+            runtimeOutcome.status === `rejected`
+          ) {
+            throw new AggregateError(
+              [sourceOutcome.reason, runtimeOutcome.reason],
+              `Source cleanup and persistence runtime teardown both failed`,
+              { cause: sourceOutcome.reason },
+            )
+          }
+          if (sourceOutcome.status === `rejected`) throw sourceOutcome.reason
+          if (runtimeOutcome.status === `rejected`) throw runtimeOutcome.reason
         },
         loadSubset: async (options: LoadSubsetOptions) => {
           const acquisition = { forwarded: false }
@@ -4530,9 +4595,7 @@ function createLoopbackSyncConfig<
         .catch(() => undefined)
 
       return {
-        cleanup: () => {
-          runtime.cleanup()
-        },
+        cleanup: () => runtime.cleanup(),
         loadSubset: (options: LoadSubsetOptions) => runtime.loadSubset(options),
         unloadSubset: (options: LoadSubsetOptions) =>
           runtime.unloadSubset(options),

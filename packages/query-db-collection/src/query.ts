@@ -22,6 +22,7 @@ import {
   QueryKeyRequiredError,
 } from './errors'
 import { createWriteUtils } from './manual-sync'
+import { runCleanupWithLocalTeardown } from './cleanup'
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -3342,13 +3343,8 @@ export function queryCollectionOptions(
 
     return {
       ...sync,
-      cleanup: () => {
-        try {
-          sync.cleanup?.()
-        } finally {
-          unmountQueryClient()
-        }
-      },
+      cleanup: () =>
+        runCleanupWithLocalTeardown(sync.cleanup, unmountQueryClient),
     }
   }
 

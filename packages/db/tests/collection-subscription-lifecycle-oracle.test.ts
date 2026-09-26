@@ -1270,7 +1270,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                 return pending.promise
               },
               unloadSubset: (options) => unloads.push(options),
-              cleanup: () => sourceCleanupSyncRuns.push(0),
+              cleanup: () => {
+                sourceCleanupSyncRuns.push(0)
+              },
             }
           },
         },
@@ -2802,7 +2804,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           return {
             loadSubset: () => true,
             unloadSubset: () => {},
-            cleanup: () => cleanupSyncRuns.push(syncRunGeneration),
+            cleanup: () => {
+              cleanupSyncRuns.push(syncRunGeneration)
+            },
           }
         },
       },
@@ -2844,6 +2848,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       const unloads: Array<number> = []
       let syncRunGeneration = -1
       let retire = false
+      let nestedRestartError: unknown
       const collection = createOnDemandCollection<{ id: string }>({
         sync: {
           sync: ({ markReady }) => {
@@ -2858,7 +2863,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                 return true
               },
               unloadSubset: () => unloads.push(ownSyncRunGeneration),
-              cleanup: () => cleanups.push(ownSyncRunGeneration),
+              cleanup: () => {
+                cleanups.push(ownSyncRunGeneration)
+              },
             }
           },
         },
@@ -2873,7 +2880,13 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
           if (!retire) return
           retire = false
           void collection.cleanup()
-          if (restart) collection.startSyncImmediate()
+          if (restart) {
+            try {
+              collection.startSyncImmediate()
+            } catch (error) {
+              nestedRestartError = error
+            }
+          }
           if (entry === `ready-effect-throw`) throw failure
         }
         removeListener =
@@ -2891,15 +2904,27 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
         }
         await flushPromises()
 
-        expect(collection.status).toBe(restart ? `ready` : `cleaned-up`)
+        const cleanupStartedDuringSyncEntry = entry !== `loading`
+        const restartSucceeded = restart && !cleanupStartedDuringSyncEntry
+        if (restart && cleanupStartedDuringSyncEntry) {
+          expect(nestedRestartError).toMatchObject({
+            name: `CollectionStateError`,
+            message: expect.stringContaining(`after cleanup() completes`),
+          })
+        } else {
+          expect(nestedRestartError).toBeUndefined()
+        }
+        expect(collection.status).toBe(
+          restartSucceeded ? `ready` : `cleaned-up`,
+        )
         const returnsObsoleteCleanup =
           entry === `ready` || entry === `ready-effect-throw`
         expect(cleanups).toEqual(returnsObsoleteCleanup ? [0, 1] : [0])
         expect(syncRunGeneration).toBe(
-          entry === `loading` ? (restart ? 1 : 0) : restart ? 2 : 1,
+          entry === `loading` ? (restart ? 1 : 0) : 1,
         )
 
-        if (restart) {
+        if (restartSucceeded) {
           subscription.requestSnapshot({
             where: new Func(`eq`, [new PropRef([`id`]), new Value(`row`)]),
           })
@@ -3763,7 +3788,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                 if (!demand) throw new Error(`unknown restart demand`)
                 unloads.push({ syncRunGeneration, demand })
               },
-              cleanup: () => sourceCleanups.push(syncRunGeneration),
+              cleanup: () => {
+                sourceCleanups.push(syncRunGeneration)
+              },
             }
           },
         },
