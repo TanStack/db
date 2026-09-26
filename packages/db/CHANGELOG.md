@@ -1,5 +1,125 @@
 # @tanstack/db
 
+## 0.10.0
+
+### Minor Changes
+
+- **Deprecation**: Mutation handler return values and QueryCollection auto-refetch behavior. ([#843](https://github.com/TanStack/db/pull/843))
+
+  **What's changed:**
+  - Handler return values remain type-compatible during the deprecation window
+  - **Deprecation warnings** are logged when deprecated patterns are used
+
+  **QueryCollection changes:**
+  - Auto-refetch after handlers is **deprecated** and will be removed in v1.0
+  - To skip auto-refetch now, return `{ refetch: false }` from your handler
+  - To migrate to explicit refetch now, await `collection.utils.refetch()` and return `{ refetch: false }` to prevent a second fetch; remove the return in v1.0
+  - In v1.0, call `await collection.utils.refetch()` explicitly when needed, or omit it to skip
+
+  **ElectricCollection changes:**
+  - Returning `{ txid }` is deprecated - use `await collection.utils.awaitTxId(txid)` instead
+  - The default `awaitTxId` and `awaitMatch` timeouts increase to 15 seconds
+
+  **Migration guide:**
+
+  ```typescript
+  // QueryCollection - skip refetch (current)
+  onInsert: async ({ transaction }) => {
+    await api.create(transaction.mutations[0].modified)
+    return { refetch: false } // Opt out of auto-refetch
+  }
+
+  // QueryCollection - migrate to explicit refetch now
+  onInsert: async ({ transaction, collection }) => {
+    await api.create(transaction.mutations[0].modified)
+    await collection.utils.refetch() // Explicit refetch
+    return { refetch: false } // Prevent a second pre-1.0 refetch; remove in v1.0
+  }
+
+  // ElectricCollection - before
+  onInsert: async ({ transaction }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    return { txid: result.txid } // Deprecated
+  }
+
+  // ElectricCollection - after
+  onInsert: async ({ transaction, collection }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    await collection.utils.awaitTxId(result.txid) // Explicit
+  }
+  ```
+
+- Require `Collection.update` keys to match the collection's declared key type. ([#1851](https://github.com/TanStack/db/pull/1851))
+  Calls that pass possibly undefined keys (including unchecked indexed access) or
+  plain strings to branded-key collections must narrow or assert those values to
+  the declared key type before calling `update`.
+
+- Keep virtual row fields on inferred collection and query row roots without ([#1865](https://github.com/TanStack/db/pull/1865))
+  exposing them on nested user objects or projected child values.
+  Default `Ref<T>` and `SingleRowRefProxy<T>` annotations now support reusable
+  helpers for both root and nested refs; helpers that require row metadata should
+  set their third generic parameter to `true`. Preserve discriminated unions when
+  removing virtual row fields.
+
+- Preserve persisted resume integrity with atomic SQLite baseline evidence and stale-writer rejection, expose persistence sync metadata as one versioned capability, and refresh uncertified Electric baselines before publishing resumed data. ([#1846](https://github.com/TanStack/db/pull/1846))
+
+  This changes the public persistence contracts: custom `PersistenceAdapter` implementations must now implement `loadResumeSnapshot`, and `SyncMetadataApi.persistence` is required with `null` explicitly representing no persistence. Custom sync wrappers that receive metadata must forward `metadata.persistence` unchanged so consumers receive either that sentinel or the complete versioned capability. A direct sync invocation may still omit the optional metadata object entirely, which consumers treat as no persistence. The Electron bridge now transports the atomic resume snapshot through IPC protocol v2; Electron main and renderer integrations must upgrade together because mixed v1/v2 peers fail closed. Node and React Native persistence instances that wrap one database handle now share transaction admission so concurrent collection startup cannot overlap transactions on that connection.
+
+- Preserve collection key and adapter utility types throughout mutation handlers and nested transaction mutations. Mutation keys now use the collection's declared key type instead of `any`; collections that use the default key type expose `string | number`. Prevent Query and Electric collections from exposing nonexistent cross-adapter utilities. ([#1849](https://github.com/TanStack/db/pull/1849))
+
+### Patch Changes
+
+- Document oracle tests as executable subsystem models, align their vocabulary with production code, and make deterministic failures easier to replay. ([#1870](https://github.com/TanStack/db/pull/1870))
+
+- Require coordinators to route complete committed transactions through the per-collection persistence owner, with named fail-stop errors for indeterminate commits and durability failures. Add clone-safe remote-subset leases with exact release, recursive wire validation, and matching Browser and Electron coordination. ([#1845](https://github.com/TanStack/db/pull/1845))
+
+- Restrict built-in aggregate helpers to their supported value domains so numeric aggregates and min/max no longer advertise impossible runtime result types. ([#1862](https://github.com/TanStack/db/pull/1862))
+
+- Wait for asynchronous adapter cleanup before a collection reaches `cleaned-up` or starts a replacement sync run. Preserve cleanup settlement through SQLite persistence, PowerSync, and Query Collection wrappers, including cleanup hooks acquired before cleanup starts and resource disposal failures. ([#1895](https://github.com/TanStack/db/pull/1895))
+
+- Separate cleanup start from settlement so dependent live queries and Effects become terminal when a source Collection starts cleanup. Keep PowerSync cleanup pending until late load-hook and trigger cleanup work settles. ([#1897](https://github.com/TanStack/db/pull/1897))
+
+- Preserve explicit locale settings when locale sorting is selected by default and omit unset locale fields from collection comparison options. ([#1833](https://github.com/TanStack/db/pull/1833))
+
+- Fix same-key delete-then-insert reduction, preserve whole-row replacements through local adapters, and publish immutable previous values for live-object and replacement-object sync updates. Same-reference live rows still require an immutable provider `previousValue`; stale or partial values on that reused reference remain unsupported. ([#1835](https://github.com/TanStack/db/pull/1835))
+
+- Preserve `null` alongside `undefined` when nullable fields flow through query references, selected results, and branch unions. ([#1852](https://github.com/TanStack/db/pull/1852))
+
+- Repair invalidated ordered queries with authoritative provider refetches and keep publication behind the repair. Revalidate active and cached Query Collection observers before applying repaired results. ([#1886](https://github.com/TanStack/db/pull/1886))
+
+- Fail-stop persisted collections when hydration or durability fails, and replay authoritative source transactions through one persistence-owned FIFO. Electric collections keep optimistic state immediate while surfacing durable failures through the collection error state instead of continuing from an incomplete baseline. ([#1853](https://github.com/TanStack/db/pull/1853))
+
+  Query collections retain ownership metadata that the persisted wrapper already published instead of restoring stale ownership after the publication boundary.
+
+- Start idle collections only after locally decidable mutation validation succeeds, and publish authoritative Query Collection refetch results without stale intermediate snapshots. ([#1840](https://github.com/TanStack/db/pull/1840))
+
+- Align live-query join keys with established predicate equality for binary, temporal, Date, and opaque values, including on-demand collection loading, and prevent nullish operands from matching in full and correlated joins. ([#1834](https://github.com/TanStack/db/pull/1834))
+
+- Preserve whole-object nullability through supported join and `unionAll` projections, retain intrinsic nullish fields when right/full joins follow branch unions, and preserve constrained generic fields through supported join and `unionAll` query chains. ([#1843](https://github.com/TanStack/db/pull/1843))
+
+- Preserve only captured accepted local inserts across a truncate. Preserve sparse-array length and RegExp state through ordered-query hashing, including hosts without a global File constructor. Prevent delayed replay reads from rerunning any transaction removed while the read was in flight, without rescanning the outbox. ([#1822](https://github.com/TanStack/db/pull/1822))
+
+- Give each placement of a reused subquery builder an independent source identity so self-joins produce the correct rows. ([#1878](https://github.com/TanStack/db/pull/1878))
+
+- Allow collection index and change-filter callbacks to traverse optional or nullable nested plain objects with optional chaining while preserving built-in values and functions as query leaves. ([#1850](https://github.com/TanStack/db/pull/1850))
+
+- Preserve explicit source aliases without changing legacy property paths. Compile SQLite expression-index queries consistently, rebuild affected stale physical indexes, and reject BigInts outside SQLite's signed 64-bit range. ([#1867](https://github.com/TanStack/db/pull/1867))
+
+- Preserve outer predicates pushed into joined and FROM subqueries during query compilation, including when the outer and inner aliases differ. ([#1877](https://github.com/TanStack/db/pull/1877))
+
+- Fix ReDoS (CWE-1333) in `like()`/`ilike()`: patterns are now matched with an iterative two-pointer walk instead of being compiled to a RegExp, so crafted patterns with many `%` wildcards can no longer trigger catastrophic backtracking on near-miss values. The matcher preserves SQL wildcard semantics when the input value itself contains `%` or `_` characters. ([#1745](https://github.com/TanStack/db/pull/1745))
+
+- Page indexed multi-column ordered queries without growing prefix loads. Complete leading-column ties still load together to preserve sort correctness. ([#1893](https://github.com/TanStack/db/pull/1893))
+
+- Preserve a Collection's exact key type in current-state and subscription change messages. Compose buffered same-key changes against the last subscriber-visible row so rollback deletes carry the correct value. ([#1872](https://github.com/TanStack/db/pull/1872))
+
+- Fix direct whole-row selections so their inferred type keeps virtual fields and optional properties, matching the runtime result. ([#1892](https://github.com/TanStack/db/pull/1892))
+
+- Preserve synchronous initial readiness for ordered and limited live queries when every required source acquisition applies synchronously. Avoid redundant ordered acquisition when sibling sources add synchronous graph input. Keep warm Query Collection results synchronous and return one aggregate fetch status from Query Collection utilities. ([#1896](https://github.com/TanStack/db/pull/1896))
+
+- Updated dependencies [[`3ad64a4`](https://github.com/TanStack/db/commit/3ad64a42a0088e1272176fb33c953526fed9b868), [`850b241`](https://github.com/TanStack/db/commit/850b241270e60871e52cb45cd9cac99bd4170ca9)]:
+  - @tanstack/db-ivm@0.1.23
+
 ## 0.9.2
 
 ### Patch Changes

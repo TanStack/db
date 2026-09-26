@@ -1,5 +1,24 @@
 # @tanstack/browser-db-sqlite-persistence
 
+## 0.2.24
+
+### Patch Changes
+
+- Require coordinators to route complete committed transactions through the per-collection persistence owner, with named fail-stop errors for indeterminate commits and durability failures. Add clone-safe remote-subset leases with exact release, recursive wire validation, and matching Browser and Electron coordination. ([#1845](https://github.com/TanStack/db/pull/1845))
+
+- Request an existing leader's route before the first coordinated write, without sending the mutation. Let leader election finish during scheduled hydration, and reject writes queued under a former leader before persistence. ([#1899](https://github.com/TanStack/db/pull/1899))
+
+- Terminate OPFS workers on pagehide, including during initialization, and reject pending requests with AbortError. Include available VFS error details in SQLite open failures. Connections must be recreated when restoring a document from the back/forward cache. ([#1844](https://github.com/TanStack/db/pull/1844))
+
+- Schedule complete SQLite hydration units fairly without holding coordinator work inside the local hydration scope. Fence stale startup rows after a coordinator reset. Preserve per-Collection leader adapter routing, mutation results across transport retries, terminal coordinator disposal, real-adapter restart order, and promise-discovered shared scheduling. ([#1868](https://github.com/TanStack/db/pull/1868))
+
+- Preserve persisted resume integrity with atomic SQLite baseline evidence and stale-writer rejection, expose persistence sync metadata as one versioned capability, and refresh uncertified Electric baselines before publishing resumed data. ([#1846](https://github.com/TanStack/db/pull/1846))
+
+  This changes the public persistence contracts: custom `PersistenceAdapter` implementations must now implement `loadResumeSnapshot`, and `SyncMetadataApi.persistence` is required with `null` explicitly representing no persistence. Custom sync wrappers that receive metadata must forward `metadata.persistence` unchanged so consumers receive either that sentinel or the complete versioned capability. A direct sync invocation may still omit the optional metadata object entirely, which consumers treat as no persistence. The Electron bridge now transports the atomic resume snapshot through IPC protocol v2; Electron main and renderer integrations must upgrade together because mixed v1/v2 peers fail closed. Node and React Native persistence instances that wrap one database handle now share transaction admission so concurrent collection startup cannot overlap transactions on that connection.
+
+- Updated dependencies [[`5108acf`](https://github.com/TanStack/db/commit/5108acf47a0724691a06af8a660014776f9cf716), [`fef53f8`](https://github.com/TanStack/db/commit/fef53f8be7f1cb68f00639a4c3206a6598663de4), [`4b9617c`](https://github.com/TanStack/db/commit/4b9617cfd36c4f0ec14ad55dd6eaa92a2e8c9a8d), [`5218f0c`](https://github.com/TanStack/db/commit/5218f0c385f61ccfa08ff366fb6f487528702017), [`98639f0`](https://github.com/TanStack/db/commit/98639f03a0071ab712d2277ee7e59e33ec6c760d), [`2781581`](https://github.com/TanStack/db/commit/27815817c56b3bca1823703dbd9893a0ef86f6d2), [`3d96614`](https://github.com/TanStack/db/commit/3d96614547cca8b085e89d628c7aa585ac7ddc88), [`510cb53`](https://github.com/TanStack/db/commit/510cb538c4706e21a4d70046bf2ab2753f47bfa8)]:
+  - @tanstack/db-sqlite-persistence-core@0.3.0
+
 ## 0.2.23
 
 ### Patch Changes
