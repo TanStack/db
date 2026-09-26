@@ -231,6 +231,9 @@ export class CollectionLifecycleManager<
         `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`,
       )
     }
+    // A synchronously finished retirement retains its public promise until
+    // settlement. Starting a new sync run assigns later cleanup to that run.
+    this.cleanupPromise = null
   }
 
   /**
@@ -394,9 +397,6 @@ export class CollectionLifecycleManager<
       if (finished) return
       finished = true
       this.cleaningUp = false
-      // Clear this operation before emitting the terminal status. A listener
-      // may start and then clean up the replacement sync run synchronously.
-      this.cleanupPromise = null
       attempt(() => this.setStatus(`cleaned-up`))
 
       // Active collection subscriptions still depend on lifecycle events.
@@ -421,6 +421,9 @@ export class CollectionLifecycleManager<
       void Promise.resolve()
         .then(() => Promise.resolve())
         .then(() => {
+          if (this.cleanupPromise === completion.promise) {
+            this.cleanupPromise = null
+          }
           if (failure) completion.reject(failure.error)
           else completion.resolve()
         })
@@ -479,8 +482,8 @@ export class CollectionLifecycleManager<
       this.idleCallbackId = null
     }
 
-    // Return this exact retirement operation even if synchronous finalization
-    // clears the manager field or an event listener starts a replacement run.
+    // Return this exact retirement operation even if an event listener starts
+    // a replacement run and cleanup while the first promise is still pending.
     return this.beginCleanup()
   }
 }

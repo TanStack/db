@@ -558,6 +558,91 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
+  it(`shares one retirement promise when cleanup finishes synchronously`, async () => {
+    let adapterCleanups = 0
+    let localCleanups = 0
+    const sync = withCollectionSyncConfigCleanup(
+      {
+        sync: ({ markReady }) => {
+          markReady()
+          return () => {
+            adapterCleanups++
+          }
+        },
+      } satisfies SyncConfig<Row, number>,
+      () => {
+        localCleanups++
+      },
+    )
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync,
+    })
+
+    try {
+      await collection.preload()
+      const first = collection.cleanup()
+      const concurrent = collection.cleanup()
+
+      expect({
+        samePromise: concurrent === first,
+        adapterCleanups,
+        localCleanups,
+      }).toEqual({
+        samePromise: true,
+        adapterCleanups: 1,
+        localCleanups: 1,
+      })
+      await first
+      expect(collection.status).toBe(`cleaned-up`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`lets a terminal listener clean a replacement sync run separately`, async () => {
+    let starts = 0
+    let adapterCleanups = 0
+    let armed = false
+    let replacementCleanup: Promise<void> | undefined
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return () => {
+            adapterCleanups++
+          }
+        },
+      },
+    })
+    const off = collection.on(`status:change`, ({ status }) => {
+      if (armed && status === `cleaned-up`) {
+        armed = false
+        collection.startSyncImmediate()
+        replacementCleanup = collection.cleanup()
+      }
+    })
+
+    try {
+      await collection.preload()
+      armed = true
+      const firstCleanup = collection.cleanup()
+
+      expect(replacementCleanup).toBeDefined()
+      expect(replacementCleanup).not.toBe(firstCleanup)
+      await Promise.all([firstCleanup, replacementCleanup!])
+      expect(starts).toBe(2)
+      expect(adapterCleanups).toBe(2)
+      expect(collection.status).toBe(`cleaned-up`)
+    } finally {
+      armed = false
+      off()
+      await collection.cleanup()
+    }
+  })
+
   it(`awaits a runtime Promise from cleanup typed to return void`, async () => {
     const cleanupGate = createDeferred<void>()
     let cleanupCalls = 0
@@ -681,7 +766,7 @@ describe(`Collection cleanup admission oracle`, () => {
               })
             }
           },
-        },
+        } satisfies SyncConfig<Row, number>,
         () => {
           throw localFailure
         },
