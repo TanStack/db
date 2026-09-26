@@ -22,9 +22,22 @@ type OrderedRequestKind =
   | `boundary`
   | `full-source`
 
+type OrderedContinuation = {
+  kind: `boundary` | `more`
+  orderedLoadGeneration: number
+  orderingInvalidationGeneration: number
+  isAuthoritativeRepair: boolean
+  windowOperationGeneration?: number
+  continuesOrderedPrefixRepair: boolean
+}
+
+class OrderedPostSettlementError {
+  constructor(readonly cause: unknown) {}
+}
+
 /** Owns the conservative provider-loading policy for one ordered source. */
 export class OrderedSourceLoader {
-  private pending: Promise<unknown> | undefined
+  private pending: Promise<void> | undefined
   // Exact request settlement is not provider extent. This latch only records
   // that some request once completed; reset may discard the boundary, and an
   // empty page retains it. A failure never reads it before a full-source
@@ -67,6 +80,8 @@ export class OrderedSourceLoader {
   private lastBoundary: unknown
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
+  private stagedContinuation: OrderedContinuation | undefined
+  private drainingNoInputContinuations = false
 
   constructor(
     private readonly info: OrderByOptimizationInfo,
@@ -78,6 +93,7 @@ export class OrderedSourceLoader {
       settlesAsync: boolean,
     ) => void = () => {},
     private readonly canRetryRepair: () => boolean = () => false,
+    private readonly getGraphInputRevision?: () => number,
   ) {
     this.info.isRequesting = () => this.requesting
   }
@@ -124,8 +140,24 @@ export class OrderedSourceLoader {
   loadMore(
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
-  ): Promise<unknown> | undefined {
+  ): Promise<void> | undefined {
     if (!this.active || this.info.limit === 0 || this.requesting) return
+    if (this.stagedContinuation) {
+      // A synchronous finite request can deliver an order-changing mutation.
+      // Its continuation is staged after that mutation invalidates ordering,
+      // so authoritative repair must supersede the stale finite chain.
+      if (
+        this.needsOrderingRepair &&
+        !this.stagedContinuation.isAuthoritativeRepair
+      ) {
+        this.stagedContinuation = undefined
+      } else {
+        this.consumeStagedContinuation(windowOperationGeneration)
+        // The consumed continuation can synchronously dispose this loader.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (!this.active || this.pending) return this.pending
+      }
+    }
     const mayRetryFailure =
       this.failedRequest === undefined ||
       (windowOperationGeneration !== undefined &&
@@ -267,7 +299,7 @@ export class OrderedSourceLoader {
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
   ): void {
-    if (!this.active || this.pending) return
+    if (!this.active || this.pending || this.stagedContinuation) return
     if (this.lastPrefixCount === count) {
       if ((this.info.dataNeeded?.() ?? 0) > 0) {
         if (continuesOrderedPrefixRepair) this.abandonOrderedPrefixRepair()
@@ -364,6 +396,7 @@ export class OrderedSourceLoader {
   }
 
   invalidateCursor(): void {
+    this.stagedContinuation = undefined
     this.lastPage = undefined
     this.lastPrefixCount = undefined
   }
@@ -440,6 +473,7 @@ export class OrderedSourceLoader {
 
   dispose(): void {
     this.active = false
+    this.stagedContinuation = undefined
     this.resetCursor()
     this.failedAcquisitions.clear()
     this.settledFiniteAcquisitions.clear()
@@ -462,7 +496,7 @@ export class OrderedSourceLoader {
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
   ): void {
-    if (!this.active || this.pending) return
+    if (!this.active || this.pending || this.stagedContinuation) return
     // Rows observed before the first provider request do not prove ordered
     // source coverage. In particular, a row inserted while limit is zero must
     // not become the cursor when that window first opens.
@@ -519,7 +553,8 @@ export class OrderedSourceLoader {
     windowOperationGeneration?: number,
     options?: LoadSubsetOptions,
     continuesOrderedPrefixRepair = false,
-  ): Promise<void> {
+    requestGraphInputRevision?: number,
+  ): Promise<void> | undefined {
     const isFullSource = kind === `full-source`
     const isOrderedRepair = kind === `ordered-repair`
     const isAuthoritativeRepair =
@@ -531,8 +566,40 @@ export class OrderedSourceLoader {
       windowOperationGeneration === undefined
     const orderedLoadGeneration = this.orderedLoadGeneration
     const orderingInvalidationGeneration = this.orderingInvalidationGeneration
-    const complete = (): void => {
-      if (this.pending === tracked) this.pending = undefined
+    const settlesAsync = result instanceof Promise
+    const canSettleSynchronously =
+      !settlesAsync &&
+      windowOperationGeneration === undefined &&
+      !isAuthoritativeRepair &&
+      requestGraphInputRevision !== undefined
+    let synchronousCompletionFailure: { error: unknown } | undefined
+    const continuation = (
+      continuationKind: OrderedContinuation[`kind`],
+    ): OrderedContinuation => ({
+      kind: continuationKind,
+      orderedLoadGeneration,
+      orderingInvalidationGeneration,
+      isAuthoritativeRepair,
+      windowOperationGeneration,
+      continuesOrderedPrefixRepair,
+    })
+    const continueOrStage = (
+      next: OrderedContinuation,
+      deferContinuation: boolean,
+    ): void => {
+      if (deferContinuation) {
+        this.stagedContinuation = next
+      } else {
+        this.runContinuation(next)
+      }
+    }
+    const complete = (
+      trackedRequest?: Promise<void>,
+      deferContinuation = false,
+    ): void => {
+      if (trackedRequest && this.pending === trackedRequest) {
+        this.pending = undefined
+      }
       if (!this.active) return
       // Retirement failure does not undo a successful acquisition. Finish its
       // boundary and continuation, then report the first cleanup error.
@@ -602,6 +669,10 @@ export class OrderedSourceLoader {
                   this.subscription.readOrderedSnapshot(options).at(-1)
                     ?.value ?? this.settledSourceBoundary
               } catch (error) {
+                if (canSettleSynchronously) {
+                  synchronousCompletionFailure = { error }
+                  throw error
+                }
                 fail(error)
               }
             }
@@ -627,28 +698,22 @@ export class OrderedSourceLoader {
             this.orderedPrefixRepairGeneration = undefined
             this.retireSettledFiniteAcquisitions()
           }
-          if (isOrderedRepair) {
-            this.loadBoundary(windowOperationGeneration, true)
-            return
-          }
-          if (kind === `ordered`) {
-            this.loadBoundary(
-              windowOperationGeneration,
-              continuesOrderedPrefixRepair,
-            )
+          if (isOrderedRepair || kind === `ordered`) {
+            continueOrStage(continuation(`boundary`), deferContinuation)
             return
           }
           // A boundary request may add tied rows without filling the query's
           // window. Resume forward loading once it settles.
-          this.loadMore(windowOperationGeneration, continuesOrderedPrefixRepair)
+          continueOrStage(continuation(`more`), deferContinuation)
         },
       ])
     }
-    const settlesAsync = result instanceof Promise
-    const request = settlesAsync ? result : Promise.resolve()
-    const fail = (error: unknown) => {
+    const fail = (error: unknown, trackedRequest?: Promise<void>) => {
       this.settledFiniteAcquisitions.delete(releaseAcquisition)
-      if (this.pending === tracked) this.pending = undefined
+      this.stagedContinuation = undefined
+      if (trackedRequest && this.pending === trackedRequest) {
+        this.pending = undefined
+      }
       if (!this.active) return
       // A failed request may already have written only part of its result.
       // None of those rows is a safe continuation boundary.
@@ -671,7 +736,37 @@ export class OrderedSourceLoader {
       if (retryRepair) this.scheduleRepairRetry()
       throw error
     }
-    const tracked = request.then(complete, fail)
+    if (canSettleSynchronously) {
+      try {
+        runAllCallbacks([
+          () => complete(undefined, true),
+          () => {
+            if (!synchronousCompletionFailure) {
+              this.onResult(true, false, false)
+            }
+          },
+          () => {
+            if (
+              !synchronousCompletionFailure &&
+              this.getGraphInputRevision?.() === requestGraphInputRevision
+            ) {
+              this.drainNoInputContinuations(requestGraphInputRevision)
+            }
+          },
+        ])
+      } catch (error) {
+        if (synchronousCompletionFailure) {
+          throw synchronousCompletionFailure.error
+        }
+        throw new OrderedPostSettlementError(error)
+      }
+      return this.pending
+    }
+    const request: Promise<void> = settlesAsync ? result : Promise.resolve()
+    const tracked: Promise<void> = request.then(
+      () => complete(tracked),
+      (error) => fail(error, tracked),
+    )
     this.pending = tracked
     void tracked.catch(() => {})
     // Register each request separately. The operation tracker observes the
@@ -685,10 +780,58 @@ export class OrderedSourceLoader {
     return tracked
   }
 
+  private runContinuation(
+    continuation: OrderedContinuation,
+    windowOperationGeneration = continuation.windowOperationGeneration,
+  ): void {
+    if (
+      !this.active ||
+      continuation.orderedLoadGeneration !== this.orderedLoadGeneration ||
+      (!continuation.isAuthoritativeRepair &&
+        continuation.orderingInvalidationGeneration !==
+          this.orderingInvalidationGeneration)
+    )
+      return
+    if (continuation.kind === `boundary`) {
+      this.loadBoundary(
+        windowOperationGeneration,
+        continuation.continuesOrderedPrefixRepair,
+      )
+    } else {
+      this.loadMore(
+        windowOperationGeneration,
+        continuation.continuesOrderedPrefixRepair,
+      )
+    }
+  }
+
+  private consumeStagedContinuation(windowOperationGeneration?: number): void {
+    const continuation = this.stagedContinuation
+    if (!continuation) return
+    this.stagedContinuation = undefined
+    this.runContinuation(continuation, windowOperationGeneration)
+  }
+
+  private drainNoInputContinuations(graphInputRevision: number): void {
+    if (this.drainingNoInputContinuations) return
+    this.drainingNoInputContinuations = true
+    try {
+      while (
+        this.stagedContinuation &&
+        !this.pending &&
+        this.getGraphInputRevision?.() === graphInputRevision
+      ) {
+        this.consumeStagedContinuation()
+      }
+    } finally {
+      this.drainingNoInputContinuations = false
+    }
+  }
+
   private loadBoundary(
     windowOperationGeneration?: number,
     continuesOrderedPrefixRepair = false,
-  ): Promise<unknown> | undefined {
+  ): Promise<void> | undefined {
     const biggest = this.settledSourceBoundary
     if (biggest === undefined) {
       return continuesOrderedPrefixRepair
@@ -868,6 +1011,7 @@ export class OrderedSourceLoader {
       | undefined
     this.requesting = true
     let observing = false
+    const graphInputRevision = this.getGraphInputRevision?.()
     try {
       try {
         request((result, options, release) => {
@@ -885,8 +1029,10 @@ export class OrderedSourceLoader {
         windowOperationGeneration,
         observed.options,
         continuesOrderedPrefixRepair,
+        graphInputRevision,
       )
     } catch (error) {
+      if (error instanceof OrderedPostSettlementError) throw error.cause
       // Both request and settlement callbacks may reenter through cleanup.
       // Keep refinement blocked until failure and release finish unwinding.
       this.requesting = true

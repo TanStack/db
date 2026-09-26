@@ -221,7 +221,7 @@ export class CollectionSubscriber<
   private sendChangesToPipeline(
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => void,
-  ) {
+  ): void {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
     const reconciledChanges = reconcileChangesForD2(
       changesArray,
@@ -232,6 +232,9 @@ export class CollectionSubscriber<
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
     const sentChanges = sendChangesToInput(input, reconciledChanges)
+    if (sentChanges > 0) {
+      this.collectionConfigBuilder.advanceGraphInputRevision()
+    }
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -358,6 +361,7 @@ export class CollectionSubscriber<
       () =>
         this.collectionConfigBuilder.liveQueryCollection?.status === `ready` &&
         !this.collectionConfigBuilder.hasActiveWindowOperation(),
+      () => this.collectionConfigBuilder.getGraphInputRevision(),
     )
     this.orderedLoader.start()
 

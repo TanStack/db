@@ -33,6 +33,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
+  LoadSubsetRequestResult,
   SyncMetadataApi,
   TransactionWithMutations,
   UpdateMutationFnParams,
@@ -3860,6 +3861,79 @@ describe(`QueryCollection`, () => {
       // collection2: startSync=false, subscriberCount=0 -> depends on implementation
       expect(collection1.status).toBe(`ready`) // Always active with startSync: true
     })
+  })
+
+  describe(`Query observer state utilities`, () => {
+    it.each([
+      [`fetching`, `paused`],
+      [`paused`, `fetching`],
+    ] as const)(
+      `aggregates fetch status independent of observer acquisition order: %s then %s`,
+      async (firstStatus, secondStatus) => {
+        const id = `aggregate-fetch-status-${firstStatus}-first`
+        const fetchingResult = createDeferred<Array<TestItem>>()
+        queryClient.setQueryDefaults([id, 1], { networkMode: `always` })
+        queryClient.setQueryDefaults([id, 2], { networkMode: `online` })
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id,
+            queryClient,
+            syncMode: `on-demand`,
+            startSync: true,
+            queryKey: ({ limit }) => (limit === undefined ? [id] : [id, limit]),
+            queryFn: ({ queryKey }) =>
+              queryKey.at(-1) === 1
+                ? fetchingResult.promise
+                : Promise.resolve([
+                    { id: String(queryKey.at(-1)), name: `resolved` },
+                  ]),
+            getKey,
+          }),
+        )
+        const loads: Partial<
+          Record<`fetching` | `paused`, LoadSubsetRequestResult>
+        > = {}
+        const start = (status: `fetching` | `paused`) => {
+          loads[status] = collection._sync.loadSubset({
+            limit: status === `fetching` ? 1 : 2,
+          })
+        }
+
+        try {
+          expect(collection.utils.fetchStatus).toBe(`idle`)
+          onlineManager.setOnline(false)
+
+          start(firstStatus)
+          await vi.waitFor(() => {
+            expect(collection.utils.fetchStatus).toBe(firstStatus)
+          })
+
+          start(secondStatus)
+          await vi.waitFor(() => {
+            expect(queryClient.getQueryState([id, 1])?.fetchStatus).toBe(
+              `fetching`,
+            )
+            expect(queryClient.getQueryState([id, 2])?.fetchStatus).toBe(
+              `paused`,
+            )
+          })
+          expect(collection.utils.fetchStatus).toBe(`fetching`)
+
+          fetchingResult.resolve([{ id: `1`, name: `resolved` }])
+          await loads.fetching
+          expect(collection.utils.fetchStatus).toBe(`paused`)
+
+          onlineManager.setOnline(true)
+          await loads.paused
+          expect(collection.utils.fetchStatus).toBe(`idle`)
+        } finally {
+          onlineManager.setOnline(true)
+          fetchingResult.resolve([{ id: `1`, name: `resolved` }])
+          await Promise.allSettled(Object.values(loads))
+          await collection.cleanup()
+        }
+      },
+    )
   })
 
   describe(`Manual Sync Operations`, () => {
@@ -8150,6 +8224,63 @@ describe(`QueryCollection`, () => {
   })
 
   describe(`Cache Persistence on Remount`, () => {
+    it(`publishes a warm ordered limit without a fetch in the initiating call stack`, async () => {
+      const rows: Array<TestItem> = [
+        { id: `1`, name: `one`, value: 1 },
+        { id: `2`, name: `two`, value: 2 },
+        { id: `3`, name: `three`, value: 3 },
+      ]
+      const queryFn = vi.fn().mockResolvedValue(rows)
+      const source = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `warm-ordered-limit-source`,
+          queryClient,
+          syncMode: `on-demand`,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          queryKey: [`warm-ordered-limit`],
+          queryFn,
+          getKey,
+          staleTime: Infinity,
+          gcTime: Infinity,
+        }),
+      )
+      const build = () =>
+        createLiveQueryCollection({
+          startSync: false,
+          query: (q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.value)
+              .limit(2),
+        })
+      const warm = build()
+      const remounted = build()
+
+      try {
+        await warm.preload()
+        expect(warm.toArray.map(({ id }) => id)).toEqual([`1`, `2`])
+        expect(queryFn).toHaveBeenCalled()
+        await warm.cleanup()
+        queryFn.mockClear()
+
+        const preload = remounted.preload()
+        expect(queryFn).not.toHaveBeenCalled()
+        expect(remounted.toArray.map(({ id }) => id)).toEqual([`1`, `2`])
+        expect(remounted.status).toBe(`ready`)
+        await preload
+        expect(queryFn).toHaveBeenCalledTimes(0)
+        await Promise.resolve()
+        expect(queryFn).toHaveBeenCalledTimes(0)
+      } finally {
+        await Promise.all([
+          warm.cleanup(),
+          remounted.cleanup(),
+          source.cleanup(),
+        ])
+      }
+    })
+
     it(`should process cached results immediately when QueryObserver resubscribes`, async () => {
       const queryKey = [`remount-cache-test`]
       const items: Array<TestItem> = [

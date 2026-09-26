@@ -863,6 +863,10 @@ range's last available row can advance the boundary; an unrelated live outlier
 cannot advance it merely by entering D2. This relies on the adapter fulfilling
 the exact ordered request, not just resolving after an arbitrary partial write.
 An empty range does not invent a boundary or prove source exhaustion.
+If an explicit window operation consumes a staged boundary continuation and
+that continuation has no boundary row, it starts no acquisition. The operation
+must continue normal demand selection for the enlarged window; consuming the
+empty continuation does not settle that window operation.
 
 For no-index prefix loading, an unrelated new key does not reacquire an already
 full window. An explicit window move, an underfilled window, or a settled
@@ -1040,6 +1044,21 @@ that is no longer reachable does not block completion. An empty outer relation
 has no child demand, but its root demand must still settle. Later readiness
 transitions follow the existing Collection contract until an executable test
 defines another public behavior.
+
+An ordinary initial ordered request also has a synchronous observation cut.
+When every acquisition needed for its completed initial window returns literal
+`true` after its establishing applied receipts are visible, core drains the
+remaining synchronous ordered continuations and graph work before the
+initiating call stack returns. The live-query Collection rows and initial-query
+readiness are observable at that cut. A Promise result keeps that acquisition
+asynchronous. This cut does not apply to explicit window moves, repair,
+truncate replay, or framework render timing, and it proves neither source
+exhaustion nor broader source coverage.
+
+If any source subscriber adds input to the graph during a synchronous ordered
+continuation, core returns to graph work before deciding whether that ordered
+source needs another acquisition. Input progress is graph-wide: a quiet
+ordered source cannot drain its continuation around pending sibling input.
 
 Pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce
