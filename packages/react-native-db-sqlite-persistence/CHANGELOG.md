@@ -1,5 +1,19 @@
 # @tanstack/react-native-db-sqlite-persistence
 
+## 0.2.24
+
+### Patch Changes
+
+- Decode op-sqlite row arrays and columnar results losslessly, and reject malformed or unknown result envelopes instead of treating them as empty results. ([#1848](https://github.com/TanStack/db/pull/1848))
+  Custom wrappers that return a genuinely ambiguous bare array can set `arrayResultMode` to `rows` or `statement-results`; without that authoritative mode, the driver rejects instead of silently reshaping data.
+
+- Preserve persisted resume integrity with atomic SQLite baseline evidence and stale-writer rejection, expose persistence sync metadata as one versioned capability, and refresh uncertified Electric baselines before publishing resumed data. ([#1846](https://github.com/TanStack/db/pull/1846))
+
+  This changes the public persistence contracts: custom `PersistenceAdapter` implementations must now implement `loadResumeSnapshot`, and `SyncMetadataApi.persistence` is required with `null` explicitly representing no persistence. Custom sync wrappers that receive metadata must forward `metadata.persistence` unchanged so consumers receive either that sentinel or the complete versioned capability. A direct sync invocation may still omit the optional metadata object entirely, which consumers treat as no persistence. The Electron bridge now transports the atomic resume snapshot through IPC protocol v2; Electron main and renderer integrations must upgrade together because mixed v1/v2 peers fail closed. Node and React Native persistence instances that wrap one database handle now share transaction admission so concurrent collection startup cannot overlap transactions on that connection.
+
+- Updated dependencies [[`5108acf`](https://github.com/TanStack/db/commit/5108acf47a0724691a06af8a660014776f9cf716), [`fef53f8`](https://github.com/TanStack/db/commit/fef53f8be7f1cb68f00639a4c3206a6598663de4), [`4b9617c`](https://github.com/TanStack/db/commit/4b9617cfd36c4f0ec14ad55dd6eaa92a2e8c9a8d), [`5218f0c`](https://github.com/TanStack/db/commit/5218f0c385f61ccfa08ff366fb6f487528702017), [`98639f0`](https://github.com/TanStack/db/commit/98639f03a0071ab712d2277ee7e59e33ec6c760d), [`2781581`](https://github.com/TanStack/db/commit/27815817c56b3bca1823703dbd9893a0ef86f6d2), [`3d96614`](https://github.com/TanStack/db/commit/3d96614547cca8b085e89d628c7aa585ac7ddc88), [`510cb53`](https://github.com/TanStack/db/commit/510cb538c4706e21a4d70046bf2ab2753f47bfa8)]:
+  - @tanstack/db-sqlite-persistence-core@0.3.0
+
 ## 0.2.23
 
 ### Patch Changes
