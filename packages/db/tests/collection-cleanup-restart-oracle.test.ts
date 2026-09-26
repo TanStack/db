@@ -574,7 +574,7 @@ describe(`Collection cleanup admission oracle`, () => {
         localCleanups++
       },
     )
-    const collection = createCollection<Row>({
+    const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync,
     })
