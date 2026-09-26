@@ -54,9 +54,45 @@ describe(`Query cleanup composition`, () => {
       await Promise.resolve()
       expect(settled).toBe(false)
 
-      if (outcome === `fulfill`) gate.resolve()
-      else gate.reject(adapterFailure)
-      await expect(result).rejects.toBe(teardownFailure)
+      if (outcome === `fulfill`) {
+        gate.resolve()
+        await expect(result).rejects.toBe(teardownFailure)
+      } else {
+        gate.reject(adapterFailure)
+        const failure = await Promise.resolve(result).catch(
+          (error: unknown) => error,
+        )
+        expect(failure).toBeInstanceOf(AggregateError)
+        expect(failure).toMatchObject({
+          cause: adapterFailure,
+          errors: [adapterFailure, teardownFailure],
+        })
+      }
     },
   )
+
+  it(`keeps a synchronous adapter failure primary when local teardown also fails`, () => {
+    const adapterFailure = new Error(`synchronous query cleanup failed`)
+    const teardownFailure = new Error(`query teardown failed`)
+    let failure: unknown
+
+    try {
+      runCleanupWithLocalTeardown(
+        () => {
+          throw adapterFailure
+        },
+        () => {
+          throw teardownFailure
+        },
+      )
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure).toMatchObject({
+      cause: adapterFailure,
+      errors: [adapterFailure, teardownFailure],
+    })
+  })
 })

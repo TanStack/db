@@ -5,6 +5,7 @@ import {
   createEffect,
   createLiveQueryCollection,
   eq,
+  withCollectionSyncConfigCleanup,
 } from '../src'
 import { createDeferred } from '../src/deferred'
 import type { SyncConfig } from '../src/types'
@@ -29,6 +30,9 @@ import type { SyncConfig } from '../src/types'
  * from cleanup-start observers, or register observers during active cleanup.
  * A repeated-source history also proves one live query enters terminal error
  * once when two lexical aliases depend on the same Collection.
+ * If adapter cleanup and local teardown both fail, the aggregate keeps the
+ * adapter error primary and the local error as a secondary diagnostic. A lone
+ * error keeps its identity.
  *
  * `expectedCleanupBoundary` is a small independent timeline model. Its
  * `dependent` field combines the live query's terminal error and the Effect's
@@ -659,6 +663,54 @@ describe(`Collection cleanup admission oracle`, () => {
       await collection.cleanup()
     }
   })
+
+  it.each([`throw`, `reject`] as const)(
+    `keeps adapter cleanup failure primary when local teardown also fails: %s`,
+    async (outcome) => {
+      const cleanupGate = createDeferred<void>()
+      const adapterFailure = new Error(`adapter cleanup failed exactly`)
+      const localFailure = new Error(`local teardown failed exactly`)
+      const sync = withCollectionSyncConfigCleanup(
+        {
+          sync: ({ markReady }) => {
+            markReady()
+            return () => {
+              if (outcome === `throw`) throw adapterFailure
+              return cleanupGate.promise.then(() => {
+                throw adapterFailure
+              })
+            }
+          },
+        },
+        () => {
+          throw localFailure
+        },
+      )
+      const collection = createCollection<Row>({
+        getKey: (row) => row.id,
+        sync,
+      })
+
+      try {
+        await collection.preload()
+        const cleanup = collection.cleanup()
+        cleanupGate.resolve()
+        const failure = await cleanup.catch((error: unknown) => error)
+
+        expect(failure).toBeInstanceOf(AggregateError)
+        const aggregate = failure as AggregateError
+        expect(aggregate.cause).toMatchObject({
+          name: `SyncCleanupError`,
+          cause: adapterFailure,
+        })
+        expect(aggregate.errors).toEqual([aggregate.cause, localFailure])
+        expect(collection.status).toBe(`cleaned-up`)
+      } finally {
+        cleanupGate.resolve()
+        await collection.cleanup().catch(() => undefined)
+      }
+    },
+  )
 
   it.each(scenarios)(
     `rejects restart without creating replacement ownership: %j`,

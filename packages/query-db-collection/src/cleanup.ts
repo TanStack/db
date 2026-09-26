@@ -12,7 +12,11 @@ export function runCleanupWithLocalTeardown(
   try {
     result = cleanup?.()
   } catch (cleanupError) {
-    teardown()
+    try {
+      teardown()
+    } catch (teardownError) {
+      throw aggregateCleanupFailures(cleanupError, teardownError)
+    }
     throw cleanupError
   }
 
@@ -20,9 +24,25 @@ export function runCleanupWithLocalTeardown(
     teardown()
   } catch (teardownError) {
     if (!result) throw teardownError
-    return result.finally(() => {
-      throw teardownError
-    })
+    return result.then(
+      () => {
+        throw teardownError
+      },
+      (cleanupError: unknown) => {
+        throw aggregateCleanupFailures(cleanupError, teardownError)
+      },
+    )
   }
   return result
+}
+
+function aggregateCleanupFailures(
+  cleanupError: unknown,
+  teardownError: unknown,
+): AggregateError {
+  return new AggregateError(
+    [cleanupError, teardownError],
+    `Adapter cleanup and local teardown both failed`,
+    { cause: cleanupError },
+  )
 }
