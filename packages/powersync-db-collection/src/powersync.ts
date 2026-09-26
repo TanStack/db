@@ -676,9 +676,18 @@ function createPowerSyncCollectionConfig<
           options: LoadSubsetOptions
           failures: number
         }
+        type DemandCleanupTask = {
+          order: number
+          promise: Promise<unknown>
+        }
+        type DemandCleanupFailure = {
+          order: number
+          error: unknown
+        }
         type DemandCleanupCollector = {
-          tasks: Array<Promise<unknown>>
-          failure?: { error: unknown }
+          tasks: Array<DemandCleanupTask>
+          failures: Array<DemandCleanupFailure>
+          nextOrder: number
         }
 
         const demands = new Map<LoadSubsetOptions, DemandRecord>()
@@ -872,13 +881,15 @@ function createPowerSyncCollectionConfig<
 
         const cleanupDemand = (demand: DemandRecord): void => {
           demands.delete(demand.options)
+          const collector = demandCleanupCollector
+          const order = collector ? collector.nextOrder++ : undefined
           try {
             const result: unknown = demand.cleanup?.()
             if (!isPromiseLike(result)) return
 
             const task = Promise.resolve(result)
-            if (demandCleanupCollector) {
-              demandCleanupCollector.tasks.push(task)
+            if (collector) {
+              collector.tasks.push({ order: order!, promise: task })
               void task.catch(() => undefined)
             } else {
               pendingDemandCleanupTasks.add(task)
@@ -891,11 +902,27 @@ function createPowerSyncCollectionConfig<
               )
             }
           } catch (error) {
-            if (demandCleanupCollector) {
-              demandCleanupCollector.failure ??= { error }
+            if (collector) {
+              collector.failures.push({ order: order!, error })
             } else {
               reportDemandCleanupFailure(error)
             }
+          }
+        }
+
+        const throwDemandCleanupFailures = (
+          collector: DemandCleanupCollector,
+        ): void => {
+          const errors = collector.failures
+            .sort((left, right) => left.order - right.order)
+            .map(({ error }) => error)
+          if (errors.length === 1) throw errors[0]
+          if (errors.length > 1) {
+            throw new AggregateError(
+              errors,
+              `PowerSync subset hook cleanup failed`,
+              { cause: errors[0] },
+            )
           }
         }
 
@@ -1014,8 +1041,11 @@ function createPowerSyncCollectionConfig<
               message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             })
             abortController.abort()
+            const pendingTasks = [...pendingDemandCleanupTasks]
             const collector: DemandCleanupCollector = {
-              tasks: [...pendingDemandCleanupTasks],
+              tasks: pendingTasks.map((promise, order) => ({ order, promise })),
+              failures: [],
+              nextOrder: pendingTasks.length,
             }
             demandCleanupCollector = collector
             for (const demand of demands.values()) {
@@ -1025,7 +1055,7 @@ function createPowerSyncCollectionConfig<
 
             if (collector.tasks.length === 0) {
               demandCleanupCollector = null
-              if (collector.failure) throw collector.failure.error
+              throwDemandCleanupFailures(collector)
               return
             }
 
@@ -1034,16 +1064,19 @@ function createPowerSyncCollectionConfig<
               while (settledTasks < collector.tasks.length) {
                 const tasks = collector.tasks.slice(settledTasks)
                 settledTasks = collector.tasks.length
-                const outcomes = await Promise.allSettled(tasks)
-                const rejected = outcomes.find(
-                  (outcome): outcome is PromiseRejectedResult =>
-                    outcome.status === `rejected`,
+                const outcomes = await Promise.allSettled(
+                  tasks.map(({ promise }) => promise),
                 )
-                if (rejected) {
-                  collector.failure ??= { error: rejected.reason }
+                for (const [index, outcome] of outcomes.entries()) {
+                  if (outcome.status === `rejected`) {
+                    collector.failures.push({
+                      order: tasks[index]!.order,
+                      error: outcome.reason,
+                    })
+                  }
                 }
               }
-              if (collector.failure) throw collector.failure.error
+              throwDemandCleanupFailures(collector)
             })().finally(() => {
               if (demandCleanupCollector === collector) {
                 demandCleanupCollector = null

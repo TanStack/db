@@ -8,7 +8,7 @@ export function runCleanupWithLocalTeardown(
   cleanup: CleanupFn | undefined,
   teardown: () => void,
 ): void | Promise<void> {
-  let result: void | Promise<void>
+  let result: unknown
   try {
     result = cleanup?.()
   } catch (cleanupError) {
@@ -23,8 +23,8 @@ export function runCleanupWithLocalTeardown(
   try {
     teardown()
   } catch (teardownError) {
-    if (!result) throw teardownError
-    return result.then(
+    if (!isPromiseLike(result)) throw teardownError
+    return Promise.resolve(result).then(
       () => {
         throw teardownError
       },
@@ -33,7 +33,15 @@ export function runCleanupWithLocalTeardown(
       },
     )
   }
-  return result
+  return isPromiseLike(result) ? Promise.resolve(result) : undefined
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<void> {
+  return (
+    !!value &&
+    (typeof value === `object` || typeof value === `function`) &&
+    typeof (value as { then?: unknown }).then === `function`
+  )
 }
 
 function aggregateCleanupFailures(

@@ -23,11 +23,13 @@ import type { SyncConfig } from '../src/types'
  * and subscriber count reaches zero. A status listener may restart from that
  * terminal event before the public cleanup promise settles; awaiting cleanup
  * is the ordinary external restart boundary. Concurrent callers share the
- * promise. Rejection still finalizes the old run once, then rejects every
- * waiter. If adapter cleanup and local teardown both fail, the aggregate keeps
- * the adapter error primary and the local error as a secondary diagnostic. A
- * lone error keeps its identity. A later ordinary preload is a new generation
- * and must work.
+ * promise. The observable cuts are the active run, retirement pending,
+ * terminal publication, public retirement Promise settlement, and replacement
+ * run. Rejection still finalizes the old run once, then rejects every waiter.
+ * If adapter cleanup and local teardown both fail, the aggregate keeps the
+ * adapter error primary and the local error as a secondary diagnostic. A lone
+ * error keeps its identity. A later ordinary preload is a new generation and
+ * must work.
  *
  * Counts, errors, status, rows, and ownership are all observed. Checking only
  * `cleaned-up` would miss leaked or duplicated physical resources.
@@ -39,13 +41,139 @@ const cleanupError = {
   message: expect.stringContaining(`after cleanup() completes`),
 }
 
-const scenarios = ([`abort`, `release`] as const).flatMap((boundary) =>
-  [false, true].flatMap((nestedCleanup) =>
-    [1, 2].map((attempts) => ({ boundary, nestedCleanup, attempts })),
-  ),
+const cleanupAdmissionAxes = {
+  boundary: [`abort`, `release`] as const,
+  nestedCleanup: [false, true] as const,
+  attempts: [1, 2] as const,
+}
+
+const cleanupAdmissionGrammar = cleanupAdmissionAxes.boundary.flatMap(
+  (boundary) =>
+    cleanupAdmissionAxes.nestedCleanup.flatMap((nestedCleanup) =>
+      cleanupAdmissionAxes.attempts.map((attempts) => ({
+        boundary,
+        nestedCleanup,
+        attempts,
+      })),
+    ),
 )
 
+async function withOracleCleanup<T>(
+  body: () => T | Promise<T>,
+  cleanups: Array<() => void | Promise<unknown>>,
+): Promise<T> {
+  let value: T | undefined
+  const failures: Array<unknown> = []
+  try {
+    value = await body()
+  } catch (error) {
+    failures.push(error)
+  }
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(failures, `Cleanup oracle and teardown failed`, {
+      cause: failures[0],
+    })
+  }
+  return value as T
+}
+
+describe(`Collection cleanup oracle calibration`, () => {
+  it(`enumerates every declared cleanup admission cell exactly once`, () => {
+    const expectedCells =
+      cleanupAdmissionAxes.boundary.length *
+      cleanupAdmissionAxes.nestedCleanup.length *
+      cleanupAdmissionAxes.attempts.length
+    const keys = cleanupAdmissionGrammar.map(
+      ({ boundary, nestedCleanup, attempts }) =>
+        `${boundary}:${nestedCleanup}:${attempts}`,
+    )
+
+    expect(expectedCells).toBe(8)
+    expect(cleanupAdmissionGrammar).toHaveLength(expectedCells)
+    expect(new Set(keys)).toHaveLength(expectedCells)
+    for (const key of keys) {
+      expect(keys.filter((candidate) => candidate === key)).toHaveLength(1)
+    }
+  })
+
+  it(`retains a primary mismatch and every teardown failure`, async () => {
+    const primary = new Error(`oracle mismatch`)
+    const firstCleanup = new Error(`first cleanup failed`)
+    const secondCleanup = new Error(`second cleanup failed`)
+    const attempts: Array<string> = []
+
+    const failure = await withOracleCleanup(() => {
+      throw primary
+    }, [
+      () => {
+        attempts.push(`first`)
+        throw firstCleanup
+      },
+      () => {
+        attempts.push(`second`)
+        return Promise.reject(secondCleanup)
+      },
+    ]).catch((error: unknown) => error)
+
+    expect(attempts).toEqual([`first`, `second`])
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure).toMatchObject({
+      cause: primary,
+      errors: [primary, firstCleanup, secondCleanup],
+    })
+  })
+})
+
 describe(`Collection cleanup admission oracle`, () => {
+  it(`awaits a structural thenable returned from contextual-void cleanup`, async () => {
+    const cleanupGate = createDeferred<void>()
+    let cleanupCalls = 0
+    const thenable = {
+      then: cleanupGate.promise.then.bind(cleanupGate.promise),
+    }
+    const cleanup: () => void = () => {
+      cleanupCalls++
+      return thenable
+    }
+    const collection = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return cleanup
+        },
+      },
+    })
+
+    await withOracleCleanup(async () => {
+      await collection.preload()
+      let settled = false
+      const retirement = collection.cleanup().then(() => {
+        settled = true
+      })
+
+      expect(cleanupCalls).toBe(1)
+      expect(collection.status).toBe(`ready`)
+      expect(() => collection.startSyncImmediate()).toThrowError(
+        expect.objectContaining(cleanupError),
+      )
+      await Promise.resolve()
+      expect(settled).toBe(false)
+
+      cleanupGate.resolve()
+      await retirement
+      expect(collection.status).toBe(`cleaned-up`)
+    }, [() => cleanupGate.resolve(), () => collection.cleanup()])
+  })
+
   it(`waits for source cleanup before publishing the restart boundary`, async () => {
     const cleanupGate = createDeferred<void>()
     let starts = 0
@@ -279,6 +407,7 @@ describe(`Collection cleanup admission oracle`, () => {
     let starts = 0
     let cleanups = 0
     const statuses: Array<string> = []
+    const settlementOrder: Array<string> = []
     const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
@@ -289,7 +418,10 @@ describe(`Collection cleanup admission oracle`, () => {
             cleanup: () => {
               cleanups++
               return cleanups === 1
-                ? cleanupGate.promise.then(() => Promise.reject(sourceError))
+                ? cleanupGate.promise.then(() => {
+                    settlementOrder.push(`adapter-cleanup-rejected`)
+                    throw sourceError
+                  })
                 : undefined
             },
           }
@@ -298,6 +430,9 @@ describe(`Collection cleanup admission oracle`, () => {
     })
     const off = collection.on(`status:change`, ({ status }) => {
       statuses.push(status)
+      if (status === `cleaned-up`) {
+        settlementOrder.push(`cleaned-up-event`)
+      }
     })
 
     try {
@@ -305,6 +440,9 @@ describe(`Collection cleanup admission oracle`, () => {
       statuses.length = 0
       const firstCleanup = collection.cleanup()
       const concurrentCleanup = collection.cleanup()
+      void firstCleanup.catch(() => {
+        settlementOrder.push(`public-cleanup-rejection-continuation`)
+      })
       const firstOutcome = firstCleanup.catch((error: unknown) => error)
       const concurrentOutcome = concurrentCleanup.catch(
         (error: unknown) => error,
@@ -326,6 +464,11 @@ describe(`Collection cleanup admission oracle`, () => {
       })
       expect(collection.status).toBe(`cleaned-up`)
       expect(statuses).toEqual([`cleaned-up`])
+      expect(settlementOrder).toEqual([
+        `adapter-cleanup-rejected`,
+        `cleaned-up-event`,
+        `public-cleanup-rejection-continuation`,
+      ])
       expect(cleanups).toBe(1)
 
       // Rejection ends the old sync run. A later run is allowed, and a
@@ -390,7 +533,7 @@ describe(`Collection cleanup admission oracle`, () => {
     },
   )
 
-  it.each(scenarios)(
+  it.each(cleanupAdmissionGrammar)(
     `rejects restart without creating replacement ownership: %j`,
     async ({ boundary, nestedCleanup, attempts }) => {
       let ops!: Parameters<SyncConfig<Row, number>[`sync`]>[0]

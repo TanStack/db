@@ -781,6 +781,88 @@ describe(`Sync Streams`, () => {
     }
   })
 
+  it.each([`first-hook-first`, `second-hook-first`] as const)(
+    `on-demand mode: preserves every acquired hook cleanup failure: %s`,
+    async (settlementOrder) => {
+      const db = await createDatabase()
+      await createTestProducts(db)
+      const firstGate = pDefer<void>()
+      const secondGate = pDefer<void>()
+      const firstFailureReached = pDefer<void>()
+      const secondFailureReached = pDefer<void>()
+      const firstError = new Error(`first acquired hook cleanup failed`)
+      const secondError = new Error(`second acquired hook cleanup failed`)
+      const firstCleanup = vi.fn(async () => {
+        await firstGate.promise
+        firstFailureReached.resolve()
+        throw firstError
+      })
+      const secondCleanup = vi.fn(async () => {
+        await secondGate.promise
+        secondFailureReached.resolve()
+        throw secondError
+      })
+      let acquisition = 0
+      const collection = createCollection(
+        powerSyncCollectionOptions({
+          database: db,
+          table: APP_SCHEMA.props.products,
+          syncMode: `on-demand`,
+          onLoadSubset: () =>
+            acquisition++ === 0 ? firstCleanup : secondCleanup,
+        }),
+      )
+      const categoryQuery = (category: string) =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ product: collection })
+              .where(({ product }) => eq(product.category, category)),
+        })
+      const firstQuery = categoryQuery(`electronics`)
+      const secondQuery = categoryQuery(`clothing`)
+
+      try {
+        await firstQuery.preload()
+        await secondQuery.preload()
+        const cleanupOutcome = collection.cleanup().then(
+          () => ({ status: `fulfilled` as const }),
+          (error: unknown) => ({ status: `rejected` as const, error }),
+        )
+
+        if (settlementOrder === `first-hook-first`) {
+          firstGate.resolve()
+          await firstFailureReached.promise
+          secondGate.resolve()
+        } else {
+          secondGate.resolve()
+          await secondFailureReached.promise
+          firstGate.resolve()
+        }
+
+        const outcome = await cleanupOutcome
+        expect(outcome.status).toBe(`rejected`)
+        if (outcome.status !== `rejected`) {
+          throw new Error(`expected on-demand cleanup to reject`)
+        }
+        expect(outcome.error).toMatchObject({ name: `SyncCleanupError` })
+        const syncCleanupError = outcome.error as { cause?: unknown }
+        expect(syncCleanupError.cause).toBeInstanceOf(AggregateError)
+        const aggregate = syncCleanupError.cause as AggregateError
+        expect(aggregate.cause).toBe(firstError)
+        expect(aggregate.errors).toEqual([firstError, secondError])
+        expect(firstCleanup).toHaveBeenCalledOnce()
+        expect(secondCleanup).toHaveBeenCalledOnce()
+      } finally {
+        firstGate.resolve()
+        secondGate.resolve()
+        await firstQuery.cleanup()
+        await secondQuery.cleanup()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it.each([`fulfill`, `reject`, `throw`] as const)(
     `disposes a subset hook that resolves after collection cleanup: %s`,
     async (outcome) => {

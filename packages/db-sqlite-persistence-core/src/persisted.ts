@@ -2047,12 +2047,12 @@ class PersistedCollectionRuntime<
   cleanup(): Promise<void> {
     this.advanceLifecycle()
     const remoteReleases: Array<Promise<void>> = []
-    let firstFailure: { error: unknown } | undefined
+    const failures: Array<unknown> = []
     const attempt = (callback: () => void): void => {
       try {
         callback()
       } catch (error) {
-        firstFailure ??= { error }
+        failures.push(error)
       }
     }
 
@@ -2097,7 +2097,12 @@ class PersistedCollectionRuntime<
     this.clearSyncControls()
     this.collection = null
     return Promise.all(remoteReleases).then(() => {
-      if (firstFailure) throw firstFailure.error
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) {
+        throw new AggregateError(failures, `Persistence cleanup failed`, {
+          cause: failures[0],
+        })
+      }
     })
   }
 
