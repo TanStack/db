@@ -650,10 +650,7 @@ function createPowerSyncCollectionConfig<
           ])
           const disposalSettlement = settlements[1]
           await settleOnUnload()
-          if (
-            disposalSettlement.status === `rejected` &&
-            onUnloadFailure
-          ) {
+          if (disposalSettlement.status === `rejected` && onUnloadFailure) {
             throw new AggregateError(
               [disposalSettlement.reason, onUnloadFailure.error],
               `PowerSync tracking disposal and load-hook cleanup both failed`,
