@@ -34,8 +34,8 @@ import type { SyncConfig } from '../src/types'
  * A repeated-source history also proves one live query enters terminal error
  * once when two lexical aliases depend on the same Collection.
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
- * adapter error primary and the local error as a secondary diagnostic. A lone
- * error keeps its identity.
+ * adapter error primary and every local error as an ordered secondary
+ * diagnostic. A lone error keeps its identity.
  * No replacement owner is admitted until terminal publication. Concurrent
  * callers share the cleanup promise. Rejection still finalizes the old run and
  * rejects every waiter. A later ordinary preload starts a new sync run.
@@ -657,6 +657,76 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(source.status).toBe(`cleaned-up`)
     } finally {
       off()
+      cleanupGate.resolve()
+      await source.cleanup().catch(() => undefined)
+    }
+  })
+
+  it(`retains every cleanup-start observer failure after adapter cleanup rejects`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const firstObserverError = new Error(
+      `first cleanup-start observer failed exactly`,
+    )
+    const secondObserverError = new Error(
+      `second cleanup-start observer failed exactly`,
+    )
+    const adapterError = new Error(`adapter cleanup failed exactly`)
+    const observerCalls: Array<string> = []
+    let starts = 0
+    const source = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+          return {
+            cleanup: () =>
+              cleanupGate.promise.then(() => {
+                throw adapterError
+              }),
+          }
+        },
+      },
+    })
+    const offFirst = source._onCleanupStart(() => {
+      observerCalls.push(`first`)
+      throw firstObserverError
+    })
+    const offSecond = source._onCleanupStart(() => {
+      observerCalls.push(`second`)
+      throw secondObserverError
+    })
+
+    try {
+      await source.preload()
+      const cleanup = source.cleanup()
+
+      expect(observerCalls).toEqual([`first`, `second`])
+      expect(source.status).toBe(`ready`)
+      cleanupGate.resolve()
+      const failure = await cleanup.catch((error: unknown) => error)
+
+      expect(failure).toBeInstanceOf(AggregateError)
+      const aggregate = failure as AggregateError
+      expect(aggregate.cause).toMatchObject({
+        name: `SyncCleanupError`,
+        cause: adapterError,
+      })
+      expect(aggregate.errors).toEqual([
+        aggregate.cause,
+        firstObserverError,
+        secondObserverError,
+      ])
+      expect(source.status).toBe(`cleaned-up`)
+
+      offFirst()
+      offSecond()
+      source.startSyncImmediate()
+      expect(starts).toBe(2)
+      expect(source.status).toBe(`ready`)
+    } finally {
+      offFirst()
+      offSecond()
       cleanupGate.resolve()
       await source.cleanup().catch(() => undefined)
     }
