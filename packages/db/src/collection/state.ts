@@ -40,6 +40,13 @@ interface PendingSyncedTransaction<
   optimisticSnapshot?: {
     upserts: Map<TKey, T>
     deletes: Set<TKey>
+    ownership: Map<
+      TKey,
+      Array<
+        | { type: `upsert`; value: T; transaction?: Transaction<any> }
+        | { type: `delete`; transaction?: Transaction<any> }
+      >
+    >
   }
   preserveHydrationSeedKeys?: boolean
   /**
@@ -66,7 +73,6 @@ type InternalChangeMessage<
     previousValue?: VirtualRowProps<TKey>
   }
 }
-
 export class CollectionStateManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -143,7 +149,7 @@ export class CollectionStateManager<
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
   private isDrainingSyncTransactions = false
-  private syncSessionGeneration = 0
+  private syncRunGeneration = 0
   public isLocalOnly = false
 
   /**
@@ -866,6 +872,80 @@ export class CollectionStateManager<
       : mutation.modified
   }
 
+  /**
+   * Capture the optimistic layers that exist when a truncate is authored.
+   * Keeping their exact owners lets application discard a later rollback
+   * without reviving a failed same-key winner or retaining post-capture work.
+   */
+  public captureTruncateOptimisticSnapshot(): NonNullable<
+    PendingSyncedTransaction<TOutput, TKey>[`optimisticSnapshot`]
+  > {
+    const upserts = new Map(this.optimisticUpserts)
+    const deletes = new Set(this.optimisticDeletes)
+    const ownership = new Map<
+      TKey,
+      Array<
+        | {
+            type: `upsert`
+            value: TOutput
+            transaction?: Transaction<any>
+          }
+        | { type: `delete`; transaction?: Transaction<any> }
+      >
+    >()
+    const capturedKeys = new Set([...upserts.keys(), ...deletes])
+    const addLayer = (
+      key: TKey,
+      layer:
+        | {
+            type: `upsert`
+            value: TOutput
+            transaction?: Transaction<any>
+          }
+        | { type: `delete`; transaction?: Transaction<any> },
+    ) => {
+      if (!capturedKeys.has(key)) return
+      const layers = ownership.get(key) ?? []
+      layers.push(layer)
+      ownership.set(key, layers)
+    }
+
+    for (const key of capturedKeys) {
+      const acceptedUpsert = this.pendingOptimisticUpserts.get(key)
+      if (acceptedUpsert) {
+        addLayer(key, {
+          type: `upsert`,
+          value: this.resolveOptimisticUpsert(acceptedUpsert),
+        })
+      } else if (this.pendingOptimisticDeletes.has(key)) {
+        addLayer(key, { type: `delete` })
+      }
+    }
+
+    for (const transaction of this.transactions.values()) {
+      if ([`completed`, `failed`].includes(transaction.state)) continue
+      for (const mutation of transaction.mutations) {
+        if (
+          !mutation.optimistic ||
+          !this.isThisCollection(mutation.collection) ||
+          !capturedKeys.has(mutation.key as TKey)
+        )
+          continue
+        if (mutation.type === `delete`) {
+          addLayer(mutation.key as TKey, { type: `delete`, transaction })
+        } else {
+          addLayer(mutation.key as TKey, {
+            type: `upsert`,
+            value: this.resolveOptimisticUpsert(mutation),
+            transaction,
+          })
+        }
+      }
+    }
+
+    return { upserts, deletes, ownership }
+  }
+
   /** Build once per output flush; queued membership excludes optimistic edits. */
   createSyncedKeyLookup(): (key: TKey) => boolean {
     if (this.pendingSyncedTransactions.length === 0)
@@ -930,7 +1010,7 @@ export class CollectionStateManager<
     processed: boolean
     failure?: { error: unknown }
   } {
-    const syncSessionGeneration = this.syncSessionGeneration
+    const syncRunGeneration = this.syncRunGeneration
     // Check if there are any persisting transaction
     let hasPersistingTransaction = false
     for (const transaction of this.transactions.values()) {
@@ -1010,6 +1090,24 @@ export class CollectionStateManager<
         ? committedSyncedTransactions.find((t) => t.truncate)
             ?.optimisticSnapshot
         : null
+      // Snapshot capture and application can be separated by mutation
+      // settlement. Freeze ownership at the application boundary: a rolled
+      // back row is no longer owned, while an accepted non-direct mutation can
+      // be cleared from the live pending maps by its source confirmation later
+      // in this same atomic batch.
+      const retainedTruncateLayer = (key: TKey) => {
+        const layers = truncateOptimisticSnapshot?.ownership.get(key) ?? []
+        for (let index = layers.length - 1; index >= 0; index--) {
+          const layer = layers[index]!
+          if (
+            layer.transaction === undefined ||
+            layer.transaction.state !== `failed`
+          ) {
+            return layer
+          }
+        }
+        return undefined
+      }
       let truncatePendingLocalChanges: Set<TKey> | undefined
       let truncatePendingLocalOrigins: Set<TKey> | undefined
 
@@ -1290,13 +1388,18 @@ export class CollectionStateManager<
       // If we had a truncate, restore the preserved optimistic state from the snapshot
       // This includes items from transactions that may have completed during processing
       if (hasTruncateSync && truncateOptimisticSnapshot) {
-        for (const [key, value] of truncateOptimisticSnapshot.upserts) {
-          if (completedDirectUpserts.has(key) && changedKeys.has(key)) continue
-          this.optimisticUpserts.set(key, value)
-        }
-        for (const key of truncateOptimisticSnapshot.deletes) {
-          if (completedDirectDeletes.has(key) && changedKeys.has(key)) continue
-          this.optimisticDeletes.add(key)
+        for (const key of truncateOptimisticSnapshot.ownership.keys()) {
+          const layer = retainedTruncateLayer(key)
+          if (!layer) continue
+          if (layer.type === `upsert`) {
+            if (completedDirectUpserts.has(key) && changedKeys.has(key))
+              continue
+            this.optimisticUpserts.set(key, layer.value)
+          } else {
+            if (completedDirectDeletes.has(key) && changedKeys.has(key))
+              continue
+            this.optimisticDeletes.add(key)
+          }
         }
       }
 
@@ -1511,11 +1614,11 @@ export class CollectionStateManager<
         failure = { error }
       }
 
-      if (this.syncSessionGeneration === syncSessionGeneration) {
+      if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()
         this.preSyncVirtualState.clear()
         Promise.resolve().then(() => {
-          if (this.syncSessionGeneration === syncSessionGeneration) {
+          if (this.syncRunGeneration === syncRunGeneration) {
             this.recentlySyncedKeys.clear()
           }
         })
@@ -1660,7 +1763,7 @@ export class CollectionStateManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
-    this.syncSessionGeneration++
+    this.syncRunGeneration++
     for (const transaction of this.pendingSyncedTransactions) {
       transaction.applied.reject(new SyncTransactionAbortedError())
     }

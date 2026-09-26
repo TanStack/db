@@ -5,6 +5,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   eq,
+  getLoadSubsetDemandKey,
 } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
 import { TraceAssertionError } from '../../db/tests/trace-runner.js'
@@ -12,6 +13,24 @@ import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
+
+/**
+ * # Does Query-backed loadSubset preserve identity and lifecycle?
+ *
+ * Canonically equal demands share one Query transport. Distinct predicates,
+ * values, order, cursor, and scope remain distinct. The final live-query owner
+ * controls cancellation, and a replacement owner starts fresh after abort.
+ * Initial failure reaches existing and late dependents; recovery becomes public
+ * only after every failed source recovers. A refetch stays pending while result
+ * application is deferred, including for existing and cached demands. A later
+ * refetch failure retains the last ready snapshot.
+ *
+ * Small identity forms and lifecycle histories drive a real QueryClient and
+ * Collection. The oracle records query calls, values, request options, abort
+ * signals, metadata, source and dependent status, exact errors, and cleanup.
+ * Fault cases prove correct call counts cannot hide wrong returned values or a
+ * stale replacement snapshot.
+ */
 
 type Row = {
   id: string
@@ -252,7 +271,7 @@ async function expectRefetchFailureKeepsReadySnapshot(): Promise<void> {
 async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
   // Internal ordering seam: this deliberately reuses old sync controls and
   // observers. It does not establish a public cleanup/restart path; real
-  // cleanup clears those observers before a new sync session starts.
+  // cleanup clears those observers before a new sync run starts.
   const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
   const queryClient = createQueryClient()
   const id = `load-subset-deferred-ready-${collectionSequence++}`
@@ -295,22 +314,15 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
   const maintenanceDeleted = new Promise<void>((resolve) => {
     resolveMaintenanceDelete = resolve
   })
-  type MetadataWithPersistedScan = SyncMetadataApi<string | number> & {
-    row: SyncMetadataApi<string | number>[`row`] & {
-      scanPersisted: () => Promise<
-        Array<{ key: string | number; value: Row; metadata?: unknown }>
-      >
-    }
-  }
-  const metadata: MetadataWithPersistedScan = {
+  const scanPersistedRows = vi.fn(async () => {
+    await scanReleased
+    return []
+  })
+  const metadata: SyncMetadataApi<string | number> = {
     row: {
       get: () => undefined,
       set: () => {},
       delete: () => {},
-      scanPersisted: async () => {
-        await scanReleased
-        return []
-      },
     },
     collection: {
       get: () => undefined,
@@ -325,6 +337,17 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
         },
       ],
     },
+    persistence: {
+      protocol: `@tanstack/db/sync-persistence`,
+      version: 1,
+      hydrateBaseline: async () => {},
+      scanPersistedRows,
+      resumeSnapshot: {
+        certify: async () => {},
+        getKeySetEvidence: () => ({ status: `consistent` }),
+        expectCurrentCommit: () => {},
+      },
+    },
   }
 
   collection._lifecycle.setStatus(`cleaned-up`)
@@ -333,6 +356,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
 
   try {
     expect(collection.status).toBe(`error`)
+    await vi.waitFor(() => expect(scanPersistedRows).toHaveBeenCalledOnce())
     releaseScan()
     await maintenanceDeleted
     for (let turn = 0; turn < 10; turn++) await Promise.resolve()
@@ -437,6 +461,279 @@ function createOnDemandCollection(idPrefix: string, rows: Array<Row>) {
     }),
   )
   return { queryClient, collection, queryFn }
+}
+
+async function expectRefetchRevalidatesExistingDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-existing-${collectionSequence++}`
+  let rows: Array<Row> = [{ id: `initial` }]
+  const queryKeyInputs: Array<LoadSubsetOptions> = []
+  const queryFnInputs: Array<LoadSubsetOptions> = []
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    queryFnInputs.push(context.meta?.loadSubsetOptions ?? {})
+    return Promise.resolve(rows.map((row) => ({ ...row })))
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: (options) => {
+        queryKeyInputs.push(options)
+        return [id, getLoadSubsetDemandKey(options)]
+      },
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+
+  try {
+    await collection._sync.loadSubset({})
+    expect(collection.has(`initial`)).toBe(true)
+
+    rows = [{ id: `refetched` }]
+    await collection._sync.loadSubset({ refetch: true })
+
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(collection.has(`initial`)).toBe(false)
+    expect(collection.has(`refetched`)).toBe(true)
+    expect(
+      queryKeyInputs.every(
+        (options) => !Object.prototype.hasOwnProperty.call(options, `refetch`),
+      ),
+    ).toBe(true)
+    expect(
+      queryFnInputs.every(
+        (options) => !Object.prototype.hasOwnProperty.call(options, `refetch`),
+      ),
+    ).toBe(true)
+    expect(
+      queryClient.getQueryCache().findAll({ queryKey: [id] }),
+    ).toHaveLength(1)
+  } finally {
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+async function expectRefetchRevalidatesCachedDemand(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-cached-${collectionSequence++}`
+  const queryKey = [id]
+  queryClient.setQueryData(queryKey, [{ id: `cached` } satisfies Row])
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        context.meta?.loadSubsetOptions ?? {},
+        `refetch`,
+      ),
+    ).toBe(false)
+    return Promise.resolve([{ id: `fresh` } satisfies Row])
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+
+  try {
+    await collection._sync.loadSubset({ refetch: true })
+    expect(queryFn).toHaveBeenCalledOnce()
+    expect(collection.has(`cached`)).toBe(false)
+    expect(collection.has(`fresh`)).toBe(true)
+  } finally {
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+async function expectDeferredRefetchWaitsForApplication(
+  demand: `existing` | `cached`,
+): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-deferred-refetch-${demand}-${collectionSequence++}`
+  const queryKey = [id]
+  let rows: Array<Row> = [{ id: `old` }]
+  if (demand === `cached`) queryClient.setQueryData(queryKey, rows)
+  const queryFn = vi.fn(() => Promise.resolve(structuredClone(rows)))
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  const barrier = createDeferred<void>()
+  let refetch: Promise<void> | undefined
+
+  try {
+    if (demand === `existing`) {
+      await collection._sync.loadSubset({})
+      expect(collection.has(`old`)).toBe(true)
+    }
+
+    collection.deferDataRefresh = barrier.promise
+    rows = [{ id: `fresh` }]
+    const result = collection._sync.loadSubset({ refetch: true })
+    expect(result).not.toBe(true)
+    refetch = result as Promise<void>
+    let settled = false
+    void refetch.then(() => {
+      settled = true
+    })
+
+    const callsBeforeBarrier = demand === `existing` ? 2 : 1
+    await vi.waitFor(() =>
+      expect(queryFn).toHaveBeenCalledTimes(callsBeforeBarrier),
+    )
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(settled).toBe(false)
+    expect(collection.has(`fresh`)).toBe(false)
+
+    collection.deferDataRefresh = null
+    barrier.resolve()
+    await refetch
+    await vi.waitFor(() => expect(collection.has(`fresh`)).toBe(true))
+  } finally {
+    collection.deferDataRefresh = null
+    barrier.resolve()
+    await refetch?.catch(() => undefined)
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-authority-${collectionSequence++}`
+  const initialResult = createDeferred<Array<Row>>()
+  const authoritativeResult = createDeferred<Array<Row>>()
+  const initialStarted = createDeferred<void>()
+  const authoritativeStarted = createDeferred<void>()
+  let calls = 0
+  const queryFn = vi.fn(() => {
+    calls++
+    if (calls === 1) {
+      initialStarted.resolve()
+      return initialResult.promise
+    }
+    authoritativeStarted.resolve()
+    return authoritativeResult.promise
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  let initialDemand: Promise<void> | undefined
+  let refetchDemand: Promise<void> | undefined
+
+  try {
+    collection.utils.writeInsert({ id: `optimistic` })
+    initialDemand = collection._sync.loadSubset({}) as Promise<void>
+    await initialStarted.promise
+
+    collection.utils.writeDelete(`optimistic`)
+    refetchDemand = collection._sync.loadSubset({
+      refetch: true,
+    }) as Promise<void>
+    let refetchSettled = false
+    void refetchDemand.then(() => {
+      refetchSettled = true
+    })
+
+    initialResult.resolve([{ id: `stale` }])
+    await authoritativeStarted.promise
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(refetchSettled).toBe(false)
+    expect(collection.has(`stale`)).toBe(false)
+
+    authoritativeResult.resolve([{ id: `authoritative` }])
+    await Promise.all([initialDemand, refetchDemand])
+    expect(collection.has(`authoritative`)).toBe(true)
+  } finally {
+    initialResult.resolve([])
+    authoritativeResult.resolve([])
+    await Promise.allSettled([
+      initialDemand ?? Promise.resolve(),
+      refetchDemand ?? Promise.resolve(),
+    ])
+    await collection.cleanup()
+    queryClient.clear()
+  }
+}
+
+async function expectReleasedRefetchRejects(): Promise<void> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-refetch-release-${collectionSequence++}`
+  const queryKey = [id]
+  queryClient.setQueryData(queryKey, [{ id: `cached` } satisfies Row])
+  const started = createDeferred<void>()
+  let signal: AbortSignal | undefined
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    signal = context.signal
+    started.resolve()
+    return new Promise<Array<Row>>((_resolve, reject) => {
+      context.signal.addEventListener(
+        `abort`,
+        () => reject(new DOMException(`refetch released`, `AbortError`)),
+        { once: true },
+      )
+    })
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey,
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  const request: LoadSubsetOptions = { refetch: true }
+  let refetch: Promise<void> | undefined
+
+  try {
+    refetch = collection._sync.loadSubset(request) as Promise<void>
+    await started.promise
+    expect(signal?.aborted).toBe(false)
+
+    collection._sync.unloadSubset(request)
+
+    expect(signal?.aborted).toBe(true)
+    await expect(refetch).rejects.toMatchObject({ name: `AbortError` })
+  } finally {
+    await collection.cleanup()
+    queryClient.clear()
+    await refetch?.catch(() => undefined)
+  }
 }
 
 type IdentityForm =
@@ -966,6 +1263,32 @@ function expectLateRetiredQuery(observation: RetiredQueryObservation): void {
 }
 
 describe(`loadSubset lifecycle oracle`, () => {
+  it(`refetches an existing semantic demand without changing its query or unload identity`, async () => {
+    await expectRefetchRevalidatesExistingDemand()
+  })
+
+  it(`refetches a newly observed cached demand before reporting it applied`, async () => {
+    await expectRefetchRevalidatesCachedDemand()
+  })
+
+  it.each([
+    { article: `an`, demand: `existing` },
+    { article: `a`, demand: `cached` },
+  ] as const)(
+    `keeps a deferred refetch for $article $demand demand pending until its result applies`,
+    async ({ demand }) => {
+      await expectDeferredRefetchWaitsForApplication(demand)
+    },
+  )
+
+  it(`keeps refetch pending until a post-write fetch becomes authoritative`, async () => {
+    await expectRefetchWaitsForPostWriteAuthority()
+  })
+
+  it(`rejects a refetch after its final acquisition is released`, async () => {
+    await expectReleasedRefetchRejects()
+  })
+
   it(`reports an initial query failure and recovers after a successful refetch`, async () => {
     await expectInitialQueryFailureStatus()
   })

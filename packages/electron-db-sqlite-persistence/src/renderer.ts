@@ -200,6 +200,20 @@ function createResolvedRendererAdapter(
         value: Record<string, unknown>
       }>
     },
+    loadResumeSnapshot: async (
+      collectionId: string,
+      ctx?: {
+        requiredIndexSignatures?: ReadonlyArray<string>
+        includeRows?: boolean
+      },
+    ) => {
+      return executeRequest(
+        `loadResumeSnapshot`,
+        collectionId,
+        { ctx },
+        resolution,
+      )
+    },
     applyCommittedTx: async (
       collectionId: string,
       tx: PersistedTx<Record<string, unknown>, string | number>,
@@ -359,35 +373,40 @@ export function createElectronSQLitePersistence(
       schemaVersion,
     })
     adapterCache.set(cacheKey, adapter)
-
-    // Wire the adapter into the coordinator so it can handle
-    // leader-side RPCs (applyCommittedTx, pullSince, getStreamPosition, etc.)
-    if (coordinator instanceof ElectronCollectionCoordinator) {
-      coordinator.setAdapter(adapter)
-    }
-
     return adapter
   }
 
   const createCollectionPersistence = (
+    collectionId: string | undefined,
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence => ({
-    adapter: getAdapterForCollection(mode, schemaVersion),
-    coordinator,
-  })
+  ): PersistedCollectionPersistence => {
+    const adapter = getAdapterForCollection(mode, schemaVersion)
+    if (coordinator instanceof ElectronCollectionCoordinator) {
+      if (collectionId === undefined) {
+        coordinator.setAdapter(adapter)
+      } else {
+        coordinator.setAdapterForCollection(collectionId, adapter)
+      }
+    }
+    return { adapter, coordinator }
+  }
 
   const defaultPersistence = createCollectionPersistence(
+    undefined,
     `sync-absent`,
     undefined,
   )
+  if (coordinator instanceof ElectronCollectionCoordinator) {
+    coordinator.setAdapter(defaultPersistence.adapter)
+  }
 
   return {
     ...defaultPersistence,
-    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
-      createCollectionPersistence(mode, schemaVersion),
+    resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
+      createCollectionPersistence(collectionId, mode, schemaVersion),
     // Backward compatible fallback for older callers.
     resolvePersistenceForMode: (mode) =>
-      createCollectionPersistence(mode, undefined),
+      createCollectionPersistence(undefined, mode, undefined),
   }
 }

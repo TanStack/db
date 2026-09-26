@@ -208,7 +208,9 @@ export function trailBaseCollectionOptions<
         let cursor: string | undefined =
           lastKey !== undefined ? cursors.get(lastKey) : undefined
         let offset: number | undefined =
-          (opts.offset ?? 0) > 0 ? opts.offset : undefined
+          cursor === undefined && (opts.offset ?? 0) > 0
+            ? opts.offset
+            : undefined
 
         const order: Array<string> | undefined = buildOrder(opts)
         const filters: Array<FilterOrComposite> | undefined = buildFilters(

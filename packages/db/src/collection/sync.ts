@@ -12,6 +12,7 @@ import {
 } from '../errors'
 import { createDeferred } from '../deferred'
 import { deepEquals } from '../utils'
+import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -62,7 +63,7 @@ export class CollectionSyncManager<
 
   public preloadPromise: Promise<void> | null = null
   private rejectPreload?: (error: unknown) => void
-  public syncCleanupFn: (() => void) | null = null
+  public syncCleanupFn: CleanupFn | null = null
   public syncLoadSubsetFn: LoadSubsetFn | null = null
   public syncUnloadSubsetFn: ((options: LoadSubsetOptions) => void) | null =
     null
@@ -73,8 +74,19 @@ export class CollectionSyncManager<
   private syncStartDeferred = false
   private syncStartRequested = false
   private deferredLoadSubsets: Array<DeferredLoadSubset> = []
-  private syncEpoch = 0
-  private loadSubsetSession = 0
+  // Fences callbacks retained across reentrant sync entry and cleanup. This
+  // changes at both boundaries; syncRunGeneration changes only at cleanup.
+  private syncCallbackEpoch = 0
+  private syncRunGeneration = 0
+  private syncEntryActive = false
+  private pendingSyncEntryCleanup:
+    | {
+        tasks: Array<Promise<void>>
+        failure?: { error: unknown }
+        onSettled?: (failure?: { error: unknown }) => void
+        completion?: Deferred<void>
+      }
+    | undefined
 
   /**
    * Creates a new CollectionSyncManager instance
@@ -123,13 +135,14 @@ export class CollectionSyncManager<
       return
     }
 
-    const syncEpoch = ++this.syncEpoch
-    const isCurrentSync = () => syncEpoch === this.syncEpoch
+    const syncCallbackEpoch = ++this.syncCallbackEpoch
+    const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
     this.lifecycle.setStatus(`loading`)
     if (!isCurrentSync()) return
     let syncEntryActive = true
     let readyEffectFailure: { error: unknown } | undefined
 
+    this.syncEntryActive = true
     try {
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
@@ -324,20 +337,20 @@ export class CollectionSyncManager<
             // - Finally, optimistic mutations re-applied on top (single batch)
             pendingTransaction.truncate = true
 
-            // Capture optimistic state NOW to preserve it even if transactions complete
-            // before this truncate transaction is committed
-            pendingTransaction.optimisticSnapshot = {
-              upserts: new Map(this.state.optimisticUpserts),
-              deletes: new Set(this.state.optimisticDeletes),
-            }
+            pendingTransaction.optimisticSnapshot =
+              this.state.captureTruncateOptimisticSnapshot()
           },
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
       )
+      this.syncEntryActive = false
       syncEntryActive = false
 
       if (!isCurrentSync()) {
-        syncRes?.cleanup?.()
+        if (syncRes?.cleanup) {
+          this.registerPendingSyncEntryCleanup(syncRes.cleanup)
+        }
+        this.completePendingSyncEntryCleanup()
         if (readyEffectFailure) throw readyEffectFailure.error
         return
       }
@@ -365,6 +378,8 @@ export class CollectionSyncManager<
       // starting sync leaves the timer alone.
       this.lifecycle.startGCTimerIfUnsubscribed()
     } catch (error) {
+      this.syncEntryActive = false
+      this.completePendingSyncEntryCleanup()
       syncEntryActive = false
       if (isCurrentSync()) this.lifecycle.markError(error)
       throw error
@@ -395,7 +410,7 @@ export class CollectionSyncManager<
     this.syncStartRequested = false
     const deferredLoadSubsets = this.deferredLoadSubsets
     this.deferredLoadSubsets = []
-    const loadSubsetSession = this.loadSubsetSession
+    const syncRunGeneration = this.syncRunGeneration
 
     try {
       if (shouldStart) {
@@ -412,7 +427,7 @@ export class CollectionSyncManager<
       const loadSubset = this.syncLoadSubsetFn
       try {
         if (
-          loadSubsetSession !== this.loadSubsetSession ||
+          syncRunGeneration !== this.syncRunGeneration ||
           options.signal?.aborted
         ) {
           throw new LoadSubsetOperationAbortedError()
@@ -452,6 +467,7 @@ export class CollectionSyncManager<
     isCurrentSync: () => boolean,
   ): SyncMetadataApi<TKey> {
     return {
+      persistence: null,
       row: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
@@ -782,7 +798,7 @@ export class CollectionSyncManager<
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
   public trackLoadPromise(promise: Promise<unknown>): void {
-    const loadSubsetSession = this.loadSubsetSession
+    const syncRunGeneration = this.syncRunGeneration
     const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
     this.trackLoadSubsetOperationPromise(promise)
@@ -798,7 +814,7 @@ export class CollectionSyncManager<
     }
 
     const finish = () => {
-      if (loadSubsetSession !== this.loadSubsetSession) return
+      if (syncRunGeneration !== this.syncRunGeneration) return
 
       const loadingEnding =
         this.pendingLoadSubsetPromises.size === 1 &&
@@ -819,8 +835,8 @@ export class CollectionSyncManager<
   }
 
   /** @internal Generation fence for subscription-owned async work. */
-  public getLoadSubsetSession(): number {
-    return this.loadSubsetSession
+  public getSyncRunGeneration(): number {
+    return this.syncRunGeneration
   }
 
   /**
@@ -884,35 +900,94 @@ export class CollectionSyncManager<
     }
   }
 
-  public cleanup(): void {
-    // Invalidate callbacks retained by asynchronous work from this session
-    // before invoking adapter cleanup or allowing a new session to start.
-    const cleanupEpoch = ++this.syncEpoch
-    this.loadSubsetSession++
+  private wrapCleanupError(error: unknown): SyncCleanupError {
+    const wrappedError = new SyncCleanupError(this.id, error as Error | string)
+    wrappedError.cause = error
+    if (error instanceof Error) wrappedError.stack = error.stack
+    return wrappedError
+  }
+
+  private invokeCleanup(cleanup: CleanupFn | null): true | Promise<void> {
+    if (!cleanup) return true
+
+    try {
+      const result = cleanup()
+      if (!isPromiseLike(result)) return true
+      return Promise.resolve(result).then(
+        () => undefined,
+        (error: unknown) => {
+          throw this.wrapCleanupError(error)
+        },
+      )
+    } catch (error) {
+      throw this.wrapCleanupError(error)
+    }
+  }
+
+  private registerPendingSyncEntryCleanup(cleanup: CleanupFn): void {
+    const pending = this.pendingSyncEntryCleanup
+    if (!pending) return
+
+    try {
+      const result = this.invokeCleanup(cleanup)
+      if (result !== true) {
+        pending.tasks.push(result)
+        void result.catch(() => undefined)
+      }
+    } catch (error) {
+      pending.failure ??= { error }
+    }
+  }
+
+  private completePendingSyncEntryCleanup(): void {
+    const pending = this.pendingSyncEntryCleanup
+    if (!pending) return
+    this.pendingSyncEntryCleanup = undefined
+
+    const settle = (failure?: { error: unknown }) => {
+      const outcome = pending.failure ?? failure
+      pending.onSettled?.(outcome)
+      if (outcome) pending.completion?.reject(outcome.error)
+      else pending.completion?.resolve()
+    }
+
+    if (pending.tasks.length === 0) {
+      settle()
+      return
+    }
+
+    void Promise.allSettled(pending.tasks).then((outcomes) => {
+      const rejected = outcomes.find(
+        (outcome): outcome is PromiseRejectedResult =>
+          outcome.status === `rejected`,
+      )
+      settle(rejected ? { error: rejected.reason } : undefined)
+    })
+  }
+
+  public cleanup(): true | Promise<void>
+  public cleanup(onSettled: (failure?: { error: unknown }) => void): boolean
+  public cleanup(
+    onSettled?: (failure?: { error: unknown }) => void,
+  ): boolean | Promise<void> {
+    // Invalidate callbacks retained by asynchronous work from this sync run
+    // before invoking adapter cleanup or allowing a new sync run to start.
+    ++this.syncCallbackEpoch
+    this.syncRunGeneration++
     this.rejectPreload?.(new CollectionPreloadAbortedError())
     const cleanup = this.syncCleanupFn
     this.syncCleanupFn = null
     this.syncLoadSubsetFn = null
     this.syncUnloadSubsetFn = null
+
+    let cleanupResult: true | Promise<void> = true
+    let cleanupFailure: { error: unknown } | undefined
     try {
-      cleanup?.()
+      cleanupResult = this.invokeCleanup(cleanup)
     } catch (error) {
-      // Keep failed cleanup retryable, but never overwrite a replacement
-      // session installed by reentrant adapter code.
-      if (this.syncEpoch === cleanupEpoch) this.syncCleanupFn = cleanup
-      // Re-throw in a microtask to surface the error after cleanup completes
-      queueMicrotask(() => {
-        if (error instanceof Error) {
-          // Preserve the original error and stack trace
-          const wrappedError = new SyncCleanupError(this.id, error)
-          wrappedError.cause = error
-          wrappedError.stack = error.stack
-          throw wrappedError
-        } else {
-          throw new SyncCleanupError(this.id, error as Error | string)
-        }
-      })
+      cleanupFailure = { error }
     }
+
     this.preloadPromise = null
     this.syncStartDeferred = false
     this.syncStartRequested = false
@@ -943,6 +1018,32 @@ export class CollectionSyncManager<
     for (const request of deferredLoadSubsets) {
       request.deferred.reject(new LoadSubsetOperationAbortedError())
     }
+
+    if (this.syncEntryActive) {
+      const completion = onSettled ? undefined : createDeferred<void>()
+      const pending = {
+        tasks: [] as Array<Promise<void>>,
+        failure: cleanupFailure,
+        onSettled,
+        completion,
+      }
+      if (cleanupResult !== true) {
+        pending.tasks.push(cleanupResult)
+        void cleanupResult.catch(() => undefined)
+      }
+      this.pendingSyncEntryCleanup = pending
+      return onSettled ? false : completion!.promise
+    }
+
+    if (cleanupFailure) throw cleanupFailure.error
+    if (cleanupResult === true) return true
+
+    if (!onSettled) return cleanupResult
+    void cleanupResult.then(
+      () => onSettled(),
+      (error: unknown) => onSettled({ error }),
+    )
+    return false
   }
 }
 

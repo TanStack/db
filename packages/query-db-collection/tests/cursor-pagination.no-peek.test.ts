@@ -3,7 +3,7 @@ import fc from 'fast-check'
 import { createDeferred } from '../../db/src/deferred.js'
 import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
 import { expectedWindow } from './cursor-pagination/model.js'
-import { createNoPeekSession } from './cursor-pagination/no-peek.js'
+import { createNoPeekDemandModel } from './cursor-pagination/no-peek.js'
 import { createFactTransport } from './cursor-pagination/no-peek-transport.js'
 import type { Row, Scope } from './cursor-pagination/model.js'
 
@@ -25,15 +25,15 @@ describe(`experimental publication-bound no-peek pagination`, () => {
   it(`keeps shallow continuation after a deeper consumer reaches the end`, async () => {
     const rows = rowsOf(9)
     const transport = createTransport(rows, 3)
-    const session = createNoPeekSession(transport.read)
-    session.request(`shallow`, 3)
-    session.request(`deep`, 10)
-    await session.refresh()
-    expect(session.get(`shallow`)).toEqual(expectedWindow(rows, scope, 3))
-    expect(session.get(`deep`)).toEqual(expectedWindow(rows, scope, 10))
-    session.release(`deep`)
-    await session.refresh()
-    expect(session.get(`shallow`)).toEqual(expectedWindow(rows, scope, 3))
+    const model = createNoPeekDemandModel(transport.read)
+    model.retainDemand(`shallow`, 3)
+    model.retainDemand(`deep`, 10)
+    await model.refresh()
+    expect(model.get(`shallow`)).toEqual(expectedWindow(rows, scope, 3))
+    expect(model.get(`deep`)).toEqual(expectedWindow(rows, scope, 10))
+    model.retireDemand(`deep`)
+    await model.refresh()
+    expect(model.get(`shallow`)).toEqual(expectedWindow(rows, scope, 3))
   })
 
   it.each([
@@ -46,7 +46,7 @@ describe(`experimental publication-bound no-peek pagination`, () => {
     async (fault) => {
       const rows = rowsOf(9)
       const transport = createTransport(rows, 3)
-      const session = createNoPeekSession(async (limit) => {
+      const model = createNoPeekDemandModel(async (limit) => {
         const packet = await transport.read(limit)
         if (fault === `missing`) delete packet.fact
         if (fault === `foreign-stamp`) packet.fact!.stamp = {}
@@ -54,20 +54,20 @@ describe(`experimental publication-bound no-peek pagination`, () => {
         if (fault === `transformed`) packet.transparent = false
         return packet
       })
-      session.request(`a`, 3)
-      await session.refresh()
-      expect(session.get(`a`)).toEqual(expectedWindow(rows, scope, 3))
+      model.retainDemand(`a`, 3)
+      await model.refresh()
+      expect(model.get(`a`)).toEqual(expectedWindow(rows, scope, 3))
       expect(transport.requests).toEqual([3, 4])
-      session.request(`b`, 10)
-      await session.refresh()
-      session.release(`b`)
-      await session.refresh()
+      model.retainDemand(`b`, 10)
+      await model.refresh()
+      model.retireDemand(`b`)
+      await model.refresh()
       expect(transport.requests.at(-1)).toBe(4)
-      expect(session.get(`a`)).toEqual(expectedWindow(rows, scope, 3))
+      expect(model.get(`a`)).toEqual(expectedWindow(rows, scope, 3))
     },
   )
 
-  it(`agrees with full-relation truth across scopes, peers, release and repartition`, async () => {
+  it(`agrees with full-relation truth across scopes, peers, demand retirement and repartition`, async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.integer({ min: 0, max: 35 }),
@@ -89,28 +89,28 @@ describe(`experimental publication-bound no-peek pagination`, () => {
           const rows = rowsOf(count)
           const transport = createTransport(rows, size, selected)
           let metadata = true
-          const session = createNoPeekSession(async (limit) => {
+          const model = createNoPeekDemandModel(async (limit) => {
             const packet = await transport.read(limit)
             if (!metadata) delete packet.fact
             return packet
           })
           const windows = new Map<string, number>()
-          session.subscribe(() => {
+          model.subscribe(() => {
             for (const [id, n] of windows)
-              expect(session.get(id)).toEqual(expectedWindow(rows, selected, n))
+              expect(model.get(id)).toEqual(expectedWindow(rows, selected, n))
           })
           for (const action of history) {
             metadata = action.metadata
             if (action.release) {
-              session.release(action.id)
+              model.retireDemand(action.id)
               windows.delete(action.id)
             } else {
-              session.request(action.id, action.count)
+              model.retainDemand(action.id, action.count)
               windows.set(action.id, action.count)
             }
-            await session.refresh()
+            await model.refresh()
             for (const [id, n] of windows)
-              expect(session.get(id)).toEqual(expectedWindow(rows, selected, n))
+              expect(model.get(id)).toEqual(expectedWindow(rows, selected, n))
           }
         },
       ),
@@ -123,7 +123,7 @@ describe(`experimental publication-bound no-peek pagination`, () => {
     const applied = createDeferred<void>()
     const received = createDeferred<void>()
     let held = false
-    const session = createNoPeekSession(async (limit) => {
+    const model = createNoPeekDemandModel(async (limit) => {
       const packet = await transport.read(limit)
       if (held) {
         received.resolve()
@@ -131,38 +131,38 @@ describe(`experimental publication-bound no-peek pagination`, () => {
       }
       return packet
     })
-    session.request(`a`, 3)
-    await session.refresh()
-    const old = session.get(`a`)
+    model.retainDemand(`a`, 3)
+    await model.refresh()
+    const old = model.get(`a`)
     held = true
-    session.request(`a`, 10)
-    const pending = session.refresh()
+    model.retainDemand(`a`, 10)
+    const pending = model.refresh()
     const observed = pending.then(
       () => undefined,
       (error: unknown) => error,
     )
     await received.promise
-    expect(session.get(`a`)).toBe(old)
-    session.reset()
+    expect(model.get(`a`)).toBe(old)
+    model.reset()
     applied.resolve()
     expect(await observed).toMatchObject({ name: `AbortError` })
-    expect(session.get(`a`)).toBeUndefined()
+    expect(model.get(`a`)).toBeUndefined()
     held = false
-    await session.refresh()
-    expect(session.get(`a`)).toEqual(expectedWindow(rowsOf(9), scope, 10))
+    await model.refresh()
+    expect(model.get(`a`)).toEqual(expectedWindow(rowsOf(9), scope, 10))
   })
 
   it(`notifies when only the published continuation changes`, async () => {
     let transport = createTransport(rowsOf(3), 3)
-    const session = createNoPeekSession((limit) => transport.read(limit))
-    session.request(`a`, 3)
+    const model = createNoPeekDemandModel((limit) => transport.read(limit))
+    model.retainDemand(`a`, 3)
     const snapshots: Array<boolean | undefined> = []
-    session.subscribe(() => snapshots.push(session.get(`a`)?.hasNextPage))
-    await session.refresh()
+    model.subscribe(() => snapshots.push(model.get(`a`)?.hasNextPage))
+    await model.refresh()
     transport = createTransport(rowsOf(4), 3)
-    await session.refresh()
+    await model.refresh()
     expect(snapshots).toEqual([false, true])
-    expect(session.get(`a`)?.rows).toEqual(rowsOf(3))
+    expect(model.get(`a`)?.rows).toEqual(rowsOf(3))
   })
 
   it.each([`acquisition`, `fallback`] as const)(
@@ -171,7 +171,7 @@ describe(`experimental publication-bound no-peek pagination`, () => {
       const transport = createTransport(rowsOf(9), 3)
       const failure = new Error(`Failed publication`)
       let fail = false
-      const session = createNoPeekSession(async (limit) => {
+      const model = createNoPeekDemandModel(async (limit) => {
         if (fail && (boundary === `acquisition` || limit === 7)) {
           fail = false
           throw failure
@@ -180,55 +180,55 @@ describe(`experimental publication-bound no-peek pagination`, () => {
         if (boundary === `fallback` && limit >= 6) delete packet.fact
         return packet
       })
-      session.request(`a`, 3)
-      await session.refresh()
-      const old = session.get(`a`)
-      session.request(`a`, 6)
+      model.retainDemand(`a`, 3)
+      await model.refresh()
+      const old = model.get(`a`)
+      model.retainDemand(`a`, 6)
       fail = true
       let publications = 0
-      session.subscribe(() => publications++)
-      await expect(session.refresh()).rejects.toBe(failure)
-      expect(session.get(`a`)).toBe(old)
+      model.subscribe(() => publications++)
+      await expect(model.refresh()).rejects.toBe(failure)
+      expect(model.get(`a`)).toBe(old)
       expect(publications).toBe(0)
-      session.request(`peer`, 9)
+      model.retainDemand(`peer`, 9)
       const results = await Promise.allSettled([
-        session.refresh(),
-        session.refresh(),
+        model.refresh(),
+        model.refresh(),
       ])
       expect(results.map((result) => result.status)).toEqual([
         `fulfilled`,
         `fulfilled`,
       ])
-      expect(session.get(`a`)).toEqual(expectedWindow(rowsOf(9), scope, 6))
-      expect(session.get(`peer`)).toEqual(expectedWindow(rowsOf(9), scope, 9))
+      expect(model.get(`a`)).toEqual(expectedWindow(rowsOf(9), scope, 6))
+      expect(model.get(`peer`)).toEqual(expectedWindow(rowsOf(9), scope, 9))
     },
   )
 
   it(`restores peek when metadata is withdrawn without changing the rows`, async () => {
     const transport = createTransport(rowsOf(9), 3)
     let metadata = true
-    const session = createNoPeekSession(async (limit) => {
+    const model = createNoPeekDemandModel(async (limit) => {
       const packet = await transport.read(limit)
       if (!metadata) delete packet.fact
       return packet
     })
-    session.request(`a`, 3)
-    await session.refresh()
-    const before = session.get(`a`)
+    model.retainDemand(`a`, 3)
+    await model.refresh()
+    const before = model.get(`a`)
     metadata = false
-    await session.refresh()
+    await model.refresh()
     expect(transport.requests).toEqual([3, 3, 4])
-    expect(session.get(`a`)).toEqual(before)
-    await session.refresh()
+    expect(model.get(`a`)).toEqual(before)
+    await model.refresh()
     expect(transport.requests.at(-1)).toBe(4)
   })
 
   it(`saves a backend request only when peek crosses a page boundary`, async () => {
     for (const size of [3, 4, 50]) {
       const transport = createTransport(rowsOf(10), size)
-      const session = createNoPeekSession(transport.read)
-      session.request(`a`, 3)
-      await session.refresh()
+      const model = createNoPeekDemandModel(transport.read)
+      model.retainDemand(`a`, 3)
+      await model.refresh()
       expect(transport.requests).toEqual([3])
       expect(transport.backend.calls).toHaveLength(1)
       const peek = createTransport(rowsOf(10), size)

@@ -9,6 +9,16 @@ import { makeComparator } from '../src/utils/comparison.js'
 import { indexedKeysSet, orderedEntriesArray, valueMapData } from './utils'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
 
+/**
+ * An index is a derived multimap from indexed value to source keys.
+ *
+ * A native Map is the sole ownership model. After put, delete, or full build,
+ * the oracle groups that Map by value and freshly sorts the groups. BasicIndex
+ * and BTreeIndex must agree on key count, key membership, equality/range lookup,
+ * ordered entries, and rebuild behavior. Small duplicate values and signed zero
+ * force collisions in the value groups without copying either index structure.
+ */
+
 type IndexValue = number
 
 type IndexConstructor = new (

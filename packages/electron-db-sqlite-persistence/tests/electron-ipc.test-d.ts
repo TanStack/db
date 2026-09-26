@@ -7,15 +7,31 @@ test(`renderer persistence requires invoke transport`, () => {
     switch (request.method) {
       case `loadSubset`:
         return Promise.resolve({
-          v: 1,
+          v: 2,
           requestId: request.requestId,
           method: request.method,
           ok: true,
           result: [],
         })
+      case `loadResumeSnapshot`:
+        return Promise.resolve({
+          v: 2,
+          requestId: request.requestId,
+          method: request.method,
+          ok: true,
+          result: {
+            rows: [],
+            keySet: { status: `consistent` },
+            collectionMetadata: [],
+            latestTerm: 0,
+            latestSeq: 0,
+            latestRowVersion: 0,
+            resetEpoch: 0,
+          },
+        })
       case `pullSince`:
         return Promise.resolve({
-          v: 1,
+          v: 2,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -26,7 +42,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `getStreamPosition`:
         return Promise.resolve({
-          v: 1,
+          v: 2,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -38,7 +54,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `loadCollectionMetadata`:
         return Promise.resolve({
-          v: 1,
+          v: 2,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -46,7 +62,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `scanRows`:
         return Promise.resolve({
-          v: 1,
+          v: 2,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -54,7 +70,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       default:
         return Promise.resolve({
-          v: 1,
+          v: 2,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -68,6 +84,7 @@ test(`renderer persistence requires invoke transport`, () => {
   })
 
   expectTypeOf(persistence.adapter).toHaveProperty(`loadSubset`)
+  expectTypeOf(persistence.adapter).toHaveProperty(`loadResumeSnapshot`)
 
   createElectronSQLitePersistence({
     invoke,

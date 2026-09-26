@@ -1,5 +1,14 @@
-/** React driver for the shared infinite-query conformance suite. */
-import { act, renderHook } from '@testing-library/react'
+/**
+ * React driver for the shared infinite-query conformance suite.
+ *
+ * `renderHook`, `act`, and the hook result are the only React-specific layer.
+ * Sources and query operators come from this package's module realm. The shared
+ * suite owns the page model and histories; this driver defines when React has
+ * committed enough work for those public observations to be read.
+ */
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
+import { expect, it } from 'vitest'
 import {
   BTreeIndex,
   createCollection,
@@ -16,16 +25,11 @@ import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
 } from '../../db/tests/conformance/infinite-contract'
-import type {
-  QueryBuild,
-  SourceHandle,
-} from '../../db/tests/conformance/contract'
+import type { QueryBuild } from '../../db/tests/conformance/contract'
 
 let sourceSequence = 0
 
-function makeSource<T extends { id: string }>(
-  initialData: ReadonlyArray<T>,
-): SourceHandle<T> {
+function makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       autoIndex: `eager`,
@@ -41,9 +45,9 @@ function makeSource<T extends { id: string }>(
   }
   return {
     collection,
-    insert: (row) => write(`insert`, row),
-    update: (row) => write(`update`, row),
-    remove: (row) => write(`delete`, row),
+    insert: (row: T) => write(`insert`, row),
+    update: (row: T) => write(`update`, row),
+    remove: (row: T) => write(`delete`, row),
   }
 }
 
@@ -202,3 +206,62 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
 }
 
 runInfiniteQuerySuite(reactInfiniteDriver)
+
+it(`publishes query-function pages in the first non-idle layout commit after mount and dependency replacement`, async () => {
+  const source = makeSource(
+    Array.from({ length: 10 }, (_, index) => ({
+      id: String(index + 1),
+      rank: index + 1,
+    })),
+  )
+  const commits: Array<{ ranks: Array<number>; status: string }> = []
+  const liveQueryCollections = new Set<{ cleanup: () => Promise<void> }>()
+  const hook = renderHook(
+    ({ minimum }: { minimum: number }) => {
+      const result = useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ row: source.collection })
+            .where(({ row }) => gt(row.rank, minimum))
+            .orderBy(({ row }) => row.rank, `desc`),
+        { pageSize: 3 },
+        [minimum],
+      )
+      useLayoutEffect(() => {
+        if (!result.collection) {
+          throw new Error(`Expected an enabled infinite-query collection`)
+        }
+        liveQueryCollections.add(result.collection)
+        commits.push({
+          ranks: result.data.map(({ rank }) => rank),
+          status: result.status,
+        })
+      })
+      return result
+    },
+    { initialProps: { minimum: 0 } },
+  )
+
+  try {
+    await waitFor(() => expect(hook.result.current.status).toBe(`ready`))
+    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+      ranks: [10, 9, 8],
+      status: `ready`,
+    })
+    commits.length = 0
+    act(() => hook.rerender({ minimum: 8 }))
+    await waitFor(() =>
+      expect(hook.result.current.data.map(({ rank }) => rank)).toEqual([10, 9]),
+    )
+    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+      ranks: [10, 9],
+      status: `ready`,
+    })
+  } finally {
+    hook.unmount()
+    await Promise.all(
+      Array.from(liveQueryCollections, (collection) => collection.cleanup()),
+    )
+    await source.collection.cleanup()
+  }
+})

@@ -19,9 +19,11 @@ import type {
   Context,
   QueryBuilder,
   QueryResult,
+  Ref,
   RefsForContext,
   WithResult,
 } from '../../src/query/index.js'
+import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 type Row = { id: string; departmentId: string }
@@ -391,11 +393,97 @@ describe(`query API type algebra`, () => {
     void projectNullishLeaves
   })
 
+  test(`optional nullable fields preserve both nullish branches`, () => {
+    type OptionalNullableRow = {
+      id: string
+      required: number
+      optional?: number
+      nullable: number | null
+      nullish?: number | null
+      exactNull: null
+      exactUndefined: undefined
+      nullishObject?: { label: string } | null
+    }
+
+    function projectOptionalNullableFields(
+      source: Collection<OptionalNullableRow, string>,
+    ) {
+      const query = new Query()
+        .from({ row: source })
+        .orderBy(({ row }) => {
+          expectTypeOf(row.required).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(row.optional).toEqualTypeOf<
+            RefLeaf<number> | undefined
+          >()
+          expectTypeOf(row.nullable).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(row.nullish).toEqualTypeOf<
+            RefLeaf<number | null> | undefined
+          >()
+          expectTypeOf(row.exactNull).toEqualTypeOf<RefLeaf<null>>()
+          expectTypeOf(row.exactUndefined).toEqualTypeOf<RefLeaf<undefined>>()
+          expectTypeOf(row.nullishObject).toEqualTypeOf<
+            Ref<{ label: string }, false, false> | null | undefined
+          >()
+          return row.nullish
+        })
+        .select(({ row }) => ({
+          required: row.required,
+          optional: row.optional,
+          nullable: row.nullable,
+          nullish: row.nullish,
+          exactNull: row.exactNull,
+          exactUndefined: row.exactUndefined,
+          nullishObject: row.nullishObject,
+        }))
+
+      type Result = QueryResult<typeof query>
+      expectTypeOf<Result[`required`]>().toEqualTypeOf<number>()
+      expectTypeOf<Result[`optional`]>().toEqualTypeOf<number | undefined>()
+      expectTypeOf<Result[`nullable`]>().toEqualTypeOf<number | null>()
+      expectTypeOf<Result[`nullish`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
+      expectTypeOf<Result[`exactNull`]>().toEqualTypeOf<null>()
+      expectTypeOf<Result[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<Result[`nullishObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
+
+      const branch = () =>
+        new Query().from({ row: source }).select(({ row }) => ({
+          nullish: row.nullish,
+          nullishObject: row.nullishObject,
+        }))
+      const union = new Query()
+        .unionAll(branch(), branch())
+        .orderBy(({ nullish }) => {
+          expectTypeOf(nullish).toEqualTypeOf<RefLeaf<number, true> | null>()
+          return nullish
+        })
+        .select(({ nullish, nullishObject }) => ({
+          nullish,
+          nullishObject,
+        }))
+      type UnionResult = QueryResult<typeof union>
+      expectTypeOf<UnionResult[`nullish`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
+      expectTypeOf<UnionResult[`nullishObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
+
+      return { query, union }
+    }
+
+    void projectOptionalNullableFields
+  })
+
   test(`branch unions preserve intrinsic nullish fields through nullable joins`, () => {
     type BranchRow = {
       id: string
       exactNull: null
       exactUndefined: undefined
+      nullableNumber: number | null
       nullableText: string | null
       nullableObject: { label: string } | null
     }
@@ -410,16 +498,42 @@ describe(`query API type algebra`, () => {
           id: value.id,
           exactNull: value.exactNull,
           exactUndefined: value.exactUndefined,
+          nullableNumber: value.nullableNumber,
           nullableText: value.nullableText,
           nullableObject: value.nullableObject,
         }))
       const union = new Query().unionAll(branch(a), branch(b))
+      const _plain = union.select(
+        ({ nullableNumber, nullableText, nullableObject }) => {
+          expectTypeOf(nullableNumber).toEqualTypeOf<RefLeaf<
+            number,
+            true
+          > | null>()
+          expectTypeOf(nullableText).toEqualTypeOf<RefLeaf<
+            string,
+            true
+          > | null>()
+          expectTypeOf(nullableObject).toEqualTypeOf<Ref<
+            { label: string },
+            true,
+            true
+          > | null>()
+          return { nullableNumber, nullableText, nullableObject }
+        },
+      )
       const rightJoined = union
         .rightJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
         .select(
-          ({ exactNull, exactUndefined, nullableText, nullableObject }) => ({
+          ({
             exactNull,
             exactUndefined,
+            nullableNumber,
+            nullableText,
+            nullableObject,
+          }) => ({
+            exactNull,
+            exactUndefined,
+            nullableNumber,
             nullableText,
             nullableObject,
           }),
@@ -427,18 +541,38 @@ describe(`query API type algebra`, () => {
       const fullJoined = union
         .fullJoin({ row: rows }, ({ id, row }) => eq(id, row.id))
         .select(
-          ({ exactNull, exactUndefined, nullableText, nullableObject }) => ({
+          ({
             exactNull,
             exactUndefined,
+            nullableNumber,
+            nullableText,
+            nullableObject,
+          }) => ({
+            exactNull,
+            exactUndefined,
+            nullableNumber,
             nullableText,
             nullableObject,
           }),
         )
 
+      type PlainResult = QueryResult<typeof _plain>
       type RightResult = QueryResult<typeof rightJoined>
       type FullResult = QueryResult<typeof fullJoined>
+      expectTypeOf<PlainResult[`nullableNumber`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
+      expectTypeOf<PlainResult[`nullableText`]>().toEqualTypeOf<
+        string | null | undefined
+      >()
+      expectTypeOf<PlainResult[`nullableObject`]>().toEqualTypeOf<
+        { label: string } | null | undefined
+      >()
       expectTypeOf<RightResult[`exactNull`]>().toEqualTypeOf<null | undefined>()
       expectTypeOf<RightResult[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<RightResult[`nullableNumber`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
       expectTypeOf<RightResult[`nullableText`]>().toEqualTypeOf<
         string | null | undefined
       >()
@@ -447,6 +581,9 @@ describe(`query API type algebra`, () => {
       >()
       expectTypeOf<FullResult[`exactNull`]>().toEqualTypeOf<null | undefined>()
       expectTypeOf<FullResult[`exactUndefined`]>().toEqualTypeOf<undefined>()
+      expectTypeOf<FullResult[`nullableNumber`]>().toEqualTypeOf<
+        number | null | undefined
+      >()
       expectTypeOf<FullResult[`nullableText`]>().toEqualTypeOf<
         string | null | undefined
       >()

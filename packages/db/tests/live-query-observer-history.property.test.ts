@@ -65,8 +65,26 @@ type RunOptions = {
   reach?: Reach
 }
 
-/*
-Contract and ownership table (source: issue #1813 and the named focused tests):
+/**
+ * # Which listeners may receive each live-query publication?
+ *
+ * The model is an eligibility ledger, not a second dispatch queue. Each
+ * listener is active or inactive and may hold one reconstructed row version.
+ * A publication snapshots eligible listeners in subscription order. Reentrant
+ * publications join the FIFO behind it. Removing, adding, throwing, or
+ * disposing during delivery affects later work according to the table below.
+ *
+ * Generated subscribe, unsubscribe, publish, and dispose histories drive both
+ * granular and wholesale observers. The driver compares exact listener order,
+ * multiplicity, raw batches, reconstructed rows, bootstrap flags, and the first
+ * surfaced error after every command. Fixed histories prove every command and
+ * reaction is reachable; injected faults calibrate the observations.
+ *
+ * Hydration, status scheduling, resource ownership, and multi-row layout have
+ * separate focused owners. This model stays one-row on purpose: listener
+ * eligibility is independent of query layout.
+ *
+ * ## Contract and ownership table
 
 | Contract | History/domain | Production path | Observation and checkpoint | Owner and limits |
 | --- | --- | --- | --- | --- |
@@ -83,10 +101,10 @@ Contract and ownership table (source: issue #1813 and the named focused tests):
 | source authority | abandoned read, consumed seed, or later observer | syncHydrationState -> markLiveResultAuthoritative/_consumeLiveQueryResult | which server/live result remains authoritative | focused `live-query-observer.test.ts` tests `does not consume...abandoned render`, `does not replay...later observer`, and the stale-server tests |
 | client resource lifecycle | preload/dehydrate/cleanup and streamed results | DbClient live-query registry | result/error/cleanup ownership | focused `db-client.test.ts`; framework/native wiring remains outside this oracle |
 
-The generated owner compares one-row insert/update histories. It preserves the
+ * The generated owner compares one-row insert/update histories. It preserves the
 raw callback batch, but does not claim multi-row layout/order, hydration,
 status scheduling, preload, framework wiring, or native boundaries.
-*/
+ */
 
 const reactions: ReadonlyArray<Reaction> = [
   `none`,

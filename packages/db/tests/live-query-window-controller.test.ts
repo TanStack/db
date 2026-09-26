@@ -20,12 +20,25 @@ interface Row {
 const ROWS: Array<Row> = [1, 2, 3, 4, 5].map((n) => ({ id: String(n), n }))
 
 let seq = 0
-function makeSource(initialData: Array<Row> = ROWS) {
+function makeSource(
+  initialData: Array<Row> = ROWS,
+  options: { deferReady?: boolean } = {},
+) {
   return createCollection(
     mockSyncCollectionOptions<Row>({
       id: `window-ctrl-${seq++}`,
       getKey: (r) => r.id,
       initialData,
+      ...(options.deferReady && {
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            initialData.forEach((value) => write({ type: `insert`, value }))
+            commit()
+            queueMicrotask(markReady)
+          },
+        },
+      }),
     }),
   )
 }
@@ -74,12 +87,24 @@ const ids = (snap: { data: ReadonlyArray<any> }) => snap.data.map((r) => r.id)
 describe(`createLiveQueryWindowController`, () => {
   it.each(
     [0, 2, 5].flatMap((rowCount) =>
-      [`fetch`, `reset`, `dispose`].map((action) => ({ rowCount, action })),
+      [`fetch`, `reset`, `dispose`].flatMap((action) =>
+        [`pending load`, `deferred ready`].map((readiness) => ({
+          rowCount,
+          action,
+          readiness,
+        })),
+      ),
     ),
   )(
-    `handles $action during initial loading with $rowCount rows`,
-    async ({ rowCount, action }) => {
-      const { source, resolveLoad } = makePendingSource(ROWS.slice(0, rowCount))
+    `handles $action during $readiness with $rowCount rows`,
+    async ({ rowCount, action, readiness }) => {
+      const pending =
+        readiness === `pending load`
+          ? makePendingSource(ROWS.slice(0, rowCount))
+          : undefined
+      const source =
+        pending?.source ??
+        makeSource(ROWS.slice(0, rowCount), { deferReady: true })
       const lq = makeOrderedLiveQuery(source, 2)
       const controller = createLiveQueryWindowController(lq, {
         pageSize: 2,
@@ -91,7 +116,7 @@ describe(`createLiveQueryWindowController`, () => {
         expect(controller.fetchNextPage()).toBe(fetch)
         const reset = action === `reset` ? controller.reset() : undefined
         if (action === `dispose`) controller.dispose()
-        resolveLoad()
+        pending?.resolveLoad()
         await reset
         await fetch
         const visibleCount = action === `fetch` ? 4 : 2
@@ -267,7 +292,7 @@ describe(`createLiveQueryWindowController`, () => {
       pageSize: 0,
     })
     controller.subscribe(() => {})
-    await lq.preload()
+    await controller.preload()
 
     const snapshot = controller.getSnapshot()
     expect(ids(snapshot)).toEqual([`1`, `2`, `3`, `4`, `5`])

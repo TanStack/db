@@ -105,17 +105,18 @@ reduction that enforces public-key congruence and multiplicity.
 These owners cooperate; they are not phases of one exclusive state machine.
 The detailed loading and publication laws below still apply.
 
-| Owner                             | Accepts / retires                                                                                                                                    | Does not establish                                        |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| Subscription acquisition          | Retires the old physical lease before replay acquisition; installs tentative ownership before adapter callbacks; each lease gets one cleanup attempt | Replay completion or permission to publish                |
-| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                            | Provider exhaustion or acceptance of an imperative window |
-| Subscription replay               | Counts setup and logical acquisition participants; checks completion after reentrant release callbacks; success releases the source replacement hold | Success of a previously failed window operation           |
-| Query builder                     | Tracks ordered publication participants in one sync session and accepts a window only for its operation generation                                   | Physical adapter ownership or cancellation                |
-| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                   | Source completeness merely because graph work drained     |
+| Owner                             | Accepts / retires                                                                                                                                       | Does not establish                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Subscription acquisition          | Retires the old acquisition lease before replay acquisition; installs tentative ownership before adapter callbacks; each lease gets one cleanup attempt | Replay completion or permission to publish                |
+| OrderedSourceLoader               | Tracks request settlement, safe continuation and repair debt; reset discards the cursor, disposal ignores late settlement                               | Provider exhaustion or acceptance of an imperative window |
+| Subscription replay               | Counts setup and logical demand participants; checks completion after reentrant release callbacks; success releases the source replacement hold         | Success of a previously failed window operation           |
+| Query builder                     | Tracks ordered publication participants in one sync run and accepts a window only for its operation generation                                          | Physical adapter ownership or cancellation                |
+| D2 and public Collection boundary | D2 accumulates private result changes; the builder flushes root and child changes when the existing gates allow it                                      | Source completeness merely because graph work drained     |
 
-Session and participant checks precede changes to the builder's ordered failure
-state, not just scheduling. An obsolete rejection cannot close a replacement
-session's publication gate. Loader-local stale-result guards are separate.
+Sync-run and participant checks precede changes to the builder's ordered
+failure state, not just scheduling. An obsolete rejection cannot close a
+replacement sync run's publication gate. Loader-local stale-result guards are
+separate.
 
 `hasPendingTruncateReplacement` means publication is still withheld, including
 after replay failure. `pendingTruncateReplacement` exposes only an unsettled
@@ -280,7 +281,7 @@ A failed hash does not publish partial
 structural cache entries, so retrying the same value cannot bypass a guard.
 A graph-run failure marks the current live query as errored and preserves the
 thrown error. It must not continue publishing from a partly advanced graph;
-recovery requires a fresh query session.
+recovery requires a fresh live-query sync run.
 Opaque reference-hashed leaves are resolved before structural recursion; their
 own properties, including self-references, are not traversed. Hash inputs must
 remain immutable once successfully cached, as with other retained D2 values.
@@ -583,6 +584,15 @@ only when callers supply no abort signal. Independently cancelable requests
 use separate transports, trading duplicate concurrent fetches for simpler
 ownership. An adapter may share its own resources, but releasing one owner
 must not cancel work or remove rows still owned by another.
+`LoadSubsetOptions.refetch` starts a new acquisition attempt for the same exact
+demand even when an adapter has completed or cached it. It is operation
+control, not request data: exact-demand identity, Query cache identity, and
+unload identity ignore it, and adapters must not expose it as user query
+metadata. The new attempt still establishes its own acquisition lease. Its
+settlement and release follow the same rules as every other acquisition: the
+returned promise waits for authoritative applied rows and rejects if its final
+logical owner releases it first. A shared transport may be replaced to satisfy
+the fresh attempt, but peer logical owners remain attached to the replacement.
 
 Request data is immutable from submission onward, including the options,
 expression trees, comparison options, and constant payloads such as Dates,
@@ -606,7 +616,7 @@ repeated teardown cannot repeat it. Other acquisitions still receive cleanup,
 and a cleanup failure cannot replace an earlier request failure. Core reports
 the error but retains no retry debt: a broken adapter can leak external resources
 if it throws before freeing them. Adapters must make their own cleanup reliable.
-Replay replaces physical leases sequentially: detach and release the old lease,
+Replay replaces acquisition leases sequentially: detach and release the old lease,
 then acquire a fresh one only if the logical demand and replay are still current.
 A release failure fails that replay without starting a replacement. A load
 throw leaves the logical demand detached; a later authoritative replay can
@@ -625,10 +635,26 @@ successful authoritative replacement reconciles the retained public snapshot.
 This rule also applies when another demand overlaps the released predicate or
 an independent source write happens to match it. Source deletions during replay
 stay private until successful publication; failure preserves the last complete
-snapshot. Query filters and routes, not request release, decide which retained
+snapshot. Query filters and routes, not demand retirement, decide which retained
 source rows belong in a query result.
 
 ### Cleanup, restart, and detached waiters
+
+Collection cleanup has two boundaries. Cleanup start is an internal synchronous
+boundary. It closes restart admission, invalidates the current sync run, detaches
+its demand, puts dependent live queries in terminal error, and marks dependent
+Effects disposed. Both dependent transitions happen before adapter cleanup
+settles. This prevents either dependent from using work that belongs to the
+discarded sync run. The Effect becomes disposed and releases its source
+subscription synchronously. Its disposal promise may still wait for in-flight
+handlers; cleanup start does not prove those handlers settled.
+
+Cleanup start is not a Collection status or resource-settlement signal. The
+source Collection keeps its prior public status while adapter cleanup is
+pending. After adapter cleanup settles and local teardown finishes, the
+Collection publishes `cleaned-up` and settles its public cleanup promise. A
+cleanup-start observer therefore cannot infer that provider sessions,
+transports, or other adapter resources have been released.
 
 Restart is not allowed inside an active cleanup callback. `startSyncImmediate()`
 throws `CollectionStateError` and `preload()` rejects with it before acquiring
@@ -639,20 +665,20 @@ including from its final `cleaned-up` status event, remains supported. This
 avoids letting old teardown clear a replacement graph or its source ownership.
 
 Collection cleanup detaches surviving logical demand from the discarded sync
-session. It aborts that session's physical work and rejects its replay barrier,
+run. It aborts that sync run's physical work and rejects its replay barrier,
 and rejects an unfinished initial preload with `AbortError`. Cleanup never
 invokes first-ready callbacks; those callbacks belong to the discarded run.
-Physical acquisitions belong to the sync session that created them; cleanup
+Physical acquisitions belong to the sync run that created them; cleanup
 retires them instead of sending an old release to a replacement adapter.
 Unlike individual subset releases, a failed sync adapter cleanup callback
 remains retryable only while that
-retirement is current; it cannot replace a newer session's cleanup callback.
+retirement is current; it cannot replace a newer sync run's cleanup callback.
 Demand requested while the Collection is cleaned up remains detached
 rather than pretending that a physical acquisition succeeded. When the
-Collection starts a new sync session, the subscription enters `loadingSubset`
+Collection starts a new sync run, the subscription enters `loadingSubset`
 before it queues reacquisition, then reacquires all detached demand through a
-fresh private publication barrier. Settlements from the old session cannot
-publish rows, report errors, or change readiness in the new session.
+fresh private publication barrier. Settlements from the old sync run cannot
+publish rows, report errors, or change readiness in the new sync run.
 
 This is the direct subscription's restart contract, not automatic recovery of
 a dependent live query. Manually cleaning up a source puts its live queries in
@@ -662,7 +688,7 @@ live query itself. This differs from a source truncate, which keeps the live
 query active behind its replay publication barrier.
 
 An initial sync error also leaves newly requested demand detached, even when
-the adapter has installed a loader. Same-session `markReady()` resumes that
+the adapter has installed a loader. `markReady()` in the same sync run resumes that
 demand; releasing it before recovery creates no physical acquisition or unload.
 Queued reacquisition must not retry a failed attempt merely because both
 loading and ready notifications scheduled it.
@@ -674,7 +700,7 @@ its result before the snapshot request returns. This promise waits for the
 recovery's publication barrier, not just adapter return. Failure rejects it with
 the replay error; release, external abort, unsubscribe, or another cleanup
 rejects it with `AbortError`. Later transport settlement cannot change that
-outcome. Cleanup may retain logical demand for the next session, but it does
+outcome. Cleanup may retain logical demand for the next sync run, but it does
 not retain the old caller's unfinished wait.
 
 Eager collections have no subset reacquisition barrier. After cleanup, their
@@ -727,12 +753,14 @@ behind the active replay barrier.
 
 ### Ordered requests, continuation, and recovery
 
-Core constructs cursors only for one order column. A direct
+Core constructs cursors only from the leading order column. A direct
 `requestLimitedSnapshot()` call with a nonempty `minValues` must supply one
-value and one order term; composite or partial-composite inputs throw before
-local delivery or source acquisition. Multi-column queries remain supported
-through the ordered loader's prefix-and-tie fallback. Its first-column equality
-request closes a tie group; it is not a composite continuation cursor.
+leading value and at least one order term; multiple boundary values throw
+before local delivery or source acquisition. For a multi-column query, the
+provider still receives the complete order, while the continuation predicate
+selects rows after the leading value. A separate first-column equality request
+loads that complete tie before local ordering applies the trailing terms. This
+is a leading-column continuation plus tie expansion, not a composite cursor.
 
 Successful settlement proves only that the exact request finished and that its
 writes were applied. It does not prove source exhaustion or broader coverage.
@@ -784,6 +812,43 @@ still follow the explicit-retry rule above. Release callbacks retire ownership
 before adapter code runs, and reentrant truncate or disposal stops the current
 retirement pass. No copied rows or additional cursor history are retained.
 
+A visible delete or source-order change after an otherwise settled,
+expressible window uses a narrower authoritative path. Core reissues the
+ordered prefix from the start with the query predicate, order terms, and
+`limit = offset + limit`; the transport `offset` is omitted because this
+acquisition starts at the provider's source prefix. It then reacquires the
+first-column tie boundary and any required refill before publishing. Only the
+new repair acquisitions remain. Every acquisition in this chain uses
+`refetch: true`, so an adapter must revalidate the exact demand instead of
+reusing completed or in-flight work. A source-order invalidation generation
+fences the chain. If another qualifying mutation arrives before it finishes,
+core starts a replacement repair before releasing the publication barrier and
+before the obsolete chain can issue another tie or refill. A repeated prefix or
+page fixed point ends the repair when no more data is needed; it cannot leave a
+held repair without pending work.
+The finite prefix and tie acquisitions they replace retire after the whole
+replacement chain succeeds.
+An invalidation that overlaps unfinished non-repair source work, a failed
+or canceled request, or a boundary that cannot be expressed still requires the
+full-source recovery above. A bounded repair failure likewise upgrades its
+next attempt to full-source recovery because partial writes cannot establish
+finite coverage.
+
+“Bounded prefix” describes the adapter acquisition, not the subscription's
+immediate local replay. `requestSnapshot()` composes the subscription and
+request predicates for both legs, but its local snapshot is predicate-only: it
+may deliver every matching row already installed in the Collection without
+applying the request's order or limit. The ordered graph's top-K operator owns
+the local result window. Provider transfer remains bounded by `orderBy` and
+`limit`; local delivery cardinality is a separate observation.
+
+Bounded repair is available only when a provider prefix is sufficient for the
+local plan. Core requires full-source recovery for an indirect order
+expression, a non-root ordered source, an inner or right join, a residual or
+cross-alias predicate, a functional predicate, grouping, `having`, functional
+`having`, or `distinct`. These cases can discard or reorder an otherwise valid
+provider prefix even when a cursor value itself is expressible.
+
 An ordered request cannot start another ordered request through its own
 synchronous writes. If the adapter then throws, graph callbacks scheduled by
 those writes still belong to the failed window operation and cannot retry it.
@@ -796,25 +861,34 @@ It also rejects window changes during graph publication, before mutating top-K.
 A synchronous result callback is provisional until the whole snapshot request
 returns: a later local read or publication throw fails and retires that
 acquisition instead of letting its queued success erase the failure.
-A later explicit window operation has a new generation and may retry from the
-safe source boundary.
+A later explicit window operation has a new window-operation generation and
+may retry from the safe source boundary.
 
 The ordered loader retains one settled loading boundary, independently of
 live rows sent to D2. It derives invalidation from the existing contribution
 rows rather than tracking a second largest-row cursor. New keys may reopen
 refinement, while duplicate delivery and order-equal updates do not. After a
+successful request, only a delete or a change that compares differently on the
+first provider order term for a row previously contributed to D2 starts the
+authoritative repair path. An unseen/new row clears continuation state so the
+graph may request more work, but does not invalidate settled prefix authority;
+a later-order-term-only update also does not take this repair path. After a
 successful finite acquisition, it reads at
 most the requested limit within that request's filtered, ordered range. That
 range's last available row can advance the boundary; an unrelated live outlier
 cannot advance it merely by entering D2. This relies on the adapter fulfilling
 the exact ordered request, not just resolving after an arbitrary partial write.
 An empty range does not invent a boundary or prove source exhaustion.
+If an explicit window operation consumes a staged boundary continuation and
+that continuation has no boundary row, it starts no acquisition. The operation
+must continue normal demand selection for the enlarged window; consuming the
+empty continuation does not settle that window operation.
 
-For no-index and multi-column prefix loading, an unrelated new key does not
-reacquire an already full window. An explicit window move, an underfilled
-window, or a settled prefix smaller than a window widened during that request
-still requires acquisition. A full local window alone does not prove that the
-provider fulfilled a concurrent window change.
+For no-index prefix loading, an unrelated new key does not reacquire an already
+full window. An explicit window move, an underfilled window, or a settled
+prefix smaller than a window widened during that request still requires
+acquisition. A full local window alone does not prove that the provider
+fulfilled a concurrent window change.
 
 A successful larger prefix retires settled smaller prefix acquisitions from
 the same ordered source plan, after the replacement has applied. It does not
@@ -866,15 +940,15 @@ after discarding the graph and requested window.
 That error belongs to the operation even if cleanup precedes registration of
 its waiter. Cleanup does not retroactively cancel an already completed operation.
 Window-operation generations stay monotonic across cleanup and restart, so a
-late rejection from an abandoned session cannot reset the replacement
-session's requested window.
+late rejection from an abandoned sync run cannot reset the replacement sync
+run's requested window.
 A window move started during an active source replay waits for that replay and
 applies only after its replacement is complete. A failed replay rejects the
 move without advancing the reported window. Replay completion callbacks carry
-their sync-session identity and become no-ops after cleanup or restart.
+their sync-run identity and become no-ops after cleanup or restart.
 Cleanup rejects the replay barrier, and therefore every window move waiting on
 it, with `AbortError`; no waiter may outlive the discarded subscription.
-Subscription-owned Promise observers carry the Collection's load-session
+Subscription-owned Promise observers carry the Collection's sync-run
 generation. Cleanup invalidates that generation before adapter teardown, so an
 obsolete replay cannot publish its private rows, report a late error, or emit a
 late `ready` transition even when the transport ignores cancellation.
@@ -882,8 +956,10 @@ Ordinary source mutations stay synchronous except while an initial ordered
 load, imperative window move, or asynchronous repair of invalid finite source
 coverage owns this publication barrier. A visible delete or a change to a
 visible row's source-order value can invalidate a provider prefix because a
-hidden row may now belong in the window. That repair loads the authoritative
-source and keeps the last complete public snapshot until it settles; an update
+hidden row may now belong in the window. After a settled request, that repair
+reacquires the bounded ordered prefix and its tie/refill chain; unsafe overlap,
+inexpressible ordering, and request failure retain the full-source fallback.
+Both paths keep the last complete public snapshot until they settle. An update
 that compares equal under the source order does not broaden demand. Mutations
 that arrive during a barrier join the private state and publish with the
 completed replacement; a failed operation keeps them private until retry or
@@ -893,6 +969,25 @@ because it returned no acquisition promise. The queued task belongs to the
 loader that scheduled it, not a replacement created after cleanup.
 The loader tracks each sequential request as a bounded participant,
 not every recursive suffix of a long refinement chain.
+
+Effects use a separate callback-publication gate because they do not publish
+through a Collection. During an authoritative ordered repair,
+source changes continue to advance the private D2 graph and accumulate a net
+delta, but `onBatch`/`onEnter`/`onUpdate`/`onExit` callbacks retain the last
+complete result. Prefix, tie, and refill promises join one continuous gate;
+the final successful participant schedules one flush of the accumulated delta.
+A synchronous adapter result still contributes the loader's wrapped repair
+participant. At flush, equal insert/delete counts are classified against the
+last callback-visible membership and value: absent-to-absent produces no event,
+while present-to-present produces an update only when the value changed.
+If truncate replay aborts an obsolete repair participant, its replacement
+completion inherits the same callback hold; the abort alone does not freeze or
+dispose the still-live Effect. Any unhandled participant failure never exposes
+the private intermediate state: source-error handling disposes the Effect and
+clears the retained delta and participants. With `skipInitial`, an asynchronous
+initial ordered chain also stays behind the gate until all initial participants
+settle, so its rows do not become later `enter` callbacks. Other ordinary
+initial/refinement requests keep their existing callback timing.
 
 ### Replay participants and failure
 
@@ -928,7 +1023,7 @@ later listener when reentry supersedes it, including an ABA transition back to
 the same status label. Subscription teardown is a one-shot logical transition:
 it stops the listener set already being walked, emits no later status, and
 removes subscriber ownership once. A later `unsubscribe()` is a no-op, including
-after a physical subset release failed.
+after an acquisition release failed.
 Failure keeps the last complete result visible and partly replayed source state
 private for both direct subscribers and query graphs. Ordinary source deltas or
 snapshot requests do not reopen that gate because they cannot prove the source
@@ -956,8 +1051,8 @@ collection demand.
 
 This project uses a single graph-run order rather than multi-dimensional
 timely-dataflow frontiers. Do not introduce a general timestamp or frontier
-framework unless a source contract proves that the generation and up-to-date
-protocol cannot express its ordering.
+framework unless a source contract proves that the sync-run generation and
+source up-to-date protocol cannot express its ordering.
 
 **Initial readiness:** preload is complete when every demand currently
 reachable from the initial query graph is covered by a settled request. Demand
@@ -965,6 +1060,21 @@ that is no longer reachable does not block completion. An empty outer relation
 has no child demand, but its root demand must still settle. Later readiness
 transitions follow the existing Collection contract until an executable test
 defines another public behavior.
+
+An ordinary initial ordered request also has a synchronous observation cut.
+When every acquisition needed for its completed initial window returns literal
+`true` after its establishing applied receipts are visible, core drains the
+remaining synchronous ordered continuations and graph work before the
+initiating call stack returns. The live-query Collection rows and initial-query
+readiness are observable at that cut. A Promise result keeps that acquisition
+asynchronous. This cut does not apply to explicit window moves, repair,
+truncate replay, or framework render timing, and it proves neither source
+exhaustion nor broader source coverage.
+
+If any source subscriber adds input to the graph during a synchronous ordered
+continuation, core returns to graph work before deciding whether that ordered
+source needs another acquisition. Input progress is graph-wide: a quiet
+ordered source cannot drain its continuation around pending sibling input.
 
 Pending demand does not hide the parent row. An active empty bucket gives it
 the current canonical bucket value, and available partial source rows produce
@@ -1089,8 +1199,17 @@ create recursive Collection machinery.
     materialization cells, visible rows, the current private replay state, and
     required Collection facades—not with settled historical replay attempts or
     raw delta history.
+14. **Cleanup:** cleanup start synchronously closes restart admission, puts
+    dependent live queries in terminal error, and marks dependent Effects
+    disposed. The source Collection keeps its prior status until adapter cleanup
+    settles; only then does it publish `cleaned-up` and settle its cleanup
+    promise.
 
 ## Glossary
+
+This subsystem glossary extends the shared
+[project glossary](../../../../../docs/contributing/glossary.md). Shared terms
+keep the meanings defined there.
 
 - **Relation:** an internal weighted multiset maintained by D2, not a public
   TanStack Collection.
@@ -1137,6 +1256,7 @@ create recursive Collection machinery.
 | Failed replay retention, peer isolation, and explicit consumer-only recovery        | `packages/db/tests/query/replay-failure-boundary.test.ts`                    |
 | Replay lease balance, reference-counted peers, and failed-start recovery            | `packages/db/tests/replay-adapter-ownership.test.ts`                         |
 | Reachable nested shape                                                              | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
+| Cleanup-start invalidation, settlement, and restart admission                       | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

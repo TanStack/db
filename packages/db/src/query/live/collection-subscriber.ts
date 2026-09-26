@@ -171,7 +171,7 @@ export class CollectionSubscriber<
       }
     }
     // currentSyncState is always defined when subscribe() is called
-    // (called during sync session setup)
+    // (called during sync run setup)
     this.collectionConfigBuilder.currentSyncState!.unsubscribeCallbacks.add(
       unsubscribe,
     )
@@ -221,17 +221,20 @@ export class CollectionSubscriber<
   private sendChangesToPipeline(
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => void,
-  ) {
+  ): void {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
     const reconciledChanges = reconcileChangesForD2(
       changesArray,
       this.sentToD2Rows,
     )
     // currentSyncState and input are always defined when this method is called
-    // (only called from active subscriptions during a sync session)
+    // (only called from active subscriptions during a sync run)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
     const sentChanges = sendChangesToInput(input, reconciledChanges)
+    if (sentChanges > 0) {
+      this.collectionConfigBuilder.advanceGraphInputRevision()
+    }
 
     // Do not provide the callback that loads more data
     // if there's no more data to load
@@ -344,11 +347,13 @@ export class CollectionSubscriber<
       orderByInfo,
       subscription,
       this.alias,
-      (result, holdPublication) => {
+      (result, holdPublication, settlesAsync) => {
         if (result instanceof Promise) {
           this.collectionConfigBuilder.trackOrderedLoadPromise(
             result,
-            holdPublication && !subscription.hasPendingTruncateReplacement,
+            holdPublication &&
+              settlesAsync &&
+              !subscription.hasPendingTruncateReplacement,
           )
         }
         onLoadSubsetResult(result)
@@ -356,6 +361,7 @@ export class CollectionSubscriber<
       () =>
         this.collectionConfigBuilder.liveQueryCollection?.status === `ready` &&
         !this.collectionConfigBuilder.hasActiveWindowOperation(),
+      () => this.collectionConfigBuilder.getGraphInputRevision(),
     )
     this.orderedLoader.start()
 
@@ -365,17 +371,23 @@ export class CollectionSubscriber<
   private truncateReplayPublicationControl(
     onStart?: () => void,
   ): TruncateReplayPublicationControl {
-    const syncSession = this.collectionConfigBuilder.getSyncSession()
+    const syncRunGeneration =
+      this.collectionConfigBuilder.getSyncRunGeneration()
     return {
       start: () => {
         onStart?.()
       },
       succeed: () => {
-        if (syncSession !== this.collectionConfigBuilder.getSyncSession()) {
+        if (
+          syncRunGeneration !==
+          this.collectionConfigBuilder.getSyncRunGeneration()
+        ) {
           return
         }
         this.orderedLoader?.settleFullSourceReplay()
-        this.collectionConfigBuilder.scheduleGraphRunForSession(syncSession)
+        this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+          syncRunGeneration,
+        )
       },
     }
   }

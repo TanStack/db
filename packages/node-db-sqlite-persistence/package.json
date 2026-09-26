@@ -22,6 +22,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
+    "test:oracles": "vitest --run tests/expression-index-oracle.test.ts",
     "test:e2e": "pnpm --filter @tanstack/db-ivm build && pnpm --filter @tanstack/db build && pnpm --filter @tanstack/db-sqlite-persistence-core build && pnpm --filter @tanstack/node-db-sqlite-persistence build && vitest --config vitest.e2e.config.ts --run"
   },
   "type": "module",

@@ -4,7 +4,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/index.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
-import { eq } from '../../src/query/builder/functions.js'
+import { and, eq } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { makeComparator } from '../../src/utils/comparison.js'
 import {
@@ -21,6 +21,36 @@ import type {
   LoadSubsetOptions,
   SyncConfig,
 } from '../../src/types.js'
+
+/**
+ * # Does an ordered window equal independent recomputation?
+ *
+ * A page is not whatever rows the loader happened to retain. It is the result
+ * of filtering the authoritative finite source, sorting with the declared
+ * terms and public-key tie-breaker, then slicing by offset and limit. Window
+ * changes, source inserts, updates, deletes, ties, nulls, locale order, and
+ * failed requests must all preserve that definition.
+ *
+ * Authority: `query/live/ARCHITECTURE.md`, especially Ordered loading and
+ * Atomic window publication, defines the value, acquisition, repair, and
+ * publication laws. This oracle establishes those laws only for the bounded
+ * row/history grammar below and the in-memory on-demand adapter seam. It does
+ * not establish a backend's physical query plan, latency, complete SQL
+ * predicate semantics, or behavior outside the generated and named domains.
+ *
+ * Plain arrays and `makeComparator` form the value oracle. Separate state
+ * nodes track requested windows, authoritative coverage, pending acquisition,
+ * and public batches. The production drivers cross scan and indexed routes,
+ * direct and joined queries, synchronous and asynchronous delivery, reentry,
+ * restart, rejection, and abort. They compare exact request options,
+ * acquisition releases, visible rows, readiness, errors, and every
+ * publication cut.
+ *
+ * Finite products pin boundary cells; fixed and random fast-check histories
+ * explore adjacent legal actions. Fault probes establish that wrong order,
+ * false coverage, duplicate work, partial publication, and bad delete payloads
+ * are observable. The model does not infer rows beyond provider evidence.
+ */
 
 type PageRow = {
   id: number
@@ -130,6 +160,153 @@ type PendingMutationScenario = {
   limit: number
   mutation: PendingMutation
   responseOutcome: `resolve` | `reject`
+  includeFilter?: boolean
+  /** Provider response cap; the recorded request retains its requested limit. */
+  orderedResponseLimit?: number
+}
+
+type PendingMutationResult = {
+  mutationRepairRequests: Array<LoadSubsetOptions>
+  releasedBeforeCleanup: Array<LoadSubsetOptions>
+}
+
+function orderSignature(options: LoadSubsetOptions) {
+  return options.orderBy?.map(({ expression, compareOptions }) => ({
+    path: expression instanceof PropRef ? expression.path : undefined,
+    direction: compareOptions.direction,
+  }))
+}
+
+function expectedOrderSignature(
+  direction: `asc` | `desc`,
+  explicitPublicKeyOrder: boolean,
+) {
+  return [
+    { path: [`rank`], direction },
+    ...(explicitPublicKeyOrder
+      ? [{ path: [`id`], direction: `asc` as const }]
+      : []),
+  ]
+}
+
+function expectPredicateBehavior(
+  where: LoadSubsetOptions[`where`],
+  accepted: ReadonlyArray<PageRow>,
+  rejected: ReadonlyArray<PageRow>,
+) {
+  expect(where).toBeDefined()
+  for (const row of accepted) {
+    expect(evaluateReferenceExpression(where!, row)).toBe(true)
+  }
+  for (const row of rejected) {
+    expect(evaluateReferenceExpression(where!, row)).not.toBe(true)
+  }
+}
+
+function classifyWhereOnlyRepairRequest(
+  request: LoadSubsetOptions,
+  scenario: PendingMutationScenario,
+): `tie` | `filtered-full-source` {
+  if (!request.where || request.orderBy || request.limit || request.cursor) {
+    throw new Error(`Expected one predicate-only repair request`)
+  }
+  if (!scenario.includeFilter) return `tie`
+
+  const distantMatchingRows: ReadonlyArray<PageRow> = [
+    { id: 101, rank: -1_000_000, keep: true },
+    { id: 102, rank: 1_000_000, keep: true },
+  ]
+  const acceptsWholeFilteredSource = distantMatchingRows.every(
+    (row) => evaluateReferenceExpression(request.where!, row) === true,
+  )
+  return acceptsWholeFilteredSource ? `filtered-full-source` : `tie`
+}
+
+function expectPendingMutationRequestWork(
+  result: PendingMutationResult,
+  scenario: PendingMutationScenario,
+  explicitPublicKeyOrder = true,
+) {
+  expect(result.mutationRepairRequests.length).toBeLessThanOrEqual(
+    (scenario.ranks.length + 1) * 8,
+  )
+  for (const request of result.mutationRepairRequests) {
+    if (request.orderBy) {
+      expect(orderSignature(request)).toStrictEqual(
+        expectedOrderSignature(scenario.direction, explicitPublicKeyOrder),
+      )
+      expect(request.limit).toBeDefined()
+      if (!request.cursor) expect([undefined, 0]).toContain(request.offset)
+    } else if (request.where) {
+      expect(request.limit).toBeUndefined()
+      expect(request.cursor).toBeUndefined()
+      expect(request.offset).toBeUndefined()
+      const kind = classifyWhereOnlyRepairRequest(request, scenario)
+      if (kind === `filtered-full-source`) {
+        expectPredicateBehavior(
+          request.where,
+          [
+            { id: 101, rank: -1_000_000, keep: true },
+            { id: 102, rank: 1_000_000, keep: true },
+          ],
+          [
+            { id: 101, rank: -1_000_000, keep: false },
+            { id: 102, rank: 1_000_000, keep: false },
+          ],
+        )
+      } else if (scenario.includeFilter) {
+        expectPredicateBehavior(
+          request.where,
+          [],
+          [
+            { id: 101, rank: -1_000_000, keep: false },
+            { id: 102, rank: 1_000_000, keep: false },
+          ],
+        )
+      }
+    } else {
+      expect(request.orderBy).toBeUndefined()
+      expect(request.where).toBeUndefined()
+      expect(request.limit).toBeUndefined()
+      expect(request.cursor).toBeUndefined()
+      expect(request.offset).toBeUndefined()
+    }
+  }
+}
+
+function expectFilteredBoundedRepairTrace(
+  result: PendingMutationResult,
+  direction: `asc` | `desc`,
+  limit: number,
+) {
+  expect(result.mutationRepairRequests).toHaveLength(2)
+  const [prefix, boundary] = result.mutationRepairRequests
+  expect(orderSignature(prefix!)).toStrictEqual(
+    expectedOrderSignature(direction, true),
+  )
+  expect(prefix!.limit).toBe(limit)
+  expect(prefix!.refetch).toBe(true)
+  expect(prefix!.cursor).toBeUndefined()
+  expect(prefix!.offset).toBeUndefined()
+  expectPredicateBehavior(
+    prefix!.where,
+    [{ id: 10, rank: -100, keep: true }],
+    [{ id: 10, rank: -100, keep: false }],
+  )
+
+  expect(boundary!.orderBy).toBeUndefined()
+  expect(boundary!.limit).toBeUndefined()
+  expect(boundary!.refetch).toBe(true)
+  expect(boundary!.cursor).toBeUndefined()
+  expect(boundary!.offset).toBeUndefined()
+  expectPredicateBehavior(
+    boundary!.where,
+    [{ id: 4, rank: 3, keep: true }],
+    [
+      { id: 4, rank: 2, keep: true },
+      { id: 4, rank: 3, keep: false },
+    ],
+  )
 }
 
 class DeliveredRowsTraceAssertionError extends TraceAssertionError {
@@ -1421,17 +1598,27 @@ async function runPendingMutationScenario(
     | `callback-value`
     | `delete-value`
     | `final-value`,
-): Promise<void> {
+): Promise<PendingMutationResult> {
   const rows = new Map<number, PageRow>(
-    scenario.ranks.map((rank, index) => [index + 1, { id: index + 1, rank }]),
+    scenario.ranks.map((rank, index) => [
+      index + 1,
+      {
+        id: index + 1,
+        rank,
+        ...(scenario.includeFilter ? { keep: true } : {}),
+      },
+    ]),
   )
-  const firstDelivered = referenceWindowRows(
+  const firstDeliveredId = referenceWindowRows(
     [...rows.values()],
     scenario.direction,
     { offset: 0, limit: 1 },
-  )[0]!
+  )[0]!.id
+  const firstDelivered = { ...rows.get(firstDeliveredId)! }
   const pending: Array<PendingCursorLoad> = []
+  let mutationRequestStart: number | undefined
   const physicallySettled = new Set<PendingCursorLoad>()
+  const released: Array<LoadSubsetOptions> = []
   const deliveredIds = new Set<number>([firstDelivered.id])
   // A rejected initial subset load is fatal. Establish a ready baseline first
   // so reject scenarios exercise subscription-scoped window recovery.
@@ -1471,19 +1658,26 @@ async function runPendingMutationScenario(
             )
             return deferred.promise
           },
+          unloadSubset: (options: LoadSubsetOptions) => {
+            released.push(options)
+          },
         }
       },
     },
   })
   const live = createLiveQueryCollection((query) => {
-    const ordered = query
-      .from({ row: source })
-      .orderBy(({ row }) => row.rank, scenario.direction)
+    const from = query.from({ row: source })
+    const filtered = scenario.includeFilter
+      ? from.where(({ row }) => eq(row.keep, true))
+      : from
+    const ordered = filtered.orderBy(({ row }) => row.rank, scenario.direction)
     return (
       explicitPublicKeyOrder
         ? ordered.orderBy(({ row }) => row.id, `asc`)
         : ordered
-    ).limit(scenario.responseOutcome === `reject` ? 1 : scenario.limit)
+    )
+      .limit(scenario.responseOutcome === `reject` ? 1 : scenario.limit)
+      .select(({ row }) => ({ id: row.id, rank: row.rank }))
   })
   const outstanding: Array<Promise<unknown>> = []
   const outcomes: Array<{
@@ -1513,7 +1707,9 @@ async function runPendingMutationScenario(
     Object.fromEntries(
       Object.entries(row).filter(
         ([key]) =>
-          ![`$key`, `$collectionId`, `$origin`, `$synced`].includes(key),
+          ![`keep`, `$key`, `$collectionId`, `$origin`, `$synced`].includes(
+            key,
+          ),
       ),
     )
   const capture = (
@@ -1565,6 +1761,7 @@ async function runPendingMutationScenario(
 
   const applyMutation = () => {
     const { mutation } = scenario
+    mutationRequestStart ??= pending.length
     begin()
     if (mutation.type === `delete`) {
       const row = rows.get(mutation.id)
@@ -1590,13 +1787,10 @@ async function runPendingMutationScenario(
       const request = pending[index]!
       if (request.settled) continue
       request.settled = true
-      const orderedRows = referenceWindowRows(
-        [...rows.values()],
-        scenario.direction,
-        {
-          offset: 0,
-          limit: rows.size,
-        },
+      const orderedRows = [...rows.values()].sort(
+        (left, right) =>
+          (left.rank - right.rank) * (scenario.direction === `asc` ? 1 : -1) ||
+          left.id - right.id,
       )
       const options = { ...request.options }
       if (transport !== `cursor`) {
@@ -1612,7 +1806,15 @@ async function runPendingMutationScenario(
         options.cursor = undefined
       }
       begin()
-      for (const row of rowsForLoadSubset(orderedRows, options)) {
+      const selected = rowsForLoadSubset(orderedRows, options)
+      const responseRows =
+        options.orderBy && scenario.orderedResponseLimit !== undefined
+          ? (options.cursor
+              ? selected.filter(({ id }) => !deliveredIds.has(id))
+              : selected
+            ).slice(0, scenario.orderedResponseLimit)
+          : selected
+      for (const row of responseRows) {
         if (deliveredIds.has(row.id)) continue
         deliveredIds.add(row.id)
         write({ type: `insert`, value: { ...row } })
@@ -1871,6 +2073,13 @@ async function runPendingMutationScenario(
         cuts.at(-1)!.window,
         `complete final mutation window`,
       ).toStrictEqual({ offset: 0, limit: finalLimit })
+      return {
+        mutationRepairRequests:
+          mutationRequestStart === undefined
+            ? []
+            : pending.slice(mutationRequestStart).map(({ options }) => options),
+        releasedBeforeCleanup: [...released],
+      }
     },
     () => [
       () => subscription?.unsubscribe(),
@@ -3262,6 +3471,175 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
+  it.each([
+    [`visible delete`, { type: `delete`, id: 1 }],
+    [
+      `visible rank update`,
+      { type: `update`, row: { id: 2, rank: 4, keep: true } },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, PendingMutation]>)(
+    `%s repairs an expressible order with a bounded prefix request`,
+    async (_name, mutation) => {
+      const result = await runPendingMutationScenario(
+        {
+          ranks: [0, 1, 2, 3],
+          direction: `asc`,
+          limit: 3,
+          mutation,
+          responseOutcome: `resolve`,
+          includeFilter: true,
+        },
+        `after-response`,
+      )
+
+      expectFilteredBoundedRepairTrace(result, `asc`, 3)
+    },
+  )
+
+  it(`finishes bounded repair when a visible delete leaves the source underfilled`, async () => {
+    const result = await runPendingMutationScenario(
+      {
+        ranks: [0, 1, 2],
+        direction: `asc`,
+        limit: 10,
+        mutation: { type: `delete`, id: 1 },
+        responseOutcome: `resolve`,
+      },
+      `after-response`,
+      undefined,
+      false,
+    )
+
+    expectPendingMutationRequestWork(
+      result,
+      {
+        ranks: [0, 1, 2],
+        direction: `asc`,
+        limit: 10,
+        mutation: { type: `delete`, id: 1 },
+        responseOutcome: `resolve`,
+      },
+      false,
+    )
+    expect(result.releasedBeforeCleanup).toHaveLength(3)
+  })
+
+  it(`rejects a malformed bounded-repair request trace`, () => {
+    const malformed: PendingMutationResult = {
+      mutationRepairRequests: [
+        {
+          orderBy: [
+            {
+              expression: new PropRef([`wrongPrimary`]),
+              compareOptions: { direction: `desc`, nulls: `last` },
+            },
+            {
+              expression: new PropRef([`wrongSecondary`]),
+              compareOptions: { direction: `desc`, nulls: `last` },
+            },
+          ],
+          limit: 3,
+          offset: 99,
+          refetch: true,
+        },
+        { refetch: true },
+      ],
+      releasedBeforeCleanup: [],
+    }
+
+    expect(() =>
+      expectFilteredBoundedRepairTrace(malformed, `asc`, 3),
+    ).toThrow()
+  })
+
+  it(`distinguishes a filtered full-source fallback from a repair tie predicate`, () => {
+    const filter = eq(new PropRef([`keep`]), true)
+    const scenario: PendingMutationScenario = {
+      ranks: [0, 1, 2],
+      direction: `asc`,
+      limit: 2,
+      mutation: { type: `delete`, id: 1 },
+      responseOutcome: `reject`,
+      includeFilter: true,
+    }
+
+    expect(classifyWhereOnlyRepairRequest({ where: filter }, scenario)).toBe(
+      `filtered-full-source`,
+    )
+    expect(
+      classifyWhereOnlyRepairRequest(
+        {
+          where: and(filter, eq(new PropRef([`rank`]), 1)),
+        },
+        scenario,
+      ),
+    ).toBe(`tie`)
+  })
+
+  it.each([false, true])(
+    `repairs a capped prefix through its first-column tie and cursor refill (explicit key=%s)`,
+    async (explicitPublicKeyOrder) => {
+      const result = await runPendingMutationScenario(
+        {
+          ranks: [0, 1, 1, 2],
+          direction: `asc`,
+          limit: 3,
+          mutation: { type: `delete`, id: 1 },
+          responseOutcome: `resolve`,
+          orderedResponseLimit: 1,
+        },
+        `after-response`,
+        undefined,
+        explicitPublicKeyOrder,
+      )
+      const requests = result.mutationRepairRequests
+
+      expect(
+        requests.map((request) =>
+          request.orderBy ? (request.cursor ? `refill` : `prefix`) : `tie`,
+        ),
+      ).toEqual([`prefix`, `tie`, `refill`, `tie`])
+      const [prefix, firstTie, refill, secondTie] = requests
+      expect(orderSignature(prefix!)).toStrictEqual(
+        expectedOrderSignature(`asc`, explicitPublicKeyOrder),
+      )
+      expect(prefix!.where).toBeUndefined()
+      expect(prefix!.limit).toBe(3)
+      expect(prefix!.refetch).toBe(true)
+      expect(prefix!.cursor).toBeUndefined()
+      expect(prefix!.offset).toBeUndefined()
+      expectPredicateBehavior(
+        firstTie!.where,
+        [{ id: 2, rank: 1 }],
+        [
+          { id: 1, rank: 0 },
+          { id: 4, rank: 2 },
+        ],
+      )
+      expect(firstTie!.orderBy).toBeUndefined()
+      expect(firstTie!.limit).toBeUndefined()
+      expect(firstTie!.refetch).toBe(true)
+      expect(firstTie!.cursor).toBeUndefined()
+      expect(firstTie!.offset).toBeUndefined()
+      expect(orderSignature(refill!)).toStrictEqual(
+        expectedOrderSignature(`asc`, explicitPublicKeyOrder),
+      )
+      expect(refill?.limit).toBe(1)
+      expect(refill?.refetch).toBe(true)
+      expect(refill?.cursor).toBeDefined()
+      expectPredicateBehavior(
+        secondTie!.where,
+        [{ id: 4, rank: 2 }],
+        [{ id: 2, rank: 1 }],
+      )
+      expect(secondTie!.orderBy).toBeUndefined()
+      expect(secondTie!.limit).toBeUndefined()
+      expect(secondTie!.refetch).toBe(true)
+      expect(secondTie!.cursor).toBeUndefined()
+      expect(secondTie!.offset).toBeUndefined()
+    },
+  )
+
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
       ([`throw`, `reject`] as const).map((delivery) => ({
@@ -3717,7 +4095,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it.each([`return-only`, `write-after-cleanup`])(
-    `does not settle a window move after its sync session is cleaned up: %s`,
+    `does not settle a window move after its sync run is cleaned up: %s`,
     async (delivery) => {
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },
@@ -3787,7 +4165,7 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  it(`tracks an asynchronous prefix refresh after synchronous satisfaction`, async () => {
+  it(`tracks an asynchronous cursor continuation after synchronous satisfaction`, async () => {
     const rows: Array<PageRow> = [
       { id: 1, rank: 1 },
       { id: 2, rank: 2 },
@@ -3858,10 +4236,11 @@ describe(`pagination recomputation oracle`, () => {
       expect(requests.length).toBeGreaterThan(initialRequestCount)
       const widenedRequest = requests
         .slice(initialRequestCount)
-        .find(({ limit }) => limit === 2)
+        .find(({ cursor }) => cursor !== undefined)
       expect(widenedRequest).toBeDefined()
-      expect(widenedRequest?.offset).toBeUndefined()
-      expect(widenedRequest?.cursor).toBeUndefined()
+      expect(widenedRequest).toMatchObject({ limit: 1, offset: 1 })
+      expect(widenedRequest?.cursor?.whereFrom).toBeDefined()
+      expect(widenedRequest?.cursor?.whereCurrent).toBeDefined()
       const settledBeforeRefinement = await Promise.race([
         Promise.resolve(widened).then(() => true),
         new Promise<false>((resolve) => setTimeout(() => resolve(false), 10)),
@@ -4076,6 +4455,53 @@ describe(`pagination recomputation oracle`, () => {
     `matches multi-column nullable ordering for a random or replayed seed`,
     runMultiOrderScenario,
   )
+
+  it(`continues an indexed multi-column window from its leading boundary`, async () => {
+    const rows: Array<MultiOrderRow> = [
+      { id: 3, primary: 0, secondary: 2 },
+      { id: 2, primary: 0, secondary: 1 },
+      { id: 1, primary: 0, secondary: 0 },
+      { id: 5, primary: 1, secondary: 1 },
+      { id: 4, primary: 1, secondary: 0 },
+      { id: 6, primary: 2, secondary: 0 },
+    ]
+    const { requests, source } = createConformingOrderedSource(
+      `pagination-multi-order-cursor-${collectionSequence++}`,
+      rows,
+    )
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ row: source })
+        .orderBy(({ row }) => row.primary, `asc`)
+        .orderBy(({ row }) => row.secondary, `desc`)
+        .limit(2)
+        .select(({ row }) => ({ id: row.id })),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 2])
+
+      const initialRequestCount = requests.length
+      const widened = live.utils.setWindow({ offset: 0, limit: 5 })
+      if (widened instanceof Promise) await widened
+
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([3, 2, 1, 5, 4])
+      const continuation = requests
+        .slice(initialRequestCount)
+        .find(({ cursor }) => cursor !== undefined)
+      expect(continuation).toMatchObject({
+        limit: 2,
+        offset: 3,
+        orderBy: expect.any(Array),
+      })
+      expect(continuation?.orderBy).toHaveLength(2)
+      expect(continuation?.cursor?.whereFrom).toBeDefined()
+      expect(continuation?.cursor?.whereCurrent).toBeDefined()
+    } finally {
+      await cleanupAll(live, source)
+    }
+  })
 
   fcTest.prop([nullableCursorScenarioArbitrary], {
     numRuns: transitionScenarioRuns,
@@ -4490,14 +4916,7 @@ describe(`pagination recomputation oracle`, () => {
         const pendingBeforeWiden = pending.length
         const widened = live.utils.setWindow({ offset: 0, limit: 3 })
         await flushPromises()
-        if (mutation.type === `insert`) {
-          expect(pending.length).toBeGreaterThan(pendingBeforeWiden)
-          expect(
-            pending
-              .slice(pendingBeforeWiden)
-              .some(({ options }) => options.limit === 3),
-          ).toBe(true)
-        } else {
+        if (mutation.type !== `insert`) {
           expect(
             pending.some(
               ({ options }) =>
@@ -4506,13 +4925,9 @@ describe(`pagination recomputation oracle`, () => {
                 options.cursor === undefined,
             ),
           ).toBe(true)
-          expect(widened).toBe(true)
-          expect(pending).toHaveLength(pendingBeforeWiden)
         }
-        for (let index = pendingBeforeWiden; index < pending.length; index++) {
-          await settle(pending[index]!)
-        }
-        if (widened instanceof Promise) await widened
+        expect(widened).toBe(true)
+        expect(pending).toHaveLength(pendingBeforeWiden)
         expect(Array.from(live.values(), ({ id }) => id)).toEqual(
           expectedWideIds,
         )
@@ -4565,7 +4980,10 @@ describe(`pagination recomputation oracle`, () => {
     seed: 1660,
   })(
     `matches recomputation when source mutations cross a pending cursor response for a fixed seed`,
-    runPendingMutationScenario,
+    async (scenario, timing) => {
+      const result = await runPendingMutationScenario(scenario, timing)
+      expectPendingMutationRequestWork(result, scenario)
+    },
   )
 
   it.each(
@@ -4607,7 +5025,10 @@ describe(`pagination recomputation oracle`, () => {
     ),
   )(
     `matches recomputation when source mutations cross a pending cursor response for a random or replayed seed`,
-    runPendingMutationScenario,
+    async (scenario, timing) => {
+      const result = await runPendingMutationScenario(scenario, timing)
+      expectPendingMutationRequestWork(result, scenario)
+    },
   )
 
   it(
@@ -4857,12 +5278,19 @@ describe(`pagination recomputation oracle`, () => {
   it.each(
     ([`asc`, `desc`] as const).flatMap((direction) =>
       ([`pages`, `widen`] as const).flatMap((mode) =>
-        [3, 10].map((pageSize) => ({ direction, mode, pageSize })),
+        [false, true].flatMap((explicitPublicKeyOrder) =>
+          [3, 10].map((pageSize) => ({
+            direction,
+            mode,
+            explicitPublicKeyOrder,
+            pageSize,
+          })),
+        ),
       ),
     ),
   )(
     `fetches linear row volume while traversing settled pages: %j`,
-    async ({ direction, mode, pageSize }) => {
+    async ({ direction, mode, explicitPublicKeyOrder, pageSize }) => {
       const pageCount = 10
       const rows = Array.from({ length: pageCount * pageSize }, (_, rank) => ({
         id: rank + 1,
@@ -4873,12 +5301,16 @@ describe(`pagination recomputation oracle`, () => {
         `pagination-transfer-${collectionSequence++}`,
         ordered,
       )
-      const live = createLiveQueryCollection((q) =>
-        q
+      const live = createLiveQueryCollection((q) => {
+        const orderedQuery = q
           .from({ row: source })
           .orderBy(({ row }) => row.rank, direction)
-          .limit(pageSize),
-      )
+        return (
+          explicitPublicKeyOrder
+            ? orderedQuery.orderBy(({ row }) => row.id, direction)
+            : orderedQuery
+        ).limit(pageSize)
+      })
       try {
         await live.preload()
         for (let page = 0; page < pageCount; page++) {
@@ -5034,9 +5466,17 @@ describe(`pagination recomputation oracle`, () => {
                   options.where === undefined &&
                   options.limit === undefined &&
                   options.cursor === undefined
+                const isOrderedRepair =
+                  options.where === undefined &&
+                  options.orderBy !== undefined &&
+                  options.limit === 1 &&
+                  options.cursor === undefined
                 const applyRows = () => {
                   const rows = rowsForLoadSubset(
-                    [...authoritativeRows.values()],
+                    [...authoritativeRows.values()].sort(
+                      (left, right) =>
+                        left.rank - right.rank || left.id - right.id,
+                    ),
                     options,
                   )
                   begin()
@@ -5047,7 +5487,7 @@ describe(`pagination recomputation oracle`, () => {
                   }
                   commit()
                 }
-                if (!recovering || !isFullSource) {
+                if (!recovering || (!isFullSource && !isOrderedRepair)) {
                   applyRows()
                   return true
                 }
@@ -5094,7 +5534,8 @@ describe(`pagination recomputation oracle`, () => {
         const recoveryLoads = loads.slice(loadsBeforeMutation)
         expect(recoveryLoads).toHaveLength(1)
         expect(recoveryLoads[0]?.where).toBeUndefined()
-        expect(recoveryLoads[0]?.limit).toBeUndefined()
+        expect(recoveryLoads[0]?.orderBy).toHaveLength(1)
+        expect(recoveryLoads[0]?.limit).toBe(1)
         expect(recoveryLoads[0]?.cursor).toBeUndefined()
         expect(live.toArray.map(projectPageRow)).toEqual([{ id: 1, rank: 0 }])
         expect(publications).toEqual([])

@@ -75,6 +75,16 @@ export class CollectionConfigurationError extends TanStackDBError {
   }
 }
 
+export class InvalidSyncPersistenceCapabilityError extends CollectionConfigurationError {
+  constructor(reason: string) {
+    super(
+      `Invalid sync persistence capability at metadata.persistence: ${reason}. ` +
+        `Custom sync wrappers must forward metadata.persistence unchanged.`,
+    )
+    this.name = `InvalidSyncPersistenceCapabilityError`
+  }
+}
+
 export class CollectionRequiresConfigError extends CollectionConfigurationError {
   constructor() {
     super(`Collection requires a config`)

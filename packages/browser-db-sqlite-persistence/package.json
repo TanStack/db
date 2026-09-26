@@ -23,6 +23,8 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
+    "test:oracles": "vitest --run tests/shared-driver-fairness-oracle.test.ts",
+    "test:opfs-fairness": "playwright test --config playwright.opfs.config.ts",
     "test:e2e": "pnpm --filter @tanstack/db-ivm build && pnpm --filter @tanstack/db build && pnpm --filter @tanstack/db-sqlite-persistence-core build && pnpm --filter @tanstack/browser-db-sqlite-persistence build && vitest --config vitest.e2e.config.ts --run"
   },
   "type": "module",
@@ -56,6 +58,7 @@
   },
   "devDependencies": {
     "@journeyapps/wa-sqlite": "^1.4.1",
+    "@playwright/test": "^1.60.0",
     "@types/better-sqlite3": "^7.6.13",
     "@vitest/coverage-istanbul": "^3.2.4",
     "better-sqlite3": "^12.6.2"

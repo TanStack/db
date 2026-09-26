@@ -4,14 +4,18 @@ import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
 
 /**
- * Custom arbitraries for generating values that deepEquals handles.
+ * `deepEquals` defines a bounded structural equivalence relation, not a general
+ * graph isomorphism.
  *
- * Same-type pairs exercise structural equality. The cross-type laws below
- * separately require Date/Temporal values of different types to be unequal in
- * both directions. They make no claim about ordering those types, or about deep
- * equality for object-valued Sets and arbitrary shared/circular graphs. The
- * bounded graph laws below construct corresponding rings and acyclic copies;
- * they do not define equality for arbitrary different cycle topologies.
+ * Independent value constructors exercise reflexivity, symmetry, copied
+ * structure, and changed-leaf inequality for primitives, arrays, records,
+ * dates, regexes, typed bytes, and selected Temporal types. Cross-type values
+ * remain unequal. Separate bounded graph laws construct corresponding rings
+ * and acyclic copies without reusing the production walk.
+ *
+ * Arbitrary different cycle topologies are outside this model. Naming that
+ * exclusion matters: more random examples cannot establish semantics the
+ * reference relation does not define.
  */
 const arbitraryPrimitive = fc.oneof(
   fc.string(),
@@ -409,6 +413,15 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(original, different, false)
       },
     )
+
+    it(`matches object-valued Sets by value rather than cardinality`, () => {
+      expectEqualityPair(
+        new Set([{ id: 1 }, { id: 2 }]),
+        new Set([{ id: 2 }, { id: 1 }]),
+        true,
+      )
+      expectEqualityPair(new Set([{ id: 1 }]), new Set([{ id: 2 }]), false)
+    })
   })
 
   describe(`equivalence relation properties`, () => {

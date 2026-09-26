@@ -604,6 +604,11 @@ export class CollectionImpl<
     this._sync.startSync()
   }
 
+  /** @internal Subscribe to the synchronous cleanup-start boundary. */
+  public _onCleanupStart(callback: () => void): () => void {
+    return this._lifecycle.onCleanupStart(callback)
+  }
+
   /** @internal */
   public _setTransactionScope(transactionScope: TransactionScope): void {
     this._mutations.setTransactionScope(transactionScope)
@@ -754,7 +759,7 @@ export class CollectionImpl<
    * ```
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
-    indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
+    indexCallback: (row: SingleRowRefProxy<TOutput, TKey, true>) => any,
     config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     return this._indexes.createIndex(indexCallback, config)
@@ -886,32 +891,32 @@ export class CollectionImpl<
 
   // Overload 1: Update multiple items with a callback
   update(
-    key: Array<TKey | unknown>,
+    key: Array<TKey>,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update(
-    keys: Array<TKey | unknown>,
+    keys: Array<TKey>,
     config: OperationConfig,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     config: OperationConfig,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
@@ -1045,7 +1050,7 @@ export class CollectionImpl<
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions = {},
-  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>> | void {
+  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>> | void {
     return currentStateAsChanges(this, options)
   }
 
@@ -1093,11 +1098,36 @@ export class CollectionImpl<
    */
   public subscribeChanges(
     callback: (
-      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
     ) => void,
+    options?: SubscribeChangesOptions<TOutput, TKey>,
+  ): CollectionSubscription
+  // Keep the pre-existing wider callback in the callable surface so Collection
+  // utility specializations remain structurally assignable to Collection.
+  public subscribeChanges(
+    callback:
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+        ) => void)
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+        ) => void),
+    options?: SubscribeChangesOptions<TOutput, TKey>,
+  ): CollectionSubscription
+  public subscribeChanges(
+    callback:
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+        ) => void)
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+        ) => void),
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
-    return this._changes.subscribeChanges(callback, options)
+    return this._changes.subscribeChanges(
+      (changes) => callback(changes),
+      options,
+    )
   }
 
   /**
@@ -1144,11 +1174,12 @@ export class CollectionImpl<
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    * Cleanup callbacks must not restart this collection or call its preload().
-   * Wait until cleanup completes before starting a new sync session.
+   * Wait until cleanup completes before starting a new sync run. If adapter
+   * cleanup rejects, this promise rejects after the Collection reaches its
+   * final cleaned-up state.
    */
-  public async cleanup(): Promise<void> {
-    this._lifecycle.cleanup()
-    return Promise.resolve()
+  public cleanup(): Promise<void> {
+    return this._lifecycle.cleanup()
   }
 }
 

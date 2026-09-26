@@ -101,7 +101,8 @@ export class OfflineExecutor {
       this.initResolve = resolve
       this.initReject = reject
     })
-
+    // Handle constructor-started rejection; waitForInit still observes it.
+    void this.initPromise.catch(() => {})
     this.initialize()
   }
 

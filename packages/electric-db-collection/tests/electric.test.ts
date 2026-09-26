@@ -87,6 +87,7 @@ describe(`Electric Integration`, () => {
     return {
       collectionMetadata,
       api: {
+        persistence: null,
         row: {
           get: () => undefined,
           set: () => {},
@@ -117,6 +118,28 @@ describe(`Electric Integration`, () => {
       Promise.resolve(
         Array.from(rows.entries()).map(([key, value]) => ({ key, value })),
       ),
+    loadResumeSnapshot: (
+      _collectionId: string,
+      options?: { includeRows?: boolean },
+    ) =>
+      Promise.resolve({
+        rows:
+          options?.includeRows === false
+            ? []
+            : Array.from(rows.entries()).map(([key, value]) => ({
+                key,
+                value,
+              })),
+        keySet: { status: `consistent` as const },
+        collectionMetadata: Array.from(
+          (collectionMetadata ?? new Map()).entries(),
+          ([key, value]) => ({ key, value }),
+        ),
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
     loadCollectionMetadata: () =>
       Promise.resolve(
         Array.from((collectionMetadata ?? new Map()).entries()).map(
@@ -3777,7 +3800,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should use persisted resume metadata when no explicit offset or handle is provided`, async () => {
+    it(`uses direct resume metadata when persistence is explicitly null`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -3811,6 +3834,7 @@ describe(`Electric Integration`, () => {
       })
 
       const originalSync = baseOptions.sync
+      expect(metadataHarness.api.persistence).toBeNull()
       createCollection({
         ...baseOptions,
         sync: {
@@ -3828,6 +3852,223 @@ describe(`Electric Integration`, () => {
           handle: `handle-1`,
         }),
       )
+    })
+
+    it(`treats omitted optional sync metadata as no persistence`, async () => {
+      vi.clearAllMocks()
+      const options = electricCollectionOptions<Row>({
+        id: `omitted-sync-metadata-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item) => item.id as number,
+        startSync: false,
+      })
+      const electricSync = options.sync
+      const collectionWithoutMetadata = createCollection({
+        ...options,
+        sync: {
+          sync: (params: Parameters<typeof electricSync.sync>[0]) => {
+            const { metadata: _omitted, ...paramsWithoutMetadata } = params
+            return electricSync.sync(paramsWithoutMetadata)
+          },
+        },
+      })
+
+      let startError: unknown
+      try {
+        collectionWithoutMetadata.startSyncImmediate()
+      } catch (error) {
+        startError = error
+      } finally {
+        await collectionWithoutMetadata.cleanup()
+      }
+
+      expect(startError).toBeUndefined()
+      expect(ShapeStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `http://test-url`,
+        }),
+      )
+    })
+
+    it(`rejects a sync wrapper that drops the entire persistence field before opening ShapeStream`, async () => {
+      vi.clearAllMocks()
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const durableResume = {
+        kind: `resume`,
+        requiresTagState: false,
+        offset: `10_0`,
+        handle: `handle-1`,
+        shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+        updatedAt: 1,
+      }
+      const collectionMetadata = new Map<string, unknown>([
+        [`electric:resume`, durableResume],
+      ])
+      const electricOptions = electricCollectionOptions<Row>({
+        id: `missing-persisted-wrapper-capability-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item) => item.id as number,
+        startSync: false,
+      })
+      const electricSync = electricOptions.sync
+      const persistedCollection = createCollection(
+        persistedCollectionOptions({
+          ...electricOptions,
+          sync: {
+            ...electricSync,
+            sync: (params: Parameters<typeof electricSync.sync>[0]) => {
+              const { persistence: _dropped, ...metadataWithoutPersistence } =
+                params.metadata!
+              return electricSync.sync({
+                ...params,
+                metadata:
+                  metadataWithoutPersistence as unknown as SyncMetadataApi<
+                    string | number
+                  >,
+              })
+            },
+          },
+          persistence: {
+            adapter: createPersistedAdapter(collectionMetadata),
+          },
+        }) as any,
+      )
+
+      const preload = persistedCollection.preload()
+      await expect(preload).rejects.toThrow(
+        /expected null or a complete capability object.*forward metadata\.persistence unchanged/i,
+      )
+
+      expect(persistedCollection.status).toBe(`error`)
+      expect(ShapeStream).not.toHaveBeenCalled()
+      expect(collectionMetadata.get(`electric:resume`)).toEqual(durableResume)
+      await persistedCollection.cleanup()
+    })
+
+    it(`rejects an incomplete advertised persistence capability before opening ShapeStream`, async () => {
+      vi.clearAllMocks()
+      const metadataHarness = createInMemorySyncMetadataApi()
+      const malformedMetadata = Object.assign(metadataHarness.api, {
+        persistence: {
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+          hydrateBaseline: () => Promise.resolve(),
+          scanPersistedRows: () => Promise.resolve([]),
+          resumeSnapshot: {
+            certify: () => Promise.resolve(),
+            getKeySetEvidence: () => ({ status: `consistent` as const }),
+          },
+        },
+      })
+      const options = electricCollectionOptions<Row>({
+        id: `incomplete-persistence-capability-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item) => item.id as number,
+        startSync: false,
+      })
+      const originalSync = options.sync
+
+      let cleanup: (() => Promise<void>) | undefined
+      let configurationError: unknown
+      try {
+        const malformedCollection = createCollection({
+          ...options,
+          startSync: true,
+          sync: {
+            ...originalSync,
+            sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+              originalSync.sync({ ...params, metadata: malformedMetadata }),
+          },
+        })
+        cleanup = () => malformedCollection.cleanup()
+      } catch (error) {
+        configurationError = error
+      }
+
+      await cleanup?.()
+
+      expect(configurationError).toEqual(
+        expect.objectContaining({
+          message: expect.stringMatching(
+            /persistence.*capability.*expectCurrentCommit/i,
+          ),
+        }),
+      )
+      expect(ShapeStream).not.toHaveBeenCalled()
+    })
+
+    it(`fails fast when a persistence wrapper drops resume generation ownership`, async () => {
+      vi.clearAllMocks()
+      const { ShapeStream } = await import(`@electric-sql/client`)
+      const durableResume = {
+        kind: `resume`,
+        requiresTagState: false,
+        offset: `10_0`,
+        handle: `handle-1`,
+        shapeId: `{"params":{"table":"test_table"},"url":"http://test-url"}`,
+        updatedAt: 1,
+      }
+      const collectionMetadata = new Map<string, unknown>([
+        [`electric:resume`, durableResume],
+      ])
+      const electricOptions = electricCollectionOptions<Row>({
+        id: `malformed-persisted-wrapper-capability-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (item) => item.id as number,
+        startSync: false,
+      })
+      const electricSync = electricOptions.sync
+      const persistedCollection = createCollection(
+        persistedCollectionOptions({
+          ...electricOptions,
+          sync: {
+            ...electricSync,
+            sync: (params: Parameters<typeof electricSync.sync>[0]) => {
+              const persistence = params.metadata?.persistence
+              if (!persistence) {
+                throw new Error(`Expected a persistence capability`)
+              }
+              const { expectCurrentCommit: _dropped, ...resumeSnapshot } =
+                persistence.resumeSnapshot
+              return electricSync.sync({
+                ...params,
+                metadata: {
+                  ...params.metadata,
+                  persistence: {
+                    ...persistence,
+                    resumeSnapshot,
+                  },
+                } as unknown as SyncMetadataApi<string | number>,
+              })
+            },
+          },
+          persistence: {
+            adapter: createPersistedAdapter(collectionMetadata),
+          },
+        }) as any,
+      )
+
+      const preload = persistedCollection.preload()
+      await expect(preload).rejects.toThrow(
+        /persistence.*capability.*expectCurrentCommit/i,
+      )
+
+      expect(persistedCollection.status).toBe(`error`)
+      expect(ShapeStream).not.toHaveBeenCalled()
+      expect(collectionMetadata.get(`electric:resume`)).toEqual(durableResume)
+      await persistedCollection.cleanup()
     })
 
     it(`prefers newer persisted resume metadata over hydrated metadata`, () => {

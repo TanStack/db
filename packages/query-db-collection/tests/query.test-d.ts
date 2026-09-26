@@ -488,6 +488,97 @@ describe(`Query collection type resolution tests`, () => {
       // Should infer ResponseType as select parameter type
       expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
     })
+
+    /**
+     * Law and source: The public schema-plus-select overload maps the `queryFn`
+     * result through `select` into materialized schema output rows. Collection
+     * mutations still accept schema input. Here, the schema relation is
+     * `createdAt: string` input -> `createdAt: Date` output.
+     *
+     * Production path and checkpoint: Infer options through
+     * `queryCollectionOptions`, create the Collection, then inspect the public
+     * types at compile time.
+     *
+     * Observations: `select` input, output-row keys, delete keys, collection
+     * reads, and mutation inputs. The paired configs are the hostile control:
+     * they differ only in whether `select` returns schema output or input.
+     * Runtime schema parsing and result publication are outside this oracle.
+     */
+    it(`preserves schema output rows selected from a wrapped response`, () => {
+      const rowSchema = z.object({
+        id: z.string(),
+        createdAt: z.string().transform((value) => new Date(value)),
+      })
+
+      type RowInput = z.input<typeof rowSchema>
+      type RowOutput = z.output<typeof rowSchema>
+      type WrappedResponse = {
+        rows: Array<RowOutput>
+        total: number
+      }
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`wrapped-transformed-schema`],
+        queryFn: async (): Promise<WrappedResponse> => ({
+          rows: [{ id: `1`, createdAt: new Date(0) }],
+          total: 1,
+        }),
+        select: (response) => {
+          expectTypeOf(response).toEqualTypeOf<WrappedResponse>()
+          return response.rows
+        },
+        schema: rowSchema,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[RowOutput]>()
+      expectTypeOf(options.getKey).returns.toEqualTypeOf<string>()
+      expectTypeOf(options.utils.writeDelete).parameters.toEqualTypeOf<
+        [string | Array<string>]
+      >()
+
+      const collection = createCollection(options)
+      collection.insert({ id: `2`, createdAt: `2026-09-20T00:00:00.000Z` })
+
+      const selected = collection.get(`1`)
+      if (selected) {
+        expectTypeOf(selected.createdAt).toEqualTypeOf<Date>()
+      }
+
+      // @ts-expect-error schema mutation inputs have not been materialized yet
+      collection.insert({ id: `3`, createdAt: new Date(0) })
+
+      type HostileResponse = {
+        inputRows: Array<RowInput>
+        outputRows: Array<RowOutput>
+      }
+
+      // Keep every option shared so unrelated config errors cannot satisfy the
+      // negative assertion at the public overload.
+      const schemaOutputSelectConfig = {
+        queryClient,
+        queryKey: [`wrapped-schema-output-control`],
+        queryFn: async (): Promise<HostileResponse> => ({
+          inputRows: [{ id: `1`, createdAt: `1970-01-01T00:00:00.000Z` }],
+          outputRows: [{ id: `1`, createdAt: new Date(0) }],
+        }),
+        select: (response: HostileResponse): Array<RowOutput> =>
+          response.outputRows,
+        schema: rowSchema,
+        getKey: (item: RowOutput) => item.id,
+      }
+      queryCollectionOptions(schemaOutputSelectConfig)
+
+      const schemaInputSelectConfig = {
+        ...schemaOutputSelectConfig,
+        select: (response: HostileResponse): Array<RowInput> =>
+          response.inputRows,
+      }
+
+      // @ts-expect-error select must return materialized schema output rows
+      queryCollectionOptions(schemaInputSelectConfig)
+    })
   })
 
   describe(`loadSubsetOptions type inference`, () => {
@@ -800,5 +891,8 @@ describe(`Query collection type resolution tests`, () => {
     expectTypeOf(collection.utils.writeDelete).toBeFunction()
     expectTypeOf(collection.utils.isFetching).toBeBoolean()
     expectTypeOf(collection.utils.isLoading).toBeBoolean()
+    expectTypeOf(collection.utils.fetchStatus).toEqualTypeOf<
+      `fetching` | `paused` | `idle`
+    >()
   })
 })

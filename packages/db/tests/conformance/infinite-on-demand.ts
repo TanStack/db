@@ -2,6 +2,16 @@ import { evaluateReferenceExpression } from '../reference-expression.js'
 import type { Collection, LoadSubsetOptions } from '../../src/index.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 
+/**
+ * Finite on-demand provider for the framework infinite-query model.
+ *
+ * The provider snapshots a complete ordered source, validates the narrow query
+ * language it promises, and independently evaluates cursor predicates before
+ * slicing the requested window. It records exact loadSubset calls for work and
+ * deduplication laws. Unsupported expressions reject even on an empty source;
+ * silently returning no rows would turn a weak fixture into a false oracle.
+ */
+
 interface Runtime {
   BTreeIndex: unknown
   createCollection: <T extends object>(

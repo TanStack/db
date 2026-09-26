@@ -12,6 +12,21 @@ import {
 import { topK, topKWithIndex } from '../../src/operators/topK.js'
 import { TopKRelation } from './topk-relation-oracle.js'
 
+/**
+ * A top-K window selects support from a signed, typed-key relation.
+ *
+ * `TopKRelation` is the independent relation model: integrate each weight by
+ * exact key/value identity, discard zero support, sort by the declared order,
+ * then slice offset/limit. Generated histories change both multiplicity and
+ * window position after each graph turn. Array, grouped, BTree, indexed, and
+ * fractional-index operators must expose the same selected support even though
+ * their move messages and internal indexes differ.
+ *
+ * The driver checks accumulated output and reported size at every cut. This is
+ * stronger than comparing the final rows, which would miss a bad retract,
+ * duplicate multiplicity, or a window move that later happened to self-heal.
+ */
+
 const keys = [1, `1`, 2, `2`, `a`] as const
 type Key = (typeof keys)[number]
 type Row = { id: number; value: string }

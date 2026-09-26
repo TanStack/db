@@ -14,9 +14,17 @@ import { createBackend } from './cursor-pagination/backend.js'
 import { expectedWindow } from './cursor-pagination/model.js'
 import type { Row, Scope } from './cursor-pagination/model.js'
 
-/** Real QueryClient -> QueryCollection -> graph -> shared window controller.
+/**
+ * # Does opaque pagination refine a real live-query window?
+ *
+ * This is the end-to-end path: QueryClient -> QueryCollection -> query graph ->
+ * shared window controller. The visible window and `hasNextPage` must match the
+ * independent full-relation model through growth, offset, ties, filtering,
+ * cancellation, replacement, and cache reuse.
+ *
  * The fixture endpoint supports prefix and rank-equality tie requests. Other
- * predicates and cursor expressions reject rather than silently dropping IR.
+ * predicates reject rather than silently dropping IR. The fixture validates
+ * cursor expressions, then chooses the explicit offset for its local reader.
  * Each tie filter has its own opaque backend sequence, just like the prefix.
  */
 function createFixture(
@@ -56,6 +64,7 @@ function createFixture(
   const pager = makePager()
   const ties = new Map<number, ReturnType<typeof makePager>>()
   const requests: Array<{ offset: number; limit: number | undefined }> = []
+  let cursorRequestCount = 0
   const direction = scope.descending ? `desc` : `asc`
   const source = createCollection(
     queryCollectionOptions<Row>({
@@ -90,10 +99,25 @@ function createFixture(
           }
           reader = tie
         }
-        expect(
-          options?.cursor,
-          `fixture uses offset requests, not IR cursors`,
-        ).toBeUndefined()
+        if (options?.cursor) {
+          cursorRequestCount++
+          expect(options.cursor.whereCurrent).toMatchObject({
+            type: `func`,
+            name: `eq`,
+            args: [
+              { type: `ref`, path: [`rank`] },
+              { type: `val`, value: expect.any(Number) },
+            ],
+          })
+          expect(options.cursor.whereFrom).toMatchObject({
+            type: `func`,
+            name: scope.descending ? `lt` : `gt`,
+            args: [
+              { type: `ref`, path: [`rank`] },
+              { type: `val`, value: expect.any(Number) },
+            ],
+          })
+        }
         if (options?.orderBy) {
           expect(options.orderBy).toMatchObject([
             { expression: { path: [`rank`] }, compareOptions: { direction } },
@@ -117,6 +141,7 @@ function createFixture(
     backend,
     gate,
     requests,
+    cursorRequestCount: () => cursorRequestCount,
     live,
     source,
     refresh: () =>
@@ -386,6 +411,9 @@ describe(`cursor adapter through production pagination`, () => {
         }
         expect(fixture.requests.length).toBeGreaterThan(0)
         expect(fixture.requests[0]?.limit).toBe(pageSize + 1)
+        if (count > pageSize) {
+          expect(fixture.cursorRequestCount()).toBeGreaterThan(0)
+        }
         expect(fixture.backend.calls).toHaveLength(
           Math.max(1, Math.ceil(count / backendSize)),
         )

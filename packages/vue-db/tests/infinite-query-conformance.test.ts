@@ -1,4 +1,10 @@
-/** Vue driver for the shared infinite-query conformance suite. */
+/**
+ * Vue driver for the shared infinite-query conformance suite.
+ *
+ * The effect scope owns the hook, and `nextTick` defines Vue's observation cut.
+ * Sources and query operators stay in this package's module realm. The shared
+ * suite, not this bridge, owns the ordered-prefix and page-ledger model.
+ */
 import {
   BTreeIndex,
   createCollection,

@@ -65,9 +65,13 @@ interface MyCollectionConfig<TItem extends object>
 
 ### 2. Sync Implementation
 
-The sync function is the heart of your collection. It must:
+Each call to the sync function starts a **sync run**. The run owns the callbacks
+and resources installed by that call until its returned cleanup ends them. A
+sync run may make several backend requests or open a longer-lived provider
+session, so it is not itself a request or provider session.
 
-The sync function must return a cleanup function for proper garbage collection:
+The sync function is the heart of your collection. It must return a cleanup
+function for proper garbage collection:
 
 ```typescript
 const sync: SyncConfig<T>['sync'] = (params) => {
@@ -474,7 +478,7 @@ sync: {
 For complete, production-ready examples, see the collection packages in the TanStack DB repository:
 
 - **[@tanstack/query-db-collection](https://github.com/TanStack/db/tree/main/packages/query-db-collection)** - Pattern A: User-provided handlers with full refetch strategy
-- **[@tanstack/trailbase-db-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection)** - Pattern B: Built-in handlers with ID-based tracking  
+- **[@tanstack/trailbase-db-collection](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection)** - Pattern B: Built-in handlers with ID-based tracking
 - **[@tanstack/electric-db-collection](https://github.com/TanStack/db/tree/main/packages/electric-db-collection)** - Pattern A: Transaction ID tracking with complex sync protocols
 - **[@tanstack/rxdb-db-collection](https://github.com/TanStack/db/tree/main/packages/rxdb-db-collection)** - Pattern B: Built-in handlers that bridge [RxDB](https://rxdb.info) change streams into TanStack DB's sync lifecycle
 

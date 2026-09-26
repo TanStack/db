@@ -7,6 +7,21 @@ import { expectedRows } from './cursor-pagination/model.js'
 import { createCursorPager } from './cursor-pagination/pager.js'
 import type { Row, Scope, Window } from './cursor-pagination/model.js'
 
+/**
+ * # Can opaque pages reconstruct any requested ordered slice?
+ *
+ * The backend owns unreadable continuation tokens and one stable filtered,
+ * totally ordered sequence. The pager may fetch and cache pages, but `read()`
+ * must equal the independent full-relation model for any offset and limit. It
+ * must reject invalid windows, foreign tokens, missing continuation, duplicate
+ * rows, wrong order, and protocol cycles instead of guessing.
+ *
+ * Generated sources vary IDs, ties, groups, direction, backend page size, and
+ * requested windows. The model never sees tokens. The driver observes returned
+ * rows, fetch order, cancellation, and bounded page traversal. This separation
+ * prevents a pager and its oracle from sharing the same cursor arithmetic.
+ */
+
 const rowsArbitrary = fc.uniqueArray(
   fc.record({
     id: fc.integer({ min: 0, max: 60 }),

@@ -63,6 +63,76 @@ function createOrderByInfo(
 }
 
 describe(`OrderedSourceLoader`, () => {
+  it(`pages an indexed multi-column order from its leading term`, async () => {
+    const requests: Array<{ method: string; options: RequestOptions }> = []
+    let dataNeeded = 0
+    const request = (method: string, options: RequestOptions) => {
+      requests.push({ method, options })
+      options.onLoadSubsetResult?.(true, options, () => {})
+    }
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 1, id: 2 } }],
+      requestLimitedSnapshot: (options: RequestOptions) =>
+        request(`limited`, options),
+      requestSnapshot: (options: RequestOptions) =>
+        request(`snapshot`, options),
+    }
+    const orderBy = [
+      ...createOrderByInfo().orderBy,
+      {
+        expression: new PropRef([`row`, `id`]),
+        compareOptions: {
+          direction: `desc` as const,
+          nulls: `last` as const,
+          stringSort: `lexical` as const,
+        },
+      },
+    ]
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({
+        orderBy,
+        dataNeeded: () => dataNeeded,
+      }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+    )
+
+    try {
+      loader.start()
+      await pendingPromise(loader)
+      await pendingPromise(loader)
+
+      expect(requests[0]?.method).toBe(`limited`)
+      expect(requests[0]?.options).toMatchObject({
+        limit: 1,
+        offset: 0,
+      })
+      expect(requests[0]?.options.orderBy).toHaveLength(2)
+      expect(
+        requests[0]?.options.orderBy?.map(({ expression }) => expression),
+      ).toEqual([new PropRef([`rank`]), new PropRef([`id`])])
+      expect(requests[1]?.method).toBe(`snapshot`)
+      expect(requests[1]?.options.where).toBeDefined()
+
+      dataNeeded = 2
+      loader.loadMore(1)
+      await pendingPromise(loader)
+
+      const continuation = requests.find(
+        ({ method, options }) =>
+          method === `limited` && options.minValues !== undefined,
+      )
+      expect(continuation?.options).toMatchObject({
+        limit: 2,
+        minValues: [1],
+      })
+      expect(continuation?.options.orderBy).toHaveLength(2)
+    } finally {
+      loader.dispose()
+    }
+  })
+
   it(`settles a larger prefix after an older lease release throws`, async () => {
     const failure = new Error(`old prefix release failed`)
     const requests: Array<LoadSubsetOptions> = []
@@ -130,6 +200,435 @@ describe(`OrderedSourceLoader`, () => {
     }
   })
 
+  it(`keeps a literal-true replacement when retiring the older prefix throws`, () => {
+    const failure = new Error(`old prefix release failed`)
+    const requests: Array<{
+      options: RequestOptions
+      acquisition: LoadSubsetOptions
+      release: ReleaseLoadSubset
+    }> = []
+    const released: Array<LoadSubsetOptions> = []
+    const request = (options: RequestOptions) => {
+      const acquisition: LoadSubsetOptions = {
+        orderBy: options.orderBy,
+        limit: options.limit,
+        where: options.where,
+      }
+      const requestIndex = requests.length
+      const release = () => {
+        released.push(acquisition)
+        if (requestIndex === 0) throw failure
+      }
+      requests.push({ options, acquisition, release })
+      options.onLoadSubsetResult?.(true, acquisition, release)
+    }
+    const subscription = {
+      readOrderedSnapshot: (options: LoadSubsetOptions) => [
+        { value: { rank: options.limit ?? 1 } },
+      ],
+      requestSnapshot: request,
+    }
+    const info = createOrderByInfo({ index: undefined, dataNeeded: () => 0 })
+    const loader = new OrderedSourceLoader(
+      info,
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => 0,
+    )
+
+    try {
+      loader.start()
+      info.limit = 2
+
+      expect(() => loader.loadMore()).toThrow(failure)
+
+      expect(requests.map(({ options }) => options.limit)).toEqual([
+        1,
+        undefined,
+        2,
+        undefined,
+      ])
+      expect(released).toEqual([requests[0]!.acquisition])
+      expect(
+        (
+          loader as unknown as {
+            settledFiniteAcquisitions: Map<
+              ReleaseLoadSubset,
+              number | undefined
+            >
+          }
+        ).settledFiniteAcquisitions.has(requests[2]!.release),
+      ).toBe(true)
+      expect(
+        (loader as unknown as { failedRequest?: unknown }).failedRequest,
+      ).toBeUndefined()
+      expect(
+        (loader as unknown as { needsOrderingRepair: boolean })
+          .needsOrderingRepair,
+      ).toBe(false)
+      expect(
+        (loader as unknown as { stagedContinuation?: unknown })
+          .stagedContinuation,
+      ).toBeUndefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
+  it(`does not fail a literal-true parent when its drained continuation throws`, () => {
+    const failure = new Error(`continuation request failed`)
+    const requests: Array<{
+      options: RequestOptions
+      acquisition?: LoadSubsetOptions
+      release?: ReleaseLoadSubset
+    }> = []
+    const released: Array<LoadSubsetOptions> = []
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+      requestLimitedSnapshot: (options: RequestOptions) => {
+        const acquisition: LoadSubsetOptions = {
+          orderBy: options.orderBy,
+          limit: options.limit,
+        }
+        const release = () => released.push(acquisition)
+        requests.push({ options, acquisition, release })
+        options.onLoadSubsetResult?.(true, acquisition, release)
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        requests.push({ options })
+        throw failure
+      },
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ dataNeeded: () => 0 }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => 0,
+    )
+
+    try {
+      expect(() => loader.start()).toThrow(failure)
+
+      expect(requests).toHaveLength(2)
+      expect(released).toEqual([])
+      expect(
+        (
+          loader as unknown as {
+            settledFiniteAcquisitions: Map<
+              ReleaseLoadSubset,
+              number | undefined
+            >
+          }
+        ).settledFiniteAcquisitions.has(requests[0]!.release!),
+      ).toBe(true)
+      expect(
+        (loader as unknown as { orderedLoadGeneration: number })
+          .orderedLoadGeneration,
+      ).toBe(0)
+      expect(
+        (loader as unknown as { failedRequest?: unknown }).failedRequest,
+      ).toBeDefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
+  it(`drains more than one literal-true continuation before returning`, () => {
+    const methods: Array<`page` | `boundary`> = []
+    let pageCount = 0
+    let boundary = 0
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: boundary } }],
+      requestLimitedSnapshot: (options: RequestOptions) => {
+        methods.push(`page`)
+        pageCount++
+        boundary = pageCount
+        options.onLoadSubsetResult?.(true, options, () => {})
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        methods.push(`boundary`)
+        options.onLoadSubsetResult?.(true, options, () => {})
+      },
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ dataNeeded: () => (pageCount < 2 ? 1 : 0) }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => 0,
+    )
+
+    try {
+      loader.start()
+
+      expect(methods).toEqual([`page`, `boundary`, `page`, `boundary`])
+      expect(pendingPromise(loader)).toBeUndefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
+  it(`does not release a fulfilled Promise parent when its continuation throws`, async () => {
+    const failure = new Error(`continuation request failed`)
+    const requests: Array<{
+      options: RequestOptions
+      acquisition?: LoadSubsetOptions
+      release?: ReleaseLoadSubset
+    }> = []
+    const released: Array<LoadSubsetOptions> = []
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+      requestLimitedSnapshot: (options: RequestOptions) => {
+        const acquisition: LoadSubsetOptions = {
+          orderBy: options.orderBy,
+          limit: options.limit,
+        }
+        const release = () => released.push(acquisition)
+        requests.push({ options, acquisition, release })
+        options.onLoadSubsetResult?.(Promise.resolve(), acquisition, release)
+      },
+      requestSnapshot: (options: RequestOptions) => {
+        requests.push({ options })
+        throw failure
+      },
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({ dataNeeded: () => 0 }),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+    )
+
+    try {
+      loader.start()
+      const parent = pendingPromise(loader)
+      expect(parent).toBeInstanceOf(Promise)
+      await expect(parent).rejects.toBe(failure)
+
+      expect(requests).toHaveLength(2)
+      expect(released).toEqual([])
+      expect(
+        (
+          loader as unknown as {
+            settledFiniteAcquisitions: Map<
+              ReleaseLoadSubset,
+              number | undefined
+            >
+          }
+        ).settledFiniteAcquisitions.has(requests[0]!.release!),
+      ).toBe(true)
+      expect(
+        (loader as unknown as { orderedLoadGeneration: number })
+          .orderedLoadGeneration,
+      ).toBe(0)
+      expect(
+        (loader as unknown as { failedRequest?: unknown }).failedRequest,
+      ).toBeDefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
+  it(`repairs ordering before an explicit window consumes a staged ordinary continuation`, () => {
+    const requests: Array<{ method: string; options: RequestOptions }> = []
+    let graphInputRevision = 0
+    const sentRows = new Map([[1, { rank: 1 }]])
+    const request = (method: string, options: RequestOptions) => {
+      requests.push({ method, options })
+      if (requests.length === 1) {
+        graphInputRevision++
+        loader.onSourceChanges(
+          [{ type: `update`, key: 1, value: { rank: 2 } }],
+          sentRows,
+        )
+      }
+      options.onLoadSubsetResult?.(true, options, () => {})
+    }
+    const subscription = {
+      setOrderByIndex: () => {},
+      readOrderedSnapshot: () => [{ value: { rank: 2 } }],
+      requestLimitedSnapshot: (options: RequestOptions) =>
+        request(`limited`, options),
+      requestSnapshot: (options: RequestOptions) =>
+        request(`snapshot`, options),
+    }
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo(),
+      subscription as unknown as CollectionSubscription,
+      `row`,
+      undefined,
+      undefined,
+      () => graphInputRevision,
+    )
+
+    try {
+      loader.start()
+
+      const stagedContinuation = (
+        loader as unknown as {
+          stagedContinuation?: {
+            isAuthoritativeRepair: boolean
+            windowOperationGeneration?: number
+          }
+        }
+      ).stagedContinuation
+      expect(stagedContinuation).toMatchObject({
+        isAuthoritativeRepair: false,
+      })
+      expect(stagedContinuation?.windowOperationGeneration).toBeUndefined()
+      expect(
+        (loader as unknown as { needsOrderingRepair: boolean })
+          .needsOrderingRepair,
+      ).toBe(true)
+
+      loader.loadMore(1)
+
+      expect(requests).toHaveLength(2)
+      expect(requests[1]?.method).toBe(`snapshot`)
+      expect(requests[1]?.options).toMatchObject({ refetch: true })
+      expect(requests[1]?.options.orderBy).toBeUndefined()
+      expect(requests[1]?.options.limit).toBeUndefined()
+      expect(requests[1]?.options.cursor).toBeUndefined()
+      expect(requests[1]?.options.where).toBeUndefined()
+    } finally {
+      loader.dispose()
+    }
+  })
+
+  const stagedWindowAxes = {
+    boundary: [`absent`, `present`] as const,
+    demand: [`satisfied`, `widened`] as const,
+  }
+  const stagedWindowCases = stagedWindowAxes.boundary.flatMap((boundary) =>
+    stagedWindowAxes.demand.map((demand) => ({ boundary, demand })),
+  )
+
+  /**
+   * Independent immediate-work model for an explicit window that consumes a
+   * staged boundary continuation. A present boundary requires its tie
+   * acquisition. An absent boundary starts no work, so only remaining window
+   * demand can require a prefix acquisition.
+   */
+  const expectedStagedWindowTrace = (
+    boundary: (typeof stagedWindowAxes.boundary)[number],
+    demand: (typeof stagedWindowAxes.demand)[number],
+  ): Array<`page` | `boundary`> => [
+    `page`,
+    ...(boundary === `present` ? ([`boundary`] as const) : []),
+    ...(demand === `widened` ? ([`page`] as const) : []),
+  ]
+
+  it(`enumerates every staged-boundary explicit-window cell exactly once`, () => {
+    const keys = stagedWindowCases.map(
+      ({ boundary, demand }) => `${boundary}:${demand}`,
+    )
+
+    expect(stagedWindowCases).toHaveLength(4)
+    expect(new Set(keys).size).toBe(4)
+  })
+
+  it.each(stagedWindowCases)(
+    `refines staged boundary $boundary with $demand explicit-window demand`,
+    async ({ boundary, demand }) => {
+      type ObservedRequest = {
+        kind: `page` | `boundary`
+        options: RequestOptions
+        settlement?: ReturnType<typeof createDeferred>
+      }
+      const requests: Array<ObservedRequest> = []
+      let graphInputRevision = 0
+      let dataNeeded = 1
+      const request = (
+        kind: ObservedRequest[`kind`],
+        options: RequestOptions,
+      ) => {
+        if (requests.length === 0) {
+          requests.push({ kind, options })
+          graphInputRevision++
+          options.onLoadSubsetResult?.(true, options, () => {})
+          return
+        }
+        const settlement = createDeferred()
+        requests.push({ kind, options, settlement })
+        options.onLoadSubsetResult?.(settlement.promise, options, () => {})
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        readOrderedSnapshot: () =>
+          boundary === `present` ? [{ value: { rank: 1 } }] : [],
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`page`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`boundary`, options),
+      }
+      const info = createOrderByInfo({ dataNeeded: () => dataNeeded })
+      const loader = new OrderedSourceLoader(
+        info,
+        subscription as unknown as CollectionSubscription,
+        `row`,
+        undefined,
+        undefined,
+        () => graphInputRevision,
+      )
+
+      try {
+        loader.start()
+        expect(
+          (loader as unknown as { stagedContinuation?: unknown })
+            .stagedContinuation,
+        ).toBeDefined()
+
+        if (demand === `widened`) {
+          info.limit = 2
+          dataNeeded = 2
+        } else {
+          dataNeeded = 0
+        }
+        const window = loader.loadMore(1)
+
+        if (requests.length === 1) {
+          expect(window).toBeUndefined()
+        } else {
+          expect(window).toBeInstanceOf(Promise)
+        }
+
+        if (boundary === `present` && demand === `widened`) {
+          requests[1]!.settlement!.resolve()
+          await vi.waitFor(() => expect(requests).toHaveLength(3))
+        }
+        for (const observed of requests.slice(1)) {
+          observed.settlement?.resolve()
+        }
+        await window
+
+        expect(requests.map(({ kind }) => kind)).toEqual(
+          expectedStagedWindowTrace(boundary, demand),
+        )
+        if (demand === `widened`) {
+          const page = requests.at(-1)!
+          expect(page.kind).toBe(`page`)
+          expect(page.options.limit).toBe(2)
+          if (boundary === `absent`) {
+            expect(page.options.offset).toBe(0)
+            expect(page.options.minValues).toBeUndefined()
+          } else {
+            expect(page.options.minValues).toEqual([1])
+          }
+        }
+      } finally {
+        for (const observed of requests) observed.settlement?.resolve()
+        loader.dispose()
+      }
+    },
+  )
+
   const syncRouteCells = (
     [`page`, `prefix`, `boundary`, `full-source`] as const
   ).flatMap((route) =>
@@ -192,14 +691,8 @@ describe(`OrderedSourceLoader`, () => {
           expect(() => loader.start()).toThrow(failure)
         } else {
           loader.start()
-          if (outcome === `success`) {
-            const pending = pendingPromise(loader)
-            if (route === `page` || route === `prefix`)
-              expect(pending).toBeInstanceOf(Promise)
-            else expect(pending).toBeUndefined()
-          } else {
-            await expect(pendingPromise(loader)).rejects.toBe(failure)
-          }
+          if (outcome === `success`) await pendingPromise(loader)
+          else await expect(pendingPromise(loader)).rejects.toBe(failure)
         }
         // Drain the synchronous boundary's own settlement as well as its parent.
         await Promise.resolve()
@@ -215,9 +708,7 @@ describe(`OrderedSourceLoader`, () => {
         if (outcome === `success`) {
           // Ordered loads establish a cursor and refine ties; neither a tie
           // load nor a full-source load may restart that refinement step.
-          expect(boundaryReads).toBe(
-            route === `full-source` ? 0 : route === `boundary` ? 2 : 1,
-          )
+          expect(boundaryReads).toBe(route === `full-source` ? 0 : 1)
           expect(requests).toHaveLength(route === `full-source` ? 1 : 2)
           if (route === `page` || route === `prefix`) {
             expect(requests[1]!.options.where).toBeDefined()
@@ -243,8 +734,8 @@ describe(`OrderedSourceLoader`, () => {
     },
   )
 
-  it.each([`page`, `prefix`, `full-source`] as const)(
-    `settles a fully synchronous $route acquisition before start returns`,
+  it.each([`page`, `prefix`] as const)(
+    `settles an ordinary synchronous $route chain before start returns`,
     (route) => {
       const requests: Array<string> = []
       const request = (method: string, options: RequestOptions): void => {
@@ -263,20 +754,20 @@ describe(`OrderedSourceLoader`, () => {
         createOrderByInfo({
           dataNeeded: () => 0,
           ...(route === `prefix` ? { index: undefined } : {}),
-          requiresFullSource: route === `full-source`,
         }),
         subscription as unknown as CollectionSubscription,
         `row`,
+        undefined,
+        undefined,
+        () => 0,
       )
       try {
         loader.start()
         expect(pendingPromise(loader)).toBeUndefined()
         expect(requests).toEqual(
-          route === `full-source`
-            ? [`snapshot`]
-            : route === `prefix`
-              ? [`snapshot`, `snapshot`]
-              : [`limited`, `snapshot`],
+          route === `prefix`
+            ? [`snapshot`, `snapshot`]
+            : [`limited`, `snapshot`],
         )
       } finally {
         loader.dispose()

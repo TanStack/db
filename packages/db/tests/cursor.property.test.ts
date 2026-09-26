@@ -6,6 +6,17 @@ import { buildCursor } from '../src/utils/cursor.js'
 import { evaluateReferenceExpression } from './reference-expression.js'
 import type { OrderBy } from '../src/query/ir.js'
 
+/**
+ * A cursor denotes the strict suffix after one ordered boundary.
+ *
+ * The reference compares candidate and boundary tuples directly, with explicit
+ * direction and null placement. Production builds an expression; the driver
+ * evaluates that expression against candidate rows and requires the same
+ * Boolean answer. Unsupported composite cursor construction must reject rather
+ * than silently approximate it. A retained local-snapshot path still checks
+ * multi-term nullable ordering without claiming composite cursor support.
+ */
+
 type Term = {
   direction: `asc` | `desc`
   nulls: `first` | `last`
@@ -71,19 +82,16 @@ function expectCursorDenotation(
   candidate: ReadonlyArray<unknown>,
   build: typeof buildCursor = buildCursor,
 ): void {
-  if (terms.length !== 1 || boundary.length !== 1) {
+  if (terms.length === 0 || boundary.length !== 1) {
     expect(() => build(orderBy(terms), [...boundary])).toThrow(
-      `Only single-column cursors are supported`,
+      `Only leading-column cursors are supported`,
     )
     return
   }
-  const length = Math.min(terms.length, boundary.length)
-  const usedTerms = terms.slice(0, length)
-  const usedBoundary = boundary.slice(0, length)
   const cursor = build(orderBy(terms), [...boundary])
   expect(cursor).toBeDefined()
   expect(Boolean(evaluateReferenceExpression(cursor!, row(candidate)))).toBe(
-    compareTuple(candidate, usedBoundary, usedTerms) > 0,
+    compareValue(candidate[0], boundary[0], terms[0]!) > 0,
   )
 }
 
@@ -214,7 +222,7 @@ describe(`buildCursor properties`, () => {
 
   it(`returns no cursor without boundary values and rejects a boundary without an order`, () => {
     expect(() => buildCursor([], [1])).toThrow(
-      `Only single-column cursors are supported`,
+      `Only leading-column cursors are supported`,
     )
     expect(buildCursor([], [])).toBeUndefined()
     expect(
@@ -231,7 +239,7 @@ describe(`buildCursor properties`, () => {
   )
 
   fcTest.prop([partialCursorArbitrary], { numRuns: 200 })(
-    `rejects mismatched cursor widths without restricting local tuple ordering`,
+    `uses one leading boundary value and rejects other mismatched widths`,
     async ([terms, boundary, candidate]) => {
       expectCursorDenotation(terms, boundary, candidate)
       await expectLocalTupleOrder(terms, boundary, candidate)
@@ -244,7 +252,7 @@ describe(`buildCursor properties`, () => {
       if (terms.length !== 1) {
         for (let attempt = 0; attempt < 2; attempt++) {
           expect(() => buildCursor(orderBy(terms), [...boundary])).toThrow(
-            `Only single-column cursors are supported`,
+            `Only leading-column cursors are supported`,
           )
         }
         return

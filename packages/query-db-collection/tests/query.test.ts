@@ -33,6 +33,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
+  LoadSubsetRequestResult,
   SyncMetadataApi,
   TransactionWithMutations,
   UpdateMutationFnParams,
@@ -95,7 +96,7 @@ function createInMemorySyncMetadataApi<
   const rowMetadata = new Map(seed?.rowMetadata)
   const collectionMetadata = new Map(seed?.collectionMetadata)
   const persistedRows = new Map(seed?.persistedRows)
-  const api = {
+  const api: SyncMetadataApi<TKey> = {
     row: {
       get: (key: TKey) => rowMetadata.get(key),
       set: (key: TKey, value: unknown) => {
@@ -104,12 +105,22 @@ function createInMemorySyncMetadataApi<
       delete: (key: TKey) => {
         rowMetadata.delete(key)
       },
-      scanPersisted: async () =>
+    },
+    persistence: {
+      protocol: `@tanstack/db/sync-persistence`,
+      version: 1,
+      hydrateBaseline: async () => {},
+      scanPersistedRows: async () =>
         Array.from(persistedRows.entries()).map(([key, value]) => ({
           key,
           value,
           metadata: rowMetadata.get(key),
         })),
+      resumeSnapshot: {
+        certify: async () => {},
+        getKeySetEvidence: () => ({ status: `consistent` }),
+        expectCurrentCommit: () => {},
+      },
     },
     collection: {
       get: (key: string) => collectionMetadata.get(key),
@@ -130,7 +141,7 @@ function createInMemorySyncMetadataApi<
     rowMetadata,
     collectionMetadata,
     persistedRows,
-    api: api as SyncMetadataApi<TKey>,
+    api,
   }
 }
 
@@ -144,6 +155,9 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
   const rows = new Map(seed.rows)
   const rowMetadata = new Map(seed.rowMetadata)
   const collectionMetadata = new Map(seed.collectionMetadata)
+  let latestTerm = 0
+  let latestSeq = 0
+  let latestRowVersion = 0
 
   return {
     rows,
@@ -155,6 +169,28 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
         value,
         metadata: rowMetadata.get(value.id),
       })),
+    loadResumeSnapshot: async (
+      _collectionId: string,
+      options?: { includeRows?: boolean },
+    ) => ({
+      rows:
+        options?.includeRows === false
+          ? []
+          : Array.from(rows.values()).map((value) => ({
+              key: value.id,
+              value,
+              metadata: rowMetadata.get(value.id),
+            })),
+      keySet: { status: `consistent` as const },
+      collectionMetadata: Array.from(
+        collectionMetadata.entries(),
+        ([key, value]) => ({ key, value }),
+      ),
+      latestTerm,
+      latestSeq,
+      latestRowVersion,
+      resetEpoch: 0,
+    }),
     loadCollectionMetadata: async () =>
       Array.from(collectionMetadata.entries()).map(([key, value]) => ({
         key,
@@ -193,6 +229,9 @@ function createPersistedQueryAdapter<TItem extends { id: string }>(
           collectionMetadata.set(mutation.key, mutation.value)
         }
       }
+      latestTerm = tx.term
+      latestSeq = tx.seq
+      latestRowVersion = tx.rowVersion
     },
     ensureIndex: async () => {},
   }
@@ -278,6 +317,107 @@ describe(`QueryCollection`, () => {
   afterEach(() => {
     // Ensure all queries are properly cleaned up after each test
     queryClient.clear()
+  })
+
+  it(`accepts the explicit null persistence sentinel from core`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `explicit-null-persistence-test`,
+      queryClient,
+      queryKey: [`explicit-null-persistence-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const originalSync = options.sync
+    let observedPersistence: unknown
+    const collection = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          observedPersistence = params.metadata?.persistence
+          return originalSync.sync(params)
+        },
+      },
+    })
+
+    collection.startSyncImmediate()
+    await collection.stateWhenReady()
+
+    expect(observedPersistence).toBeNull()
+    expect(queryFn).toHaveBeenCalledOnce()
+    await collection.cleanup()
+  })
+
+  it(`treats omitted optional sync metadata as no persistence`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `omitted-sync-metadata-test`,
+      queryClient,
+      queryKey: [`omitted-sync-metadata-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const querySync = options.sync
+    const collectionWithoutMetadata = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof querySync.sync>[0]) => {
+          const { metadata: _omitted, ...paramsWithoutMetadata } = params
+          return querySync.sync(paramsWithoutMetadata)
+        },
+      },
+    })
+
+    let startError: unknown
+    try {
+      collectionWithoutMetadata.startSyncImmediate()
+      await collectionWithoutMetadata.stateWhenReady()
+    } catch (error) {
+      startError = error
+    } finally {
+      await collectionWithoutMetadata.cleanup()
+    }
+
+    expect(startError).toBeUndefined()
+    expect(queryFn).toHaveBeenCalledOnce()
+  })
+
+  it(`rejects a sync wrapper that drops the entire persistence field before querying`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+    const options = queryCollectionOptions<TestItem>({
+      id: `missing-persistence-field-test`,
+      queryClient,
+      queryKey: [`missing-persistence-field-test`],
+      queryFn,
+      getKey,
+      startSync: false,
+    })
+    const originalSync = options.sync
+    const malformedCollection = createCollection({
+      ...options,
+      startSync: false,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+          const { persistence: _dropped, ...metadataWithoutPersistence } =
+            params.metadata!
+          return originalSync.sync({
+            ...params,
+            metadata: metadataWithoutPersistence as unknown as SyncMetadataApi<
+              string | number
+            >,
+          })
+        },
+      },
+    })
+
+    expect(() => malformedCollection.startSyncImmediate()).toThrow(
+      /expected null or a complete capability object.*forward metadata\.persistence unchanged/i,
+    )
+    expect(malformedCollection.status).toBe(`error`)
+    expect(queryFn).not.toHaveBeenCalled()
+    await malformedCollection.cleanup()
   })
 
   it(`should pass through additional top-level Query observer options`, async () => {
@@ -799,6 +939,95 @@ describe(`QueryCollection`, () => {
         await collection.cleanup()
       }
     })
+
+    it.each([
+      { label: `the default option`, options: undefined, rejects: false },
+      {
+        label: `throwOnError false`,
+        options: { throwOnError: false },
+        rejects: false,
+      },
+      {
+        label: `throwOnError true`,
+        options: { throwOnError: true },
+        rejects: true,
+      },
+    ] as const)(
+      `preserves $label when a deferred replacement has a transport error`,
+      async ({ options, rejects }) => {
+        const barrier = createDeferred<void>()
+        const transportError = new Error(`Deferred replacement failed`)
+        const queryFn = vi
+          .fn()
+          .mockResolvedValueOnce([{ id: `server`, name: `Initial` }])
+          .mockResolvedValueOnce([{ id: `server`, name: `Skipped` }])
+          .mockRejectedValueOnce(transportError)
+        const consoleError = vi
+          .spyOn(console, `error`)
+          .mockImplementation(() => {})
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id: `deferred-transport-error-${String(rejects)}-${String(options === undefined)}`,
+            queryClient,
+            queryKey: [
+              `deferred-transport-error`,
+              rejects,
+              options === undefined,
+            ],
+            queryFn,
+            getKey,
+            startSync: true,
+            retry: false,
+          }),
+        )
+
+        try {
+          await collection.stateWhenReady()
+          collection.deferDataRefresh = barrier.promise
+          let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+          const observed = collection.utils.refetch(options).then(
+            (results) => {
+              outcome = `fulfilled`
+              return { results }
+            },
+            (error: unknown) => {
+              outcome = `rejected`
+              return { error }
+            },
+          )
+
+          await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+          for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+          expect(outcome).toBe(`pending`)
+
+          collection.deferDataRefresh = null
+          barrier.resolve()
+          const settlement = await observed
+
+          if (rejects) {
+            expect(outcome).toBe(`rejected`)
+            expect(`error` in settlement ? settlement.error : undefined).toBe(
+              transportError,
+            )
+          } else {
+            expect(outcome).toBe(`fulfilled`)
+            expect(
+              `results` in settlement ? settlement.results : undefined,
+            ).toEqual([
+              expect.objectContaining({
+                isError: true,
+                error: transportError,
+              }),
+            ])
+          }
+        } finally {
+          collection.deferDataRefresh = null
+          barrier.resolve()
+          consoleError.mockRestore()
+          await collection.cleanup()
+        }
+      },
+    )
 
     it(`applies successive eager results in publication order`, async () => {
       const queryKey = [`eager-result-publication-order`]
@@ -1336,12 +1565,16 @@ describe(`QueryCollection`, () => {
 
     // Verify the validation error was logged
     await vi.waitFor(() => {
-      const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
-        call[0].includes(
-          `@tanstack/query-db-collection: queryFn must return an array of objects`,
-        ),
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`[QueryCollection] Error applying query`),
+        expect.objectContaining({
+          name: `InvalidQueryResultError`,
+          message: expect.stringContaining(
+            `@tanstack/query-db-collection: queryFn must return an array of objects`,
+          ),
+        }),
       )
-      expect(errorCallArgs).toBeDefined()
     })
 
     // The collection state should remain empty or unchanged
@@ -1725,12 +1958,16 @@ describe(`QueryCollection`, () => {
 
       // Verify the validation error was logged
       await vi.waitFor(() => {
-        const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
-          call[0].includes(
-            `@tanstack/query-db-collection: select() must return an array of objects`,
-          ),
+        expect(consoleErrorSpy).toHaveBeenCalledTimes(1)
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringContaining(`[QueryCollection] Error applying query`),
+          expect.objectContaining({
+            name: `InvalidQueryResultError`,
+            message: expect.stringContaining(
+              `@tanstack/query-db-collection: select() must return an array of objects`,
+            ),
+          }),
         )
-        expect(errorCallArgs).toBeDefined()
       })
 
       expect(collection.size).toBe(0)
@@ -2012,7 +2249,7 @@ describe(`QueryCollection`, () => {
       expect(options.onDelete).toBeDefined()
     })
 
-    it(`should wrap handlers and call the original handler`, async () => {
+    it(`should preserve handler parameter identity`, async () => {
       const queryKey = [`handlerTest`]
       const items = [{ id: `1`, name: `Item 1` }]
       const queryFn = vi.fn().mockResolvedValue(items)
@@ -2096,10 +2333,19 @@ describe(`QueryCollection`, () => {
       await options.onUpdate!(updateMockParams)
       await options.onDelete!(deleteMockParams)
 
-      // Verify the original handlers were called
-      expect(onInsert).toHaveBeenCalledWith(insertMockParams)
-      expect(onUpdate).toHaveBeenCalledWith(updateMockParams)
-      expect(onDelete).toHaveBeenCalledWith(deleteMockParams)
+      // Phase tracking gives handler-local refetch calls their non-circular
+      // fetch boundary without replacing public objects.
+      for (const [handler, expected] of [
+        [onInsert, insertMockParams],
+        [onUpdate, updateMockParams],
+        [onDelete, deleteMockParams],
+      ] as const) {
+        expect(handler).toHaveBeenCalledOnce()
+        const actual = handler.mock.calls[0]![0]
+        expect(actual.transaction).toBe(expected.transaction)
+        expect(actual.collection).toBe(expected.collection)
+        expect(actual.collection.utils).toBe(expected.collection.utils)
+      }
     })
 
     it(`should call refetch based on handler return value`, async () => {
@@ -2179,7 +2425,10 @@ describe(`QueryCollection`, () => {
       await optionsDefault.onInsert!(insertParamsDefault)
 
       // Verify handler was called and refetch was triggered (queryFn called again)
-      expect(onInsertDefault).toHaveBeenCalledWith(insertParamsDefault)
+      expect(onInsertDefault).toHaveBeenCalledOnce()
+      expect(onInsertDefault.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       await vi.waitFor(() => {
         expect(queryFnDefault).toHaveBeenCalledTimes(1)
       })
@@ -2208,7 +2457,10 @@ describe(`QueryCollection`, () => {
       await optionsFalse.onInsert!(insertParamsFalse)
 
       // Verify handler was called but refetch was NOT triggered (queryFn not called)
-      expect(onInsertFalse).toHaveBeenCalledWith(insertParamsFalse)
+      expect(onInsertFalse).toHaveBeenCalledOnce()
+      expect(onInsertFalse.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       // Wait a bit to ensure no refetch happens
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(queryFnFalse).not.toHaveBeenCalled()
@@ -2234,7 +2486,10 @@ describe(`QueryCollection`, () => {
 
       await optionsPrimitive.onInsert!(insertParamsPrimitive)
 
-      expect(onInsertPrimitive).toHaveBeenCalledWith(insertParamsPrimitive)
+      expect(onInsertPrimitive).toHaveBeenCalledOnce()
+      expect(onInsertPrimitive.mock.calls[0]![0].transaction).toBe(
+        insertTransaction,
+      )
       await vi.waitFor(() => {
         expect(queryFnPrimitive).toHaveBeenCalledTimes(1)
       })
@@ -2244,6 +2499,52 @@ describe(`QueryCollection`, () => {
         collectionFalse.cleanup(),
         collectionPrimitive.cleanup(),
       ])
+    })
+
+    it(`does not reject a deprecated auto-refetch when result application fails`, async () => {
+      resetWarnings()
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const queryFn = vi
+        .fn<() => Promise<Array<TestItem>>>()
+        .mockResolvedValueOnce([{ id: `1`, name: `Initial` }])
+        .mockResolvedValueOnce(42 as unknown as Array<TestItem>)
+      const onInsert = vi.fn().mockResolvedValue(undefined)
+      const options = queryCollectionOptions<TestItem>({
+        id: `invalid-deprecated-auto-refetch`,
+        queryClient,
+        queryKey: [`invalid-deprecated-auto-refetch`],
+        queryFn,
+        getKey,
+        onInsert,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+      const transaction = {
+        id: `invalid-deprecated-auto-refetch-transaction`,
+        mutations: [],
+      } as unknown as TransactionWithMutations<TestItem, `insert`>
+
+      try {
+        await collection.stateWhenReady()
+
+        await expect(
+          options.onInsert!({ transaction, collection }),
+        ).resolves.toBeUndefined()
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        await vi.waitFor(() => {
+          expect(consoleError).toHaveBeenCalledWith(
+            expect.stringContaining(`[QueryCollection] Error applying query`),
+            expect.objectContaining({ name: `InvalidQueryResultError` }),
+          )
+        })
+      } finally {
+        warning.mockRestore()
+        consoleError.mockRestore()
+        await collection.cleanup()
+      }
     })
 
     it(`supports a warning-free single-refetch migration path`, async () => {
@@ -2270,13 +2571,8 @@ describe(`QueryCollection`, () => {
         })
         queryFn.mockClear()
 
-        await options.onInsert!({
-          transaction: {
-            id: `explicit-refetch-transaction`,
-            mutations: [],
-          } as unknown as TransactionWithMutations<TestItem, `insert`>,
-          collection,
-        })
+        const mutation = collection.insert({ id: `2`, name: `Item 2` })
+        await mutation.isPersisted.promise
 
         expect(queryFn).toHaveBeenCalledTimes(1)
         expect(warning).not.toHaveBeenCalled()
@@ -2463,6 +2759,61 @@ describe(`QueryCollection`, () => {
 
       postCleanupSubscription.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
+    })
+
+    it(`does not cancel an applied refetch when sync restarts before settlement classification`, async () => {
+      const queryKey = [`refetch-sync-restart`]
+      const refetchResult = createDeferred<Array<TestItem>>()
+      const queryFn = vi
+        .fn<() => Promise<Array<TestItem>>>()
+        .mockResolvedValueOnce([{ id: `1`, name: `Initial` }])
+        .mockImplementationOnce(() => refetchResult.promise)
+        .mockResolvedValue([{ id: `1`, name: `Restarted` }])
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `refetch-sync-restart`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          startSync: true,
+        }),
+      )
+      const heldMicrotasks: Array<VoidFunction> = []
+      const scheduleMicrotask = globalThis.queueMicrotask
+      let queueMicrotaskSpy: { mockRestore: () => void } | undefined
+
+      try {
+        await collection.stateWhenReady()
+        queueMicrotaskSpy = vi
+          .spyOn(globalThis, `queueMicrotask`)
+          .mockImplementation((callback) => heldMicrotasks.push(callback))
+        const refetch = collection.utils.refetch({ throwOnError: true })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+
+        refetchResult.resolve([{ id: `1`, name: `Refetched` }])
+        for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+        expect(collection.get(`1`)?.name).toBe(`Refetched`)
+        expect(heldMicrotasks.length).toBeGreaterThan(0)
+
+        queueMicrotaskSpy.mockRestore()
+        queueMicrotaskSpy = undefined
+        await collection.cleanup()
+        collection.startSyncImmediate()
+        heldMicrotasks.forEach((callback) => scheduleMicrotask(callback))
+
+        await expect(refetch).resolves.toEqual([
+          expect.objectContaining({
+            isSuccess: true,
+            data: [{ id: `1`, name: `Refetched` }],
+          }),
+        ])
+      } finally {
+        queueMicrotaskSpy?.mockRestore()
+        refetchResult.resolve([{ id: `1`, name: `Refetched` }])
+        heldMicrotasks.forEach((callback) => scheduleMicrotask(callback))
+        await collection.cleanup()
+      }
     })
 
     it(`should handle query lifecycle during restart cycle`, async () => {
@@ -3510,6 +3861,79 @@ describe(`QueryCollection`, () => {
       // collection2: startSync=false, subscriberCount=0 -> depends on implementation
       expect(collection1.status).toBe(`ready`) // Always active with startSync: true
     })
+  })
+
+  describe(`Query observer state utilities`, () => {
+    it.each([
+      [`fetching`, `paused`],
+      [`paused`, `fetching`],
+    ] as const)(
+      `aggregates fetch status independent of observer acquisition order: %s then %s`,
+      async (firstStatus, secondStatus) => {
+        const id = `aggregate-fetch-status-${firstStatus}-first`
+        const fetchingResult = createDeferred<Array<TestItem>>()
+        queryClient.setQueryDefaults([id, 1], { networkMode: `always` })
+        queryClient.setQueryDefaults([id, 2], { networkMode: `online` })
+        const collection = createCollection(
+          queryCollectionOptions<TestItem>({
+            id,
+            queryClient,
+            syncMode: `on-demand`,
+            startSync: true,
+            queryKey: ({ limit }) => (limit === undefined ? [id] : [id, limit]),
+            queryFn: ({ queryKey }) =>
+              queryKey.at(-1) === 1
+                ? fetchingResult.promise
+                : Promise.resolve([
+                    { id: String(queryKey.at(-1)), name: `resolved` },
+                  ]),
+            getKey,
+          }),
+        )
+        const loads: Partial<
+          Record<`fetching` | `paused`, LoadSubsetRequestResult>
+        > = {}
+        const start = (status: `fetching` | `paused`) => {
+          loads[status] = collection._sync.loadSubset({
+            limit: status === `fetching` ? 1 : 2,
+          })
+        }
+
+        try {
+          expect(collection.utils.fetchStatus).toBe(`idle`)
+          onlineManager.setOnline(false)
+
+          start(firstStatus)
+          await vi.waitFor(() => {
+            expect(collection.utils.fetchStatus).toBe(firstStatus)
+          })
+
+          start(secondStatus)
+          await vi.waitFor(() => {
+            expect(queryClient.getQueryState([id, 1])?.fetchStatus).toBe(
+              `fetching`,
+            )
+            expect(queryClient.getQueryState([id, 2])?.fetchStatus).toBe(
+              `paused`,
+            )
+          })
+          expect(collection.utils.fetchStatus).toBe(`fetching`)
+
+          fetchingResult.resolve([{ id: `1`, name: `resolved` }])
+          await loads.fetching
+          expect(collection.utils.fetchStatus).toBe(`paused`)
+
+          onlineManager.setOnline(true)
+          await loads.paused
+          expect(collection.utils.fetchStatus).toBe(`idle`)
+        } finally {
+          onlineManager.setOnline(true)
+          fetchingResult.resolve([{ id: `1`, name: `resolved` }])
+          await Promise.allSettled(Object.values(loads))
+          await collection.cleanup()
+        }
+      },
+    )
   })
 
   describe(`Manual Sync Operations`, () => {
@@ -6693,14 +7117,21 @@ describe(`QueryCollection`, () => {
           ],
         ]),
       })
-      const scanPersisted = vi.fn().mockReturnValue(persistedScan.promise)
-      const metadataApi = {
+      const scanPersistedRows = vi.fn().mockReturnValue(persistedScan.promise)
+      const metadataApi: SyncMetadataApi<string | number> = {
         ...metadataHarness.api,
-        row: {
-          ...metadataHarness.api.row,
-          scanPersisted,
+        persistence: {
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+          hydrateBaseline: async () => {},
+          scanPersistedRows,
+          resumeSnapshot: {
+            certify: async () => {},
+            getKeySetEvidence: () => ({ status: `consistent` }),
+            expectCurrentCommit: () => {},
+          },
         },
-      } as SyncMetadataApi<string | number>
+      }
 
       const baseOptions = queryCollectionOptions<CategorisedItem>({
         id: `stale-retained-reconciliation`,
@@ -6724,7 +7155,8 @@ describe(`QueryCollection`, () => {
       })
       const load = collection._sync.loadSubset({})
       await vi.waitFor(() => {
-        expect(scanPersisted).toHaveBeenCalledOnce()
+        expect(scanPersistedRows).toHaveBeenCalledOnce()
+        expect(scanPersistedRows).toHaveBeenCalledWith()
       })
 
       collection._sync.unloadSubset({})
@@ -7792,6 +8224,63 @@ describe(`QueryCollection`, () => {
   })
 
   describe(`Cache Persistence on Remount`, () => {
+    it(`publishes a warm ordered limit without a fetch in the initiating call stack`, async () => {
+      const rows: Array<TestItem> = [
+        { id: `1`, name: `one`, value: 1 },
+        { id: `2`, name: `two`, value: 2 },
+        { id: `3`, name: `three`, value: 3 },
+      ]
+      const queryFn = vi.fn().mockResolvedValue(rows)
+      const source = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `warm-ordered-limit-source`,
+          queryClient,
+          syncMode: `on-demand`,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          queryKey: [`warm-ordered-limit`],
+          queryFn,
+          getKey,
+          staleTime: Infinity,
+          gcTime: Infinity,
+        }),
+      )
+      const build = () =>
+        createLiveQueryCollection({
+          startSync: false,
+          query: (q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.value)
+              .limit(2),
+        })
+      const warm = build()
+      const remounted = build()
+
+      try {
+        await warm.preload()
+        expect(warm.toArray.map(({ id }) => id)).toEqual([`1`, `2`])
+        expect(queryFn).toHaveBeenCalled()
+        await warm.cleanup()
+        queryFn.mockClear()
+
+        const preload = remounted.preload()
+        expect(queryFn).not.toHaveBeenCalled()
+        expect(remounted.toArray.map(({ id }) => id)).toEqual([`1`, `2`])
+        expect(remounted.status).toBe(`ready`)
+        await preload
+        expect(queryFn).toHaveBeenCalledTimes(0)
+        await Promise.resolve()
+        expect(queryFn).toHaveBeenCalledTimes(0)
+      } finally {
+        await Promise.all([
+          warm.cleanup(),
+          remounted.cleanup(),
+          source.cleanup(),
+        ])
+      }
+    })
+
     it(`should process cached results immediately when QueryObserver resubscribes`, async () => {
       const queryKey = [`remount-cache-test`]
       const items: Array<TestItem> = [

@@ -2,8 +2,15 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, expect, it } from 'vitest'
 import { oraclePropertyOptions } from './oracle-config.js'
 
-// Ordinary discovery runs a real positive property and an unrelated assertion.
-// Only subprocess calibration chooses a fault, skip, or zero-run variant.
+/**
+ * Calibration fixture for the guarded replay protocol.
+ *
+ * Ordinary discovery runs one real positive property and one unrelated test.
+ * A child process may inject exactly one fault: setup, property, unrelated test,
+ * skip, zero runs, expected failure, precondition exhaustion, or wrong replay
+ * coordinates. The parent uses these variants to prove it neither accepts a
+ * false-green run nor rewrites fast-check's real failure.
+ */
 const fault = process.env.TANSTACK_DB_ORACLE_REPLAY_CALIBRATION
 beforeEach(() => {
   if (fault === `setup`) throw new Error(`replay setup sentinel`)

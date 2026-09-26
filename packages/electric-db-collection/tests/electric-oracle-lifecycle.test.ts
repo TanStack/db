@@ -1,6 +1,13 @@
 import { expect, it, vi } from 'vitest'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 
+/**
+ * Calibration for Electric oracle ownership. The cases prove that a timeout is
+ * only an observation failure, that later resources still release, and that
+ * cleanup cannot replace a primary semantic failure. Provider properties rely
+ * on these rules when a held stream or local HTTP server misbehaves.
+ */
+
 it(`tries every Electric oracle resource and retains primary and secondary failures`, async () => {
   const primary = new Error(`primary`)
   const secondary = new Error(`secondary`)
