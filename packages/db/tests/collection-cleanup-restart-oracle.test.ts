@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createCollection, createLiveQueryCollection } from '../src'
+import {
+  createCollection,
+  createLiveQueryCollection,
+  withCollectionSyncConfigCleanup,
+} from '../src'
 import { createDeferred } from '../src/deferred'
 import type { SyncConfig } from '../src/types'
 
@@ -20,7 +24,10 @@ import type { SyncConfig } from '../src/types'
  * terminal event before the public cleanup promise settles; awaiting cleanup
  * is the ordinary external restart boundary. Concurrent callers share the
  * promise. Rejection still finalizes the old run once, then rejects every
- * waiter. A later ordinary preload is a new generation and must work.
+ * waiter. If adapter cleanup and local teardown both fail, the aggregate keeps
+ * the adapter error primary and the local error as a secondary diagnostic. A
+ * lone error keeps its identity. A later ordinary preload is a new generation
+ * and must work.
  *
  * Counts, errors, status, rows, and ownership are all observed. Checking only
  * `cleaned-up` would miss leaked or duplicated physical resources.
@@ -249,6 +256,54 @@ describe(`Collection cleanup admission oracle`, () => {
       await collection.cleanup()
     }
   })
+
+  it.each([`throw`, `reject`] as const)(
+    `keeps adapter cleanup failure primary when local teardown also fails: %s`,
+    async (outcome) => {
+      const cleanupGate = createDeferred<void>()
+      const adapterFailure = new Error(`adapter cleanup failed exactly`)
+      const localFailure = new Error(`local teardown failed exactly`)
+      const sync = withCollectionSyncConfigCleanup(
+        {
+          sync: ({ markReady }) => {
+            markReady()
+            return () => {
+              if (outcome === `throw`) throw adapterFailure
+              return cleanupGate.promise.then(() => {
+                throw adapterFailure
+              })
+            }
+          },
+        },
+        () => {
+          throw localFailure
+        },
+      )
+      const collection = createCollection<Row>({
+        getKey: (row) => row.id,
+        sync,
+      })
+
+      try {
+        await collection.preload()
+        const cleanup = collection.cleanup()
+        cleanupGate.resolve()
+        const failure = await cleanup.catch((error: unknown) => error)
+
+        expect(failure).toBeInstanceOf(AggregateError)
+        const aggregate = failure as AggregateError
+        expect(aggregate.cause).toMatchObject({
+          name: `SyncCleanupError`,
+          cause: adapterFailure,
+        })
+        expect(aggregate.errors).toEqual([aggregate.cause, localFailure])
+        expect(collection.status).toBe(`cleaned-up`)
+      } finally {
+        cleanupGate.resolve()
+        await collection.cleanup().catch(() => undefined)
+      }
+    },
+  )
 
   it.each(scenarios)(
     `rejects restart without creating replacement ownership: %j`,

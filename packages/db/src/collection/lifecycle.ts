@@ -352,7 +352,8 @@ export class CollectionLifecycleManager<
     const completion = createDeferred<void>()
     this.cleanupPromise = completion.promise
     this.cleaningUp = true
-    let firstFailure: { error: unknown } | undefined
+    let localFailure: { error: unknown } | undefined
+    let synchronousSyncFailure: { error: unknown } | undefined
     let syncCleanupComplete = true
     let finished = false
 
@@ -360,14 +361,13 @@ export class CollectionLifecycleManager<
       try {
         callback()
       } catch (error) {
-        firstFailure ??= { error }
+        localFailure ??= { error }
       }
     }
 
     const finish = (syncFailure?: { error: unknown }) => {
       if (finished) return
       finished = true
-      firstFailure ??= syncFailure
       this.cleaningUp = false
       // Clear this operation before emitting the terminal status. A listener
       // may start and then clean up the replacement sync run synchronously.
@@ -383,7 +383,16 @@ export class CollectionLifecycleManager<
       // Keep cleanup observably asynchronous even when every release is
       // synchronous. Existing callers may use this turn to let optimistic
       // settlement finish before starting the next operation.
-      const failure = firstFailure
+      const failure =
+        syncFailure && localFailure
+          ? {
+              error: new AggregateError(
+                [syncFailure.error, localFailure.error],
+                `Adapter cleanup and local teardown both failed`,
+                { cause: syncFailure.error },
+              ),
+            }
+          : (syncFailure ?? localFailure)
       void Promise.resolve()
         .then(() => Promise.resolve())
         .then(() => {
@@ -399,7 +408,7 @@ export class CollectionLifecycleManager<
     try {
       syncCleanupComplete = this.sync.cleanup(finish)
     } catch (error) {
-      firstFailure ??= { error }
+      synchronousSyncFailure = { error }
     }
 
     attempt(() => this.state.cleanup())
@@ -413,7 +422,7 @@ export class CollectionLifecycleManager<
     // first-ready listeners belong to the discarded run.
     this.onFirstReadyCallbacks = []
 
-    if (syncCleanupComplete) finish()
+    if (syncCleanupComplete) finish(synchronousSyncFailure)
     return completion.promise
   }
 
