@@ -1062,9 +1062,6 @@ function createPowerSyncCollectionConfig<
                 ...pendingLoads,
               ])
               const disposalSettlement = ownershipSettlements[0]
-              if (disposalSettlement.status === `rejected`) {
-                collector.failure ??= { error: disposalSettlement.reason }
-              }
 
               let settledTasks = 0
               while (settledTasks < collector.tasks.length) {
@@ -1078,6 +1075,9 @@ function createPowerSyncCollectionConfig<
                 if (rejected) {
                   collector.failure ??= { error: rejected.reason }
                 }
+              }
+              if (disposalSettlement.status === `rejected`) {
+                throw disposalSettlement.reason
               }
               if (collector.failure) throw collector.failure.error
             })().finally(() => {
