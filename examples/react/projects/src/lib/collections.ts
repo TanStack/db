@@ -21,8 +21,8 @@ export const usersCollection = createCollection(
       const users = await trpc.users.getAll.query()
       return users.map((user) => ({
         ...user,
-        created_at: new Date(user.created_at),
-        updated_at: new Date(user.updated_at),
+        createdAt: new Date(user.createdAt),
+        updatedAt: new Date(user.updatedAt),
       }))
     },
     queryClient,
