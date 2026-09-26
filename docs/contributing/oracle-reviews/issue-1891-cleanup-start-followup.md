@@ -435,3 +435,47 @@ files but the type checker rejected the event recorder's broad
 observation from the already-discriminated event value. The targeted oracle and
 its type check then passed. The final full DB-package rerun passed all 6,406
 tests across 216 files with no type errors.
+
+## Multiple cleanup-start failure reconciliation
+
+Reviewed semantic head:
+`eb93f42094a365f5b2b599504ed4ffea4da66bbb`
+
+Review baseline: `7de64caeeb46c0a6d2b9f5c7e7cf424d7e6193da`
+
+A final current-head review found one failure-fidelity gap. Cleanup start
+attempted every observer, but `runAllCallbacks` rethrew only the first observer
+failure and `beginCleanup` retained only one local failure. With two throwing
+observers and a rejecting adapter cleanup, the public `AggregateError` retained
+the wrapped adapter failure and the first observer failure but silently dropped
+the second observer failure.
+
+The fixed oracle is the smallest distinguishing history: two cleanup-start
+observers throw distinct sentinel errors in registration order, adapter cleanup
+rejects after a held gate, and cleanup then admits a new sync run. The RED run
+reached both observers and failed because `AggregateError.errors` had two entries
+instead of three. Production now records every local teardown failure in
+execution order. Adapter cleanup remains the primary `cause`; a lone local
+failure keeps its identity; multiple local-only failures use the first local
+failure as their aggregate cause. Teardown, terminal publication, and later
+restart still complete.
+
+| Requirement | Reconciliation outcome |
+| --- | --- |
+| ORC-001 | Pass. The existing cleanup contract and ORC-010 failure-fidelity law require each cleanup diagnostic to remain distinguishable. The test does not claim provider transport shutdown or full demand/replay coverage. |
+| ORC-002 | Pass. Expected error identity and order come from callback execution order and adapter-primary precedence, not the production aggregator. |
+| ORC-003 | Pass. The existing contract, timeline model, fixed failure history, public Collection driver, and exact aggregate comparison remain distinguishable. |
+| ORC-004 | Not applicable. This is one fixed controlled history, not a generated-grammar claim. |
+| ORC-005 | Pass. The test calls public preload, cleanup, and restart entry points; observer call order, exact error identities, status, and restart are observed. |
+| ORC-006 | Pass. Baseline production was the hostile wrong design. It reached both callbacks and failed only the missing-third-error assertion. |
+| ORC-007 | Not applicable. No important generated property changed. |
+| ORC-008 | Not applicable. No stateful reference model changed. |
+| ORC-009 | Pass. Cleanup start, adapter cleanup, local teardown, settlement, and restart retain their glossary meanings. |
+| ORC-010 | Pass. The aggregate keeps the adapter failure as `cause` and retains both observer failures in execution order while cleanup releases resources and permits restart. |
+| ORC-011 | Not applicable. The named defect is information loss in one concrete aggregator; no meaningfully independent semantic formulation is needed beyond exact sentinel identities and order. |
+
+ORC-012 is satisfied for this repair by the requirement-by-requirement record
+above. The focused RED run failed one of one selected tests with no type errors.
+After the repair, the complete cleanup/restart oracle passed 37 of 37 tests,
+and the five-suite lifecycle collateral passed 204 of 204 tests with no type
+errors. Targeted ESLint, Prettier, and `git diff --check` passed.
