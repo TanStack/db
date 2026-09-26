@@ -291,3 +291,147 @@ stated type, lint, format, and build checks. That record classified pending late
 hooks and trigger disposal as an open design gap and named cleanup start only as
 the destination. This follow-up implements and calibrates that destination; it
 does not rewrite the earlier verdict.
+
+## Design-grammar reconciliation
+
+Reviewed semantic head:
+`20407a501a2441cd3780198809e75c00eb410925`
+
+The frozen preservation contract required the model to retain cleanup start,
+all-owned retirement, observer and adapter failure aggregation, late-registration
+rollback, one notification per owner per boundary, terminal dependent ownership
+across source restart, and the PowerSync pending-resource refinement. The
+smallest reconstruction is a graph of independent laws rather than one model of
+every lifecycle manager:
+
+- a three-cut timeline owns cleanup start, terminal `cleaned-up` publication,
+  and later public cleanup-Promise settlement;
+- observer registration ownership crosses cleanup-boundary identity, so one
+  registration receives one notification for each boundary until it
+  unsubscribes;
+- dependent ownership crosses sync-run identity, so source restart does not
+  revive a live query terminalized by the retired run;
+- setup rollback owns the inverted history in which a dependent registers while
+  cleanup is already active;
+- a provenance-labelled failure relation keeps adapter failure primary and
+  observer or local failure secondary; and
+- the PowerSync task collector refines the one adapter-cleanup obligation with
+  active, released, pending, and late hook cleanup plus present or in-flight
+  trigger disposal.
+
+The core timeline now models all three observable cuts. At cleanup start,
+restart admission is closed, public status is unchanged, and cleanup is
+pending. At terminal publication, admission is open and status is `cleaned-up`
+while the original cleanup Promise remains pending. Promise settlement follows.
+The model still does not reproduce callback registries, manager order, provider
+tasks, replay, or publication machinery.
+
+### Reconstruction, ablation, exclusion, and range
+
+Every known valid witness reconstructs from the graph above. The timeline owns
+the held-adapter case. Separate driver refinements cover live queries, Effects,
+repeated aliases, late observers, source position, abort and release reentry,
+runtime cleanup return shape, concurrent callers, terminal-event restart, and
+failure combinations. PowerSync separately covers each provider task origin and
+their consequential overlap.
+
+One-at-a-time ablation produced these results:
+
+| Removed coordinate or relation | Lost distinction |
+| --- | --- |
+| Cleanup start | Dependents remain active while adapter cleanup is pending. |
+| Terminal-publication cut | Event-time restart and event-before-Promise order disappear. |
+| Cleanup-Promise cut | Adapter settlement becomes indistinguishable from public completion. |
+| Sync-run identity | A source restart may revive an already-terminal dependent. |
+| Registration by cleanup boundary | Once-per-boundary and once-per-lifetime become indistinguishable. |
+| Cleaning-source position | Setup can retain an owner acquired before the cleaning source. |
+| Adapter/local failure provenance | Rejection timing may choose the wrong primary failure. |
+| Runtime return shape | A contextual-`void` Promise can be mistaken for synchronous cleanup. |
+| PowerSync task origin | A late hook, released hook, or in-flight trigger can fall outside adapter ownership. |
+| PowerSync task-set growth | Cleanup can snapshot tasks once and settle before a late disposer. |
+
+The two-attempt reentry coordinate does not justify a full Cartesian expansion
+by itself, but it retains one repeated-denial observation without meaningful
+runtime cost. The existing eight reentry cells therefore remain. Stable case
+IDs now calibrate the complete `abort|release × plain|nested × 1|2` product and
+the complete `event|await × source|live-query` product. The executable check
+asserts the expected order, completeness, and uniqueness of all twelve IDs.
+The source-position matrix and PowerSync result-shape matrices are explicit
+one-dimensional enumerations with no derived product or skipped cells.
+
+Nearby invalid states are rejected or kept outside this owner:
+
+- an observer registered after cleanup settlement does not retroactively
+  observe the old boundary;
+- restarting or recreating a live-query Collection differs from restarting
+  only its cleaned source;
+- a settled ordinary-unload failure is reported once rather than retroactively
+  adopted by a later cleanup; and
+- provider transport shutdown, demand replay, and general row publication
+  remain outside this oracle.
+
+No independent marginal case was supplied after the grammar froze. Range is
+therefore untested beyond the current core driver and the Node SQLite PowerSync
+refinement. Existing persistence and PowerSync cases shaped the grammar and are
+not held-out range evidence. Browser, mobile, multi-process, and provider
+transport behavior remain outside the claim.
+
+### New executable controls
+
+The core owner adds three focused witnesses:
+
+1. A cleanup-start observer throws before the adapter cleanup later rejects.
+   The final `AggregateError` keeps the wrapped adapter failure as `cause` and
+   the observer failure as its secondary error.
+2. One ordinary observer remains registered across two cleanup/restart
+   boundaries, receives exactly one notification for each, then receives none
+   after unsubscribe.
+3. Restarting a cleaned source leaves the original dependent live query in
+   terminal error, preserves its prior result, and emits no replacement
+   publication.
+
+The PowerSync refinement adds the higher-order overlap omitted by the separate
+late-hook and in-flight-trigger cases. One cleanup starts while trigger creation
+and another subset hook are both pending. Both later cleanup functions are
+owned and invoked once. Hook cleanup rejects first while trigger disposal stays
+pending. Cleanup remains pending, then rejects with trigger disposal as the
+deterministic primary failure, without duplicate adapter logging or an
+unhandled rejection.
+
+The direct observer-plus-adapter checker was calibrated with a temporary
+priority-inversion mutant. The mutant made the observer failure the aggregate
+cause and failed the intended test at its exact cause assertion: one failure and
+33 skipped tests. Restoring production made all 34 core oracle tests pass. No
+production change was required.
+
+### Reusable boundary-law prompts
+
+| Prompt | Disposition |
+| --- | --- |
+| Real-provider conformance | Applicable to the provider refinement. PowerSync runs through `@powersync/node` and a real temporary Node SQLite database. The in-memory core fixture makes no provider-value claim. |
+| Minimal ambiguity | Applicable and covered. Incidental non-Promise return, runtime Promise, synchronous throw, asynchronous rejection, and fulfillment have separate witnesses. |
+| Name invariance | Not applicable. No user-controlled name or SQL alias selects cleanup classification. |
+| Representation symmetry | Applicable only to cleanup return representation. Function and object cleanup forms plus contextual-`void` runtime Promises preserve the same settlement law. |
+| Await-boundary transitions | Applicable and covered at cleanup start, terminal publication, adapter settlement, late hook return, trigger creation, and disposer settlement. |
+| Local/transport refinement | Boundary only. Core and Node SQLite share lifecycle settlement; provider transport termination remains explicitly unclaimed. |
+| Partial-construction cleanup | Applicable and covered for cleaning-source position, pending hook acquisition, trigger creation, and their combined overlap. This does not claim every provider construction step. |
+| Value-and-work refinement | Not applicable as a bounded-work law. Exact once counts protect ownership, not performance or transfer cardinality. |
+
+### Exact-head environment and receipts
+
+The semantic head ran with Node `24.19.0`, pnpm `11.1.0`, Vitest `3.2.4`,
+TypeScript `5.9.3`, `@powersync/node` `0.20.0`, and Darwin `25.6.0` on arm64.
+
+- The cleanup/restart oracle passed 34 of 34 tests with no type errors.
+- The PowerSync load-hook suite passed 33 of 33 tests with no type errors.
+- The full PowerSync package passed 176 of 176 tests across 11 files with no
+  type errors.
+- Targeted ESLint and Prettier checks passed.
+- `git diff --check` passed.
+
+The first full DB-package verification executed 6,406 assertions across 216
+files but the type checker rejected the event recorder's broad
+`CollectionStatus` annotation. The follow-up semantic head above narrows that
+observation from the already-discriminated event value. The targeted oracle and
+its type check then passed. The final full DB-package rerun passed all 6,406
+tests across 216 files with no type errors.
