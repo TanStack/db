@@ -78,3 +78,154 @@ Verification after the semantic commit: the focused regression passed 1/1; the
 complete ordered-lifecycle owner passed 229/229; six surrounding ordered-loader,
 ordered-work, and live-query suites passed 311/311; DB build, changed-file lint,
 format, and diff checks passed.
+
+## Loss-audit and design-grammar closeout
+
+- Production semantic head: `74e554937a439e89dcadef8ad4a0f61fef0635d4`
+- Oracle/test head: `fb6d61421480980ef38037d13ef579e74a3de491`
+- Runtime: Node `24.19.0`, pnpm `11.1.0`, Vitest `3.2.4`
+- Extraction target: the smallest oracle grammar that preserves ordered initial
+  readiness, graph progress, repair precedence, and failure evidence without
+  multiplying unrelated lifecycle dimensions.
+
+The closeout changed tests and oracle evidence only. The intended production
+behavior remains the behavior at the semantic head. The loss audit recovered
+independent ordering directions, continuation depth, Promise-parent ownership,
+captured-failure replay, and primary-versus-cleanup diagnostics as material
+properties that the earlier review did not fully preserve.
+
+### Model
+
+The preservation contract was frozen before the final grammar changes:
+
+| ID | Preserved property | Authority |
+| --- | --- | --- |
+| DG-P1 | A literal-`true` initial ordered acquisition publishes its complete initial window before the initiating stack returns. | Architecture and existing public readiness contract |
+| DG-P2 | A Promise-returning acquisition promises the settled checkpoint, not the synchronous checkpoint. | Adapter settlement contract |
+| DG-P3 | A synchronous ordered continuation drains until it reaches real pending work, exhaustion, failure, or graph input that requires a graph turn. | Architecture and reviewed semantic behavior |
+| DG-P4 | Sibling-source input reaches the shared graph before the loader decides that another ordered acquisition is necessary. | Architecture and cross-source regression |
+| DG-P5 | Ordering repair takes precedence over a staged ordinary continuation and an explicit window cannot consume stale work. | Reviewed repair semantic head |
+| DG-P6 | A fulfilled Promise parent remains owned when its continuation throws; repair debt is recorded without retiring the successful acquisition. | Acquisition ownership and repair contract |
+| DG-P7 | Nullable multi-term ordering varies each term's direction and null placement independently. | Public order-by semantics |
+| DG-P8 | Readiness evidence includes rows and status; work evidence includes the exact acquisition and release trace. | Oracle observation contract |
+| DG-P9 | A primary oracle mismatch remains primary while every cleanup failure remains distinguishable and every cleanup is attempted. | `oracle-tests.md` ORC-010 |
+| DG-P10 | Explicit-window, replay, repair, and Effect scheduling laws keep their existing owners; this grammar does not silently absorb them. | Coverage map and user-confirmed scope |
+
+The surviving grammar has four separate subgrammars rather than one artificial
+Cartesian product:
+
+1. Initial readiness is `acquisition path × settlement` (`page` or `prefix` by
+   literal `true` or Promise), exactly four cells.
+2. The existing ordered lifecycle product remains 192 cells:
+   acquisition path × delivery phase × window action × outcome × sync-run
+   generation × initial/replay barrier.
+3. Post-success failure remains its bounded settlement × failure-phase grammar;
+   it is not multiplied into initial readiness.
+4. Query same-result reentry remains with the Query Collection result-settlement
+   owner and is reviewed in the companion result-settlement record.
+
+Graph progress is expressed as three overlays: a quiet multi-step continuation
+drain, sibling-source graph progress, and ordering-repair precedence. The
+nullable lifecycle grammar retains its 22 declared lifecycle cells and adds a
+four-cell primary/secondary direction overlay. Random generation varies both
+directions independently. This preserves the missing relation without turning
+every lifecycle cell into another four-way product.
+
+### Evidence
+
+Reconstruction reaches every declared cell: four initial-settlement cells, all
+192 original lifecycle histories, all 22 nullable lifecycle cells, and all four
+direction pairs. Exact uniqueness checks prevent a duplicated declaration from
+masquerading as coverage. A four-step synchronous trace
+`page → boundary → page → boundary` proves continuation depth rather than only
+one-step reentry.
+
+One-at-a-time ablation gave each retained coordinate a distinct job:
+
+- Removing settlement shape erases the synchronous-versus-Promise readiness
+  boundary; removing acquisition path erases indexed page versus unindexed
+  prefix behavior.
+- Removing any original lifecycle axis erases a distinct public checkpoint,
+  request shape, terminal outcome, sync generation, window transition, or
+  replay barrier.
+- Coupling the two sort directions removes `asc/asc` and `desc/desc`; the
+  four-cell overlay prevents that false grammar.
+- Removing quiet drain, sibling progress, or repair precedence respectively
+  permits shallow return, stale extra acquisition, or stale-continuation work.
+- Removing Promise-parent retention permits a continuation failure to discard a
+  successful acquisition that repair still needs.
+- Removing failure-safe cleanup lets a teardown error hide the oracle mismatch.
+
+The nearby invalid designs are therefore concrete: readiness before applied
+receipts and continuations, a third stale acquisition after sibling progress,
+ordinary continuation before repair, early parent release after a continuation
+failure, coupled sort directions, and cleanup replacement of the primary
+failure. Explicit-window histories, replay histories, repair histories, and
+Effect scheduling remain valid neighboring domains, but their laws stay with
+their existing owners. Framework render-time scheduling is outside this
+grammar.
+
+The independent formulations have deliberately narrower equivalence claims:
+
+- Direct source and warm Query cache must agree on final rows and readiness,
+  while a warm cache has no source acquisition chain to compare.
+- Direct source and React must agree on rows and status at React's receiving
+  checkpoint; this says nothing about render-time scheduling.
+- The sibling-source wait-for-graph history adds an exact physical request
+  trace, so it constrains work as well as final rows.
+
+### Process
+
+The extraction source was frozen at the production semantic head, with the
+architecture, oracle guide, coverage map, ordered lifecycle owner, loader
+regressions, Query Collection owner, and existing framework/cache formulations
+as named evidence. Production semantics were not changed to satisfy the
+grammar. Candidate coordinates survived only when reconstruction or
+one-at-a-time ablation showed a distinct law, checkpoint, exclusion, or active
+overlap; otherwise they remained separate overlays or with their existing
+owner.
+
+Two hostile controls demonstrate detection and replay:
+
+- A temporary early-release mutant made the Promise-parent continuation test
+  fail at the exact lease assertion. Restoring production made the focused test
+  pass.
+- A temporary `secondary-order` fault failed the random nullable property at
+  seed `-1998078481`, shrink path `0:0:0:0:0`, after four shrinks. Direct replay
+  with `TANSTACK_DB_ORACLE_PROPERTY=ordered-work.nullable-lifecycle` reproduced
+  the same `success-rows` mismatch with zero additional shrinks. Restoring the
+  oracle made that exact replay pass.
+
+The cleanup control injects one primary mismatch and two teardown failures. It
+proves both teardown callbacks run, the `AggregateError.cause` is the primary
+mismatch, and `errors` retains the primary plus both cleanup diagnostics in
+order.
+
+The decomposition loss is explicit: separate subgrammars do not prove every
+cross-product interaction. The overlays preserve the intersections implicated
+by the issue and loss audit; unrelated combinations remain with their existing
+owners. This avoids combinatorial confidence without hiding the boundary.
+
+### ORC disposition at the oracle/test head
+
+| Requirement | Outcome |
+| --- | --- |
+| ORC-001 | Pass. DG-P1 through DG-P10 name the intended laws, authorities, and exclusions. |
+| ORC-002 | Pass. Expected rows come from finite-source sorting and slicing; settlement and ownership expectations come from public contracts, not loader continuation or repair machinery. |
+| ORC-003 | Pass. The opening contract, scenario grammar, finite reference, real live-query driver, and mismatch/refinement checks remain visible and distinguishable. |
+| ORC-004 | Pass. Reconstruction, one-at-a-time ablation, bounded range, overlays, and nearby invalid designs are recorded above; executable uniqueness checks guard the enumerated cells. |
+| ORC-005 | Pass. Real source Collections and live queries expose rows, status, requests, releases, repair, and readiness at named checkpoints. |
+| ORC-006 | Pass. The early-release mutant and secondary-order fault both reached their intended checkpoints and failed by assertion; neither was a setup failure or timeout. |
+| ORC-007 | Pass. Both important generated properties retain equal fixed and random campaigns, and the captured nullable failure was replayed directly by seed, shrink path, and property name. |
+| ORC-008 | Not applicable. The closeout introduces no reference-model state and neither combines nor splits existing model states. |
+| ORC-009 | Pass. Settlement, acquisition, graph input, repair, readiness, replay, and applied receipt retain their architecture/glossary meanings; overlay-only terms are identified above. |
+| ORC-010 | Pass. The harness preserves the primary failure as cause, retains every cleanup diagnostic, attempts all cleanup callbacks, and has an executable hostile control. |
+| ORC-011 | Pass. Warm-cache, React receiving-driver, and sibling wait-for-graph formulations state exactly which observations are equivalent and which work or scheduling facts differ. |
+| ORC-012 | Pass. This section records every ORC-001 through ORC-011 outcome against exact semantic and oracle/test heads. |
+
+Verification at the oracle/test head: the ordered loader and lifecycle owners
+passed 298/298 with test type checking; the Query Collection ownership owner
+passed 227/227 across runtime and source type-check projects. DB and Query
+Collection builds passed. Changed-file lint reported no errors (two existing
+`require-await` warnings remain elsewhere in the Query Collection owner), and
+format plus diff checks passed.
