@@ -3,6 +3,7 @@
 import { useRef, useSyncExternalStore } from 'react'
 import {
   BaseQueryBuilder,
+  IR,
   UnhashableQueryIRError,
   createLiveQueryCollection,
   createLiveQueryObserver,
@@ -31,6 +32,9 @@ import type {
 } from '@tanstack/db'
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
+// Suspense renders can be abandoned before React subscribes. Keep their
+// collection briefly so a nearby retry can commit without starting over.
+const DEFAULT_SUSPENSE_GC_TIME_MS = 5000
 const DERIVED_IDENTITY_SINGLE_RENDER_WARN_MS = 16
 const DERIVED_IDENTITY_RENDER_COUNT_WARN_THRESHOLD = 10
 const DERIVED_IDENTITY_TOTAL_WARN_MS = 50
@@ -38,6 +42,72 @@ const warnedDepsCallsites = new Set<string>()
 const warnedDerivedIdentityCallsites = new Set<string>()
 const warnedUnhashableIdentityCallsites = new Set<string>()
 const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
+
+type SuspenseCollection = Collection<object, string | number, {}>
+type SuspenseCollectionEntry = {
+  collection: SuspenseCollection
+  removeStatusListeners: () => void
+}
+
+const unscopedSuspenseCollections = new Map<string, SuspenseCollectionEntry>()
+const suspenseCollectionsByClient = new WeakMap<
+  DbClient,
+  Map<string, SuspenseCollectionEntry>
+>()
+const suspenseSourceIds = new WeakMap<object, number>()
+let nextSuspenseSourceId = 0
+
+function getSuspenseSourceId(source: object): number {
+  let id = suspenseSourceIds.get(source)
+  if (id === undefined) {
+    id = ++nextSuspenseSourceId
+    suspenseSourceIds.set(source, id)
+  }
+  return id
+}
+
+function getUnscopedSuspenseKey(
+  preparedValue: unknown,
+  queryHash: string,
+): string {
+  const query =
+    preparedValue instanceof BaseQueryBuilder
+      ? preparedValue
+      : preparedValue &&
+          typeof preparedValue === `object` &&
+          `query` in preparedValue &&
+          preparedValue.query instanceof BaseQueryBuilder
+        ? preparedValue.query
+        : undefined
+  if (!query) return queryHash
+  const sourceIds = IR.collectCollectionSources(query._getQuery()).map(
+    ({ collection }) => getSuspenseSourceId(collection),
+  )
+  return `${sourceIds.join(`,`)}:${queryHash}`
+}
+
+function getSuspenseCollections(
+  client: DbClient | undefined,
+): Map<string, SuspenseCollectionEntry> {
+  if (!client) return unscopedSuspenseCollections
+  let collections = suspenseCollectionsByClient.get(client)
+  if (!collections) {
+    collections = new Map()
+    suspenseCollectionsByClient.set(client, collections)
+  }
+  return collections
+}
+
+function releaseSuspenseCollection(
+  collections: Map<string, SuspenseCollectionEntry>,
+  queryHash: string,
+  collection: SuspenseCollection,
+): void {
+  const entry = collections.get(queryHash)
+  if (entry?.collection !== collection) return
+  collections.delete(queryHash)
+  entry.removeStatusListeners()
+}
 
 export type DerivedIdentityProfiler = {
   renderCount: number
@@ -120,7 +190,16 @@ function getCurrentTime(): number {
 
 function getWarningCallsite(stackIndex: number): string {
   const stack = new Error().stack ?? `unknown`
-  return stack.split(`\n`)[stackIndex]?.trim() ?? stack
+  const lines = stack.split(`\n`)
+  const userFrame = lines
+    .slice(1)
+    .find(
+      (line) =>
+        !line.includes(`useLiveQuery.ts`) &&
+        !line.includes(`useLiveSuspenseQuery.ts`) &&
+        !line.includes(`useLiveInfiniteQuery.ts`),
+    )
+  return userFrame?.trim() ?? lines[stackIndex]?.trim() ?? stack
 }
 
 function warnDerivedIdentityHotPath(
@@ -256,7 +335,10 @@ export function warnUnhashableDerivedIdentity(
   )
 }
 
-function createCollectionFromPreparedQuery(value: unknown) {
+function createCollectionFromPreparedQuery(
+  value: unknown,
+  defaultGcTime = DEFAULT_GC_TIME_MS,
+) {
   if (value === undefined || value === null) {
     return null
   }
@@ -270,14 +352,14 @@ function createCollectionFromPreparedQuery(value: unknown) {
     return createLiveQueryCollection({
       query: value,
       startSync: true,
-      gcTime: DEFAULT_GC_TIME_MS,
+      gcTime: defaultGcTime,
     })
   }
 
   if (typeof value === `object`) {
     return createLiveQueryCollection({
       startSync: true,
-      gcTime: DEFAULT_GC_TIME_MS,
+      gcTime: defaultGcTime,
       ...(value as LiveQueryCollectionConfig<any>),
     })
   }
@@ -644,6 +726,22 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps?: Array<unknown>,
 ) {
+  return useLiveQueryImpl(configOrQueryOrCollection, deps)
+}
+
+/** @internal Shared implementation for the Suspense wrapper. */
+export function useLiveQueryForSuspense(
+  configOrQueryOrCollection: any,
+  deps: Array<unknown> | undefined,
+) {
+  return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
+}
+
+function useLiveQueryImpl(
+  configOrQueryOrCollection: any,
+  deps: Array<unknown> | undefined,
+  forSuspense = false,
+) {
   const contextDbClient = useOptionalDbClient()
   // Check if it's already a collection
   const inputIsCollection = isCollection(configOrQueryOrCollection)
@@ -676,6 +774,7 @@ export function useLiveQuery(
     null,
   )
   const queryHashRef = useRef<string | undefined>(undefined)
+  const suspenseKeyRef = useRef<string | undefined>(undefined)
   const identityErrorRef = useRef<UnhashableQueryIRError | undefined>(undefined)
 
   const queryKey = !inputIsCollection
@@ -747,6 +846,47 @@ export function useLiveQuery(
     warnDeprecatedDepsArray()
   }
 
+  const canReuseSuspenseKey =
+    forSuspense &&
+    !inputIsCollection &&
+    queryHash !== undefined &&
+    !dbClient &&
+    collectionRef.current !== null &&
+    clientRef.current === dbClient &&
+    queryHashRef.current === queryHash &&
+    suspenseKeyRef.current !== undefined
+
+  if (
+    forSuspense &&
+    !inputIsCollection &&
+    queryHash &&
+    !dbClient &&
+    !canReuseSuspenseKey &&
+    preparedQueryValue === unpreparedQueryValue
+  ) {
+    preparedQueryValue = prepareQueryValue(
+      configOrQueryOrCollection,
+      dbClient,
+      deferredCollectionsRef.current,
+    )
+  }
+
+  const suspenseKey =
+    queryHash && !dbClient
+      ? canReuseSuspenseKey
+        ? suspenseKeyRef.current
+        : getUnscopedSuspenseKey(preparedQueryValue, queryHash)
+      : queryHash
+
+  const suspenseCollections =
+    forSuspense && !inputIsCollection && suspenseKey
+      ? getSuspenseCollections(dbClient)
+      : undefined
+  const suspenseEntry = suspenseKey
+    ? suspenseCollections?.get(suspenseKey)
+    : undefined
+  const suspenseCollection = suspenseEntry?.collection
+
   const identityChanged =
     depsRef.current === null ||
     (deps !== undefined
@@ -792,21 +932,59 @@ export function useLiveQuery(
       collectionRef.current = configOrQueryOrCollection
       configRef.current = configOrQueryOrCollection
     } else {
-      if (preparedQueryValue === unpreparedQueryValue) {
-        preparedQueryValue = prepareQueryValue(
-          configOrQueryOrCollection,
-          dbClient,
-          deferredCollectionsRef.current,
-        )
+      if (suspenseCollection) {
+        collectionRef.current = suspenseCollection
+      } else {
+        if (preparedQueryValue === unpreparedQueryValue) {
+          preparedQueryValue = prepareQueryValue(
+            configOrQueryOrCollection,
+            dbClient,
+            deferredCollectionsRef.current,
+          )
+        }
+        collectionRef.current = createCollectionFromPreparedQuery(
+          preparedQueryValue,
+          forSuspense ? DEFAULT_SUSPENSE_GC_TIME_MS : DEFAULT_GC_TIME_MS,
+        ) as SuspenseCollection | null
+        if (suspenseCollections && suspenseKey && collectionRef.current) {
+          const collection = collectionRef.current
+          const removeCleanupListener = collection.on(`status:cleaned-up`, () =>
+            releaseSuspenseCollection(
+              suspenseCollections,
+              suspenseKey,
+              collection,
+            ),
+          )
+          const removeErrorListener = collection.on(`status:error`, () => {
+            // Keep the failed collection through React's immediate retry so
+            // the hook can throw its actual load error to an ErrorBoundary.
+            // Retire it afterward so a later boundary reset starts fresh.
+            setTimeout(
+              () =>
+                releaseSuspenseCollection(
+                  suspenseCollections,
+                  suspenseKey,
+                  collection,
+                ),
+              0,
+            )
+          })
+          const entry: SuspenseCollectionEntry = {
+            collection,
+            removeStatusListeners: () => {
+              removeCleanupListener()
+              removeErrorListener()
+            },
+          }
+          suspenseCollections.set(suspenseKey, entry)
+        }
       }
-      collectionRef.current = createCollectionFromPreparedQuery(
-        preparedQueryValue,
-      ) as Collection<object, string | number, {}>
       configRef.current = configOrQueryOrCollection
       depsRef.current = [...identityDeps]
     }
     clientRef.current = dbClient
     queryHashRef.current = queryHash
+    suspenseKeyRef.current = suspenseKey
     identityErrorRef.current = identityError
   }
 

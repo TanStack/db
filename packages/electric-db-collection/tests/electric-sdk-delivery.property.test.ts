@@ -37,7 +37,7 @@ type Request = { url: URL; respond: (response: Response) => void }
 function controlledHttp() {
   const queued: Array<Request> = []
   const waiting: Array<{
-    snapshot: boolean
+    snapshot: boolean | undefined
     resolve: (request: Request) => void
     reject: (error: unknown) => void
   }> = []
@@ -81,7 +81,9 @@ function controlledHttp() {
       signal?.addEventListener(`abort`, abort, { once: true })
       active.add(abort)
       const index = waiting.findIndex(
-        (waiter) => waiter.snapshot === isSnapshot(request),
+        (waiter) =>
+          waiter.snapshot === undefined ||
+          waiter.snapshot === isSnapshot(request),
       )
       if (index >= 0) waiting.splice(index, 1)[0]!.resolve(request)
       else queued.push(request)
@@ -96,6 +98,13 @@ function controlledHttp() {
       if (index >= 0) return Promise.resolve(queued.splice(index, 1)[0]!)
       return new Promise((resolve, reject) =>
         waiting.push({ snapshot, resolve, reject }),
+      )
+    },
+    takeAny: (): Promise<Request> => {
+      if (closed) return Promise.reject(closedError)
+      if (queued.length > 0) return Promise.resolve(queued.shift()!)
+      return new Promise((resolve, reject) =>
+        waiting.push({ snapshot: undefined, resolve, reject }),
       )
     },
     close: () => {
@@ -270,6 +279,92 @@ it(`rejects a snapshot driver that delivers boundaries but drops response rows`,
     name: `AssertionError`,
     message: expect.stringContaining(`snapshot 0 applied rows`),
   })
+})
+
+it(`lets requestSnapshot own the warm-stream transport transition`, async () => {
+  const http = controlledHttp()
+  let delivery = deferred<void>()
+  const subscribe = ShapeStream.prototype.subscribe
+  const spy = vi
+    .spyOn(ShapeStream.prototype, `subscribe`)
+    .mockImplementation(function (this: ShapeStream, callback, onError) {
+      return subscribe.call(
+        this,
+        (messages) => {
+          const result = callback(messages)
+          delivery.resolve()
+          return result
+        },
+        onError,
+      )
+    })
+  const collection = createCollection(
+    electricCollectionOptions<Item>({
+      id: `sdk-warm-snapshot-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/warm-snapshot-${sequence}`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    }),
+  )
+
+  return withElectricCleanup(async () => {
+    const initial = await atCheckpoint(http.take(), `initial live request`)
+    initial.respond(
+      new Response(
+        JSON.stringify([
+          {
+            headers: {
+              control: `up-to-date`,
+              global_last_seen_lsn: `1`,
+            },
+          },
+        ]),
+        { headers: headers(1) },
+      ),
+    )
+    await atCheckpoint(delivery.promise, `initial up-to-date delivery`)
+
+    // Hold the next live poll. The installed SDK's requestSnapshot owns the
+    // pause/abort transition from this poll to the subset request.
+    await atCheckpoint(http.take(), `warm live poll`)
+    delivery = deferred<void>()
+    const loading = collection._sync.loadSubset({
+      where: new IR.Func(`gte`, [new IR.PropRef([`id`]), new IR.Value(1)]),
+    })
+    const request = await atCheckpoint(
+      http.takeAny(),
+      `first request after warm loadSubset`,
+    )
+    expect(request.url.searchParams.has(`subset__where`)).toBe(true)
+    expect(http.activeCount()).toBe(1)
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: 2,
+          },
+          data: [],
+        }),
+        { headers: headers(2) },
+      ),
+    )
+    await atCheckpoint(delivery.promise, `warm snapshot delivery`)
+    await atCheckpoint(Promise.resolve(loading), `warm snapshot completion`)
+  }, [
+    () => collection.cleanup(),
+    () => http.close(),
+    () => spy.mockRestore(),
+    () => expect(http.activeCount()).toBe(0),
+  ])
 })
 
 async function checkMembership(

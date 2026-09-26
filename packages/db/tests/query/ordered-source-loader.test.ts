@@ -734,6 +734,47 @@ describe(`OrderedSourceLoader`, () => {
     },
   )
 
+  it.each([`page`, `prefix`] as const)(
+    `settles an ordinary synchronous $route chain before start returns`,
+    (route) => {
+      const requests: Array<string> = []
+      const request = (method: string, options: RequestOptions): void => {
+        requests.push(method)
+        options.onLoadSubsetResult?.(true, options, () => {})
+      }
+      const subscription = {
+        setOrderByIndex: () => {},
+        readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+        requestLimitedSnapshot: (options: RequestOptions) =>
+          request(`limited`, options),
+        requestSnapshot: (options: RequestOptions) =>
+          request(`snapshot`, options),
+      }
+      const loader = new OrderedSourceLoader(
+        createOrderByInfo({
+          dataNeeded: () => 0,
+          ...(route === `prefix` ? { index: undefined } : {}),
+        }),
+        subscription as unknown as CollectionSubscription,
+        `row`,
+        undefined,
+        undefined,
+        () => 0,
+      )
+      try {
+        loader.start()
+        expect(pendingPromise(loader)).toBeUndefined()
+        expect(requests).toEqual(
+          route === `prefix`
+            ? [`snapshot`, `snapshot`]
+            : [`limited`, `snapshot`],
+        )
+      } finally {
+        loader.dispose()
+      }
+    },
+  )
+
   it(`recovers authoritatively when reading a settled boundary fails`, async () => {
     const failure = new Error(`boundary read failed`)
     const requests: Array<{ method: string; options: RequestOptions }> = []

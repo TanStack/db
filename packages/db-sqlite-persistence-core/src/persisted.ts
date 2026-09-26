@@ -5,6 +5,7 @@ import {
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
   compileSingleRowExpression,
+  getLoadSubsetDemandKey,
   safeRandomUUID,
   toBooleanPredicate,
   withCollectionConfigFactory,
@@ -1226,6 +1227,7 @@ class PersistedCollectionRuntime<
     lifecycleGeneration: number
   }> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
+  private readonly hydratedDemands = new Set<string | undefined>()
 
   private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
     null
@@ -1262,6 +1264,8 @@ class PersistedCollectionRuntime<
   private indexRemovedUnsubscribe: (() => void) | null = null
   private remoteEnsureRetryTimer: ReturnType<typeof setTimeout> | null = null
   private nextRequestId = 0
+  private startupSettled = false
+  private sourceTruncateGeneration = 0
 
   private latestTerm = 0
   private latestSeq = 0
@@ -1543,6 +1547,9 @@ class PersistedCollectionRuntime<
           await this.waitForAppliedReceiptsAfter(startup.appliedCursor)
         }
       }
+      if (lifecycleGeneration === this.lifecycleGeneration) {
+        this.startupSettled = true
+      }
       resolveStartupMetadata()
     })().catch((error) => {
       rejectStartupMetadata(error)
@@ -1622,6 +1629,8 @@ class PersistedCollectionRuntime<
   ): Promise<number | undefined> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return undefined
 
+    // The baseline shares the unconstrained demand key. Its lease is never
+    // released, and every reload rereads it, so that coverage stays valid.
     const baseline = {}
     this.activeSubsets.set(this.getSubsetKey(baseline), baseline)
     const appliedCursor = this.appliedReceiptSequence
@@ -1760,9 +1769,11 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     this.throwIfTerminal()
     const lifecycleGeneration = this.lifecycleGeneration
+    const subsetKey = this.getSubsetKey(options)
+    const truncateGeneration = this.sourceTruncateGeneration
     const routeRemoteDemandDuringHydration =
       this.canRouteRemoteDemandThroughCoordinator()
-    this.activeSubsets.set(this.getSubsetKey(options), options)
+    this.activeSubsets.set(subsetKey, options)
     const appliedCursor = this.appliedReceiptSequence
     try {
       await this.applyMutex.run(async () => {
@@ -1793,7 +1804,6 @@ class PersistedCollectionRuntime<
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       await this.waitForAppliedReceiptsAfter(appliedCursor)
     } catch (error) {
-      const subsetKey = this.getSubsetKey(options)
       if (this.activeSubsets.get(subsetKey) === options) {
         this.activeSubsets.delete(subsetKey)
       }
@@ -1830,26 +1840,82 @@ class PersistedCollectionRuntime<
       return
     }
 
+    if (
+      truncateGeneration === this.sourceTruncateGeneration &&
+      this.activeSubsets.get(subsetKey) === options
+    ) {
+      this.hydratedDemands.add(getLoadSubsetDemandKey(options))
+    }
+
     if (upstreamLoadSubset) {
       try {
         await upstreamLoadSubset(options)
       } catch (error) {
-        if (
-          options.signal?.aborted ||
-          (typeof error === `object` &&
-            error !== null &&
-            `name` in error &&
-            error.name === `AbortError`)
-        ) {
-          this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
-          throw error
-        }
-        console.warn(`Failed to trigger remote subset load:`, error)
-        this.queueRemoteSubsetEnsure(options)
-        // Hydration remains readable, but it does not satisfy remote demand.
+        this.noteUpstreamLoadFailure(options, error)
         throw error
       }
     }
+  }
+
+  loadHydratedSubset(
+    options: LoadSubsetOptions,
+    upstreamLoadSubset?: LoadSubsetFn,
+  ): true | Promise<void> | undefined {
+    if (
+      !this.startupSettled ||
+      this.isHydratingNow() ||
+      this.canRouteRemoteDemandThroughCoordinator() ||
+      options.refetch === true ||
+      !this.hydratedDemands.has(getLoadSubsetDemandKey(options))
+    ) {
+      return
+    }
+
+    this.activeSubsets.set(this.getSubsetKey(options), options)
+    let result: true | Promise<void>
+    try {
+      result = upstreamLoadSubset?.(options) ?? true
+    } catch (error) {
+      this.noteUpstreamLoadFailure(options, error)
+      return Promise.reject(error)
+    }
+    if (result === true) {
+      this.queueRemoteSubsetEnsure(options)
+      return true
+    }
+
+    return result.then(
+      () => {
+        this.queueRemoteSubsetEnsure(options)
+      },
+      (error: unknown) => {
+        this.noteUpstreamLoadFailure(options, error)
+        throw error
+      },
+    )
+  }
+
+  private noteUpstreamLoadFailure(
+    options: LoadSubsetOptions,
+    error: unknown,
+  ): void {
+    if (
+      options.signal?.aborted ||
+      (typeof error === `object` &&
+        error !== null &&
+        `name` in error &&
+        error.name === `AbortError`)
+    ) {
+      this.pendingRemoteSubsetEnsures.delete(this.getSubsetKey(options))
+      return
+    }
+    console.warn(`Failed to trigger remote subset load:`, error)
+    this.queueRemoteSubsetEnsure(options)
+  }
+
+  noteSourceTruncate(): void {
+    this.sourceTruncateGeneration++
+    this.hydratedDemands.clear()
   }
 
   unloadSubset(
@@ -1859,6 +1925,11 @@ class PersistedCollectionRuntime<
     const subsetKey = this.getSubsetKey(options)
     this.activeSubsets.delete(subsetKey)
     this.pendingRemoteSubsetEnsures.delete(subsetKey)
+    const demandKey = getLoadSubsetDemandKey(options)
+    const stillActive = Array.from(this.activeSubsets.values()).some(
+      (active) => getLoadSubsetDemandKey(active) === demandKey,
+    )
+    if (!stillActive) this.hydratedDemands.delete(demandKey)
     if (this.mode === `sync-present`) {
       void this.persistence.coordinator
         .requestReleaseRemoteSubset(this.collectionId, options)
@@ -2093,6 +2164,7 @@ class PersistedCollectionRuntime<
 
     this.pendingRemoteSubsetEnsures.clear()
     this.activeSubsets.clear()
+    this.hydratedDemands.clear()
     for (const transaction of this.queuedHydrationTransactions) {
       transaction.rejectApplied?.(new SyncTransactionAbortedError())
     }
@@ -2112,6 +2184,8 @@ class PersistedCollectionRuntime<
 
   private advanceLifecycle(): void {
     this.lifecycleGeneration++
+    this.startupSettled = false
+    this.hydratedDemands.clear()
     this.startupMetadataPromise = null
     this.startPromise = null
     this.resumeBaselinePromise = null
@@ -3384,6 +3458,8 @@ class PersistedCollectionRuntime<
     lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
+    // A subscriber may reacquire reentrantly from the truncate commit.
+    this.hydratedDemands.clear()
     this.resetSequence++
     if (this.syncControls.begin && this.syncControls.commit) {
       const applied = this.withInternalApply(() => {
@@ -3495,11 +3571,13 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
+    const truncateGeneration = this.sourceTruncateGeneration
     const activeSubsetOptions =
       this.activeSubsets.size > 0
         ? Array.from(this.activeSubsets.values())
         : [{}]
 
+    this.hydratedDemands.clear()
     this.hydrationSequence++
     const hydrationContext = { suppliedRowKeys: new Set<TKey>() }
     this.activeHydrationContext = hydrationContext
@@ -3544,9 +3622,21 @@ class PersistedCollectionRuntime<
         this.activeHydrationContext = undefined
       }
     }
-
     if (lifecycleGeneration === this.lifecycleGeneration) {
       await this.flushQueuedHydrationTransactionsUnsafe(adapter)
+      // Coordinator commits queued during this hydrate are processed outside
+      // its scope. Leave the synchronous fast path closed until a later load
+      // if any such commit still needs to be applied.
+      if (
+        truncateGeneration === this.sourceTruncateGeneration &&
+        this.queuedTxCommitted.length === 0
+      ) {
+        for (const options of activeSubsetOptions) {
+          if (this.activeSubsets.get(this.getSubsetKey(options)) === options) {
+            this.hydratedDemands.add(getLoadSubsetDemandKey(options))
+          }
+        }
+      }
     }
   }
 
@@ -4265,6 +4355,7 @@ function createWrappedSyncConfig<
           : undefined,
         truncate: () => {
           if (startupState.cleanedUp) return
+          runtime.noteSourceTruncate()
           const openTransaction = getOpenTransaction()
           if (openTransaction?.terminalFailure ?? getTerminalFailure()) return
           if (!openTransaction) {
@@ -4402,6 +4493,7 @@ function createWrappedSyncConfig<
       }
 
       let sourceResult: SyncConfigRes = {}
+      let sourceResultSettled = false
       let activeSourceSyncEntry: Promise<void> | undefined
       fullStartPromise = runtime.ensureStarted()
       // Startup can fail before the source reaches markReady or loadSubset,
@@ -4414,6 +4506,7 @@ function createWrappedSyncConfig<
         await runtime.ensureStartupMetadataLoaded()
 
         if (startupState.cleanedUp) {
+          sourceResultSettled = true
           return sourceResult
         }
 
@@ -4450,6 +4543,7 @@ function createWrappedSyncConfig<
             }),
           )
         }
+        sourceResultSettled = true
         return sourceResult
       })()
       resolveSourceResultAssigned()
@@ -4505,39 +4599,13 @@ function createWrappedSyncConfig<
           if (sourceOutcome.status === `rejected`) throw sourceOutcome.reason
           if (runtimeOutcome.status === `rejected`) throw runtimeOutcome.reason
         },
-        loadSubset: async (options: LoadSubsetOptions) => {
+        loadSubset: (options: LoadSubsetOptions): true | Promise<void> => {
           const acquisition = { forwarded: false }
           acquisitions.set(options, acquisition)
-          await fullStartPromise
-          const resolvedSourceResult = await sourceResultPromise
-          if (
-            startupState.cleanedUp ||
-            acquisitions.get(options) !== acquisition
-          ) {
-            return
-          }
-          const openTransaction = getOpenTransaction()
-          // Electric can keep one immediate source transaction open across
-          // callbacks. Let that transaction reserve its FIFO turn before a
-          // subset hydration advances the generation it was built against.
-          if (
-            openTransaction &&
-            !openTransaction.internal &&
-            openTransaction.beginOptions?.immediate
-          ) {
-            await waitForPublicationAdmission(
-              openTransaction,
-              options,
-              acquisition,
-            )
-          }
-          if (
-            options.signal?.aborted ||
-            acquisitions.get(options) !== acquisition
-          ) {
-            return
-          }
-          return runtime.loadSubset(options, (loadOptions) => {
+          const forwardUpstream = (
+            resolvedSourceResult: SyncConfigRes,
+            loadOptions: LoadSubsetOptions,
+          ): true | Promise<void> => {
             // Hydration is another async boundary. A release before this
             // point owns no upstream lease and must not start one later.
             if (
@@ -4556,7 +4624,56 @@ function createWrappedSyncConfig<
               acquisition.forwarded = false
               throw error
             }
-          })
+          }
+
+          const openTransaction = getOpenTransaction()
+          const needsPublicationAdmission =
+            openTransaction &&
+            !openTransaction.internal &&
+            openTransaction.beginOptions?.immediate
+          const hydrated =
+            sourceResultSettled && !needsPublicationAdmission
+              ? runtime.loadHydratedSubset(options, (loadOptions) =>
+                  forwardUpstream(sourceResult, loadOptions),
+                )
+              : undefined
+          if (hydrated !== undefined) {
+            return hydrated
+          }
+
+          return (async () => {
+            await fullStartPromise
+            const resolvedSourceResult = await sourceResultPromise
+            if (
+              startupState.cleanedUp ||
+              acquisitions.get(options) !== acquisition
+            ) {
+              return
+            }
+            const currentTransaction = getOpenTransaction()
+            // An immediate source transaction reserves its FIFO turn before
+            // subset hydration advances the generation it was built against.
+            if (
+              currentTransaction &&
+              !currentTransaction.internal &&
+              currentTransaction.beginOptions?.immediate
+            ) {
+              await waitForPublicationAdmission(
+                currentTransaction,
+                options,
+                acquisition,
+              )
+            }
+            if (
+              options.signal?.aborted ||
+              acquisitions.get(options) !== acquisition
+            ) {
+              return
+            }
+            return runtime.loadSubset(options, (loadOptions) =>
+              forwardUpstream(resolvedSourceResult, loadOptions),
+            )
+          })()
         },
         unloadSubset: (options: LoadSubsetOptions) => {
           const acquisition = acquisitions.get(options)
@@ -4599,8 +4716,9 @@ function createLoopbackSyncConfig<
         .catch(() => undefined)
 
       return {
+        loadSubset: (options: LoadSubsetOptions): true | Promise<void> =>
+          runtime.loadHydratedSubset(options) ?? runtime.loadSubset(options),
         cleanup: () => runtime.cleanup(),
-        loadSubset: (options: LoadSubsetOptions) => runtime.loadSubset(options),
         unloadSubset: (options: LoadSubsetOptions) =>
           runtime.unloadSubset(options),
       }

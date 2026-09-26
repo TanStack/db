@@ -9,7 +9,9 @@ import {
   SyncTransactionAbortedError,
   collectionOptions,
   createCollection,
+  createLiveQueryCollection,
   createTransaction,
+  eq,
 } from '@tanstack/db'
 import {
   oraclePropertyOptions,
@@ -424,6 +426,31 @@ function createCoordinatorHarness(): CoordinatorHarness {
   }
 
   return harness
+}
+
+function createLocalCoordinatorHarness() {
+  let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+  return Object.assign(new SingleProcessCoordinator(), {
+    subscribe: (
+      _collectionId: string,
+      onMessage: (message: ProtocolEnvelope<unknown>) => void,
+    ) => {
+      subscriber = onMessage
+      return () => {
+        subscriber = undefined
+      }
+    },
+    emit: (payload: TxCommitted | CollectionReset) => {
+      subscriber?.({
+        v: 1,
+        dbName: `test-db`,
+        collectionId: `sync-present`,
+        senderId: `remote-node`,
+        ts: Date.now(),
+        payload,
+      })
+    },
+  })
 }
 
 type FailStopCoordinatorHarness = PersistedCollectionCoordinator & {
@@ -8529,7 +8556,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         },
       }),
     )
-
     const readyPromise = collection.stateWhenReady()
     for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
       await flushAsyncWork()
@@ -12982,6 +13008,427 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  it(`answers only retained exact demands synchronously from hydrated rows`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `one` },
+      { id: `2`, title: `two` },
+    ])
+    const loadRows = adapter.loadSubset
+    adapter.loadSubset = async (...args) => {
+      const rows = await loadRows(...args)
+      return rows.slice(0, args[1].limit)
+    }
+    const coordinator = createLocalCoordinatorHarness()
+    const upstreamLoads: Array<LoadSubsetOptions> = []
+    const upstreamUnloads: Array<LoadSubsetOptions> = []
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options) => {
+                upstreamLoads.push(options)
+                return true
+              },
+              unloadSubset: (options) => upstreamUnloads.push(options),
+            }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.startSyncImmediate()
+    const first: LoadSubsetOptions = { limit: 2 }
+    const sibling: LoadSubsetOptions = { limit: 2 }
+    try {
+      await collection._sync.loadSubset(first)
+      const persistedReads = adapter.loadSubsetCalls.length
+
+      expect(collection._sync.loadSubset(sibling)).toBe(true)
+      expect(adapter.loadSubsetCalls).toHaveLength(persistedReads)
+      expect(upstreamLoads).toEqual([first, sibling])
+
+      collection._sync.unloadSubset(first)
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `retained-sibling`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+      })
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(collection.size).toBe(2)
+
+      collection._sync.unloadSubset(sibling)
+      const narrow: LoadSubsetOptions = { limit: 1 }
+      await collection._sync.loadSubset(narrow)
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 2,
+        txId: `drop-released-demand`,
+        latestRowVersion: 2,
+        requiresFullReload: true,
+      })
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(collection.size).toBe(1)
+
+      const reacquired = collection._sync.loadSubset({ limit: 2 })
+      expect(reacquired).not.toBe(true)
+      await reacquired
+      expect(collection.size).toBe(2)
+      expect(upstreamUnloads).toEqual([first, sibling])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`makes a sibling live query synchronously ready from a retained hydrated demand`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `cached` }])
+    const source = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydrated-demand-live-query`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    source.startSyncImmediate()
+    const query = () =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q.from({ todo: source }).where(({ todo }) => eq(todo.id, `1`)),
+        startSync: true,
+      })
+    const owner = query()
+    let sibling: ReturnType<typeof query> | undefined
+    try {
+      await owner.preload()
+      sibling = query()
+      expect(sibling.status).toBe(`ready`)
+      expect(sibling.toArray.map(({ id }) => id)).toEqual([`1`])
+    } finally {
+      await sibling?.cleanup()
+      await owner.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it(`makes a loopback sibling synchronously ready from a retained hydrated demand`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `cached` }])
+    const source = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `loopback-hydrated-demand-live-query`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        persistence: { adapter },
+      }),
+    )
+    source.startSyncImmediate()
+    const query = () =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q.from({ todo: source }).where(({ todo }) => eq(todo.id, `1`)),
+        startSync: true,
+      })
+    const owner = query()
+    let sibling: ReturnType<typeof query> | undefined
+    try {
+      await owner.preload()
+      sibling = query()
+      expect(sibling.status).toBe(`ready`)
+      expect(sibling.toArray.map(({ id }) => id)).toEqual([`1`])
+    } finally {
+      await sibling?.cleanup()
+      await owner.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  fcTest.prop(
+    [
+      fc
+        .array(
+          fc
+            .record({
+              type: fc.constantFrom(`acquire` as const, `release` as const),
+              demand: fc.constantFrom(`one` as const, `two` as const),
+            })
+            .map(
+              (operation) =>
+                operation as
+                  | { type: `acquire`; demand: `one` | `two` }
+                  | { type: `release`; demand: `one` | `two` },
+            ),
+          { minLength: 1, maxLength: 20 },
+        )
+        .chain((operations) =>
+          fc
+            .array(fc.integer({ min: 0, max: operations.length }), {
+              maxLength: 4,
+            })
+            .map((truncatePositions) => {
+              const positions = new Set(truncatePositions)
+              return operations.flatMap((operation, index) =>
+                positions.has(index)
+                  ? ([{ type: `truncate` as const }, operation] as const)
+                  : [operation],
+              )
+            }),
+        ),
+    ],
+    oraclePropertyOptions(50, `persistence.retained-demand`),
+  )(
+    `matches the retained exact-demand model across acquire, release, and truncate histories`,
+    async (history) => {
+      const adapter = createRecordingAdapter([
+        { id: `1`, title: `one` },
+        { id: `2`, title: `two` },
+      ])
+      const loadRows = adapter.loadSubset
+      adapter.loadSubset = async (...args) => {
+        const rows = await loadRows(...args)
+        return rows.slice(0, args[1].limit)
+      }
+      let truncateSource: (() => void) | undefined
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `hydrated-demand-history`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: ({ begin, truncate, commit, markReady }) => {
+              truncateSource = () => {
+                begin()
+                truncate()
+                commit()
+              }
+              markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      collection.startSyncImmediate()
+      for (let attempt = 0; attempt < 20 && !truncateSource; attempt++) {
+        await flushAsyncWork()
+      }
+      expect(truncateSource).toBeTypeOf(`function`)
+
+      const active: Record<`one` | `two`, Array<LoadSubsetOptions>> = {
+        one: [],
+        two: [],
+      }
+      const hydrated = new Set<`one` | `two`>()
+      const optionsFor = (demand: `one` | `two`): LoadSubsetOptions => ({
+        limit: demand === `one` ? 1 : 2,
+      })
+
+      try {
+        for (const operation of history) {
+          if (operation.type === `truncate`) {
+            truncateSource?.()
+            hydrated.clear()
+            continue
+          }
+
+          const demand = operation.demand
+          if (operation.type === `release`) {
+            const options = active[demand].pop()
+            if (!options) continue
+            collection._sync.unloadSubset(options)
+            if (active[demand].length === 0) hydrated.delete(demand)
+            continue
+          }
+
+          const options = optionsFor(demand)
+          const result = collection._sync.loadSubset(options)
+          expect(result === true).toBe(hydrated.has(demand))
+          if (result !== true) await result
+          active[demand].push(options)
+          hydrated.add(demand)
+        }
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it(`invalidates hydrated demand when the source truncates`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `cached` }])
+    let truncateSource!: () => void
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydrated-demand-truncate`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, truncate, commit, markReady }) => {
+            truncateSource = () => {
+              begin()
+              truncate()
+              commit()
+            }
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      expect(collection.size).toBe(1)
+      truncateSource()
+      expect(collection.size).toBe(0)
+
+      const persistedReads = adapter.loadSubsetCalls.length
+      const reacquired = collection._sync.loadSubset({ limit: 1 })
+      expect(reacquired).not.toBe(true)
+      await reacquired
+      expect(adapter.loadSubsetCalls).toHaveLength(persistedReads + 1)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not restore hydrated coverage after a truncate overtakes a reload`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `cached` }])
+    const readSubset = adapter.loadSubset
+    let subsetReads = 0
+    let enterReload!: () => void
+    let releaseReload!: () => void
+    const reloadEntered = new Promise<void>((resolve) => {
+      enterReload = resolve
+    })
+    const reloadGate = new Promise<void>((resolve) => {
+      releaseReload = resolve
+    })
+    adapter.loadSubset = async (...args) => {
+      subsetReads++
+      if (subsetReads === 2) {
+        enterReload()
+        await reloadGate
+      }
+      return readSubset(...args)
+    }
+    const coordinator = createLocalCoordinatorHarness()
+    let truncateSource!: () => void
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, truncate, commit, markReady }) => {
+            truncateSource = () => {
+              begin()
+              truncate()
+              commit()
+            }
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.startSyncImmediate()
+    try {
+      await collection._sync.loadSubset({ limit: 1 })
+      coordinator.emit({
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `reload-before-truncate`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+      })
+      await reloadEntered
+      truncateSource()
+      releaseReload()
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(collection.size).toBe(0)
+
+      const readsBeforeReacquire = adapter.loadSubsetCalls.length
+      const reacquired = collection._sync.loadSubset({ limit: 1 })
+      expect(reacquired).not.toBe(true)
+      await reacquired
+      expect(adapter.loadSubsetCalls).toHaveLength(readsBeforeReacquire + 1)
+    } finally {
+      releaseReload()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not advertise hydrated coverage after a terminal reset reload failure`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `cached` }])
+    const readSubset = adapter.loadSubset
+    const failure = new Error(`reset reload failed`)
+    let failNextRead = false
+    adapter.loadSubset = async (...args) => {
+      if (failNextRead) {
+        failNextRead = false
+        throw failure
+      }
+      return readSubset(...args)
+    }
+    const coordinator = createLocalCoordinatorHarness()
+    const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: { sync: ({ markReady }) => (markReady(), {}) },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    collection.startSyncImmediate()
+    try {
+      const retained: LoadSubsetOptions = { limit: 1 }
+      await collection._sync.loadSubset(retained)
+      expect(collection.size).toBe(1)
+
+      failNextRead = true
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+      await flushAsyncWork()
+      await flushAsyncWork()
+      expect(collection.size).toBe(0)
+
+      const readsBeforeReacquire = adapter.loadSubsetCalls.length
+      const reacquired = collection._sync.loadSubset({ limit: 1 })
+      expect(reacquired).not.toBe(true)
+      await expect(Promise.resolve(reacquired)).rejects.toBe(failure)
+      expect(adapter.loadSubsetCalls).toHaveLength(readsBeforeReacquire)
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(failure)
+    } finally {
+      warn.mockRestore()
+      await collection.cleanup()
+    }
+  })
+
   it(`does not retain refresh history as permanent subset demand`, async () => {
     const adapter = createRecordingAdapter([{ id: `1`, title: `Before` }])
     const coordinator = createCoordinatorHarness()
@@ -13090,9 +13537,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       expect(collection.status).toBe(`ready`)
       adapter.loadSubset = () => Promise.reject(hydrationFailure)
 
+      // A distinct demand must still reach persistence; the retained exact
+      // demand above is eligible for the synchronous hydrated fast path.
       await expect(
         atPersistedOracleCheckpoint(
-          Promise.resolve(collection._sync.loadSubset({ limit: 1 })),
+          Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
           `later on-demand hydration rejected`,
         ),
       ).rejects.toBe(hydrationFailure)
@@ -14341,7 +14790,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         id: `retry`,
         title: `Retry visible to both owners`,
       })
-      failing.requestSnapshot({ optimizedOnly: false })
+      failing.requestSnapshot({ optimizedOnly: false, refetch: true })
       await flushAsyncWork()
       expect(stripVirtualProps(collection.get(`retry`))).toEqual({
         id: `retry`,
@@ -14688,6 +15137,171 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  it(`does not mark a demand hydrated after its last acquisition leaves mid-read`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `one` },
+      { id: `2`, title: `two` },
+      { id: `3`, title: `three` },
+    ])
+    const readSubset = adapter.loadSubset
+    let releaseRead!: () => void
+    let enterRead!: () => void
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    const readEntered = new Promise<void>((resolve) => {
+      enterRead = resolve
+    })
+    let blockNextRead = true
+    adapter.loadSubset = async (...args) => {
+      if (blockNextRead) {
+        blockNextRead = false
+        enterRead()
+        await readGate
+      }
+      return readSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `released-mid-read`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      const first: LoadSubsetOptions = { limit: 3 }
+      const pending = collection._sync.loadSubset(first)
+      await readEntered
+      collection._sync.unloadSubset(first)
+      releaseRead()
+      await pending
+
+      const reacquired = collection._sync.loadSubset({ limit: 3 })
+      expect(reacquired).not.toBe(true)
+      await reacquired
+      expect(collection.get(`3`)).toBeDefined()
+    } finally {
+      releaseRead()
+      await collection.cleanup()
+    }
+  })
+
+  it(`does not answer a registered but unread demand synchronously`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `one` }])
+    const readSubset = adapter.loadSubset
+    let releaseRead!: () => void
+    let enterRead!: () => void
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    const readEntered = new Promise<void>((resolve) => {
+      enterRead = resolve
+    })
+    let blockNextRead = true
+    adapter.loadSubset = async (...args) => {
+      if (blockNextRead) {
+        blockNextRead = false
+        enterRead()
+        await readGate
+      }
+      return readSubset(...args)
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `registered-before-read`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+
+    try {
+      const first = collection._sync.loadSubset({ limit: 1 })
+      await readEntered
+      const second = collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+      releaseRead()
+      await Promise.all([first, second])
+      expect(collection.get(`1`)).toBeDefined()
+    } finally {
+      releaseRead()
+      await collection.cleanup()
+    }
+  })
+
+  it(`stops ensuring an aborted coordinator acquisition`, async () => {
+    vi.useFakeTimers()
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const abortError = Object.assign(new Error(`abort`), { name: `AbortError` })
+    const ensured: Array<LoadSubsetOptions> = []
+    const first: LoadSubsetOptions = { limit: 1 }
+    const second: LoadSubsetOptions = { limit: 1 }
+    const coordinator = createCoordinatorHarness()
+    coordinator.requestEnsureRemoteSubset = (_id, options) => {
+      ensured.push(options)
+      return options === second ? Promise.reject(abortError) : Promise.resolve()
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `fast-path-abort`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return { loadSubset: () => true, unloadSubset: () => {} }
+          },
+        },
+        persistence: {
+          adapter: createRecordingAdapter([{ id: `1`, title: `one` }]),
+          coordinator,
+        },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await collection._sync.loadSubset(first)
+      const result = await Promise.resolve(
+        collection._sync.loadSubset(second),
+      ).then(
+        () => `ready`,
+        (error: unknown) => error,
+      )
+      expect(result).toBe(abortError)
+
+      const callsBeforeRetry = ensured.filter(
+        (options) => options === second,
+      ).length
+      await vi.advanceTimersByTimeAsync(500)
+      expect(ensured.filter((options) => options === second)).toHaveLength(
+        callsBeforeRetry,
+      )
+    } finally {
+      await collection.cleanup()
+      warning.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it(`does not release or acquire an upstream lease cancelled during hydration`, async () => {
     const adapter = createRecordingAdapter()
     const hydrate = adapter.loadSubset
@@ -14734,7 +15348,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     )
     collection.startSyncImmediate()
     const first: LoadSubsetOptions = { limit: 1 }
-    const second: LoadSubsetOptions = { limit: 1 }
+    const second: LoadSubsetOptions = { limit: 2 }
     try {
       await collection._sync.loadSubset(first)
       expect(leases).toBe(1)
