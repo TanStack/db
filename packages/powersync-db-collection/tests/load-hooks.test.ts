@@ -1027,7 +1027,7 @@ describe(`Sync Streams`, () => {
     },
   )
 
-  it.each([`fulfill`, `reject`] as const)(
+  it.each([`fulfill`, `reject`, `throw`] as const)(
     `settles a subset hook that resolves after collection cleanup: %s`,
     async (outcome) => {
       const db = await createDatabase()
@@ -1036,11 +1036,12 @@ describe(`Sync Streams`, () => {
       const hookEntered = pDefer<void>()
       const cleanupGate = pDefer<void>()
       const cleanupError = new Error(`late subset cleanup failed`)
-      const cleanupHook = vi.fn(() =>
-        cleanupGate.promise.then(() => {
+      const cleanupHook = vi.fn(() => {
+        if (outcome === `throw`) throw cleanupError
+        return cleanupGate.promise.then(() => {
           if (outcome === `reject`) throw cleanupError
-        }),
-      )
+        })
+      })
       const createDiffTrigger = vi.spyOn(db.triggers, `createDiffTrigger`)
 
       const collection = createCollection(
@@ -1116,13 +1117,15 @@ describe(`Sync Streams`, () => {
         expect(await preload).toEqual(expected)
         hook.resolve(cleanupHook)
         await vi.waitFor(() => expect(cleanupHook).toHaveBeenCalledOnce())
-        expect(cleanupSettled).toBe(false)
-        expect(collection.status).toBe(`ready`)
+        if (outcome !== `throw`) {
+          expect(cleanupSettled).toBe(false)
+          expect(collection.status).toBe(`ready`)
+        }
         expect(createDiffTrigger).not.toHaveBeenCalled()
 
         cleanupGate.resolve()
         const cleanupResult = await cleanupOutcome
-        if (outcome === `reject`) {
+        if (outcome !== `fulfill`) {
           expect(cleanupResult).toMatchObject({
             status: `rejected`,
             error: { name: `SyncCleanupError`, cause: cleanupError },
