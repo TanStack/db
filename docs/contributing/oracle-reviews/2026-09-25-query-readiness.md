@@ -229,3 +229,62 @@ passed 227/227 across runtime and source type-check projects. DB and Query
 Collection builds passed. Changed-file lint reported no errors (two existing
 `require-await` warnings remain elsewhere in the Query Collection owner), and
 format plus diff checks passed.
+
+## Empty-boundary explicit-window follow-up
+
+- Base: `93169bd295a628d157e26858eed6a489a75fb44f`
+- Reviewed semantic head: `9cf8ebec9d6ce7d5610cc698bcd571d3bea17734`
+- Runtime: Node `24.19.0`, pnpm `11.1.0`, Vitest `3.2.4`
+- Finding: CodeRabbit review `5325930839`, inline comment `4111391073`
+
+The architecture already required an explicit underfilled window to acquire its
+missing prefix. It now states the adjacent continuation rule directly: a
+staged boundary with no boundary row starts no acquisition, so consuming it
+cannot settle the enlarged window operation.
+
+The controlled regression reaches the production loader path without timing:
+
+1. An indexed finite acquisition returns literal `true` with no rows while the
+   graph-input revision changes.
+2. The loader retains an ordinary staged boundary continuation but no settled
+   source boundary.
+3. The driver enlarges the window and calls `loadMore(1)` while `dataNeeded()`
+   reports two missing rows.
+4. The refinement check requires a pending window result and a new source-prefix
+   acquisition with `limit: 2`, `offset: 0`, and no cursor boundary.
+
+At the base, the same-path RED failed because `loadMore(1)` returned `undefined`
+after consuming the empty continuation and started no second acquisition. The
+fix returns only when continuation consumption starts pending work. Otherwise,
+normal demand selection handles the enlarged window. The active-state check
+also preserves synchronous disposal reentry.
+
+The prior suites missed the defect because they covered synchronous
+multi-continuation draining, staged-continuation repair precedence, and public
+window settlement separately. They did not cross graph-input change, an empty
+finite result, the resulting staged boundary, and a wider explicit window in
+one history. This deterministic internal-boundary regression is the smallest
+owner because the disputed observation is whether `OrderedSourceLoader`
+starts an acquisition. The public ordered lifecycle owner remains the broader
+window-settlement authority and passed unchanged.
+
+| Requirement | Outcome |
+| --- | --- |
+| ORC-001 | Pass. The architecture owns the empty-boundary continuation law and limits it to an explicit window whose consumed continuation starts no acquisition. It does not claim source exhaustion or revise replay, repair, or framework scheduling. |
+| ORC-002 | Pass. The expected request follows from the independently stated window and demand law: an empty boundary proves no prefix, and an enlarged underfilled window requires acquisition from offset zero. The test imports no production continuation classifier. |
+| ORC-003 | Pass. This record states the contract and one controlled history; the test drives the production loader and checks the pending result plus exact acquisition shape. No reusable reference state or generated grammar is introduced. |
+| ORC-004 | Not applicable. The repair adds one deterministic regression and makes no generated-history coverage claim. |
+| ORC-005 | Pass. The driver invokes the real `OrderedSourceLoader.start()` and `loadMore(1)` entry points, proves the staged continuation exists, and observes the exact second acquisition and pending operation at the post-`loadMore` checkpoint. |
+| ORC-006 | Pass. Unchanged production at the base reached every stated precondition and failed by assertion: the pending result was `undefined`, and the second acquisition was absent. The semantic head passes the same test. |
+| ORC-007 | Not applicable. No important generated property or campaign changed. |
+| ORC-008 | Not applicable. The regression adds no stateful reference-model state. |
+| ORC-009 | Pass. Window, boundary, graph-input revision, acquisition, and settlement retain their project glossary and architecture meanings. The test introduces no model-only state term. |
+| ORC-010 | Not applicable. The regression performs no shrinking or normalized capture. Its deferred acquisition is resolved in `finally`, and loader disposal cannot replace the recorded assertion. |
+| ORC-011 | Not applicable. The exact pending result and acquisition trace directly distinguish the one disputed control-flow fault; no plausible shared semantic classifier requires a second formulation. |
+| ORC-012 | Pass. This versioned follow-up records every ORC-001 through ORC-011 outcome against the exact base and reviewed semantic head. |
+
+Verification at the semantic head: the focused RED/GREEN regression passed
+1/1; the complete ordered-loader suite passed 63/63; the six ordered loader,
+state, lifecycle, work, default-work, and demand-retirement owners passed
+433/433. All runs reported no type errors. Package TypeScript, DB build and
+declaration generation, changed-file lint, Prettier, and diff checks passed.
