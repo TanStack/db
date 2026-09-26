@@ -1,12 +1,14 @@
 # Issue #1891 cleanup-start follow-up oracle review
 
-Reviewed semantic head: `8f0481ad1e5d096a372da7df0002c8d4c2319c9d`
+Reviewed semantic head: `14b06080e0881f41b5363b8a4a3ffd0c3b3aed31`
 
 Base and prior review-record head:
 `355554078675c9aaf924b649d2bdcd3636e40d4a`
 
 Initial implementation and control head:
 `2fa7fada018613063c2f0d4a915f244ec68412d1`
+
+Evaluate Review fix head: `8f0481ad1e5d096a372da7df0002c8d4c2319c9d`
 
 Scope: the cleanup-start boundary in core, dependent live-query and Effect
 invalidation, and the PowerSync late on-demand hook and trigger-disposal repair.
@@ -124,7 +126,7 @@ boundary. Cleanup settlement maps to the later public cleanup Promise cut.
 | ORC-011: independent second formulation | Pass. The named shared-fault hypothesis is that core or a wrapper starts cleanup but discards a returned Promise or late-owned task. Core's in-memory timeline, the prior persisted same-resource/retired-owner refinement, and PowerSync's real SQLite hook/trigger path use meaningfully different machinery. Repeated-alias live-query reporting, pending Effect-handler disposal, and throwing or reentrant observer registration independently test cleanup-start invalidation and ownership. These formulations share only the settlement, invalidation, once-only release, and primary-failure laws. They make no equivalence claim about row ordering, projection, duplicates, or nonempty results. The same-SQLite multi-process and mobile-host risks remain outside this review. |
 
 ORC-012 is satisfied by this versioned record for semantic head
-`8f0481ad1e5d096a372da7df0002c8d4c2319c9d`. It records every ORC-001 through
+`14b06080e0881f41b5363b8a4a3ffd0c3b3aed31`. It records every ORC-001 through
 ORC-011 outcome and is linked from the coverage map. The initial
 `2fa7fada018613063c2f0d4a915f244ec68412d1` head remains only as provenance for
 the controls and pre-fix review findings described below.
@@ -212,15 +214,20 @@ failure removed that candidate in favor of cleanup start.
 At the reviewed head:
 
 - the cleanup/restart oracle passed 24 of 24 tests;
+- its TypeScript check passed; and
+- `git diff --check` passed before this documentation closeout.
+
+At the Evaluate Review fix head `8f0481ad`, before the final behavior-preserving
+deduplication simplification:
+
 - the Effect collateral suite passed 86 of 86 tests;
 - the Collection subscription-lifecycle collateral passed 445 of 445 tests;
 - DB TypeScript and targeted ESLint checks passed;
 - the full PowerSync package passed 170 of 170 tests across 11 files with no
   type errors;
-- the PowerSync production build and targeted ESLint check passed;
+- the PowerSync production build and targeted ESLint check passed; and
 - the final no-await in-flight trigger-disposal mutant failed both intended
-  assertions and was restored; and
-- `git diff --check` passed before this documentation closeout.
+  assertions and was restored.
 
 The initial `2fa7fada` implementation receipts were 32 of 32 focused core and
 Effect tests, 22 of 22 focused PowerSync load-hook tests, and 165 of 165 full
