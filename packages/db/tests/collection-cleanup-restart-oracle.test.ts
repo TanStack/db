@@ -22,10 +22,11 @@ import type { SyncConfig } from '../src/types'
  * it is not a Collection status and does not prove that adapter resources have
  * been released.
  *
- * The two-phase history grammar starts with a ready source and either a live
+ * The three-cut history grammar starts with a ready source and either a live
  * query or Effect dependent. It invokes cleanup, holds adapter cleanup, checks
- * the cleanup-start observation, releases the adapter, and checks cleanup
- * settlement. Adjacent histories re-enter start or preload from abort and
+ * the cleanup-start observation, releases the adapter, observes terminal
+ * `cleaned-up` publication, and checks the later cleanup-Promise settlement.
+ * Adjacent histories re-enter start or preload from abort and
  * release callbacks, request nested cleanup, reject adapter cleanup, throw
  * from cleanup-start observers, or register observers during active cleanup.
  * The late live-query history places the cleaning source before and after a
@@ -36,16 +37,15 @@ import type { SyncConfig } from '../src/types'
  * adapter error primary and the local error as a secondary diagnostic. A lone
  * error keeps its identity.
  *
- * `expectedCleanupBoundary` is a small independent timeline model. Its
+ * `expectedCleanupBoundary` is a small independent three-cut timeline model. Its
  * `dependent` field combines the live query's terminal error and the Effect's
  * disposed state because both observations mean the dependent can no longer
  * use the discarded sync run. At cleanup start, status retains the prior public
- * value while cleanup remains pending. At settlement, restart admission opens,
- * status becomes `cleaned-up`, and cleanup is settled. The model does not
- * reproduce manager callbacks or adapter machinery. The terminal status event
- * precedes the public cleanup promise continuation; a status listener may
- * restart at that event. Adjacent event-restart histories cover that smaller
- * interval outside this two-checkpoint model.
+ * value while cleanup remains pending. Terminal publication opens restart
+ * admission and changes status to `cleaned-up` while the cleanup Promise remains
+ * pending. The Promise settles afterward. The model does not reproduce manager
+ * callbacks or adapter machinery. A status listener may restart at terminal
+ * publication; adjacent event-restart histories exercise that reentry.
  *
  * The production driver calls the real cleanup, live-query, and Effect entry
  * points. Refinement checks run before releasing the controlled adapter gate
@@ -62,7 +62,10 @@ const cleanupError = {
   message: expect.stringContaining(`after cleanup() completes`),
 }
 
-type CleanupBoundary = `cleanup-start` | `cleanup-settlement`
+type CleanupBoundary =
+  | `cleanup-start`
+  | `terminal-publication`
+  | `cleanup-settlement`
 type CleanupBoundaryObservation<TStatus extends string> = {
   restartAdmission: `closed` | `open`
   collectionStatus: TStatus | `cleaned-up`
@@ -70,7 +73,7 @@ type CleanupBoundaryObservation<TStatus extends string> = {
   dependent: `active` | `terminal`
 }
 
-/** Independent two-phase law for observations at each cleanup checkpoint. */
+/** Independent three-cut law for observations at each cleanup checkpoint. */
 function expectedCleanupBoundary<TStatus extends string>(
   priorStatus: TStatus,
   boundary: CleanupBoundary,
@@ -79,6 +82,14 @@ function expectedCleanupBoundary<TStatus extends string>(
     return {
       restartAdmission: `closed`,
       collectionStatus: priorStatus,
+      cleanup: `pending`,
+      dependent: `terminal`,
+    }
+  }
+  if (boundary === `terminal-publication`) {
+    return {
+      restartAdmission: `open`,
+      collectionStatus: `cleaned-up`,
       cleanup: `pending`,
       dependent: `terminal`,
     }
@@ -109,13 +120,55 @@ function observeDependent(active: boolean): `active` | `terminal` {
   return active ? `active` : `terminal`
 }
 
-const scenarios = ([`abort`, `release`] as const).flatMap((boundary) =>
+const reentryScenarios = ([`abort`, `release`] as const).flatMap((boundary) =>
   [false, true].flatMap((nestedCleanup) =>
-    [1, 2].map((attempts) => ({ boundary, nestedCleanup, attempts })),
+    [1, 2].map((attempts) => ({
+      id: `${boundary}:${nestedCleanup ? `nested` : `plain`}:${attempts}`,
+      boundary,
+      nestedCleanup,
+      attempts,
+    })),
   ),
 )
 
+const completedBoundaryScenarios = ([`event`, `await`] as const).flatMap(
+  (boundary) =>
+    [false, true].map((liveQuery) => ({
+      id: `${boundary}:${liveQuery ? `live-query` : `source`}`,
+      boundary,
+      liveQuery,
+    })),
+)
+
+function expectExactCaseIds(
+  actual: ReadonlyArray<{ id: string }>,
+  expected: ReadonlyArray<string>,
+): void {
+  const ids = actual.map(({ id }) => id)
+  expect(ids).toEqual(expected)
+  expect(new Set(ids).size).toBe(ids.length)
+}
+
 describe(`Collection cleanup admission oracle`, () => {
+  it(`calibrates every declared bounded-product cell exactly once`, () => {
+    expectExactCaseIds(reentryScenarios, [
+      `abort:plain:1`,
+      `abort:plain:2`,
+      `abort:nested:1`,
+      `abort:nested:2`,
+      `release:plain:1`,
+      `release:plain:2`,
+      `release:nested:1`,
+      `release:nested:2`,
+    ])
+    expectExactCaseIds(completedBoundaryScenarios, [
+      `event:source`,
+      `event:live-query`,
+      `await:source`,
+      `await:live-query`,
+    ])
+  })
+
   it(`waits for source cleanup before publishing the restart boundary`, async () => {
     const cleanupGate = createDeferred<void>()
     let starts = 0
@@ -123,6 +176,13 @@ describe(`Collection cleanup admission oracle`, () => {
     let sourceCleanupSettled = false
     const statuses: Array<string> = []
     const settlementOrder: Array<string> = []
+    let publicCleanupSettled = false
+    let atTerminalPublication:
+      | Pick<
+          CleanupBoundaryObservation<`ready`>,
+          `collectionStatus` | `cleanup`
+        >
+      | undefined
     const collection = createCollection<Row, number>({
       getKey: (row) => row.id,
       sync: {
@@ -144,6 +204,10 @@ describe(`Collection cleanup admission oracle`, () => {
     const off = collection.on(`status:change`, ({ status }) => {
       statuses.push(status)
       if (status === `cleaned-up`) {
+        atTerminalPublication = {
+          collectionStatus: collection.status,
+          cleanup: observeCleanupSettlement(publicCleanupSettled),
+        }
         settlementOrder.push(`cleaned-up-event`)
       }
     })
@@ -155,6 +219,7 @@ describe(`Collection cleanup admission oracle`, () => {
       const firstCleanup = collection.cleanup()
       const concurrentCleanup = collection.cleanup()
       void firstCleanup.then(() => {
+        publicCleanupSettled = true
         settlementOrder.push(`public-cleanup-promise-continuation`)
       })
 
@@ -176,6 +241,14 @@ describe(`Collection cleanup admission oracle`, () => {
         `cleanup-settlement`,
       )
       expect(sourceCleanupSettled).toBe(true)
+      const terminalPublication = expectedCleanupBoundary(
+        `ready`,
+        `terminal-publication`,
+      )
+      expect(atTerminalPublication).toEqual({
+        collectionStatus: terminalPublication.collectionStatus,
+        cleanup: terminalPublication.cleanup,
+      })
       expect(collection.status).toBe(atCleanupSettlement.collectionStatus)
       expect(statuses).toEqual([`cleaned-up`])
       expect(settlementOrder).toEqual([
@@ -444,6 +517,51 @@ describe(`Collection cleanup admission oracle`, () => {
     }
   })
 
+  it(`keeps adapter cleanup failure primary when cleanup-start observer also fails`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const observerError = new Error(`cleanup-start observer failed exactly`)
+    const adapterError = new Error(`adapter cleanup failed exactly`)
+    const source = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            cleanup: () =>
+              cleanupGate.promise.then(() => {
+                throw adapterError
+              }),
+          }
+        },
+      },
+    })
+    const off = source._onCleanupStart(() => {
+      throw observerError
+    })
+
+    try {
+      await source.preload()
+      const cleanup = source.cleanup()
+
+      expect(source.status).toBe(`ready`)
+      cleanupGate.resolve()
+      const failure = await cleanup.catch((error: unknown) => error)
+
+      expect(failure).toBeInstanceOf(AggregateError)
+      const aggregate = failure as AggregateError
+      expect(aggregate.cause).toMatchObject({
+        name: `SyncCleanupError`,
+        cause: adapterError,
+      })
+      expect(aggregate.errors).toEqual([aggregate.cause, observerError])
+      expect(source.status).toBe(`cleaned-up`)
+    } finally {
+      off()
+      cleanupGate.resolve()
+      await source.cleanup().catch(() => undefined)
+    }
+  })
+
   it(`releases an Effect cleanup-start observer registered during active cleanup`, async () => {
     const cleanupGate = createDeferred<void>()
     const source = createCollection<Row, number>({
@@ -593,6 +711,87 @@ describe(`Collection cleanup admission oracle`, () => {
     } finally {
       cleanupGate.resolve()
       await source.cleanup().catch(() => undefined)
+    }
+  })
+
+  it(`notifies one observer once per cleanup boundary until it unsubscribes`, async () => {
+    let starts = 0
+    let observerCalls = 0
+    const source = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+        },
+      },
+    })
+    const off = source._onCleanupStart(() => {
+      observerCalls++
+    })
+
+    try {
+      await source.preload()
+      const firstCleanup = source.cleanup()
+      expect(observerCalls).toBe(1)
+      await firstCleanup
+
+      source.startSyncImmediate()
+      const secondCleanup = source.cleanup()
+      expect(observerCalls).toBe(2)
+      await secondCleanup
+
+      off()
+      source.startSyncImmediate()
+      await source.cleanup()
+      expect({ starts, observerCalls }).toEqual({ starts: 3, observerCalls: 2 })
+    } finally {
+      off()
+      await source.cleanup()
+    }
+  })
+
+  it(`does not revive a terminal live query when its source restarts`, async () => {
+    let starts = 0
+    const source = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          starts++
+          begin()
+          write({ type: `insert`, value: { id: 1, rank: starts } })
+          commit()
+          markReady()
+        },
+      },
+    })
+    const live = createLiveQueryCollection((q) => q.from({ row: source }))
+    const publications: Array<unknown> = []
+    const subscription = live.subscribeChanges((changes) => {
+      publications.push(changes)
+    })
+    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    try {
+      await live.preload()
+      expect(live.get(1)?.rank).toBe(1)
+      publications.length = 0
+
+      await source.cleanup()
+      expect(live.status).toBe(`error`)
+
+      source.startSyncImmediate()
+      expect(source.status).toBe(`ready`)
+      expect(starts).toBe(2)
+      expect(live.status).toBe(`error`)
+      expect(live.get(1)?.rank).toBe(1)
+      expect(publications).toEqual([])
+      expect(reports).toHaveBeenCalledTimes(1)
+    } finally {
+      subscription.unsubscribe()
+      reports.mockRestore()
+      await live.cleanup()
+      await source.cleanup()
     }
   })
 
@@ -864,7 +1063,7 @@ describe(`Collection cleanup admission oracle`, () => {
     },
   )
 
-  it.each(scenarios)(
+  it.each(reentryScenarios)(
     `rejects restart without creating replacement ownership: %j`,
     async ({ boundary, nestedCleanup, attempts }) => {
       let ops!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
@@ -1001,11 +1200,7 @@ describe(`Collection cleanup admission oracle`, () => {
     },
   )
 
-  it.each(
-    ([`event`, `await`] as const).flatMap((boundary) =>
-      [false, true].map((liveQuery) => ({ boundary, liveQuery })),
-    ),
-  )(
+  it.each(completedBoundaryScenarios)(
     `admits restart at the completed cleanup boundary: %j`,
     async ({ boundary, liveQuery }) => {
       let starts = 0

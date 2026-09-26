@@ -1272,6 +1272,116 @@ describe(`Sync Streams`, () => {
     },
   )
 
+  it(`on-demand mode: owns a late hook and in-flight trigger through cleanup`, async () => {
+    const db = await createDatabase()
+    await createTestProducts(db)
+    const triggerGate = pDefer<() => Promise<void>>()
+    const disposeGate = pDefer<void>()
+    const hookGate = pDefer<() => Promise<void>>()
+    const hookEntered = pDefer<void>()
+    const hookCleanupGate = pDefer<void>()
+    const hookError = new Error(`late hook cleanup failed`)
+    const triggerError = new Error(`in-flight trigger cleanup failed`)
+    const cleanupHook = vi.fn(() =>
+      hookCleanupGate.promise.then(() => {
+        throw hookError
+      }),
+    )
+    const disposeTracking = vi.fn(() =>
+      disposeGate.promise.then(() => {
+        throw triggerError
+      }),
+    )
+    const createDiffTrigger = vi
+      .spyOn(db.triggers, `createDiffTrigger`)
+      .mockImplementation(() => triggerGate.promise)
+    let acquisition = 0
+    const collection = createCollection(
+      powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.products,
+        syncMode: `on-demand`,
+        onLoadSubset: () => {
+          if (acquisition++ === 0) return () => {}
+          hookEntered.resolve()
+          return hookGate.promise
+        },
+      }),
+    )
+    const categoryQuery = (category: string) =>
+      createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ product: collection })
+            .where(({ product }) => eq(product.category, category)),
+      })
+    const firstQuery = categoryQuery(`electronics`)
+    const secondQuery = categoryQuery(`clothing`)
+    const firstPreload = firstQuery.preload().catch(() => undefined)
+    let secondPreload: Promise<void | undefined> = Promise.resolve()
+    const logger = vi.spyOn(db.logger, `log`)
+    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const unhandled: Array<unknown> = []
+    const onUnhandled = (error: unknown) => unhandled.push(error)
+    process.on(`unhandledRejection`, onUnhandled)
+
+    try {
+      await vi.waitFor(() => expect(createDiffTrigger).toHaveBeenCalledOnce())
+      secondPreload = secondQuery.preload().catch(() => undefined)
+      await hookEntered.promise
+      let cleanupSettled = false
+      const cleanupOutcome = collection.cleanup().then(
+        () => {
+          cleanupSettled = true
+          return { status: `fulfilled` as const }
+        },
+        (error: unknown) => {
+          cleanupSettled = true
+          return { status: `rejected` as const, error }
+        },
+      )
+
+      triggerGate.resolve(disposeTracking)
+      hookGate.resolve(cleanupHook)
+      await vi.waitFor(() => {
+        expect(disposeTracking).toHaveBeenCalledOnce()
+        expect(cleanupHook).toHaveBeenCalledOnce()
+      })
+
+      hookCleanupGate.resolve()
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(cleanupSettled).toBe(false)
+
+      disposeGate.resolve()
+      expect(await cleanupOutcome).toMatchObject({
+        status: `rejected`,
+        error: { name: `SyncCleanupError`, cause: triggerError },
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).toEqual([])
+      expect(
+        logger.mock.calls.filter(
+          ([entry]) =>
+            entry.message === `Could not clean up subset hook for products`,
+        ),
+      ).toEqual([])
+      expect(disposeTracking).toHaveBeenCalledOnce()
+      expect(cleanupHook).toHaveBeenCalledOnce()
+    } finally {
+      triggerGate.resolve(disposeTracking)
+      hookGate.resolve(cleanupHook)
+      hookCleanupGate.resolve()
+      disposeGate.resolve()
+      process.removeListener(`unhandledRejection`, onUnhandled)
+      createDiffTrigger.mockRestore()
+      reports.mockRestore()
+      await Promise.all([firstPreload, secondPreload])
+      await firstQuery.cleanup()
+      await secondQuery.cleanup()
+      await collection.cleanup().catch(() => undefined)
+    }
+  })
+
   it.each([`fulfill`, `reject`, `throw`] as const)(
     `settles a subset hook that resolves after collection cleanup: %s`,
     async (outcome) => {
