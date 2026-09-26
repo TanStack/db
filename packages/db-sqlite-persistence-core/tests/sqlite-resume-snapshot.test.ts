@@ -300,17 +300,24 @@ describe(`SQLite resume snapshots`, () => {
       const initialSnapshotRelease = deferred()
       releaseInitialSnapshot = initialSnapshotRelease.resolve
       let snapshotCalls = 0
-      adapter.loadResumeSnapshot = async (...args) => {
-        const snapshot = await loadResumeSnapshot(...args)
-        snapshotCalls++
-        if (snapshotCalls === 1) {
-          reachedInitialSnapshot.resolve()
-          await initialSnapshotRelease.promise
-        } else if (snapshotCalls === 2) {
-          reachedHydrationSnapshot.resolve()
-        }
-        return snapshot
-      }
+      const runInHydrationScope = adapter.runInHydrationScope.bind(adapter)
+      adapter.runInHydrationScope = (task) =>
+        runInHydrationScope((scopedAdapter) =>
+          task({
+            ...scopedAdapter,
+            loadResumeSnapshot: async (...args) => {
+              const snapshot = await scopedAdapter.loadResumeSnapshot(...args)
+              snapshotCalls++
+              if (snapshotCalls === 1) {
+                reachedInitialSnapshot.resolve()
+                await initialSnapshotRelease.promise
+              } else if (snapshotCalls === 2) {
+                reachedHydrationSnapshot.resolve()
+              }
+              return snapshot
+            },
+          }),
+        )
 
       collection = createCollection(
         persistedCollectionOptions<{ id: string; title: string }, string>({
