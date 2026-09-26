@@ -364,7 +364,7 @@ describe(`Collection cleanup admission oracle`, () => {
           throw localFailure
         },
       )
-      const collection = createCollection<Row>({
+      const collection = createCollection<Row, number>({
         getKey: (row) => row.id,
         sync,
       })
