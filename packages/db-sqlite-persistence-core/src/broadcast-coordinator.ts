@@ -115,7 +115,7 @@ type CollectionState = {
 // belong to the persisted sync wrapper, not the elected writer transport.
 type CoordinatorAdapter = Pick<
   PersistenceAdapter,
-  `loadSubset` | `applyCommittedTx` | `ensureIndex`
+  `loadSubset` | `applyCommittedTx` | `ensureIndex` | `runInRegularScope`
 > & {
   pullSince?: (
     collectionId: string,
@@ -638,6 +638,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ): Promise<ApplyLocalMutationsResponse> {
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute
     if (this.isLeader(collectionId)) {
       return this.handleApplyLocalMutations(collectionId, {
         type: `rpc:applyLocalMutations:req`,
@@ -660,6 +662,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     tx: PersistedTx,
     scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<ApplyCommittedTxResponse> {
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute
     const request: Extract<RPCRequest, { type: `rpc:applyCommittedTx:req` }> = {
       type: `rpc:applyCommittedTx:req`,
       rpcId: safeRandomUUID(),
@@ -884,17 +888,37 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
   }
 
+  private waitForInitialRoute(collectionId: string): Promise<void> | undefined {
+    const state = this.collections.get(collectionId)
+    if (
+      state?.participatesInLeadership &&
+      !state.isLeader &&
+      state.leaderId === null
+    ) {
+      return this.waitForLeadershipRoute(
+        collectionId,
+        state,
+        undefined,
+        RPC_TIMEOUT_MS,
+      )
+    }
+    return undefined
+  }
+
   private waitForLeadershipRoute(
     collectionId: string,
     state: CollectionState,
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<void> {
     if (state.isLeader || state.leaderId !== null) return Promise.resolve()
 
     return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
       const finish = () => {
         state.routeWaiters?.delete(onRouteChange)
         signal?.removeEventListener(`abort`, onAbort)
+        if (timer !== undefined) clearTimeout(timer)
       }
       const onAbort = () => {
         finish()
@@ -919,6 +943,16 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
 
       ;(state.routeWaiters ??= new Set()).add(onRouteChange)
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          finish()
+          reject(
+            new Error(
+              `${this.coordinatorName}: leadership route for collection "${collectionId}" timed out after ${timeoutMs}ms`,
+            ),
+          )
+        }, timeoutMs)
+      }
       signal?.addEventListener(`abort`, onAbort, { once: true })
       if (signal?.aborted) {
         onAbort()
@@ -1719,12 +1753,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       spec: PersistedIndexSpec
     },
   ): Promise<RPCResponse> {
-    await this.withWriterLock(() =>
-      this.requireAdapter(collectionId).ensureIndex(
-        collectionId,
-        request.signature,
-        request.spec,
-      ),
+    await this.withScheduledWriterLock(collectionId, (adapter) =>
+      adapter.ensureIndex(collectionId, request.signature, request.spec),
     )
     return {
       type: `rpc:ensurePersistedIndex:res`,
@@ -1818,6 +1848,15 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       state,
       pendingTx,
     )
+    if (tx === null) {
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `NOT_LEADER`,
+        error: `not the leader for ${collectionId}`,
+      }
+    }
 
     const response: ApplyLocalMutationsResponse = {
       type: `rpc:applyLocalMutations:res`,
@@ -1973,6 +2012,15 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       request.tx,
       scopedAdapter,
     )
+    if (tx === null) {
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `NOT_LEADER`,
+        error: `not the leader for ${collectionId}`,
+      }
+    }
     const response: ApplyCommittedTxResponse = {
       type: `rpc:applyCommittedTx:res`,
       rpcId: request.rpcId,
@@ -2042,24 +2090,37 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     state: CollectionState,
     pendingTx: Omit<PersistedTx, `term` | `seq` | `rowVersion`>,
     scopedAdapter?: HydrationPersistenceAdapter,
-  ): Promise<PersistedTx> {
-    return this.withWriterLock(async () => {
-      const tx: PersistedTx = {
-        ...pendingTx,
-        term: state.latestTerm,
-        seq: state.latestSeq + 1,
-        rowVersion: state.latestRowVersion + 1,
-      }
-      const adapter = scopedAdapter ?? this.requireAdapter(collectionId)
-      try {
-        await adapter.applyCommittedTx(collectionId, tx)
-      } catch (error) {
-        throw toPersistedCollectionDurabilityError(collectionId, error)
-      }
-      state.latestSeq = tx.seq
-      state.latestRowVersion = tx.rowVersion
-      return tx
-    })
+  ): Promise<PersistedTx | null> {
+    const expectedTerm = state.latestTerm
+    return this.withScheduledWriterLock(
+      collectionId,
+      async (adapter) => {
+        if (
+          this.isDisposed() ||
+          this.collections.get(collectionId) !== state ||
+          !state.isLeader ||
+          state.leaderId !== this.nodeId ||
+          state.latestTerm !== expectedTerm
+        ) {
+          return null
+        }
+        const tx: PersistedTx = {
+          ...pendingTx,
+          term: state.latestTerm,
+          seq: state.latestSeq + 1,
+          rowVersion: state.latestRowVersion + 1,
+        }
+        try {
+          await adapter.applyCommittedTx(collectionId, tx)
+        } catch (error) {
+          throw toPersistedCollectionDurabilityError(collectionId, error)
+        }
+        state.latestSeq = tx.seq
+        state.latestRowVersion = tx.rowVersion
+        return tx
+      },
+      scopedAdapter,
+    )
   }
 
   private async handlePullSince(
@@ -2116,6 +2177,24 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   // -----------------------------------------------------------------------
   // DB Writer Lock
   // -----------------------------------------------------------------------
+
+  private withScheduledWriterLock<T>(
+    collectionId: string,
+    task: (adapter: CoordinatorAdapter) => Promise<T>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<T> {
+    if (scopedAdapter) {
+      return this.withWriterLock(() => task(scopedAdapter))
+    }
+    // Enter the shared scheduler before taking the database-wide Web Lock.
+    // A hydrate waiting for its first commit may need that lock to finish.
+    const adapter = this.requireAdapter(collectionId)
+    return adapter.runInRegularScope
+      ? adapter.runInRegularScope((unscheduledAdapter) =>
+          this.withWriterLock(() => task(unscheduledAdapter)),
+        )
+      : this.withWriterLock(() => task(adapter))
+  }
 
   private async withWriterLock<T>(fn: () => Promise<T>): Promise<T> {
     const lockName = `tsdb:writer:${this.dbName}`

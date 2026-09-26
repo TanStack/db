@@ -438,6 +438,10 @@ export interface PersistenceAdapter {
   runInHydrationScope?: <T>(
     task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
   ) => Promise<T>
+  /** Schedule one regular operation before it acquires external writer locks. */
+  runInRegularScope?: <T>(
+    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+  ) => Promise<T>
   /** Whether hydration scopes currently enter a shared driver scheduler. */
   isHydrationScopeScheduled?: () => boolean
 }

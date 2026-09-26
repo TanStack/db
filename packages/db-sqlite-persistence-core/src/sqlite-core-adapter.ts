@@ -1306,6 +1306,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     return hydration
   }
 
+  runInRegularScope<T>(
+    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+  ): Promise<T> {
+    return this.runRegular(() => task(this.hydrationAdapter))
+  }
+
   isHydrationScopeScheduled(): boolean {
     return this.resolveScheduler() !== undefined
   }
@@ -2063,9 +2069,9 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestSeq: number
     latestRowVersion: number
   }> {
-    return this.runRegular(() =>
-      this.getStreamPositionUnscheduled(collectionId),
-    )
+    // Election must not queue behind a hydrate awaiting its first writer route.
+    // The stream-position snapshot still uses the driver's transaction admission.
+    return this.getStreamPositionUnscheduled(collectionId)
   }
 
   private async getStreamPositionUnscheduled(collectionId: string): Promise<{
