@@ -4,6 +4,27 @@ import { localOnlyCollectionOptions } from '../src/local-only'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 
+/**
+ * # Do settled change messages reconstruct the Collection's public rows?
+ *
+ * The public change-message contract and issue #1901 require a consumer that
+ * applies every delivered insert, update, and delete to agree with the
+ * Collection after the corresponding optimistic transactions persist.
+ *
+ * A one-key optional value is the independent reference model. Its legal
+ * history grammar inserts only while absent and updates or deletes only while
+ * present. Bounded enumeration covers every such history of length one through
+ * four from an absent row. The production driver applies each history through
+ * a local-only Collection, either in one same-turn batch or sequentially. At
+ * the applied-settlement checkpoint, both the public row and a change-message
+ * mirror must equal the reference value.
+ *
+ * This partial oracle does not cover an initially present row, multiple keys,
+ * failed persistence, sync-transaction cancellation, callback batch shape, or
+ * intermediate publication. The collection-state retention oracle owns queued
+ * source admission and cancellation histories.
+ */
+
 interface TestItem extends Record<string, unknown> {
   id: number
   name: string
@@ -20,11 +41,8 @@ const nextKinds = (present: boolean): Array<OpKind> =>
   present ? [`update`, `delete`] : [`insert`]
 
 /**
- * Every sequence of insert/update/delete on a single key that the collection
- * actually permits, up to `maxLength` operations - the cartesian product of
- * {insert, update, delete}^maxLength filtered to valid paths through the
- * collection's own state machine (insert only while absent; update/delete
- * only while present).
+ * Every sequence the one-key presence model permits up to `maxLength`:
+ * insert only while absent, and update or delete only while present.
  */
 function generateSequences(
   maxLength: number,
@@ -69,11 +87,16 @@ function applyOp(
 const settle = (tx: { isPersisted: { promise: Promise<unknown> } }) =>
   tx.isPersisted.promise
 
+function assertFinalAgreement(
+  collectionValue: string | undefined,
+  mirrorValue: string | undefined,
+  expected: string | undefined,
+): void {
+  expect(collectionValue).toBe(expected)
+  expect(mirrorValue).toBe(expected)
+}
+
 describe(`change-event history oracle`, () => {
-  // Cartesian product of every generated sequence with each execution mode:
-  // "batched" issues every op in the same tick (where same-tick delete/
-  // re-insert races can desync change events from state); "sequential"
-  // awaits each op before the next, as a control that should always agree.
   const cases = generateSequences(4).flatMap((sequence, index) =>
     ([`batched`, `sequential`] as const).map((mode) => ({
       mode,
@@ -83,6 +106,17 @@ describe(`change-event history oracle`, () => {
       id: `history-oracle-${mode}-${index}`,
     })),
   )
+
+  it(`reaches the delete-reinsert witness and rejects a dropped reinsertion`, () => {
+    const witness: Array<Op> = [
+      { kind: `insert`, step: 1 },
+      { kind: `delete`, step: 2 },
+      { kind: `insert`, step: 3 },
+    ]
+    expect(generateSequences(4)).toContainEqual(witness)
+    expect(cases).toHaveLength(22)
+    expect(() => assertFinalAgreement(`v3`, undefined, `v3`)).toThrow()
+  })
 
   it.each(cases)(
     `$mode: change history matches final state for $label`,
@@ -98,8 +132,6 @@ describe(`change-event history oracle`, () => {
         }),
       )
 
-      // Rebuilds collection state purely from emitted change events, the
-      // same way a derived cache or index would.
       const mirror = new Map<number, string>()
       const subscription = collection.subscribeChanges((changes) => {
         for (const change of changes) {
@@ -108,18 +140,20 @@ describe(`change-event history oracle`, () => {
         }
       })
 
-      if (mode === `batched`) {
-        await Promise.all(
-          sequence.map((op) => applyOp(collection, op)).map(settle),
-        )
-      } else {
-        for (const op of sequence) await settle(applyOp(collection, op))
+      try {
+        if (mode === `batched`) {
+          await Promise.all(
+            sequence.map((op) => applyOp(collection, op)).map(settle),
+          )
+        } else {
+          for (const op of sequence) await settle(applyOp(collection, op))
+        }
+
+        assertFinalAgreement(collection.get(1)?.name, mirror.get(1), expected)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
       }
-
-      expect(collection.get(1)?.name).toBe(expected)
-      expect(mirror.get(1)).toBe(expected)
-
-      subscription.unsubscribe()
     },
   )
 })

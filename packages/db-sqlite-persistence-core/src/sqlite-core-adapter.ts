@@ -282,17 +282,17 @@ function isDuplicateColumnAddError(
   error: unknown,
   columnName: string,
 ): boolean {
-  if (!(error instanceof Error)) {
+  if (typeof error !== `string` && !(error instanceof Error)) {
     return false
   }
 
-  const message = error.message.toLowerCase()
-  const normalizedColumnName = columnName.toLowerCase()
+  const normalizedMessage = (
+    typeof error === `string` ? error : error.message
+  ).toLowerCase()
   return (
-    (message.includes(`duplicate column name`) &&
-      message.includes(normalizedColumnName)) ||
-    (message.includes(`already exists`) &&
-      message.includes(normalizedColumnName))
+    normalizedMessage.includes(columnName.toLowerCase()) &&
+    (normalizedMessage.includes(`duplicate column name`) ||
+      normalizedMessage.includes(`already exists`))
   )
 }
 
