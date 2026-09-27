@@ -91,3 +91,42 @@ five adjacent lifecycle, metadata, reconciliation, hydration, and load-subset
 owners: 223 tests. The complete DB oracle campaign passed 41 files and 2,197
 tests. Package build, TypeScript, changed-file ESLint and Prettier, and
 `git diff --check` also passed.
+
+## Follow-up review: mirror-agreement class coverage
+
+- Reviewed test head: `bbde36962534f55d1e0515224ef5bb070ce5aad3`.
+- Production remains at the corrected implementation above. This follow-up
+  changes only oracle tests, their replay registration, and documentation.
+- The change-event owner now executes 366 bounded history cells: all legal
+  operation-kind/key histories of lengths one through four for one key from
+  absence, and lengths one through three for two keys from each initial-presence
+  state. Values are deterministic and distinct by step. Each history runs in
+  same-turn and sequential modes. Two 100-run campaigns also
+  explore up to twenty legal actions over four keys. One uses seed `1902`; the
+  other has no seed unless a direct seed-and-path replay is requested.
+- The queued-sync fixture builds its initial mirror from its declared source
+  rows. It checks that mirror against complete public rows at every delivered
+  callback and after the queued work settles, including canceled predecessors.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001: contract authority and limits | Pass. Issue #1901 and the public change-message contract authorize mirror/public agreement. The executable owner limits its claim to local-only persistence and named queued-sync cases; it does not claim arbitrary adapters or unbounded histories. |
+| ORC-002: independent judgment | Pass. A plain keyed Map computes expected complete rows from legal actions. A second Map applies delivered change messages. Neither imports Collection merge or change-composition rules. The queued fixture derives its initial mirror from declared input, not from production output. |
+| ORC-003: distinguishable responsibilities | Pass. The change-event owner names the contract, keyed Map model, bounded and generated grammar, local-only Collection driver, and callback/settlement comparisons. The queued owner keeps its source model and controlled driver separate. |
+| ORC-004: generated-history grammar controls | Pass. The `insert -> delete -> insert` witness is reconstructed. Removing same-turn mode loses the original failure; removing sequential mode loses settled-prefix checks. Initial presence and two keys expose replacement against retained rows and independent-key interactions. Bounded limits are one key/four actions and two keys/three actions. The generated range is four keys/twenty actions. The grammar rejects insert of a present key and update or delete of an absent key. These are local mutation histories, not arbitrary sync-adapter histories. |
+| ORC-005: production path and observation | Pass. The driver calls public `insert`, `update`, `delete`, `subscribeChanges`, and public Collection reads. It compares complete keyed row values with the model after persistence, at every sequential prefix, and against the event mirror at every delivered callback. The queued driver checks the same relation at its controlled publication cuts. |
+| ORC-006: checker calibration | Pass for the reported fault. A temporary production mutant omitted the absent-key pre-sync value; bounded case `one-key-batched-8` failed at mirror agreement with `[]` against the expected row for key 1. The mutant was removed. Missing, extra, and wrong mirrored rows also fail the comparison control. A separate tentative change-composition mutant survived this witness; branch reach was not established, so it is not counted as a kill. |
+| ORC-007: fixed/random campaigns and replay | Pass. The new generated owner runs the identical arbitrary, production driver, recorder, comparison, and 100-run budget with fixed seed `1902` and a seedless campaign. Direct guarded replay with seed `1902` and path `0` selected exactly the named property and recorded one completed witness. The retention owner now runs matching fixed and seedless 100-run campaigns; its direct replay also passed. The optimistic-history fixed campaign now matches its 100-run random budget. |
+| ORC-008: stateful-model minimality | Pass. Per-key presence determines legal next actions; per-key row value determines the promised observation. Two states that disagree on either can be distinguished by a legal next action or the next public-row check. The model needs no production queue or publication state. |
+| ORC-009: vocabulary mapping | Pass. The local driver waits for optimistic-transaction persistence, not an applied sync receipt. It calls delivered inserts, updates, and deletes change messages and compares the public Collection rows. The Map is a reference model, not a production Collection state. |
+| ORC-010: failure fidelity and cleanup | Pass. Both changed drivers retain the primary law failure, collect separate cleanup failures, and release their subscriptions and Collections. The queued driver also releases the held persistence gate. The bounded and generated histories retain their input and checkpoint in the failing test name or fast-check replay. |
+| ORC-011: independent second formulation | Not triggered. No identified semantic fault is plausible in both the plain Map transition and the change-message fold. The three-way comparison of model, public rows, and event mirror is complementary evidence, not a claim that two production paths are independent. |
+
+ORC-012 is satisfied for the follow-up by this append-only entry and its exact
+reviewed test head. The original review and its older head remain intact.
+
+The two primary owners passed 434 tests. The complete DB oracle campaign passed
+41 files and 2,544 tests. TypeScript, changed-file ESLint and Prettier, guarded
+seed-and-path replay, and `git diff --check` passed. These checks give bounded
+and sampled class-level protection, not a proof over every future schedule or
+provider implementation.
