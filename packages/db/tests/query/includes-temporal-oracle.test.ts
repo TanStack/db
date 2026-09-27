@@ -1449,11 +1449,7 @@ function expectContradictoryReplacementStartCrashes(): void {
       options?: Parameters<CollectionSubscription[`requestSnapshot`]>[0],
     ) => {
       requestCount += 1
-      options?.onLoadSubsetResult?.(
-        true,
-        { where: options.where },
-        () => {},
-      )
+      options?.onLoadSubsetResult?.(true, { where: options.where }, () => {})
       return requestCount === 1
     },
     releaseSnapshot,
