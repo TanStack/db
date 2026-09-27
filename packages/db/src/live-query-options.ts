@@ -4,7 +4,7 @@ import {
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
-import { getRuntimeReferenceIdentity } from './query/runtime-reference-identity.js'
+import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
 import type { CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
@@ -122,14 +122,7 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
       [`singleResult`, config.singleResult === true],
       [
         `defaultStringCollation`,
-        config.defaultStringCollation?.stringSort === `custom`
-          ? {
-              ...config.defaultStringCollation,
-              compare: getRuntimeReferenceIdentity(
-                config.defaultStringCollation.compare,
-              ),
-            }
-          : config.defaultStringCollation,
+        getStringCollationIdentity(config.defaultStringCollation),
       ],
     ]
   }

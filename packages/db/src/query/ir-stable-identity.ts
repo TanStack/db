@@ -2,7 +2,10 @@ import { isPlainObject } from '../utils/type-guards.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
-import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
+import {
+  getRuntimeReferenceIdentity,
+  getStringCollationIdentity,
+} from './runtime-reference-identity.js'
 import { getPropRefPropertyPath, getPropRefSourceAlias } from './ir.js'
 import type {
   Aggregate,
@@ -573,15 +576,8 @@ function canonicalizeCompareOptions(
   path: string,
   seen: WeakSet<object>,
 ): StableIdentityValue {
-  if (compareOptions.stringSort !== `custom`) {
-    return canonicalizeRuntimeValue(compareOptions, path, seen)
-  }
-
   return canonicalizeRuntimeValue(
-    {
-      ...compareOptions,
-      compare: getRuntimeReferenceIdentity(compareOptions.compare),
-    },
+    getStringCollationIdentity(compareOptions),
     path,
     seen,
   )

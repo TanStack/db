@@ -1394,6 +1394,43 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(withInEmpty).toEqual([])
     })
 
+    it(`applies custom string collation during persisted subset ordering`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `custom-collation-order`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-custom-collation`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [`alpha`, `middle`, `zeta`].map((title, index) => ({
+          type: `insert` as const,
+          key: String(index),
+          value: { id: String(index), title, createdAt: ``, score: index },
+        })),
+      })
+
+      const rows = await adapter.loadSubset(collectionId, {
+        orderBy: [
+          {
+            expression: new IR.PropRef([`title`]),
+            compareOptions: {
+              direction: `asc`,
+              nulls: `last`,
+              stringSort: `custom`,
+              compare: (left, right) => right.localeCompare(left),
+            },
+          },
+        ],
+      })
+
+      expect(rows.map(({ value }) => value.title)).toEqual([
+        `zeta`,
+        `middle`,
+        `alpha`,
+      ])
+    })
+
     it(`supports datetime/strftime predicate compilation for ISO date fields`, async () => {
       const { adapter } = registerContractHarness()
       const collectionId = `date-pushdown`
