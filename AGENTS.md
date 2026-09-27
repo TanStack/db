@@ -441,6 +441,24 @@ classifier, fixture, or assertion that let it pass. Use that analysis to suggest
 the smallest test or oracle improvement that would catch the same class of bug,
 not only the reported example.
 
+### Close the Declared Bug Class
+
+A passing reproduction fixes one trace; it does not establish that the bug
+class is closed. Before claiming closure, name the violated product law and
+bound the claim by legal histories, production paths, and public observations
+at specific checkpoints.
+
+Extend the primary oracle so it reaches the reported trace and nearby legal
+histories that distinguish the repair from plausible wrong designs. Use a
+separate oracle owner when another boundary needs a different model. Show that
+the check fails on the original implementation or a hostile mutant at the
+intended checkpoint, then passes with the fix.
+
+At closeout, state what the evidence covers. Record remaining in-scope
+histories or paths in the oracle coverage map with an owner and needed witness.
+A reachable in-scope counterexample keeps the class open. Passing random runs
+is not a universal proof.
+
 ### Keep Oracles Independent
 
 An oracle is useful only when its expected result comes from a source independent

@@ -210,6 +210,13 @@ presence of a preferred heading, class, comment template, or helper.
 - **Acceptance evidence:** Each applicable requirement has concrete evidence or
   an explicit unresolved gap. Each non-applicable requirement has a reason tied
   to its trigger.
+- **Conditional bug-class closure:** When a change claims to eliminate a bug
+  class, the review evidence MUST name its contract × history × production-path
+  × observation boundary, identify the original and adjacent distinguishing
+  witnesses, show a relevant wrong design rejected at the intended checkpoint,
+  and list unresolved in-scope cells with their coverage-map owner. A known
+  reachable counterexample prevents a closure claim. One oracle need not own
+  every boundary.
 - **Evidence location:** At closeout, verdict-critical evidence outside the
   executable oracle MUST live in a versioned review record tied to the exact
   reviewed head. An editable pull-request description alone does not satisfy
