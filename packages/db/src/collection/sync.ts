@@ -112,6 +112,18 @@ export class CollectionSyncManager<
     this._events = deps.events
   }
 
+  private createDuplicateKeyError(key: TKey): DuplicateKeySyncError {
+    const utils = this.config.utils as
+      | Partial<LiveQueryCollectionUtils>
+      | undefined
+    const internal = utils?.[LIVE_QUERY_INTERNAL]
+    return new DuplicateKeySyncError(key, this.id, {
+      hasCustomGetKey: internal?.hasCustomGetKey ?? false,
+      hasJoins: internal?.hasJoins ?? false,
+      hasDistinct: internal?.hasDistinct ?? false,
+    })
+  }
+
   /** Mark the active sync transaction as changing collection layout. */
   public markLayoutChange(): void {
     this.getActivePendingSyncTransaction().layoutChanged = true
@@ -164,6 +176,7 @@ export class CollectionSyncManager<
               collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
               applied,
+              duplicateKeyError: (key) => this.createDuplicateKeyError(key),
             })
           },
           write: (
@@ -195,17 +208,9 @@ export class CollectionSyncManager<
 
             // Check if an item with this key already exists when inserting
             if (messageWithOptionalKey.type === `insert`) {
-              const insertingIntoExistingSynced = this.state.syncedData.has(key)
-              const hasPendingDeleteForKey =
-                pendingTransaction.deletedKeys.has(key)
-              const isTruncateTransaction = pendingTransaction.truncate === true
-              // Allow insert after truncate in the same transaction even if it existed in syncedData
-              if (
-                insertingIntoExistingSynced &&
-                !hasPendingDeleteForKey &&
-                !isTruncateTransaction
-              ) {
-                const existingValue = this.state.syncedData.get(key)
+              const queuedState = this.state.getPendingSyncedKeyState(key)
+              if (queuedState.exists) {
+                const existingValue = queuedState.value
                 const valuesEqual =
                   existingValue !== undefined &&
                   deepEquals(existingValue, messageWithOptionalKey.value)
@@ -216,15 +221,7 @@ export class CollectionSyncManager<
                   // using the configured rowUpdateMode semantics.
                   messageType = `update`
                 } else {
-                  const utils = this.config.utils as
-                    | Partial<LiveQueryCollectionUtils>
-                    | undefined
-                  const internal = utils?.[LIVE_QUERY_INTERNAL]
-                  throw new DuplicateKeySyncError(key, this.id, {
-                    hasCustomGetKey: internal?.hasCustomGetKey ?? false,
-                    hasJoins: internal?.hasJoins ?? false,
-                    hasDistinct: internal?.hasDistinct ?? false,
-                  })
+                  throw this.createDuplicateKeyError(key)
                 }
               }
             }

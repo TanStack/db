@@ -1,7 +1,10 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { DuplicateKeySyncError } from '../src/errors.js'
+import {
+  DuplicateKeySyncError,
+  SyncTransactionAbortedError,
+} from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
@@ -960,6 +963,172 @@ it(`keeps the first queued before-image when metadata reserves the key`, async (
     await Promise.allSettled(receipts)
   }
 })
+
+type ParkedSyncHarness = {
+  collection: Collection<RetainedRow, number>
+  sync: Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
+  releasePersistence: () => Promise<void>
+}
+
+async function withParkedSync(
+  initialRows: ReadonlyArray<RetainedRow>,
+  run: (harness: ParkedSyncHarness) => Promise<void>,
+): Promise<void> {
+  let sync!: ParkedSyncHarness[`sync`]
+  let release!: () => void
+  const persistence = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        for (const row of initialRows)
+          actions.write({ type: `insert`, value: row })
+        actions.write({ type: `insert`, value: { id: 2, value: 0 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const blocker = createTransaction<RetainedRow>({
+    autoCommit: false,
+    mutationFn: () => persistence,
+  })
+  let blockerCommit: Promise<unknown> | undefined
+
+  try {
+    await collection.stateWhenReady()
+    blocker.mutate(() =>
+      collection.update(2, (draft) => {
+        draft.value = 1
+      }),
+    )
+    blockerCommit = blocker.commit()
+    await Promise.resolve()
+    expect(blocker.state).toBe(`persisting`)
+    await run({
+      collection,
+      sync,
+      releasePersistence: async () => {
+        release()
+        await blockerCommit
+      },
+    })
+  } finally {
+    release()
+    if (blocker.state === `pending` || blocker.state === `persisting`)
+      blocker.rollback()
+    await blockerCommit?.catch(() => undefined)
+    await collection.cleanup()
+  }
+}
+
+it.each([`retained source row`, `earlier queued insert`] as const)(
+  `revalidates a queued insert when its prerequisite delete is canceled: %s`,
+  async (predecessor) => {
+    // Law: canceling a sync transaction before application abandons its writes.
+    // The independent source Map therefore retains row 1, making the later
+    // insert a duplicate. The production driver parks both receipts behind an
+    // unrelated mutation, cancels the delete, then observes receipt settlement
+    // and retained source/public rows after the mutation releases the drain.
+    await withParkedSync(
+      predecessor === `retained source row` ? [{ id: 1, value: 0 }] : [],
+      async ({ collection, sync, releasePersistence }) => {
+        let predecessorReceipt: Promise<void> | undefined
+        if (predecessor === `earlier queued insert`) {
+          sync.begin()
+          sync.write({ type: `insert`, value: { id: 1, value: 0 } })
+          const pendingPredecessor = sync.commit()
+          if (pendingPredecessor === true)
+            throw new Error(`predecessor was not queued`)
+          predecessorReceipt = pendingPredecessor
+        }
+
+        const deleteController = new AbortController()
+        sync.begin()
+        sync.write({ type: `delete`, key: 1 })
+        const deleteReceipt = sync.commit(deleteController.signal)
+        if (deleteReceipt === true) throw new Error(`delete was not queued`)
+
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 2 } })
+        const insertReceipt = sync.commit()
+        if (insertReceipt === true) throw new Error(`insert was not queued`)
+
+        deleteController.abort()
+        await releasePersistence()
+        await predecessorReceipt
+        const [deleteOutcome, insertOutcome] = await Promise.all([
+          deleteReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+          insertReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof DuplicateKeySyncError
+                ? (`duplicate` as const)
+                : (`other-error` as const),
+          ),
+        ])
+
+        expect({
+          deleteOutcome,
+          insertOutcome,
+          retainedSourceValue: collection._state.syncedData.get(1)?.value,
+          publicValue: collection.get(1)?.value,
+        }).toEqual({
+          deleteOutcome: `aborted`,
+          insertOutcome: `duplicate`,
+          retainedSourceValue: 0,
+          publicValue: 0,
+        })
+      },
+    )
+  },
+)
+
+it.each([
+  { label: `an earlier queued insert`, predecessor: `earlier` },
+  { label: `an insert in the same transaction`, predecessor: `same` },
+] as const)(
+  `rejects a duplicate insert after $label`,
+  async ({ predecessor }) => {
+    // The source Map contains the first queued insert before the second write is
+    // admitted. The duplicate-key law is independent of whether the first row
+    // has already crossed the public publication boundary.
+    await withParkedSync(
+      [],
+      async ({ collection, sync, releasePersistence }) => {
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+        let firstReceipt: true | Promise<void> | undefined
+        if (predecessor === `earlier`) {
+          firstReceipt = sync.commit()
+          if (firstReceipt === true)
+            throw new Error(`first insert was not queued`)
+          sync.begin()
+        }
+        expect(() =>
+          sync.write({ type: `insert`, value: { id: 1, value: 2 } }),
+        ).toThrow(DuplicateKeySyncError)
+        firstReceipt ??= sync.commit()
+
+        await releasePersistence()
+        if (firstReceipt !== true) await firstReceipt
+        expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 1 })
+      },
+    )
+  },
+)
 
 it(`snapshots a buffered delete before its row object is reused`, async () => {
   const reusedRow: LivePreviousRow = { id: 1, value: 0 }

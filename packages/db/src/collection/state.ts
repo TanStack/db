@@ -22,6 +22,7 @@ import type { CollectionChangesManager } from './changes'
 import type { CollectionIndexesManager } from './indexes'
 import type { CollectionEventsManager } from './events'
 import type { Deferred } from '../deferred'
+import type { DuplicateKeySyncError } from '../errors.js'
 
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,
@@ -49,6 +50,8 @@ interface PendingSyncedTransaction<
     >
   }
   preserveHydrationSeedKeys?: boolean
+  /** Present on adapter transactions that can be revalidated after cancel. */
+  duplicateKeyError?: (key: TKey) => DuplicateKeySyncError
   /**
    * When true, this transaction should be processed immediately even if there
    * are persisting user transactions. Used by manual write operations (writeInsert,
@@ -143,7 +146,9 @@ export class CollectionStateManager<
   public size = 0
 
   // State used for computing the change events
-  public preSyncVisibleState = new Map<TKey, TOutput>()
+  // Hidden keys are captured as undefined so a later recompute cannot become
+  // the baseline for a sync commit that must publish that key's change.
+  public preSyncVisibleState = new Map<TKey, TOutput | undefined>()
   public preSyncVirtualState = new Map<TKey, VirtualRowProps<TKey>>()
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
@@ -965,6 +970,38 @@ export class CollectionStateManager<
     return (key) => queued.get(key) ?? (!truncated && this.syncedData.has(key))
   }
 
+  /** Resolve authoritative key state after every earlier queued transaction. */
+  getPendingSyncedKeyState(key: TKey): {
+    exists: boolean
+    value: TOutput | undefined
+  } {
+    let value = this.syncedData.get(key)
+    let exists = this.syncedData.has(key)
+    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (transaction.truncate) {
+        exists = false
+        value = undefined
+      }
+      for (const operation of transaction.operations) {
+        if (operation.key !== key) continue
+        if (operation.type === `delete`) {
+          exists = false
+          value = undefined
+        } else if (operation.type === `update` && rowUpdateMode === `partial`) {
+          exists = true
+          value = Object.assign({}, value, operation.value)
+        } else {
+          exists = true
+          value = operation.value
+        }
+      }
+    }
+
+    return { exists, value }
+  }
+
   /**
    * Get the previous value for a key given previous optimistic state
    */
@@ -980,6 +1017,27 @@ export class CollectionStateManager<
       return previousUpserts.get(key)
     }
     return this.syncedData.get(key)
+  }
+
+  private findDuplicateQueuedInsert():
+    | {
+        transaction: PendingSyncedTransaction<TOutput, TKey>
+        key: TKey
+      }
+    | undefined {
+    const syncedKeys = new Set(this.syncedData.keys())
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (transaction.truncate) syncedKeys.clear()
+      for (const operation of transaction.operations) {
+        const key = operation.key as TKey
+        if (operation.type === `insert` && syncedKeys.has(key)) {
+          return { transaction, key }
+        }
+        if (operation.type === `delete`) syncedKeys.delete(key)
+        else syncedKeys.add(key)
+      }
+    }
+    return undefined
   }
 
   /**
@@ -1154,7 +1212,7 @@ export class CollectionStateManager<
       let currentVisibleState = this.preSyncVisibleState
       if (currentVisibleState.size === 0) {
         // No pre-captured state, capture it now for pure sync operations
-        currentVisibleState = new Map<TKey, TOutput>()
+        currentVisibleState = new Map<TKey, TOutput | undefined>()
         for (const key of changedKeys) {
           const currentValue = this.get(key)
           if (currentValue !== undefined) {
@@ -1635,7 +1693,7 @@ export class CollectionStateManager<
     return { processed: false }
   }
 
-  /** Abandons one committed transaction before it becomes visible. */
+  /** Abandons a queued transaction and invalidated dependents before visibility. */
   public cancelPendingSyncedTransaction(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
   ): void {
@@ -1644,8 +1702,35 @@ export class CollectionStateManager<
     const index = this.pendingSyncedTransactions.indexOf(transaction)
     if (index === -1) return
 
-    this.pendingSyncedTransactions.splice(index, 1)
-    transaction.applied.reject(new SyncTransactionAbortedError())
+    const canceledTransactions = new Set<
+      PendingSyncedTransaction<TOutput, TKey>
+    >()
+    const cancel = (
+      pending: PendingSyncedTransaction<TOutput, TKey>,
+      error: Error,
+    ) => {
+      const pendingIndex = this.pendingSyncedTransactions.indexOf(pending)
+      if (pendingIndex === -1 || pending.applicationStarted) return
+      this.pendingSyncedTransactions.splice(pendingIndex, 1)
+      canceledTransactions.add(pending)
+      pending.applied.reject(error)
+    }
+
+    cancel(transaction, new SyncTransactionAbortedError())
+
+    // Admission can depend on earlier queued writes. After cancellation,
+    // replay the remaining authoritative key membership and reject any
+    // transaction whose insert has become a duplicate. Repeat because
+    // removing that transaction can invalidate a later insert in turn.
+    let invalid = this.findDuplicateQueuedInsert()
+    while (invalid !== undefined) {
+      cancel(
+        invalid.transaction,
+        invalid.transaction.duplicateKeyError?.(invalid.key) ??
+          new SyncTransactionAbortedError(),
+      )
+      invalid = this.findDuplicateQueuedInsert()
+    }
 
     const remainingPendingKeys = new Set<TKey>()
     for (const pending of this.pendingSyncedTransactions) {
@@ -1653,12 +1738,14 @@ export class CollectionStateManager<
         remainingPendingKeys.add(operation.key as TKey)
       }
     }
-    for (const operation of transaction.operations) {
-      const key = operation.key as TKey
-      if (!remainingPendingKeys.has(key)) {
-        this.recentlySyncedKeys.delete(key)
-        this.preSyncVisibleState.delete(key)
-        this.preSyncVirtualState.delete(key)
+    for (const canceled of canceledTransactions) {
+      for (const operation of canceled.operations) {
+        const key = operation.key as TKey
+        if (!remainingPendingKeys.has(key)) {
+          this.recentlySyncedKeys.delete(key)
+          this.preSyncVisibleState.delete(key)
+          this.preSyncVirtualState.delete(key)
+        }
       }
     }
 
@@ -1723,8 +1810,8 @@ export class CollectionStateManager<
     for (const key of syncedKeys) {
       if (!this.preSyncVisibleState.has(key)) {
         const currentValue = this.get(key)
+        this.preSyncVisibleState.set(key, currentValue)
         if (currentValue !== undefined) {
-          this.preSyncVisibleState.set(key, currentValue)
           this.preSyncVirtualState.set(
             key,
             this.getVirtualPropsSnapshotForState(key),
