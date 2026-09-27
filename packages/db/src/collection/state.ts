@@ -125,6 +125,11 @@ export class CollectionStateManager<
   public syncedCollectionMetadata = new Map<string, unknown>()
   public hydrationSeedKeys = new Set<TKey>()
   public hydratedKeys = new Set<TKey>()
+  // DbClient may receive a stale hydration chunk after an adapter delete.
+  // Only DbClient collections retain these absences until cleanup because
+  // hydration has no completion boundary.
+  private appliedAdapterDeletedKeys?: Set<TKey>
+  private hasAppliedAdapterTruncate = false
 
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
@@ -996,6 +1001,10 @@ export class CollectionStateManager<
     return (key) => queued.get(key) ?? (!truncated && this.syncedData.has(key))
   }
 
+  enableHydrationAuthorityTracking(): void {
+    this.appliedAdapterDeletedKeys ??= new Set<TKey>()
+  }
+
   /** A late hydration seed cannot supersede committed adapter work. */
   createAdapterAuthorityLookup(): (key: TKey) => boolean {
     const queuedKeys = new Set<TKey>()
@@ -1009,8 +1018,10 @@ export class CollectionStateManager<
       }
     }
     return (key) =>
+      this.hasAppliedAdapterTruncate ||
       queuedTruncate ||
       queuedKeys.has(key) ||
+      this.appliedAdapterDeletedKeys?.has(key) === true ||
       (this.syncedData.has(key) && !this.hydrationSeedKeys.has(key))
   }
 
@@ -1465,6 +1476,13 @@ export class CollectionStateManager<
           this.syncedMetadata.clear()
           this.hydrationSeedKeys.clear()
           this.hydratedKeys.clear()
+          if (
+            !transaction.preserveHydrationSeedKeys &&
+            this.appliedAdapterDeletedKeys
+          ) {
+            this.hasAppliedAdapterTruncate = true
+            this.appliedAdapterDeletedKeys.clear()
+          }
           this.clearOriginTrackingState()
 
           // Clear currentVisibleState for truncated keys to ensure subsequent operations
@@ -1558,6 +1576,9 @@ export class CollectionStateManager<
           if (!transaction.preserveHydrationSeedKeys) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)
+            if (operation.type === `delete`)
+              this.appliedAdapterDeletedKeys?.add(key)
+            else this.appliedAdapterDeletedKeys?.delete(key)
           }
         }
 
@@ -2056,6 +2077,8 @@ export class CollectionStateManager<
     this.pendingOptimisticDirectDeletes.clear()
     this.hydrationSeedKeys.clear()
     this.hydratedKeys.clear()
+    this.appliedAdapterDeletedKeys?.clear()
+    this.hasAppliedAdapterTruncate = false
     this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0

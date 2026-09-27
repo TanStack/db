@@ -122,8 +122,12 @@ comment and the current API/architecture contract before extending its model.
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
 also covers one-pass queued-sync cancellation and focused late-hydration cases
 in `packages/db/tests/db-client.test.ts`. Those cases cross queued adapter
-insert and delete with a held local mutation. They do not establish arbitrary
-hydration stream order or already-applied delete tombstone behavior.
+insert and delete with a held local mutation. The
+[DbClient hydration authority oracle](../../packages/db/tests/db-client-hydration-authority-oracle.test.ts)
+crosses applied adapter insert, update, delete, and truncate with hydration
+before and after the applied receipt. It includes delete/reinsert and
+truncate/reinsert controls. These owners do not establish arbitrary hydration
+stream order, a later authoritative hydration epoch, or unbounded retention.
 
 ## Acceptance map
 

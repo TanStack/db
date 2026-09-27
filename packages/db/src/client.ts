@@ -471,6 +471,7 @@ export class DbClient {
       startSync: false,
     } as any)
     collection._setTransactionScope(this.transactionScope)
+    collection._state.enableHydrationAuthorityTracking()
     if (deferSyncStart) {
       collection._deferSyncStart()
     }
