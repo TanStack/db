@@ -226,3 +226,63 @@ Collection cleanup; non-DbClient Collections do not allocate that set.
 The complete DB oracle campaign passed 42 files and 2,563 tests. The four
 focused owners passed 493 tests. Package build, TypeScript, changed-file
 ESLint and Prettier, and `git diff --check` passed.
+
+## Follow-up review: queued partial-update dependency
+
+- Reviewed implementation and test head:
+  `0d580682cce96e829cb0152d9f8403d94904d81d`.
+- Starting head: `9f719cfcac6fb53c7b2ac9952fa8999e302f0e2a`.
+- Primary executable owner:
+  `packages/db/tests/collection-state-retention-oracle.property.test.ts`.
+
+A partial update admitted while a queued source row exists depends on that row.
+If cancellation removes its only earlier source, the update's whole sync
+transaction rejects with `AbortError`; downstream transactions that depended
+on its writes reject as well. An update admitted against an absent key remains
+an independent upsert, and a full-row update can replace an absent row. This
+preserves the persisted-source partial-upsert contract rather than changing all
+missing-key updates into errors. A surviving identical insert echo can become
+the source row after an earlier insert is canceled, so its later update remains
+valid.
+
+The fixed witness was RED on the starting head: canceling the queued insert
+left both committed and open dependent updates fulfilled and materialized a
+row. The corrected head passes those witnesses, a same-transaction insert and
+update control, independent-upsert controls, a surviving-echo control, and an
+atomic multi-key/transitive-cancellation control. The generated driver crosses
+three source origins, two update modes, cancellation, open versus committed
+child receipts, and bounded row values. All 24 structural combinations have a
+fixed witness; matching 100-run fixed-seed and seedless campaigns vary values.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001: contract authority and limits | Pass. The user-approved dependency rule governs cancellation; existing persisted-source tests establish that absent partial updates may upsert. The claim covers direct Collection sync transactions parked before application, not arbitrary provider or persistence-wrapper scheduling. |
+| ORC-002: independent judgment | Pass. The expected row and receipt outcomes are derived from the declared retained/queued source history and update mode. The reference does not read the pending projection, operation flags, or production classifier. |
+| ORC-003: distinguishable responsibilities | Pass. The queued-update opening states the law and limits; the scenario's source history determines the expected row and receipt outcomes; its axes are the grammar; real sync actions plus a held mutation are the driver; applied receipts, retained rows, public rows, and the callback mirror are compared after the drain. |
+| ORC-004: grammar controls | Pass. `queued-insert -> update -> cancel` reconstructs the reported case; queued upsert, retained row, and surviving echo distinguish source ownership. Removing the source-origin or cancellation axis loses the dependency witness; removing update mode loses the full-row independence control; removing receipt phase loses the open-transaction cut. The bounded domain is one key, two transactions, values -2 through 2, plus focused same-transaction and transitive/multi-key cases. Conflicting inserts and arbitrary nested `begin` calls are excluded. |
+| ORC-005: production path and observation | Pass. The driver calls real `begin`, `write`, `commit`, and abort signals. It observes receipt outcome, retained and public complete rows after application, and mirror/public agreement at every delivered callback. |
+| ORC-006: checker calibration | Pass. Temporarily removing the dependency revalidation check made the fixed-seed property fail by assertion after six tests. It shrank to queued insert, committed partial update, then cancellation with seed `190201` and path `5:0:1:1:1`. The mutant was restored; this was neither timeout nor setup failure. The original focused witness also failed at receipt and row comparison before the fix. |
+| ORC-007: fixed/random campaigns and replay | Pass. Both campaigns use the same arbitrary, driver, observations, and 100-run budget. The fixed seed is `190201`; the other is seedless unless replayed. Direct guarded replay of seed `190201` and path `5:0:1:1:1` recorded the named property, the same path, two completed replay runs, and `failed:false` on the corrected head. |
+| ORC-008: stateful-model minimality | Not triggered. The expected result is recomputed from each immutable scenario rather than maintained in a stateful reference model. |
+| ORC-009: vocabulary mapping | Pass. The scenario's `source` arm identifies the retained source row, a queued adapter insert, or an independent queued upsert. `updatePhase` maps to an open or committed sync transaction; the applied receipt and public row retain their glossary meanings. |
+| ORC-010: failure fidelity and cleanup | Pass. The queued harness preserves the primary mismatch separately from cleanup failures, releases the held mutation, and cleans up the subscription and Collection. Fast-check retains the failing input, seed, and shrink path. |
+| ORC-011: independent second formulation | Not triggered. The reviewer did not name a fault plausibly shared by the source-history reference and production's queued projection. Existing persisted-source upsert tests and the full-row/independent-upsert controls reject the initial overbroad design. |
+
+Under ORC-012, the bounded direct-sync dependency class above has no known
+reachable counterexample. The original cancellation witness and adjacent
+upsert, full-row, echo, open-transaction, and transitive witnesses are owned by
+the state-retention oracle. Persistence-wrapper replay remains owned by the
+SQLite persisted histories, and Electric stream completeness remains owned by
+the Electric oracle; neither is claimed closed by this Collection test. The
+coverage map names these owners and their limits. This append-only record names
+the exact reviewed implementation head; it is committed afterward.
+
+The complete DB oracle campaign passed 42 files and 2,575 tests; the focused
+owner passed all 80 tests. The full DB runtime suite passed 186 files and
+6,543 tests with Vitest's background typecheck disabled. Electric runtime
+oracles passed 211 tests and persisted-source tests passed 437 tests. The DB
+package build, direct `tsc --noEmit`, changed-file ESLint and Prettier, and
+`git diff --check` passed. An earlier full Vitest run with background typecheck
+enabled passed its runtime assertions but exited nonzero: two new test
+type-narrowing errors were then corrected, while separate diagnostics in the
+untouched subset-error test file remain outside this change.

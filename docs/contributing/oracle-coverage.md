@@ -120,9 +120,10 @@ comment and the current API/architecture contract before extending its model.
 | Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue.property.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and appointment-list models with executed target/seed/path checks. Callback-reentrant scheduling is outside the initial cleanup-queue domain. |
 
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
-also covers one-pass queued-sync cancellation and focused late-hydration cases
-in `packages/db/tests/db-client.test.ts`. Those cases cross queued adapter
-insert and delete with a held local mutation. The
+also covers one-pass queued-sync cancellation, partial-update dependencies on
+queued source rows, and focused late-hydration cases in
+`packages/db/tests/db-client.test.ts`. Those cases cross queued adapter insert
+and delete with a held local mutation. The
 [DbClient hydration authority oracle](../../packages/db/tests/db-client-hydration-authority-oracle.test.ts)
 crosses applied adapter insert, update, delete, and truncate with hydration
 before and after the applied receipt. It includes delete/reinsert and
