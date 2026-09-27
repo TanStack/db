@@ -717,17 +717,24 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const opts: CompareOptions =
       typeof options === `string`
         ? { direction: options, nulls: `first` }
-        : {
-            direction: options.direction ?? `asc`,
-            nulls: options.nulls ?? `first`,
-            stringSort: options.stringSort,
-            locale:
-              options.stringSort === `locale` ? options.locale : undefined,
-            localeOptions:
-              options.stringSort === `locale`
-                ? options.localeOptions
-                : undefined,
-          }
+        : options.stringSort === `custom`
+          ? {
+              direction: options.direction ?? `asc`,
+              nulls: options.nulls ?? `first`,
+              stringSort: `custom`,
+              compare: options.compare,
+            }
+          : {
+              direction: options.direction ?? `asc`,
+              nulls: options.nulls ?? `first`,
+              stringSort: options.stringSort,
+              locale:
+                options.stringSort === `locale` ? options.locale : undefined,
+              localeOptions:
+                options.stringSort === `locale`
+                  ? options.localeOptions
+                  : undefined,
+            }
 
     const makeOrderByClause = (res: any) => {
       return {

@@ -94,5 +94,18 @@ describe(`buildCursor`, () => {
       ),
     ).toBe(true)
     expect(canExpressCursorOrder(localeOrder, [{ rank: 1 }])).toBe(false)
+
+    const customOrder: OrderBy = [
+      {
+        expression: new PropRef([`label`]),
+        compareOptions: {
+          direction: `asc`,
+          nulls: `first`,
+          stringSort: `custom`,
+          compare: (a: string, b: string) => a.length - b.length,
+        },
+      },
+    ]
+    expect(canExpressCursorOrder(customOrder, [`item2`])).toBe(false)
   })
 })

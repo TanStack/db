@@ -45,7 +45,10 @@ export type OrderByOptimizationInfo = {
   dataNeeded?: () => number
   /** Reads the source loader's synchronous request guard, when installed. */
   isRequesting?: () => boolean
-  /** Whether local operators can discard or reorder the provider's prefix. */
+  /**
+   * Whether a provider-ordered finite prefix is insufficient for the local
+   * plan, including when a custom local collation defines another order.
+   */
   requiresFullSource: boolean
 }
 
@@ -135,8 +138,10 @@ export function processOrderBy(
 
   let orderByOptimizationInfo: OrderByOptimizationInfo | undefined
 
-  // When there's a limit, we create orderByOptimizationInfo to pass orderBy/limit
-  // to loadSubset so the sync layer can optimize the query.
+  // When there's a limit, create orderByOptimizationInfo for top-K source
+  // loading. Unbounded queries use subscription hints instead. A plan whose
+  // local semantics cannot be established from a provider prefix records
+  // requiresFullSource and issues one filtered full-source acquisition.
   // We try to use an index on the FIRST orderBy column for lazy loading,
   // even for multi-column orderBy (using wider bounds on first column).
   // Skip this optimization when using grouped ordering (includes with limit),
@@ -251,6 +256,9 @@ export function processOrderBy(
         index,
         orderBy: sourceOrderBy,
         requiresFullSource:
+          sourceOrderBy.some(
+            ({ compareOptions }) => compareOptions.stringSort === `custom`,
+          ) ||
           !sourceOrderIsDirect ||
           rawQuery.from.type !== `collectionRef` ||
           rawQuery.from.sourceId !== orderBySourceId ||

@@ -277,7 +277,10 @@ export function isTemporal(a: unknown): a is TemporalLike {
   return typeof tag === `string` && temporalTypes.has(tag)
 }
 
-export const DEFAULT_COMPARE_OPTIONS: CompareOptions = {
+export const DEFAULT_COMPARE_OPTIONS: Exclude<
+  CompareOptions,
+  { stringSort: `custom` }
+> = {
   direction: `asc`,
   nulls: `first`,
   stringSort: `locale`,

@@ -560,12 +560,31 @@ function canonicalizeOrderBy(
       valueContext,
       scope,
     ),
-    compareOptions: canonicalizeRuntimeValue(
+    compareOptions: canonicalizeCompareOptions(
       orderBy.compareOptions,
       `${path}.compareOptions`,
       seen,
     ),
   }
+}
+
+function canonicalizeCompareOptions(
+  compareOptions: OrderByClause[`compareOptions`],
+  path: string,
+  seen: WeakSet<object>,
+): StableIdentityValue {
+  if (compareOptions.stringSort !== `custom`) {
+    return canonicalizeRuntimeValue(compareOptions, path, seen)
+  }
+
+  return canonicalizeRuntimeValue(
+    {
+      ...compareOptions,
+      compare: getRuntimeReferenceIdentity(compareOptions.compare),
+    },
+    path,
+    seen,
+  )
 }
 
 function canonicalizeExpression(

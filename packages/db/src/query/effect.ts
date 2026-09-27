@@ -16,6 +16,7 @@ import { OrderedSourceLoader } from './live/ordered-source-loader.js'
 import {
   buildQueryFromConfig,
   computeSubscriptionOrderByHints,
+  extractCollectionFromSource,
   extractCollectionSources,
   extractCollectionsFromQuery,
   reconcileChangesForD2,
@@ -33,7 +34,12 @@ import type {
   LazyCollectionCallbacks,
   LazyDemandPlan,
 } from './compiler/joins.js'
-import type { ChangeMessage, KeyedStream, ResultStream } from '../types.js'
+import type {
+  ChangeMessage,
+  KeyedStream,
+  ResultStream,
+  StringCollationConfig,
+} from '../types.js'
 
 // ---------------------------------------------------------------------------
 // Public Types
@@ -371,6 +377,7 @@ interface EffectPipelineRunnerConfig<
  */
 class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private readonly query: QueryIR
+  private readonly queryCompareOptions: StringCollationConfig
   private readonly collections: Record<string, Collection<any, any, any>>
   private readonly collectionSources: ReturnType<
     typeof extractCollectionSources
@@ -446,6 +453,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     // Parse query
     this.query = buildQueryFromConfig({ query: config.query })
+    this.queryCompareOptions = extractCollectionFromSource(
+      this.query,
+    ).compareOptions
 
     // Extract source collections
     this.collections = extractCollectionsFromQuery(this.query)
@@ -1027,7 +1037,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     // For unordered subscriptions, pass orderBy/limit hints so on-demand
     // collections can optimise server-side fetching.
-    const hints = computeSubscriptionOrderByHints(this.query, alias)
+    const hints = computeSubscriptionOrderByHints(
+      this.query,
+      alias,
+      this.queryCompareOptions,
+    )
 
     return {
       includeInitialState,
