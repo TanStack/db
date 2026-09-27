@@ -175,3 +175,54 @@ ORC-012 is satisfied by this append-only review entry, the exact reviewed code
 head above, and the coverage-map link. The two edited test files passed 108
 tests. The DB oracle campaign passed 41 files and 2,547 tests. Package build,
 TypeScript, changed-file ESLint and Prettier, and `git diff --check` passed.
+
+## Follow-up review: applied adapter authority over hydration
+
+- Reviewed implementation and test head:
+  `95f5a77cb648f9961bf850f0983dd957c3fbe478`.
+- Starting production head: `cc12dea59ce1b81faec4e1b01f5b651e6c0272f3`.
+- Primary executable owner:
+  `packages/db/tests/db-client-hydration-authority-oracle.test.ts`.
+
+The previous queued-hydration controls did not cross an adapter delete or
+truncate **after its applied receipt settled**. A late chunk then restored the
+deleted row or the entire truncated snapshot. The new oracle states the
+adapter-over-seed law independently of the queued projection: for each key it
+recomputes the last applied adapter decision, or uses the latest hydration seed
+when no adapter decision exists. It compares retained source rows, complete
+public rows, and a change-message mirror after every completed action, plus
+mirror/public agreement in every delivered callback.
+
+On the starting production, four of thirteen bounded cases failed: hydration
+after applied delete or truncate, both with and without an earlier chunk.
+The delete witness retained an unwanted `after-target` row; the truncate
+witness restored all three stale rows. The corrected implementation retains
+adapter delete authority per key and global truncate authority for DbClient
+Collections. The final fifteen history cells plus one reachability check pass.
+The extra cells cover delete/reinsert, insert/delete, and truncate/reinsert.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001: contract authority and limits | Pass. The existing late-hydration adapter-authority contract forbids seeds from superseding adapter work. The executable opening limits the claim to one or two immediately applied transactions, three keys, and up to two chunks. Queued work remains with the state-retention owner. |
+| ORC-002: independent judgment | Pass. The reference scans a declared action history per key; it does not import or copy Collection's queued projection, authority lookup, or row classifier. |
+| ORC-003: distinguishable responsibilities | Pass. The opening states the law and limits; the per-key scan is the model; the bounded cases are the grammar; DbClient hydration and sync actions are the driver; retained, public, and mirrored rows are the refinement check. |
+| ORC-004: grammar controls | Pass for the bounded enumeration. The original applied-delete witness is reconstructed. Removing after-receipt hydration loses all four RED cases; removing truncate loses global-absence coverage; removing the untouched peer loses the selective-admission control. The domain crosses four one-transaction decisions with three hydration positions, plus three two-transaction histories. A different duplicate insert behind an authoritative insert is excluded by the existing duplicate-key contract. |
+| ORC-005: production path and observation | Pass. The driver calls `DbClient.collection` with initial data, real sync `begin`/`write`/`truncate`/`commit`, and `applyCollectionChunk`. It checks after applied receipts and hydration calls, and captures callback-time mirror/public rows. |
+| ORC-006: checker calibration | Pass. The unchanged production failed at the intended retained-row comparison in four cells, including the named delete and truncate mistakes. None failed during setup or cleanup. The corrected implementation passes all cells. |
+| ORC-007: fixed/random campaigns and replay | Not triggered. This is a finite bounded enumeration, not an important generated property. |
+| ORC-008: stateful-model minimality | Not triggered. The reference recomputes each expected row from the immutable declared history rather than maintaining a transition model. |
+| ORC-009: vocabulary mapping | Pass. A model adapter decision maps to one sync transaction after its applied receipt; hydration seed, source row, public row, and change message retain their glossary meanings. |
+| ORC-010: failure fidelity and cleanup | Pass. The driver retains the primary comparison failure, records separate unsubscribe and client-cleanup failures, and releases both resources. |
+| ORC-011: independent second formulation | Not triggered. No plausible fault shared by the declarative last-authority scan and production's incremental admission was identified. The source/public/mirror comparison supplies complementary observations, not a second semantic formulation. |
+
+Under ORC-012's class-closure condition, the bounded **applied** authority
+class above is closed; the broader hydration authority class is not claimed
+closed. The coverage map names the queued and applied owners and their limits.
+Arbitrary stream orders, a later authoritative hydration epoch, and unbounded
+retention remain outside this oracle's claim. With no hydration-completion
+boundary, DbClient retains one tombstone per distinct adapter-deleted key until
+Collection cleanup; non-DbClient Collections do not allocate that set.
+
+The complete DB oracle campaign passed 42 files and 2,563 tests. The four
+focused owners passed 493 tests. Package build, TypeScript, changed-file
+ESLint and Prettier, and `git diff --check` passed.
