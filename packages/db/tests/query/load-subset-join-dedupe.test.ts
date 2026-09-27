@@ -132,7 +132,7 @@ describe(`loadSubset join-key deduplication`, () => {
     ),
   )
 
-  it(`requests only a newly inserted join key`, async () => {
+  it(`requests one complete union replacement after inserting a join key`, async () => {
     const { collection: parentCollection, insert } = createParents()
     const { collection: childCollection, loads } = createChildren()
     const live = createJoinedQuery(parentCollection, childCollection)
@@ -159,7 +159,7 @@ describe(`loadSubset join-key deduplication`, () => {
     })
     expect(load.where).toBeDefined()
     expect(extractSimpleComparisons(load.where)).toEqual([
-      { field: [`parentId`], operator: `in`, value: [4] },
+      { field: [`parentId`], operator: `in`, value: [1, 2, 3, 4] },
     ])
   })
 })

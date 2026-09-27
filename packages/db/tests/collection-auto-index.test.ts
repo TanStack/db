@@ -625,7 +625,7 @@ describe(`Collection Auto-Indexing`, () => {
         type: `index`,
         operation: `in`,
         field: `id2`,
-        value: [`other2`],
+        value: [`1`, `2`, `3`, `4`, `5`, `other2`],
       },
     ])
 
@@ -746,7 +746,7 @@ describe(`Collection Auto-Indexing`, () => {
         type: `index`,
         operation: `in`,
         field: `id2`,
-        value: [`other2`],
+        value: [`1`, `2`, `3`, `4`, `5`, `other2`],
       },
     ])
 

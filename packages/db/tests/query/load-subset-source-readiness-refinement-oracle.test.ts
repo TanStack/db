@@ -14,33 +14,29 @@ import type { LoadSubsetOptions } from '../../src/types.js'
 /**
  * # Can an obsolete source attempt satisfy a fresh correlated demand?
  *
- * Changing the parent correlation key retires the old child demand and starts
- * a new generation. The old request may resolve or reject before or after the
- * fresh one, but it may not mark the fresh query ready, publish stale children,
- * or release the fresh acquisition lease.
+ * Changing the parent correlation key retires the old child demand and records
+ * a new generation. While the obsolete acquisition remains pending, the
+ * controller coalesces that generation and starts its replacement only after
+ * the obsolete acquisition settles. The old request may resolve or reject, but
+ * it may not mark the fresh query ready or publish stale children.
  *
- * This four-cell refinement crosses old resolve/reject with old-first/fresh-
- * first settlement. It drives real parent and on-demand child Collections and
- * checks request predicates, abort state at unload, readiness, and visible rows.
+ * This two-cell refinement crosses obsolete resolve and reject outcomes. It
+ * drives real parent and on-demand child Collections and checks serialized
+ * request predicates, abort state at unload, readiness, and visible rows.
  */
 
 type Row = { id: string; group: string }
 
-it.each([
-  { oldOutcome: `resolve`, settlementOrder: `old-first` },
-  { oldOutcome: `reject`, settlementOrder: `old-first` },
-  { oldOutcome: `resolve`, settlementOrder: `fresh-first` },
-  { oldOutcome: `reject`, settlementOrder: `fresh-first` },
-] as const)(
-  `fences a retired source-demand attempt across $settlementOrder $oldOutcome settlement`,
-  async ({ oldOutcome, settlementOrder }) => {
+it.each([`resolve`, `reject`] as const)(
+  `starts fresh source demand after the retired attempt settles with %s`,
+  async (oldOutcome) => {
     type Parent = { id: string; group: string }
     type Child = { id: string; group: string }
     type PendingRequest = {
       options: LoadSubsetOptions
       rows: ReturnType<typeof createDeferred<ReadonlyArray<Child>>>
     }
-    const caseId = `${oldOutcome}-${settlementOrder}`
+    const caseId = oldOutcome
     const parentId = `readiness-generation-parent-${caseId}`
     const childId = `readiness-generation-child-${caseId}`
     let parentBegin!: () => void
@@ -180,43 +176,35 @@ it.each([
       if (parentApplied !== true) await parentApplied
       await flushPromises()
 
-      expect(pending).toHaveLength(2)
+      expect(pending).toHaveLength(1)
       expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
-      expect(requestedGroups(pending[1]!.options)).toEqual([`fresh`])
       expect(pending[0]!.options.signal?.aborted).toBe(true)
-      expect(pending[1]!.options.signal?.aborted).toBe(false)
-      expectUnloads(pending[0]!.options)
+      expectUnloads()
       expect(live.status).toBe(`loading`)
       expect(preloadState).toBe(`pending`)
 
       const freshChild: Child = { id: `fresh-child`, group: `fresh` }
-      const freshSettlement = { settled: false }
-      const settleOld = async () => {
-        if (oldOutcome === `resolve`) {
-          pending[0]!.rows.resolve([])
-        } else {
-          pending[0]!.rows.reject(new Error(`retired source demand failed`))
-        }
-        await flushPromises()
+      if (oldOutcome === `resolve`) {
+        pending[0]!.rows.resolve([])
+      } else {
+        pending[0]!.rows.reject(new Error(`retired source demand failed`))
       }
-      const settleFresh = async () => {
-        expect(child.get(freshChild.id)).toBeUndefined()
-        pending[1]!.rows.resolve([freshChild])
-        await flushPromises()
-        freshSettlement.settled = true
-      }
-      const settlements =
-        settlementOrder === `old-first`
-          ? [settleOld, settleFresh]
-          : [settleFresh, settleOld]
-      for (const settle of settlements) {
-        await settle()
-        expect(live.status).toBe(freshSettlement.settled ? `ready` : `loading`)
-        expect(preloadState).toBe(
-          freshSettlement.settled ? `resolved` : `pending`,
-        )
-        expect(live.utils.lastSubsetError).toBeUndefined()
-      }
+      await flushPromises()
+
+      expect(pending).toHaveLength(2)
+      expect(requestedGroups(pending[1]!.options)).toEqual([`fresh`])
+      expect(pending[1]!.options.signal?.aborted).toBe(false)
+      expectUnloads(pending[0]!.options)
+      expect(live.status).toBe(`loading`)
+      expect(preloadState).toBe(`pending`)
+      expect(live.utils.lastSubsetError).toBeUndefined()
+
+      expect(child.get(freshChild.id)).toBeUndefined()
+      pending[1]!.rows.resolve([freshChild])
+      await flushPromises()
+      expect(live.status).toBe(`ready`)
+      expect(preloadState).toBe(`resolved`)
+      expect(live.utils.lastSubsetError).toBeUndefined()
 
       await preload
       await flushPromises()
