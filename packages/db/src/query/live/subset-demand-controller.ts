@@ -1,269 +1,164 @@
 import { inArray } from '../builder/functions.js'
 import { PropRef } from '../ir.js'
 import { createValueIdentity } from '../equality-value-identity.js'
-import { createDeferred } from '../../deferred.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
-import type {
-  CollectionSubscription,
-  ReleaseLoadSubset,
-} from '../../collection/subscription.js'
-import type { Deferred } from '../../deferred.js'
+import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
 import type { LoadSubsetRequestResult } from '../../types.js'
 
-type DemandAcquisition = {
-  generation: number
+type DemandSegment = {
   keys: Map<string, unknown>
+  where: BasicExpression<boolean>
   abortController: AbortController
-  release: ReleaseLoadSubset
+  ready: LoadSubsetRequestResult
+  state: `starting` | `pending` | `settled` | `failed`
+  replaces?: Array<DemandSegment>
 }
 
 type DemandState = {
-  subscription: CollectionSubscription
-  plan: LazyDemandPlan
   keys: Map<string, unknown>
-  established?: DemandAcquisition
-  pendingReplacement?: DemandAcquisition
-  generation: number
-  waiter?: { deferred: Deferred<void>; generation: number }
+  segments: Array<DemandSegment>
 }
 
 export type DemandUpdate = {
   changed: boolean
   empty: boolean
-  ready: Promise<void> | true
+  ready: Promise<Array<unknown>> | true
 }
 
 /**
  * Keeps lazy subset requests aligned with the current relation of demanded
- * keys. Expansion acquires one complete replacement in the background. The
- * established acquisitions remain live until that replacement has applied;
- * then they are released. A failed or obsolete replacement never retires the
- * established coverage.
+ * keys. Growth loads only new keys. Churn replaces fragmented coverage after
+ * the replacement applies, so prior coverage remains live in the meantime.
  */
 export class SubsetDemandController {
   private readonly states = new Map<string, DemandState>()
   private readonly warnedPlans = new Set<string>()
   private valueIdentity = createValueIdentity()
-  private clearing = false
 
   setDemand(
     subscription: CollectionSubscription,
     plan: LazyDemandPlan,
     keys: Set<unknown>,
   ): DemandUpdate {
-    if (this.clearing) {
-      return { changed: false, empty: keys.size === 0, ready: true }
-    }
-
     const nextKeys = canonicalizeKeys(keys, this.valueIdentity)
-    let state = this.states.get(plan.id)
+    const previous = this.states.get(plan.id)
+    const hasFailedCoverage = previous?.segments.some(
+      (segment) =>
+        segment.state === `failed` && intersects(segment.keys, nextKeys),
+    )
     if (
-      state &&
-      equalKeySets(state.keys, nextKeys) &&
-      (acquisitionCovers(state.established, nextKeys) ||
-        equalKeySets(state.pendingReplacement?.keys, nextKeys))
+      previous &&
+      equalKeySets(previous.keys, nextKeys) &&
+      !hasFailedCoverage
     ) {
       return { changed: false, empty: nextKeys.size === 0, ready: true }
     }
 
-    if (!state) {
-      state = {
-        subscription,
-        plan,
-        keys: nextKeys,
-        generation: 0,
-      }
-      this.states.set(plan.id, state)
-    }
+    const segments = (previous?.segments ?? []).filter(
+      (segment) =>
+        segment.state !== `failed` &&
+        intersects(segment.keys, nextKeys) &&
+        (!segment.replaces || equalKeySets(segment.keys, nextKeys)),
+    )
+    const retired = (previous?.segments ?? []).filter(
+      (segment) => !segments.includes(segment),
+    )
+    const retryReplacement = previous?.segments.some(
+      (segment) =>
+        segment.replaces &&
+        segment.state === `failed` &&
+        equalKeySets(segment.keys, nextKeys),
+    )
+    const state: DemandState = { keys: nextKeys, segments }
+    this.states.set(plan.id, state)
 
-    settleWaiter(state)
-    state.subscription = subscription
-    state.plan = plan
-    state.keys = nextKeys
-    state.generation += 1
-    const generation = state.generation
-    if (
-      state.pendingReplacement &&
-      !equalKeySets(state.pendingReplacement.keys, nextKeys)
-    ) {
-      state.pendingReplacement.abortController.abort()
-    }
-
-    const retired =
-      state.established && !intersects(state.established.keys, nextKeys)
-        ? state.established
-        : undefined
-    if (retired) state.established = undefined
-    if (retired) {
-      releaseAcquisition(retired)
-      if (
-        this.states.get(plan.id) !== state ||
-        state.generation !== generation
-      ) {
-        return { changed: false, empty: false, ready: true }
-      }
+    for (const segment of retired) releaseSegment(subscription, segment)
+    if (this.states.get(plan.id) !== state) {
+      return { changed: false, empty: false, ready: true }
     }
 
     if (nextKeys.size === 0) {
-      const pendingReplacement = state.pendingReplacement
-      const established = state.established
-      state.pendingReplacement = undefined
-      state.established = undefined
       this.states.delete(plan.id)
-      if (pendingReplacement) releaseAcquisition(pendingReplacement)
-      if (established) releaseAcquisition(established)
-      // Release callbacks may synchronously install newer demand. Do not let
-      // this obsolete empty turn retire it in CollectionSubscriber.
-      if (this.states.has(plan.id)) {
-        return { changed: false, empty: false, ready: true }
-      }
       return { changed: true, empty: true, ready: true }
     }
 
-    if (acquisitionCovers(state.established, nextKeys)) {
-      return { changed: true, empty: false, ready: true }
+    const coveredKeys = new Set(
+      segments.flatMap((segment) => [...segment.keys.keys()]),
+    )
+    const added = new Map(
+      [...nextKeys].filter(([key]) => !coveredKeys.has(key)),
+    )
+    const removed = previous
+      ? [...previous.keys.keys()].some((key) => !nextKeys.has(key))
+      : false
+    const replace =
+      retryReplacement || (removed && (added.size > 0 || segments.length > 1))
+    const requestedKeys = replace ? nextKeys : added
+    if (requestedKeys.size > 0) {
+      const segment = createSegment(plan, requestedKeys)
+      if (replace) segment.replaces = [...segments]
+      segments.push(segment)
+      if (
+        !startSegment(subscription, segment, () => this.warnUnoptimized(plan))
+      ) {
+        segment.state = `failed`
+      } else if (replace) {
+        if (segment.ready instanceof Promise) {
+          void segment.ready.then(
+            () => this.finishReplacement(subscription, plan.id, segment),
+            () => {},
+          )
+        } else {
+          this.finishReplacement(subscription, plan.id, segment)
+        }
+      }
     }
 
-    const deferred = createDeferred<void>()
-    state.waiter = { deferred, generation }
-    this.advance(state)
-    if (this.states.get(plan.id) !== state || state.generation !== generation) {
+    if (this.states.get(plan.id) !== state) {
       return { changed: false, empty: false, ready: true }
     }
+    const pending = state.segments
+      .filter(
+        (segment) =>
+          segment.state === `pending` && intersects(segment.keys, nextKeys),
+      )
+      .map((segment) => segment.ready)
+      .filter((ready): ready is Promise<void> => ready instanceof Promise)
     return {
       changed: true,
       empty: false,
-      ready: deferred.isPending() ? deferred.promise : true,
+      ready: pending.length > 0 ? Promise.all(pending) : true,
     }
   }
 
   clear(): void {
-    this.clearing = true
-    const states = [...this.states.values()]
-    this.states.clear()
-    try {
-      for (const state of states) {
-        const pendingReplacement = state.pendingReplacement
-        const established = state.established
-        state.pendingReplacement = undefined
-        state.established = undefined
-        settleWaiter(state)
-        if (pendingReplacement) releaseAcquisition(pendingReplacement)
-        if (established) releaseAcquisition(established)
-      }
-    } finally {
-      this.clearing = false
+    for (const state of this.states.values()) {
+      for (const segment of state.segments) segment.abortController.abort()
     }
+    this.states.clear()
     this.warnedPlans.clear()
     this.valueIdentity = createValueIdentity()
   }
 
-  private advance(
-    state: DemandState,
-    failureChannel: `caller` | `waiter` = `caller`,
-  ): void {
-    if (this.states.get(state.plan.id) !== state) return
-    if (acquisitionCovers(state.established, state.keys)) {
-      settleWaiter(state, state.generation)
-      return
-    }
-    if (state.pendingReplacement) return
-
-    const replacement = createAcquisition(state.keys, state.generation)
-    state.pendingReplacement = replacement
-    let result: LoadSubsetRequestResult
-    try {
-      result = startAcquisition(
-        state.subscription,
-        state.plan,
-        replacement,
-        () => this.warnUnoptimized(state.plan),
-      )
-    } catch (error) {
-      if (state.pendingReplacement === replacement) {
-        state.pendingReplacement = undefined
-      }
-      releaseAcquisition(replacement)
-      if (failureChannel === `waiter`) {
-        rejectWaiter(state, replacement.generation, error)
-        return
-      }
-      // A direct setDemand call reports the synchronous throw to its caller.
-      // Do not also leave a rejected promise that nobody received.
-      settleWaiter(state, replacement.generation)
-      throw error
-    }
-
-    if (result instanceof Promise) {
-      void result.then(
-        () => this.finishReplacement(state, replacement),
-        (error: unknown) => this.failReplacement(state, replacement, error),
-      )
-      return
-    }
-
-    this.finishReplacement(state, replacement)
-  }
-
   private finishReplacement(
-    state: DemandState,
-    replacement: DemandAcquisition,
+    subscription: CollectionSubscription,
+    planId: string,
+    replacement: DemandSegment,
   ): void {
-    const active =
-      this.states.get(state.plan.id) === state &&
-      state.pendingReplacement === replacement
-    if (!active) {
-      releaseAcquisition(replacement)
-      settleWaiter(state, replacement.generation)
+    const state = this.states.get(planId)
+    if (
+      !state?.segments.includes(replacement) ||
+      !equalKeySets(replacement.keys, state.keys)
+    ) {
+      releaseSegment(subscription, replacement)
       return
     }
-
-    state.pendingReplacement = undefined
-    const isCurrent =
-      replacement.generation === state.generation &&
-      equalKeySets(replacement.keys, state.keys)
-    settleWaiter(state, replacement.generation)
-    if (!isCurrent) {
-      releaseAcquisition(replacement)
-      this.advance(state, `waiter`)
-      return
-    }
-
-    const replaced = state.established
-    state.established = replacement
-    if (replaced) releaseAcquisition(replaced)
-  }
-
-  private failReplacement(
-    state: DemandState,
-    replacement: DemandAcquisition,
-    error: unknown,
-  ): void {
-    const active =
-      this.states.get(state.plan.id) === state &&
-      state.pendingReplacement === replacement
-    const isCurrent =
-      active &&
-      replacement.generation === state.generation &&
-      equalKeySets(replacement.keys, state.keys)
-    if (active) state.pendingReplacement = undefined
-    if (isCurrent) {
-      rejectWaiter(state, replacement.generation, error)
-    } else {
-      settleWaiter(state, replacement.generation)
-    }
-    releaseAcquisition(replacement, isCurrent ? { error } : undefined)
-    if (!active) {
-      return
-    }
-
-    if (isCurrent) return
-
-    // A superseded failure belongs only to its old generation. The newest
-    // demand waits for a fresh union replacement.
-    this.advance(state, `waiter`)
+    const replaced = replacement.replaces ?? []
+    replacement.replaces = undefined
+    state.segments = [replacement]
+    for (const segment of replaced) releaseSegment(subscription, segment)
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {
@@ -289,10 +184,9 @@ function canonicalizeKeys(
 }
 
 function equalKeySets(
-  left: Map<string, unknown> | undefined,
+  left: Map<string, unknown>,
   right: Map<string, unknown>,
 ): boolean {
-  if (!left) return false
   return (
     left.size === right.size && [...left.keys()].every((key) => right.has(key))
   )
@@ -305,83 +199,59 @@ function intersects(
   return [...left.keys()].some((key) => right.has(key))
 }
 
-function acquisitionCovers(
-  acquisition: DemandAcquisition | undefined,
-  keys: Map<string, unknown>,
-): boolean {
-  if (keys.size === 0) return true
-  if (!acquisition) return false
-  return [...keys.keys()].every((key) => acquisition.keys.has(key))
-}
-
-function settleWaiter(state: DemandState, generation?: number): void {
-  const waiter = state.waiter
-  if (
-    !waiter ||
-    (generation !== undefined && waiter.generation !== generation)
-  ) {
-    return
-  }
-  state.waiter = undefined
-  waiter.deferred.resolve(undefined)
-}
-
-function rejectWaiter(
-  state: DemandState,
-  generation: number,
-  error: unknown,
-): void {
-  const waiter = state.waiter
-  if (!waiter || waiter.generation !== generation) return
-  state.waiter = undefined
-  waiter.deferred.reject(error)
-}
-
-function createAcquisition(
-  keys: Map<string, unknown>,
-  generation: number,
-): DemandAcquisition {
-  return {
-    generation,
-    keys: new Map(keys),
-    abortController: new AbortController(),
-    release: () => {},
-  }
-}
-
-function startAcquisition(
-  subscription: CollectionSubscription,
+function createSegment(
   plan: LazyDemandPlan,
-  acquisition: DemandAcquisition,
-  onUnoptimized: () => void,
-): LoadSubsetRequestResult {
-  const where: BasicExpression<boolean> = inArray(new PropRef(plan.path), [
-    ...acquisition.keys.values(),
-  ])
-  let result: LoadSubsetRequestResult = true
-  subscription.requestSnapshot({
+  keys: Map<string, unknown>,
+): DemandSegment {
+  const where = inArray(new PropRef(plan.path), [...keys.values()])
+  return {
+    keys,
     where,
-    signal: acquisition.abortController.signal,
+    abortController: new AbortController(),
+    ready: true,
+    state: `starting`,
+  }
+}
+
+function startSegment(
+  subscription: CollectionSubscription,
+  segment: DemandSegment,
+  onUnoptimized: () => void,
+): boolean {
+  let observed = false
+  const requested = subscription.requestSnapshot({
+    where: segment.where,
+    signal: segment.abortController.signal,
     trackLoadSubsetPromise: false,
     onUnoptimized,
-    onLoadSubsetResult: (observedResult, _options, release) => {
-      result = observedResult
-      acquisition.release = release
+    onLoadSubsetResult: (result) => {
+      observed = true
+      segment.ready = result
+      segment.state = result instanceof Promise ? `pending` : `settled`
     },
   })
-  return result
+  if (!requested) segment.state = `failed`
+  if (segment.ready instanceof Promise) {
+    void segment.ready.then(
+      () => {
+        segment.state = `settled`
+      },
+      () => {
+        segment.state = `failed`
+      },
+    )
+  }
+  return observed
 }
 
-function releaseAcquisition(
-  acquisition: DemandAcquisition,
-  primaryFailure?: { error: unknown },
+function releaseSegment(
+  subscription: CollectionSubscription,
+  segment: DemandSegment,
 ): void {
-  acquisition.abortController.abort()
+  segment.abortController.abort()
   try {
-    acquisition.release(primaryFailure)
+    subscription.releaseSnapshot(segment.where)
   } catch {
-    // CollectionSubscription reports adapter cleanup failures after its one
-    // release attempt. Demand changes must still reach the graph; adapters own
-    // any remote retry.
+    // CollectionSubscription has already reported the one cleanup failure.
   }
 }

@@ -37,10 +37,8 @@ import type { Scheduler } from 'fast-check'
  * 4. A successful load settles only after its source writes are public.
  * 5. Failure belongs to the demand that failed. Retired failure cannot poison
  *    a later demand or keep unrelated graph work private.
- * 6. Expansion keeps established coverage until one complete union replacement
- *    applies. Failure or obsolete settlement cannot retire that coverage.
- * 7. Replacement is single-flight and generation-fenced. Churn coalesces into
- *    the latest union without letting stale work settle current readiness.
+ * 6. Growth loads only uncovered keys. Churn replaces fragmented coverage only
+ *    after the complete current union applies; failure preserves prior coverage.
  *
  * No one state machine mirrors the production controller. The file uses small
  * models for readiness, cancellation, scheduled completion, and progressive
@@ -50,9 +48,9 @@ import type { Scheduler } from 'fast-check'
  *
  * The production drivers use real Collections, compiled includes, applied
  * receipts, release callbacks, replay barriers, and source writes. They observe
- * readiness, preload settlement, visible rows, request keys, errors, releases,
- * peak live acquisitions, and cumulative requested keys at each named boundary.
- * The live-query architecture remains the contract source.
+ * readiness, preload settlement, visible rows, request keys, release signals,
+ * and errors at each named boundary. The live-query architecture remains the
+ * contract source.
  */
 
 type Post = {
@@ -1372,19 +1370,16 @@ async function expectRetainedDemandBlocksReadiness(): Promise<void> {
 
     posts.write(`insert`, secondPost)
     await flushPromises()
-    expect(requests.map(({ keys }) => keys)).toEqual([[1]])
+    expect(requests.map(({ keys }) => keys)).toEqual([[1], [2]])
+
+    requests[1]!.deferred.resolve()
+    await requests[1]!.outcome
+    await flushPromises()
     expect(preload.preloadSettled).toBe(false)
     expect(live.isReady()).toBe(false)
 
     requests[0]!.deferred.resolve()
     await requests[0]!.outcome
-    await flushPromises()
-    expect(requests.map(({ keys }) => keys)).toEqual([[1], [1, 2]])
-    expect(preload.preloadSettled).toBe(false)
-    expect(live.isReady()).toBe(false)
-
-    requests[1]!.deferred.resolve()
-    await requests[1]!.outcome
     await finishPreload(preload)
     expect(live.isReady()).toBe(true)
   } finally {
@@ -1395,326 +1390,53 @@ async function expectRetainedDemandBlocksReadiness(): Promise<void> {
   }
 }
 
-type MeasuredDemandRequest = {
-  deferred: Deferred<void>
-  keys: Array<number>
-  options: LoadSubsetOptions
-  released: boolean
-}
-
-function createMeasuredDemandComments() {
-  const requests: Array<MeasuredDemandRequest> = []
-  const releases: Array<Array<number>> = []
-  let unloadFailure:
-    | { error: Error; keys: ReadonlyArray<number>; attempted: boolean }
-    | undefined
-  let activeAcquisitions = 0
-  let peakActiveAcquisitions = 0
-  let cumulativeRequestedKeys = 0
-  let ready = false
-  const collection = createCollection<Comment>({
-    id: nextCollectionId(`measured-demand-comments`),
-    getKey: (comment) => comment.id,
-    syncMode: `on-demand`,
-    autoIndex: `eager`,
-    defaultIndexType: BasicIndex,
-    sync: {
-      sync: ({ markReady }) => ({
-        loadSubset: (options) => {
-          const keys = correlationKeys([options], `postId`)
-          const request = {
-            deferred: createDeferred<void>(),
-            keys,
-            options,
-            released: false,
-          }
-          requests.push(request)
-          activeAcquisitions += 1
-          peakActiveAcquisitions = Math.max(
-            peakActiveAcquisitions,
-            activeAcquisitions,
-          )
-          cumulativeRequestedKeys += keys.length
-          return request.deferred.promise.then(() => {
-            if (!ready && !options.signal?.aborted) {
-              ready = true
-              markReady()
-            }
-          })
-        },
-        unloadSubset: (options) => {
-          const request = requests.find(
-            (candidate) => candidate.options === options,
-          )
-          if (!request) throw new Error(`Released an unknown acquisition`)
-          if (request.released) throw new Error(`Released an acquisition twice`)
-          request.released = true
-          activeAcquisitions -= 1
-          releases.push(request.keys)
-          if (
-            unloadFailure &&
-            !unloadFailure.attempted &&
-            request.keys.length === unloadFailure.keys.length &&
-            request.keys.every(
-              (key, index) => key === unloadFailure!.keys[index],
-            )
-          ) {
-            unloadFailure.attempted = true
-            throw unloadFailure.error
-          }
-        },
-      }),
-    },
-  })
-  collection.createIndex((comment) => comment.postId)
-  return {
-    collection,
-    requests,
-    releases,
-    failUnloadOnce: (keys: ReadonlyArray<number>, error: Error) => {
-      unloadFailure = { error, keys, attempted: false }
-    },
-    work: () => ({
-      activeAcquisitions,
-      cumulativeRequestedKeys,
-      peakActiveAcquisitions,
-    }),
-  }
-}
-
-async function expectDemandReplacementRetainsCoverageAndFencesGenerations(): Promise<void> {
-  const measured = createMeasuredDemandComments()
-  const subscription = measured.collection.subscribeChanges(() => {}, {
+async function expectDemandChurnConsolidatesWithoutReloadingGrowth(): Promise<void> {
+  const { collection, requests } = createPendingComments()
+  const subscription = collection.subscribeChanges(() => {}, {
     includeInitialState: false,
   })
   const controller = new SubsetDemandController()
-  const reportedErrors: Array<unknown> = []
-  subscription.on(`loadSubset:error`, ({ error }) => {
-    reportedErrors.push(error)
-  })
   const plan: LazyDemandPlan = {
-    id: `union-demand-replacement`,
+    id: `churn-consolidation`,
     path: [`postId`],
-    collectionId: measured.collection.id,
+    collectionId: collection.id,
     initialKeys: new Set(),
   }
-
-  const settle = async (index: number): Promise<void> => {
-    const request = measured.requests[index]
-    if (!request) throw new Error(`Missing measured request ${index}`)
-    request.deferred.resolve()
-    await request.deferred.promise
-    await flushPromises()
+  const settle = async (index: number, ready: Promise<unknown> | true) => {
+    requests[index]!.deferred.resolve()
+    await requests[index]!.outcome
+    if (ready instanceof Promise) await ready
   }
 
   try {
-    const initial = controller.setDemand(subscription, plan, new Set([1]))
-    expect(measured.requests.map(({ keys }) => keys)).toEqual([[1]])
-    await settle(0)
-    if (initial.ready instanceof Promise) await initial.ready
-
-    const expansion = controller.setDemand(subscription, plan, new Set([1, 2]))
-    expect(measured.requests.map(({ keys }) => keys)).toEqual([[1], [1, 2]])
-    expect(measured.releases).toEqual([])
-    expect(measured.work()).toEqual({
-      activeAcquisitions: 2,
-      cumulativeRequestedKeys: 3,
-      peakActiveAcquisitions: 2,
-    })
-
-    await settle(1)
-    if (expansion.ready instanceof Promise) await expansion.ready
-    expect(measured.releases).toEqual([[1]])
-    expect(measured.work().activeAcquisitions).toBe(1)
-
-    const replacementError = new Error(`replacement failed`)
-    const cleanupError = new Error(`replacement cleanup failed`)
-    const failed = controller.setDemand(subscription, plan, new Set([1, 2, 3]))
-    expect(measured.requests[2]?.keys).toEqual([1, 2, 3])
-    expect(measured.releases).toEqual([[1]])
-    measured.failUnloadOnce([1, 2, 3], cleanupError)
-    measured.requests[2]!.deferred.reject(replacementError)
-    if (!(failed.ready instanceof Promise)) {
-      throw new Error(`Expected failed replacement to be asynchronous`)
-    }
-    await expect(failed.ready).rejects.toBe(replacementError)
-    await flushPromises()
-    expect(subscription.lastError).toBe(replacementError)
-    expect(reportedErrors).toEqual([replacementError])
-    expect(measured.releases).toEqual([[1], [1, 2, 3]])
-    expect(measured.work().activeAcquisitions).toBe(1)
-
-    const retry = controller.setDemand(subscription, plan, new Set([1, 2, 3]))
-    expect(retry.changed).toBe(true)
-    expect(measured.requests[3]?.keys).toEqual([1, 2, 3])
-    await settle(3)
-    if (retry.ready instanceof Promise) await retry.ready
-    expect(measured.releases).toEqual([[1], [1, 2, 3], [1, 2]])
-
-    const obsolete = controller.setDemand(
-      subscription,
-      plan,
-      new Set([1, 2, 3, 4]),
-    )
-    const current = controller.setDemand(
-      subscription,
-      plan,
-      new Set([1, 2, 3, 4, 5]),
-    )
-    expect(measured.requests.map(({ keys }) => keys)).toEqual([
-      [1],
-      [1, 2],
-      [1, 2, 3],
-      [1, 2, 3],
-      [1, 2, 3, 4],
-    ])
-    expect(measured.requests[4]?.options.signal?.aborted).toBe(true)
-
-    await settle(4)
-    if (obsolete.ready instanceof Promise) await obsolete.ready
-    expect(measured.releases).toEqual([[1], [1, 2, 3], [1, 2], [1, 2, 3, 4]])
-    expect(measured.requests[5]?.keys).toEqual([1, 2, 3, 4, 5])
-    let currentSettled = false
-    if (current.ready instanceof Promise) {
-      void current.ready.then(
-        () => {
-          currentSettled = true
-        },
-        () => {
-          currentSettled = true
-        },
+    for (let key = 1; key <= 3; key++) {
+      const update = controller.setDemand(
+        subscription,
+        plan,
+        new Set(Array.from({ length: key }, (_, index) => index + 1)),
       )
+      expect(requests[key - 1]!.keys).toEqual([key])
+      await settle(key - 1, update.ready)
     }
-    await flushPromises()
-    expect(currentSettled).toBe(false)
+    expect(requests.flatMap(({ keys }) => keys)).toHaveLength(3)
 
-    await settle(5)
-    if (current.ready instanceof Promise) await current.ready
-    expect(measured.releases).toEqual([
-      [1],
-      [1, 2, 3],
-      [1, 2],
-      [1, 2, 3, 4],
-      [1, 2, 3],
-    ])
-
-    const obsoleteFailure = controller.setDemand(
+    const replacement = controller.setDemand(
       subscription,
       plan,
-      new Set([1, 2, 3, 4, 5, 6]),
+      new Set([2, 3, 4]),
     )
-    const latest = controller.setDemand(
-      subscription,
-      plan,
-      new Set([1, 2, 3, 4, 5, 6, 7]),
-    )
-    expect(measured.requests[6]?.options.signal?.aborted).toBe(true)
-    measured.requests[6]!.deferred.reject(new Error(`obsolete failure`))
-    if (obsoleteFailure.ready instanceof Promise) await obsoleteFailure.ready
-    await flushPromises()
-    expect(measured.requests[7]?.keys).toEqual([1, 2, 3, 4, 5, 6, 7])
-    expect(measured.releases.at(-1)).toEqual([1, 2, 3, 4, 5, 6])
-    expect(measured.work().activeAcquisitions).toBe(2)
-
-    await settle(7)
-    if (latest.ready instanceof Promise) await latest.ready
-    expect(measured.work()).toEqual({
-      activeAcquisitions: 1,
-      cumulativeRequestedKeys: 31,
-      peakActiveAcquisitions: 2,
-    })
+    expect(requests[3]!.keys).toEqual([2, 3, 4])
+    expect(requests[1]!.signal?.aborted).toBe(false)
+    expect(requests[2]!.signal?.aborted).toBe(false)
+    await settle(3, replacement.ready)
+    expect(requests[1]!.signal?.aborted).toBe(true)
+    expect(requests[2]!.signal?.aborted).toBe(true)
   } finally {
-    for (const request of measured.requests) request.deferred.resolve()
-    await Promise.allSettled(
-      measured.requests.map(({ deferred }) => deferred.promise),
-    )
+    for (const request of requests) request.deferred.resolve()
+    await Promise.allSettled(requests.map(({ outcome }) => outcome))
     controller.clear()
     subscription.unsubscribe()
-    await measured.collection.cleanup()
-  }
-}
-
-async function expectSynchronousFollowupFailureRejectsLatestDemand(): Promise<void> {
-  const firstResult = createDeferred<void>()
-  const failure = new Error(`follow-up replacement failed to start`)
-  const attempts: Array<Array<number>> = []
-  const releases: Array<Array<number>> = []
-  const accepted = new Map<LoadSubsetOptions, Array<number>>()
-  const comments = createCollection<Comment>({
-    id: nextCollectionId(`synchronous-followup-failure-comments`),
-    getKey: (comment) => comment.id,
-    syncMode: `on-demand`,
-    autoIndex: `eager`,
-    defaultIndexType: BasicIndex,
-    sync: {
-      sync: () => ({
-        loadSubset: (options) => {
-          const keys = correlationKeys([options], `postId`)
-          attempts.push(keys)
-          if (keys.length === 2) throw failure
-          accepted.set(options, keys)
-          return firstResult.promise
-        },
-        unloadSubset: (options) => {
-          const keys = accepted.get(options)
-          if (!keys) {
-            throw new Error(`Released an unknown acquisition`)
-          }
-          releases.push(keys)
-        },
-      }),
-    },
-  })
-  comments.createIndex((comment) => comment.postId)
-  const subscription = comments.subscribeChanges(() => {}, {
-    includeInitialState: false,
-  })
-  const controller = new SubsetDemandController()
-  const plan: LazyDemandPlan = {
-    id: `synchronous-followup-failure`,
-    path: [`postId`],
-    collectionId: comments.id,
-    initialKeys: new Set(),
-  }
-  let firstReady: Promise<void> | undefined
-  let latestReady: Promise<void> | undefined
-
-  try {
-    const first = controller.setDemand(subscription, plan, new Set([1]))
-    if (!(first.ready instanceof Promise)) {
-      throw new Error(`Expected the first replacement to be asynchronous`)
-    }
-    firstReady = first.ready
-
-    const latest = controller.setDemand(subscription, plan, new Set([1, 2]))
-    if (!(latest.ready instanceof Promise)) {
-      throw new Error(`Expected the latest replacement to be asynchronous`)
-    }
-    latestReady = latest.ready
-    expect(attempts).toEqual([[1]])
-
-    firstResult.resolve()
-    await expect(latestReady).rejects.toBe(failure)
-    await flushPromises()
-
-    expect(attempts).toEqual([[1], [1, 2]])
-    expect(releases).toEqual([[1]])
-    expect(subscription.lastError).toBe(failure)
-
-    expect(() =>
-      controller.setDemand(subscription, plan, new Set([1, 2])),
-    ).toThrow(failure)
-    expect(attempts).toEqual([[1], [1, 2], [1, 2]])
-  } finally {
-    firstResult.resolve()
-    await Promise.allSettled(
-      [firstReady, latestReady].filter(
-        (ready): ready is Promise<void> => ready !== undefined,
-      ),
-    )
-    controller.clear()
-    subscription.unsubscribe()
-    await comments.cleanup()
+    await collection.cleanup()
   }
 }
 
@@ -2447,18 +2169,13 @@ describe(`includes temporal oracle`, () => {
   )
 
   it(
-    `the latest pending demand generation blocks readiness after expansion`,
+    `retained pending demand blocks readiness after demand expands`,
     expectRetainedDemandBlocksReadiness,
   )
 
   it(
-    `replaces fragmented demand as one applied generation without losing coverage`,
-    expectDemandReplacementRetainsCoverageAndFencesGenerations,
-  )
-
-  it(
-    `a synchronous follow-up failure rejects the latest demand generation`,
-    expectSynchronousFollowupFailureRejectsLatestDemand,
+    `consolidates churn after apply without reloading monotonic growth`,
+    expectDemandChurnConsolidatesWithoutReloadingGrowth,
   )
 
   it(

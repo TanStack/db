@@ -96,7 +96,6 @@ type SubsetAcquisitionRecord = {
   abortController?: AbortController
   removeRequestAbortListener?: () => void
   releaseAttempted?: true
-  reportedFailure?: Error
 }
 
 type SubsetDemand = {
@@ -488,7 +487,7 @@ export class CollectionSubscription
     this.observeLoadSubsetResult(
       result,
       demand,
-      next,
+      next.options,
       true,
       () => isCurrent() && !next.options.signal?.aborted,
     )
@@ -851,7 +850,7 @@ export class CollectionSubscription
   private observeLoadSubsetResult(
     syncResult: LoadSubsetRequestResult,
     demand: SubsetDemand,
-    acquisition: SubsetAcquisitionRecord,
+    options: LoadSubsetOptions,
     trackStatus: boolean,
     shouldReportError: () => boolean = () => true,
   ): void {
@@ -879,8 +878,8 @@ export class CollectionSubscription
         this.isSyncRunGenerationCurrent(syncRunGeneration) &&
         shouldReportError()
       ) {
-        this.reportAcquisitionFailure(
-          acquisition,
+        this.recordLoadSubsetError(
+          options,
           this.normalizeLoadSubsetPromiseError(syncResult, error),
         )
       }
@@ -1103,26 +1102,6 @@ export class CollectionSubscription
     return normalized
   }
 
-  /** Report one primary failure per acquisition, including reentrant release. */
-  private reportAcquisitionFailure(
-    acquisition: SubsetAcquisitionRecord,
-    error: unknown,
-    reportAborted = false,
-  ): Error {
-    const normalized = normalizeError(error)
-    if (acquisition.options.signal?.aborted && !reportAborted) return normalized
-    if (acquisition.reportedFailure) return acquisition.reportedFailure
-
-    // Install the winner before listeners run. A listener may synchronously
-    // release this same demand through its exact release callback.
-    acquisition.reportedFailure = normalized
-    return this.recordLoadSubsetError(
-      acquisition.options,
-      normalized,
-      reportAborted,
-    )
-  }
-
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
     const newChanges = this.filterAndFlipChanges(changes)
@@ -1197,15 +1176,13 @@ export class CollectionSubscription
       started,
     } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return false
-    const acquisition = demand.acquisition
     if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Report the result synchronously, including a wait for an unavailable loader.
     opts?.onLoadSubsetResult?.(
       syncResult,
-      acquisition.options,
-      (primaryFailure) =>
-        this.releaseDemand(demand, primaryFailure, acquisition),
+      demand.acquisition.options,
+      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
     )
     if (!this.isDemandActive(demand)) return false
 
@@ -1213,7 +1190,7 @@ export class CollectionSubscription
       this.observeLoadSubsetResult(
         syncResult,
         demand,
-        acquisition,
+        demand.acquisition.options,
         opts?.trackLoadSubsetPromise ?? true,
       )
     }
@@ -1290,18 +1267,16 @@ export class CollectionSubscription
   private releaseDemand(
     demand: SubsetDemand,
     primaryFailure?: { error: unknown },
-    callbackAcquisition = demand.acquisition,
   ): void {
     if (!primaryFailure) {
       const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index)
       return
     }
-    if (demand.acquisition !== callbackAcquisition) return
 
     try {
-      this.reportAcquisitionFailure(
-        callbackAcquisition,
+      this.recordLoadSubsetError(
+        demand.acquisition.options,
         primaryFailure.error,
         true,
       )
@@ -1572,18 +1547,19 @@ export class CollectionSubscription
       started,
     } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return
-    const acquisition = demand.acquisition
 
     // Report the result synchronously, including a wait for an unavailable loader.
-    onLoadSubsetResult?.(syncResult, acquisition.options, (primaryFailure) =>
-      this.releaseDemand(demand, primaryFailure, acquisition),
+    onLoadSubsetResult?.(
+      syncResult,
+      demand.acquisition.options,
+      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
     )
     if (!this.isDemandActive(demand)) return
     if (started) {
       this.observeLoadSubsetResult(
         syncResult,
         demand,
-        acquisition,
+        demand.acquisition.options,
         shouldTrackLoadSubsetPromise,
       )
     }
