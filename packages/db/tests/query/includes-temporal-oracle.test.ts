@@ -53,18 +53,23 @@ import type { Scheduler } from 'fast-check'
  * and errors at each named boundary. The live-query architecture remains the
  * contract source.
  *
- * The fragmented-demand lane drives the production controller through a real
- * CollectionSubscription. It observes requested key unions and adapter abort
+ * The fragmented-demand lanes observe requested key unions and adapter abort
  * signals before settlement and after success, rejection, retry, or
- * obsolescence. This proves the acquisition-retirement boundary. It does not
- * prove visible-row retention through a compiled includes query after a failed
- * consolidation; the coverage map retains that separate witness.
+ * obsolescence. The direct controller lane proves the acquisition-retirement
+ * boundary. A compiled includes lane also makes adapter unload remove owned
+ * rows, so rejection proves that established child rows remain publicly
+ * visible rather than only that old signals remain live.
  */
 
 type Post = {
   id: number
   authorId: string
   title: string
+}
+
+type PostChange = {
+  type: `insert` | `delete`
+  value: Post
 }
 
 type Comment = {
@@ -1273,10 +1278,11 @@ function createMutablePosts(
   options: { markReadyInitially?: boolean } = {},
 ): {
   collection: Collection<Post>
-  write: (type: `insert` | `delete`, post: Post) => void
+  write: (type: PostChange[`type`], post: Post) => void
+  writeBatch: (changes: ReadonlyArray<PostChange>) => void
   markReady: () => void
 } {
-  let writePost: (type: `insert` | `delete`, post: Post) => void = () => {
+  let writePosts: (changes: ReadonlyArray<PostChange>) => void = () => {
     throw new Error(`Post collection has not started`)
   }
   let markPostsReady: () => void = () => {
@@ -1291,9 +1297,9 @@ function createMutablePosts(
         for (const post of initial) write({ type: `insert`, value: post })
         commit()
         if (options.markReadyInitially !== false) markReady()
-        writePost = (type, post) => {
+        writePosts = (changes) => {
           begin()
-          write({ type, value: post })
+          for (const change of changes) write(change)
           commit()
         }
         markPostsReady = markReady
@@ -1302,7 +1308,8 @@ function createMutablePosts(
   })
   return {
     collection,
-    write: (type, post) => writePost(type, post),
+    write: (type, post) => writePosts([{ type, value: post }]),
+    writeBatch: (changes) => writePosts(changes),
     markReady: () => markPostsReady(),
   }
 }
@@ -1478,6 +1485,127 @@ async function expectDemandChurnPreservesCoverage(
     controller.clear()
     subscription.unsubscribe()
     await collection.cleanup()
+  }
+}
+
+async function expectFailedConsolidationKeepsVisibleRows(): Promise<void> {
+  const posts = createMutablePosts([
+    { id: 1, authorId: `selected`, title: `one` },
+  ])
+  const requests: Array<{
+    deferred: Deferred<void>
+    outcome: Promise<void>
+    keys: Array<number>
+    signal: AbortSignal | undefined
+  }> = []
+  const installed = new Map<number, Comment>()
+  const acquisitionKeys = new Map<LoadSubsetOptions, Array<number>>()
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`temporal-visible-coverage-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => ({
+        loadSubset: (options) => {
+          const deferred = createDeferred<void>()
+          const keys = correlationKeys([options], `postId`)
+          const outcome = deferred.promise.then(async () => {
+            if (options.signal?.aborted) return
+            begin()
+            for (const postId of keys) {
+              const comment = {
+                id: postId * 100,
+                postId,
+                body: `comment ${postId}`,
+              }
+              installed.set(postId, comment)
+              write({ type: `insert`, value: comment })
+            }
+            const applied = commit(options.signal)
+            if (applied instanceof Promise) await applied
+            acquisitionKeys.set(options, keys)
+            markReady()
+          })
+          requests.push({ deferred, outcome, keys, signal: options.signal })
+          return outcome
+        },
+        unloadSubset: (options) => {
+          const keys = acquisitionKeys.get(options)
+          if (!keys) return
+          acquisitionKeys.delete(options)
+          begin()
+          for (const postId of keys) {
+            const comment = installed.get(postId)
+            if (comment) write({ type: `delete`, value: comment })
+            installed.delete(postId)
+          }
+          commit()
+        },
+      }),
+    },
+  })
+  const live = createPostsWithCommentsLive(posts.collection, comments)
+  const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const settle = async (index: number) => {
+    requests[index]!.deferred.resolve()
+    await requests[index]!.outcome
+    await flushPromises()
+  }
+  const visibleCommentIds = () =>
+    live.toArray
+      .flatMap(({ comments: rows }) => rows.map(({ id }) => id))
+      .sort((left, right) => left - right)
+
+  try {
+    const preload = live.preload()
+    await flushPromises()
+    expect(requests.map(({ keys }) => keys)).toEqual([[1]])
+    await settle(0)
+    await preload
+
+    for (let postId = 2; postId <= 3; postId++) {
+      posts.write(`insert`, {
+        id: postId,
+        authorId: `selected`,
+        title: String(postId),
+      })
+      await flushPromises()
+      expect(requests.at(-1)?.keys).toEqual([postId])
+      await settle(postId - 1)
+    }
+    expect(visibleCommentIds()).toEqual([100, 200, 300])
+
+    posts.writeBatch([
+      {
+        type: `delete`,
+        value: { id: 1, authorId: `selected`, title: `one` },
+      },
+      {
+        type: `insert`,
+        value: { id: 4, authorId: `selected`, title: `four` },
+      },
+    ])
+    await flushPromises()
+    expect(requests[3]?.keys).toEqual([2, 3, 4])
+    expect(requests[1]?.signal?.aborted).toBe(false)
+    expect(requests[2]?.signal?.aborted).toBe(false)
+
+    const failure = new Error(`replacement failed`)
+    requests[3]!.deferred.reject(failure)
+    await expect(requests[3]!.outcome).rejects.toBe(failure)
+    await flushPromises()
+
+    expect(live.status).toBe(`error`)
+    expect(live.utils.lastSubsetError).toBe(failure)
+    expect(visibleCommentIds()).toEqual([200, 300])
+  } finally {
+    for (const request of requests) request.deferred.resolve()
+    await Promise.allSettled(requests.map(({ outcome }) => outcome))
+    await live.cleanup()
+    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+    consoleError.mockRestore()
   }
 }
 
@@ -2247,6 +2375,11 @@ describe(`includes temporal oracle`, () => {
 
   it(`failed churn replacement retains coverage and retries its union`, () =>
     expectDemandChurnPreservesCoverage(`failure`))
+
+  it(
+    `failed churn replacement keeps established child rows visible`,
+    expectFailedConsolidationKeepsVisibleRows,
+  )
 
   it(`obsolete churn replacement cannot retire established coverage`, () =>
     expectDemandChurnPreservesCoverage(`obsolete`))
