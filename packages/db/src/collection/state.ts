@@ -24,6 +24,26 @@ import type { CollectionEventsManager } from './events'
 import type { Deferred } from '../deferred'
 import type { DuplicateKeySyncError } from '../errors.js'
 
+type PendingSyncOperation<
+  T extends object,
+  TKey extends string | number,
+> = OptimisticChangeMessage<T, TKey> & {
+  /** Preserve adapter intent when queue changes require reclassification. */
+  originalSyncType?: `insert`
+}
+
+type PendingSyncedKeyState<T extends object> = {
+  exists: boolean
+  value: T | undefined
+}
+
+type PendingSyncedProjection<T extends object, TKey extends string | number> = {
+  states: Map<TKey, PendingSyncedKeyState<T>>
+  truncated: boolean
+}
+
+type PendingInsertDisposition = `insert` | `update` | `duplicate`
+
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -31,10 +51,10 @@ interface PendingSyncedTransaction<
   committed: boolean
   applicationStarted: boolean
   layoutChanged: boolean
-  operations: Array<OptimisticChangeMessage<T>>
+  operations: Array<PendingSyncOperation<T, TKey>>
   truncate?: boolean
-  deletedKeys: Set<string | number>
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
+  explicitRowMetadataWriteKeys?: Set<TKey>
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
   /** Resolves after application and rejects if canceled before application. */
   applied: Deferred<void>
@@ -52,6 +72,8 @@ interface PendingSyncedTransaction<
   preserveHydrationSeedKeys?: boolean
   /** Present on adapter transactions that can be revalidated after cancel. */
   duplicateKeyError?: (key: TKey) => DuplicateKeySyncError
+  /** Retained until commit so an invalidated active transaction stays addressable. */
+  invalidationError?: Error
   /**
    * When true, this transaction should be processed immediately even if there
    * are persisting user transactions. Used by manual write operations (writeInsert,
@@ -94,6 +116,10 @@ export class CollectionStateManager<
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
+  private pendingSyncedProjection: PendingSyncedProjection<TOutput, TKey> = {
+    states: new Map(),
+    truncated: false,
+  }
   public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
   public syncedCollectionMetadata = new Map<string, unknown>()
@@ -970,36 +996,71 @@ export class CollectionStateManager<
     return (key) => queued.get(key) ?? (!truncated && this.syncedData.has(key))
   }
 
-  /** Resolve authoritative key state after every earlier queued transaction. */
-  getPendingSyncedKeyState(key: TKey): {
-    exists: boolean
-    value: TOutput | undefined
-  } {
-    let value = this.syncedData.get(key)
-    let exists = this.syncedData.has(key)
-    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
-
-    for (const transaction of this.pendingSyncedTransactions) {
-      if (transaction.truncate) {
-        exists = false
-        value = undefined
-      }
-      for (const operation of transaction.operations) {
-        if (operation.key !== key) continue
-        if (operation.type === `delete`) {
-          exists = false
-          value = undefined
-        } else if (operation.type === `update` && rowUpdateMode === `partial`) {
-          exists = true
-          value = Object.assign({}, value, operation.value)
-        } else {
-          exists = true
-          value = operation.value
-        }
-      }
+  private getProjectedSyncedKeyState(
+    projection: PendingSyncedProjection<TOutput, TKey>,
+    key: TKey,
+  ): PendingSyncedKeyState<TOutput> {
+    const state = projection.states.get(key)
+    if (state !== undefined) return state
+    if (projection.truncated) return { exists: false, value: undefined }
+    return {
+      exists: this.syncedData.has(key),
+      value: this.syncedData.get(key),
     }
+  }
 
-    return { exists, value }
+  private classifyProjectedInsert(
+    projection: PendingSyncedProjection<TOutput, TKey>,
+    key: TKey,
+    value: TOutput,
+  ): PendingInsertDisposition {
+    const current = this.getProjectedSyncedKeyState(projection, key)
+    if (!current.exists) return `insert`
+    if (
+      (current.value !== undefined && deepEquals(current.value, value)) ||
+      this.hydrationSeedKeys.has(key)
+    ) {
+      return `update`
+    }
+    return `duplicate`
+  }
+
+  /** Classify an adapter insert against retained and queued source state. */
+  classifyPendingSyncedInsert(
+    key: TKey,
+    value: TOutput,
+  ): PendingInsertDisposition {
+    return this.classifyProjectedInsert(
+      this.pendingSyncedProjection,
+      key,
+      value,
+    )
+  }
+
+  private applyPendingSyncOperation(
+    projection: PendingSyncedProjection<TOutput, TKey>,
+    operation: PendingSyncOperation<TOutput, TKey>,
+  ): void {
+    const key = operation.key as TKey
+    const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+    if (operation.type === `delete`) {
+      projection.states.set(key, { exists: false, value: undefined })
+    } else if (operation.type === `update` && rowUpdateMode === `partial`) {
+      const current = this.getProjectedSyncedKeyState(projection, key)
+      projection.states.set(key, {
+        exists: true,
+        value: Object.assign({}, current.value, operation.value),
+      })
+    } else {
+      projection.states.set(key, { exists: true, value: operation.value })
+    }
+  }
+
+  /** Extend the queued projection after admitting one sync operation. */
+  stagePendingSyncOperation(
+    operation: PendingSyncOperation<TOutput, TKey>,
+  ): void {
+    this.applyPendingSyncOperation(this.pendingSyncedProjection, operation)
   }
 
   /**
@@ -1019,25 +1080,99 @@ export class CollectionStateManager<
     return this.syncedData.get(key)
   }
 
-  private findDuplicateQueuedInsert():
+  private rebuildAutomaticRowMetadataWrites(
+    transaction: PendingSyncedTransaction<TOutput, TKey>,
+  ): void {
+    const explicitKeys = transaction.explicitRowMetadataWriteKeys ?? new Set()
+    const operationKeys = new Set(
+      transaction.operations.map((operation) => operation.key as TKey),
+    )
+    for (const key of operationKeys) {
+      if (!explicitKeys.has(key)) transaction.rowMetadataWrites.delete(key)
+    }
+    for (const operation of transaction.operations) {
+      const key = operation.key as TKey
+      if (explicitKeys.has(key)) continue
+      if (operation.type === `delete`) {
+        transaction.rowMetadataWrites.set(key, { type: `delete` })
+      } else if (operation.metadata !== undefined) {
+        transaction.rowMetadataWrites.set(key, {
+          type: `set`,
+          value: operation.metadata,
+        })
+      } else if (operation.type === `insert`) {
+        transaction.rowMetadataWrites.set(key, { type: `delete` })
+      }
+    }
+  }
+
+  private rebuildPendingSyncedProjection():
     | {
         transaction: PendingSyncedTransaction<TOutput, TKey>
         key: TKey
+        error: Error
       }
     | undefined {
-    const syncedKeys = new Set(this.syncedData.keys())
+    let projection: PendingSyncedProjection<TOutput, TKey> = {
+      states: new Map(),
+      truncated: false,
+    }
+
     for (const transaction of this.pendingSyncedTransactions) {
-      if (transaction.truncate) syncedKeys.clear()
+      const beforeTransaction: PendingSyncedProjection<TOutput, TKey> = {
+        states: new Map(projection.states),
+        truncated: projection.truncated,
+      }
+      transaction.invalidationError = undefined
+      if (transaction.truncate) {
+        projection.states.clear()
+        projection.truncated = true
+      }
+
+      let invalidKey: TKey | undefined
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
-        if (operation.type === `insert` && syncedKeys.has(key)) {
-          return { transaction, key }
+        if (
+          operation.originalSyncType === `insert` &&
+          operation.type !== `delete`
+        ) {
+          const disposition = this.classifyProjectedInsert(
+            projection,
+            key,
+            operation.value,
+          )
+          if (disposition === `duplicate`) {
+            invalidKey = key
+            break
+          }
+          operation.type = disposition
         }
-        if (operation.type === `delete`) syncedKeys.delete(key)
-        else syncedKeys.add(key)
+        this.applyPendingSyncOperation(projection, operation)
       }
+
+      if (invalidKey !== undefined) {
+        projection = beforeTransaction
+        const error =
+          transaction.duplicateKeyError?.(invalidKey) ??
+          new SyncTransactionAbortedError()
+        if (transaction.committed) {
+          return { transaction, key: invalidKey, error }
+        }
+        transaction.invalidationError = error
+        continue
+      }
+      this.rebuildAutomaticRowMetadataWrites(transaction)
     }
+
+    this.pendingSyncedProjection = projection
     return undefined
+  }
+
+  /** Rebuild after truncate or application changes queue history. */
+  refreshPendingSyncedProjection(): void {
+    const invalid = this.rebuildPendingSyncedProjection()
+    if (invalid !== undefined && !invalid.transaction.committed) return
+    if (invalid !== undefined) throw invalid.error
   }
 
   /**
@@ -1388,6 +1523,10 @@ export class CollectionStateManager<
         }
       }
 
+      // The retained base now includes every removed committed transaction.
+      // Rebuild only the projection for still-open transactions.
+      this.refreshPendingSyncedProjection()
+
       // A completed optimistic insert may have used a temporary client key while
       // the sync confirmation used a different server-generated key. Once a
       // sync commit has been applied, stop retaining completed optimistic keys
@@ -1696,15 +1835,14 @@ export class CollectionStateManager<
   /** Abandons a queued transaction and invalidated dependents before visibility. */
   public cancelPendingSyncedTransaction(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
+    reason: Error = new SyncTransactionAbortedError(),
   ): void {
     if (transaction.applicationStarted) return
 
     const index = this.pendingSyncedTransactions.indexOf(transaction)
     if (index === -1) return
 
-    const canceledTransactions = new Set<
-      PendingSyncedTransaction<TOutput, TKey>
-    >()
+    const canceledKeys = new Set<TKey>()
     const cancel = (
       pending: PendingSyncedTransaction<TOutput, TKey>,
       error: Error,
@@ -1712,40 +1850,36 @@ export class CollectionStateManager<
       const pendingIndex = this.pendingSyncedTransactions.indexOf(pending)
       if (pendingIndex === -1 || pending.applicationStarted) return
       this.pendingSyncedTransactions.splice(pendingIndex, 1)
-      canceledTransactions.add(pending)
+      for (const operation of pending.operations) {
+        canceledKeys.add(operation.key as TKey)
+      }
       pending.applied.reject(error)
     }
 
-    cancel(transaction, new SyncTransactionAbortedError())
+    cancel(transaction, reason)
 
     // Admission can depend on earlier queued writes. After cancellation,
-    // replay the remaining authoritative key membership and reject any
-    // transaction whose insert has become a duplicate. Repeat because
-    // removing that transaction can invalidate a later insert in turn.
-    let invalid = this.findDuplicateQueuedInsert()
+    // replay the queue with the same classifier used by normal admission.
+    // Committed invalid dependents are rejected now. An active invalidated
+    // transaction stays addressable until its caller invokes commit().
+    let invalid = this.rebuildPendingSyncedProjection()
     while (invalid !== undefined) {
-      cancel(
-        invalid.transaction,
-        invalid.transaction.duplicateKeyError?.(invalid.key) ??
-          new SyncTransactionAbortedError(),
-      )
-      invalid = this.findDuplicateQueuedInsert()
+      cancel(invalid.transaction, invalid.error)
+      invalid = this.rebuildPendingSyncedProjection()
     }
 
     const remainingPendingKeys = new Set<TKey>()
     for (const pending of this.pendingSyncedTransactions) {
+      if (pending.invalidationError !== undefined) continue
       for (const operation of pending.operations) {
         remainingPendingKeys.add(operation.key as TKey)
       }
     }
-    for (const canceled of canceledTransactions) {
-      for (const operation of canceled.operations) {
-        const key = operation.key as TKey
-        if (!remainingPendingKeys.has(key)) {
-          this.recentlySyncedKeys.delete(key)
-          this.preSyncVisibleState.delete(key)
-          this.preSyncVirtualState.delete(key)
-        }
+    for (const key of canceledKeys) {
+      if (!remainingPendingKeys.has(key)) {
+        this.recentlySyncedKeys.delete(key)
+        this.preSyncVisibleState.delete(key)
+        this.preSyncVirtualState.delete(key)
       }
     }
 
@@ -1869,6 +2003,7 @@ export class CollectionStateManager<
     this.isLocalOnly = false
     this.size = 0
     this.pendingSyncedTransactions = []
+    this.pendingSyncedProjection = { states: new Map(), truncated: false }
     this.preSyncVisibleState.clear()
     this.preSyncVirtualState.clear()
     this.recentlySyncedKeys.clear()

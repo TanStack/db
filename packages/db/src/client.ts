@@ -881,7 +881,6 @@ export class DbClient {
           key: row.key,
           value: row.value,
         })),
-        deletedKeys: new Set(),
         rowMetadataWrites,
         collectionMetadataWrites: new Map(),
         applied: createDeferred<void>(),

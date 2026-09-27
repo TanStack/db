@@ -378,8 +378,10 @@ export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 /**
  * Confirms whether a committed sync transaction is visible or is waiting for
  * its turn in the collection's causal queue. A pending receipt rejects with an
- * error named `AbortError` if cancellation wins before application. Once the
- * writes are visible, later cancellation has no effect.
+ * error named `AbortError` if its own cancellation wins before application. It
+ * rejects with `DuplicateKeySyncError` if cancellation of earlier queued work
+ * invalidates an insert admission. Once the writes are visible, later
+ * cancellation has no effect.
  */
 export type SyncAppliedReceipt = true | Promise<void>
 
@@ -428,7 +430,9 @@ export interface SyncConfig<
      * Returns `true` when the writes and events are already visible. Otherwise
      * returns a receipt that resolves after they become visible. If collection
      * cleanup or an optional request abort abandons the transaction first, the
-     * receipt rejects with an error named `AbortError`.
+     * receipt rejects with an error named `AbortError`. If cancellation of an
+     * earlier transaction invalidates this transaction's insert admission, the
+     * receipt rejects with `DuplicateKeySyncError`.
      * Pass a signal only for request-scoped work that must not publish after
      * cancellation. Aborting after application has no effect.
      */
