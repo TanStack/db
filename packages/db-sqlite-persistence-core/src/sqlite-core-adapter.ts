@@ -527,6 +527,9 @@ function compareOrderByValues(
   }
 
   if (typeof left === `string` && typeof right === `string`) {
+    if (compareOptions.stringSort === `custom`) {
+      return compareOptions.compare(left, right)
+    }
     if (compareOptions.stringSort === `locale`) {
       return left.localeCompare(
         right,

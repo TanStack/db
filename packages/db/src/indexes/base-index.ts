@@ -17,15 +17,15 @@ function canonicalizeLocale(locale: string | undefined): string | undefined {
 }
 
 type LocaleCompareOptions = CompareOptions & {
-  stringSort?: `locale`
+  stringSort: `locale`
   locale?: string
   localeOptions?: object
 }
 
-function usesLocaleCollation(
+function resolveStringSort(
   options: CompareOptions,
-): options is LocaleCompareOptions {
-  return (options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort) === `locale`
+): NonNullable<CompareOptions[`stringSort`]> {
+  return options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort!
 }
 
 /**
@@ -240,26 +240,37 @@ export abstract class BaseIndex<
    */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
     const indexCompareOptions = this.compareOptions
-    const indexUsesLocale = usesLocaleCollation(indexCompareOptions)
-    const requestedUsesLocale = usesLocaleCollation(compareOptions)
+    const indexStringSort = resolveStringSort(indexCompareOptions)
+    const requestedStringSort = resolveStringSort(compareOptions)
 
     if (
       indexCompareOptions.nulls !== compareOptions.nulls ||
-      indexUsesLocale !== requestedUsesLocale
+      indexStringSort !== requestedStringSort
     ) {
       return false
     }
 
-    if (!indexUsesLocale || !requestedUsesLocale) {
+    if (indexStringSort === `custom` && requestedStringSort === `custom`) {
+      return (
+        indexCompareOptions.stringSort === `custom` &&
+        compareOptions.stringSort === `custom` &&
+        indexCompareOptions.compare === compareOptions.compare
+      )
+    }
+
+    if (indexStringSort !== `locale` || requestedStringSort !== `locale`) {
       return true
     }
 
+    const indexLocaleOptions = indexCompareOptions as LocaleCompareOptions
+    const requestedLocaleOptions = compareOptions as LocaleCompareOptions
+
     return (
-      canonicalizeLocale(indexCompareOptions.locale) ===
-        canonicalizeLocale(compareOptions.locale) &&
+      canonicalizeLocale(indexLocaleOptions.locale) ===
+        canonicalizeLocale(requestedLocaleOptions.locale) &&
       deepEquals(
-        normalizeLocaleOptions(indexCompareOptions.localeOptions),
-        normalizeLocaleOptions(compareOptions.localeOptions),
+        normalizeLocaleOptions(indexLocaleOptions.localeOptions),
+        normalizeLocaleOptions(requestedLocaleOptions.localeOptions),
       )
     )
   }

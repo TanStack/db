@@ -21,13 +21,15 @@ export interface CollectionLike<
 > {}
 
 /**
- * StringSortOpts - Options for string sorting behavior
+ * StringCollationConfig - Options for string sorting behavior
  *
- * This discriminated union allows for two types of string sorting:
- * - **Lexical**: Simple character-by-character comparison (default)
+ * This discriminated union allows for three types of string sorting:
+ * - **Lexical**: Simple character-by-character comparison
  * - **Locale**: Locale-aware sorting with optional customization
+ * - **Custom**: Local comparison by a stable user-provided function reference
  *
- * The union ensures that locale options are only available when locale sorting is selected.
+ * Custom comparators must remain deterministic and immutable for their lifetime.
+ * Runtime query and index identity uses the exact function reference.
  */
 export type StringCollationConfig =
   | {
@@ -37,6 +39,10 @@ export type StringCollationConfig =
       stringSort?: `locale`
       locale?: string
       localeOptions?: object
+    }
+  | {
+      stringSort: `custom`
+      compare: (a: string, b: string) => number
     }
 
 /**

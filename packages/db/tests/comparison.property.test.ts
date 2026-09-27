@@ -1,4 +1,4 @@
-import { describe, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import {
   areValuesEqual,
@@ -476,6 +476,32 @@ describe(`makeComparator property-based tests`, () => {
       expect(checkAntisymmetry(ab, ba)).toBe(true)
     },
   )
+
+  it(`delegates only string pairs to a custom string comparator`, () => {
+    const calls: Array<[string, string]> = []
+    const compare = (a: string, b: string) => {
+      calls.push([a, b])
+      return a.replaceAll(` `, ``).localeCompare(b.replaceAll(` `, ``))
+    }
+    const custom: CompareOptions = {
+      direction: `asc`,
+      nulls: `first`,
+      stringSort: `custom`,
+      compare,
+    }
+
+    expect(makeComparator(custom)(`pillowfort`, `pillow fort`)).toBe(0)
+    expect(calls).toEqual([[`pillowfort`, `pillow fort`]])
+
+    calls.length = 0
+    expect(makeComparator(custom)(2, 1)).toBeGreaterThan(0)
+    expect(makeComparator(custom)(null, `value`)).toBeLessThan(0)
+    expect(calls).toEqual([])
+
+    expect(
+      makeComparator({ ...custom, direction: `desc` })(`a`, `b`),
+    ).toBeGreaterThan(0)
+  })
 })
 
 describe(`normalizeValue property-based tests`, () => {

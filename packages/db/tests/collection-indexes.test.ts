@@ -241,6 +241,32 @@ describe(`Collection Indexes`, () => {
       ).toBe(index)
     })
 
+    it(`reuses custom string indexes only for the exact comparator reference`, () => {
+      const compare = (a: string, b: string) => a.length - b.length
+      const compareOptions = {
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `custom`,
+        compare,
+      } as const
+      const index = collection.createIndex((row) => row.name, {
+        options: {
+          compareOptions,
+          compareFn: makeComparator(compareOptions),
+        },
+      })
+
+      expect(findIndexForField(collection, [`name`], compareOptions)).toBe(
+        index,
+      )
+      expect(
+        findIndexForField(collection, [`name`], {
+          ...compareOptions,
+          compare: (a: string, b: string) => a.length - b.length,
+        }),
+      ).toBeUndefined()
+    })
+
     it(`should create multiple indexes`, () => {
       const statusIndex = collection.createIndex((row) => row.status)
       const ageIndex = collection.createIndex((row) => row.age)
@@ -1753,6 +1779,66 @@ describe(`Collection Indexes`, () => {
 
       const ids = result.map((r) => r.value.id).sort()
       expect(ids).toEqual([`high`])
+    })
+
+    it(`keeps ordinary string range semantics outside custom collation`, async () => {
+      let comparatorCalls = 0
+      const compare = (a: string, b: string) => {
+        comparatorCalls++
+        return b.localeCompare(a)
+      }
+      const customCollection = createCollection<
+        { id: string; label: string },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        autoIndex: `off`,
+        defaultIndexType: BTreeIndex,
+        defaultStringCollation: {
+          stringSort: `custom`,
+          compare,
+        },
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `a`, label: `apple` } })
+            write({ type: `insert`, value: { id: `z`, label: `zebra` } })
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      try {
+        await customCollection.stateWhenReady()
+        customCollection.createIndex((row) => row.label, {
+          options: {
+            compareFn: makeComparator({
+              direction: `asc`,
+              nulls: `first`,
+              stringSort: `custom`,
+              compare,
+            }),
+            compareOptions: {
+              direction: `asc`,
+              nulls: `first`,
+              stringSort: `custom`,
+              compare,
+            },
+          },
+        })
+        comparatorCalls = 0
+
+        const result = customCollection.currentStateAsChanges({
+          where: gt(new PropRef([`label`]), `m`),
+        })!
+
+        expect(result.map(({ key }) => key)).toEqual([`z`])
+        expect(comparatorCalls).toBe(0)
+      } finally {
+        await customCollection.cleanup()
+      }
     })
 
     it(`should return all matching rows for a range predicate when the field also contains NaN`, async () => {

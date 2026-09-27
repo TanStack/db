@@ -264,6 +264,7 @@ export class CollectionSubscriber<
     const hints = computeSubscriptionOrderByHints(
       this.collectionConfigBuilder.query,
       this.alias,
+      this.collectionConfigBuilder.queryCompareOptions,
     )
 
     // Track loading via the loadSubset promise directly.

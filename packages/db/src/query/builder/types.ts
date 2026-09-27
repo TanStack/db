@@ -603,8 +603,8 @@ export type OrderByCallback<TContext extends Context> = (
  * OrderByOptions - Configuration for orderBy operations
  *
  * Combines direction and null handling with string-specific sorting options.
- * The intersection with StringSortOpts allows for either simple lexical sorting
- * or locale-aware sorting with customizable options.
+ * The intersection with StringCollationConfig allows lexical, locale-aware,
+ * or custom local string sorting.
  */
 export type OrderByOptions = {
   direction?: OrderByDirection

@@ -53,7 +53,7 @@ import {
   getRuntimeReferenceIdentity,
 } from '../../src/query/runtime-reference-identity.js'
 import { createValueIdentity } from '../../src/query/equality-value-identity.js'
-import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
+import type { BasicExpression, OrderBy, QueryIR } from '../../src/query/ir.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 
 interface User {
@@ -735,6 +735,49 @@ describe(`loadSubset demand identity`, () => {
     )
     expect(getLoadSubsetDemandKey(demand(a))).not.toBe(
       getLoadSubsetDemandKey(demand(b)),
+    )
+  })
+
+  it(`uses exact custom comparator identity for order terms`, () => {
+    const compare = (a: string, b: string) => a.length - b.length
+    const orderByFor = (candidate: typeof compare): OrderBy => [
+      {
+        expression: new PropRef([`row`, `label`]),
+        compareOptions: {
+          direction: `asc` as const,
+          nulls: `first` as const,
+          stringSort: `custom`,
+          compare: candidate,
+        },
+      },
+    ]
+    const queryFor = (candidate: typeof compare): QueryIR => ({
+      ...getQueryIR(new Query().from({ user: usersCollection })),
+      orderBy: [
+        {
+          expression: new PropRef([`user`, `name`]),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `custom`,
+            compare: candidate,
+          },
+        },
+      ],
+    })
+    const clone = (a: string, b: string) => a.length - b.length
+
+    expect(getLoadSubsetDemandKey({ orderBy: orderByFor(compare) })).toBe(
+      getLoadSubsetDemandKey({ orderBy: orderByFor(compare) }),
+    )
+    expect(getLoadSubsetDemandKey({ orderBy: orderByFor(compare) })).not.toBe(
+      getLoadSubsetDemandKey({ orderBy: orderByFor(clone) }),
+    )
+    expect(getQueryIdentity(queryFor(compare))).toBe(
+      getQueryIdentity(queryFor(compare)),
+    )
+    expect(getQueryIdentity(queryFor(compare))).not.toBe(
+      getQueryIdentity(queryFor(clone)),
     )
   })
 

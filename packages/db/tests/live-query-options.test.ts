@@ -78,4 +78,28 @@ describe(`live query identity`, () => {
     expect(() => getLiveQueryHash(first)).toThrow(/function value/)
     expect(() => getLiveQueryHash(second)).toThrow(/function value/)
   })
+
+  it(`uses exact custom comparator identity in live-query config hashes`, () => {
+    const source = createCollection<{ id: string }>({
+      id: `live-query-custom-collation-source`,
+      getKey: (row) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    })
+    const query = new BaseQueryBuilder().from({ source })
+    const compare = (a: string, b: string) => a.length - b.length
+    const config = (candidate: typeof compare) => ({
+      query,
+      defaultStringCollation: {
+        stringSort: `custom` as const,
+        compare: candidate,
+      },
+    })
+
+    expect(getLiveQueryHash(config(compare))).toBe(
+      getLiveQueryHash(config(compare)),
+    )
+    expect(getLiveQueryHash(config(compare))).not.toBe(
+      getLiveQueryHash(config((a: string, b: string) => a.length - b.length)),
+    )
+  })
 })
