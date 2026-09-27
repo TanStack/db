@@ -1000,9 +1000,39 @@ async function withParkedSync(
     mutationFn: () => persistence,
   })
   let blockerCommit: Promise<unknown> | undefined
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+  const publicRows = () =>
+    [...collection.state]
+      .map(([key, row]) => [key, row.value] as const)
+      .sort(([left], [right]) => left - right)
+  const mirror = new Map<number, number>(
+    initialRows.map(({ id, value }) => [id, value]),
+  )
+  mirror.set(2, 0)
+  const publications: Array<{
+    publicRows: Array<readonly [number, number]>
+    mirrorRows: Array<[number, number]>
+  }> = []
+  const mirrorRows = () => [...mirror].sort(([left], [right]) => left - right)
+  let primaryFailure: unknown
+  let hasPrimaryFailure = false
 
   try {
     await collection.stateWhenReady()
+    expect(publicRows()).toEqual(mirrorRows())
+    subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) mirror.delete(change.key)
+          else mirror.set(change.key, change.value.value)
+        }
+        publications.push({
+          publicRows: publicRows(),
+          mirrorRows: mirrorRows(),
+        })
+      },
+      { includeInitialState: false },
+    )
     blocker.mutate(() =>
       collection.update(2, (draft) => {
         draft.value = 1
@@ -1019,12 +1049,54 @@ async function withParkedSync(
         await blockerCommit
       },
     })
-  } finally {
+    for (const publication of publications) {
+      expect(publication.mirrorRows).toEqual(publication.publicRows)
+    }
+    expect(mirrorRows()).toEqual(publicRows())
+  } catch (error) {
+    primaryFailure = error
+    hasPrimaryFailure = true
+  }
+
+  const cleanupFailures: Array<unknown> = []
+  try {
     release()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
     if (blocker.state === `pending` || blocker.state === `persisting`)
       blocker.rollback()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
     await blockerCommit?.catch(() => undefined)
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
+    subscription?.unsubscribe()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
     await collection.cleanup()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  if (hasPrimaryFailure && cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [primaryFailure, ...cleanupFailures],
+      `Queued sync oracle and cleanup both failed`,
+      { cause: primaryFailure },
+    )
+  }
+  if (hasPrimaryFailure) throw primaryFailure
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `Queued sync cleanup failed`, {
+      cause: cleanupFailures[0],
+    })
   }
 }
 
@@ -1829,11 +1901,22 @@ it(`does not carry previous-value state across a failed sync run`, async () => {
   }
 })
 
+const retentionHistory = fc.array(retentionActionArbitrary, {
+  minLength: 1,
+  maxLength: 20,
+})
+
+fcTest.prop([retentionHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
+  `matches retained authoritative state with a fixed seed`,
+  async (actions) => {
+    await runRetentionHistory(actions)
+  },
+)
 fcTest.prop(
-  [fc.array(retentionActionArbitrary, { minLength: 1, maxLength: 20 })],
+  [retentionHistory],
   oraclePropertyOptions(100, `collection-state.retention`),
 )(
-  `matches retained authoritative state without optimistic overlays after every committed sync history`,
+  `matches retained authoritative state with a random or replayed seed`,
   async (actions) => {
     await runRetentionHistory(actions)
   },
@@ -2171,7 +2254,7 @@ it(`publishes the subscriber-visible row when a buffered optimistic update becom
     queued: 1,
   })
 })
-fcTest.prop([optimisticHistory], { numRuns: oracleRuns(60), seed: 86103 })(
+fcTest.prop([optimisticHistory], { numRuns: oracleRuns(100), seed: 86103 })(
   `matches optimistic ownership and publication histories with a fixed seed`,
   async ({ initial, steps }) => {
     await runOptimisticHistory(initial, steps)
