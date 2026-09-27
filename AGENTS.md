@@ -789,14 +789,9 @@ Tests and contract documentation can grow to prove the behavior. Report their
 weight separately from production code. Do not compress code or weaken names
 to reduce a line count. Reduce states, branches, helpers, and recovery paths.
 
-Use this order for a bug fix:
-
-1. Reproduce the behavior through a valid public input, or demonstrate a
-   contradictory collaborator signal at its boundary.
-2. Identify the invariant or public contract the behavior violates.
-3. Strengthen or simplify the existing control flow.
-4. Add new state or recovery machinery only when the public contract requires
-   recovery.
+Use the test-first and bug-class guidance above to reproduce the failure and
+identify the violated contract. Strengthen or simplify existing control flow
+before adding state or recovery machinery.
 
 ### Separate Valid Edge Cases from Contract Contradictions
 
@@ -828,9 +823,8 @@ Prefer a small change to the current abstraction over a replacement state
 machine. A new state machine requires an explicit architectural reason and an
 oracle law that the existing design cannot express.
 
-When a reviewer proposes defensive machinery, first reproduce the case under
-valid contracts. If only contradictory mocks reproduce it, add an invariant
-witness and fail before mutation. Do not add speculative recovery.
+For reviewer-proposed defensive machinery based only on contradictory mocks,
+add an invariant witness that fails before mutation instead.
 
 ## General Principles
 
