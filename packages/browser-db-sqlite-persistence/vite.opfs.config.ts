@@ -27,6 +27,13 @@ export default defineConfig({
     },
   },
   server: {
+    proxy: {
+      '/electric': {
+        target: process.env.ELECTRIC_URL ?? `http://127.0.0.1:3000`,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/electric/, ``),
+      },
+    },
     fs: {
       allow: [resolve(packageDirectory, `../..`)],
     },
