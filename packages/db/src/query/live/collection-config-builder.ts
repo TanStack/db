@@ -101,7 +101,8 @@ export class CollectionConfigBuilder<
   private readonly orderByIndices = new WeakMap<object, string>()
 
   private readonly compare?: (val1: TResult, val2: TResult) => number
-  private readonly compareOptions?: StringCollationConfig
+  private readonly compareOptions: StringCollationConfig
+  readonly queryCompareOptions: StringCollationConfig
 
   private isGraphRunning = false
   private graphInputRevision = 0
@@ -206,10 +207,13 @@ export class CollectionConfigBuilder<
       this.compare = createOrderByComparator<TResult>(this.orderByIndices)
     }
 
-    // Use explicitly provided compareOptions if available, otherwise inherit from FROM collection
+    // Query ordering inherits from the leading source. The live-query Collection
+    // may independently override the collation it exposes to downstream queries.
+    this.queryCompareOptions = extractCollectionFromSource(
+      this.query,
+    ).compareOptions
     this.compareOptions =
-      this.config.defaultStringCollation ??
-      extractCollectionFromSource(this.query).compareOptions
+      this.config.defaultStringCollation ?? this.queryCompareOptions
 
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously

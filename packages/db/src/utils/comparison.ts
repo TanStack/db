@@ -56,8 +56,11 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   if (aUnordered) return 1
   if (bUnordered) return -1
 
-  // if a and b are both strings, compare them based on locale
+  // If both values are strings, apply the configured string collation.
   if (typeof a === `string` && typeof b === `string`) {
+    if (opts.stringSort === `custom`) {
+      return opts.compare(a, b)
+    }
     if (opts.stringSort === `locale`) {
       return a.localeCompare(b, opts.locale, opts.localeOptions)
     }

@@ -170,6 +170,28 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
   })
 
+  it(`preserves a custom string comparator by exact reference`, () => {
+    const compare = (a: string, b: string) => a.length - b.length
+    const query = new Query()
+      .from({ employees: employeesCollection })
+      .orderBy(({ employees }) => employees.name, {
+        direction: `desc`,
+        stringSort: `custom`,
+        compare,
+      })
+
+    const clause = getQueryIR(query).orderBy![0]!
+    expect(clause.compareOptions).toMatchObject({
+      direction: `desc`,
+      nulls: `first`,
+      stringSort: `custom`,
+    })
+    if (clause.compareOptions.stringSort !== `custom`) {
+      throw new Error(`expected custom string collation`)
+    }
+    expect(clause.compareOptions.compare).toBe(compare)
+  })
+
   it(`supports simple order by expressions`, () => {
     const builder = new Query()
     const query = builder

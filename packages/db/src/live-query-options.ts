@@ -4,6 +4,7 @@ import {
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
+import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
 import type { CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
@@ -119,7 +120,10 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
       [`getKey`, config.getKey],
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
-      [`defaultStringCollation`, config.defaultStringCollation],
+      [
+        `defaultStringCollation`,
+        getStringCollationIdentity(config.defaultStringCollation),
+      ],
     ]
   }
   if (value === undefined || value === null) return [`disabled`]

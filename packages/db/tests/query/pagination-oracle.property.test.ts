@@ -50,6 +50,17 @@ import type {
  * explore adjacent legal actions. Fault probes establish that wrong order,
  * false coverage, duplicate work, partial publication, and bad delete payloads
  * are observable. The model does not infer rows beyond provider evidence.
+ *
+ * The fixed C-01 through C-09 custom-collation lane declares an independent
+ * rank relation and literal public-key sequences. It crosses ascending and
+ * descending order, scan and auto-index execution, inherited and per-order
+ * configuration, bounded and unbounded queries, a later ordered source that
+ * inherits the leading source's default, an output Collection with a different
+ * downstream default, comparator-equal keys, and hostile provider order. It
+ * also requires exactly one initial filtered full-source acquisition. This
+ * lane establishes local custom ordering only; it does not authorize custom
+ * cursor pagination, comparator-aware range predicates, or backend collation
+ * parity.
  */
 
 type PageRow = {
@@ -1583,6 +1594,143 @@ async function runAdversarialOrderedProviderScenario(
   )
 }
 
+type CustomCollationRow = {
+  id: number
+  groupId: number
+  label: string
+  keep: boolean
+}
+
+const customCollationProviderRows = [
+  { id: 0, groupId: 1, label: `3`, keep: false },
+  { id: 1, groupId: 1, label: `pillow fort`, keep: true },
+  { id: 3, groupId: 1, label: `+3 power`, keep: true },
+  { id: 4, groupId: 1, label: `pillowfort`, keep: true },
+  { id: 2, groupId: 1, label: `3`, keep: true },
+] satisfies ReadonlyArray<CustomCollationRow>
+
+const customCollationRanks = new Map<string, number>([
+  [`3`, 0],
+  [`+3 power`, 0],
+  [`pillowfort`, 1],
+  [`pillow fort`, 2],
+])
+
+function compareCustomCollationStrings(a: string, b: string): number {
+  return customCollationRanks.get(a)! - customCollationRanks.get(b)!
+}
+
+async function runCustomCollationScenario(options: {
+  direction: `asc` | `desc`
+  autoIndex: `off` | `eager`
+  sourceDefault: boolean
+  bounded: boolean
+  outputDefault?: `lexical`
+}): Promise<void> {
+  const loads: Array<LoadSubsetOptions> = []
+  const delivered = new Set<number>()
+  const source = createCollection<CustomCollationRow>({
+    id: `pagination-custom-collation-${collectionSequence++}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: options.autoIndex,
+    defaultIndexType: options.autoIndex === `eager` ? BTreeIndex : undefined,
+    defaultStringCollation: options.sourceDefault
+      ? {
+          stringSort: `custom`,
+          compare: compareCustomCollationStrings,
+        }
+      : { stringSort: `lexical` },
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        markReady()
+        return {
+          loadSubset: (loadOptions: LoadSubsetOptions) => {
+            loads.push(loadOptions)
+            const matchingRows = loadOptions.where
+              ? customCollationProviderRows.filter(
+                  (row) =>
+                    evaluateReferenceExpression(loadOptions.where!, row) ===
+                    true,
+                )
+              : customCollationProviderRows
+            // Deliberately honor only the provider's hostile physical order.
+            // A finite first request therefore cannot establish local custom
+            // collation coverage.
+            const requestedRows = matchingRows.slice(
+              loadOptions.offset ?? 0,
+              loadOptions.limit === undefined
+                ? undefined
+                : (loadOptions.offset ?? 0) + loadOptions.limit,
+            )
+            begin()
+            for (const row of requestedRows) {
+              if (delivered.has(row.id)) continue
+              delivered.add(row.id)
+              write({ type: `insert`, value: { ...row } })
+            }
+            const receipt = commit()
+            return receipt === true ? Promise.resolve() : receipt
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    defaultStringCollation:
+      options.outputDefault === `lexical`
+        ? { stringSort: `lexical` }
+        : undefined,
+    query: (query) => {
+      const filtered = query
+        .from({ row: source })
+        .where(({ row }) => eq(row.keep, true))
+      const ordered = options.sourceDefault
+        ? filtered.orderBy(({ row }) => row.label, {
+            direction: options.direction,
+            nulls: `first`,
+          })
+        : filtered.orderBy(({ row }) => row.label, {
+            direction: options.direction,
+            nulls: `first`,
+            stringSort: `custom`,
+            compare: compareCustomCollationStrings,
+          })
+      if (options.bounded) {
+        return ordered.limit(4).select(({ row }) => ({
+          id: row.id,
+          label: row.label,
+        }))
+      }
+      return ordered.select(({ row }) => ({
+        id: row.id,
+        label: row.label,
+      }))
+    },
+  })
+
+  try {
+    await live.preload()
+    const expectedIds =
+      options.direction === `asc` ? [2, 3, 4, 1] : [1, 4, 2, 3]
+    expect(Array.from(live.values(), ({ id }) => id)).toEqual(expectedIds)
+    if (options.autoIndex === `eager`) {
+      expect(source.indexes.size, `auto-index path reached`).toBeGreaterThan(0)
+    } else {
+      expect(source.indexes.size, `scan path reached`).toBe(0)
+    }
+    expect(loads).toHaveLength(1)
+    expect(loads[0]?.where).toBeDefined()
+    expect(loads[0]?.orderBy).toBeUndefined()
+    expect(loads[0]?.limit).toBeUndefined()
+    expect(loads[0]?.offset).toBeUndefined()
+    expect(loads[0]?.cursor).toBeUndefined()
+  } finally {
+    await cleanupAll(live, source)
+  }
+}
+
 async function runPendingMutationScenario(
   scenario: PendingMutationScenario,
   timing: `before-response` | `after-response`,
@@ -2139,7 +2287,6 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     query
       .from({ row: source })
       .orderBy(({ row }) => row.rank, `asc`)
-      .orderBy(({ row }) => row.id, `asc`)
       .limit(1),
   )
 
@@ -5808,6 +5955,151 @@ describe(`pagination recomputation oracle`, () => {
     expect(loads[1]?.limit).toBeUndefined()
     expect(loads[1]?.offset).toBeUndefined()
     expect(loads[1]?.cursor).toBeUndefined()
+  })
+
+  it.each([
+    {
+      cell: `C-01 inherited ascending scan`,
+      direction: `asc`,
+      autoIndex: `off`,
+      sourceDefault: true,
+      bounded: true,
+    },
+    {
+      cell: `C-02 inherited descending scan`,
+      direction: `desc`,
+      autoIndex: `off`,
+      sourceDefault: true,
+      bounded: true,
+    },
+    {
+      cell: `C-03 inherited ascending index`,
+      direction: `asc`,
+      autoIndex: `eager`,
+      sourceDefault: true,
+      bounded: true,
+    },
+    {
+      cell: `C-04 inherited descending index`,
+      direction: `desc`,
+      autoIndex: `eager`,
+      sourceDefault: true,
+      bounded: true,
+    },
+    {
+      cell: `C-05 per-order override`,
+      direction: `asc`,
+      autoIndex: `eager`,
+      sourceDefault: false,
+      bounded: true,
+    },
+    {
+      cell: `C-06 inherited unbounded order`,
+      direction: `asc`,
+      autoIndex: `off`,
+      sourceDefault: true,
+      bounded: false,
+    },
+    {
+      cell: `C-07 explicit unbounded order`,
+      direction: `asc`,
+      autoIndex: `eager`,
+      sourceDefault: false,
+      bounded: false,
+    },
+    {
+      cell: `C-09 output default does not override source inheritance`,
+      direction: `asc`,
+      autoIndex: `off`,
+      sourceDefault: true,
+      bounded: false,
+      outputDefault: `lexical`,
+    },
+  ] as const)(
+    `uses one filtered full-source acquisition for custom collation ($cell)`,
+    async ({ direction, autoIndex, sourceDefault, bounded, outputDefault }) => {
+      await runCustomCollationScenario({
+        direction,
+        autoIndex,
+        sourceDefault,
+        bounded,
+        outputDefault,
+      })
+    },
+  )
+
+  it(`uses the leading source custom collation when ordering a later source (C-08 multi-source inheritance)`, async () => {
+    type ScopeRow = { id: number; groupId: number }
+    const scope = createCollection(
+      mockSyncCollectionOptions({
+        id: `pagination-custom-collation-scope-${collectionSequence++}`,
+        initialData: [{ id: 1, groupId: 1 }] satisfies Array<ScopeRow>,
+        getKey: (row: ScopeRow) => row.id,
+        defaultStringCollation: {
+          stringSort: `custom`,
+          compare: compareCustomCollationStrings,
+        },
+      }),
+    )
+    const loads: Array<LoadSubsetOptions> = []
+    const delivered = new Set<number>()
+    const source = createCollection<CustomCollationRow>({
+      id: `pagination-custom-collation-joined-${collectionSequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      defaultStringCollation: { stringSort: `lexical` },
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          markReady()
+          return {
+            loadSubset: (loadOptions: LoadSubsetOptions) => {
+              loads.push(loadOptions)
+              const matchingRows = loadOptions.where
+                ? customCollationProviderRows.filter(
+                    (row) =>
+                      evaluateReferenceExpression(loadOptions.where!, row) ===
+                      true,
+                  )
+                : customCollationProviderRows
+              begin()
+              for (const row of matchingRows) {
+                if (delivered.has(row.id)) continue
+                delivered.add(row.id)
+                write({ type: `insert`, value: { ...row } })
+              }
+              const receipt = commit()
+              return receipt === true ? Promise.resolve() : receipt
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection((query) =>
+      query
+        .from({ scope })
+        .innerJoin({ row: source }, ({ scope: outer, row }) =>
+          eq(outer.groupId, row.groupId),
+        )
+        .where(({ row }) => eq(row.keep, true))
+        .orderBy(({ row }) => row.label, {
+          direction: `asc`,
+          nulls: `first`,
+        })
+        .select(({ row }) => ({ id: row.id, label: row.label })),
+    )
+
+    try {
+      await live.preload()
+      expect(Array.from(live.values(), ({ id }) => id)).toEqual([2, 3, 4, 1])
+      expect(loads).toHaveLength(1)
+      expect(loads[0]?.where).toBeDefined()
+      expect(loads[0]?.orderBy).toBeUndefined()
+      expect(loads[0]?.limit).toBeUndefined()
+      expect(loads[0]?.offset).toBeUndefined()
+      expect(loads[0]?.cursor).toBeUndefined()
+    } finally {
+      await cleanupAll(live, source, scope)
+    }
   })
 
   it(`inherits collection locale options through scan and auto-index ordering`, async () => {
