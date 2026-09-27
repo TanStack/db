@@ -28,8 +28,11 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * independent filter/sort/window recomputation. It must also avoid duplicate
  * finite requests, repeated source scans, partial initial publications, and
  * cross-source suppression when joined loads overlap or replay.
- * Direct LEFT-joined filters also require a finite root prefix, settlement of
- * child demand before continuation, and one complete initial publication.
+ * Direct LEFT-joined filters require a finite indexed root prefix, settlement
+ * of child demand before continuation, and one complete initial publication.
+ * Custom collation uses one full-source request, while an unindexed underfilled
+ * prefix falls back to full source. Both must wait for joined demand before
+ * publishing an anti-join result.
  *
  * The value model is a plain sorted array. The work model records normalized
  * page and boundary requests, examined source rows, publications, and errors.
@@ -254,6 +257,7 @@ async function observeConsumer(
   joinFilter: JoinFilter = `two-alias`,
   delayJoinedDemand = false,
   removeJoinedMarker = false,
+  loadingMode: `indexed` | `unindexed` | `custom` = `indexed`,
 ): Promise<ConsumerObservation> {
   type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const truth = rowsForScenario(scenario).sort(compareRows(scenario.direction))
@@ -296,8 +300,8 @@ async function observeConsumer(
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
+    autoIndex: loadingMode === `unindexed` ? `off` : `eager`,
+    defaultIndexType: loadingMode === `unindexed` ? undefined : BTreeIndex,
     sync: {
       sync: (operations) => {
         sync = operations
@@ -406,7 +410,7 @@ async function observeConsumer(
     | ReturnType<NonNullable<typeof live>[`subscribeChanges`]>
     | undefined
   const query = (q: InitialQueryBuilder) => {
-    const ordered = q
+    const joined = q
       .from({ row: source })
       .leftJoin({ marker: markerSource }, ({ row, marker }) =>
         eq(row.id, joinFilter === `to-one` ? marker.id : marker.rowId),
@@ -424,7 +428,15 @@ async function observeConsumer(
             return eq(row.id, marker.rowId)
         }
       })
-      .orderBy(({ row }) => row.rank, scenario.direction)
+    const labelRanks = new Map(truth.map(({ label, rank }) => [label, rank]))
+    const ordered =
+      loadingMode === `custom`
+        ? joined.orderBy(({ row }) => row.label, {
+            direction: scenario.direction,
+            stringSort: `custom`,
+            compare: (a, b) => labelRanks.get(a)! - labelRanks.get(b)!,
+          })
+        : joined.orderBy(({ row }) => row.rank, scenario.direction)
     return (rowToDelete ? ordered.orderBy(({ row }) => row.id, `asc`) : ordered)
       .limit(2)
       .select(({ row }) => ({
@@ -469,9 +481,13 @@ async function observeConsumer(
         for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
           await flushPromises()
         }
-        expect(
-          requests.filter(({ kind: requestKind }) => requestKind === `page`),
-        ).toHaveLength(1)
+        if (loadingMode === `indexed`)
+          expect(
+            requests.filter(({ kind: requestKind }) => requestKind === `page`),
+          ).toHaveLength(1)
+        else if (loadingMode === `custom`) expect(requests).toHaveLength(1)
+        else
+          expect(requests.some(({ limit }) => limit === undefined)).toBe(true)
         joinedLoadGate.resolve()
       }
       await preload
@@ -2688,6 +2704,47 @@ describe(`ordered source work oracle`, () => {
           expect(observation.requests[0]?.kind).toBe(`page`)
           expect(observation.requests[0]?.limit).toBeGreaterThan(0)
         }
+      }
+    },
+  )
+
+  it.each(
+    ([`collection`, `effect`] as const).flatMap((consumer) =>
+      ([`unindexed`, `custom`] as const).map((loadingMode) => ({
+        consumer,
+        loadingMode,
+      })),
+    ),
+  )(
+    `settles joined demand and publishes a complete $loadingMode $consumer window`,
+    async ({ consumer, loadingMode }) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 1,
+          middleEligible: false,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        `none`,
+        true,
+        false,
+        loadingMode,
+      )
+      expect(observed.rows.map(({ id }) => id)).toEqual([3])
+      expect(observed.errors).toEqual([])
+      if (loadingMode === `custom`) {
+        expect(observed.requests).toHaveLength(1)
+        expect(observed.requests[0]?.kind).toBe(`boundary`)
+        expect(observed.requests[0]?.limit).toBeUndefined()
+        expect(observed.requests[0]?.hasCursor).toBe(false)
+        expect(observed.requests[0]?.offset).toBeUndefined()
+      } else {
+        expect(observed.requests[0]?.kind).toBe(`page`)
+        expect(observed.requests.some(({ limit }) => limit === undefined)).toBe(
+          true,
+        )
       }
     },
   )

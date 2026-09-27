@@ -1061,12 +1061,11 @@ export class CollectionConfigBuilder<
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
         this.pendingOrderedLoads.size > 0 ||
-        (this.hasJoinedFilterWindow() &&
-          Object.values(this.optimizableOrderByCollections).some(
-            (info) =>
-              info.waitForJoinedDemand &&
-              this.hasPendingJoinedWork(info.sourceId),
-          ))
+        Object.values(this.optimizableOrderByCollections).some(
+          (info) =>
+            info.waitForJoinedDemand &&
+            this.hasPendingJoinedWork(info.sourceId),
+        )
       ) {
         return
       }
