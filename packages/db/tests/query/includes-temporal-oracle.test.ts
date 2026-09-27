@@ -37,6 +37,10 @@ import type { Scheduler } from 'fast-check'
  * 4. A successful load settles only after its source writes are public.
  * 5. Failure belongs to the demand that failed. Retired failure cannot poison
  *    a later demand or keep unrelated graph work private.
+ * 6. Expansion keeps established coverage until one complete union replacement
+ *    applies. Failure or obsolete settlement cannot retire that coverage.
+ * 7. Replacement is single-flight and generation-fenced. Churn coalesces into
+ *    the latest union without letting stale work settle current readiness.
  *
  * No one state machine mirrors the production controller. The file uses small
  * models for readiness, cancellation, scheduled completion, and progressive
@@ -46,8 +50,9 @@ import type { Scheduler } from 'fast-check'
  *
  * The production drivers use real Collections, compiled includes, applied
  * receipts, release callbacks, replay barriers, and source writes. They observe
- * readiness, preload settlement, visible rows, request keys, and errors at each
- * named boundary. The live-query architecture remains the contract source.
+ * readiness, preload settlement, visible rows, request keys, errors, releases,
+ * peak live acquisitions, and cumulative requested keys at each named boundary.
+ * The live-query architecture remains the contract source.
  */
 
 type Post = {
@@ -1367,16 +1372,19 @@ async function expectRetainedDemandBlocksReadiness(): Promise<void> {
 
     posts.write(`insert`, secondPost)
     await flushPromises()
-    expect(requests.map(({ keys }) => keys)).toEqual([[1], [2]])
-
-    requests[1]!.deferred.resolve()
-    await requests[1]!.outcome
-    await flushPromises()
+    expect(requests.map(({ keys }) => keys)).toEqual([[1]])
     expect(preload.preloadSettled).toBe(false)
     expect(live.isReady()).toBe(false)
 
     requests[0]!.deferred.resolve()
     await requests[0]!.outcome
+    await flushPromises()
+    expect(requests.map(({ keys }) => keys)).toEqual([[1], [1, 2]])
+    expect(preload.preloadSettled).toBe(false)
+    expect(live.isReady()).toBe(false)
+
+    requests[1]!.deferred.resolve()
+    await requests[1]!.outcome
     await finishPreload(preload)
     expect(live.isReady()).toBe(true)
   } finally {
@@ -1384,6 +1392,246 @@ async function expectRetainedDemandBlocksReadiness(): Promise<void> {
     await Promise.allSettled(requests.map(({ outcome }) => outcome))
     await live.cleanup()
     await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  }
+}
+
+type MeasuredDemandRequest = {
+  deferred: Deferred<void>
+  keys: Array<number>
+  options: LoadSubsetOptions
+  released: boolean
+}
+
+function createMeasuredDemandComments() {
+  const requests: Array<MeasuredDemandRequest> = []
+  const releases: Array<Array<number>> = []
+  let unloadFailure:
+    | { error: Error; keys: ReadonlyArray<number>; attempted: boolean }
+    | undefined
+  let activeAcquisitions = 0
+  let peakActiveAcquisitions = 0
+  let cumulativeRequestedKeys = 0
+  let ready = false
+  const collection = createCollection<Comment>({
+    id: nextCollectionId(`measured-demand-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: ({ markReady }) => ({
+        loadSubset: (options) => {
+          const keys = correlationKeys([options], `postId`)
+          const request = {
+            deferred: createDeferred<void>(),
+            keys,
+            options,
+            released: false,
+          }
+          requests.push(request)
+          activeAcquisitions += 1
+          peakActiveAcquisitions = Math.max(
+            peakActiveAcquisitions,
+            activeAcquisitions,
+          )
+          cumulativeRequestedKeys += keys.length
+          return request.deferred.promise.then(() => {
+            if (!ready && !options.signal?.aborted) {
+              ready = true
+              markReady()
+            }
+          })
+        },
+        unloadSubset: (options) => {
+          const request = requests.find(
+            (candidate) => candidate.options === options,
+          )
+          if (!request) throw new Error(`Released an unknown acquisition`)
+          if (request.released) throw new Error(`Released an acquisition twice`)
+          request.released = true
+          activeAcquisitions -= 1
+          releases.push(request.keys)
+          if (
+            unloadFailure &&
+            !unloadFailure.attempted &&
+            request.keys.length === unloadFailure.keys.length &&
+            request.keys.every(
+              (key, index) => key === unloadFailure!.keys[index],
+            )
+          ) {
+            unloadFailure.attempted = true
+            throw unloadFailure.error
+          }
+        },
+      }),
+    },
+  })
+  collection.createIndex((comment) => comment.postId)
+  return {
+    collection,
+    requests,
+    releases,
+    failUnloadOnce: (keys: ReadonlyArray<number>, error: Error) => {
+      unloadFailure = { error, keys, attempted: false }
+    },
+    work: () => ({
+      activeAcquisitions,
+      cumulativeRequestedKeys,
+      peakActiveAcquisitions,
+    }),
+  }
+}
+
+async function expectDemandReplacementRetainsCoverageAndFencesGenerations(): Promise<void> {
+  const measured = createMeasuredDemandComments()
+  const subscription = measured.collection.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+  const controller = new SubsetDemandController()
+  const reportedErrors: Array<unknown> = []
+  subscription.on(`loadSubset:error`, ({ error }) => {
+    reportedErrors.push(error)
+  })
+  const plan: LazyDemandPlan = {
+    id: `union-demand-replacement`,
+    path: [`postId`],
+    collectionId: measured.collection.id,
+    initialKeys: new Set(),
+  }
+
+  const settle = async (index: number): Promise<void> => {
+    const request = measured.requests[index]
+    if (!request) throw new Error(`Missing measured request ${index}`)
+    request.deferred.resolve()
+    await request.deferred.promise
+    await flushPromises()
+  }
+
+  try {
+    const initial = controller.setDemand(subscription, plan, new Set([1]))
+    expect(measured.requests.map(({ keys }) => keys)).toEqual([[1]])
+    await settle(0)
+    if (initial.ready instanceof Promise) await initial.ready
+
+    const expansion = controller.setDemand(subscription, plan, new Set([1, 2]))
+    expect(measured.requests.map(({ keys }) => keys)).toEqual([[1], [1, 2]])
+    expect(measured.releases).toEqual([])
+    expect(measured.work()).toEqual({
+      activeAcquisitions: 2,
+      cumulativeRequestedKeys: 3,
+      peakActiveAcquisitions: 2,
+    })
+
+    await settle(1)
+    if (expansion.ready instanceof Promise) await expansion.ready
+    expect(measured.releases).toEqual([[1]])
+    expect(measured.work().activeAcquisitions).toBe(1)
+
+    const replacementError = new Error(`replacement failed`)
+    const cleanupError = new Error(`replacement cleanup failed`)
+    const failed = controller.setDemand(subscription, plan, new Set([1, 2, 3]))
+    expect(measured.requests[2]?.keys).toEqual([1, 2, 3])
+    expect(measured.releases).toEqual([[1]])
+    measured.failUnloadOnce([1, 2, 3], cleanupError)
+    measured.requests[2]!.deferred.reject(replacementError)
+    if (!(failed.ready instanceof Promise)) {
+      throw new Error(`Expected failed replacement to be asynchronous`)
+    }
+    await expect(failed.ready).rejects.toBe(replacementError)
+    await flushPromises()
+    expect(subscription.lastError).toBe(replacementError)
+    expect(reportedErrors.at(-1)).toBe(replacementError)
+    expect(reportedErrors).not.toContain(cleanupError)
+    expect(measured.releases).toEqual([[1], [1, 2, 3]])
+    expect(measured.work().activeAcquisitions).toBe(1)
+
+    const retry = controller.setDemand(subscription, plan, new Set([1, 2, 3]))
+    expect(retry.changed).toBe(true)
+    expect(measured.requests[3]?.keys).toEqual([1, 2, 3])
+    await settle(3)
+    if (retry.ready instanceof Promise) await retry.ready
+    expect(measured.releases).toEqual([[1], [1, 2, 3], [1, 2]])
+
+    const obsolete = controller.setDemand(
+      subscription,
+      plan,
+      new Set([1, 2, 3, 4]),
+    )
+    const current = controller.setDemand(
+      subscription,
+      plan,
+      new Set([1, 2, 3, 4, 5]),
+    )
+    expect(measured.requests.map(({ keys }) => keys)).toEqual([
+      [1],
+      [1, 2],
+      [1, 2, 3],
+      [1, 2, 3],
+      [1, 2, 3, 4],
+    ])
+    expect(measured.requests[4]?.options.signal?.aborted).toBe(true)
+
+    await settle(4)
+    if (obsolete.ready instanceof Promise) await obsolete.ready
+    expect(measured.releases).toEqual([[1], [1, 2, 3], [1, 2], [1, 2, 3, 4]])
+    expect(measured.requests[5]?.keys).toEqual([1, 2, 3, 4, 5])
+    let currentSettled = false
+    if (current.ready instanceof Promise) {
+      void current.ready.then(
+        () => {
+          currentSettled = true
+        },
+        () => {
+          currentSettled = true
+        },
+      )
+    }
+    await flushPromises()
+    expect(currentSettled).toBe(false)
+
+    await settle(5)
+    if (current.ready instanceof Promise) await current.ready
+    expect(measured.releases).toEqual([
+      [1],
+      [1, 2, 3],
+      [1, 2],
+      [1, 2, 3, 4],
+      [1, 2, 3],
+    ])
+
+    const obsoleteFailure = controller.setDemand(
+      subscription,
+      plan,
+      new Set([1, 2, 3, 4, 5, 6]),
+    )
+    const latest = controller.setDemand(
+      subscription,
+      plan,
+      new Set([1, 2, 3, 4, 5, 6, 7]),
+    )
+    expect(measured.requests[6]?.options.signal?.aborted).toBe(true)
+    measured.requests[6]!.deferred.reject(new Error(`obsolete failure`))
+    if (obsoleteFailure.ready instanceof Promise) await obsoleteFailure.ready
+    await flushPromises()
+    expect(measured.requests[7]?.keys).toEqual([1, 2, 3, 4, 5, 6, 7])
+    expect(measured.releases.at(-1)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(measured.work().activeAcquisitions).toBe(2)
+
+    await settle(7)
+    if (latest.ready instanceof Promise) await latest.ready
+    expect(measured.work()).toEqual({
+      activeAcquisitions: 1,
+      cumulativeRequestedKeys: 31,
+      peakActiveAcquisitions: 2,
+    })
+  } finally {
+    for (const request of measured.requests) request.deferred.resolve()
+    await Promise.allSettled(
+      measured.requests.map(({ deferred }) => deferred.promise),
+    )
+    controller.clear()
+    subscription.unsubscribe()
+    await measured.collection.cleanup()
   }
 }
 
@@ -2116,8 +2364,13 @@ describe(`includes temporal oracle`, () => {
   )
 
   it(
-    `retained pending demand blocks readiness after demand expands`,
+    `the latest pending demand generation blocks readiness after expansion`,
     expectRetainedDemandBlocksReadiness,
+  )
+
+  it(
+    `replaces fragmented demand as one applied generation without losing coverage`,
+    expectDemandReplacementRetainsCoverageAndFencesGenerations,
   )
 
   it(

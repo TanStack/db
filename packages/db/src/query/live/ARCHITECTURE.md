@@ -734,6 +734,20 @@ of that contract. Buffering, snapshot tokens, shape offsets, Collection
 transactions, and local indexes are source-specific ways to satisfy it; they
 are not materializer state.
 
+One lazy-demand plan keeps established acquisitions distinct from its pending
+replacement. When the demanded key set expands beyond established coverage,
+the controller requests the complete current key union as one replacement and
+keeps the established acquisitions live while that request is pending. It
+releases them only after the replacement's applied settlement. Replacement
+failure preserves the established coverage. Demand changes while a replacement
+is pending are coalesced into the latest generation: the obsolete replacement
+cannot establish readiness or release current coverage, and at most one next
+replacement starts after it settles. A partial shrink may retain an established
+acquisition that still intersects current demand; full retirement releases it.
+This bounds controller-owned replacement work to the established acquisitions
+plus one candidate without suppressing progressive rows from the current
+generation.
+
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
 transaction is parked in the causal queue. The promise resolves only after the
@@ -1191,6 +1205,9 @@ create recursive Collection machinery.
    graph work.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered; obsolete demand does not block it.
+    Expanding lazy demand establishes one applied union replacement before
+    retiring prior coverage. Failed or obsolete replacements cannot retire
+    established coverage or settle the current demand generation.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
     remains.
 12. **Work:** irrelevant rows do not cause unrelated scans or activate unrelated
