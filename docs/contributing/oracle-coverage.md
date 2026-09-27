@@ -159,7 +159,12 @@ The post-merge review added three missing domains to existing owners:
   They vary truncate before/during/after an optimistic delete, rejection versus
   rollback, post-capture direct insertion, and later ordinary sync/key reuse. A
   hidden accepted insert returns after rollback; an uncaptured insert retires,
-  and neither snapshot is rebased onto synced fields.
+  and neither snapshot is rebased onto synced fields. The state-retention owner
+  also crosses both accepted-delete/dependent-edit settlement orders with
+  reinsert success or failure, with and without truncate. Its public row and
+  change-message checks run after every step. These eight histories do not
+  establish every ordering of the insert outcome relative to sibling settlement
+  or an arbitrary later source acknowledgement.
 
 | Issue obligation | Implemented evidence | Limit |
 | --- | --- | --- |

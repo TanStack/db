@@ -599,24 +599,28 @@ export class CollectionStateManager<
               const previous = this.pendingOptimisticUpserts.get(mutation.key)
               const confirmsInsert =
                 previous?.insertDependency?.mutation === mutation
+              const insertDependency =
+                mutation.type === `update`
+                  ? (previous?.insertDependency ??
+                    pendingInserts.get(mutation.key))
+                  : undefined
               this.pendingOptimisticUpserts.set(mutation.key, {
                 key: mutation.key,
                 modified: confirmsInsert
                   ? previous.modified
                   : mutation.modified,
-                insertDependency:
-                  mutation.type === `update`
-                    ? (previous?.insertDependency ??
-                      pendingInserts.get(mutation.key))
-                    : undefined,
+                insertDependency,
               })
-              this.pendingOptimisticDeletes.delete(mutation.key)
+              // This accepted edit is conditional on the unconfirmed insert.
+              // It cannot retire the accepted delete underneath that insert.
+              if (!insertDependency) {
+                this.pendingOptimisticDeletes.delete(mutation.key)
+                this.pendingOptimisticDirectDeletes.delete(mutation.key)
+              }
               if (isDirectTransaction) {
                 this.pendingOptimisticDirectUpserts.add(mutation.key)
-                this.pendingOptimisticDirectDeletes.delete(mutation.key)
               } else {
                 this.pendingOptimisticDirectUpserts.delete(mutation.key)
-                this.pendingOptimisticDirectDeletes.delete(mutation.key)
               }
               break
             }
