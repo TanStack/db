@@ -19,7 +19,8 @@
       ],
       "@tanstack/db-sqlite-persistence-core/*": [
         "../db-sqlite-persistence-core/src/*"
-      ]
+      ],
+      "@tanstack/query-db-collection": ["../query-db-collection/src"]
     }
   },
   "include": [

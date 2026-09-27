@@ -20,6 +20,10 @@ export default defineConfig({
         packageDirectory,
         `../db-sqlite-persistence-core/src`,
       ),
+      '@tanstack/query-db-collection': resolve(
+        packageDirectory,
+        `../query-db-collection/src`,
+      ),
     },
   },
   server: {
