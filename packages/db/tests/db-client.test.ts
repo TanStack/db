@@ -1108,6 +1108,8 @@ describe(`DbClient`, () => {
       })
       let blockerCommit: Promise<unknown> | undefined
 
+      let primaryFailure: unknown
+      let hasPrimaryFailure = false
       try {
         await collection.preload()
         blocker.mutate(() =>
@@ -1133,13 +1135,38 @@ describe(`DbClient`, () => {
         await receipt
         expect(collection._state.syncedData.get(`1`)?.name).toBe(expectedName)
         expect(collection.get(`1`)?.name).toBe(expectedName)
-      } finally {
+      } catch (error) {
+        primaryFailure = error
+        hasPrimaryFailure = true
+      }
+
+      const cleanupFailures: Array<unknown> = []
+      try {
         release()
         if (blocker.state === `pending` || blocker.state === `persisting`)
           blocker.rollback()
         await blockerCommit?.catch(() => undefined)
-        await collection.cleanup()
+      } catch (error) {
+        cleanupFailures.push(error)
       }
+      try {
+        await collection.cleanup()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      if (hasPrimaryFailure && cleanupFailures.length > 0) {
+        throw new AggregateError(
+          [primaryFailure, ...cleanupFailures],
+          `Queued hydration and cleanup both failed`,
+          { cause: primaryFailure },
+        )
+      }
+      if (hasPrimaryFailure) throw primaryFailure
+      if (cleanupFailures.length > 0)
+        throw new AggregateError(
+          cleanupFailures,
+          `Queued hydration cleanup failed`,
+        )
     },
   )
 

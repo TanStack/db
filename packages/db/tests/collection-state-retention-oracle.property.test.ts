@@ -1007,6 +1007,8 @@ it(`retires a committed-invalid transaction found by projection refresh`, async 
     applied: validApplied,
   }
 
+  let primaryFailure: unknown
+  let hasPrimaryFailure = false
   try {
     await collection.stateWhenReady()
     collection._state.pendingSyncedTransactions.push(valid, pending)
@@ -1021,7 +1023,13 @@ it(`retires a committed-invalid transaction found by projection refresh`, async 
       collection._state.classifyPendingSyncedInsert(2, { id: 2, value: 3 }),
     ).toBe(`duplicate`)
     expect(collection.get(1)?.value).toBe(0)
-  } finally {
+  } catch (error) {
+    primaryFailure = error
+    hasPrimaryFailure = true
+  }
+
+  const cleanupFailures: Array<unknown> = []
+  try {
     for (const transaction of [pending, valid]) {
       const index =
         collection._state.pendingSyncedTransactions.indexOf(transaction)
@@ -1031,8 +1039,27 @@ it(`retires a committed-invalid transaction found by projection refresh`, async 
     if (applied.isPending()) applied.resolve()
     if (validApplied.isPending()) validApplied.resolve()
     collection._state.refreshPendingSyncedProjection()
-    await collection.cleanup()
+  } catch (error) {
+    cleanupFailures.push(error)
   }
+  try {
+    await collection.cleanup()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  if (hasPrimaryFailure && cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [primaryFailure, ...cleanupFailures],
+      `Projection refresh and cleanup both failed`,
+      { cause: primaryFailure },
+    )
+  }
+  if (hasPrimaryFailure) throw primaryFailure
+  if (cleanupFailures.length > 0)
+    throw new AggregateError(
+      cleanupFailures,
+      `Projection refresh cleanup failed`,
+    )
 })
 
 it.each([
