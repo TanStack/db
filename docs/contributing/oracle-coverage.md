@@ -165,6 +165,8 @@ The post-merge review added three missing domains to existing owners:
   change-message checks run after every step. These eight histories do not
   establish every ordering of the insert outcome relative to sibling settlement
   or an arbitrary later source acknowledgement.
+  The [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
+  preserves the exact RED/GREEN evidence and reviewed commits.
 
 | Issue obligation | Implemented evidence | Limit |
 | --- | --- | --- |
