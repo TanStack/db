@@ -1830,6 +1830,34 @@ it(`publishes the subscriber-visible row when a buffered optimistic update becom
     queued: 1,
   })
 })
+it.each(
+  [false, true].flatMap((truncate) =>
+    [false, true].map((insertAccepted) => ({ truncate, insertAccepted })),
+  ),
+)(
+  `retains an accepted edit when an earlier delete settles later: %j`,
+  async ({ truncate, insertAccepted }) => {
+    const replacement: OptimisticStep = {
+      type: `sync`,
+      rows: [],
+      truncate: true,
+      immediate: false,
+      copies: 1,
+    }
+    await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `delete`, key: 1, optimistic: true },
+        { type: `edit`, key: 1, fields: { c: 0 }, optimistic: true },
+        { type: `edit`, key: 1, fields: { c: 1 }, optimistic: true },
+        { type: `settle`, slot: 2, success: true, cascade: false },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+        ...(truncate ? [replacement] : []),
+        { type: `settle`, slot: 0, success: insertAccepted, cascade: false },
+      ],
+    )
+  },
+)
 fcTest.prop([optimisticHistory], { numRuns: oracleRuns(60), seed: 86103 })(
   `matches optimistic ownership and publication histories with a fixed seed`,
   async ({ initial, steps }) => {
