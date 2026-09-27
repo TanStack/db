@@ -17,6 +17,7 @@ import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
+import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions, SyncAppliedReceipt } from '../../src/types.js'
 import type { LazyDemandPlan } from '../../src/query/compiler/joins.js'
@@ -1440,6 +1441,38 @@ async function expectDemandChurnConsolidatesWithoutReloadingGrowth(): Promise<vo
   }
 }
 
+function expectContradictoryReplacementStartCrashes(): void {
+  const releaseSnapshot = vi.fn()
+  let requestCount = 0
+  const subscription = {
+    requestSnapshot: (
+      options?: Parameters<CollectionSubscription[`requestSnapshot`]>[0],
+    ) => {
+      requestCount += 1
+      options?.onLoadSubsetResult?.(
+        true,
+        { where: options.where },
+        () => {},
+      )
+      return requestCount === 1
+    },
+    releaseSnapshot,
+  } as unknown as CollectionSubscription
+  const controller = new SubsetDemandController()
+  const plan: LazyDemandPlan = {
+    id: `contradictory-replacement-start`,
+    path: [`postId`],
+    collectionId: `contradictory-replacement-start`,
+    initialKeys: new Set(),
+  }
+
+  controller.setDemand(subscription, plan, new Set([1, 2]))
+  expect(() =>
+    controller.setDemand(subscription, plan, new Set([2, 3])),
+  ).toThrow(`Subset demand snapshot did not start`)
+  expect(releaseSnapshot).not.toHaveBeenCalled()
+}
+
 async function expectObsoleteDemandCannotSettleReactivatedDemand(): Promise<void> {
   const post = { id: 1, authorId: `selected`, title: `one` }
   const posts = createMutablePosts([post], { markReadyInitially: false })
@@ -2176,6 +2209,11 @@ describe(`includes temporal oracle`, () => {
   it(
     `consolidates churn after apply without reloading monotonic growth`,
     expectDemandChurnConsolidatesWithoutReloadingGrowth,
+  )
+
+  it(
+    `crashes before replacing coverage when snapshot admission contradicts its result`,
+    expectContradictoryReplacementStartCrashes,
   )
 
   it(

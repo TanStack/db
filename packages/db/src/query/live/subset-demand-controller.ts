@@ -100,11 +100,14 @@ export class SubsetDemandController {
       const segment = createSegment(plan, requestedKeys)
       if (replace) segment.replaces = [...segments]
       segments.push(segment)
-      if (
-        !startSegment(subscription, segment, () => this.warnUnoptimized(plan))
-      ) {
-        segment.state = `failed`
-      } else if (replace) {
+      const started = startSegment(subscription, segment, () =>
+        this.warnUnoptimized(plan),
+      )
+      if (this.states.get(plan.id) !== state) {
+        return { changed: false, empty: false, ready: true }
+      }
+      if (!started) throw new Error(`Subset demand snapshot did not start`)
+      if (replace) {
         if (segment.ready instanceof Promise) {
           void segment.ready.then(
             () => this.finishReplacement(subscription, plan.id, segment),
@@ -116,9 +119,6 @@ export class SubsetDemandController {
       }
     }
 
-    if (this.states.get(plan.id) !== state) {
-      return { changed: false, empty: false, ready: true }
-    }
     const pending = state.segments
       .filter(
         (segment) =>
@@ -230,7 +230,6 @@ function startSegment(
       segment.state = result instanceof Promise ? `pending` : `settled`
     },
   })
-  if (!requested) segment.state = `failed`
   if (segment.ready instanceof Promise) {
     void segment.ready.then(
       () => {
@@ -241,7 +240,7 @@ function startSegment(
       },
     )
   }
-  return observed
+  return requested && observed
 }
 
 function releaseSegment(
