@@ -160,7 +160,10 @@ export class SubsetDemandController {
     this.valueIdentity = createValueIdentity()
   }
 
-  private advance(state: DemandState): void {
+  private advance(
+    state: DemandState,
+    failureChannel: `caller` | `waiter` = `caller`,
+  ): void {
     if (this.states.get(state.plan.id) !== state) return
     if (acquisitionCovers(state.established, state.keys)) {
       settleWaiter(state, state.generation)
@@ -182,10 +185,14 @@ export class SubsetDemandController {
       if (state.pendingReplacement === replacement) {
         state.pendingReplacement = undefined
       }
-      // The synchronous throw is the caller's error channel. Do not also leave
-      // a rejected promise that nobody received.
-      settleWaiter(state, replacement.generation)
       releaseAcquisition(replacement)
+      if (failureChannel === `waiter`) {
+        rejectWaiter(state, replacement.generation, error)
+        return
+      }
+      // A direct setDemand call reports the synchronous throw to its caller.
+      // Do not also leave a rejected promise that nobody received.
+      settleWaiter(state, replacement.generation)
       throw error
     }
 
@@ -220,7 +227,7 @@ export class SubsetDemandController {
     settleWaiter(state, replacement.generation)
     if (!isCurrent) {
       releaseAcquisition(replacement)
-      this.advance(state)
+      this.advance(state, `waiter`)
       return
     }
 
@@ -256,7 +263,7 @@ export class SubsetDemandController {
 
     // A superseded failure belongs only to its old generation. The newest
     // demand waits for a fresh union replacement.
-    this.advance(state)
+    this.advance(state, `waiter`)
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {

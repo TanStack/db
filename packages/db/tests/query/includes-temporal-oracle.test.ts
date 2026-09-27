@@ -1635,6 +1635,90 @@ async function expectDemandReplacementRetainsCoverageAndFencesGenerations(): Pro
   }
 }
 
+async function expectSynchronousFollowupFailureRejectsLatestDemand(): Promise<void> {
+  const firstResult = createDeferred<void>()
+  const failure = new Error(`follow-up replacement failed to start`)
+  const attempts: Array<Array<number>> = []
+  const releases: Array<Array<number>> = []
+  const accepted = new Map<LoadSubsetOptions, Array<number>>()
+  const comments = createCollection<Comment>({
+    id: nextCollectionId(`synchronous-followup-failure-comments`),
+    getKey: (comment) => comment.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BasicIndex,
+    sync: {
+      sync: () => ({
+        loadSubset: (options) => {
+          const keys = correlationKeys([options], `postId`)
+          attempts.push(keys)
+          if (keys.length === 2) throw failure
+          accepted.set(options, keys)
+          return firstResult.promise
+        },
+        unloadSubset: (options) => {
+          const keys = accepted.get(options)
+          if (!keys) {
+            throw new Error(`Released an unknown acquisition`)
+          }
+          releases.push(keys)
+        },
+      }),
+    },
+  })
+  comments.createIndex((comment) => comment.postId)
+  const subscription = comments.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+  const controller = new SubsetDemandController()
+  const plan: LazyDemandPlan = {
+    id: `synchronous-followup-failure`,
+    path: [`postId`],
+    collectionId: comments.id,
+    initialKeys: new Set(),
+  }
+  let firstReady: Promise<void> | undefined
+  let latestReady: Promise<void> | undefined
+
+  try {
+    const first = controller.setDemand(subscription, plan, new Set([1]))
+    if (!(first.ready instanceof Promise)) {
+      throw new Error(`Expected the first replacement to be asynchronous`)
+    }
+    firstReady = first.ready
+
+    const latest = controller.setDemand(subscription, plan, new Set([1, 2]))
+    if (!(latest.ready instanceof Promise)) {
+      throw new Error(`Expected the latest replacement to be asynchronous`)
+    }
+    latestReady = latest.ready
+    expect(attempts).toEqual([[1]])
+
+    firstResult.resolve()
+    await expect(latestReady).rejects.toBe(failure)
+    await flushPromises()
+
+    expect(attempts).toEqual([[1], [1, 2]])
+    expect(releases).toEqual([[1]])
+    expect(subscription.lastError).toBe(failure)
+
+    expect(() =>
+      controller.setDemand(subscription, plan, new Set([1, 2])),
+    ).toThrow(failure)
+    expect(attempts).toEqual([[1], [1, 2], [1, 2]])
+  } finally {
+    firstResult.resolve()
+    await Promise.allSettled(
+      [firstReady, latestReady].filter(
+        (ready): ready is Promise<void> => ready !== undefined,
+      ),
+    )
+    controller.clear()
+    subscription.unsubscribe()
+    await comments.cleanup()
+  }
+}
+
 async function expectObsoleteDemandCannotSettleReactivatedDemand(): Promise<void> {
   const post = { id: 1, authorId: `selected`, title: `one` }
   const posts = createMutablePosts([post], { markReadyInitially: false })
@@ -2371,6 +2455,11 @@ describe(`includes temporal oracle`, () => {
   it(
     `replaces fragmented demand as one applied generation without losing coverage`,
     expectDemandReplacementRetainsCoverageAndFencesGenerations,
+  )
+
+  it(
+    `a synchronous follow-up failure rejects the latest demand generation`,
+    expectSynchronousFollowupFailureRejectsLatestDemand,
   )
 
   it(
