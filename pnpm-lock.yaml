@@ -1075,6 +1075,12 @@ importers:
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.60.0
+      '@tanstack/query-core':
+        specifier: ^5.90.20
+        version: 5.90.20
+      '@tanstack/query-db-collection':
+        specifier: workspace:*
+        version: link:../query-db-collection
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13

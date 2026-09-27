@@ -130,6 +130,16 @@ before and after the applied receipt. It includes delete/reinsert and
 truncate/reinsert controls. These owners do not establish arbitrary hydration
 stream order, a later authoritative hydration epoch, or unbounded retention.
 
+The [two-tab OPFS remote-subset oracle](../../packages/browser-db-sqlite-persistence/e2e/remote-subset-two-tab.opfs.spec.ts)
+now exercises a real Chromium follower with a QueryClient-backed, filtered
+on-demand live query. It checks the function-bearing local request, clone-safe
+follower post, public row, and rejection of an invalid nested wire value before
+transport. A raw-options mutant fails with browser `DataCloneError`. The
+[review record](oracle-reviews/2026-09-27-remote-subset-two-tab.md) names the
+exact reviewed commit. The test does not run React, Firefox/Zen, or a live
+backend, and it does not settle exclusive OPFS ownership during leadership
+transfer.
+
 ## Acceptance map
 
 The post-merge review added three missing domains to existing owners:
