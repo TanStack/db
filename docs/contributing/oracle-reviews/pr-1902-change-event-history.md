@@ -130,3 +130,48 @@ The two primary owners passed 434 tests. The complete DB oracle campaign passed
 seed-and-path replay, and `git diff --check` passed. These checks give bounded
 and sampled class-level protection, not a proof over every future schedule or
 provider implementation.
+
+## Follow-up review: five queued-sync findings
+
+- Reviewed implementation and test head:
+  `d1a38b59b88ee914a212e4fd2581c8b9ac902ed5`.
+- Starting head for the external review:
+  `d0d76e3bb4645ee1d33faadf40eaf4289d777504`.
+- This append-only entry covers all five findings in the user's review. The
+  primary queued-sync owner remains
+  `packages/db/tests/collection-state-retention-oracle.property.test.ts`.
+  Focused `packages/db/tests/db-client.test.ts` cases drive the separate
+  DbClient hydration boundary.
+
+| Finding | RED evidence on starting head | GREEN boundary on reviewed head |
+| --- | --- | --- |
+| R01: refresh recovery | A synthetic committed-invalid queue entry remained queued with its applied receipt pending, and replay returned before assigning the rebuilt projection. Current production refresh callers cannot form this state. | Refresh rejects and retires the invalid entry while retaining a valid queued sibling. A later duplicate classification sees that sibling in the rebuilt projection. This is internal hardening, not a claimed public reach witness. |
+| R02: doomed open write | Canceling a queued delete invalidated an open insert. A later insert threw `DuplicateKeySyncError` synchronously from `write()`. | The later write cannot revive the doomed transaction; `commit()` returns the rejected applied receipt. Cancellation reaches the problematic state, even though the review named commit-time refresh. |
+| R03: bulk hydration | A late hydration chunk overwrote a queued adapter insert and resurrected a queued adapter delete while a local mutation held application. | Both controlled histories retain adapter authority in source and public rows after applied settlement. `initialData` runs before sync starts, so the review's initial-data variant is not a reachable queued path. Projection-aware row classification alone would not prevent stale hydration from winning; the seed is excluded for keys with committed adapter work. |
+| R04: cancellation work | A queue-entry counter saw 2,275 indexed reads for 64 dependent inserts, above the 512-read bound. Counting only operation iteration had falsely passed because each rebuild stopped at the first invalid transaction. | One replay retires all invalid committed dependents. The probe also includes preceding writes inside those dependents and a valid queued sibling; it checks receipts and complete public rows. The changed-key undo avoids cloning the whole projection for each transaction. The counter bounds queue inspection, not every cost of optimistic recomputation. |
+| R05: impossible guard | Source control flow returned an invalid transaction only when `committed` was true. The refresh check for `!committed` was unreachable. | The guard is gone; direct source review and static checks validate the cleanup. No artificial product RED is claimed for dead code. |
+
+The missing test dimensions were, respectively: a committed-invalid refresh
+recovery state; a write after open-transaction invalidation; hydration while
+same-key adapter work was queued; cancellation work rather than admission work;
+and a direct control-flow check. The new fixed histories preserve the RED
+witnesses. The existing generated histories were not widened by this follow-up.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001: contract authority and limits | Pass. The established duplicate-key and applied-receipt contracts govern R01 and R02. The existing late-hydration adapter-authority test governs R03. The queued-work bound protects the PR's incremental-admission design. The synthetic recovery probe is not offered as a current public path, and no test here proves arbitrary provider schedules or total cancellation runtime. |
+| ORC-002: independent judgment | Pass. The queued owner derives expected rows from declared source rows and delivered change messages. Focused hydration expectations come from adapter-over-seed authority, not the production classifier. The queue-read counter measures production work but does not compute expected rows. |
+| ORC-003: distinguishable responsibilities | Pass. The state-retention owner already states its source Map, legal sync histories, controlled driver, public observations, and applied-settlement checkpoint. The hydration cases are focused boundary regressions rather than a new oracle model. |
+| ORC-004: generated-history grammar controls | Not triggered for this follow-up: it adds fixed controlled histories and makes no new generated-grammar claim. The owner's existing generated grammar is unchanged. |
+| ORC-005: production path and observation | Pass. The driver calls real sync `begin`/`write`/`commit`, aborts a real signal, and checks applied receipts, public rows, retained source data, and the event mirror. Hydration calls `DbClient.applyCollectionChunk`. R01 is explicitly an internal synthetic-state probe. |
+| ORC-006: checker calibration | Pass for the claimed repairs. Each behavioral probe failed on the starting implementation and passed on the reviewed head. The R04 counter killed the repeated-rebuild design at a named work checkpoint; the corrected probe distinguishes queue traversal from early operation-loop termination. R05 uses source evidence, not a product mutant. |
+| ORC-007: fixed/random campaigns and replay | Not triggered by the new fixed controls. The existing state-retention fixed and seedless campaigns ran in the package oracle campaign. The direct replay interface is unchanged; its prior checked replay is recorded above. |
+| ORC-008: stateful-model minimality | Not triggered: this follow-up does not add or remove reference-model state. The new controlled histories distinguish dependent transactions, valid siblings, and a retained source row without copying the production queue into expected results. |
+| ORC-009: vocabulary mapping | Pass. The new cases distinguish sync transactions, optimistic transactions, applied receipts, source rows, hydration seeds, change messages, and public rows. No new model-only production synonym is introduced. |
+| ORC-010: failure fidelity and cleanup | Pass. The queued oracle helper preserves the primary mismatch and separate cleanup failures. The synthetic refresh and focused hydration probes now do the same, release their held gates or receipts, and clean up Collections. |
+| ORC-011: independent second formulation | Not triggered. The review did not identify a semantic fault plausibly shared by the source Map and change-message mirror for the queued law. Hydration authority is tested against both retained and public rows; these are complementary observations, not claimed independent formulations. |
+
+ORC-012 is satisfied by this append-only review entry, the exact reviewed code
+head above, and the coverage-map link. The two edited test files passed 108
+tests. The DB oracle campaign passed 41 files and 2,547 tests. Package build,
+TypeScript, changed-file ESLint and Prettier, and `git diff --check` passed.
