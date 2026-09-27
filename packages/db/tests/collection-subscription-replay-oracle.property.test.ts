@@ -3359,6 +3359,96 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  it(`keeps a replay replacement when an obsolete acquisition reports its primary failure`, async () => {
+    let begin!: () => void
+    let commit!: () => void
+    let truncate!: () => void
+    const where = new Func(`eq`, [new PropRef([`id`]), new Value(`one`)])
+    const firstLoad = createDeferred<void>()
+    const replacementLoad = createDeferred<void>()
+    const staleFailure = new Error(`obsolete acquisition failed`)
+    const loads: Array<LoadSubsetOptions> = []
+    const unloads: Array<LoadSubsetOptions> = []
+    const reportedErrors: Array<unknown> = []
+    let release: ((primaryFailure?: { error: unknown }) => void) | undefined
+    const collection = createCollection<ReplayRow>({
+      id: `stale-primary-failure-after-replay-replacement`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          begin = operations.begin
+          commit = operations.commit
+          truncate = operations.truncate
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              loads.push(options)
+              return loads.length === 1
+                ? firstLoad.promise
+                : replacementLoad.promise
+            },
+            unloadSubset: (options) => unloads.push(options),
+          }
+        },
+      },
+    })
+    const subscription = collection.subscribeChanges(() => {}, {
+      includeInitialState: false,
+    })
+    subscription.on(`loadSubset:error`, ({ error }) => {
+      reportedErrors.push(error)
+    })
+
+    try {
+      subscription.requestSnapshot({
+        where,
+        optimizedOnly: false,
+        onLoadSubsetResult: (result, _options, releaseDemand) => {
+          release = releaseDemand
+          if (result instanceof Promise) {
+            void result.catch((error: unknown) => {
+              releaseDemand({ error })
+            })
+          }
+        },
+      })
+      expect(release).toBeTypeOf(`function`)
+
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+
+      expect(loads).toHaveLength(2)
+      expect(unloads).toEqual([loads[0]])
+      expect(loads[0]!.signal?.aborted).toBe(true)
+      expect(loads[1]!.signal?.aborted).toBe(false)
+
+      firstLoad.reject(staleFailure)
+      await flushPromises()
+
+      expect(reportedErrors).toEqual([])
+      expect(subscription.lastError).toBeUndefined()
+      expect(loads[1]!.signal?.aborted).toBe(false)
+      expect(unloads).toEqual([loads[0]])
+
+      replacementLoad.resolve()
+      await flushPromises()
+      expect(subscription.status).toBe(`ready`)
+
+      release!()
+      expect(loads[1]!.signal?.aborted).toBe(true)
+      expect(unloads).toEqual(loads)
+    } finally {
+      firstLoad.resolve()
+      replacementLoad.resolve()
+      await flushPromises()
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`rejects replay completion with the exact reported adapter error`, async () => {
     let begin!: () => void
     let commit!: () => void

@@ -1204,7 +1204,8 @@ export class CollectionSubscription
     opts?.onLoadSubsetResult?.(
       syncResult,
       acquisition.options,
-      (primaryFailure) => this.releaseDemand(demand, primaryFailure),
+      (primaryFailure) =>
+        this.releaseDemand(demand, primaryFailure, acquisition),
     )
     if (!this.isDemandActive(demand)) return false
 
@@ -1289,16 +1290,18 @@ export class CollectionSubscription
   private releaseDemand(
     demand: SubsetDemand,
     primaryFailure?: { error: unknown },
+    callbackAcquisition = demand.acquisition,
   ): void {
     if (!primaryFailure) {
       const index = this.subsetDemands.indexOf(demand)
       if (index !== -1) this.releaseDemandAt(index)
       return
     }
+    if (demand.acquisition !== callbackAcquisition) return
 
     try {
       this.reportAcquisitionFailure(
-        demand.acquisition,
+        callbackAcquisition,
         primaryFailure.error,
         true,
       )
@@ -1573,7 +1576,7 @@ export class CollectionSubscription
 
     // Report the result synchronously, including a wait for an unavailable loader.
     onLoadSubsetResult?.(syncResult, acquisition.options, (primaryFailure) =>
-      this.releaseDemand(demand, primaryFailure),
+      this.releaseDemand(demand, primaryFailure, acquisition),
     )
     if (!this.isDemandActive(demand)) return
     if (started) {
