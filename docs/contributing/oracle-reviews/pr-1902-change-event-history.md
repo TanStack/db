@@ -4,15 +4,16 @@
 
 - Base commit: `f473a36201abe9af43d36a83492a2649668756d8`.
 - Original PR head: `8c763b8c531297ec615e157c3669a907a4b6eb59`.
-- Reviewed change: the Git tree containing this record, PR #1902, and the
-  queued-admission follow-up produced by its external-review evaluation.
+- Corrected implementation head:
+  `78786469a0a49db3d9349ac378cb2bce96d09afb`.
+- Reviewed change: PR #1902 plus the queue-admission and cancellation repair at
+  that corrected implementation head.
 - Primary executable owners:
   `packages/db/tests/change-event-history-oracle.test.ts` and
   `packages/db/tests/collection-state-retention-oracle.property.test.ts`.
 
-The eventual commit or pull request identifies the exact immutable tree. This
-record fixes the comparison base because a file cannot contain the hash of the
-commit that already contains it.
+This record is committed after the implementation it audits so it can name that
+immutable tree directly.
 
 ## Claim and limits
 
@@ -53,8 +54,8 @@ adapter-specific persistence behavior.
 | ORC-010: failure fidelity and cleanup | Pass. The RED comparison recorded receipt outcomes and both retained and public values in one observation. Controlled gates release in `finally`; subscriptions and Collections clean up even after assertion failure. |
 | ORC-011: independent second formulation | Not applicable. No remaining shared-fault hypothesis requires another formulation. The mirror and direct public read are complementary observations, not claimed as two independent semantic implementations. |
 
-ORC-012 is satisfied by this versioned, base-identified record and its link from
-`docs/contributing/oracle-coverage.md`.
+ORC-012 is satisfied by this versioned record, its exact corrected
+implementation head, and its link from `docs/contributing/oracle-coverage.md`.
 
 ## External-review reconciliation
 
@@ -73,9 +74,20 @@ The vendor docstring warning has no repository-configured 80% threshold and
 does not identify a missing product contract. It is not a merge-blocking
 finding for this repository.
 
+A follow-up prep review found three additional defects in the first corrected
+implementation. Deterministic RED probes measured 2,144 queued-operation
+inspections for a 64-row snapshot with a 128-inspection linear allowance,
+showed cancellation rejecting both a valid identical echo and a hydration
+replacement, and showed abort-before-commit making the active transaction
+unaddressable. The corrected implementation uses an incremental queued
+projection, replays cancellation through the normal insert classifier, and
+retains invalidated active transactions until `commit()` returns their rejected
+receipt.
+
 ## Verification boundary
 
-Closeout requires the two executable owners, the existing load-subset
-cancellation owner, the package type check, changed-file lint/format checks,
-and `git diff --check`. Exact final counts belong in the pull request or task
-receipt because they describe that immutable execution rather than this law.
+The corrected implementation head passed the two primary executable owners and
+five adjacent lifecycle, metadata, reconciliation, hydration, and load-subset
+owners: 223 tests. The complete DB oracle campaign passed 41 files and 2,197
+tests. Package build, TypeScript, changed-file ESLint and Prettier, and
+`git diff --check` also passed.
