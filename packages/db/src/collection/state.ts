@@ -86,10 +86,12 @@ interface PendingSyncedTransaction<
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
 
+type InsertDependency = { mutation: object; transaction: Transaction<any> }
+
 type OptimisticUpsert<T extends object> = Pick<
   PendingMutation<T>,
   `key` | `modified`
-> & { insert?: object }
+> & { insertDependency?: InsertDependency }
 
 type InternalChangeMessage<
   T extends object = Record<string, unknown>,
@@ -565,7 +567,7 @@ export class CollectionStateManager<
 
     // A retained update can depend on an unconfirmed insert, not just its key.
     // Keep that exact dependency so settlement and key reuse cannot conflate rows.
-    const pendingInserts = new Map<TKey, object>()
+    const pendingInserts = new Map<TKey, InsertDependency>()
     // Retain successful contributions; failed/active work is recomputed below.
     for (const transaction of this.transactions.values()) {
       const isDirectTransaction =
@@ -595,38 +597,52 @@ export class CollectionStateManager<
               // values. A slow insert must not replace its accepted dependent
               // update with the older insertion snapshot.
               const previous = this.pendingOptimisticUpserts.get(mutation.key)
-              const confirmsInsert = previous?.insert === mutation
+              const confirmsInsert =
+                previous?.insertDependency?.mutation === mutation
+              const insertDependency =
+                mutation.type === `update`
+                  ? (previous?.insertDependency ??
+                    pendingInserts.get(mutation.key))
+                  : undefined
               this.pendingOptimisticUpserts.set(mutation.key, {
                 key: mutation.key,
                 modified: confirmsInsert
                   ? previous.modified
                   : mutation.modified,
-                insert:
-                  mutation.type === `update`
-                    ? (previous?.insert ?? pendingInserts.get(mutation.key))
-                    : undefined,
+                insertDependency,
               })
-              this.pendingOptimisticDeletes.delete(mutation.key)
+              // This accepted edit is conditional on the unconfirmed insert.
+              // It cannot retire the accepted delete underneath that insert.
+              if (!insertDependency) {
+                this.pendingOptimisticDeletes.delete(mutation.key)
+                this.pendingOptimisticDirectDeletes.delete(mutation.key)
+              }
               if (isDirectTransaction) {
                 this.pendingOptimisticDirectUpserts.add(mutation.key)
-                this.pendingOptimisticDirectDeletes.delete(mutation.key)
               } else {
                 this.pendingOptimisticDirectUpserts.delete(mutation.key)
+              }
+              break
+            }
+            case `delete`: {
+              // An accepted edit of a still-active reinsert belongs after this
+              // older delete. Keep both layers so failure of the insert still
+              // reveals the accepted delete.
+              const hasDependentEdit =
+                this.pendingOptimisticUpserts.get(mutation.key)
+                  ?.insertDependency !== undefined
+              if (!hasDependentEdit) {
+                this.pendingOptimisticUpserts.delete(mutation.key)
+                this.pendingOptimisticDirectUpserts.delete(mutation.key)
+              }
+              this.pendingOptimisticDeletes.add(mutation.key)
+              if (isDirectTransaction) {
+                this.pendingOptimisticDirectDeletes.add(mutation.key)
+              } else {
                 this.pendingOptimisticDirectDeletes.delete(mutation.key)
               }
               break
             }
-            case `delete`:
-              this.pendingOptimisticUpserts.delete(mutation.key)
-              this.pendingOptimisticDeletes.add(mutation.key)
-              if (isDirectTransaction) {
-                this.pendingOptimisticDirectUpserts.delete(mutation.key)
-                this.pendingOptimisticDirectDeletes.add(mutation.key)
-              } else {
-                this.pendingOptimisticDirectUpserts.delete(mutation.key)
-                this.pendingOptimisticDirectDeletes.delete(mutation.key)
-              }
-              break
           }
         }
       } else {
@@ -641,9 +657,10 @@ export class CollectionStateManager<
             transaction.state !== `failed` &&
             !this.acknowledgedInserts.has(mutation)
           ) {
-            pendingInserts.set(mutation.key, mutation)
+            pendingInserts.set(mutation.key, { mutation, transaction })
           } else if (
-            this.pendingOptimisticUpserts.get(mutation.key)?.insert === mutation
+            this.pendingOptimisticUpserts.get(mutation.key)?.insertDependency
+              ?.mutation === mutation
           ) {
             // Drop only the dependent row, never a later same-key insertion or
             // successful sibling attribution. Failed transactions remain listed.
@@ -905,7 +922,7 @@ export class CollectionStateManager<
   ): TOutput {
     const key = mutation.key as TKey
     const dependent = this.pendingOptimisticUpserts.get(key)
-    return dependent?.insert === mutation
+    return dependent?.insertDependency?.mutation === mutation
       ? dependent.modified
       : mutation.modified
   }
@@ -950,13 +967,17 @@ export class CollectionStateManager<
 
     for (const key of capturedKeys) {
       const acceptedUpsert = this.pendingOptimisticUpserts.get(key)
+      // A later accepted edit can depend on an active insert above an older
+      // accepted delete. Capture both so the delete survives insert rollback.
+      if (this.pendingOptimisticDeletes.has(key)) {
+        addLayer(key, { type: `delete` })
+      }
       if (acceptedUpsert) {
         addLayer(key, {
           type: `upsert`,
           value: this.resolveOptimisticUpsert(acceptedUpsert),
+          transaction: acceptedUpsert.insertDependency?.transaction,
         })
-      } else if (this.pendingOptimisticDeletes.has(key)) {
-        addLayer(key, { type: `delete` })
       }
     }
 
@@ -1664,7 +1685,12 @@ export class CollectionStateManager<
       for (const key of this.pendingOptimisticDirectDeletes) {
         if (
           hasTruncateSync &&
-          truncateOptimisticSnapshot?.deletes.has(key) &&
+          (truncateOptimisticSnapshot?.deletes.has(key) ||
+            truncateOptimisticSnapshot?.ownership
+              .get(key)
+              ?.some(
+                (layer) => layer.type === `delete` && !layer.transaction,
+              )) &&
           !changedKeys.has(key)
         )
           continue

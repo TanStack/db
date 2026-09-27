@@ -13,7 +13,9 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * later synced data. While active, an optimistic intent overlays the synced
  * base. After success it remains as an accepted local snapshot until source
  * acknowledgement retires it. Failure removes it. An update authored from an
- * unacknowledged insert depends on that insert's existence.
+ * unacknowledged insert depends on that insert's existence. An accepted delete
+ * underneath that insert remains independently owned: if the insert fails,
+ * the dependent update disappears but the delete does not.
  *
  * The reference graph has three small nodes: a synced base Map, an ordered list
  * of authored intents, and a queue of source batches. `visible()` folds accepted
