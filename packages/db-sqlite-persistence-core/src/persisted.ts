@@ -2003,10 +2003,7 @@ class PersistedCollectionRuntime<
       )
     }
     return this.applyMutex.run(async () => {
-      await this.applyBufferedSyncTransactionUnsafe(
-        transaction,
-        this.persistence.adapter,
-      )
+      await this.applyBufferedSyncTransactionUnsafe(transaction)
     })
   }
 
@@ -2644,7 +2641,7 @@ class PersistedCollectionRuntime<
 
   private async applyBufferedSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
-    adapter: HydrationPersistenceAdapter,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<{
     applied: boolean
     hydrationFailure?: { reason: unknown }
@@ -2674,7 +2671,7 @@ class PersistedCollectionRuntime<
       if (!transaction.internal) {
         await this.persistAndBroadcastExternalSyncTransactionUnsafe(
           transaction,
-          adapter,
+          scopedAdapter,
         )
       }
       transaction.resolveApplied?.()
@@ -2724,7 +2721,7 @@ class PersistedCollectionRuntime<
 
   private async persistAndBroadcastExternalSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
-    adapter: HydrationPersistenceAdapter = this.persistence.adapter,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<void> {
     if (transaction.internal) {
       return
@@ -2745,7 +2742,10 @@ class PersistedCollectionRuntime<
     const response = await this.persistence.coordinator.requestApplyCommittedTx(
       this.collectionId,
       tx,
-      adapter,
+      // A hydration-scoped adapter is already inside the shared scheduler.
+      // Ordinary source commits pass no scoped adapter so the coordinator
+      // enters that scheduler before taking the database-wide writer lock.
+      scopedAdapter,
     )
     if (!response.ok) {
       if (response.code === `PERSISTENCE_ERROR`) {

@@ -30,7 +30,8 @@
     "vite.config.ts",
     "vite.opfs.config.ts",
     "vitest.e2e.config.ts",
-    "playwright.opfs.config.ts"
+    "playwright.opfs.config.ts",
+    "playwright.opfs-electric.config.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

@@ -140,6 +140,21 @@ exact reviewed commit. The test does not run React, Firefox/Zen, or a live
 backend, and it does not settle exclusive OPFS ownership during leadership
 transfer.
 
+The [two-tab live Electric OPFS oracle](../../packages/browser-db-sqlite-persistence/e2e/electric-resume-two-tab.opfs.spec.ts)
+crosses real Chromium tabs, Web Locks, OPFS workers, PostgreSQL, and the
+installed Electric SDK. It checks distinct per-Collection schema versions,
+unchanged public and durable rows when a follower opens, leadership transfer
+with later source rows, and recovery of partial-row loss or a fully empty
+pre-key-ledger baseline with a stale resume marker. A wrapped source-commit
+test in `packages/browser-db-sqlite-persistence/tests/browser-coordinator.test.ts`
+checks scheduler entry before the writer-lock request; the old bypass fails at
+that order assertion. The live recovery histories also guard the resulting
+progress. These bounded histories do not prove Firefox/Zen,
+React rendering, React Native, arbitrary large datasets, or an exclusive-OPFS
+ownership topology. Their
+[review record](oracle-reviews/issue-1589-live-electric-opfs.md) preserves the
+RED and GREEN host observations.
+
 ## Acceptance map
 
 The post-merge review added three missing domains to existing owners:
