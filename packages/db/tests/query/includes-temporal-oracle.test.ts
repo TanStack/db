@@ -52,6 +52,13 @@ import type { Scheduler } from 'fast-check'
  * readiness, preload settlement, visible rows, request keys, release signals,
  * and errors at each named boundary. The live-query architecture remains the
  * contract source.
+ *
+ * The fragmented-demand lane drives the production controller through a real
+ * CollectionSubscription. It observes requested key unions and adapter abort
+ * signals before settlement and after success, rejection, retry, or
+ * obsolescence. This proves the acquisition-retirement boundary. It does not
+ * prove visible-row retention through a compiled includes query after a failed
+ * consolidation; the coverage map retains that separate witness.
  */
 
 type Post = {
@@ -1391,7 +1398,9 @@ async function expectRetainedDemandBlocksReadiness(): Promise<void> {
   }
 }
 
-async function expectDemandChurnConsolidatesWithoutReloadingGrowth(): Promise<void> {
+async function expectDemandChurnPreservesCoverage(
+  replacementOutcome: `success` | `failure` | `obsolete`,
+): Promise<void> {
   const { collection, requests } = createPendingComments()
   const subscription = collection.subscribeChanges(() => {}, {
     includeInitialState: false,
@@ -1429,7 +1438,38 @@ async function expectDemandChurnConsolidatesWithoutReloadingGrowth(): Promise<vo
     expect(requests[3]!.keys).toEqual([2, 3, 4])
     expect(requests[1]!.signal?.aborted).toBe(false)
     expect(requests[2]!.signal?.aborted).toBe(false)
-    await settle(3, replacement.ready)
+
+    if (replacementOutcome === `failure`) {
+      if (!(replacement.ready instanceof Promise)) {
+        throw new Error(`Expected replacement demand to be asynchronous`)
+      }
+      const failure = new Error(`replacement failed`)
+      const failed = Promise.all([requests[3]!.outcome, replacement.ready])
+      requests[3]!.deferred.reject(failure)
+      await expect(failed).rejects.toBe(failure)
+      expect(requests[1]!.signal?.aborted).toBe(false)
+      expect(requests[2]!.signal?.aborted).toBe(false)
+
+      const retry = controller.setDemand(subscription, plan, new Set([2, 3, 4]))
+      expect(requests[3]!.signal?.aborted).toBe(true)
+      expect(requests[4]!.keys).toEqual([2, 3, 4])
+      expect(requests[1]!.signal?.aborted).toBe(false)
+      expect(requests[2]!.signal?.aborted).toBe(false)
+      await settle(4, retry.ready)
+    } else if (replacementOutcome === `obsolete`) {
+      const current = controller.setDemand(subscription, plan, new Set([2, 3]))
+      expect(requests[3]!.signal?.aborted).toBe(true)
+      expect(requests[4]!.keys).toEqual([2, 3])
+      expect(requests[1]!.signal?.aborted).toBe(false)
+      expect(requests[2]!.signal?.aborted).toBe(false)
+      await settle(3, replacement.ready)
+      expect(requests[1]!.signal?.aborted).toBe(false)
+      expect(requests[2]!.signal?.aborted).toBe(false)
+      await settle(4, current.ready)
+    } else {
+      await settle(3, replacement.ready)
+    }
+
     expect(requests[1]!.signal?.aborted).toBe(true)
     expect(requests[2]!.signal?.aborted).toBe(true)
   } finally {
@@ -1449,11 +1489,7 @@ function expectContradictoryReplacementStartCrashes(): void {
       options?: Parameters<CollectionSubscription[`requestSnapshot`]>[0],
     ) => {
       requestCount += 1
-      options?.onLoadSubsetResult?.(
-        true,
-        { where: options.where },
-        () => {},
-      )
+      options?.onLoadSubsetResult?.(true, { where: options.where }, () => {})
       return requestCount === 1
     },
     releaseSnapshot,
@@ -2206,10 +2242,14 @@ describe(`includes temporal oracle`, () => {
     expectRetainedDemandBlocksReadiness,
   )
 
-  it(
-    `consolidates churn after apply without reloading monotonic growth`,
-    expectDemandChurnConsolidatesWithoutReloadingGrowth,
-  )
+  it(`consolidates churn after apply without reloading monotonic growth`, () =>
+    expectDemandChurnPreservesCoverage(`success`))
+
+  it(`failed churn replacement retains coverage and retries its union`, () =>
+    expectDemandChurnPreservesCoverage(`failure`))
+
+  it(`obsolete churn replacement cannot retire established coverage`, () =>
+    expectDemandChurnPreservesCoverage(`obsolete`))
 
   it(
     `crashes before replacing coverage when snapshot admission contradicts its result`,
