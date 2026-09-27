@@ -1394,42 +1394,63 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(withInEmpty).toEqual([])
     })
 
-    it(`applies custom string collation during persisted subset ordering`, async () => {
-      const { adapter } = registerContractHarness()
-      const collectionId = `custom-collation-order`
+    // At loadSubset completion, persisted fallback ordering must use the exact
+    // custom comparator, then direction and public-key tie order. A lexical
+    // fallback fails every cell below.
+    it.each([
+      {
+        case: `ascending`,
+        direction: `asc` as const,
+        compare: (left: string, right: string) => right.localeCompare(left),
+        expected: [`zeta`, `middle`, `alpha`],
+      },
+      {
+        case: `descending`,
+        direction: `desc` as const,
+        compare: (left: string, right: string) => right.localeCompare(left),
+        expected: [`alpha`, `middle`, `zeta`],
+      },
+      {
+        case: `comparator-equal key order`,
+        direction: `asc` as const,
+        compare: () => 0,
+        expected: [`zeta`, `alpha`, `middle`],
+      },
+    ])(
+      `applies custom string collation during persisted subset ordering ($case)`,
+      async ({ case: caseName, direction, compare, expected }) => {
+        const { adapter } = registerContractHarness()
+        const collectionId = `custom-collation-order-${caseName}`
 
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `seed-custom-collation`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [`alpha`, `middle`, `zeta`].map((title, index) => ({
-          type: `insert` as const,
-          key: String(index),
-          value: { id: String(index), title, createdAt: ``, score: index },
-        })),
-      })
+        await adapter.applyCommittedTx(collectionId, {
+          txId: `seed-custom-collation`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [`zeta`, `alpha`, `middle`].map((title, index) => ({
+            type: `insert` as const,
+            key: String(index),
+            value: { id: String(index), title, createdAt: ``, score: index },
+          })),
+        })
 
-      const rows = await adapter.loadSubset(collectionId, {
-        orderBy: [
-          {
-            expression: new IR.PropRef([`title`]),
-            compareOptions: {
-              direction: `asc`,
-              nulls: `last`,
-              stringSort: `custom`,
-              compare: (left, right) => right.localeCompare(left),
+        const rows = await adapter.loadSubset(collectionId, {
+          orderBy: [
+            {
+              expression: new IR.PropRef([`title`]),
+              compareOptions: {
+                direction,
+                nulls: `last`,
+                stringSort: `custom`,
+                compare,
+              },
             },
-          },
-        ],
-      })
+          ],
+        })
 
-      expect(rows.map(({ value }) => value.title)).toEqual([
-        `zeta`,
-        `middle`,
-        `alpha`,
-      ])
-    })
+        expect(rows.map(({ value }) => value.title)).toEqual(expected)
+      },
+    )
 
     it(`supports datetime/strftime predicate compilation for ISO date fields`, async () => {
       const { adapter } = registerContractHarness()
