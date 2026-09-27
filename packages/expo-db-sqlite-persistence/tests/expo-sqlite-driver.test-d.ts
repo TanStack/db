@@ -5,6 +5,7 @@ import {
   createExpoSQLiteDriver,
 } from '../src/expo-sqlite-driver'
 import type { SQLiteDatabase } from 'expo-sqlite'
+import type { SQLiteDatabase as SQLite57Database } from 'expo-sqlite-57'
 import type { ExpoSQLiteDatabaseLike } from '../src'
 
 /**
@@ -24,6 +25,16 @@ describe(`Expo SQLite driver types`, () => {
     createExpoSQLitePersistence({ database })
     createExpoSQLiteDriver({ database })
     new ExpoSQLiteDriver({ database })
+
+    const compatible: ExpoSQLiteDatabaseLike = database
+    void compatible
+  })
+
+  it(`accepts an Expo SQLite 57 database directly`, () => {
+    const database = null as unknown as SQLite57Database
+
+    createExpoSQLitePersistence({ database })
+    createExpoSQLiteDriver({ database })
 
     const compatible: ExpoSQLiteDatabaseLike = database
     void compatible
