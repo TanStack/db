@@ -50,6 +50,8 @@ export type OrderByOptimizationInfo = {
    * plan, including when a custom local collation defines another order.
    */
   requiresFullSource: boolean
+  /** A joined filter needs its lazy inputs to settle before another page. */
+  waitForJoinedDemand?: boolean
 }
 
 /**
@@ -245,6 +247,16 @@ export function processOrderBy(
         a: Record<string, unknown> | null | undefined,
         b: Record<string, unknown> | null | undefined,
       ) => compareTerm(a ? extract(a) : a, b ? extract(b) : b)
+      const canPageJoinedFilter =
+        rawQuery.join?.length === 1 &&
+        rawQuery.join[0]!.type === `left` &&
+        rawQuery.join[0]!.from.type === `collectionRef`
+      const hasCrossAliasWhere =
+        rawQuery.where?.some((where) =>
+          [...getSourceAliasesFromExpression(getWhereExpression(where))].some(
+            (alias) => alias !== orderByAlias,
+          ),
+        ) ?? false
 
       const info: OrderByOptimizationInfo = {
         sourceId: orderBySourceId,
@@ -255,6 +267,7 @@ export function processOrderBy(
         valueExtractorForRawRow: extract,
         index,
         orderBy: sourceOrderBy,
+        waitForJoinedDemand: canPageJoinedFilter && hasCrossAliasWhere,
         requiresFullSource:
           sourceOrderBy.some(
             ({ compareOptions }) => compareOptions.stringSort === `custom`,
@@ -269,9 +282,7 @@ export function processOrderBy(
           (rawQuery.where?.some(
             (where) =>
               isResidualWhere(where) ||
-              [
-                ...getSourceAliasesFromExpression(getWhereExpression(where)),
-              ].some((alias) => alias !== orderByAlias),
+              (!canPageJoinedFilter && hasCrossAliasWhere),
           ) ??
             false) ||
           (rawQuery.fnWhere?.length ?? 0) > 0 ||

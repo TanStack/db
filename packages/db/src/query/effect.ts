@@ -660,6 +660,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
               )
             }
           },
+          () => false,
+          undefined,
+          () => this.hasPendingJoinedWork(sourceId),
         )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
@@ -694,6 +697,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (status === `cleaned-up`) {
           handleSourceCleanup()
           return
+        }
+
+        if (
+          status === `ready` &&
+          this.pendingChanges.size > 0 &&
+          Object.values(this.optimizableOrderByCollections).some(
+            (info) => info.waitForJoinedDemand,
+          )
+        ) {
+          this.scheduleGraphRun()
         }
 
         // Track source readiness for skipInitial
@@ -795,7 +808,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
-      void update.ready.then(undefined, () => {})
+      void update.ready.then(
+        () => {
+          if (!this.disposed) this.scheduleGraphRun()
+        },
+        () => {},
+      )
     }
   }
 
@@ -924,6 +942,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.isGraphRunning = true
     try {
+      if (!this.graph.pendingWork()) this.loadMoreIfNeeded()
       // Ordered refill can also dispose the runner between graph steps.
       while (!this.isDisposed() && this.graph.pendingWork()) {
         this.graph.run()
@@ -963,18 +982,29 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       return
     }
 
+    if (
+      Object.values(this.optimizableOrderByCollections).some(
+        (info) =>
+          info.waitForJoinedDemand && this.hasPendingJoinedWork(info.sourceId),
+      )
+    ) {
+      return
+    }
+
     const shouldPublish = !this.skipInitial || this.initialLoadComplete
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
     for (const [key, changes] of this.pendingChanges) {
-      const event = this.classifyPendingChangesAgainstPublishedRows
-        ? classifyHeldDelta<TRow, TKey>(
-            key as TKey,
-            changes,
-            this.publishedRows,
-          )
-        : classifyImmediateDelta<TRow, TKey>(key as TKey, changes)
+      const event =
+        this.tracksPublishedRows ||
+        this.classifyPendingChangesAgainstPublishedRows
+          ? classifyHeldDelta<TRow, TKey>(
+              key as TKey,
+              changes,
+              this.publishedRows,
+            )
+          : classifyImmediateDelta<TRow, TKey>(key as TKey, changes)
       if (event) {
         if (this.tracksPublishedRows) {
           if (event.type === `exit`) this.publishedRows.delete(key)
@@ -1080,6 +1110,17 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           throw error
       }
     }
+  }
+
+  private hasPendingJoinedWork(orderedSourceId: string): boolean {
+    return (
+      this.demand.hasPendingDemand() ||
+      Object.entries(this.subscriptions).some(
+        ([sourceId, subscription]) =>
+          sourceId !== orderedSourceId &&
+          subscription.status === `loadingSubset`,
+      )
+    )
   }
 
   /** Tear down subscriptions and clear state */

@@ -409,6 +409,29 @@ export class CollectionConfigBuilder<
     this.maybeRunGraphFn?.()
   }
 
+  hasPendingJoinedWork(orderedSourceId: string): boolean {
+    return (
+      [...this.activeDemands.values()].some((demand) => !demand.settled) ||
+      Object.entries(this.subscriptions).some(
+        ([sourceId, subscription]) =>
+          sourceId !== orderedSourceId &&
+          subscription.status === `loadingSubset`,
+      )
+    )
+  }
+
+  private hasJoinedFilterWindow(): boolean {
+    return Object.values(this.optimizableOrderByCollections).some(
+      (info) => info.waitForJoinedDemand,
+    )
+  }
+
+  scheduleGraphRunWithLoaders(): void {
+    if (this.maybeRunGraphFn && this.hasJoinedFilterWindow())
+      this.maybeRunGraphFn()
+    else this.scheduleGraphRun()
+  }
+
   failDemand(planId: string, generation: number, error: unknown): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
@@ -1037,7 +1060,13 @@ export class CollectionConfigBuilder<
         this.windowFailed ||
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
-        this.pendingOrderedLoads.size > 0
+        this.pendingOrderedLoads.size > 0 ||
+        (this.hasJoinedFilterWindow() &&
+          Object.values(this.optimizableOrderByCollections).some(
+            (info) =>
+              info.waitForJoinedDemand &&
+              this.hasPendingJoinedWork(info.sourceId),
+          ))
       ) {
         return
       }
@@ -1207,6 +1236,7 @@ export class CollectionConfigBuilder<
         this.isInErrorState = false
         this.maybeRunGraphFn?.()
       }
+      if (this.hasJoinedFilterWindow()) this.maybeRunGraphFn?.()
     }
 
     // Update ready status based on all source collections

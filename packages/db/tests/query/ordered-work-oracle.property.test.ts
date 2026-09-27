@@ -9,7 +9,7 @@ import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
-import { eq, gte } from '../../src/query/builder/functions.js'
+import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -28,6 +28,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * independent filter/sort/window recomputation. It must also avoid duplicate
  * finite requests, repeated source scans, partial initial publications, and
  * cross-source suppression when joined loads overlap or replay.
+ * Direct LEFT-joined filters also require a finite root prefix, settlement of
+ * child demand before continuation, and one complete initial publication.
  *
  * The value model is a plain sorted array. The work model records normalized
  * page and boundary requests, examined source rows, publications, and errors.
@@ -36,7 +38,9 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * direction, and middle-row count; generated runs vary the same grammar.
  *
  * Counts are contract bounds, not timing benchmarks. They pin established
- * request and scan behavior only where the test names that promise.
+ * request and scan behavior only where the test names that promise. These
+ * scenarios exercise local evaluation; they do not model a remote adapter
+ * applying a relation hint.
  */
 
 type Row = {
@@ -55,6 +59,8 @@ type Scenario = {
   tied: boolean
   direction: `asc` | `desc`
 }
+
+type JoinFilter = `two-alias` | `joined-only` | `some` | `none` | `to-one`
 
 type RequestObservation = {
   kind: `page` | `boundary`
@@ -124,6 +130,10 @@ function rowsForScenario(scenario: Scenario): Array<Row> {
       label: `last`,
     },
   ]
+}
+
+function matchesJoinFilter(row: Row, joinFilter: JoinFilter): boolean {
+  return joinFilter === `none` ? !row.eligible : row.eligible
 }
 
 let harnessId = 0
@@ -241,22 +251,33 @@ function expectDistinctRequests(
 async function observeConsumer(
   kind: `collection` | `effect`,
   scenario: Scenario,
-  joinedOnlyPredicate = false,
+  joinFilter: JoinFilter = `two-alias`,
+  delayJoinedDemand = false,
+  removeJoinedMarker = false,
 ): Promise<ConsumerObservation> {
   type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const truth = rowsForScenario(scenario).sort(compareRows(scenario.direction))
   const sourceSize = truth.length
-  const eligibleTruth = truth.filter(({ eligible }) => eligible)
+  // The reference evaluates relation existence from authoritative marker
+  // membership. It does not use the compiler's predicate classifier.
+  const matchingTruth = truth.filter((row) =>
+    matchesJoinFilter(row, joinFilter),
+  )
   const rowToDelete =
-    eligibleTruth.length >= 3 &&
-    eligibleTruth[0]!.rank !== eligibleTruth[1]!.rank
-      ? eligibleTruth[0]
+    !removeJoinedMarker &&
+    matchingTruth.length >= 3 &&
+    matchingTruth[0]!.rank !== matchingTruth[1]!.rank
+      ? matchingTruth[0]
       : undefined
   const delivered = new Set<number>()
   const requests: Array<RequestObservation> = []
   const errors: Array<string> = []
   const effectRows = new Map<number, Row>()
+  const joinedLoadGate = createDeferred<void>()
+  let joinedRequests = 0
+  const deliveredMarkers = new Set<number>()
   let sync!: Sync
+  let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
 
   const apply = async (rows: ReadonlyArray<Row>) => {
     const fresh = rows.filter((row) => !delivered.has(row.id))
@@ -309,13 +330,16 @@ async function observeConsumer(
               return
             }
 
-            const start =
-              options.cursor?.lastKey === undefined
-                ? (options.offset ?? 0)
-                : matching.findIndex(
-                    ({ id }) => id === options.cursor?.lastKey,
-                  ) + 1
-            const page = matching.slice(start).slice(0, options.limit)
+            const candidates = options.cursor
+              ? matching.filter(
+                  (row) =>
+                    evaluateReferenceExpression(
+                      options.cursor!.whereFrom,
+                      row,
+                    ) === true,
+                )
+              : matching.slice(options.offset ?? 0)
+            const page = candidates.slice(0, options.limit)
             if (page.length > 0) {
               await apply(page)
             }
@@ -331,18 +355,45 @@ async function observeConsumer(
   const markerSource = createCollection<Marker, number>({
     id: `ordered-marker-${kind}-${harnessId++}`,
     getKey: ({ id }) => id,
-    syncMode: `eager`,
+    syncMode: delayJoinedDemand ? `on-demand` : `eager`,
     startSync: true,
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
-      sync: ({ begin, write, commit, markReady }) => {
+      sync: (operations) => {
+        markerSync = operations
+        const { begin, write, commit, markReady } = operations
+        if (delayJoinedDemand) {
+          markReady()
+          return {
+            loadSubset: async ({ where, signal }) => {
+              joinedRequests++
+              await joinedLoadGate.promise
+              const fresh = markers.filter(
+                (marker) =>
+                  !deliveredMarkers.has(marker.id) &&
+                  (!where ||
+                    evaluateReferenceExpression(where, marker) === true),
+              )
+              if (fresh.length === 0) return
+              begin()
+              for (const marker of fresh) {
+                deliveredMarkers.add(marker.id)
+                write({ type: `insert`, value: marker })
+              }
+              const receipt = commit(signal)
+              if (receipt !== true) await receipt
+            },
+            unloadSubset: () => {},
+          }
+        }
         begin()
         for (const marker of markers) {
           write({ type: `insert`, value: marker })
         }
         commit()
         markReady()
+        return undefined
       },
     },
   })
@@ -358,11 +409,21 @@ async function observeConsumer(
     const ordered = q
       .from({ row: source })
       .leftJoin({ marker: markerSource }, ({ row, marker }) =>
-        eq(row.id, marker.rowId),
+        eq(row.id, joinFilter === `to-one` ? marker.id : marker.rowId),
       )
-      .where(({ row, marker }) =>
-        joinedOnlyPredicate ? gte(marker.rowId, 0) : eq(row.id, marker.rowId),
-      )
+      .where(({ row, marker }) => {
+        switch (joinFilter) {
+          case `joined-only`:
+          case `to-one`:
+            return gte(marker.rowId, 0)
+          case `some`:
+            return not(isUndefined(marker.rowId))
+          case `none`:
+            return isUndefined(marker.rowId)
+          case `two-alias`:
+            return eq(row.id, marker.rowId)
+        }
+      })
       .orderBy(({ row }) => row.rank, scenario.direction)
     return (rowToDelete ? ordered.orderBy(({ row }) => row.id, `asc`) : ordered)
       .limit(2)
@@ -381,13 +442,14 @@ async function observeConsumer(
 
   return withHistoryCleanup(
     async () => {
+      let preload: Promise<void> | undefined
       if (kind === `collection`) {
         live = createLiveQueryCollection(query)
         subscription = live.subscribeChanges(() => {
           publications.push(visibleRows())
           rawPublications.push([...live!.values()].map(copiedRow))
         })
-        await live.preload()
+        preload = live.preload()
       } else {
         effect = createEffect<Row, number>({
           query,
@@ -402,15 +464,33 @@ async function observeConsumer(
         })
       }
 
+      if (delayJoinedDemand) {
+        await vi.waitFor(() => expect(joinedRequests).toBeGreaterThan(0))
+        for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
+          await flushPromises()
+        }
+        expect(
+          requests.filter(({ kind: requestKind }) => requestKind === `page`),
+        ).toHaveLength(1)
+        joinedLoadGate.resolve()
+      }
+      await preload
+
       for (let turn = 0; turn < truth.length * 3 + 6; turn++) {
         await flushPromises()
       }
 
       const rows = visibleRows()
-      const expected = eligibleTruth.slice(0, 2)
-      expect(rows, JSON.stringify({ kind, scenario, requests })).toEqual(
-        expected,
-      )
+      if (joinFilter === `none` && !delayJoinedDemand) {
+        expect(
+          [...markerSource.values()].map(({ rowId }) => rowId).sort(),
+        ).toEqual(markers.map(({ rowId }) => rowId).sort())
+      }
+      const expected = matchingTruth.slice(0, 2)
+      expect(
+        rows,
+        JSON.stringify({ kind, scenario, requests, publications }),
+      ).toEqual(expected)
       if (live) {
         expectRawWindow(
           [...live.values()].map(copiedRow),
@@ -444,6 +524,22 @@ async function observeConsumer(
       // and tie refinements, so compare that path by rows and work bounds.
       let finalRows = rows
       const publicationsBeforeMutation = publications.length
+      if (removeJoinedMarker) {
+        const removed = markers[0]!
+        markerSync.begin({ immediate: true })
+        markerSync.write({ type: `delete`, value: removed })
+        const receipt = markerSync.commit()
+        if (receipt !== true) await receipt
+        for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
+          await flushPromises()
+        }
+        finalRows = visibleRows()
+        expect(finalRows).toEqual(
+          truth
+            .filter((row) => row.eligible && row.id !== removed.id)
+            .slice(0, 2),
+        )
+      }
       if (rowToDelete) {
         truth.splice(truth.indexOf(rowToDelete), 1)
         delivered.delete(rowToDelete.id)
@@ -456,12 +552,14 @@ async function observeConsumer(
         }
         finalRows = visibleRows()
         expect(finalRows, JSON.stringify({ kind, scenario, requests })).toEqual(
-          truth.filter(({ eligible }) => eligible).slice(0, 2),
+          truth.filter((row) => matchesJoinFilter(row, joinFilter)).slice(0, 2),
         )
         if (live)
           expectRawWindow(
             [...live.values()].map(copiedRow),
-            truth.filter(({ eligible }) => eligible).slice(0, 2),
+            truth
+              .filter((row) => matchesJoinFilter(row, joinFilter))
+              .slice(0, 2),
             scenario.direction,
             true,
           )
@@ -472,7 +570,10 @@ async function observeConsumer(
       expect(publications.at(-1) ?? []).toEqual(finalRows)
       // The explicit source deletion can publish without another provider call.
       expect(publications.length).toBeLessThanOrEqual(
-        requests.length + 1 + Number(rowToDelete !== undefined),
+        requests.length +
+          1 +
+          Number(rowToDelete !== undefined) +
+          Number(removeJoinedMarker),
       )
       expect(requests.length).toBeLessThanOrEqual(sourceSize * 3 + 2)
       expect(
@@ -494,6 +595,7 @@ async function observeConsumer(
       }
     },
     () => {
+      joinedLoadGate.resolve()
       const requestCount = requests.length
       return [
         () => subscription?.unsubscribe(),
@@ -2541,17 +2643,125 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it(`fills ordered windows filtered only through a left-joined alias`, async () => {
+  it(`keeps the collection anti-join result when the joined row exists`, async () => {
+    const observed = await observeConsumer(
+      `collection`,
+      exhaustiveScenarios[0]!,
+      `none`,
+    )
+    expect(observed.rows.map(({ id }) => id)).toEqual([2])
+  })
+
+  it(`removes a matched parent from the anti-join Effect`, async () => {
+    const observed = await observeConsumer(
+      `effect`,
+      exhaustiveScenarios[0]!,
+      `none`,
+    )
+    expect(observed.rows.map(({ id }) => id)).toEqual([2])
+  })
+
+  it(`bounds ordered root acquisition for a none left-join filter`, async () => {
     for (const scenario of exhaustiveScenarios) {
-      const [collection, effect] = await Promise.all([
-        observeConsumer(`collection`, scenario, true),
-        observeConsumer(`effect`, scenario, true),
-      ])
-      expect(collection.rows).toEqual(effect.rows)
-      expect(collection.errors).toEqual([])
-      expect(effect.errors).toEqual([])
+      const observed = await observeConsumer(`collection`, scenario, `none`)
+      expect(observed.requests.length).toBeGreaterThan(0)
+      expect(observed.requests[0]?.kind).toBe(`page`)
+      expect(observed.requests[0]?.limit).toBeGreaterThan(0)
     }
   })
+
+  it.each([`joined-only`, `some`, `to-one`] as const)(
+    `bounds ordered root acquisition for a %s left-join filter`,
+    async (joinFilter) => {
+      for (const scenario of exhaustiveScenarios) {
+        const [collection, effect] = await Promise.all([
+          observeConsumer(`collection`, scenario, joinFilter),
+          observeConsumer(`effect`, scenario, joinFilter),
+        ])
+        expect(collection.rows).toEqual(effect.rows)
+        expect(collection.errors).toEqual([])
+        expect(effect.errors).toEqual([])
+
+        // A direct LEFT-joined filter retains finite root acquisition.
+        for (const observation of [collection, effect]) {
+          expect(observation.requests.length).toBeGreaterThan(0)
+          expect(observation.requests[0]?.kind).toBe(`page`)
+          expect(observation.requests[0]?.limit).toBeGreaterThan(0)
+        }
+      }
+    },
+  )
+
+  it.each(
+    ([`collection`, `effect`] as const).flatMap((consumer) =>
+      ([`some`, `none`] as const).map((joinFilter) => ({
+        consumer,
+        joinFilter,
+      })),
+    ),
+  )(
+    `waits for a $joinFilter joined demand before requesting another root page in a $consumer`,
+    async ({ consumer, joinFilter }) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 1,
+          middleEligible: false,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        joinFilter,
+        true,
+      )
+      expect(observed.errors).toEqual([])
+      expect(observed.requests[0]?.kind).toBe(`page`)
+    },
+  )
+
+  it.each([`collection`, `effect`] as const)(
+    `refills a joined-filter %s window after a child leaves`,
+    async (consumer) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 1,
+          middleEligible: true,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        `some`,
+        false,
+        true,
+      )
+      expect(observed.rows.map(({ id }) => id)).toEqual([3, 2])
+      expect(observed.requests.some(({ hasCursor }) => hasCursor)).toBe(true)
+    },
+  )
+
+  it.each([`collection`, `effect`] as const)(
+    `stops a joined-filter %s after the needed root prefix`,
+    async (consumer) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 40,
+          middleEligible: true,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        `some`,
+      )
+      expect(observed.requests.length).toBeLessThan(10)
+      expect(
+        observed.requests.every(
+          ({ kind, key }) => kind === `page` || key !== undefined,
+        ),
+      ).toBe(true)
+    },
+  )
 
   it.each(
     [0, 1, 2, 3, 4].flatMap((middleCount) =>

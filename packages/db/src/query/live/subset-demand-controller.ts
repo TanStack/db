@@ -142,6 +142,12 @@ export class SubsetDemandController {
     this.valueIdentity = createValueIdentity()
   }
 
+  hasPendingDemand(): boolean {
+    return [...this.states.values()].some((state) =>
+      state.segments.some((segment) => segment.state === `pending`),
+    )
+  }
+
   private finishReplacement(
     subscription: CollectionSubscription,
     planId: string,

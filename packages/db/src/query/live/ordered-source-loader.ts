@@ -94,6 +94,7 @@ export class OrderedSourceLoader {
     ) => void = () => {},
     private readonly canRetryRepair: () => boolean = () => false,
     private readonly getGraphInputRevision?: () => number,
+    private readonly hasPendingJoinedWork: () => boolean = () => false,
   ) {
     this.info.isRequesting = () => this.requesting
   }
@@ -142,6 +143,8 @@ export class OrderedSourceLoader {
     continuesOrderedPrefixRepair = false,
   ): Promise<void> | undefined {
     if (!this.active || this.info.limit === 0 || this.requesting) return
+    if (this.info.waitForJoinedDemand && this.hasPendingJoinedWork())
+      return this.pending
     if (this.stagedContinuation) {
       // A synchronous finite request can deliver an order-changing mutation.
       // Its continuation is staged after that mutation invalidates ordering,

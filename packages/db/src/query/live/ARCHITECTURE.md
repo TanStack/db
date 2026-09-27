@@ -857,7 +857,15 @@ local plan. Core requires full-source recovery for an indirect order
 expression, a non-root ordered source, an inner or right join, a residual or
 cross-alias predicate, a functional predicate, grouping, `having`, functional
 `having`, or `distinct`. These cases can discard or reorder an otherwise valid
-provider prefix even when a cursor value itself is expressible.
+provider prefix even when a cursor value itself is expressible. A single direct
+LEFT join to a Collection is an exception for a cross-alias filter when every order
+term comes from the root source. Its joined filter can remove root rows, but
+cannot make a later root precede an earlier root. Before loading another root
+page, core waits for the current lazy join demand and any joined subset load to
+settle, then reruns the graph. Joined-side changes also recheck ordered demand
+so a removed match can refill a short window. The adapter receives ordinary
+finite root requests; this contract does not imply that it can evaluate the
+relation filter remotely.
 
 A custom string comparator is a local ordering contract. If any resolved
 source order term uses `stringSort: 'custom'`, bounded and unbounded queries
