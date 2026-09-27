@@ -195,6 +195,9 @@ export class CollectionSyncManager<
             if (pendingTransaction.committed) {
               throw new SyncTransactionAlreadyCommittedWriteError()
             }
+            // Cancellation can invalidate an open transaction between writes.
+            // Its commit receipt owns that failure; later writes cannot revive it.
+            if (pendingTransaction.invalidationError !== undefined) return
 
             let key: TKey | undefined = undefined
             if (`key` in messageWithOptionalKey) {
@@ -228,8 +231,7 @@ export class CollectionSyncManager<
               originalSyncType?: `insert`
             }
             pendingTransaction.operations.push(message)
-            if (pendingTransaction.invalidationError === undefined)
-              this.state.stagePendingSyncOperation(message)
+            this.state.stagePendingSyncOperation(message)
 
             if (messageType === `delete`) {
               pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })

@@ -11,6 +11,7 @@ import {
 } from '../src'
 import { mockSyncCollectionOptions } from './utils'
 import type { DehydratedLiveQueryResult, InitialQueryBuilder } from '../src'
+import type { SyncConfig } from '../src/types'
 
 type Person = {
   id: string
@@ -1061,6 +1062,86 @@ describe(`DbClient`, () => {
       source: `adapter`,
     })
   })
+
+  it.each([
+    {
+      label: `insert`,
+      initialRows: [],
+      operation: {
+        type: `insert`,
+        value: { id: `1`, name: `adapter` },
+      },
+      expectedName: `adapter`,
+    },
+    {
+      label: `delete`,
+      initialRows: [{ id: `1`, name: `seed` }],
+      operation: { type: `delete`, key: `1` },
+      expectedName: undefined,
+    },
+  ] as const)(
+    `keeps queued adapter $label authoritative over late hydration chunks`,
+    async ({ label, initialRows, operation, expectedName }) => {
+      let sync!: Parameters<SyncConfig<Person, string>[`sync`]>[0]
+      let release!: () => void
+      const persistence = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const descriptor = collectionOptions<Person, string>({
+        id: `queued-adapter-authority`,
+        getKey: (person) => person.id,
+        sync: {
+          rowUpdateMode: `full`,
+          sync: (actions) => {
+            sync = actions
+            actions.markReady()
+          },
+        },
+      })
+      const client = new DbClient()
+      const collection = client.collection(descriptor, {
+        initialData: [{ id: `blocker`, name: `before` }, ...initialRows],
+      })
+      const blocker = createTransaction<Person>({
+        autoCommit: false,
+        mutationFn: () => persistence,
+      })
+      let blockerCommit: Promise<unknown> | undefined
+
+      try {
+        await collection.preload()
+        blocker.mutate(() =>
+          collection.update(`blocker`, (draft) => {
+            draft.name = `pending`
+          }),
+        )
+        blockerCommit = blocker.commit()
+        await Promise.resolve()
+        expect(blocker.state).toBe(`persisting`)
+
+        sync.begin()
+        sync.write(operation)
+        const receipt = sync.commit()
+        if (receipt === true) throw new Error(`adapter ${label} was not queued`)
+
+        client.applyCollectionChunk({
+          collectionId: `queued-adapter-authority`,
+          rows: [{ key: `1`, value: { id: `1`, name: `stale hydration` } }],
+        })
+        release()
+        await blockerCommit
+        await receipt
+        expect(collection._state.syncedData.get(`1`)?.name).toBe(expectedName)
+        expect(collection.get(`1`)?.name).toBe(expectedName)
+      } finally {
+        release()
+        if (blocker.state === `pending` || blocker.state === `persisting`)
+          blocker.rollback()
+        await blockerCommit?.catch(() => undefined)
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`does not serialize optimistic pending mutations`, async () => {
     const descriptor = collectionOptions(

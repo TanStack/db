@@ -6,6 +6,7 @@ import {
   SyncTransactionAbortedError,
 } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { runOptimisticHistory } from './optimistic-history-oracle.js'
@@ -849,6 +850,190 @@ async function runImmutablePreviousValuePublication(
     await collection.cleanup()
   }
 }
+
+it(`revalidates canceled-delete dependents in one queued-work pass`, async () => {
+  const rowCount = 64
+  const rows = Array.from({ length: rowCount }, (_, index) => ({
+    id: index + 10,
+    value: 0,
+  }))
+  await withParkedSync(
+    [...rows, { id: 5000, value: 0 }],
+    async ({ collection, sync, releasePersistence }) => {
+      const controller = new AbortController()
+      sync.begin()
+      for (const row of rows) sync.write({ type: `delete`, key: row.id })
+      const deleteReceipt = sync.commit(controller.signal)
+      if (deleteReceipt === true) throw new Error(`delete was not queued`)
+      const deleteOutcome = deleteReceipt.then(
+        () => `fulfilled` as const,
+        (error: unknown) =>
+          error instanceof SyncTransactionAbortedError
+            ? (`aborted` as const)
+            : (`other-error` as const),
+      )
+
+      const insertOutcomes: Array<Promise<`fulfilled` | `duplicate`>> = []
+      for (const row of rows) {
+        sync.begin()
+        sync.write({ type: `update`, value: { id: 5000, value: row.id } })
+        sync.write({
+          type: `insert`,
+          value: { id: row.id, value: row.value + 1 },
+        })
+        const receipt = sync.commit()
+        if (receipt === true) throw new Error(`dependent insert was not queued`)
+        insertOutcomes.push(
+          receipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) => {
+              if (!(error instanceof DuplicateKeySyncError)) throw error
+              return `duplicate` as const
+            },
+          ),
+        )
+      }
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1000, value: 7 } })
+      const siblingReceipt = sync.commit()
+      if (siblingReceipt === true) throw new Error(`sibling was not queued`)
+
+      let inspectedQueueEntries = 0
+      const pending = collection._state.pendingSyncedTransactions
+      collection._state.pendingSyncedTransactions = new Proxy(pending, {
+        get(target, property, receiver) {
+          if (typeof property === `string` && /^\d+$/.test(property)) {
+            inspectedQueueEntries++
+          }
+          return Reflect.get(target, property, receiver)
+        },
+      })
+
+      controller.abort()
+      expect(inspectedQueueEntries).toBeLessThanOrEqual(rowCount * 8)
+      await releasePersistence()
+      expect(await deleteOutcome).toBe(`aborted`)
+      expect(await Promise.all(insertOutcomes)).toEqual(
+        Array(rowCount).fill(`duplicate`),
+      )
+      await siblingReceipt
+      for (const row of rows) {
+        expect(collection.get(row.id)?.value).toBe(row.value)
+      }
+      expect(collection.get(5000)?.value).toBe(0)
+      expect(collection.get(1000)?.value).toBe(7)
+    },
+  )
+})
+
+it(`reports an invalidated open transaction on its applied receipt after another write`, async () => {
+  await withParkedSync(
+    [{ id: 1, value: 0 }],
+    async ({ collection, sync, releasePersistence }) => {
+      const controller = new AbortController()
+      sync.begin()
+      sync.write({ type: `delete`, key: 1 })
+      const deleteReceipt = sync.commit(controller.signal)
+      if (deleteReceipt === true) throw new Error(`delete was not queued`)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 2 } })
+      controller.abort()
+
+      expect(() =>
+        sync.write({ type: `insert`, value: { id: 1, value: 3 } }),
+      ).not.toThrow()
+      const insertReceipt = sync.commit()
+      if (insertReceipt === true)
+        throw new Error(`invalidated insert did not return a receipt`)
+
+      await releasePersistence()
+      await expect(deleteReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await expect(insertReceipt).rejects.toBeInstanceOf(DuplicateKeySyncError)
+      expect(collection.get(1)?.value).toBe(0)
+    },
+  )
+})
+
+it(`retires a committed-invalid transaction found by projection refresh`, async () => {
+  // Current callers cannot create this queue state. Exercise the internal
+  // recovery boundary so a future refresh caller cannot strand its receipt.
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { id: 1, value: 0 } })
+        commit()
+        markReady()
+      },
+    },
+  })
+  const applied = createDeferred<void>()
+  void applied.promise.catch(() => undefined)
+  const pending = {
+    committed: true,
+    applicationStarted: false,
+    layoutChanged: false,
+    operations: [
+      {
+        type: `insert` as const,
+        originalSyncType: `insert` as const,
+        key: 1,
+        value: { id: 1, value: 2 },
+      },
+    ],
+    rowMetadataWrites: new Map(),
+    collectionMetadataWrites: new Map(),
+    applied,
+    duplicateKeyError: (key: number) =>
+      new DuplicateKeySyncError(key, collection.id),
+  }
+  const validApplied = createDeferred<void>()
+  void validApplied.promise.catch(() => undefined)
+  const valid = {
+    ...pending,
+    operations: [
+      {
+        ...pending.operations[0]!,
+        key: 2,
+        value: { id: 2, value: 2 },
+      },
+    ],
+    applied: validApplied,
+  }
+
+  try {
+    await collection.stateWhenReady()
+    collection._state.pendingSyncedTransactions.push(valid, pending)
+    expect(() => collection._state.refreshPendingSyncedProjection()).toThrow(
+      DuplicateKeySyncError,
+    )
+    expect(collection._state.pendingSyncedTransactions).toContain(valid)
+    expect(collection._state.pendingSyncedTransactions).not.toContain(pending)
+    expect(applied.isPending()).toBe(false)
+    await expect(applied.promise).rejects.toBeInstanceOf(DuplicateKeySyncError)
+    expect(
+      collection._state.classifyPendingSyncedInsert(2, { id: 2, value: 3 }),
+    ).toBe(`duplicate`)
+    expect(collection.get(1)?.value).toBe(0)
+  } finally {
+    for (const transaction of [pending, valid]) {
+      const index =
+        collection._state.pendingSyncedTransactions.indexOf(transaction)
+      if (index !== -1)
+        collection._state.pendingSyncedTransactions.splice(index, 1)
+    }
+    if (applied.isPending()) applied.resolve()
+    if (validApplied.isPending()) validApplied.resolve()
+    collection._state.refreshPendingSyncedProjection()
+    await collection.cleanup()
+  }
+})
 
 it.each([
   { initial: 0, updates: [1] },

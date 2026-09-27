@@ -996,6 +996,24 @@ export class CollectionStateManager<
     return (key) => queued.get(key) ?? (!truncated && this.syncedData.has(key))
   }
 
+  /** A late hydration seed cannot supersede committed adapter work. */
+  createAdapterAuthorityLookup(): (key: TKey) => boolean {
+    const queuedKeys = new Set<TKey>()
+    let queuedTruncate = false
+    for (const transaction of this.pendingSyncedTransactions) {
+      if (!transaction.committed || transaction.preserveHydrationSeedKeys)
+        continue
+      if (transaction.truncate) queuedTruncate = true
+      for (const operation of transaction.operations) {
+        queuedKeys.add(operation.key as TKey)
+      }
+    }
+    return (key) =>
+      queuedTruncate ||
+      queuedKeys.has(key) ||
+      (this.syncedData.has(key) && !this.hydrationSeedKeys.has(key))
+  }
+
   private getProjectedSyncedKeyState(
     projection: PendingSyncedProjection<TOutput, TKey>,
     key: TKey,
@@ -1106,32 +1124,45 @@ export class CollectionStateManager<
     }
   }
 
-  private rebuildPendingSyncedProjection():
-    | {
-        transaction: PendingSyncedTransaction<TOutput, TKey>
-        key: TKey
-        error: Error
-      }
-    | undefined {
-    let projection: PendingSyncedProjection<TOutput, TKey> = {
+  private rebuildPendingSyncedProjection(): Array<{
+    transaction: PendingSyncedTransaction<TOutput, TKey>
+    key: TKey
+    error: Error
+  }> {
+    const projection: PendingSyncedProjection<TOutput, TKey> = {
       states: new Map(),
       truncated: false,
     }
+    const invalidCommitted: Array<{
+      transaction: PendingSyncedTransaction<TOutput, TKey>
+      key: TKey
+      error: Error
+    }> = []
 
     for (const transaction of this.pendingSyncedTransactions) {
-      const beforeTransaction: PendingSyncedProjection<TOutput, TKey> = {
-        states: new Map(projection.states),
-        truncated: projection.truncated,
-      }
-      transaction.invalidationError = undefined
+      // An open transaction invalidated by cancellation remains doomed until
+      // its commit returns the rejected applied receipt. truncate() can reset
+      // it explicitly after clearing its operations.
+      if (transaction.invalidationError !== undefined) continue
+      const wasTruncated = projection.truncated
+      const statesBeforeTruncate = transaction.truncate
+        ? projection.states
+        : undefined
+      const previousStates = new Map<
+        TKey,
+        PendingSyncedKeyState<TOutput> | undefined
+      >()
       if (transaction.truncate) {
-        projection.states.clear()
+        projection.states = new Map()
         projection.truncated = true
       }
 
       let invalidKey: TKey | undefined
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
+        if (!previousStates.has(key)) {
+          previousStates.set(key, projection.states.get(key))
+        }
         if (
           operation.originalSyncType === `insert` &&
           operation.type !== `delete`
@@ -1151,12 +1182,21 @@ export class CollectionStateManager<
       }
 
       if (invalidKey !== undefined) {
-        projection = beforeTransaction
+        if (statesBeforeTruncate !== undefined) {
+          projection.states = statesBeforeTruncate
+        } else {
+          for (const [key, previous] of previousStates) {
+            if (previous === undefined) projection.states.delete(key)
+            else projection.states.set(key, previous)
+          }
+        }
+        projection.truncated = wasTruncated
         const error =
           transaction.duplicateKeyError?.(invalidKey) ??
           new SyncTransactionAbortedError()
         if (transaction.committed) {
-          return { transaction, key: invalidKey, error }
+          invalidCommitted.push({ transaction, key: invalidKey, error })
+          continue
         }
         transaction.invalidationError = error
         continue
@@ -1165,14 +1205,32 @@ export class CollectionStateManager<
     }
 
     this.pendingSyncedProjection = projection
-    return undefined
+    return invalidCommitted
+  }
+
+  private rejectInvalidCommittedTransactions(
+    invalid: ReturnType<typeof this.rebuildPendingSyncedProjection>,
+  ): Set<TKey> {
+    const rejected = new Set(invalid.map(({ transaction }) => transaction))
+    this.pendingSyncedTransactions = this.pendingSyncedTransactions.filter(
+      (transaction) => !rejected.has(transaction),
+    )
+    const canceledKeys = new Set<TKey>()
+    for (const { transaction, error } of invalid) {
+      for (const operation of transaction.operations) {
+        canceledKeys.add(operation.key as TKey)
+      }
+      transaction.applied.reject(error)
+    }
+    return canceledKeys
   }
 
   /** Rebuild after truncate or application changes queue history. */
   refreshPendingSyncedProjection(): void {
     const invalid = this.rebuildPendingSyncedProjection()
-    if (invalid !== undefined && !invalid.transaction.committed) return
-    if (invalid !== undefined) throw invalid.error
+    if (invalid.length === 0) return
+    this.rejectInvalidCommittedTransactions(invalid)
+    throw invalid[0]!.error
   }
 
   /**
@@ -1862,10 +1920,9 @@ export class CollectionStateManager<
     // replay the queue with the same classifier used by normal admission.
     // Committed invalid dependents are rejected now. An active invalidated
     // transaction stays addressable until its caller invokes commit().
-    let invalid = this.rebuildPendingSyncedProjection()
-    while (invalid !== undefined) {
-      cancel(invalid.transaction, invalid.error)
-      invalid = this.rebuildPendingSyncedProjection()
+    const invalid = this.rebuildPendingSyncedProjection()
+    for (const key of this.rejectInvalidCommittedTransactions(invalid)) {
+      canceledKeys.add(key)
     }
 
     const remainingPendingKeys = new Set<TKey>()

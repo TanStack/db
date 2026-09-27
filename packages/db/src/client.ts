@@ -839,13 +839,14 @@ export class DbClient {
     },
     seedKind?: `initialData` | `hydration`,
   ): void {
+    const hasAuthoritativeAdapterWork =
+      collection._state.createAdapterAuthorityLookup()
+    const hasProjectedSyncedKey = collection._state.createSyncedKeyLookup()
     const rows = chunk.rows.flatMap((row) => {
       const value = collection.validateData(row.value, `insert`)
       const key = collection.config.getKey(value)
       const isAdapterAuthoritative =
-        seedKind === `hydration` &&
-        collection._state.syncedData.has(key) &&
-        !collection._state.hydrationSeedKeys.has(key)
+        seedKind === `hydration` && hasAuthoritativeAdapterWork(key)
 
       return isAdapterAuthoritative ? [] : [{ ...row, key, value }]
     })
@@ -875,7 +876,7 @@ export class DbClient {
         applicationStarted: false,
         layoutChanged: false,
         operations: rows.map((row) => ({
-          type: collection._state.syncedData.has(row.key)
+          type: hasProjectedSyncedKey(row.key)
             ? (`update` as const)
             : (`insert` as const),
           key: row.key,
