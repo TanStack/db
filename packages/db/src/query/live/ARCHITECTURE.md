@@ -734,6 +734,16 @@ of that contract. Buffering, snapshot tokens, shape offsets, Collection
 transactions, and local indexes are source-specific ways to satisfy it; they
 are not materializer state.
 
+Lazy-demand growth requests only uncovered keys. When contraction or churn
+would leave fragmented coverage, the controller requests one complete current
+key union while retaining every established acquisition that still intersects
+current demand. It releases those acquisitions only after the replacement's
+applied settlement. A failed or obsolete replacement cannot retire established
+coverage, and a retry requests the same union again. A partial shrink may keep
+one intersecting acquisition without replacement. This avoids repeatedly
+loading the growing prefix while allowing a changing bounded window to return
+to one acquisition.
+
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
 transaction is parked in the causal queue. The promise resolves only after the
@@ -1221,6 +1231,8 @@ create recursive Collection machinery.
    graph work.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered; obsolete demand does not block it.
+    Lazy-demand growth loads only uncovered keys. A fragmented churn replacement
+    retires prior coverage only after its union applies; failure preserves it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
     remains.
 12. **Work:** irrelevant rows do not cause unrelated scans or activate unrelated
