@@ -866,6 +866,8 @@ settle, then reruns the graph. Joined-side changes also recheck ordered demand
 so a removed match can refill a short window. The adapter receives ordinary
 finite root requests; this contract does not imply that it can evaluate the
 relation filter remotely.
+Finite continuation still requires an order index; an underfilled unindexed
+prefix retains the established full-source fallback.
 
 A custom string comparator is a local ordering contract. If any resolved
 source order term uses `stringSort: 'custom'`, bounded and unbounded queries

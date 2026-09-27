@@ -8,7 +8,9 @@ questions. The executable owner is
 `packages/db/tests/query/ordered-work-oracle.property.test.ts`; the ordered
 lifecycle and pagination oracles are adjacent owners. This review covers one
 direct LEFT join to a Collection with direct root ordering. It does not prove
-remote relation filtering or a changed-FK failure.
+remote relation filtering or a changed-FK failure. Finite continuation also
+requires an order index; without one, the existing full-source fallback can
+still apply after an underfilled prefix.
 
 Recent merged work covered adjacent paths: #1893 fixed indexed multi-term
 paging, #1903 replaced fragmented lazy join demand after churn, and #1904
