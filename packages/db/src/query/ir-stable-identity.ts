@@ -2,7 +2,10 @@ import { isPlainObject } from '../utils/type-guards.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
-import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
+import {
+  getRuntimeReferenceIdentity,
+  getStringCollationIdentity,
+} from './runtime-reference-identity.js'
 import { getPropRefPropertyPath, getPropRefSourceAlias } from './ir.js'
 import type {
   Aggregate,
@@ -560,12 +563,24 @@ function canonicalizeOrderBy(
       valueContext,
       scope,
     ),
-    compareOptions: canonicalizeRuntimeValue(
+    compareOptions: canonicalizeCompareOptions(
       orderBy.compareOptions,
       `${path}.compareOptions`,
       seen,
     ),
   }
+}
+
+function canonicalizeCompareOptions(
+  compareOptions: OrderByClause[`compareOptions`],
+  path: string,
+  seen: WeakSet<object>,
+): StableIdentityValue {
+  return canonicalizeRuntimeValue(
+    getStringCollationIdentity(compareOptions),
+    path,
+    seen,
+  )
 }
 
 function canonicalizeExpression(

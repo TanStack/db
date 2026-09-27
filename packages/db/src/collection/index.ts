@@ -1195,6 +1195,10 @@ function buildCompareOptionsFromConfig(
     return { stringSort: `lexical` }
   }
 
+  if (options.stringSort === `custom`) {
+    return { stringSort: `custom`, compare: options.compare }
+  }
+
   return {
     stringSort: `locale`,
     ...(`locale` in options &&

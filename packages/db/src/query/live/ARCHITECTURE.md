@@ -734,6 +734,16 @@ of that contract. Buffering, snapshot tokens, shape offsets, Collection
 transactions, and local indexes are source-specific ways to satisfy it; they
 are not materializer state.
 
+Lazy-demand growth requests only uncovered keys. When contraction or churn
+would leave fragmented coverage, the controller requests one complete current
+key union while retaining every established acquisition that still intersects
+current demand. It releases those acquisitions only after the replacement's
+applied settlement. A failed or obsolete replacement cannot retire established
+coverage, and a retry requests the same union again. A partial shrink may keep
+one intersecting acquisition without replacement. This avoids repeatedly
+loading the growing prefix while allowing a changing bounded window to return
+to one acquisition.
+
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
 transaction is parked in the causal queue. The promise resolves only after the
@@ -848,6 +858,36 @@ expression, a non-root ordered source, an inner or right join, a residual or
 cross-alias predicate, a functional predicate, grouping, `having`, functional
 `having`, or `distinct`. These cases can discard or reorder an otherwise valid
 provider prefix even when a cursor value itself is expressible.
+
+A custom string comparator is a local ordering contract. If any resolved
+source order term uses `stringSort: 'custom'`, bounded and unbounded queries
+use one authoritative filtered full-source request for the first acquisition
+and every replacement: the source predicate remains, while `orderBy`, `limit`,
+`offset`, and cursor are omitted. Core then sorts locally and uses ascending
+public-key order for comparator-equal rows, including when the primary term is
+descending. It never
+interprets the comparator function as a stable backend collation identity or
+as evidence that a provider can paginate that order. Custom cursor pagination
+therefore remains unsupported.
+
+Implicit string collation is a query-level default inherited from the first
+source Collection. It applies even when an order term references a later source
+whose own Collection default differs. Provider hint admission resolves every
+term against that same query default before any source receives `orderBy`. A
+`defaultStringCollation` override on the output live-query Collection changes
+that Collection's downstream default only; it does not change the source query's
+ordering semantics or provider hint admission.
+
+The callback applies only to string/string comparisons. Null placement,
+non-string ordering, and primary direction keep their existing semantics.
+Runtime query identity and local index reuse use the exact callback reference;
+two extensionally equivalent functions are distinct. Callers must keep the
+callback deterministic and immutable for its lifetime, because an index cannot
+detect a mutable closure's semantic change. Ordinary `gt`/`gte`/`lt`/`lte`
+predicates retain their lexical evaluator semantics and cannot use a custom
+string index for range traversal. Stable cross-runtime collation identifiers,
+provider capability negotiation, comparator exception policy, and backend
+collation fidelity are outside this contract.
 
 An ordered request cannot start another ordered request through its own
 synchronous writes. If the adapter then throws, graph callbacks scheduled by
@@ -1191,6 +1231,8 @@ create recursive Collection machinery.
    graph work.
 10. **Initial demand:** preload completes when every initially reachable demand
     is covered; obsolete demand does not block it.
+    Lazy-demand growth loads only uncovered keys. A fragmented churn replacement
+    retires prior coverage only after its union applies; failure preserves it.
 11. **Ownership:** a query-db row exists exactly while an explicit owner
     remains.
 12. **Work:** irrelevant rows do not cause unrelated scans or activate unrelated
