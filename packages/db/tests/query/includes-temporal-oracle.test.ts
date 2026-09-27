@@ -1540,8 +1540,7 @@ async function expectDemandReplacementRetainsCoverageAndFencesGenerations(): Pro
     await expect(failed.ready).rejects.toBe(replacementError)
     await flushPromises()
     expect(subscription.lastError).toBe(replacementError)
-    expect(reportedErrors.at(-1)).toBe(replacementError)
-    expect(reportedErrors).not.toContain(cleanupError)
+    expect(reportedErrors).toEqual([replacementError])
     expect(measured.releases).toEqual([[1], [1, 2, 3]])
     expect(measured.work().activeAcquisitions).toBe(1)
 

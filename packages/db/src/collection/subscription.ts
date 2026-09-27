@@ -103,6 +103,7 @@ type SubsetDemand = {
   acquisition: SubsetAcquisitionRecord
   acquisitionState: `starting` | `active` | `detached`
   initialResult?: Deferred<void>
+  reportedFailure?: Error
 }
 
 type TruncateReplayAttempt = {
@@ -878,7 +879,8 @@ export class CollectionSubscription
         this.isSyncRunGenerationCurrent(syncRunGeneration) &&
         shouldReportError()
       ) {
-        this.recordLoadSubsetError(
+        this.reportDemandFailure(
+          demand,
           options,
           this.normalizeLoadSubsetPromiseError(syncResult, error),
         )
@@ -1102,6 +1104,23 @@ export class CollectionSubscription
     return normalized
   }
 
+  /** Report one primary failure per logical demand, including reentrant release. */
+  private reportDemandFailure(
+    demand: SubsetDemand,
+    options: LoadSubsetOptions,
+    error: unknown,
+    reportAborted = false,
+  ): Error {
+    const normalized = normalizeError(error)
+    if (options.signal?.aborted && !reportAborted) return normalized
+    if (demand.reportedFailure) return demand.reportedFailure
+
+    // Install the winner before listeners run. A listener may synchronously
+    // release this same demand through its exact release callback.
+    demand.reportedFailure = normalized
+    return this.recordLoadSubsetError(options, normalized, reportAborted)
+  }
+
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
     const newChanges = this.filterAndFlipChanges(changes)
@@ -1275,7 +1294,8 @@ export class CollectionSubscription
     }
 
     try {
-      this.recordLoadSubsetError(
+      this.reportDemandFailure(
+        demand,
         demand.acquisition.options,
         primaryFailure.error,
         true,
