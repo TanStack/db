@@ -195,7 +195,13 @@ export class CollectionSyncManager<
 
             // Check if an item with this key already exists when inserting
             if (messageWithOptionalKey.type === `insert`) {
-              const insertingIntoExistingSynced = this.state.syncedData.has(key)
+              // A prior transaction's delete for this key may still be queued
+              // behind a persisting transaction, not yet merged into
+              // syncedData. Only pay for the queue-aware lookup when the fast
+              // syncedData check actually finds a candidate duplicate.
+              const insertingIntoExistingSynced =
+                this.state.syncedData.has(key) &&
+                this.state.createSyncedKeyLookup()(key)
               const hasPendingDeleteForKey =
                 pendingTransaction.deletedKeys.has(key)
               const isTruncateTransaction = pendingTransaction.truncate === true

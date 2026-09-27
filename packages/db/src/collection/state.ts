@@ -143,7 +143,9 @@ export class CollectionStateManager<
   public size = 0
 
   // State used for computing the change events
-  public preSyncVisibleState = new Map<TKey, TOutput>()
+  // Hidden keys are captured as undefined so a later recompute cannot become
+  // the baseline for a sync commit that must publish that key's change.
+  public preSyncVisibleState = new Map<TKey, TOutput | undefined>()
   public preSyncVirtualState = new Map<TKey, VirtualRowProps<TKey>>()
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
@@ -1154,7 +1156,7 @@ export class CollectionStateManager<
       let currentVisibleState = this.preSyncVisibleState
       if (currentVisibleState.size === 0) {
         // No pre-captured state, capture it now for pure sync operations
-        currentVisibleState = new Map<TKey, TOutput>()
+        currentVisibleState = new Map<TKey, TOutput | undefined>()
         for (const key of changedKeys) {
           const currentValue = this.get(key)
           if (currentValue !== undefined) {
@@ -1723,8 +1725,8 @@ export class CollectionStateManager<
     for (const key of syncedKeys) {
       if (!this.preSyncVisibleState.has(key)) {
         const currentValue = this.get(key)
+        this.preSyncVisibleState.set(key, currentValue)
         if (currentValue !== undefined) {
-          this.preSyncVisibleState.set(key, currentValue)
           this.preSyncVirtualState.set(
             key,
             this.getVirtualPropsSnapshotForState(key),
