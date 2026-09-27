@@ -3,13 +3,14 @@
  * browser driver runs real Electric streams through two OPFS tabs with distinct
  * per-collection schema versions. At each cut, public and durable rows must
  * equal the source rows, and merely opening another tab must not reset either
- * collection. A legacy torn-row/stale-resume state must request a fresh source
- * snapshot after reopen. This bounded host history does not choose the general
- * exclusive-OPFS ownership topology or prove Firefox/Zen behavior.
+ * collection. Partial-row loss and a fully empty legacy baseline with a stale
+ * resume marker must request a fresh source snapshot after reopen. These
+ * bounded host histories do not choose the general exclusive-OPFS ownership
+ * topology or prove Firefox/Zen behavior.
  */
 import { expect, test } from '@playwright/test'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
-import type { Page } from '@playwright/test'
+import type { BrowserContext, Page } from '@playwright/test'
 import type {
   ElectricOPFSObservation,
   LegacyPoisonObservation,
@@ -18,6 +19,22 @@ import type {
 type SourceRows = {
   a: Array<{ id: string; label: string }>
   b: Array<{ id: string; label: string }>
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function pageDiagnostic(page: Page): Promise<string> {
+  try {
+    if (page.isClosed()) return `page closed`
+    const diagnostic = await page.evaluate(() =>
+      window.__electricOPFSProbe?.diagnostic(),
+    )
+    return JSON.stringify(diagnostic ?? { probe: `unavailable` })
+  } catch (error) {
+    return `probe diagnostic unavailable: ${errorMessage(error)}`
+  }
 }
 
 async function openProbe(page: Page, url: string): Promise<void> {
@@ -39,13 +56,9 @@ async function openProbe(page: Page, url: string): Promise<void> {
       throw new Error(observation.failure)
     }
   } catch (error) {
-    const diagnostic = page.isClosed()
-      ? `page closed`
-      : JSON.stringify(
-          await page.evaluate(() => window.__electricOPFSProbe?.diagnostic()),
-        )
+    const diagnostic = await pageDiagnostic(page)
     throw new Error(
-      `Electric OPFS page failed: ${error instanceof Error ? error.message : String(error)}; ` +
+      `Electric OPFS page failed: ${errorMessage(error)}; ` +
         `page errors: ${JSON.stringify(pageErrors)}; diagnostic: ${diagnostic}`,
       { cause: error },
     )
@@ -97,9 +110,34 @@ async function closeProbe(page: Page): Promise<Array<string>> {
   return failures
 }
 
-test(`two OPFS tabs with live Electric preserve distinct schemas and recover a legacy torn resume`, async ({
-  context,
-}) => {
+async function cleanupPages(
+  pages: Array<Page>,
+  cleanupFailures: Array<string>,
+): Promise<void> {
+  for (const page of pages.reverse()) {
+    try {
+      if (page.isClosed()) continue
+      cleanupFailures.push(...(await closeProbe(page)))
+    } catch (error) {
+      cleanupFailures.push(`probe cleanup: ${errorMessage(error)}`)
+      try {
+        if (!page.isClosed()) await page.close()
+      } catch (closeError) {
+        cleanupFailures.push(`page close: ${errorMessage(closeError)}`)
+      }
+    }
+  }
+}
+
+const legacyLossCases = [
+  { name: `partially torn`, missingIds: [`a1`], rowsAfter: 1 },
+  { name: `fully empty`, missingIds: [`a1`, `a2`], rowsAfter: 0 },
+] as const
+
+async function runHistory(
+  context: BrowserContext,
+  legacyLoss: (typeof legacyLossCases)[number],
+): Promise<void> {
   const token = crypto.randomUUID().replaceAll(`-`, ``).slice(0, 12)
   const databaseId = `electric-1589-${token}`
   const collectionAId = `${databaseId}-a`
@@ -206,13 +244,13 @@ test(`two OPFS tabs with live Electric preserve distinct schemas and recover a l
     pages.push(maintenance)
     await openProbe(maintenance, urlFor(`maintenance`))
     const poison: LegacyPoisonObservation = await maintenance.evaluate(
-      ({ collectionId, missingId }) =>
-        window.__electricOPFSProbe!.poisonLegacy(collectionId, missingId),
-      { collectionId: collectionAId, missingId: `a1` },
+      ({ collectionId, missingIds }) =>
+        window.__electricOPFSProbe!.poisonLegacy(collectionId, missingIds),
+      { collectionId: collectionAId, missingIds: legacyLoss.missingIds },
     )
     expect(poison).toMatchObject({
       rowsBefore: 2,
-      rowsAfter: 1,
+      rowsAfter: legacyLoss.rowsAfter,
       metadataPreserved: true,
     })
     cleanupFailures.push(...(await closeProbe(maintenance)))
@@ -240,17 +278,7 @@ test(`two OPFS tabs with live Electric preserve distinct schemas and recover a l
     primaryFailure = error
   }
 
-  for (const page of pages.reverse()) {
-    if (page.isClosed()) continue
-    try {
-      cleanupFailures.push(...(await closeProbe(page)))
-    } catch (error) {
-      cleanupFailures.push(
-        error instanceof Error ? error.message : String(error),
-      )
-      if (!page.isClosed()) await page.close()
-    }
-  }
+  await cleanupPages(pages, cleanupFailures)
   if (connected) {
     for (const table of [tableA, tableB]) {
       try {
@@ -279,4 +307,49 @@ test(`two OPFS tabs with live Electric preserve distinct schemas and recover a l
   }
   if (primaryFailure) throw primaryFailure
   expect(cleanupFailures).toEqual([])
+}
+
+for (const legacyLoss of legacyLossCases) {
+  test(`two OPFS tabs with live Electric preserve distinct schemas and recover a ${legacyLoss.name} legacy baseline`, async ({
+    context,
+  }) => runHistory(context, legacyLoss))
+}
+
+test(`keeps the page failure primary when the diagnostic read also fails`, async () => {
+  const navigationFailure = new Error(`navigation failed`)
+  const page = {
+    on: () => undefined,
+    goto: () => Promise.reject(navigationFailure),
+    isClosed: () => false,
+    evaluate: () => Promise.reject(new Error(`diagnostic failed`)),
+  } as unknown as Page
+
+  const failure: unknown = await openProbe(page, `/unavailable`).then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  expect(failure).toMatchObject({ cause: navigationFailure })
+  expect(String(failure)).toContain(`diagnostic failed`)
+})
+
+test(`records cleanup and fallback page-close failures separately`, async () => {
+  const cleanupFailure = new Error(`cleanup failed`)
+  const closeFailure = new Error(`close failed`)
+  let closeAttempts = 0
+  const page = {
+    isClosed: () => false,
+    evaluate: () => Promise.reject(cleanupFailure),
+    close: () => {
+      closeAttempts++
+      return Promise.reject(closeFailure)
+    },
+  } as unknown as Page
+  const failures: Array<string> = []
+
+  await cleanupPages([page], failures)
+  expect(failures).toEqual([
+    `probe cleanup: cleanup failed`,
+    `page close: close failed`,
+  ])
+  expect(closeAttempts).toBe(1)
 })

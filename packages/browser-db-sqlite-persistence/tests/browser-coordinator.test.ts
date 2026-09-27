@@ -2266,6 +2266,88 @@ describe(`BrowserCollectionCoordinator`, () => {
   })
 
   describe(`RPC - applyCommittedTx`, () => {
+    it(`schedules an ordinary source commit before requesting the writer lock`, async () => {
+      const adapter = createStubAdapter()
+      const coordinator = createCoordinator(adapter)
+      const collectionId = `ordinary-source-commit`
+      const unsubscribe = coordinator.subscribe(collectionId, () => {})
+      let applySource!: () => Promise<void>
+      const collection = createCollection(
+        persistedCollectionOptions<{ id: string }, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              applySource = async () => {
+                begin()
+                write({ type: `insert`, value: { id: `source-row` } })
+                await commit()
+              }
+              markReady()
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        await vi.waitFor(() =>
+          expect(coordinator.isLeader(collectionId)).toBe(true),
+        )
+
+        const events: Array<string> = []
+        adapter.runInRegularScope = async (task) => {
+          events.push(`scheduler-enter`)
+          try {
+            return await task(adapter)
+          } finally {
+            events.push(`scheduler-exit`)
+          }
+        }
+        const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+        adapter.applyCommittedTx = async (...args) => {
+          events.push(`apply`)
+          await applyCommittedTx(...args)
+        }
+        const requestLock = mockNavigatorLocks.request.bind(mockNavigatorLocks)
+        const lockSpy = vi
+          .spyOn(mockNavigatorLocks, `request`)
+          .mockImplementation((name, optionsOrCallback, maybeCallback) => {
+            if (name === `tsdb:writer:test-db`) {
+              events.push(`writer-lock-request`)
+            }
+            return requestLock(name, optionsOrCallback, maybeCallback)
+          })
+
+        try {
+          await applySource()
+          expect(events).toEqual([
+            `scheduler-enter`,
+            `writer-lock-request`,
+            `apply`,
+            `scheduler-exit`,
+          ])
+          expect(adapter.appliedTxs).toHaveLength(1)
+          expect(adapter.appliedTxs[0]).toMatchObject({
+            collectionId,
+            tx: {
+              mutations: [{ key: `source-row`, value: { id: `source-row` } }],
+            },
+          })
+          expect(collection.get(`source-row`)).toMatchObject({
+            id: `source-row`,
+          })
+        } finally {
+          lockSpy.mockRestore()
+        }
+      } finally {
+        await collection.cleanup()
+        unsubscribe()
+        coordinator.dispose()
+      }
+    })
+
     it(`completes the first source commit when leader election overlaps scheduled hydration`, async () => {
       const database = createWASQLiteTestDatabase({ filename: `:memory:` })
       const coordinator = createCoordinator()

@@ -1,5 +1,5 @@
 /**
- * Browser driver for the #1589 host history. The fixture uses real OPFS worker
+ * Browser driver for the #1589 host histories. The fixture uses real OPFS worker
  * handles, Web Locks, BroadcastChannel, and the installed Electric SDK against
  * the Playwright suite's PostgreSQL/Electric services. The spec supplies the
  * independent PostgreSQL rows and checks public plus durable Collection rows.
@@ -60,7 +60,7 @@ type ElectricOPFSProbe = {
   observe: () => Promise<ElectricOPFSObservation>
   poisonLegacy: (
     collectionId: string,
-    missingId: string,
+    missingIds: ReadonlyArray<string>,
   ) => Promise<LegacyPoisonObservation>
   cleanup: () => Promise<Array<string>>
 }
@@ -137,8 +137,8 @@ window.__electricOPFSProbe = {
     collections: await readCollections(),
     shapeRequests: [...shapeRequests],
   }),
-  poisonLegacy: (collectionId, missingId) =>
-    poisonLegacy(collectionId, missingId),
+  poisonLegacy: (collectionId, missingIds) =>
+    poisonLegacy(collectionId, missingIds),
   cleanup: async () => {
     if (cleaned) return []
     cleaned = true
@@ -175,7 +175,7 @@ function quoteTrustedIdentifier(identifier: string): string {
 async function poisonLegacyResume(
   database: BrowserWASQLiteDatabase,
   collectionId: string,
-  missingId: string,
+  missingIds: ReadonlyArray<string>,
 ): Promise<LegacyPoisonObservation> {
   const registration = await database.execute<{ table_name: string }>(
     `SELECT table_name FROM collection_registry WHERE collection_id = ?`,
@@ -206,17 +206,19 @@ async function poisonLegacyResume(
   const before = await database.execute<{ count: number }>(
     `SELECT COUNT(*) AS count FROM ${collectionTable}`,
   )
-  await database.execute(
-    `DELETE FROM ${collectionTable} WHERE json_extract(value, '$.id') = ?`,
-    [missingId],
-  )
+  for (const missingId of missingIds) {
+    await database.execute(
+      `DELETE FROM ${collectionTable} WHERE json_extract(value, '$.id') = ?`,
+      [missingId],
+    )
+  }
   const after = await database.execute<{ count: number }>(
     `SELECT COUNT(*) AS count FROM ${collectionTable}`,
   )
   const rowsBefore = before[0]?.count ?? -1
   const rowsAfter = after[0]?.count ?? -1
-  if (rowsBefore - rowsAfter !== 1) {
-    throw new Error(`Legacy poison did not remove exactly one durable row`)
+  if (rowsBefore - rowsAfter !== missingIds.length) {
+    throw new Error(`Legacy poison did not remove every selected durable row`)
   }
 
   // This reproduces the pre-key-ledger format, where an old resume marker
@@ -264,8 +266,8 @@ try {
   cleanupTasks.unshift(async () => database.close?.())
 
   if (mode === `maintenance`) {
-    poisonLegacy = (collectionId, missingId) =>
-      poisonLegacyResume(database, collectionId, missingId)
+    poisonLegacy = (collectionId, missingIds) =>
+      poisonLegacyResume(database, collectionId, missingIds)
     phase = `ready`
   } else {
     stage = `building collections`
