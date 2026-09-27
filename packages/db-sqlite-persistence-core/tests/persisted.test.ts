@@ -79,6 +79,8 @@ import type {
  * A source abort before core application rejects that transaction's receipt.
  * It does not invalidate the durable baseline or an independent queued source
  * transaction when the failed transaction made no public or durable change.
+ * A terminal durability failure also rejects an exact retained on-demand
+ * acquisition. Hydrated rows cannot turn that failed sync run back to ready.
  *
  * Refinement checkpoints compare public rows, durable state, metadata, request
  * data, sequence evidence, exact errors, and late-work fencing. Fixed hostile
@@ -106,7 +108,10 @@ type TodoSyncParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
 
 const requestedOracleReplayProperty = readOracleRunConfig().replayProperty
 const describeUnlessOracleReplay =
-  requestedOracleReplayProperty === undefined ? describe : describe.skip
+  requestedOracleReplayProperty === undefined ||
+  requestedOracleReplayProperty === `persistence.retained-demand`
+    ? describe
+    : describe.skip
 
 const persistedKeySetEvidenceStatuses = [
   `consistent`,
@@ -2061,7 +2066,13 @@ function registerGeneratedPersistenceProperty<Value>(options: {
   }
 }
 
-describe(`generated persistence durability oracles`, () => {
+const describeDurabilityOracles =
+  requestedOracleReplayProperty === undefined ||
+  requestedOracleReplayProperty.startsWith(`sqlite-persistence.`)
+    ? describe
+    : describe.skip
+
+describeDurabilityOracles(`generated persistence durability oracles`, () => {
   if (requestedOracleReplayProperty === undefined) {
     it(`reconstructs the full grammar and rejects ablated, out-of-range, and foreign histories`, () => {
       for (const {
@@ -13158,114 +13169,178 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  fcTest.prop(
-    [
+  type RetainedDemandOperation =
+    | { type: `acquire` | `release`; demand: `one` | `two` }
+    | { type: `truncate` }
+  // The generated prefix varies demand ownership and reset history. Its
+  // terminal suffix reaches a retained hydrated demand, fails a source write,
+  // then checks the exact error and absence of a new upstream acquisition.
+  // The pre-fix fast path returned true and incremented upstreamLoads here.
+  // This recording adapter does not establish browser/OPFS behavior.
+  const retainedDemandHistory = fc
+    .array(
+      fc.record({
+        type: fc.constantFrom(`acquire` as const, `release` as const),
+        demand: fc.constantFrom(`one` as const, `two` as const),
+      }),
+      { minLength: 1, maxLength: 20 },
+    )
+    .chain((operations) =>
       fc
-        .array(
-          fc
-            .record({
-              type: fc.constantFrom(`acquire` as const, `release` as const),
-              demand: fc.constantFrom(`one` as const, `two` as const),
-            })
-            .map(
-              (operation) =>
-                operation as
-                  | { type: `acquire`; demand: `one` | `two` }
-                  | { type: `release`; demand: `one` | `two` },
-            ),
-          { minLength: 1, maxLength: 20 },
-        )
-        .chain((operations) =>
-          fc
-            .array(fc.integer({ min: 0, max: operations.length }), {
-              maxLength: 4,
-            })
-            .map((truncatePositions) => {
-              const positions = new Set(truncatePositions)
-              return operations.flatMap((operation, index) =>
-                positions.has(index)
-                  ? ([{ type: `truncate` as const }, operation] as const)
-                  : [operation],
-              )
-            }),
-        ),
-    ],
-    oraclePropertyOptions(50, `persistence.retained-demand`),
-  )(
-    `matches the retained exact-demand model across acquire, release, and truncate histories`,
-    async (history) => {
-      const adapter = createRecordingAdapter([
-        { id: `1`, title: `one` },
-        { id: `2`, title: `two` },
-      ])
-      const loadRows = adapter.loadSubset
-      adapter.loadSubset = async (...args) => {
-        const rows = await loadRows(...args)
-        return rows.slice(0, args[1].limit)
-      }
-      let truncateSource: (() => void) | undefined
-      const collection = createCollection(
-        persistedCollectionOptions<Todo, string>({
-          id: `hydrated-demand-history`,
-          getKey: (row) => row.id,
-          syncMode: `on-demand`,
-          sync: {
-            sync: ({ begin, truncate, commit, markReady }) => {
-              truncateSource = () => {
-                begin()
-                truncate()
-                commit()
-              }
-              markReady()
-              return { loadSubset: () => true }
-            },
-          },
-          persistence: { adapter },
+        .array(fc.integer({ min: 0, max: operations.length }), {
+          maxLength: 4,
+        })
+        .map((truncatePositions): Array<RetainedDemandOperation> => {
+          const positions = new Set(truncatePositions)
+          return operations.flatMap((operation, index) =>
+            positions.has(index)
+              ? [{ type: `truncate` as const }, operation]
+              : [operation],
+          )
         }),
-      )
-      collection.startSyncImmediate()
-      for (let attempt = 0; attempt < 20 && !truncateSource; attempt++) {
-        await flushAsyncWork()
-      }
-      expect(truncateSource).toBeTypeOf(`function`)
+    )
+  const runRetainedDemandHistory = async (
+    history: ReadonlyArray<RetainedDemandOperation>,
+  ): Promise<void> => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `one` },
+      { id: `2`, title: `two` },
+    ])
+    const loadRows = adapter.loadSubset
+    adapter.loadSubset = async (...args) => {
+      const rows = await loadRows(...args)
+      return rows.slice(0, args[1].limit)
+    }
+    let truncateSource: (() => void) | undefined
+    let failSource: (() => true | Promise<void>) | undefined
+    let upstreamLoads = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `hydrated-demand-history`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, truncate, commit, markReady }) => {
+            truncateSource = () => {
+              begin()
+              truncate()
+              commit()
+            }
+            failSource = () => {
+              begin()
+              write({
+                type: `insert`,
+                value: { id: `terminal-write`, title: `must not persist` },
+              })
+              return commit()
+            }
+            markReady()
+            return {
+              loadSubset: () => {
+                upstreamLoads++
+                return true
+              },
+            }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    collection.startSyncImmediate()
+    for (let attempt = 0; attempt < 20 && !truncateSource; attempt++) {
+      await flushAsyncWork()
+    }
+    expect(truncateSource).toBeTypeOf(`function`)
 
-      const active: Record<`one` | `two`, Array<LoadSubsetOptions>> = {
-        one: [],
-        two: [],
+    const active: Record<`one` | `two`, Array<LoadSubsetOptions>> = {
+      one: [],
+      two: [],
+    }
+    const hydrated = new Set<`one` | `two`>()
+    const optionsFor = (demand: `one` | `two`): LoadSubsetOptions => ({
+      limit: demand === `one` ? 1 : 2,
+    })
+
+    try {
+      for (const operation of history) {
+        if (operation.type === `truncate`) {
+          truncateSource?.()
+          hydrated.clear()
+          continue
+        }
+
+        const demand = operation.demand
+        if (operation.type === `release`) {
+          const options = active[demand].pop()
+          if (!options) continue
+          collection._sync.unloadSubset(options)
+          if (active[demand].length === 0) hydrated.delete(demand)
+          continue
+        }
+
+        const options = optionsFor(demand)
+        const result = collection._sync.loadSubset(options)
+        expect(result === true).toBe(hydrated.has(demand))
+        if (result !== true) await result
+        active[demand].push(options)
+        hydrated.add(demand)
       }
-      const hydrated = new Set<`one` | `two`>()
-      const optionsFor = (demand: `one` | `two`): LoadSubsetOptions => ({
-        limit: demand === `one` ? 1 : 2,
+
+      // A terminal durability failure is absorbing even when a retained
+      // demand still has hydrated rows. No later acquisition owns a new
+      // upstream lease or receives synchronous readiness.
+      const retained = optionsFor(`one`)
+      const retainedResult = collection._sync.loadSubset(retained)
+      if (retainedResult !== true) await retainedResult
+      const adapterFailure = new Error(`retained demand durability failed`)
+      adapter.applyCommittedTx = () => Promise.reject(adapterFailure)
+      const failedReceipt = failSource?.()
+      if (!(failedReceipt instanceof Promise)) {
+        throw new Error(`expected a failing source receipt`)
+      }
+      const receiptOutcome = await failedReceipt.then(
+        () => ({ status: `fulfilled` as const }),
+        (reason: unknown) => ({ status: `rejected` as const, reason }),
+      )
+      const terminalError = collection._lifecycle.getSyncError()
+      expect(receiptOutcome).toEqual({
+        status: `rejected`,
+        reason: terminalError,
+      })
+      expect(terminalError).toMatchObject({
+        name: `PersistedCollectionDurabilityError`,
+        cause: adapterFailure,
       })
 
+      const loadsBeforeRetry = upstreamLoads
+      let retryFailure: unknown
       try {
-        for (const operation of history) {
-          if (operation.type === `truncate`) {
-            truncateSource?.()
-            hydrated.clear()
-            continue
-          }
-
-          const demand = operation.demand
-          if (operation.type === `release`) {
-            const options = active[demand].pop()
-            if (!options) continue
-            collection._sync.unloadSubset(options)
-            if (active[demand].length === 0) hydrated.delete(demand)
-            continue
-          }
-
-          const options = optionsFor(demand)
-          const result = collection._sync.loadSubset(options)
-          expect(result === true).toBe(hydrated.has(demand))
-          if (result !== true) await result
-          active[demand].push(options)
-          hydrated.add(demand)
-        }
-      } finally {
-        await collection.cleanup()
+        await collection._sync.loadSubset(optionsFor(`one`))
+      } catch (error) {
+        retryFailure = error
       }
-    },
+      expect({ retryFailure, upstreamLoads }).toEqual({
+        retryFailure: terminalError,
+        upstreamLoads: loadsBeforeRetry,
+      })
+    } finally {
+      await collection.cleanup()
+    }
+  }
+
+  fcTest.prop([retainedDemandHistory], {
+    numRuns: oracleRuns(50),
+    seed: 186001,
+  })(
+    `matches the retained exact-demand model with a fixed seed`,
+    runRetainedDemandHistory,
+  )
+  fcTest.prop(
+    [retainedDemandHistory],
+    oraclePropertyOptions(50, `persistence.retained-demand`),
+  )(
+    `matches the retained exact-demand model with a random or replayed seed`,
+    runRetainedDemandHistory,
   )
 
   it(`invalidates hydrated demand when the source truncates`, async () => {

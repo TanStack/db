@@ -1861,6 +1861,8 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
     upstreamLoadSubset?: LoadSubsetFn,
   ): true | Promise<void> | undefined {
+    const failure = this.getCurrentTerminalFailure()
+    if (failure) return Promise.reject(failure.error)
     if (
       !this.startupSettled ||
       this.isHydratingNow() ||
@@ -1880,7 +1882,6 @@ class PersistedCollectionRuntime<
       return Promise.reject(error)
     }
     if (result === true) {
-      this.queueRemoteSubsetEnsure(options)
       return true
     }
 
