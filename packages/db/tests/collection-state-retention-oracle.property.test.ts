@@ -2868,13 +2868,22 @@ it(`publishes the subscriber-visible row when a buffered optimistic update becom
     queued: 1,
   })
 })
+// The accepted delete survives a dependent reinsert's failure regardless of
+// whether the delete or the dependent edit settles first. A successful reinsert
+// instead leaves the accepted edit visible. Truncate must preserve both laws.
 it.each(
   [false, true].flatMap((truncate) =>
-    [false, true].map((insertAccepted) => ({ truncate, insertAccepted })),
+    [false, true].flatMap((editSettlesFirst) =>
+      [false, true].map((insertAccepted) => ({
+        truncate,
+        editSettlesFirst,
+        insertAccepted,
+      })),
+    ),
   ),
 )(
-  `retains an accepted edit when an earlier delete settles later: %j`,
-  async ({ truncate, insertAccepted }) => {
+  `retains accepted delete and dependent edit across settlement orders: %j`,
+  async ({ truncate, editSettlesFirst, insertAccepted }) => {
     const replacement: OptimisticStep = {
       type: `sync`,
       rows: [],
@@ -2882,18 +2891,34 @@ it.each(
       immediate: false,
       copies: 1,
     }
-    await runOptimisticHistory(
+    const acceptedSettlements: Array<OptimisticStep> = editSettlesFirst
+      ? [
+          { type: `settle`, slot: 2, success: true, cascade: false },
+          { type: `settle`, slot: 0, success: true, cascade: false },
+        ]
+      : [
+          { type: `settle`, slot: 0, success: true, cascade: false },
+          { type: `settle`, slot: 1, success: true, cascade: false },
+        ]
+    const counts = await runOptimisticHistory(
       [{ id: 1, a: 0, b: 0, c: 0 }],
       [
         { type: `delete`, key: 1, optimistic: true },
         { type: `edit`, key: 1, fields: { c: 0 }, optimistic: true },
         { type: `edit`, key: 1, fields: { c: 1 }, optimistic: true },
-        { type: `settle`, slot: 2, success: true, cascade: false },
-        { type: `settle`, slot: 0, success: true, cascade: false },
+        ...acceptedSettlements,
         ...(truncate ? [replacement] : []),
         { type: `settle`, slot: 0, success: insertAccepted, cascade: false },
       ],
     )
+    expect(counts).toMatchObject({
+      edits: 3,
+      deletes: 1,
+      settlements: 3,
+      dependencies: 1,
+      failures: Number(!insertAccepted),
+      replacements: Number(truncate),
+    })
   },
 )
 fcTest.prop([optimisticHistory], { numRuns: oracleRuns(100), seed: 86103 })(
