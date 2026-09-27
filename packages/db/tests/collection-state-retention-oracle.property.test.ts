@@ -1185,6 +1185,7 @@ type ParkedSyncHarness = {
 async function withParkedSync(
   initialRows: ReadonlyArray<RetainedRow>,
   run: (harness: ParkedSyncHarness) => Promise<void>,
+  rowUpdateMode: `partial` | `full` = `full`,
 ): Promise<void> {
   let sync!: ParkedSyncHarness[`sync`]
   let release!: () => void
@@ -1195,7 +1196,7 @@ async function withParkedSync(
     getKey: (row) => row.id,
     startSync: true,
     sync: {
-      rowUpdateMode: `full`,
+      rowUpdateMode,
       sync: (actions) => {
         sync = actions
         actions.begin()
@@ -1481,6 +1482,407 @@ it(`keeps an invalidated active transaction addressable until commit`, async () 
         publicValue: 0,
       })
     },
+  )
+})
+
+it.each([`committed`, `open`] as const)(
+  `cancels a %s update whose queued source insert is canceled`,
+  async (updatePhase) => {
+    // The update was admitted with a source row supplied by the queued insert.
+    // Canceling that insert cancels its dependent update, rather than turning
+    // the update into an unrelated missing-key upsert.
+    await withParkedSync(
+      [],
+      async ({ collection, sync, releasePersistence }) => {
+        const insertController = new AbortController()
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+        const insertReceipt = sync.commit(insertController.signal)
+        if (insertReceipt === true) throw new Error(`insert was not queued`)
+
+        sync.begin()
+        sync.write({ type: `update`, value: { id: 1, value: 2 } })
+        let updateReceipt: true | Promise<void> | undefined
+        if (updatePhase === `committed`) {
+          updateReceipt = sync.commit()
+          if (updateReceipt === true) throw new Error(`update was not queued`)
+        }
+
+        insertController.abort()
+        if (updatePhase === `open`) {
+          updateReceipt = sync.commit()
+          if (updateReceipt === true) throw new Error(`update was not queued`)
+        }
+        const pendingUpdateReceipt = updateReceipt
+        if (pendingUpdateReceipt === undefined || pendingUpdateReceipt === true)
+          throw new Error(`missing queued update receipt`)
+
+        await releasePersistence()
+        const [insertOutcome, updateOutcome] = await Promise.all([
+          insertReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+          pendingUpdateReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+        ])
+        expect({
+          insertOutcome,
+          updateOutcome,
+          retainedRow: collection._state.syncedData.get(1),
+          publicRow: collection.get(1),
+        }).toEqual({
+          insertOutcome: `aborted`,
+          updateOutcome: `aborted`,
+          retainedRow: undefined,
+          publicRow: undefined,
+        })
+
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 3 } })
+        expect(sync.commit()).toBe(true)
+        expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 3 })
+        expect(collection.get(1)?.value).toBe(3)
+      },
+      `partial`,
+    )
+  },
+)
+
+it.each([
+  { label: `no source row`, base: `absent` },
+  { label: `a same-transaction delete`, base: `deleted` },
+  { label: `a same-transaction truncate`, base: `truncated` },
+] as const)(
+  `keeps an independent partial upsert after $label`,
+  async ({ base }) => {
+    await withParkedSync(
+      base === `absent` ? [] : [{ id: 1, value: 0 }],
+      async ({ collection, sync, releasePersistence }) => {
+        sync.begin()
+        if (base === `deleted`) sync.write({ type: `delete`, key: 1 })
+        if (base === `truncated`) sync.truncate()
+        sync.write({ type: `update`, value: { id: 1, value: 2 } })
+        const receipt = sync.commit()
+        await releasePersistence()
+        if (receipt !== true) await receipt
+        expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+        expect(collection.get(1)?.value).toBe(2)
+      },
+      `partial`,
+    )
+  },
+)
+
+it(`applies a partial update after an insert in the same sync transaction`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      const receipt = sync.commit()
+      if (receipt === true) throw new Error(`sync was not queued`)
+      await releasePersistence()
+      await receipt
+      expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+      expect(collection.get(1)?.value).toBe(2)
+    },
+    `partial`,
+  )
+})
+
+/**
+ * A queued partial update depends on the row it observed at admission. If that
+ * row came only from canceled queued work, the update's whole transaction is
+ * canceled. An absent-row upsert and a full-row update remain independent.
+ *
+ * The reference below uses only the declared source history: a retained row
+ * survives cancellation, while a queued insert or upsert does not. It does
+ * not inspect the collection's pending projection or operation classifier.
+ * The grammar varies source ownership, update mode, cancellation timing,
+ * receipt phase, and row values. The driver parks adapter transactions behind
+ * an unrelated persisting mutation; the refinement compares both receipts,
+ * retained source rows, and public rows after the drain. It does not claim
+ * arbitrary nested begin/commit behavior or persistence-wrapper replay.
+ */
+type QueuedUpdateDependencyScenario = {
+  source: `queued-insert` | `queued-upsert` | `retained`
+  updateMode: `partial` | `full`
+  cancelSource: boolean
+  updatePhase: `committed` | `open`
+  sourceValue: number
+  updateValue: number
+}
+
+const queuedUpdateDependencyScenario = fc.record({
+  source: fc.constantFrom(
+    `queued-insert` as const,
+    `queued-upsert` as const,
+    `retained` as const,
+  ),
+  updateMode: fc.constantFrom(`partial` as const, `full` as const),
+  cancelSource: fc.boolean(),
+  updatePhase: fc.constantFrom(`committed` as const, `open` as const),
+  sourceValue: fc.integer({ min: -2, max: 2 }),
+  updateValue: fc.integer({ min: -2, max: 2 }),
+})
+
+async function runQueuedUpdateDependencyScenario(
+  scenario: QueuedUpdateDependencyScenario,
+): Promise<void> {
+  const sourceRow = {
+    id: 1,
+    value: scenario.sourceValue,
+    stable: `base`,
+  }
+  const losesRequiredRow =
+    scenario.cancelSource &&
+    scenario.source !== `retained` &&
+    scenario.updateMode === `partial`
+  const expectedRow = losesRequiredRow
+    ? undefined
+    : {
+        id: 1,
+        value: scenario.updateValue,
+        stable: scenario.updateMode === `full` ? `replacement` : `base`,
+      }
+
+  await withParkedSync(
+    scenario.source === `retained` ? [sourceRow] : [],
+    async ({ collection, sync, releasePersistence }) => {
+      const sourceController = new AbortController()
+      sync.begin()
+      sync.write({
+        type: scenario.source === `queued-insert` ? `insert` : `update`,
+        value: sourceRow,
+      })
+      const sourceReceipt = sync.commit(sourceController.signal)
+      if (sourceReceipt === true) throw new Error(`source was not queued`)
+
+      sync.begin()
+      const updateRow =
+        scenario.updateMode === `full`
+          ? { id: 1, value: scenario.updateValue, stable: `replacement` }
+          : { id: 1, value: scenario.updateValue }
+      sync.write({ type: `update`, value: updateRow })
+      let updateReceipt: true | Promise<void> | undefined
+      if (scenario.updatePhase === `committed`) {
+        updateReceipt = sync.commit()
+        if (updateReceipt === true) throw new Error(`update was not queued`)
+      }
+
+      if (scenario.cancelSource) sourceController.abort()
+      if (scenario.updatePhase === `open`) {
+        updateReceipt = sync.commit()
+        if (updateReceipt === true) throw new Error(`update was not queued`)
+      }
+      const pendingUpdateReceipt = updateReceipt
+      if (pendingUpdateReceipt === undefined || pendingUpdateReceipt === true)
+        throw new Error(`missing queued update receipt`)
+
+      await releasePersistence()
+      const [sourceOutcome, updateOutcome] = await Promise.all([
+        sourceReceipt.then(
+          () => `fulfilled` as const,
+          (error: unknown) =>
+            error instanceof SyncTransactionAbortedError
+              ? (`aborted` as const)
+              : (`other-error` as const),
+        ),
+        pendingUpdateReceipt.then(
+          () => `fulfilled` as const,
+          (error: unknown) =>
+            error instanceof SyncTransactionAbortedError
+              ? (`aborted` as const)
+              : (`other-error` as const),
+        ),
+      ])
+      const publicRow = collection.get(1)
+
+      expect({
+        sourceOutcome,
+        updateOutcome,
+        retainedRow: collection._state.syncedData.get(1),
+        publicRow:
+          publicRow === undefined
+            ? undefined
+            : {
+                id: publicRow.id,
+                value: publicRow.value,
+                stable: `stable` in publicRow ? publicRow.stable : undefined,
+              },
+      }).toEqual({
+        sourceOutcome: scenario.cancelSource ? `aborted` : `fulfilled`,
+        updateOutcome: losesRequiredRow ? `aborted` : `fulfilled`,
+        retainedRow: expectedRow,
+        publicRow: expectedRow,
+      })
+    },
+    scenario.updateMode,
+  )
+}
+
+it(`covers the queued-update dependency grammar's source, mode, cancel, and receipt cuts`, async () => {
+  for (const source of [
+    `queued-insert`,
+    `queued-upsert`,
+    `retained`,
+  ] as const) {
+    for (const updateMode of [`partial`, `full`] as const) {
+      for (const cancelSource of [false, true]) {
+        for (const updatePhase of [`committed`, `open`] as const) {
+          await runQueuedUpdateDependencyScenario({
+            source,
+            updateMode,
+            cancelSource,
+            updatePhase,
+            sourceValue: 1,
+            updateValue: 2,
+          })
+        }
+      }
+    }
+  }
+})
+
+fcTest.prop([queuedUpdateDependencyScenario], {
+  numRuns: oracleRuns(100),
+  seed: 190_201,
+})(
+  `preserves queued update dependencies with a fixed seed`,
+  async (scenario) => {
+    await runQueuedUpdateDependencyScenario(scenario)
+  },
+)
+fcTest.prop(
+  [queuedUpdateDependencyScenario],
+  oraclePropertyOptions(100, `collection-state.queued-update-dependency`),
+)(
+  `preserves queued update dependencies with a random or replayed seed`,
+  async (scenario) => {
+    await runQueuedUpdateDependencyScenario(scenario)
+  },
+)
+
+it(`cancels a dependent transaction atomically and its downstream update`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      const sourceController = new AbortController()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const sourceReceipt = sync.commit(sourceController.signal)
+      if (sourceReceipt === true) throw new Error(`source was not queued`)
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      sync.write({ type: `insert`, value: { id: 3, value: 3 } })
+      const dependentReceipt = sync.commit()
+      if (dependentReceipt === true) throw new Error(`dependent was not queued`)
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 3, value: 4 } })
+      const downstreamReceipt = sync.commit()
+      if (downstreamReceipt === true)
+        throw new Error(`downstream was not queued`)
+
+      sourceController.abort()
+      await releasePersistence()
+      const outcomes = await Promise.all(
+        [sourceReceipt, dependentReceipt, downstreamReceipt].map((receipt) =>
+          receipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+        ),
+      )
+      expect(outcomes).toEqual([`aborted`, `aborted`, `aborted`])
+      expect(collection._state.syncedData.has(1)).toBe(false)
+      expect(collection._state.syncedData.has(3)).toBe(false)
+      expect(collection.has(1)).toBe(false)
+      expect(collection.has(3)).toBe(false)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 5 } })
+      sync.write({ type: `insert`, value: { id: 3, value: 6 } })
+      expect(sync.commit()).toBe(true)
+      expect(collection._state.syncedData.get(1)?.value).toBe(5)
+      expect(collection._state.syncedData.get(3)?.value).toBe(6)
+    },
+    `partial`,
+  )
+})
+
+it(`keeps an update when a surviving insert echo replaces its canceled base`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      const firstController = new AbortController()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const firstReceipt = sync.commit(firstController.signal)
+      if (firstReceipt === true) throw new Error(`first insert was not queued`)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const echoReceipt = sync.commit()
+      if (echoReceipt === true) throw new Error(`echo was not queued`)
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      const updateReceipt = sync.commit()
+      if (updateReceipt === true) throw new Error(`update was not queued`)
+
+      firstController.abort()
+      await releasePersistence()
+      await expect(firstReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await Promise.all([echoReceipt, updateReceipt])
+      expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+      expect(collection.get(1)?.value).toBe(2)
+    },
+    `partial`,
+  )
+})
+
+it(`keeps an update begun after an earlier insert was canceled as an upsert`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      const firstController = new AbortController()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const firstReceipt = sync.commit(firstController.signal)
+      if (firstReceipt === true) throw new Error(`first insert was not queued`)
+
+      firstController.abort()
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      const updateReceipt = sync.commit()
+      if (updateReceipt === true) throw new Error(`update was not queued`)
+
+      await releasePersistence()
+      await expect(firstReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await updateReceipt
+      expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+      expect(collection.get(1)?.value).toBe(2)
+    },
+    `partial`,
   )
 })
 

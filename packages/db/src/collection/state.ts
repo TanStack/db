@@ -30,6 +30,8 @@ type PendingSyncOperation<
 > = OptimisticChangeMessage<T, TKey> & {
   /** Preserve adapter intent when queue changes require reclassification. */
   originalSyncType?: `insert`
+  /** A partial update admitted against a row must not become an upsert. */
+  admittedAgainstExistingRow?: boolean
 }
 
 type PendingSyncedKeyState<T extends object> = {
@@ -1089,6 +1091,16 @@ export class CollectionStateManager<
   stagePendingSyncOperation(
     operation: PendingSyncOperation<TOutput, TKey>,
   ): void {
+    if (
+      operation.type === `update` &&
+      operation.originalSyncType !== `insert` &&
+      this.config.sync.rowUpdateMode !== `full`
+    ) {
+      operation.admittedAgainstExistingRow = this.getProjectedSyncedKeyState(
+        this.pendingSyncedProjection,
+        operation.key as TKey,
+      ).exists
+    }
     this.applyPendingSyncOperation(this.pendingSyncedProjection, operation)
   }
 
@@ -1169,6 +1181,7 @@ export class CollectionStateManager<
       }
 
       let invalidKey: TKey | undefined
+      let invalidReason: Error | undefined
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
         if (!previousStates.has(key)) {
@@ -1189,6 +1202,16 @@ export class CollectionStateManager<
           }
           operation.type = disposition
         }
+        if (
+          operation.admittedAgainstExistingRow === true &&
+          !this.getProjectedSyncedKeyState(projection, key).exists
+        ) {
+          // Cancellation must not turn an admitted dependent update into an
+          // independent missing-key upsert during queue replay.
+          invalidKey = key
+          invalidReason = new SyncTransactionAbortedError()
+          break
+        }
         this.applyPendingSyncOperation(projection, operation)
       }
 
@@ -1203,6 +1226,7 @@ export class CollectionStateManager<
         }
         projection.truncated = wasTruncated
         const error =
+          invalidReason ??
           transaction.duplicateKeyError?.(invalidKey) ??
           new SyncTransactionAbortedError()
         if (transaction.committed) {

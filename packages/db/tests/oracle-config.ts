@@ -36,6 +36,7 @@ const staticOracleProperties = [
   `sqlite-resume.startup-generation`,
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
+  `collection-state.queued-update-dependency`,
   `collection-state.change-event-history`,
   `collection-state.optimistic-history`,
   `collection-state.truncate-capture-ownership`,
