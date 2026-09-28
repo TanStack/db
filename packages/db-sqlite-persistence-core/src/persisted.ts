@@ -464,6 +464,8 @@ type SingleProcessRemoteSubsetAcquisition = {
 
 export interface SQLiteDriver {
   readonly [SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY]?: object
+  /** Host-specific limit on bound parameters in one query, when lower than SQLite's. */
+  readonly maxBoundParameters?: number
   exec: (sql: string) => Promise<void>
   query: <T>(
     sql: string,
