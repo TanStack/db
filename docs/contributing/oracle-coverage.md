@@ -140,8 +140,12 @@ The [live Electric immediate-reload witness](../../packages/browser-db-sqlite-pe
 checks one Chromium/OPFS history: an `onInsert` handler receives PostgreSQL
 transaction evidence, `awaitTxId` and the optimistic transaction settle while
 the source row's adapter write is held, and a hard page close is followed by
-recovery of the exact public and durable row from live Electric. It does not
-prove Windows/Edge behavior, offline recovery, or a durable-acknowledgment
+an empty raw OPFS snapshot before the recovering Collection or Electric starts.
+After release, the witness checks the exact public and durable row from live
+Electric and records that the reopened page sent no user-insert request. Public
+rows are polled before durable snapshots to avoid a full OPFS read on every
+pre-publication tick. This bounded history does not prove Windows/Edge behavior,
+offline recovery, arbitrary later re-inserts, or a durable-acknowledgment
 contract for `awaitTxId`.
 
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)

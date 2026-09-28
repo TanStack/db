@@ -16,7 +16,7 @@ import type { ElectricCollectionUtils } from '../../electric-db-collection/src/e
 type Item = { id: string; label: string }
 
 export type ImmediateReloadObservation = {
-  phase: `starting` | `ready` | `failed`
+  phase: `starting` | `before-source-start` | `ready` | `failed`
   failure?: string
   status: string
   insertAcknowledged: boolean
@@ -25,10 +25,17 @@ export type ImmediateReloadObservation = {
   durableRows: Array<Item>
 }
 
+export type ImmediateReloadPublicObservation = Omit<
+  ImmediateReloadObservation,
+  `durableRows`
+>
+
 type ImmediateReloadProbe = {
   phase: () => ImmediateReloadObservation[`phase`]
   insert: (row: Item) => Promise<void>
+  observePublic: () => ImmediateReloadPublicObservation
   observe: () => Promise<ImmediateReloadObservation>
+  releaseRecoveryStart: () => void
   cleanup: () => Promise<Array<string>>
 }
 
@@ -71,6 +78,7 @@ if (mode !== `hold` && mode !== `plain`) {
 }
 
 const releasePersistence = gate()
+const recoveryStart = gate()
 let phase: ImmediateReloadObservation[`phase`] = `starting`
 let failure: string | undefined
 let insertAcknowledged = false
@@ -83,18 +91,27 @@ let insert: ImmediateReloadProbe[`insert`] = () =>
 let cleaned = false
 const cleanupTasks: Array<() => Promise<void> | void> = []
 
+const observePublic = (): ImmediateReloadPublicObservation => ({
+  phase,
+  ...(failure ? { failure } : {}),
+  status: status(),
+  insertAcknowledged,
+  sourcePersistenceHeld,
+  publicRows: publicRows(),
+})
+
 window.__electricImmediateReloadProbe = {
   phase: () => phase,
   insert: (row) => insert(row),
+  observePublic,
   observe: async () => ({
-    phase,
-    ...(failure ? { failure } : {}),
-    status: status(),
-    insertAcknowledged,
-    sourcePersistenceHeld,
-    publicRows: publicRows(),
+    ...observePublic(),
     durableRows: await durableRows(),
   }),
+  releaseRecoveryStart: () => {
+    if (mode !== `plain`) throw new Error(`Recovery start is not held`)
+    recoveryStart.open()
+  },
   cleanup: async () => {
     if (cleaned) return []
     cleaned = true
@@ -158,26 +175,33 @@ try {
   })
 
   const adapter = options.persistence.adapter
-  const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
-  adapter.applyCommittedTx = async (id, tx) => {
-    if (
-      mode === `hold` &&
-      tx.mutations.some((mutation) => mutation.type !== `delete`)
-    ) {
-      sourcePersistenceHeld = true
-      await releasePersistence.promise
+  durableRows = async () => {
+    const snapshot = await adapter.loadResumeSnapshot(collectionId)
+    return sortedRows(snapshot.rows.map(({ value }) => value as Item))
+  }
+  if (mode === `hold`) {
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+    adapter.applyCommittedTx = async (id, tx) => {
+      if (tx.mutations.some((mutation) => mutation.type !== `delete`)) {
+        sourcePersistenceHeld = true
+        await releasePersistence.promise
+      }
+      await applyCommittedTx(id, tx)
     }
-    await applyCommittedTx(id, tx)
+  }
+
+  // The reopened page reads raw OPFS before creating a Collection or starting
+  // Electric. The test then explicitly releases this fixture-only boundary.
+  if (mode === `plain`) {
+    phase = `before-source-start`
+    await recoveryStart.promise
+    phase = `starting`
   }
 
   const collection = createCollection(options)
   cleanupTasks.unshift(() => collection.cleanup())
   status = () => collection.status
   publicRows = () => sortedRows(collection.values())
-  durableRows = async () => {
-    const snapshot = await adapter.loadResumeSnapshot(collectionId)
-    return sortedRows(snapshot.rows.map(({ value }) => value as Item))
-  }
   insert = async (row) => {
     try {
       const transaction = collection.insert(row)

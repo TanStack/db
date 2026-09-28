@@ -8,9 +8,25 @@
 import { expect, test } from '@playwright/test'
 import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import type { Page } from '@playwright/test'
-import type { ImmediateReloadObservation } from './electric-immediate-reload.opfs'
+import type {
+  ImmediateReloadObservation,
+  ImmediateReloadPublicObservation,
+} from './electric-immediate-reload.opfs'
 
 const pageErrors = new WeakMap<Page, Array<string>>()
+
+function recordInsertRequests(page: Page): Array<string> {
+  const requests: Array<string> = []
+  page.on(`request`, (request) => {
+    if (
+      request.method() === `POST` &&
+      new URL(request.url()).pathname === `/__issue1456/insert`
+    ) {
+      requests.push(request.url())
+    }
+  })
+  return requests
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -36,7 +52,7 @@ async function openProbe(page: Page, url: string): Promise<void> {
   pageErrors.set(page, errors)
   page.on(`pageerror`, (error) => errors.push(error.message))
   try {
-    await page.goto(url)
+    await page.goto(url, { waitUntil: `commit` })
     await page.waitForFunction(
       () =>
         window.__electricImmediateReloadProbe !== undefined &&
@@ -61,23 +77,69 @@ async function observe(page: Page): Promise<ImmediateReloadObservation> {
   return page.evaluate(() => window.__electricImmediateReloadProbe!.observe())
 }
 
+async function observePublic(
+  page: Page,
+): Promise<ImmediateReloadPublicObservation> {
+  return page.evaluate(() =>
+    window.__electricImmediateReloadProbe!.observePublic(),
+  )
+}
+
+function expectedPublicObservation(
+  expected: ImmediateReloadObservation,
+): ImmediateReloadPublicObservation {
+  return {
+    phase: expected.phase,
+    ...(expected.failure !== undefined ? { failure: expected.failure } : {}),
+    status: expected.status,
+    insertAcknowledged: expected.insertAcknowledged,
+    sourcePersistenceHeld: expected.sourcePersistenceHeld,
+    publicRows: expected.publicRows,
+  }
+}
+
+async function pollExpectedObservation(
+  expected: ImmediateReloadObservation,
+  readPublic: () => Promise<ImmediateReloadPublicObservation>,
+  readFull: () => Promise<ImmediateReloadObservation>,
+  timeout = 60_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const state = await readPublic()
+        if (state.phase === `failed`) {
+          throw new Error(state.failure || `Probe failed without a message`)
+        }
+        return state
+      },
+      { timeout },
+    )
+    .toEqual(expectedPublicObservation(expected))
+  await expect
+    .poll(
+      async () => {
+        const state = await readFull()
+        if (state.phase === `failed`) {
+          throw new Error(state.failure || `Probe failed without a message`)
+        }
+        return state
+      },
+      { timeout },
+    )
+    .toEqual(expected)
+}
+
 async function expectObservation(
   page: Page,
   expected: ImmediateReloadObservation,
 ): Promise<void> {
   try {
-    await expect
-      .poll(
-        async () => {
-          const state = await observe(page)
-          if (state.phase === `failed`) {
-            throw new Error(state.failure || `Probe failed without a message`)
-          }
-          return state
-        },
-        { timeout: 60_000 },
-      )
-      .toEqual(expected)
+    await pollExpectedObservation(
+      expected,
+      () => observePublic(page),
+      () => observe(page),
+    )
   } catch (error) {
     throw new Error(
       `${errorMessage(error)}\ndiagnostic: ${await diagnostic(page)}`,
@@ -184,7 +246,20 @@ test(`an Electric-acknowledged insert survives an immediate reload before its OP
     await first.close()
     const reopened = await context.newPage()
     pages.push(reopened)
+    const reopenedInsertRequests = recordInsertRequests(reopened)
     await openProbe(reopened, urlFor(`plain`))
+    const beforeRecovery = await observe(reopened)
+    expect(beforeRecovery).toEqual({
+      phase: `before-source-start`,
+      status: `unavailable`,
+      insertAcknowledged: false,
+      sourcePersistenceHeld: false,
+      publicRows: [],
+      durableRows: [],
+    })
+    await reopened.evaluate(() =>
+      window.__electricImmediateReloadProbe!.releaseRecoveryStart(),
+    )
     await expectObservation(reopened, {
       phase: `ready`,
       status: `ready`,
@@ -193,6 +268,7 @@ test(`an Electric-acknowledged insert survives an immediate reload before its OP
       publicRows: [row],
       durableRows: [row],
     })
+    expect(reopenedInsertRequests).toEqual([])
     expect(pageErrors.get(reopened)).toEqual([])
   } catch (error) {
     primaryFailure = error
@@ -238,4 +314,128 @@ test(`an Electric-acknowledged insert survives an immediate reload before its OP
   }
   if (primaryFailure) throw primaryFailure
   expect(cleanupFailures).toEqual([])
+})
+
+test(`records only insert posts on the observed page`, () => {
+  let onRequest:
+    | ((request: { method: () => string; url: () => string }) => void)
+    | undefined
+  const page = {
+    on: (
+      event: string,
+      listener: (request: { method: () => string; url: () => string }) => void,
+    ) => {
+      if (event === `request`) onRequest = listener
+    },
+  } as unknown as Page
+  const requests = recordInsertRequests(page)
+  const emit = (method: string, url: string) => {
+    onRequest!({ method: () => method, url: () => url })
+  }
+
+  emit(`GET`, `http://example.test/__issue1456/insert`)
+  emit(`POST`, `http://example.test/unrelated`)
+  emit(`POST`, `http://example.test/__issue1456/insert`)
+  expect(requests).toEqual([`http://example.test/__issue1456/insert`])
+})
+
+test(`waits for public rows before reading and then checks durable rows`, async () => {
+  const row = { id: `one`, label: `inserted on server` }
+  const expected: ImmediateReloadObservation = {
+    phase: `ready`,
+    status: `ready`,
+    insertAcknowledged: false,
+    sourcePersistenceHeld: false,
+    publicRows: [row],
+    durableRows: [row],
+  }
+  let publicReads = 0
+  let fullSnapshotReads = 0
+
+  await pollExpectedObservation(
+    expected,
+    () => {
+      publicReads++
+      return Promise.resolve({
+        ...expectedPublicObservation(expected),
+        publicRows: publicReads < 3 ? [] : [row],
+      })
+    },
+    () => {
+      fullSnapshotReads++
+      return Promise.resolve({
+        ...expected,
+        durableRows: fullSnapshotReads < 2 ? [] : [row],
+      })
+    },
+    5_000,
+  )
+  expect(publicReads).toBe(3)
+  expect(fullSnapshotReads).toBe(2)
+})
+
+test(`reports a failed probe even when its error message is empty`, async () => {
+  const page = {
+    on: () => undefined,
+    goto: () => Promise.resolve(),
+    waitForFunction: () => Promise.resolve(),
+    evaluate: () => Promise.resolve({ phase: `failed`, failure: `` }),
+    isClosed: () => false,
+  } as unknown as Page
+
+  const failure: unknown = await openProbe(page, `/unused`).then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  expect(String(failure)).toContain(`Probe failed without a message`)
+})
+
+test(`reports terminal failure without polling for durable rows`, async () => {
+  test.setTimeout(10_000)
+  let observations = 0
+  const page = {
+    isClosed: () => false,
+    evaluate: () => {
+      observations++
+      return Promise.resolve({ phase: `failed`, failure: `source rejected` })
+    },
+  } as unknown as Page
+
+  const failure: unknown = await expectObservation(page, {
+    phase: `ready`,
+    status: `ready`,
+    insertAcknowledged: true,
+    sourcePersistenceHeld: true,
+    publicRows: [],
+    durableRows: [],
+  }).then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  expect(String(failure)).toContain(`source rejected`)
+  expect(observations).toBe(2)
+})
+
+test(`includes page errors that occur after probe startup`, async () => {
+  let onPageError: ((error: Error) => void) | undefined
+  const page = {
+    on: (event: string, listener: (error: Error) => void) => {
+      if (event === `pageerror`) onPageError = listener
+    },
+    goto: () => Promise.resolve(),
+    waitForFunction: () => Promise.resolve(),
+    evaluate: () => Promise.resolve({ phase: `ready`, status: `ready` }),
+    isClosed: () => false,
+  } as unknown as Page
+
+  await openProbe(page, `/unused`)
+  expect(onPageError).toBeDefined()
+  onPageError!(new Error(`late page failure`))
+  expect(await diagnostic(page)).toContain(`late page failure`)
+})
+
+test(`retains page errors when a diagnostic sees a closed page`, async () => {
+  const page = { isClosed: () => true } as unknown as Page
+  pageErrors.set(page, [`page closed after failure`])
+  expect(await diagnostic(page)).toContain(`page closed after failure`)
 })
