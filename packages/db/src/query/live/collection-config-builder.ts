@@ -1309,6 +1309,7 @@ function accumulateChanges<T>(
     orderByIndex,
   }
   if (multiplicity < 0) {
+    // Keep the first retraction so order-only moves compare with the last publication.
     if (changes.deletes === 0) {
       changes.previousValue = value
       changes.previousOrderByIndex = orderByIndex
