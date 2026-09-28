@@ -1076,7 +1076,7 @@ Paced mutations provide fine-grained control over **when and how** mutations are
 Powered by [TanStack Pacer](https://github.com/TanStack/pacer), paced mutations are ideal for scenarios like:
 - **Auto-save forms** that wait for the user to stop typing
 - **Slider controls** that need smooth updates without overwhelming the backend
-- **Sequential workflows** where order matters and every mutation must persist
+- **Sequential workflows** where admitted mutations must be attempted in order
 
 ### Key Design
 
@@ -1084,7 +1084,7 @@ The fundamental difference between strategies is how they handle transactions:
 
 **Debounce/Throttle**: Only one pending transaction (collecting mutations) and one persisting transaction (writing to backend) at a time. Multiple rapid mutations automatically merge together into a single transaction.
 
-**Queue**: Each mutation creates a separate transaction, guaranteed to run in the order they're made (FIFO by default, configurable to LIFO). All mutations are guaranteed to persist.
+**Queue**: Each mutation creates a separate transaction. Admitted mutations run in queue order (FIFO by default, configurable to LIFO). If `maxSize` is set and the waiting queue is full, the returned transaction fails and its optimistic state rolls back.
 
 ### Available Strategies
 
@@ -1092,7 +1092,7 @@ The fundamental difference between strategies is how they handle transactions:
 |----------|----------|----------|
 | **`debounceStrategy`** | Wait for inactivity before persisting. Only final state is saved. | Auto-save forms, search-as-you-type |
 | **`throttleStrategy`** | Ensure minimum spacing between executions. Mutations between executions are merged. | Sliders, progress updates, analytics |
-| **`queueStrategy`** | Each mutation becomes a separate transaction, processed sequentially in order (FIFO by default, configurable to LIFO). All mutations guaranteed to persist. | Sequential workflows, file uploads, rate-limited APIs |
+| **`queueStrategy`** | Each mutation becomes a separate transaction. Admitted mutations are attempted sequentially in queue order (FIFO by default, configurable to LIFO). | Sequential workflows, file uploads, rate-limited APIs |
 
 ### Debounce Strategy
 
@@ -1180,11 +1180,12 @@ function VolumeSlider() {
 **Key characteristics**:
 - Guarantees minimum spacing between persists
 - Can execute on leading edge, trailing edge, or both
+- With `leading: false, trailing: true`, the first write waits until the first trailing edge
 - Mutations between executions are merged
 
 ### Queue Strategy
 
-The queue strategy creates a separate transaction for each mutation and processes them sequentially in order. Unlike debounce/throttle which may drop intermediate mutations, **every mutation is guaranteed to be attempted**, making it ideal for workflows where you can't skip any operations.
+The queue strategy creates a separate transaction for each mutation and processes admitted transactions sequentially in queue order. Unlike debounce/throttle, **every admitted mutation is attempted**. When `maxSize` is set, overflow is rejected at admission rather than silently dropped.
 
 ```tsx
 import { usePacedMutations, queueStrategy } from "@tanstack/react-db"
@@ -1227,12 +1228,14 @@ function FileUploader() {
 - Each mutation becomes its own transaction
 - Processes sequentially in order (FIFO by default)
 - Can configure to LIFO by setting `getItemsFrom: 'back'`
-- All mutations guaranteed to be attempted (unlike debounce/throttle which may skip intermediate mutations)
+- Every admitted mutation is attempted (unlike debounce/throttle which may merge intermediate mutations)
+- `maxSize` limits waiting items; overflow fails the returned transaction and rolls back its optimistic state
 - Waits for each transaction to complete before starting the next
 
 **Error handling**:
 - If a mutation fails, **it is not automatically retried** - the transaction transitions to "failed" state
 - Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
+- Queue overflow rejects `transaction.isPersisted.promise` with `QueueCapacityExceededError`
 - **Subsequent mutations continue processing** - a single failure does not block the queue
 - Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
 - To implement retry logic, see [Retry Behavior](#retry-behavior)

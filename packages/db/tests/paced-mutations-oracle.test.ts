@@ -23,9 +23,11 @@ import type { Transaction } from '../src/transactions'
  * waits are positive. The clock only advances.
  * The final advance is the observation cut: persistence calls retain their
  * recorded times, and returned transaction states must agree with the model.
- * It settles every accepted call. Queue capacity/drop behavior, omitted edge
- * defaults, options-object mutation, cleanup, and failed persistence await a
- * separate contract decision or existing lifecycle tests.
+ * It settles every admitted call. Queue capacity counts waiting items; an
+ * overflow rejects its transaction and removes its optimistic row. An explicit
+ * non-leading throttle waits for its first trailing edge. Strategy factories
+ * leave caller-owned options unchanged. Omitted edge defaults and failed
+ * persistence remain outside this owner's finite grammar.
  *
  * Model `pendingIds` combines the production active optimistic transaction's
  * mutations. Model `ready` is an ordered list of queue calls, not pacer-lite's
@@ -153,6 +155,34 @@ function throttleStarts(actions: Array<Action>, wait: number): Array<Start> {
   return starts
 }
 
+// A non-leading window starts on the first call after an idle edge. Calls in
+// that window share the trailing transaction, even if calls continue steadily.
+function nonLeadingThrottleStarts(
+  actions: Array<Action>,
+  wait: number,
+): Array<Start> {
+  let now = 0
+  let due: number | undefined
+  let pendingIds: Array<number> = []
+  const starts: Array<Start> = []
+  for (const action of actions) {
+    if (action.kind === `mutate`) {
+      pendingIds.push(action.id)
+      due ??= now + wait
+      continue
+    }
+    const target = now + action.ms
+    while (due !== undefined && due <= target) {
+      now = due
+      starts.push({ at: now, ids: pendingIds })
+      pendingIds = []
+      due = undefined
+    }
+    now = target
+  }
+  return starts
+}
+
 async function createReadyCollection() {
   const collection = createCollection(
     mockSyncCollectionOptionsNoInitialState<{ id: number }>({
@@ -172,7 +202,7 @@ async function createReadyCollection() {
 // every resource even when an earlier cleanup step throws.
 async function withCleanup<T>(
   strategy: Strategy,
-  collection: Awaited<ReturnType<typeof createReadyCollection>>,
+  collection: { cleanup: () => Promise<void> },
   run: () => Promise<T>,
   release?: () => Promise<void>,
 ): Promise<T> {
@@ -211,6 +241,25 @@ async function withCleanup<T>(
     throw new AggregateError(cleanupErrors, `Oracle cleanup failed`)
   }
   return outcome.value
+}
+
+function observeReceipt<T extends object>(transaction: Transaction<T>) {
+  const receipt: {
+    outcome: `pending` | `fulfilled` | `rejected`
+    returnedSame?: boolean
+    error?: unknown
+  } = { outcome: `pending` }
+  void transaction.isPersisted.promise.then(
+    (resolved) => {
+      receipt.outcome = `fulfilled`
+      receipt.returnedSame = resolved === transaction
+    },
+    (error: unknown) => {
+      receipt.outcome = `rejected`
+      receipt.error = error
+    },
+  )
+  return receipt
 }
 
 type Observation = {
@@ -340,6 +389,15 @@ const throttleActions: Array<Action> = [
   { kind: `advance`, ms: 10 },
 ]
 
+const nonLeadingThrottleActions: Array<Action> = [
+  { kind: `mutate`, id: 1 },
+  { kind: `advance`, ms: 4 },
+  { kind: `mutate`, id: 2 },
+  { kind: `advance`, ms: 6 },
+  { kind: `mutate`, id: 3 },
+  { kind: `advance`, ms: 10 },
+]
+
 const cases: Array<Case> = [
   ...([`front`, `back`] as const).flatMap((addTo) =>
     ([`front`, `back`] as const).map((takeFrom) => ({
@@ -373,6 +431,14 @@ const cases: Array<Case> = [
     sameTransaction: [[1], [2, 3], [4]],
     strategy: () =>
       throttleStrategy({ wait: 10, leading: true, trailing: true }),
+  },
+  {
+    name: `explicit non-leading throttle waits for each trailing edge`,
+    actions: nonLeadingThrottleActions,
+    expected: nonLeadingThrottleStarts(nonLeadingThrottleActions, 10),
+    sameTransaction: [[1, 2], [3]],
+    strategy: () =>
+      throttleStrategy({ wait: 10, leading: false, trailing: true }),
   },
 ]
 
@@ -464,13 +530,198 @@ describe(`paced mutation timeline oracle`, () => {
     )
   })
 
+  for (const { maxSize, wait, expectedStarts, expectedStates } of [
+    {
+      maxSize: 0,
+      wait: 0,
+      expectedStarts: [],
+      expectedStates: [`failed`, `failed`, `failed`],
+    },
+    {
+      maxSize: 1,
+      wait: 10,
+      expectedStarts: [1, 2],
+      expectedStates: [`persisting`, `pending`, `failed`],
+    },
+    {
+      maxSize: 1,
+      wait: 0,
+      expectedStarts: [1, 2, 3],
+      expectedStates: [`persisting`, `pending`, `pending`],
+    },
+  ]) {
+    it(`queue capacity ${maxSize} at wait ${wait} rejects only overflow`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = queueStrategy({ maxSize, wait })
+      const started: Array<number> = []
+      const releases: Array<() => void> = []
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          const id = transaction.mutations[0].changes.id
+          if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+          started.push(id)
+          return new Promise<void>((resolve) => releases.push(resolve))
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const transactions = [mutate(1), mutate(2), mutate(3)]
+          const receipts = transactions.map(observeReceipt)
+          await vi.advanceTimersByTimeAsync(0)
+          expect(transactions.map((transaction) => transaction.state)).toEqual(
+            expectedStates,
+          )
+          for (const [index, state] of expectedStates.entries()) {
+            expect(collection.get(index + 1)?.id).toBe(
+              state === `failed` ? undefined : index + 1,
+            )
+          }
+          for (const [index, state] of expectedStates.entries()) {
+            if (state === `failed`) {
+              expect(
+                receipts[index],
+                `overflow receipt at admission`,
+              ).toMatchObject({
+                outcome: `rejected`,
+                error: { name: `QueueCapacityExceededError` },
+              })
+            }
+          }
+          await vi.advanceTimersByTimeAsync(30)
+          for (let index = 0; index < expectedStarts.length; index++) {
+            releases[index]?.()
+            await vi.advanceTimersByTimeAsync(0)
+          }
+          expect(started).toEqual(expectedStarts)
+          for (const [index, state] of expectedStates.entries()) {
+            if (state !== `failed`) {
+              expect(
+                receipts[index],
+                `admitted receipt after drain`,
+              ).toMatchObject({
+                outcome: `fulfilled`,
+                returnedSame: true,
+              })
+            }
+          }
+        },
+        async () => {
+          for (const release of releases) release()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
+  it(`queue overflow preserves admitted same-key mutations`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<{ id: number; value: number }>({
+        id: `paced-capacity-same-key`,
+        getKey: (item) => item.id,
+      }),
+    )
+    const preload = collection.preload()
+    collection.utils.begin()
+    collection.utils.commit()
+    collection.utils.markReady()
+    await preload
+    const strategy = queueStrategy({ maxSize: 1, wait: 10 })
+    const started: Array<number> = []
+    const releases: Array<() => void> = []
+    const mutate = createPacedMutations<number, { id: number; value: number }>({
+      onMutate: (value) => {
+        if (value === 1) collection.insert({ id: 1, value })
+        else
+          collection.update(1, (draft) => {
+            draft.value = value
+          })
+      },
+      mutationFn: ({ transaction }) => {
+        const value = transaction.mutations[0].changes.value
+        if (typeof value !== `number`) throw new Error(`Missing value`)
+        started.push(value)
+        return new Promise<void>((resolve) => releases.push(resolve))
+      },
+      strategy,
+    })
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        const second = mutate(2)
+        const overflow = mutate(3)
+        const firstReceipt = observeReceipt(first)
+        const secondReceipt = observeReceipt(second)
+        const overflowReceipt = observeReceipt(overflow)
+        await vi.advanceTimersByTimeAsync(0)
+        expect([first.state, second.state, overflow.state]).toEqual([
+          `persisting`,
+          `pending`,
+          `failed`,
+        ])
+        expect(collection.get(1)?.value).toBe(2)
+        expect(overflowReceipt, `same-key overflow receipt`).toMatchObject({
+          outcome: `rejected`,
+          error: { name: `QueueCapacityExceededError` },
+        })
+        await vi.advanceTimersByTimeAsync(10)
+        releases[0]?.()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(started).toEqual([1, 2])
+        expect(firstReceipt).toMatchObject({
+          outcome: `fulfilled`,
+          returnedSame: true,
+        })
+        expect(secondReceipt.outcome).toBe(`pending`)
+        expect(
+          collection.get(1)?.value,
+          `admitted optimistic update after first settlement`,
+        ).toBe(2)
+        releases[1]?.()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(secondReceipt).toMatchObject({
+          outcome: `fulfilled`,
+          returnedSame: true,
+        })
+      },
+      async () => {
+        for (const release of releases) release()
+        await vi.advanceTimersByTimeAsync(0)
+      },
+    )
+  })
+
+  it(`strategy factories preserve frozen caller options`, () => {
+    const debounceOptions = Object.freeze({ wait: 10 })
+    const throttleOptions = Object.freeze({ wait: 10 })
+    const queueOptions = Object.freeze({ wait: 10, maxSize: 1 })
+    const debounce = debounceStrategy(debounceOptions)
+    const throttle = throttleStrategy(throttleOptions)
+    const queue = queueStrategy(queueOptions)
+    try {
+      expect(debounceOptions).toEqual({ wait: 10 })
+      expect(throttleOptions).toEqual({ wait: 10 })
+      expect(queueOptions).toEqual({ wait: 10, maxSize: 1 })
+    } finally {
+      debounce.cleanup()
+      throttle.cleanup()
+      queue.cleanup()
+    }
+  })
+
   it(`preserves a trace failure and cleanup failure separately`, async () => {
     const collection = await createReadyCollection()
     const cleanupCollection = vi.spyOn(collection, `cleanup`)
     const cleanupError = new Error(`strategy cleanup failed`)
     const strategy: Strategy = {
       _type: `queue`,
-      execute: () => {},
+      execute: () => true,
       cleanup: () => {
         throw cleanupError
       },
@@ -529,5 +780,59 @@ describe(`paced mutation timeline oracle`, () => {
         }),
       ).rejects.toMatchObject({ name: `AssertionError` })
     }
+  })
+
+  it(`rejects capacity, overflow settlement, early throttle, and option mutation mutants`, async () => {
+    const capacityChecker = async (strategy: Strategy) => {
+      const collection = await createReadyCollection()
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: () => Promise.resolve(),
+        strategy,
+      })
+      return withCleanup(strategy, collection, () => {
+        mutate(1)
+        mutate(2)
+        const third = mutate(3)
+        expect(third.state, `overflow settlement`).toBe(`failed`)
+        return Promise.resolve()
+      })
+    }
+    await expect(
+      capacityChecker(queueStrategy({ maxSize: Infinity, wait: 10 })),
+    ).rejects.toMatchObject({ name: `AssertionError` })
+
+    const falseGreen = queueStrategy({ maxSize: 1, wait: 10 })
+    const originalExecute = falseGreen.execute
+    falseGreen.execute = (fn) => {
+      originalExecute(fn)
+      return true
+    }
+    await expect(capacityChecker(falseGreen)).rejects.toMatchObject({
+      name: `AssertionError`,
+    })
+
+    const nonLeading = cases.find(
+      (testCase) =>
+        testCase.name ===
+        `explicit non-leading throttle waits for each trailing edge`,
+    )
+    if (!nonLeading) throw new Error(`Missing non-leading calibration case`)
+    await expect(
+      runProduction(
+        {
+          ...nonLeading,
+          strategy: () =>
+            throttleStrategy({ wait: 10, leading: true, trailing: true }),
+        },
+        (actual) => expect(actual.starts).toEqual(nonLeading.expected),
+      ),
+    ).rejects.toMatchObject({ name: `AssertionError` })
+
+    const options: { wait: number; trailing?: boolean } = { wait: 10 }
+    options.trailing = true
+    expect(() => expect(options).toEqual({ wait: 10 })).toThrowError(
+      expect.objectContaining({ name: `AssertionError` }),
+    )
   })
 })

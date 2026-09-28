@@ -48,10 +48,15 @@ import type { Transaction } from '../transactions'
 export function throttleStrategy(
   options: ThrottleStrategyOptions,
 ): ThrottleStrategy {
-  const throttler = new LiteThrottler(
-    (callback: () => Transaction) => callback(),
-    options,
-  )
+  // Pacer-lite measures the first non-leading wait from epoch zero. Own this
+  // trailing-only window so its first execution waits from the first call.
+  const trailingOnly = options.leading === false && options.trailing === true
+  let trailingTimeout: ReturnType<typeof setTimeout> | undefined
+  const throttler = trailingOnly
+    ? undefined
+    : new LiteThrottler((callback: () => Transaction) => callback(), {
+        ...options,
+      })
 
   return {
     _type: `throttle`,
@@ -59,10 +64,18 @@ export function throttleStrategy(
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
     ) => {
-      throttler.maybeExecute(fn as () => Transaction)
+      if (trailingOnly) {
+        trailingTimeout ??= setTimeout(() => {
+          trailingTimeout = undefined
+          fn()
+        }, options.wait)
+      } else {
+        throttler?.maybeExecute(fn as () => Transaction)
+      }
     },
     cleanup: () => {
-      throttler.cancel()
+      if (trailingTimeout !== undefined) clearTimeout(trailingTimeout)
+      throttler?.cancel()
     },
   }
 }

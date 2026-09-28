@@ -184,7 +184,7 @@ import { queueStrategy } from "@tanstack/db"
 
 queueStrategy({
   wait?: number,                      // ms between processing items (default 0)
-  maxSize?: number,                   // drop items if queue exceeds this
+  maxSize?: number,                   // reject overflow when waiting queue is full
   addItemsTo?: "front" | "back",     // default "back" (FIFO)
   getItemsFrom?: "front" | "back",   // default "front" (FIFO)
 })

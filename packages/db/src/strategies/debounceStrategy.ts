@@ -30,7 +30,7 @@ export function debounceStrategy(
 ): DebounceStrategy {
   const debouncer = new LiteDebouncer(
     (callback: () => Transaction) => callback(),
-    options,
+    { ...options },
   )
 
   return {

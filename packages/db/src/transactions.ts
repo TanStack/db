@@ -564,12 +564,19 @@ class Transaction<T extends object = Record<string, unknown>> {
    *   // Transaction automatically rolled back on mutation function failure
    * }
    */
-  rollback(config?: { isSecondaryRollback?: boolean }): Transaction<T> {
+  rollback(config?: {
+    isSecondaryRollback?: boolean
+    error?: Error
+  }): Transaction<T> {
     const isSecondaryRollback = config?.isSecondaryRollback ?? false
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
     if (this.state === `failed`) return this
+
+    if (config?.error) {
+      this.error = { message: config.error.message, error: config.error }
+    }
 
     this.setState(`failed`)
 

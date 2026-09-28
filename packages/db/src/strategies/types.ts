@@ -14,7 +14,7 @@ export interface BaseStrategy<TName extends string = string> {
    */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
-  ) => void | Promise<void>
+  ) => void | boolean | Promise<void>
 
   /**
    * Clean up any resources held by the strategy
@@ -50,7 +50,7 @@ export interface DebounceStrategy extends BaseStrategy<`debounce`> {
 export interface QueueStrategyOptions {
   /** Wait time between processing queue items (milliseconds) */
   wait?: number
-  /** Maximum queue size (items are dropped if exceeded) */
+  /** Maximum number of waiting items; overflow rejects its transaction */
   maxSize?: number
   /** Where to add new items in the queue */
   addItemsTo?: `front` | `back`
@@ -65,6 +65,10 @@ export interface QueueStrategyOptions {
  */
 export interface QueueStrategy extends BaseStrategy<`queue`> {
   options?: QueueStrategyOptions
+  /** Returns whether the transaction was admitted to the queue. */
+  execute: <T extends object = Record<string, unknown>>(
+    fn: () => Transaction<T>,
+  ) => boolean
 }
 
 /**

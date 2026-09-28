@@ -3,12 +3,13 @@ import type { QueueStrategy, QueueStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
 /**
- * Creates a queue strategy that processes all mutations in order with proper serialization.
+ * Creates a queue strategy that processes admitted mutations in order with proper serialization.
  *
  * Unlike other strategies that may drop executions, queue ensures every
- * mutation is attempted sequentially. Each transaction commit completes before
+ * admitted mutation is attempted sequentially. Each transaction commit completes before
  * the next one starts. Useful when data consistency is critical and
- * every operation must be attempted in order.
+ * every admitted operation must be attempted in order. When a bounded queue is
+ * full, the returned transaction fails and its optimistic mutation rolls back.
  *
  * **Error handling behavior:**
  * - If a mutation fails, it is NOT automatically retried - the transaction transitions to "failed" state
@@ -85,10 +86,7 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
-    ) => {
-      // Add the transaction-creating function to the queue
-      queuer.addItem(fn as () => Transaction)
-    },
+    ) => queuer.addItem(fn as () => Transaction),
     cleanup: () => {
       queuer.stop()
       queuer.clear()

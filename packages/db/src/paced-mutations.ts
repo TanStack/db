@@ -1,4 +1,5 @@
 import { createTransaction } from './transactions'
+import { QueueCapacityExceededError } from './errors'
 import type { MutationFn, Transaction } from './types'
 import type { Strategy } from './strategies/types'
 
@@ -149,14 +150,21 @@ export function createPacedMutations<
     // For queue strategy, pass a function that commits the captured transaction
     // This prevents the error when commitCallback tries to access the cleared activeTransaction
     if (strategy._type === `queue`) {
-      const capturedTx = activeTransaction
       activeTransaction = null // Clear so next mutation creates a new transaction
-      strategy.execute(() => {
-        capturedTx.commit().catch(() => {
+      const admitted = strategy.execute(() => {
+        txToReturn.commit().catch(() => {
           // Errors are handled via transaction.isPersisted.promise
         })
-        return capturedTx
+        return txToReturn
       })
+      if (!admitted) {
+        // Admission failure belongs to this call; admitted same-key writes
+        // must remain in the queue and keep their optimistic state.
+        txToReturn.rollback({
+          error: new QueueCapacityExceededError(),
+          isSecondaryRollback: true,
+        })
+      }
     } else {
       // For debounce/throttle, use commitCallback which manages activeTransaction
       strategy.execute(commitCallback)

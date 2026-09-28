@@ -312,6 +312,13 @@ export class TransactionError extends TanStackDBError {
   }
 }
 
+export class QueueCapacityExceededError extends TransactionError {
+  constructor() {
+    super(`Queue capacity exceeded; the mutation was not admitted`)
+    this.name = `QueueCapacityExceededError`
+  }
+}
+
 export class MissingMutationFunctionError extends TransactionError {
   constructor() {
     super(`mutationFn is required when creating a transaction`)
