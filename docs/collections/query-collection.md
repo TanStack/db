@@ -687,7 +687,7 @@ Direct writes bypass this system entirely and write directly to the synced data 
 
 Direct writes should be used when:
 
-- You need to sync real-time updates from WebSockets or server-sent events
+- You need to sync real-time updates from WebSockets or server-sent events (see [Live Updates from a WebSocket](#live-updates-from-a-websocket) for when a refetch is still needed)
 - You're dealing with large datasets where refetching everything is too expensive
 - You receive incremental updates or server-computed field updates
 - You need to implement complex pagination or partial data loading scenarios
@@ -737,28 +737,157 @@ todosCollection.utils.writeBatch(() => {
 })
 ```
 
-### Real-World Example: WebSocket Integration
+### Live Updates from a WebSocket
+
+Many apps pair a query collection with a push channel. The server sends an
+event when data changes, and the client refetches the affected data. Two rules
+keep this correct:
+
+1. Keep the channel open only while the collection is in use.
+2. Never treat cached data as current while an event might have been missed.
+
+#### Open the channel inside sync
+
+A collection syncs only while something uses it. Sync starts when the first
+live query subscribes, when you call `preload()`, or at creation with
+`startSync: true`. It stops once the collection has had no subscribers for its
+`gcTime`. Open the channel when sync starts and close it in the cleanup that
+sync returns. One channel then serves every component that reads the
+collection, and it closes when none do.
+
+The example below uses `socket`, a stand-in for your app's WebSocket client.
+`socket.subscribe` returns a `ready` promise that resolves when the server
+confirms the subscription, and `socket.onReconnect` registers a callback for
+reconnects.
 
 ```typescript
-// Handle real-time updates from WebSocket without triggering full refetches
-ws.on("todos:update", (changes) => {
-  todosCollection.utils.writeBatch(() => {
-    changes.forEach((change) => {
-      switch (change.type) {
-        case "insert":
-          todosCollection.utils.writeInsert(change.data)
-          break
-        case "update":
-          todosCollection.utils.writeUpdate(change.data)
-          break
-        case "delete":
-          todosCollection.utils.writeDelete(change.id)
-          break
+import { createCollection } from "@tanstack/db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+
+const base = queryCollectionOptions({
+  queryKey: ["deployments"],
+  queryFn: fetchDeployments,
+  queryClient,
+  getKey: (deployment) => deployment.id,
+})
+
+export const deploymentsCollection = createCollection({
+  ...base,
+  // How long sync, and the channel, outlive the last subscriber.
+  gcTime: 30_000,
+  sync: {
+    ...base.sync,
+    sync: (params) => {
+      const { collection } = params
+      let closed = false
+      let inFlight: Promise<unknown> | undefined
+      let dirty = false
+
+      // Keep one refetch in flight and queue at most one more, so a burst
+      // of events cannot restart the fetch forever.
+      const revalidate = () => {
+        if (closed) return
+        if (inFlight) {
+          dirty = true
+          return
+        }
+        inFlight = collection.utils.refetch().finally(() => {
+          inFlight = undefined
+          if (dirty) {
+            dirty = false
+            revalidate()
+          }
+        })
       }
-    })
-  })
+
+      const channel = socket.subscribe("deployments", revalidate)
+      // Events sent before the server confirmed were not delivered.
+      void channel.ready.then(revalidate)
+      const stopReconnect = socket.onReconnect(revalidate)
+
+      const inner = base.sync.sync(params)
+      const innerCleanup =
+        typeof inner === "function" ? inner : inner?.cleanup
+
+      return {
+        ...(typeof inner === "object" ? inner : {}),
+        cleanup: async () => {
+          closed = true
+          stopReconnect()
+          channel.unsubscribe()
+          await innerCleanup?.()
+        },
+      }
+    },
+  },
 })
 ```
+
+#### When to refetch
+
+A fetch that started before an event can return data from before that event.
+Refetch at each point where events may have gone undelivered:
+
+- **On each event.** The refetch starts after the event, so its result includes
+  the change.
+- **When the server confirms the subscription.** The first fetch usually starts
+  before the server confirms. Events sent in that window were never delivered.
+  Subscribing before fetching is not enough on its own. What closes the gap is
+  a refetch after confirmation.
+- **On reconnect.** Events sent while the socket was down were lost.
+
+`utils.refetch()` restarts a fetch that is already running. If every event
+called it directly and events arrived faster than a fetch completes, no fetch
+would finish. The `revalidate` helper above lets the running fetch finish,
+then runs one more.
+
+Once `closed` is set, the helper ignores events. A socket can deliver an event
+after you unsubscribe.
+
+#### Patching rows instead of refetching
+
+You can apply event payloads with [direct writes](#direct-writes) instead of
+refetching. Inside the sync function above:
+
+```typescript
+const applyEvent = (changes: Array<DeploymentChange>) => {
+  collection.utils.writeBatch(() => {
+    for (const change of changes) {
+      if (change.type === "delete") {
+        collection.utils.writeDelete(change.id)
+      } else {
+        collection.utils.writeUpsert(change.data)
+      }
+    }
+  })
+}
+```
+
+Know the tradeoffs first:
+
+- In eager mode, a patch avoids a network request. But a fetch already running
+  when the event arrived can finish later and replace the patch with older
+  data. Call `revalidate()` after the patch when that matters.
+- In on-demand mode, every direct write already refetches the active queries.
+  See [Direct Writes and Query Sync](#direct-writes-and-query-sync). A patch
+  does not save a request there.
+- The confirmation and reconnect gaps still need a refetch. Patches cover only
+  the events you receive.
+
+#### Settings that control the channel's lifetime
+
+- The `gcTime` on the collection config, as in the example, sets how long the
+  channel stays open after the last subscriber leaves. It defaults to 5
+  minutes. The `gcTime` you pass to `queryCollectionOptions` is a different
+  setting: it controls how long TanStack Query keeps cached query data.
+- Spreading `queryCollectionOptions(...)` drops the hidden factory that
+  [`DbClient`](#request-scoped-queryclient) uses to build one instance per
+  client. With `DbClient`, build the wrapped config inside
+  `collectionOptions("deployments", (client) => ...)` and take `queryClient`
+  from `client.requireDependency`.
+- In on-demand mode, this pattern opens one channel for the whole collection,
+  and `utils.refetch()` refetches every active query. There is no hook yet for
+  opening a separate channel for each loaded subset.
 
 ### Example: Incremental Updates
 
