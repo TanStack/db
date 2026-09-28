@@ -5,6 +5,8 @@ import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   createLifecycleModel,
+  deferralCleanupHistories,
+  expectedDeferralBatches,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
   reduceLifecycle,
@@ -13,6 +15,7 @@ import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
 import type {
+  DeferralLifecycleCommand,
   DemandName,
   LifecycleAttempt,
   LifecycleCommand,
@@ -33,6 +36,13 @@ import type {
  * insert, update, and delete batches, visible rows, status, syncRuns, and
  * unloads. It also records the phase before each observation so a final-state
  * match cannot hide an early or duplicate publication.
+ *
+ * A deferral interrupted by cleanup belongs to the ended sync run. Its prior
+ * discard cannot suppress a later sync run's subscriber batches. The bounded
+ * deferral histories in the shared grammar compare one or two later inserts
+ * at the new deferral's close. They also check that an old handle closing
+ * during the new deferral cannot publish early or suppress its batch. A
+ * compiled live-query includes path remains outside this model.
  *
  * Ownership and caller-promise outcomes stay in the lifecycle-history driver.
  * This separation keeps the row model small while the shared command grammar
@@ -1260,7 +1270,88 @@ function expectNoPublicationMismatches(
   ).toEqual([])
 }
 
+let deferralHistoryId = 0
+
+async function runDeferralCleanupHistory(
+  commands: ReadonlyArray<DeferralLifecycleCommand>,
+): Promise<void> {
+  let operations!: SyncOperations
+  let syncRuns = 0
+  const collection = createCollection<Row, RowKey>({
+    id: `publication-after-deferral-cleanup-${deferralHistoryId++}`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (next) => {
+        syncRuns++
+        operations = next
+        next.markReady()
+      },
+    },
+  })
+  const batches: Array<Array<RowKey>> = []
+  const handles = new Map<
+    `outer` | `inner` | `current`,
+    ReturnType<typeof collection._deferPublication>
+  >()
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+
+  try {
+    for (const command of commands) {
+      if (command.type === `open`) {
+        handles.set(command.handle, collection._deferPublication())
+      } else if (command.type === `close`) {
+        const handle = handles.get(command.handle)
+        if (!handle) throw new Error(`missing ${command.handle} handle`)
+        handle[command.outcome]()
+        if (command.handle === `current`) {
+          expect(batches).toEqual(expectedDeferralBatches(commands))
+        } else if (command.handle === `outer` && subscription) {
+          expect(batches).toEqual([])
+        }
+      } else if (command.type === `write`) {
+        operations.begin({ immediate: true })
+        operations.write({
+          type: `insert`,
+          value: { id: command.key, value: command.key.charCodeAt(0) },
+        })
+        operations.commit()
+        if (subscription) expect(batches).toEqual([])
+      } else if (command.type === `cleanup`) {
+        await collection.cleanup()
+        expect(collection.status).toBe(`cleaned-up`)
+      } else if (command.type === `restart`) {
+        collection.startSyncImmediate()
+        expect(collection.get(`a`)).toBeUndefined()
+      } else {
+        subscription = collection.subscribeChanges(
+          (changes) => batches.push(changes.map(({ key }) => key)),
+          { includeInitialState: false },
+        )
+      }
+    }
+    expect(syncRuns).toBe(2)
+  } finally {
+    subscription?.unsubscribe()
+    await collection.cleanup()
+  }
+}
+
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it(`reconstructs every bounded deferral cleanup history`, () => {
+    expect(deferralCleanupHistories).toHaveLength(32)
+    expect(new Set(deferralCleanupHistories.map(({ name }) => name)).size).toBe(
+      32,
+    )
+  })
+
+  it.each(deferralCleanupHistories)(
+    `publishes independent batches after deferral cleanup: $name`,
+    async ({ commands }) => {
+      await runDeferralCleanupHistory(commands)
+    },
+  )
+
   it.each(
     ([`initial`, `replay`, `restart`] as const).flatMap((phase) =>
       [1, 2].flatMap((demandCount) =>
