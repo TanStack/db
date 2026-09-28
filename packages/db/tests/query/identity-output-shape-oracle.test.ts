@@ -4,9 +4,11 @@ import { Temporal } from 'temporal-polyfill'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { count as countRows } from '../../src/query/builder/functions.js'
 import { compileExpression } from '../../src/query/compiler/evaluators.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { getEqualityValueIdentity } from '../../src/query/equality-value-identity.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
 import {
   getLoadSubsetDemandKey,
   getQueryIdentity,
@@ -21,6 +23,7 @@ import {
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import type { CollectionImpl } from '../../src/collection/index.js'
 import type { QueryIR } from '../../src/query/ir.js'
 
@@ -40,8 +43,9 @@ import type { QueryIR } from '../../src/query/ir.js'
  *
  * Equality-value identity (D2 keyed state) and equality-operand identity
  * (query IR) must partition supported values alike. The value-pair grammar
- * declares expected equality independently, then checks both production paths
- * at key construction. This law does not claim that SQL NULL matches a row.
+ * declares expected equality independently, then checks both identity paths
+ * at key construction. Fixed pairs also check public group rows after initial
+ * publication. This law does not claim that SQL NULL matches a row.
  */
 
 type User = { id: number; label: string }
@@ -398,6 +402,9 @@ const fixedEqualityPairs: Array<EqualityPair> = [
   { label: `null and undefined`, left: null, right: undefined, equal: false },
   { label: `bigint and number`, left: 1n, right: 1, equal: false },
   { label: `infinities`, left: Infinity, right: -Infinity, equal: false },
+  { label: `empty string`, left: ``, right: ``, equal: true },
+  { label: `different strings`, left: `alpha`, right: `beta`, equal: false },
+  { label: `same-prefix strings`, left: `ab`, right: `ac`, equal: false },
   {
     label: `binary and reserved-looking string`,
     left: new Uint8Array([1]),
@@ -473,12 +480,20 @@ const equalityPairArbitrary: fc.Arbitrary<EqualityPair> = fc.oneof(
     right: value + 1,
     equal: false,
   })),
-  fc.string().map((value) => ({
-    label: `string`,
-    left: value,
-    right: value,
-    equal: true,
-  })),
+  fc.oneof(
+    fc.string().map((value) => ({
+      label: `equal string`,
+      left: value,
+      right: value,
+      equal: true,
+    })),
+    fc.string({ minLength: 2 }).map((value) => ({
+      label: `same-prefix strings`,
+      left: value,
+      right: `${value.slice(0, -1)}${value.endsWith(`a`) ? `b` : `a`}`,
+      equal: false,
+    })),
+  ),
   fc.boolean().map((value) => ({
     label: `boolean`,
     left: value,
@@ -539,6 +554,43 @@ describe(`equality-value and IR operand identity agree`, () => {
   it.each(fixedEqualityPairs)(`partitions $label as declared`, (pair) => {
     assertEqualityPartition(pair)
   })
+
+  it.each(fixedEqualityPairs)(
+    `materializes $label into the declared public groups`,
+    async ({ left, right, equal }) => {
+      const source = createCollection(
+        mockSyncCollectionOptions<{ id: number; value: unknown }>({
+          id: `equality-identity-public-groups`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: 1, value: left },
+            { id: 2, value: right },
+          ],
+        }),
+      )
+      const groups = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ source })
+            .groupBy(({ source: row }) => row.value)
+            .select(({ source: row }) => ({
+              value: row.value,
+              count: countRows(row.id),
+            })),
+      })
+      await withHistoryCleanup(
+        () => {
+          expect(groups.size).toBe(equal ? 1 : 2)
+          expect(groups.toArray.map((row) => row.count).sort()).toStrictEqual(
+            equal ? [2] : [1, 1],
+          )
+          return Promise.resolve()
+        },
+        () => [() => groups.cleanup(), () => source.cleanup()],
+      )
+    },
+  )
 
   it.each([20260928, undefined])(
     `agrees across the supported value grammar, seed=%s`,
