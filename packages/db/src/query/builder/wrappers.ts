@@ -1,4 +1,4 @@
-import { markDbInstance } from '../../duplicate-instance-check.js'
+import { registerWrapper } from './wrapper-identity.js'
 import type { CaseWhenValue } from './functions.js'
 import type { QueryBuilder } from './index.js'
 
@@ -7,7 +7,7 @@ export class ToArrayWrapper<_T = unknown> {
   declare readonly _type: `toArray`
   declare readonly _result: _T
   constructor(public readonly query: QueryBuilder<any>) {
-    markDbInstance(this)
+    registerWrapper(this, `toArray()`)
   }
 }
 
@@ -16,7 +16,7 @@ export class ConcatToArrayWrapper<_T = unknown> {
   declare readonly _type: `concatToArray`
   declare readonly _result: _T
   constructor(public readonly query: QueryBuilder<any>) {
-    markDbInstance(this)
+    registerWrapper(this, `concat(toArray())`)
   }
 }
 
@@ -25,7 +25,7 @@ export class CaseWhenWrapper<_T = any> {
   declare readonly _type: `caseWhen`
   readonly _result?: _T
   constructor(public readonly args: Array<CaseWhenValue>) {
-    markDbInstance(this)
+    registerWrapper(this, `caseWhen()`)
   }
 }
 
@@ -38,6 +38,6 @@ export class MaterializeWrapper<
   declare readonly _result: _T
   declare readonly _isSingle: _IsSingle
   constructor(public readonly query: QueryBuilder<any>) {
-    markDbInstance(this)
+    registerWrapper(this, `materialize()`)
   }
 }

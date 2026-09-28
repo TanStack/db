@@ -1,11 +1,6 @@
 import { PropRef, Value, isBasicOrAggregateExpression } from '../ir.js'
-import {
-  CaseWhenWrapper,
-  ConcatToArrayWrapper,
-  MaterializeWrapper,
-  ToArrayWrapper,
-} from './wrappers.js'
 import { isRefProxy, registerRefProxy } from './ref-proxy-identity.js'
+import { getWrapperExpressionName } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
@@ -379,20 +374,8 @@ export function toExpression(value: any): BasicExpression<any> {
   }
   // toArray(), concat(toArray()), and materialize() must be used as direct
   // select fields, not inside expressions
-  if (
-    value instanceof ToArrayWrapper ||
-    value instanceof ConcatToArrayWrapper ||
-    value instanceof CaseWhenWrapper ||
-    value instanceof MaterializeWrapper
-  ) {
-    const name =
-      value instanceof ToArrayWrapper
-        ? `toArray()`
-        : value instanceof ConcatToArrayWrapper
-          ? `concat(toArray())`
-          : value instanceof CaseWhenWrapper
-            ? `caseWhen()`
-            : `materialize()`
+  const name = getWrapperExpressionName(value)
+  if (name) {
     throw new Error(
       `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
         `Use ${name} directly as a select field value instead.`,
