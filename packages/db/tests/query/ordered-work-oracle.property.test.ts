@@ -9,6 +9,7 @@ import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
+import { toArray } from '../../src/query/index.js'
 import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
   oracleRandomParameters,
@@ -33,6 +34,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * Custom collation uses one full-source request, while an unindexed underfilled
  * prefix falls back to full source. Both must wait for joined demand before
  * publishing an anti-join result.
+ * Demand for a separate include cannot hold the ordered root continuation.
+ * An empty joined replay still wakes held Effect deltas.
  *
  * The value model is a plain sorted array. The work model records normalized
  * page and boundary requests, examined source rows, publications, and errors.
@@ -3261,6 +3264,254 @@ describe(`ordered source work oracle`, () => {
       expect(
         releases.filter((release) => release === acquisition),
       ).toHaveLength(1)
+    }
+  })
+
+  it.each([`collection`, `effect`] as const)(
+    `continues an ordered anti-join %s while an unrelated include demand is pending`,
+    async (kind) => {
+      const rows = [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+        { id: 3, rank: 3 },
+      ]
+      const delivered = new Set<number>()
+      const rootRequests: Array<{ cursor: boolean; limit?: number }> = []
+      const extraGate = createDeferred<void>()
+      let extraLoads = 0
+
+      const root = createCollection({
+        id: `ordered-unrelated-root-${harnessId++}`,
+        getKey: (row: (typeof rows)[number]) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: async (options) => {
+                rootRequests.push({
+                  cursor: !!options.cursor,
+                  limit: options.limit,
+                })
+                if (rootRequests.length > 15) throw new Error(`request loop`)
+                const matching = options.where
+                  ? rows.filter(
+                      (row) =>
+                        evaluateReferenceExpression(options.where!, row) ===
+                        true,
+                    )
+                  : rows
+                const candidates = options.cursor
+                  ? matching.filter(
+                      (row) =>
+                        evaluateReferenceExpression(
+                          options.cursor!.whereFrom,
+                          row,
+                        ) === true,
+                    )
+                  : matching.slice(options.offset ?? 0)
+                const fresh = candidates
+                  .slice(0, options.limit)
+                  .filter((row) => !delivered.has(row.id))
+                if (fresh.length === 0) return
+                begin()
+                for (const row of fresh) {
+                  delivered.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+                const receipt = commit()
+                if (receipt !== true) await receipt
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const markerSource = createCollection({
+        id: `ordered-unrelated-marker-${harnessId++}`,
+        getKey: (row: { id: number; rowId: number }) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 2, rowId: 2 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      const extraSource = createCollection({
+        id: `ordered-unrelated-extra-${harnessId++}`,
+        getKey: (row: { id: number; rowId: number }) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: async () => {
+                extraLoads++
+                await extraGate.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const query = (q: InitialQueryBuilder) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: markerSource }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(2)
+          .select(({ row }) => ({
+            id: row.id,
+            extras: toArray(
+              q
+                .from({ extra: extraSource })
+                .where(({ extra }) => eq(extra.rowId, row.id)),
+            ),
+          }))
+      const live =
+        kind === `collection` ? createLiveQueryCollection(query) : undefined
+      const effectRows = new Set<number>()
+      const effect =
+        kind === `effect`
+          ? createEffect<{ id: number; extras: Array<unknown> }>({
+              query,
+              onBatch: (events) => {
+                for (const event of events) {
+                  if (event.type === `exit`) effectRows.delete(event.value.id)
+                  else effectRows.add(event.value.id)
+                }
+              },
+            })
+          : undefined
+      const preload = live?.preload()
+
+      try {
+        await vi.waitFor(() => expect(extraLoads).toBeGreaterThan(0))
+        for (let i = 0; i < 12; i++) await flushPromises()
+        expect(
+          rootRequests.some((request) => request.cursor),
+          JSON.stringify({
+            rootRequests,
+            extraLoads,
+            rows: live?.toArray ?? [...effectRows],
+          }),
+        ).toBe(true)
+        extraGate.resolve()
+        await preload
+        await vi.waitFor(() =>
+          expect(rootRequests.some((request) => request.cursor)).toBe(true),
+        )
+        expect(live?.toArray.map(({ id }) => id) ?? [...effectRows]).toEqual([
+          1, 3,
+        ])
+      } finally {
+        extraGate.resolve()
+        await Promise.all([
+          effect?.dispose(),
+          live?.cleanup(),
+          root.cleanup(),
+          markerSource.cleanup(),
+          extraSource.cleanup(),
+        ])
+      }
+    },
+  )
+
+  it(`releases held Effect changes after an empty joined replay`, async () => {
+    type ReplayRow = { id: number; rank: number; label: string }
+    const initialRow = { id: 1, rank: 1, label: `old` }
+    let rootSync!: Parameters<SyncConfig<ReplayRow, number>[`sync`]>[0]
+    const root = createCollection<ReplayRow, number>({
+      id: `ordered-replay-wakeup-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.begin()
+          operations.write({ type: `insert`, value: initialRow })
+          operations.commit()
+          operations.markReady()
+        },
+      },
+    })
+    const replayGate = createDeferred<void>()
+    let joinedLoads = 0
+    let joinedSync!: Parameters<
+      SyncConfig<{ id: number; rowId: number }, number>[`sync`]
+    >[0]
+    const joined = createCollection<{ id: number; rowId: number }, number>({
+      id: `ordered-replay-wakeup-joined-${harnessId++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          joinedSync = operations
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              joinedLoads++
+              return joinedLoads === 1 ? true : replayGate.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<number, string>()
+    const effect = createEffect<{ id: number; label: string }>({
+      query: (q) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: joined }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(1)
+          .select(({ row }) => ({ id: row.id, label: row.label })),
+      onBatch: (events) => {
+        for (const event of events) {
+          if (event.type === `exit`) visible.delete(event.value.id)
+          else visible.set(event.value.id, event.value.label)
+        }
+      },
+    })
+    try {
+      await vi.waitFor(() => expect(visible.get(1)).toBe(`old`))
+      joinedSync.begin()
+      joinedSync.truncate()
+      const truncateReceipt = joinedSync.commit()
+      if (truncateReceipt !== true) await truncateReceipt
+      await vi.waitFor(() => expect(joinedLoads).toBeGreaterThan(1))
+
+      rootSync.begin({ immediate: true })
+      rootSync.write({ type: `update`, value: { ...initialRow, label: `new` } })
+      const updateReceipt = rootSync.commit()
+      if (updateReceipt !== true) await updateReceipt
+      for (let i = 0; i < 5; i++) await flushPromises()
+      expect(visible.get(1)).toBe(`old`)
+
+      replayGate.resolve()
+      await vi.waitFor(() => expect(visible.get(1)).toBe(`new`))
+    } finally {
+      replayGate.resolve()
+      await Promise.all([effect.dispose(), root.cleanup(), joined.cleanup()])
     }
   })
 

@@ -50,8 +50,8 @@ export type OrderByOptimizationInfo = {
    * plan, including when a custom local collation defines another order.
    */
   requiresFullSource: boolean
-  /** A joined filter needs its lazy inputs to settle before another page. */
-  waitForJoinedDemand?: boolean
+  /** Source whose lazy demand must settle before a joined-filter page. */
+  joinedFilterSourceId?: string
 }
 
 /**
@@ -247,16 +247,19 @@ export function processOrderBy(
         a: Record<string, unknown> | null | undefined,
         b: Record<string, unknown> | null | undefined,
       ) => compareTerm(a ? extract(a) : a, b ? extract(b) : b)
-      const canPageJoinedFilter =
-        rawQuery.join?.length === 1 &&
-        rawQuery.join[0]!.type === `left` &&
-        rawQuery.join[0]!.from.type === `collectionRef`
       const hasCrossAliasWhere =
         rawQuery.where?.some((where) =>
           [...getSourceAliasesFromExpression(getWhereExpression(where))].some(
             (alias) => alias !== orderByAlias,
           ),
         ) ?? false
+      const joinedFilterSourceId =
+        hasCrossAliasWhere &&
+        rawQuery.join?.length === 1 &&
+        rawQuery.join[0]!.type === `left` &&
+        rawQuery.join[0]!.from.type === `collectionRef`
+          ? rawQuery.join[0]!.from.sourceId
+          : undefined
 
       const info: OrderByOptimizationInfo = {
         sourceId: orderBySourceId,
@@ -267,7 +270,7 @@ export function processOrderBy(
         valueExtractorForRawRow: extract,
         index,
         orderBy: sourceOrderBy,
-        waitForJoinedDemand: canPageJoinedFilter && hasCrossAliasWhere,
+        joinedFilterSourceId,
         requiresFullSource:
           sourceOrderBy.some(
             ({ compareOptions }) => compareOptions.stringSort === `custom`,
@@ -280,7 +283,7 @@ export function processOrderBy(
           ) ??
             false) ||
           (rawQuery.where?.some(isResidualWhere) ?? false) ||
-          (hasCrossAliasWhere && !canPageJoinedFilter) ||
+          (hasCrossAliasWhere && joinedFilterSourceId === undefined) ||
           (rawQuery.fnWhere?.length ?? 0) > 0 ||
           rawQuery.groupBy !== undefined ||
           rawQuery.having !== undefined ||

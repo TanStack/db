@@ -78,6 +78,11 @@ and results move in opposite conceptual directions.
 
 The graph owns the data plane. A small adapter owns asynchronous demand. The
 normal Collection transaction boundary owns public publication.
+For each active sync run, the Collection builder keeps one set of ordered
+source loaders. It checks them after graph steps and once when a turn starts
+without graph input. The transaction scheduler coalesces graph jobs; a sync
+generation fences jobs left over from an older run. The loaders' request
+latches, rather than per-job loader callbacks, stop repeated acquisitions.
 
 ## Concrete implementation map
 
@@ -91,6 +96,7 @@ operators and a few boundary adapters:
 | Compile relation IDs and demand plans     | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
 | Reduce public keys and build routes       | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
 | Run the graph and publish root rows       | `packages/db/src/query/live/collection-config-builder.ts`                                              |
+| Schedule Collection and Effect graph turns | `packages/db/src/query/live/graph-scheduler.ts`                                                         |
 | Publish Collection-valued buckets         | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
 | Start and release asynchronous demand     | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
 | Ordered provider loading and continuation | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
@@ -863,7 +869,8 @@ term comes from the root source. Its joined filter can remove root rows, but
 cannot make a later root precede an earlier root. Before loading another root
 page, core waits for the current lazy join demand and any joined subset load to
 settle, then reruns the graph. Joined-side changes also recheck ordered demand
-so a removed match can refill a short window. The adapter receives ordinary
+so a removed match can refill a short window. An empty joined replay still
+releases held Effect callbacks. The adapter receives ordinary
 finite root requests; this contract does not imply that it can evaluate the
 relation filter remotely.
 Finite continuation still requires an order index; an underfilled unindexed

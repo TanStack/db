@@ -41,3 +41,53 @@ of both consumers during the first Collection callback saw the Effect's earlier
 state. Their callback schedules are separate, so that observation alone does
 not show that either pending-work definition released at an invalid point.
 The temporary fixture was removed; no product change was justified by it.
+
+## Follow-up review of demand scope and wake-up
+
+The later review was checked against `2a6b119f0dd85370d9f179b8a942fc163f08ea13`.
+It contained two new product failures and several repeat or speculative claims.
+
+| ID | Disposition | Evidence and destination |
+| --- | --- | --- |
+| A1 | fixed-now | A direct LEFT-join anti-join stopped after its first root page while a separate include demand was held. Collection and Effect both made the next cursor request before that unrelated demand settled after the gate was scoped to the joined source and its plans. Two ordered-work oracle cells retain the RED/GREEN trace. |
+| A2 | refuted | A zero-change source callback can schedule another loader pass, but the loader's last page, prefix, and tie-boundary latches prevent the stated no-progress request loop. Existing underfilled joined-window oracle cells finish with bounded, distinct requests. Disabling the last-page latch makes all 20 underfilled-source cells fail at the provider-request cap. |
+| A3 | design-decision | Collection still reads plan settlement; Effect still reads controller segment state. Both now use one source-scoped pending-work predicate. The distinct state owners have no demonstrated incorrect release; the earlier shared-source probe remains in R3 above. |
+| A4 | refuted | Full-source custom collation still needs the joined-demand publication gate. The earlier hostile mutant made four Collection/Effect fallback cells publish an incorrect anti-join row; the custom cell checks one full-source request. |
+| A5 | duplicate of A1/A3 | The repeated scope concern led to the A1 fixture. The remaining state-owner question is A3. |
+| B1 | fixed-now | The source/plan/status gate is now one helper. The old methods were similar but had different state queries, so they were not verbatim copies. A further refactor removed Collection's per-run loader callback registry and redundant scheduler state; the resulting PR is net-negative in production lines. |
+| B2 | duplicate of A4 | Disabling the full-source gate is the killed mutant, not a safe fix. |
+| B3 | confirmed-open | The ordinary ordered Effect classifier concern is R2 above. The prior 2,048-step differential found no legal event-type difference; a minimal divergent source history remains needed. |
+| B4 | duplicate of A2 | The second no-progress-loop claim adds no new path. |
+| B5 | fixed-now | A held empty joined truncate replay produced no replacement delta to wake Effect. A root update stayed at its old callback-visible value after replay settled. Listening for the joined subscription's `ready` transition released the delta. The ordered-work oracle retains the RED/GREEN case. Collection already has a replay-success wake-up. |
+| B6 | duplicate of B1 | A shared predicate removes one scope definition. The Collection scheduler refactor supplies the net-negative code reduction; Collection and Effect still own separate public publication paths. |
+
+The second review supplied the missing unrelated-demand and empty-replay
+histories. The alleged infinite loop did not survive the no-progress check.
+
+## Code-weight refactor
+
+The existing D2 graph and `OrderedSourceLoader` now drive ordered continuation
+on every Collection graph turn, matching the Effect runner's existing schedule.
+The Collection builder keeps one loader set per sync run and fences queued jobs
+by sync generation. The transaction scheduler already deduplicates and clears
+jobs, so the builder's second per-context callback registry and clear listener
+were removed. Collection and Effect also use one dependency-graph scheduling
+helper rather than separate transaction scheduling implementations. The source
+loader's fixed-point latches still bound requests when a graph turn receives
+no new rows. Effect's immediate and held delta classification now share one
+classifier; only ordered Effects pass callback-visible row state. A single
+monotonically increasing demand generation replaces per-plan generation
+bookkeeping.
+
+Against merge base `afbeb44eef48d92b6e30ae5fd2843b938ee9163c`, the seven
+changed production TypeScript files contain 215 added and 331 deleted lines
+(net **−116 raw lines**). Counting nonblank, noncomment diff lines gives 197
+added and 221 deleted (net **−24 executable lines**). This measure excludes
+architecture prose, tests, and review records. It is a line-count check, not a
+claim that each old state was redundant: the joined-source demand and public
+publication gates remain necessary for correctness.
+
+The full `packages/db/tests` run passed 6,603 tests across 186 files after the
+production refactor. The ordered-work oracle passed 93 cells, including the
+unrelated-demand and empty-replay repairs. The scheduler test exercised 81
+cases, including repeated-alias failure ownership across falsy failures.

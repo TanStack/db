@@ -5,12 +5,7 @@ import {
   SetWindowReentrancyError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
-import {
-  getActivePublicationContext,
-  transactionScopedScheduler,
-  withPublicationContext,
-} from '../../scheduler.js'
-import { getActiveTransaction } from '../../transactions.js'
+import { withPublicationContext } from '../../scheduler.js'
 import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
@@ -19,6 +14,8 @@ import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
 import { materializeCompilation } from './materialized-pipeline.js'
 import { BucketFacadeAdapter } from './bucket-facade-adapter.js'
+import { scheduleQueryGraphRun } from './graph-scheduler.js'
+import { hasPendingJoinedWork as hasPendingJoinedSourceWork } from './subset-demand-controller.js'
 import {
   buildQueryFromConfig,
   extractCollectionFromSource,
@@ -68,11 +65,6 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    */
   getWindow: () => { offset: number; limit: number } | undefined
   [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils
-}
-
-type PendingGraphRun = {
-  syncRunGeneration: number
-  loadCallbacks: Set<() => void>
 }
 
 // Global counter for auto-generated collection IDs
@@ -132,22 +124,10 @@ export class CollectionConfigBuilder<
     | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
+  private loadMoreFn: (() => void) | undefined
   private readonly builderDependencies = new Set<
     CollectionConfigBuilder<any, any>
   >()
-
-  // Pending graph runs per scheduler context (e.g., per transaction)
-  // The builder manages its own state; the scheduler just orchestrates execution order
-  // Only stores callbacks - if sync ends, pending jobs gracefully no-op
-  private readonly pendingGraphRuns = new Map<
-    SchedulerContextId,
-    PendingGraphRun
-  >()
-
-  // Unsubscribe function for scheduler's onClear listener
-  // Registered when sync starts, unregistered when sync stops
-  // Prevents memory leaks by releasing the scheduler's reference to this builder
-  private unsubscribeFromSchedulerClears?: () => void
 
   private graphCache: D2 | undefined
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -172,7 +152,7 @@ export class CollectionConfigBuilder<
       settled: boolean
     }
   >()
-  private readonly demandGenerations = new Map<string, number>()
+  private demandGeneration = 0
   private readonly pendingOrderedLoads = new Set<Promise<unknown>>()
   private orderedLoadFailed = false
   // Source replay cannot settle a failed imperative window operation.
@@ -393,8 +373,7 @@ export class CollectionConfigBuilder<
   }
 
   beginDemand(planId: string): number {
-    const generation = (this.demandGenerations.get(planId) ?? 0) + 1
-    this.demandGenerations.set(planId, generation)
+    const generation = ++this.demandGeneration
     this.activeDemands.set(planId, {
       generation,
       settled: false,
@@ -409,27 +388,19 @@ export class CollectionConfigBuilder<
     this.maybeRunGraphFn?.()
   }
 
-  hasPendingJoinedWork(orderedSourceId: string): boolean {
-    return (
-      [...this.activeDemands.values()].some((demand) => !demand.settled) ||
-      Object.entries(this.subscriptions).some(
-        ([sourceId, subscription]) =>
-          sourceId !== orderedSourceId &&
-          subscription.status === `loadingSubset`,
-      )
+  hasPendingJoinedWork(joinedSourceId: string): boolean {
+    return hasPendingJoinedSourceWork(
+      joinedSourceId,
+      this.lazySourcesCallbacks,
+      this.subscriptions,
+      (planId) => this.activeDemands.get(planId)?.settled === false,
     )
   }
 
   private hasJoinedFilterWindow(): boolean {
     return Object.values(this.optimizableOrderByCollections).some(
-      (info) => info.waitForJoinedDemand,
+      (info) => info.joinedFilterSourceId !== undefined,
     )
-  }
-
-  scheduleGraphRunWithLoaders(): void {
-    if (this.maybeRunGraphFn && this.hasJoinedFilterWindow())
-      this.maybeRunGraphFn()
-    else this.scheduleGraphRun()
   }
 
   failDemand(planId: string, generation: number, error: unknown): void {
@@ -566,19 +537,12 @@ export class CollectionConfigBuilder<
     return this.graphInputRevision
   }
 
-  // The callback function is called after the graph has run.
-  // This gives the callback a chance to load more data if needed,
-  // that's used to optimize orderBy operators that set a limit,
-  // in order to load some more data if we still don't have enough rows after the pipeline has run.
-  // That can happen because even though we load N rows, the pipeline might filter some of these rows out
-  // causing the orderBy operator to receive less than N rows or even no rows at all.
-  // So this callback would notice that it doesn't have enough rows and load some more.
-  // Readiness follows source/demand state, not the callback's return value.
-  maybeRunGraph(callback?: () => void) {
+  // Every graph turn checks ordered demand after D2 reaches a checkpoint.
+  // The source loader owns the fixed-point latches that prevent repeat requests.
+  maybeRunGraph() {
     if (this.isGraphRunning) {
       // no nested runs of the graph
-      // which is possible if the `callback`
-      // would call `maybeRunGraph` e.g. after it has loaded some more data
+      // which is possible if a loader synchronously sends more source rows
       return
     }
 
@@ -608,7 +572,7 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
-        let callbackCalled = false
+        let checkedLoaders = false
         const drainGraph = () => {
           while (syncState.graph.pendingWork()) {
             try {
@@ -620,22 +584,22 @@ export class CollectionConfigBuilder<
               throw error
             }
             if (!isCurrentSyncRun()) return false
-            callback?.()
+            this.loadMoreFn?.()
             if (!isCurrentSyncRun()) return false
-            callbackCalled = true
+            checkedLoaders = true
           }
           return true
         }
 
         if (!drainGraph()) return
 
-        // Ensure the callback runs at least once even when the graph has no pending work.
+        // Ensure loaders run at least once even when the graph has no pending work.
         // This handles lazy loading scenarios where setWindow() increases the limit or
         // an async loadSubset completes and we need to re-check if more data is needed.
         // drainGraph changes this flag inside its closure.
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (!callbackCalled) {
-          callback?.()
+        if (!checkedLoaders) {
+          this.loadMoreFn?.()
           if (!isCurrentSyncRun()) return
         }
 
@@ -676,137 +640,40 @@ export class CollectionConfigBuilder<
    *
    * Multiple calls during a transaction are coalesced into a single execution.
    * Dependencies are auto-discovered from subscribed live queries, or can be overridden.
-   * Load callbacks are combined when entries merge.
    *
    * Uses the current sync run's config and syncState from instance properties.
    *
-   * @param callback - Optional callback to load more data if needed
    * @param options - Optional scheduling configuration
    * @param options.contextId - Transaction ID to group work; defaults to active transaction
    * @param options.jobId - Unique identifier for this job; defaults to this builder instance
    * @param options.dependencies - Explicit dependency list; overrides auto-discovered dependencies
    */
-  scheduleGraphRun(
-    callback?: () => void,
-    options?: {
-      contextId?: SchedulerContextId
-      jobId?: unknown
-      dependencies?: Array<CollectionConfigBuilder<any, any>>
-    },
-  ) {
-    const contextId =
-      options?.contextId ??
-      getActiveTransaction()?.id ??
-      getActivePublicationContext()
-    // Use the builder instance as the job ID for deduplication. This is memory-safe
-    // because the scheduler's context Map is deleted after flushing (no long-term retention).
-    const jobId = options?.jobId ?? this
-    // Snapshot before scheduling parents, which can reenter source setup.
-    const dependentBuilders = options?.dependencies ?? [
-      ...this.builderDependencies,
-    ]
-
-    // Ensure dependent builders are actually scheduled in this context so that
-    // dependency edges always point to a real job (or a deduped no-op if already scheduled).
-    if (contextId) {
-      for (const dep of dependentBuilders) {
-        if (typeof dep.scheduleGraphRun === `function`) {
-          dep.scheduleGraphRun(undefined, { contextId })
-        }
-      }
-    }
-
-    // We intentionally scope deduplication to the builder instance. Each instance
-    // owns caches and compiled pipelines, so sharing work across instances that
-    // merely reuse the same string id would execute the wrong builder's graph.
-
+  scheduleGraphRun(options?: {
+    contextId?: SchedulerContextId
+    jobId?: unknown
+    dependencies?: Array<CollectionConfigBuilder<any, any>>
+  }) {
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
         `scheduleGraphRun called without active sync run. This should not happen.`,
       )
     }
 
-    // Manage our own state - get or create pending callbacks for this context
-    let pending = contextId ? this.pendingGraphRuns.get(contextId) : undefined
-    if (!pending || pending.syncRunGeneration !== this.syncRunGeneration) {
-      pending = {
-        syncRunGeneration: this.syncRunGeneration,
-        loadCallbacks: new Set(),
-      }
-      if (contextId) {
-        this.pendingGraphRuns.set(contextId, pending)
-      }
-    }
-
-    // Add callback if provided (this is what accumulates between schedules)
-    if (callback) {
-      pending.loadCallbacks.add(callback)
-    }
-
-    // Schedule execution (scheduler just orchestrates order, we manage state)
-    // For immediate execution (no contextId), pass pending directly since it won't be in the map
-    const pendingToPass = contextId ? undefined : pending
-    transactionScopedScheduler.schedule({
-      contextId,
-      jobId,
-      dependencies: dependentBuilders,
-      run: () => this.executeGraphRun(contextId, pendingToPass),
-    })
-  }
-
-  /**
-   * Clears pending graph run state for a specific context.
-   * Called when the scheduler clears a context (e.g., transaction rollback/abort).
-   */
-  clearPendingGraphRun(contextId: SchedulerContextId): void {
-    this.pendingGraphRuns.delete(contextId)
-  }
-
-  /**
-   * Returns true if this builder has a pending graph run for the given context.
-   */
-  hasPendingGraphRun(contextId: SchedulerContextId): boolean {
-    return this.pendingGraphRuns.has(contextId)
-  }
-
-  /**
-   * Executes a pending graph run. Called by the scheduler when dependencies are satisfied.
-   * Clears the pending state BEFORE execution so that any re-schedules during the run
-   * create fresh state and don't interfere with the current execution.
-   * Uses instance sync state - if sync has ended, gracefully returns without executing.
-   *
-   * @param contextId - Optional context ID to look up pending state
-   * @param pendingParam - For immediate execution (no context), pending state is passed directly
-   */
-  private executeGraphRun(
-    contextId?: SchedulerContextId,
-    pendingParam?: PendingGraphRun,
-  ): void {
-    // Get pending state: either from parameter (no context) or from map (with context)
-    // Remove from map BEFORE checking sync state to prevent leaking entries when sync ends
-    // before the transaction flushes (e.g., unsubscribe during in-flight transaction)
-    const pending =
-      pendingParam ??
-      (contextId ? this.pendingGraphRuns.get(contextId) : undefined)
-    if (contextId) {
-      this.pendingGraphRuns.delete(contextId)
-    }
-
-    // If no pending state, nothing to execute (context was cleared)
-    if (!pending) {
-      return
-    }
-
-    // If sync run has ended, don't execute (graph is finalized, subscriptions cleared)
-    if (
-      pending.syncRunGeneration !== this.syncRunGeneration ||
-      !this.currentSyncConfig ||
-      !this.currentSyncState
-    ) {
-      return
-    }
-
-    this.maybeRunGraph(() => runAllCallbacks(pending.loadCallbacks))
+    const syncRunGeneration = this.syncRunGeneration
+    scheduleQueryGraphRun(
+      options?.jobId ?? this,
+      options?.dependencies ?? this.builderDependencies,
+      () => {
+        if (
+          syncRunGeneration === this.syncRunGeneration &&
+          this.currentSyncConfig &&
+          this.currentSyncState
+        ) {
+          this.maybeRunGraph()
+        }
+      },
+      options?.contextId,
+    )
   }
 
   private getSyncConfig(): SyncConfig<TResult> {
@@ -861,14 +728,6 @@ export class CollectionConfigBuilder<
       )
       this.currentSyncState = fullSyncState
 
-      // Listen for scheduler context clears to clean up our pending state
-      // Re-register on each sync start so the listener is active for the sync run's lifetime
-      this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
-        (contextId) => {
-          this.clearPendingGraphRun(contextId)
-        },
-      )
-
       // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
       // This ensures we don't miss the event if subset loading completes synchronously.
       // When isLoadingSubset becomes false, we may need to mark the collection as ready
@@ -885,16 +744,11 @@ export class CollectionConfigBuilder<
       )
       syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
 
-      const loadSubsetDataCallbacks = this.subscribeToAllCollections(
-        config,
-        fullSyncState,
-      )
+      this.loadMoreFn = this.subscribeToAllCollections(config, fullSyncState)
 
-      this.maybeRunGraphFn = () =>
-        this.scheduleGraphRun(loadSubsetDataCallbacks)
+      this.maybeRunGraphFn = () => this.scheduleGraphRun()
 
-      // Initial run with callback to load more data if needed
-      this.scheduleGraphRun(loadSubsetDataCallbacks)
+      this.scheduleGraphRun()
     } catch (error) {
       try {
         teardown()
@@ -914,15 +768,12 @@ export class CollectionConfigBuilder<
     this.currentSyncConfig = undefined
     this.currentSyncState = undefined
     this.maybeRunGraphFn = undefined
+    this.loadMoreFn = undefined
     this.currentWindow = undefined
     this.settledWindow = this.initialWindow
     this.isInErrorState = false
     this.fatalQueryError = false
     this.erroredSourceIds.clear()
-
-    // Clear all pending graph runs to prevent memory leaks from in-flight transactions
-    // that may flush after the sync run ends
-    this.pendingGraphRuns.clear()
 
     // Reset caches so a fresh graph/pipeline is compiled on next start
     // This avoids reusing a finalized D2 graph across GC restarts
@@ -934,7 +785,6 @@ export class CollectionConfigBuilder<
 
     // Reset lazy source alias state
     this.lazySources.clear()
-    this.demandGenerations.clear()
     this.activeDemands.clear()
     this.pendingOrderedLoads.clear()
     this.orderedLoadFailed = false
@@ -947,11 +797,6 @@ export class CollectionConfigBuilder<
     Object.keys(this.subscriptions).forEach(
       (key) => delete this.subscriptions[key],
     )
-
-    // Unregister from scheduler's onClear listener to prevent memory leaks
-    // The scheduler's listener Set would otherwise keep a strong reference to this builder
-    this.unsubscribeFromSchedulerClears?.()
-    this.unsubscribeFromSchedulerClears = undefined
   }
 
   /**
@@ -1063,8 +908,8 @@ export class CollectionConfigBuilder<
         this.pendingOrderedLoads.size > 0 ||
         Object.values(this.optimizableOrderByCollections).some(
           (info) =>
-            info.waitForJoinedDemand &&
-            this.hasPendingJoinedWork(info.sourceId),
+            info.joinedFilterSourceId !== undefined &&
+            this.hasPendingJoinedWork(info.joinedFilterSourceId),
         )
       ) {
         return

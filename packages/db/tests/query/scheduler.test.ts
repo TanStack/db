@@ -1520,7 +1520,7 @@ describe(`live query scheduler`, () => {
     },
   )
 
-  it(`coalesces load-more callbacks scheduled within the same context`, () => {
+  it(`coalesces graph runs scheduled within the same context`, () => {
     const baseCollection = createCollection<User>({
       id: `loader-users`,
       getKey: (user) => user.id,
@@ -1535,7 +1535,6 @@ describe(`live query scheduler`, () => {
     })
 
     const contextId = Symbol(`loader-context`)
-    const loader = vi.fn(() => true)
     const config = {
       begin: vi.fn(),
       write: vi.fn(),
@@ -1558,20 +1557,17 @@ describe(`live query scheduler`, () => {
 
     const maybeRunGraphSpy = vi
       .spyOn(builder, `maybeRunGraph`)
-      .mockImplementation((combinedLoader) => {
-        combinedLoader?.()
-      })
+      .mockImplementation(() => {})
 
     // Set instance properties since this test calls scheduleGraphRun directly
     builder.currentSyncConfig = config
     builder.currentSyncState = syncState
 
-    builder.scheduleGraphRun(loader, { contextId })
-    builder.scheduleGraphRun(loader, { contextId })
+    builder.scheduleGraphRun({ contextId })
+    builder.scheduleGraphRun({ contextId })
 
     transactionScopedScheduler.flush(contextId)
 
-    expect(loader).toHaveBeenCalledTimes(1)
     expect(maybeRunGraphSpy).toHaveBeenCalledTimes(1)
 
     maybeRunGraphSpy.mockRestore()
@@ -1582,7 +1578,7 @@ describe(`live query scheduler`, () => {
       [false, true].map((loaderResult) => ({ initialWork, loaderResult })),
     ),
   )(
-    `drains loader writes before publication: initial=$initialWork return=$loaderResult`,
+    `drains source loader writes before publication: initial=$initialWork return=$loaderResult`,
     ({ initialWork, loaderResult }) => {
       const source = createCollection<User>({
         getKey: (user) => user.id,
@@ -1610,24 +1606,16 @@ describe(`live query scheduler`, () => {
         flushPendingChanges: () => events.push(`publish`),
       } as unknown as FullSyncState
       const contextId = Symbol(`loader-write-context`)
-      builder.scheduleGraphRun(
-        () => {
-          events.push(`first`)
-          if (!wrote) {
-            wrote = true
-            pendingWork = true
-          }
-          return loaderResult
-        },
-        { contextId },
-      )
-      builder.scheduleGraphRun(
-        () => {
-          events.push(`second`)
-          return true
-        },
-        { contextId },
-      )
+      Reflect.set(builder, `loadMoreFn`, () => {
+        events.push(`first`)
+        if (!wrote) {
+          wrote = true
+          pendingWork = true
+        }
+        events.push(`second`)
+        return loaderResult
+      })
+      builder.scheduleGraphRun({ contextId })
       transactionScopedScheduler.flush(contextId)
       expect(events).toEqual([
         ...(initialWork ? [`graph`] : []),
@@ -1638,226 +1626,150 @@ describe(`live query scheduler`, () => {
         `second`,
         `publish`,
       ])
-      expect(builder.hasPendingGraphRun(contextId)).toBe(false)
+      expect(hasPendingJobs(transactionScopedScheduler, contextId)).toBe(false)
     },
   )
 
-  it.each(
-    [
-      { name: `undefined`, failure: undefined },
-      { name: `null`, failure: null },
-      { name: `false`, failure: false },
-      { name: `zero`, failure: 0 },
-      { name: `empty string`, failure: `` },
-      { name: `NaN`, failure: Number.NaN },
-    ].flatMap((entry) =>
-      [false, true].map((laterFails) => ({ ...entry, laterFails })),
-    ),
-  )(
-    `preserves the first falsy graph-loader failure: $name laterFails=$laterFails`,
-    ({ failure, laterFails }) => {
-      const baseCollection = createCollection<User>({
-        id: `falsy-loader-users-${String(failure)}`,
-        getKey: (user) => user.id,
-        sync: {
-          sync: () => () => {},
-        },
-      })
+  it.each(falsyListenerFailureCases)(
+    `attempts every repeated-alias source loader and preserves the first $name failure`,
+    async ({ failure }) => {
+      const createSource = (name: string) =>
+        createCollection<User>({
+          id: `source-loader-${name}`,
+          getKey: (user) => user.id,
+          startSync: true,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return () => {}
+            },
+          },
+        })
+      const firstSource = createSource(`first`)
+      const secondSource = createSource(`second`)
+      const thirdSource = createSource(`third`)
       const builder = new CollectionConfigBuilder({
-        id: `falsy-loader-builder-${String(failure)}`,
-        query: (q) => q.from({ user: baseCollection }),
+        id: `source-loader-builder`,
+        query: (q) =>
+          q.from({ root: firstSource }).select(({ root }) => ({
+            id: root.id,
+            second: q
+              .from({ item: secondSource })
+              .where(({ item }) => eq(item.id, root.id)),
+            third: q
+              .from({ item: thirdSource })
+              .where(({ item }) => eq(item.id, root.id)),
+          })),
       })
-      const contextId = Symbol(`falsy-loader-context`)
-      const laterLoader = vi.fn(() => {
-        if (laterFails) throw new Error(`later loader failed`)
-        return false
-      })
+      type BuilderSyncConfig = Parameters<
+        ReturnType<typeof builder.getConfig>[`sync`][`sync`]
+      >[0]
       const config = {
         begin: vi.fn(),
         write: vi.fn(),
         commit: vi.fn(),
         markReady: vi.fn(),
         truncate: vi.fn(),
-      } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
+      } as unknown as BuilderSyncConfig
+      const builderInternals = builder as unknown as {
+        graphCache: FullSyncState[`graph`]
+        inputsCache: FullSyncState[`inputs`]
+        pipelineCache: FullSyncState[`pipeline`]
+        collectionSources: Array<{
+          sourceId: string
+          alias: string
+          collection: object
+        }>
+        subscribeToAllCollections: (
+          syncConfig: typeof config,
+          state: FullSyncState,
+        ) => () => void
+      }
       const syncState = {
         messagesCount: 0,
-        subscribedToAllCollections: true,
         unsubscribeCallbacks: new Set<() => void>(),
-        graph: {
-          pendingWork: () => false,
-          run: vi.fn(),
-        },
-        inputs: {},
-        pipeline: {},
+        subscribedToAllCollections: false,
+        graph: builderInternals.graphCache,
+        inputs: builderInternals.inputsCache,
+        pipeline: builderInternals.pipelineCache,
       } as unknown as FullSyncState
-      const maybeRunGraphSpy = vi
-        .spyOn(builder, `maybeRunGraph`)
-        .mockImplementation((combinedLoader) => {
-          combinedLoader?.()
+      const sourceIdFor = (collection: object): string => {
+        const source = builderInternals.collectionSources.find(
+          (candidate) => candidate.collection === collection,
+        )
+        if (!source) throw new Error(`Expected a lexical source`)
+        return source.sourceId
+      }
+      const firstSourceId = sourceIdFor(firstSource)
+      const secondSourceId = sourceIdFor(secondSource)
+      const thirdSourceId = sourceIdFor(thirdSource)
+      expect(
+        builderInternals.collectionSources.map(({ alias }) => alias),
+      ).toEqual([`root`, `item`, `item`])
+      expect(new Set([firstSourceId, secondSourceId, thirdSourceId]).size).toBe(
+        3,
+      )
+      const laterFailure = new Error(`later source failed`)
+      const loaderCalls: Array<string> = []
+      const loaderCallCounts = new Map<string, number>()
+      const loadMoreSpy = vi
+        .spyOn(CollectionSubscriber.prototype, `loadMoreIfNeeded`)
+        .mockImplementation(function (this: unknown) {
+          const { sourceId } = this as { sourceId: string }
+          loaderCalls.push(sourceId)
+          loaderCallCounts.set(
+            sourceId,
+            (loaderCallCounts.get(sourceId) ?? 0) + 1,
+          )
+          if (sourceId === firstSourceId) throw failure
+          if (sourceId === secondSourceId) throw laterFailure
+          if (sourceId === thirdSourceId) return true
+          throw new Error(`Unexpected source: ${sourceId}`)
         })
 
-      builder.currentSyncConfig = config
-      builder.currentSyncState = syncState
-      builder.scheduleGraphRun(
-        () => {
-          throw failure
-        },
-        { contextId },
-      )
-      builder.scheduleGraphRun(laterLoader, { contextId })
-
-      let didThrow = false
-      let thrown: unknown
       try {
-        transactionScopedScheduler.flush(contextId)
-      } catch (error) {
-        didThrow = true
-        thrown = error
-      } finally {
-        maybeRunGraphSpy.mockRestore()
-      }
+        builder.currentSyncConfig = config
+        builder.currentSyncState = syncState
+        const loadAllSources = builderInternals.subscribeToAllCollections(
+          config,
+          syncState,
+        )
 
-      expect(didThrow).toBe(true)
-      expect(Object.is(thrown, failure)).toBe(true)
-      expect(laterLoader).toHaveBeenCalledOnce()
+        let didThrow = false
+        let thrown: unknown
+        try {
+          loadAllSources()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(Object.is(thrown, failure)).toBe(true)
+        expect(loaderCalls).toEqual([
+          firstSourceId,
+          secondSourceId,
+          thirdSourceId,
+        ])
+        expect(loaderCallCounts).toEqual(
+          new Map([
+            [firstSourceId, 1],
+            [secondSourceId, 1],
+            [thirdSourceId, 1],
+          ]),
+        )
+        expect(loadMoreSpy).toHaveBeenCalledTimes(3)
+      } finally {
+        for (const unsubscribe of syncState.unsubscribeCallbacks) unsubscribe()
+        loadMoreSpy.mockRestore()
+        await Promise.all([
+          firstSource.cleanup(),
+          secondSource.cleanup(),
+          thirdSource.cleanup(),
+        ])
+      }
     },
   )
-
-  it(`attempts every repeated-alias source loader and preserves the first failure`, async () => {
-    const createSource = (name: string) =>
-      createCollection<User>({
-        id: `source-loader-${name}`,
-        getKey: (user) => user.id,
-        startSync: true,
-        sync: {
-          sync: ({ markReady }) => {
-            markReady()
-            return () => {}
-          },
-        },
-      })
-    const firstSource = createSource(`first`)
-    const secondSource = createSource(`second`)
-    const thirdSource = createSource(`third`)
-    const builder = new CollectionConfigBuilder({
-      id: `source-loader-builder`,
-      query: (q) =>
-        q.from({ root: firstSource }).select(({ root }) => ({
-          id: root.id,
-          second: q
-            .from({ item: secondSource })
-            .where(({ item }) => eq(item.id, root.id)),
-          third: q
-            .from({ item: thirdSource })
-            .where(({ item }) => eq(item.id, root.id)),
-        })),
-    })
-    type BuilderSyncConfig = Parameters<
-      ReturnType<typeof builder.getConfig>[`sync`][`sync`]
-    >[0]
-    const config = {
-      begin: vi.fn(),
-      write: vi.fn(),
-      commit: vi.fn(),
-      markReady: vi.fn(),
-      truncate: vi.fn(),
-    } as unknown as BuilderSyncConfig
-    const builderInternals = builder as unknown as {
-      graphCache: FullSyncState[`graph`]
-      inputsCache: FullSyncState[`inputs`]
-      pipelineCache: FullSyncState[`pipeline`]
-      collectionSources: Array<{
-        sourceId: string
-        alias: string
-        collection: object
-      }>
-      subscribeToAllCollections: (
-        syncConfig: typeof config,
-        state: FullSyncState,
-      ) => () => void
-    }
-    const syncState = {
-      messagesCount: 0,
-      unsubscribeCallbacks: new Set<() => void>(),
-      subscribedToAllCollections: false,
-      graph: builderInternals.graphCache,
-      inputs: builderInternals.inputsCache,
-      pipeline: builderInternals.pipelineCache,
-    } as unknown as FullSyncState
-    const sourceIdFor = (collection: object): string => {
-      const source = builderInternals.collectionSources.find(
-        (candidate) => candidate.collection === collection,
-      )
-      if (!source) throw new Error(`Expected a lexical source`)
-      return source.sourceId
-    }
-    const firstSourceId = sourceIdFor(firstSource)
-    const secondSourceId = sourceIdFor(secondSource)
-    const thirdSourceId = sourceIdFor(thirdSource)
-    expect(
-      builderInternals.collectionSources.map(({ alias }) => alias),
-    ).toEqual([`root`, `item`, `item`])
-    expect(new Set([firstSourceId, secondSourceId, thirdSourceId]).size).toBe(3)
-    const laterFailure = new Error(`later source failed`)
-    const loaderCalls: Array<string> = []
-    const loaderCallCounts = new Map<string, number>()
-    const loadMoreSpy = vi
-      .spyOn(CollectionSubscriber.prototype, `loadMoreIfNeeded`)
-      .mockImplementation(function (this: unknown) {
-        const { sourceId } = this as { sourceId: string }
-        loaderCalls.push(sourceId)
-        loaderCallCounts.set(
-          sourceId,
-          (loaderCallCounts.get(sourceId) ?? 0) + 1,
-        )
-        if (sourceId === firstSourceId) throw undefined
-        if (sourceId === secondSourceId) throw laterFailure
-        if (sourceId === thirdSourceId) return true
-        throw new Error(`Unexpected source: ${sourceId}`)
-      })
-
-    try {
-      builder.currentSyncConfig = config
-      builder.currentSyncState = syncState
-      const loadAllSources = builderInternals.subscribeToAllCollections(
-        config,
-        syncState,
-      )
-
-      let didThrow = false
-      let thrown: unknown
-      try {
-        loadAllSources()
-      } catch (error) {
-        didThrow = true
-        thrown = error
-      }
-
-      expect(didThrow).toBe(true)
-      expect(Object.is(thrown, undefined)).toBe(true)
-      expect(loaderCalls).toEqual([
-        firstSourceId,
-        secondSourceId,
-        thirdSourceId,
-      ])
-      expect(loaderCallCounts).toEqual(
-        new Map([
-          [firstSourceId, 1],
-          [secondSourceId, 1],
-          [thirdSourceId, 1],
-        ]),
-      )
-      expect(loadMoreSpy).toHaveBeenCalledTimes(3)
-    } finally {
-      for (const unsubscribe of syncState.unsubscribeCallbacks) unsubscribe()
-      loadMoreSpy.mockRestore()
-      await Promise.all([
-        firstSource.cleanup(),
-        secondSource.cleanup(),
-        thirdSource.cleanup(),
-      ])
-    }
-  })
 
   it(`should handle optimistic mutations with nested left joins without scheduler errors`, async () => {
     // This test verifies that optimistic mutations on collections with nested live query

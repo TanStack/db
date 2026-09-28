@@ -22,10 +22,6 @@ import type { CollectionConfigBuilder } from './collection-config-builder.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { LazyDemandPlan } from '../compiler/joins.js'
 
-const loadMoreCallbackSymbol = Symbol.for(
-  `@tanstack/db.collection-config-builder`,
-)
-
 type TruncateReplayPublicationControl = NonNullable<
   SubscribeChangesOptions[`truncateReplayPublication`]
 >
@@ -220,7 +216,6 @@ export class CollectionSubscriber<
 
   private sendChangesToPipeline(
     changes: Iterable<ChangeMessage<any, string | number>>,
-    callback?: () => void,
   ): void {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
     const reconciledChanges = reconcileChangesForD2(
@@ -231,21 +226,11 @@ export class CollectionSubscriber<
     // (only called from active subscriptions during a sync run)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.sourceId]!
-    const sentChanges = sendChangesToInput(input, reconciledChanges)
-    if (sentChanges > 0) {
+    if (sendChangesToInput(input, reconciledChanges) > 0) {
       this.collectionConfigBuilder.advanceGraphInputRevision()
     }
-
-    // Do not provide the callback that loads more data
-    // if there's no more data to load
-    // otherwise we end up in an infinite loop trying to load more data
-    const dataLoader = sentChanges > 0 ? callback : undefined
-
-    // We need to schedule a graph run even if there's no data to load
-    // because we need to mark the collection as ready if it's not already
-    // and that's only done in `scheduleGraphRun`
-    if (dataLoader) this.collectionConfigBuilder.scheduleGraphRun(dataLoader)
-    else this.collectionConfigBuilder.scheduleGraphRunWithLoaders()
+    // A zero-change source settlement can still release ordered demand.
+    this.collectionConfigBuilder.scheduleGraphRun()
   }
 
   private subscribeToMatchingChanges(
@@ -306,7 +291,7 @@ export class CollectionSubscriber<
 
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changesArray)
-      this.sendChangesToPipelineWithTracking(splittedChanges, subscription)
+      this.sendChangesToPipeline(splittedChanges)
     }
 
     // Subscribe to changes with onStatusChange - listener is registered before any snapshot
@@ -364,7 +349,11 @@ export class CollectionSubscriber<
         this.collectionConfigBuilder.liveQueryCollection?.status === `ready` &&
         !this.collectionConfigBuilder.hasActiveWindowOperation(),
       () => this.collectionConfigBuilder.getGraphInputRevision(),
-      () => this.collectionConfigBuilder.hasPendingJoinedWork(this.sourceId),
+      () =>
+        orderByInfo.joinedFilterSourceId !== undefined &&
+        this.collectionConfigBuilder.hasPendingJoinedWork(
+          orderByInfo.joinedFilterSourceId,
+        ),
     )
     this.orderedLoader.start()
 
@@ -424,34 +413,6 @@ export class CollectionSubscriber<
     } catch (error) {
       if (!Object.is(subscription.lastError, error)) throw error
     }
-  }
-
-  private sendChangesToPipelineWithTracking(
-    changes: Iterable<ChangeMessage<any, string | number>>,
-    subscription: CollectionSubscription,
-  ) {
-    const orderByInfo = this.getOrderByInfo()
-    if (!orderByInfo) {
-      this.sendChangesToPipeline(changes)
-      return
-    }
-
-    // Cache the loadMoreIfNeeded callback on the subscription using a symbol property.
-    // This ensures we pass the same function instance to the scheduler each time,
-    // allowing it to deduplicate callbacks when multiple changes arrive during a transaction.
-    type SubscriptionWithLoader = CollectionSubscription & {
-      [loadMoreCallbackSymbol]?: () => void
-    }
-
-    const subscriptionWithLoader = subscription as SubscriptionWithLoader
-
-    subscriptionWithLoader[loadMoreCallbackSymbol] ??=
-      this.loadMoreIfNeeded.bind(this, subscription)
-
-    this.sendChangesToPipeline(
-      changes,
-      subscriptionWithLoader[loadMoreCallbackSymbol],
-    )
   }
 
   private getWhereClause(): BasicExpression<boolean> | undefined {

@@ -143,7 +143,7 @@ export class OrderedSourceLoader {
     continuesOrderedPrefixRepair = false,
   ): Promise<void> | undefined {
     if (!this.active || this.info.limit === 0 || this.requesting) return
-    if (this.info.waitForJoinedDemand && this.hasPendingJoinedWork())
+    if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork())
       return this.pending
     if (this.stagedContinuation) {
       // A synchronous finite request can deliver an order-changing mutation.

@@ -1,17 +1,16 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { createDeferred } from '../deferred.js'
-import {
-  getActivePublicationContext,
-  transactionScopedScheduler,
-} from '../scheduler.js'
-import { getActiveTransaction } from '../transactions.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
-import { SubsetDemandController } from './live/subset-demand-controller.js'
+import { scheduleQueryGraphRun } from './live/graph-scheduler.js'
+import {
+  SubsetDemandController,
+  hasPendingJoinedWork as hasPendingJoinedSourceWork,
+} from './live/subset-demand-controller.js'
 import { OrderedSourceLoader } from './live/ordered-source-loader.js'
 import {
   buildQueryFromConfig,
@@ -30,6 +29,7 @@ import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
 import type { Context } from './builder/types.js'
 import type { BasicExpression, QueryIR } from './ir.js'
 import type { OrderByOptimizationInfo } from './compiler/order-by.js'
+import type { GraphDependency } from './live/graph-scheduler.js'
 import type {
   LazyCollectionCallbacks,
   LazyDemandPlan,
@@ -426,7 +426,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // last coherent membership rather than their net multiplicity alone.
   private readonly publishedRows = new Map<unknown, TRow>()
   private tracksPublishedRows = false
-  private classifyPendingChangesAgainstPublishedRows = false
 
   // skipInitial state
   private readonly skipInitial: boolean
@@ -434,7 +433,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Scheduler integration
   private subscribedToAllCollections = false
-  private readonly builderDependencies = new Set<unknown>()
+  private readonly builderDependencies = new Set<GraphDependency>()
 
   // Reentrance guard
   private isGraphRunning = false
@@ -632,6 +631,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // dispose, so start() must be able to release every acquired source.
       this.unsubscribeCallbacks.add(unsubscribe)
 
+      if (
+        Object.values(this.optimizableOrderByCollections).some(
+          (info) => info.joinedFilterSourceId === sourceId,
+        )
+      ) {
+        this.unsubscribeCallbacks.add(
+          subscription.on(`status:ready`, () => {
+            if (!this.disposed) this.scheduleGraphRun()
+          }),
+        )
+      }
+
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {
         lazyCallbacks.setDemand = (plan: LazyDemandPlan, keys: Set<unknown>) =>
@@ -662,7 +673,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           },
           () => false,
           undefined,
-          () => this.hasPendingJoinedWork(sourceId),
+          () =>
+            orderByInfo.joinedFilterSourceId !== undefined &&
+            this.hasPendingJoinedWork(orderByInfo.joinedFilterSourceId),
         )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
@@ -697,16 +710,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (status === `cleaned-up`) {
           handleSourceCleanup()
           return
-        }
-
-        if (
-          status === `ready` &&
-          this.pendingChanges.size > 0 &&
-          Object.values(this.optimizableOrderByCollections).some(
-            (info) => info.waitForJoinedDemand,
-          )
-        ) {
-          this.scheduleGraphRun()
         }
 
         // Track source readiness for skipInitial
@@ -828,42 +831,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * live query collections, ensuring parent queries run before effects.
    */
   private scheduleGraphRun(): void {
-    const contextId =
-      getActiveTransaction()?.id ?? getActivePublicationContext()
-
-    // Snapshot before scheduling parents, which can reenter source setup.
-    const deps = [...this.builderDependencies]
-
-    // Ensure dependent builders are scheduled in this context so that
-    // dependency edges always point to a real job.
-    if (contextId) {
-      for (const dep of deps) {
-        if (
-          typeof dep === `object` &&
-          dep !== null &&
-          `scheduleGraphRun` in dep &&
-          typeof (dep as any).scheduleGraphRun === `function`
-        ) {
-          ;(dep as any).scheduleGraphRun(undefined, { contextId })
-        }
-      }
-    }
-
-    transactionScopedScheduler.schedule({
-      contextId,
-      jobId: this,
-      dependencies: deps,
-      run: () => this.executeScheduledGraphRun(),
+    scheduleQueryGraphRun(this, this.builderDependencies, () => {
+      if (!this.disposed && this.subscribedToAllCollections) this.runGraph()
     })
-  }
-
-  /**
-   * Called by the scheduler when dependencies are satisfied.
-   * Checks that the effect is still active before running.
-   */
-  private executeScheduledGraphRun(): void {
-    if (this.disposed || !this.subscribedToAllCollections) return
-    this.runGraph()
   }
 
   /** Hold Effect callback publication across one authoritative repair chain. */
@@ -872,7 +842,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     replacementAfterFailure: () => Promise<void> | undefined,
   ): void {
     if (this.disposed) return
-    this.classifyPendingChangesAgainstPublishedRows = true
     if (this.pendingOrderedPublications.size === 0) {
       this.orderedPublicationFailed = false
     }
@@ -985,7 +954,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     if (
       Object.values(this.optimizableOrderByCollections).some(
         (info) =>
-          info.waitForJoinedDemand && this.hasPendingJoinedWork(info.sourceId),
+          info.joinedFilterSourceId !== undefined &&
+          this.hasPendingJoinedWork(info.joinedFilterSourceId),
       )
     ) {
       return
@@ -996,15 +966,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
     for (const [key, changes] of this.pendingChanges) {
-      const event =
-        this.tracksPublishedRows ||
-        this.classifyPendingChangesAgainstPublishedRows
-          ? classifyHeldDelta<TRow, TKey>(
-              key as TKey,
-              changes,
-              this.publishedRows,
-            )
-          : classifyImmediateDelta<TRow, TKey>(key as TKey, changes)
+      const event = classifyDelta<TRow, TKey>(
+        key as TKey,
+        changes,
+        this.tracksPublishedRows ? this.publishedRows : undefined,
+      )
       if (event) {
         if (this.tracksPublishedRows) {
           if (event.type === `exit`) this.publishedRows.delete(key)
@@ -1015,7 +981,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
 
     this.pendingChanges = new Map()
-    this.classifyPendingChangesAgainstPublishedRows = false
 
     if (events.length > 0) {
       this.onBatchProcessed(events)
@@ -1112,14 +1077,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  private hasPendingJoinedWork(orderedSourceId: string): boolean {
-    return (
-      this.demand.hasPendingDemand() ||
-      Object.entries(this.subscriptions).some(
-        ([sourceId, subscription]) =>
-          sourceId !== orderedSourceId &&
-          subscription.status === `loadingSubset`,
-      )
+  private hasPendingJoinedWork(joinedSourceId: string): boolean {
+    return hasPendingJoinedSourceWork(
+      joinedSourceId,
+      this.lazySourcesCallbacks,
+      this.subscriptions,
+      (planId) => this.demand.hasPendingDemand(planId),
     )
   }
 
@@ -1147,7 +1110,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.pendingOrderedPublications.clear()
     this.orderedPublicationFailed = false
     this.tracksPublishedRows = false
-    this.classifyPendingChangesAgainstPublishedRows = false
     this.lazySources.clear()
     this.demand.clear()
     this.builderDependencies.clear()
@@ -1222,43 +1184,18 @@ function accumulateEffectChanges<T>(
   return acc
 }
 
-/** Classify accumulated per-key changes into a DeltaEvent */
-function classifyImmediateDelta<
-  TRow extends object,
-  TKey extends string | number,
->(key: TKey, changes: EffectChanges<TRow>): DeltaEvent<TRow, TKey> | undefined {
-  const { inserts, deletes, insertValue, deleteValue } = changes
-
-  if (inserts > 0 && deletes === 0) {
-    return { type: `enter`, key, value: insertValue! }
-  }
-
-  if (deletes > 0 && inserts === 0) {
-    return { type: `exit`, key, value: deleteValue! }
-  }
-
-  if (inserts > 0 && deletes > 0) {
-    return {
-      type: `update`,
-      key,
-      value: insertValue!,
-      previousValue: deleteValue!,
-    }
-  }
-
-  return undefined
-}
-
-function classifyHeldDelta<TRow extends object, TKey extends string | number>(
+/** Interpret a D2 batch against callback-visible state when a window holds it. */
+function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
-  publishedRows: ReadonlyMap<unknown, TRow>,
+  publishedRows?: ReadonlyMap<unknown, TRow>,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
-  const wasPresent = publishedRows.has(key)
-  const previousValue = publishedRows.get(key)
-  const nextMultiplicity = Number(wasPresent) + inserts - deletes
-  const isPresent = nextMultiplicity > 0
+  const wasPresent = publishedRows ? publishedRows.has(key) : deletes > 0
+  const previousValue = publishedRows?.get(key) ?? deleteValue
+  const isPresent = publishedRows
+    ? Number(wasPresent) + inserts - deletes > 0
+    : inserts > 0
 
   if (!wasPresent && isPresent) {
     // Row entered the query result
@@ -1275,7 +1212,7 @@ function classifyHeldDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    !deepEquals(previousValue, insertValue)
+    (!publishedRows || !deepEquals(previousValue, insertValue))
   ) {
     // Row updated within the query result
     return {

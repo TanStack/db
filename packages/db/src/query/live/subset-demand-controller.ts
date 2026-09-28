@@ -3,7 +3,10 @@ import { PropRef } from '../ir.js'
 import { createValueIdentity } from '../equality-value-identity.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
-import type { LazyDemandPlan } from '../compiler/joins.js'
+import type {
+  LazyCollectionCallbacks,
+  LazyDemandPlan,
+} from '../compiler/joins.js'
 import type { BasicExpression } from '../ir.js'
 import type { LoadSubsetRequestResult } from '../../types.js'
 
@@ -142,9 +145,11 @@ export class SubsetDemandController {
     this.valueIdentity = createValueIdentity()
   }
 
-  hasPendingDemand(): boolean {
-    return [...this.states.values()].some((state) =>
-      state.segments.some((segment) => segment.state === `pending`),
+  hasPendingDemand(planId: string): boolean {
+    return (
+      this.states
+        .get(planId)
+        ?.segments.some((segment) => segment.state === `pending`) ?? false
     )
   }
 
@@ -178,6 +183,22 @@ export class SubsetDemandController {
         `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
     )
   }
+}
+
+/** An ordered filter waits only for demand on its joined source. */
+export function hasPendingJoinedWork(
+  joinedSourceId: string,
+  lazySourcesCallbacks: Record<string, LazyCollectionCallbacks>,
+  subscriptions: Record<string, CollectionSubscription>,
+  isPendingPlan: (planId: string) => boolean,
+): boolean {
+  return (
+    (lazySourcesCallbacks[joinedSourceId]?.plans?.some((plan) =>
+      isPendingPlan(plan.id),
+    ) ??
+      false) ||
+    subscriptions[joinedSourceId]?.status === `loadingSubset`
+  )
 }
 
 function canonicalizeKeys(
