@@ -265,7 +265,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
   const cache = new Map<string, any>()
 
   function createSelectedProxy(path: Array<string>): any {
-    const pathKey = path.join(`.`)
+    const pathKey = JSON.stringify(path)
     if (cache.has(pathKey)) {
       return cache.get(pathKey)
     }

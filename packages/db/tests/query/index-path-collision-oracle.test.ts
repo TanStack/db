@@ -4,6 +4,9 @@
  * Contract: A source row matches an AND predicate according to each complete
  * property path. A scalar property named `a.b` and a nested `a.b` property are
  * distinct fields. Adding an index may change work, but not public rows.
+ * Authority: `docs/guides/live-queries.md` documents AND filters, selected
+ * fields, and computed `orderBy` values. The live-query architecture treats an
+ * index as a physical query detail rather than a different result contract.
  *
  * Model: Plain JavaScript reads each field independently and intersects the
  * two comparisons. It does not use query expressions or index classifications.
@@ -13,20 +16,25 @@
  * then query the same Collection after indexing. Also compile public Collection
  * subscription and live-query callbacks with and without that index. Vary
  * argument order, bound inclusivity, reversed operands, and bound field.
+ * A selected-field ordering reads both paths through the public `$selected`
+ * callback proxy.
  *
  * Production driver: `currentStateAsChanges`, Collection subscriptions, and
  * live-query Collections run the real predicates and callback compilers.
- * Refinement check: At each checkpoint, exact public keys equal the model keys.
+ * Refinement check: At each checkpoint, exact public keys equal the model keys;
+ * selected-field order equals a direct JavaScript sort over both field values.
  * The cross product contains rows that a merged range omits or adds; unchanged
- * scan results make index addition an explicit metamorphic control.
+ * scan results make index addition an explicit metamorphic control. The
+ * nested index's lookup spy proves the indexed path ran after installation.
  *
  * Known omissions: This bounded owner does not claim arbitrary path segments,
  * nullish values, custom collation, or incremental publication histories.
+ * Lazy demand target deduplication has a separate compiler-boundary witness.
  */
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { and, gt, lt, lte } from '../../src/query/builder/functions.js'
+import { add, and, gt, lt, lte } from '../../src/query/builder/functions.js'
 import { PropRef } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -109,8 +117,10 @@ it.each(cases)(
         .sort()
 
     expect(queryKeys(), `scan result`).toEqual(expected)
-    collection.createIndex((row) => row.a.b)
+    const index = collection.createIndex((row) => row.a.b)
+    const lookup = vi.spyOn(index, `lookup`)
     expect(queryKeys(), `indexed result`).toEqual(expected)
+    expect(lookup, `indexed path reached`).toHaveBeenCalled()
   },
 )
 
@@ -131,6 +141,34 @@ it.each([false, true])(
     subscription.unsubscribe()
   },
 )
+
+it(`keeps selected dotted and nested paths distinct in a public order`, async () => {
+  const collection = await readyCollection(`selected-order`)
+  const result = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ item: collection })
+        .fn.select(({ item }) => ({
+          id: item.id,
+          'a.b': item[`a.b`],
+          a: { b: item.a.b },
+        }))
+        .orderBy(({ $selected }) => add($selected[`a.b`], $selected.a.b))
+        .orderBy(({ $selected }) => $selected.id),
+    startSync: true,
+  })
+
+  await result.stateWhenReady()
+  const expected = [...rows]
+    .sort(
+      (left, right) =>
+        left[`a.b`] + left.a.b - (right[`a.b`] + right.a.b) ||
+        left.id.localeCompare(right.id),
+    )
+    .map((row) => row.id)
+  expect(result.toArray.map((row) => row.id)).toEqual(expected)
+  await result.cleanup()
+})
 
 it.each([false, true])(
   `preserves distinct fields in a live-query callback (indexed=%s)`,
