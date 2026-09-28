@@ -13,26 +13,36 @@ import type {
   HydrationStraddleReach,
 } from './electric-hydration-straddle.opfs'
 
+const pageErrors = new WeakMap<Page, Array<string>>()
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 async function diagnostic(page: Page): Promise<string> {
+  const errors = pageErrors.get(page) ?? []
   try {
-    if (page.isClosed()) return `page closed`
-    return JSON.stringify(
-      (await page.evaluate(() =>
+    if (page.isClosed()) {
+      return JSON.stringify({ probe: `page closed`, pageErrors: errors })
+    }
+    return JSON.stringify({
+      ...((await page.evaluate(() =>
         window.__electricHydrationStraddleProbe?.diagnostic(),
-      )) ?? { probe: `unavailable` },
-    )
+      )) ?? { probe: `unavailable` }),
+      pageErrors: errors,
+    })
   } catch (error) {
-    return `probe diagnostic unavailable: ${errorMessage(error)}`
+    return JSON.stringify({
+      probeDiagnosticUnavailable: errorMessage(error),
+      pageErrors: errors,
+    })
   }
 }
 
 async function openProbe(page: Page, url: string): Promise<void> {
-  const pageErrors: Array<string> = []
-  page.on(`pageerror`, (error) => pageErrors.push(error.message))
+  const errors: Array<string> = []
+  pageErrors.set(page, errors)
+  page.on(`pageerror`, (error) => errors.push(error.message))
   try {
     await page.goto(url, { waitUntil: `commit` })
     await page.waitForFunction(
@@ -43,11 +53,12 @@ async function openProbe(page: Page, url: string): Promise<void> {
     const state = await page.evaluate(() =>
       window.__electricHydrationStraddleProbe!.diagnostic(),
     )
-    if (state.phase === `failed`) throw new Error(state.failure)
+    if (state.phase === `failed`) {
+      throw new Error(state.failure || `Probe failed without a failure message`)
+    }
   } catch (error) {
     throw new Error(
       `Electric hydration-straddle page failed: ${errorMessage(error)}; ` +
-        `page errors: ${JSON.stringify(pageErrors)}; ` +
         `diagnostic: ${await diagnostic(page)}`,
       { cause: error },
     )
@@ -85,7 +96,11 @@ async function expectExactRow(
     await expect
       .poll(
         async () => {
-          const { phase, status, publicRows, durableRows } = await observe(page)
+          const { phase, failure, status, publicRows, durableRows } =
+            await observe(page)
+          if (phase === `failed`) {
+            throw new Error(failure || `Probe failed without a failure message`)
+          }
           return { phase, status, publicRows, durableRows }
         },
         { timeout: 60_000 },
@@ -241,3 +256,65 @@ async function closeProbe(page: Page): Promise<Array<string>> {
   await page.close()
   return failures
 }
+
+test(`reports a failed probe even when its error message is empty`, async () => {
+  const page = {
+    on: () => undefined,
+    goto: () => Promise.resolve(),
+    waitForFunction: () => Promise.resolve(),
+    evaluate: () => Promise.resolve({ phase: `failed`, failure: `` }),
+    isClosed: () => false,
+  } as unknown as Page
+
+  const failure: unknown = await openProbe(page, `/unused`).then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  expect(String(failure)).toContain(`Probe failed without a failure message`)
+})
+
+test(`reports a terminal commit failure without polling for rows`, async () => {
+  test.setTimeout(10_000)
+  let observations = 0
+  const page = {
+    isClosed: () => false,
+    evaluate: () => {
+      observations++
+      return Promise.resolve({
+        phase: `failed`,
+        failure: `parked commit rejected`,
+        status: `error`,
+        publicRows: [],
+        durableRows: [],
+      })
+    },
+  } as unknown as Page
+
+  const failure: unknown = await expectExactRow(page, {
+    id: `one`,
+    label: `source update`,
+  }).then(
+    () => undefined,
+    (error: unknown) => error,
+  )
+  expect(String(failure)).toContain(`parked commit rejected`)
+  expect(observations).toBe(2)
+})
+
+test(`includes page errors that occur after probe startup`, async () => {
+  let onPageError: ((error: Error) => void) | undefined
+  const page = {
+    on: (event: string, listener: (error: Error) => void) => {
+      if (event === `pageerror`) onPageError = listener
+    },
+    goto: () => Promise.resolve(),
+    waitForFunction: () => Promise.resolve(),
+    evaluate: () => Promise.resolve({ phase: `ready`, status: `ready` }),
+    isClosed: () => false,
+  } as unknown as Page
+
+  await openProbe(page, `/unused`)
+  expect(onPageError).toBeDefined()
+  onPageError!(new Error(`late page failure`))
+  expect(await diagnostic(page)).toContain(`late page failure`)
+})

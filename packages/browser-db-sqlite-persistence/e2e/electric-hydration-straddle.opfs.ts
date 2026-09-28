@@ -75,6 +75,11 @@ function sortedRows(rows: Iterable<Item>): Array<Item> {
   )
 }
 
+function failureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message || (error instanceof Error ? error.name : `Unknown failure`)
+}
+
 const parameters = new URL(location.href).searchParams
 const databaseId = parameters.get(`databaseId`)
 const collectionId = parameters.get(`collectionId`)
@@ -210,11 +215,17 @@ try {
             return params.commit(...args)
           }
           reach.rowCommitParked = true
-          return releaseCommit.promise.then(async () => {
-            const applied = params.commit(...args)
-            if (applied !== true) await applied
-            reach.rowCommitApplied = true
-          })
+          return releaseCommit.promise
+            .then(async () => {
+              const applied = params.commit(...args)
+              if (applied !== true) await applied
+              reach.rowCommitApplied = true
+            })
+            .catch((error: unknown) => {
+              failure ??= failureMessage(error)
+              phase = `failed`
+              throw error
+            })
         },
       }),
   }
@@ -306,7 +317,7 @@ try {
     void Promise.resolve(collection._sync.loadSubset(subsetDemand))
       .then(() => collection._sync.unloadSubset(subsetDemand))
       .catch((error: unknown) => {
-        failure = error instanceof Error ? error.message : String(error)
+        failure ??= failureMessage(error)
         phase = `failed`
       })
       .finally(() => {
