@@ -81,3 +81,13 @@ core change, and the touched test driver's purpose has a JSDoc. The optional
 extra CLI review remains deferred to the normal PR review process. No
 reviewed item remains unclassified; later CodeRabbit reviews at new heads
 require separate evaluation.
+
+## Cloudflare bound-parameter follow-up
+
+- Reviewed executable commit: `33907be70dbb987fcca4e502e5b0b4d7ab3f0a4e`.
+- Cloudflare's [Durable Objects limits](https://developers.cloudflare.com/durable-objects/platform/limits/) permit at most 100 bound parameters per SQL query. A full replacement inserts four bound values per row and two per expected key. The prior 100-row chunk could therefore exceed the host cap at 26 rows.
+- The Cloudflare driver now declares that fixed host limit. The core adapter captures the driver's capability before it wraps the driver for scheduling, and uses at most 25 replacement rows per statement for Cloudflare. Drivers without a lower declared limit retain the 100-row default; the core 205-row work test observes a 400-binding row statement to pin that distinction. This is a driver capability, not a user option.
+- Contract × history × path × observation: for unique-key, non-delete `truncate: true` replacements of 25, 26, and 205 rows, `applyCommittedTx` through the Cloudflare driver must fulfill with every input key durably present and a consistent expected-key set. At each `sql.exec` call, the binding count must be at most 100. The fixed test uses a Node SQLite storage seam that rejects calls above Cloudflare's documented cap; it does not execute inside Workers.
+- RED on the prior PR head `f20e84b2971d4e018b6c2c45f3b11af92ba47d00`: the 25-row case passed; 26 and 205 rows rejected at the host-cap seam. This was an assertion/path failure, not a test setup failure. GREEN on `33907be7`: all three cases passed. The old 100-row implementation is the hostile control for the boundary assertion; a global 25-row change would fail the generic driver's 400-binding assertion.
+- Verification: the complete core suite passed 340 tests with one TODO; the focused Cloudflare suite passed three tests. Both packages built, and changed-file ESLint, Prettier, and Git whitespace checks passed. The local full Cloudflare suite could not collect its three older files because the filtered checkout lacks the `better-sqlite3` dev dependency. Nonfatal Expo example tsconfig warnings also appeared. CI remains the full host-package check.
+- The test owns the documented Cloudflare binding boundary, not all possible host restrictions, native Workers execution, or Chromium/OPFS latency. The issue was closed by maintainer decision without making a latency measurement a closure prerequisite.
