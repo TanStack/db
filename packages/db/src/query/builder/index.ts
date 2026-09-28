@@ -1,5 +1,6 @@
 import { CollectionImpl } from '../../collection/index.js'
 import { hasCollectionOptionsBrand } from '../../collection-options.js'
+import { isPlainObject as isRecord } from '../../utils/type-guards.js'
 import {
   Aggregate as AggregateExpr,
   CollectionRef,
@@ -11,7 +12,6 @@ import {
   QueryRef,
   UnionAll,
   UnionFrom,
-  Value as ValueExpr,
   isExpressionLike,
 } from '../ir.js'
 import {
@@ -1046,25 +1046,11 @@ function getValueTypeName(value: unknown): string {
 
 // Helper to ensure we have a BasicExpression/Aggregate for a value
 function toExpr(value: any): BasicExpression | Aggregate {
-  if (value === undefined) return toExpression(null)
-  if (
-    value instanceof AggregateExpr ||
-    value instanceof FuncExpr ||
-    value instanceof PropRef ||
-    value instanceof ValueExpr
-  ) {
-    return value as BasicExpression | Aggregate
-  }
-  return toExpression(value)
+  return toExpression(value ?? null)
 }
 
 function isPlainObject(value: any): value is Record<string, any> {
-  return (
-    value !== null &&
-    typeof value === `object` &&
-    !isExpressionLike(value) &&
-    !value.__refProxy
-  )
+  return isRecord(value) && !isExpressionLike(value) && !isRefProxy(value)
 }
 
 function buildNestedSelect(

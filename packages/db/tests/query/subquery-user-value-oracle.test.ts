@@ -3,24 +3,26 @@ import { describe, expect, it } from 'vitest'
 import { buildQuery } from '../../src/query/builder/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { collectCollectionSources } from '../../src/query/ir.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { count, createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
 /**
- * A QueryRef is a relational boundary: its DISTINCT result is formed before an
- * outer join and WHERE, and a source row remains user data even when its fields
- * resemble query IR. The query API and the live-query architecture's public
- * surface law authorize both expectations.
+ * A QueryRef is a relational boundary: DISTINCT and aggregate results are
+ * formed before an outer join and WHERE. Renaming a no-select QueryRef keeps
+ * its source bound. Source rows and selected objects remain user data even
+ * when their fields resemble query IR or contain empty arrays. The query API
+ * and the live-query architecture's public surface law authorize these rules.
  *
- * These small finite models use ordinary array filtering, equality, and a Set
- * for DISTINCT. They do not inspect the optimized IR or either value
+ * The finite DISTINCT model uses ordinary array filtering, equality, and a Set.
+ * The fixed public expectations do not inspect optimized IR or either value
  * classifier. The first driver checks the compiler's complete output bag after
  * one graph run, because a keyed public Collection can collapse duplicate
  * contributors and hide a lost DISTINCT. The other drivers use real live-query
- * Collections and check user rows at preload or query construction. An excluded
- * outer row makes WHERE observable in the first history. This suite does not
- * claim coverage of every join type or IR-shaped field.
+ * Collections and check public rows at preload or query construction. An
+ * excluded outer row makes WHERE observable in the first history. Fixed joined
+ * filters expose pushdown across DISTINCT and nested aggregate boundaries.
+ * This suite does not claim coverage of source updates or every join type.
  */
 
 type Person = { id: number; groupId: number; enabled: boolean }
@@ -171,6 +173,118 @@ describe('subquery boundaries preserve operators and user rows', () => {
       await source.collection.cleanup()
     }
   })
+
+  it.each([
+    { name: 'reference-shaped', payload: { type: 'ref', path: ['name'] } },
+    {
+      name: 'function-shaped',
+      payload: { type: 'func', name: 'user', args: [] },
+    },
+    {
+      name: 'conditional-shaped',
+      payload: { type: 'conditionalSelect', branches: [] },
+    },
+    { name: 'proxy-shaped', payload: { __refProxy: true, __path: ['name'] } },
+    { name: 'wrapper-shaped', payload: { __brand: 'MaterializeWrapper' } },
+  ])('keeps selected $name user objects intact', async ({ payload }) => {
+    const source = createControlledCollection('selected-container', [{ id: 1 }])
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ item: source.collection }).select(() => ({ payload })),
+      getKey: () => 1,
+    })
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([{ payload }])
+    } finally {
+      await live.cleanup()
+      await source.collection.cleanup()
+    }
+  })
+
+  it('keeps an outer virtual-field WHERE after a joined DISTINCT result', async () => {
+    const source = createControlledCollection('distinct-pushdown', [
+      { id: 1, groupId: 1 },
+      { id: 2, groupId: 1 },
+    ])
+    const people = createControlledCollection('distinct-pushdown-people', [
+      { id: 1, groupId: 1 },
+    ])
+    const live = createLiveQueryCollection({
+      query: (q) => {
+        const groups = q
+          .from({ item: source.collection })
+          .select(({ item }) => ({ groupId: item.groupId }))
+          .distinct()
+        return q
+          .from({ person: people.collection })
+          .innerJoin({ group: groups }, ({ person, group }) =>
+            eq(person.groupId, group.groupId),
+          )
+          .where(({ group }) => eq(group.$key, 2))
+          .select(({ group }) => ({ groupId: group.groupId }))
+      },
+      getKey: () => 1,
+    })
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([])
+    } finally {
+      await live.cleanup()
+      await source.collection.cleanup()
+      await people.collection.cleanup()
+    }
+  })
+
+  it('keeps an outer WHERE after a nested aggregate select', async () => {
+    const source = createControlledCollection('nested-aggregate-pushdown', [
+      { id: 1 },
+      { id: 2 },
+    ])
+    const people = createControlledCollection('nested-aggregate-people', [
+      { id: 2 },
+    ])
+    const live = createLiveQueryCollection({
+      query: (q) => {
+        const stats = q
+          .from({ item: source.collection })
+          .select(({ item }) => ({
+            stats: { type: 'summary', total: count(item.id) },
+          }))
+        return q
+          .from({ person: people.collection })
+          .innerJoin({ result: stats }, ({ person, result }) =>
+            eq(person.id, result.stats.total),
+          )
+          .where(({ result }) => eq(result.$key, 'single_group'))
+          .select(({ result }) => ({ total: result.stats.total }))
+      },
+      getKey: () => 1,
+    })
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([{ total: 2 }])
+    } finally {
+      await live.cleanup()
+      await source.collection.cleanup()
+      await people.collection.cleanup()
+    }
+  })
+
+  it('keeps a renamed no-select QueryRef bound to its source', async () => {
+    const source = createControlledCollection('renamed-query-ref', [{ id: 1 }])
+    const live = createLiveQueryCollection({
+      query: (q) => q.from({ one: q.from({ item: source.collection }) }),
+    })
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
+    } finally {
+      await live.cleanup()
+      await source.collection.cleanup()
+    }
+  })
+
   it.each([
     { id: 1, type: 'ref', path: ['name'] },
     { id: 2, type: 'func', name: 'user', args: [] },

@@ -2,7 +2,7 @@ import { createDeferred } from './deferred'
 import { deepEquals } from './utils'
 import { safeRandomUUID } from './utils/uuid'
 import { normalizeError } from './utils/error.js'
-import './duplicate-instance-check'
+import { assertSingleDbInstance } from './duplicate-instance-check.js'
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
@@ -18,6 +18,8 @@ import type {
   TransactionState,
   TransactionWithMutations,
 } from './types'
+
+assertSingleDbInstance()
 
 export class TransactionScope {
   private transactions: Array<Transaction<any>> = []

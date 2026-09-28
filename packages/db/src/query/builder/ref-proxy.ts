@@ -1,4 +1,10 @@
 import { Aggregate, Func, PropRef, Value } from '../ir.js'
+import {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from './functions.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
@@ -13,6 +19,8 @@ export interface RefProxy<T = any> {
   /** @internal */
   readonly __type: T
 }
+
+const refProxies = new WeakSet<object>()
 
 /**
  * Virtual properties available on all row ref proxies.
@@ -116,6 +124,7 @@ export function createSingleRowRefProxy<
       },
     })
 
+    refProxies.add(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -189,6 +198,7 @@ export function createRefProxy<T extends Record<string, any>>(
       },
     })
 
+    refProxies.add(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -242,6 +252,7 @@ export function createRefProxy<T extends Record<string, any>>(
     },
   })
 
+  refProxies.add(rootProxy)
   return rootProxy
 }
 
@@ -310,6 +321,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
       },
     })
 
+    refProxies.add(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -317,7 +329,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
   const wrappedSelectedProxy = createSelectedProxy([])
 
   // Wrap the base proxy to also handle $selected access
-  return new Proxy(baseProxy, {
+  const selectedRootProxy = new Proxy(baseProxy, {
     get(target, prop, receiver) {
       if (prop === `$selected`) {
         return wrappedSelectedProxy
@@ -348,6 +360,8 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
     T & {
       $selected: SingleRowRefProxy<any, string | number, true>
     }
+  refProxies.add(selectedRootProxy)
+  return selectedRootProxy
 }
 
 /**
@@ -365,19 +379,17 @@ export function toExpression(value: any): BasicExpression<any> {
   // toArray(), concat(toArray()), and materialize() must be used as direct
   // select fields, not inside expressions
   if (
-    value &&
-    typeof value === `object` &&
-    (value.__brand === `ToArrayWrapper` ||
-      value.__brand === `ConcatToArrayWrapper` ||
-      value.__brand === `CaseWhenWrapper` ||
-      value.__brand === `MaterializeWrapper`)
+    value instanceof ToArrayWrapper ||
+    value instanceof ConcatToArrayWrapper ||
+    value instanceof CaseWhenWrapper ||
+    value instanceof MaterializeWrapper
   ) {
     const name =
-      value.__brand === `ToArrayWrapper`
+      value instanceof ToArrayWrapper
         ? `toArray()`
-        : value.__brand === `ConcatToArrayWrapper`
+        : value instanceof ConcatToArrayWrapper
           ? `concat(toArray())`
-          : value.__brand === `CaseWhenWrapper`
+          : value instanceof CaseWhenWrapper
             ? `caseWhen()`
             : `materialize()`
     throw new Error(
@@ -401,7 +413,7 @@ export function toExpression(value: any): BasicExpression<any> {
  * Type guard to check if a value is a RefProxy
  */
 export function isRefProxy(value: any): value is RefProxy {
-  return value && typeof value === `object` && value.__refProxy === true
+  return value && typeof value === `object` && refProxies.has(value)
 }
 
 /**

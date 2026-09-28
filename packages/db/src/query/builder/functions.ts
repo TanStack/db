@@ -1,4 +1,4 @@
-import { Aggregate, Func } from '../ir'
+import { Aggregate, Func, PropRef, Value } from '../ir'
 import { isRefProxy, toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
@@ -824,7 +824,13 @@ function getCaseWhenValueIndexes(argCount: number): Array<number> {
 
 function isExpressionValue(value: CaseWhenValue | undefined): boolean {
   if (isRefProxy(value)) return true
-  if (value instanceof Aggregate || value instanceof Func) return true
+  if (
+    value instanceof Aggregate ||
+    value instanceof Func ||
+    value instanceof PropRef ||
+    value instanceof Value
+  )
+    return true
   if (value == null) return true
   if (
     typeof value === `string` ||
@@ -835,25 +841,6 @@ function isExpressionValue(value: CaseWhenValue | undefined): boolean {
     return true
   }
   if (value instanceof Date || Array.isArray(value)) return true
-  if (typeof value === `object`) {
-    const candidate = value as {
-      type?: unknown
-      args?: unknown
-      name?: unknown
-      path?: unknown
-      value?: unknown
-    }
-
-    if (
-      (candidate.type === `agg` || candidate.type === `func`) &&
-      typeof candidate.name === `string` &&
-      Array.isArray(candidate.args)
-    ) {
-      return true
-    }
-    if (candidate.type === `ref` && Array.isArray(candidate.path)) return true
-    if (candidate.type === `val` && `value` in candidate) return true
-  }
   return false
 }
 

@@ -123,6 +123,7 @@
 import { deepEquals } from '../utils.js'
 import { CannotCombineEmptyExpressionListError } from '../errors.js'
 import {
+  Aggregate,
   CollectionRef as CollectionRefClass,
   Func,
   PropRef,
@@ -132,6 +133,7 @@ import {
   createResidualWhere,
   getFromSources,
   getWhereExpression,
+  isExpressionLike,
   isResidualWhere,
 } from './ir.js'
 import type { BasicExpression, From, QueryIR, Select, Where } from './ir.js'
@@ -489,7 +491,10 @@ function removeRedundantFromClause(from: From): From {
   const processedQuery = removeRedundantSubqueries(from.query)
 
   // Check if this subquery is redundant
-  if (isRedundantSubquery(processedQuery)) {
+  if (
+    isRedundantSubquery(processedQuery) &&
+    from.alias === getFirstFromAlias(processedQuery)
+  ) {
     // Return the inner query's FROM clause with this alias
     const innerFrom = removeRedundantFromClause(processedQuery.from)
     if (innerFrom.type === `collectionRef`) {
@@ -526,7 +531,9 @@ function isRedundantSubquery(query: QueryIR): boolean {
     query.offset === undefined &&
     !query.fnSelect &&
     (!query.fnWhere || query.fnWhere.length === 0) &&
-    (!query.fnHaving || query.fnHaving.length === 0)
+    (!query.fnHaving || query.fnHaving.length === 0) &&
+    !query.distinct &&
+    !query.singleResult
   )
 }
 
@@ -1073,6 +1080,7 @@ function isSafeToPushIntoExistingSubquery(
   outerAlias: string,
 ): boolean {
   return !(
+    query.distinct ||
     unsafeSelect(query, whereClause, outerAlias) ||
     unsafeGroupBy(query) ||
     unsafeHaving(query) ||
@@ -1090,12 +1098,13 @@ function isSafeToPushIntoExistingSubquery(
  */
 function selectHasAggregates(select: Select): boolean {
   for (const value of Object.values(select)) {
-    if (typeof value === `object`) {
-      const v: any = value
-      if (v.type === `agg`) return true
-      if (!(`type` in v)) {
-        if (selectHasAggregates(v as unknown as Select)) return true
-      }
+    if (value instanceof Aggregate) return true
+    if (
+      value !== null &&
+      typeof value === `object` &&
+      !isExpressionLike(value)
+    ) {
+      if (selectHasAggregates(value as Select)) return true
     }
   }
   return false

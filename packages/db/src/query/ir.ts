@@ -1,3 +1,5 @@
+import { assertSingleDbInstance } from '../duplicate-instance-check.js'
+
 /*
 This is the intermediate representation of the query.
 */
@@ -5,6 +7,8 @@ This is the intermediate representation of the query.
 import type { CompareOptions } from './builder/types'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { NamespacedRow } from '../types'
+
+assertSingleDbInstance()
 
 export interface QueryIR {
   from: From

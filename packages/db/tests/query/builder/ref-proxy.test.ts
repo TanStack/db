@@ -7,6 +7,7 @@ import {
   val,
 } from '../../../src/query/builder/ref-proxy.js'
 import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
+import { MaterializeWrapper } from '../../../src/query/builder/functions.js'
 
 describe(`ref-proxy`, () => {
   describe(`createSingleRowRefProxy`, () => {
@@ -228,6 +229,20 @@ describe(`ref-proxy`, () => {
 
       expect(expression).toBeInstanceOf(Value)
       expect((expression as Value).value).toBe(literal)
+    })
+
+    it(`wraps user objects with wrapper and proxy-like fields as values`, () => {
+      for (const literal of [
+        { __brand: `MaterializeWrapper` },
+        { __refProxy: true, __path: [`users`, `id`] },
+      ]) {
+        const expression = toExpression(literal)
+        expect(expression).toBeInstanceOf(Value)
+        expect((expression as Value).value).toBe(literal)
+      }
+      expect(() => toExpression(new MaterializeWrapper({} as any))).toThrow(
+        /materialize\(\) cannot be used inside expressions/,
+      )
     })
   })
 
