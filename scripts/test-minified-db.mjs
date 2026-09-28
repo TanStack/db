@@ -7,7 +7,7 @@
 // does not replace the generated oracles or framework adapter conformance.
 // The --calibrate modes are hostile controls for this check, not CI jobs.
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
@@ -22,9 +22,16 @@ assert.ok(
   `Unknown mode: ${mode}`,
 )
 
-const bundleDirectory = await mkdtemp(
-  path.join(root, 'packages/db/node_modules/.minified-db-'),
+const dbNodeModules = path.join(root, 'packages/db/node_modules')
+const dbNodeModulesInfo = await stat(dbNodeModules).catch((error) => {
+  if (error.code !== 'ENOENT') throw error
+  return null
+})
+assert.ok(
+  dbNodeModulesInfo?.isDirectory(),
+  'Install workspace dependencies before running test:minified-db',
 )
+const bundleDirectory = await mkdtemp(path.join(dbNodeModules, '.minified-db-'))
 const bundlePath = path.join(bundleDirectory, 'index.mjs')
 
 const aliasIvm = {
@@ -216,6 +223,7 @@ async function checkCollectionsAndQueries(db) {
 
 try {
   const bundle = await build({
+    absWorkingDir: root,
     entryPoints: [path.join(root, 'packages/db/src/index.ts')],
     outfile: bundlePath,
     bundle: true,
