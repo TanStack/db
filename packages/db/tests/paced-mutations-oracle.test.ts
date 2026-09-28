@@ -168,7 +168,52 @@ async function createReadyCollection() {
   return collection
 }
 
-async function runProduction(testCase: Case): Promise<{
+// Keep the violated law as the primary cause if cleanup also fails. Release
+// every resource even when an earlier cleanup step throws.
+async function withCleanup<T>(
+  strategy: Strategy,
+  collection: Awaited<ReturnType<typeof createReadyCollection>>,
+  run: () => Promise<T>,
+  release?: () => Promise<void>,
+): Promise<T> {
+  const outcome = await Promise.resolve()
+    .then(run)
+    .then(
+      (value) => ({ ok: true, value }) as const,
+      (error: unknown) => ({ ok: false, error }) as const,
+    )
+  const cleanupErrors: Array<unknown> = []
+  try {
+    await release?.()
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+  try {
+    strategy.cleanup()
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+  try {
+    await collection.cleanup()
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+
+  if (!outcome.ok) {
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, `Oracle cleanup also failed`, {
+        cause: outcome.error,
+      })
+    }
+    throw outcome.error
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, `Oracle cleanup failed`)
+  }
+  return outcome.value
+}
+
+type Observation = {
   starts: Array<Start>
   sameTransaction: Array<Array<number>>
   states: Array<string>
@@ -178,7 +223,12 @@ async function runProduction(testCase: Case): Promise<{
     outcome: string
     returnedSame: boolean | undefined
   }>
-}> {
+}
+
+async function runProduction(
+  testCase: Case,
+  check: (actual: Observation) => void,
+): Promise<Observation> {
   const collection = await createReadyCollection()
   const strategy = testCase.strategy()
   const starts: Array<Start> = []
@@ -204,7 +254,7 @@ async function runProduction(testCase: Case): Promise<{
     strategy,
   })
 
-  try {
+  return withCleanup(strategy, collection, async () => {
     for (const action of testCase.actions) {
       if (action.kind === `mutate`) {
         const transaction = mutate(action.id)
@@ -238,7 +288,7 @@ async function runProduction(testCase: Case): Promise<{
       if (group) group.push(id)
       else groups.set(transaction, [id])
     }
-    return {
+    const actual = {
       starts,
       sameTransaction: [...groups.values()],
       states: [...transactions.values()].map(
@@ -247,13 +297,9 @@ async function runProduction(testCase: Case): Promise<{
       optimistic,
       persistence: [...persistence.values()],
     }
-  } finally {
-    try {
-      strategy.cleanup()
-    } finally {
-      await collection.cleanup()
-    }
-  }
+    check(actual)
+    return actual
+  })
 }
 
 const queueActions: Array<Action> = [
@@ -333,26 +379,27 @@ const cases: Array<Case> = [
 describe(`paced mutation timeline oracle`, () => {
   for (const testCase of cases) {
     it(testCase.name, async () => {
-      const actual = await runProduction(testCase)
-      expect(actual.starts).toEqual(testCase.expected)
-      expect(actual.sameTransaction).toEqual(testCase.sameTransaction)
-      expect(actual.optimistic).toEqual(
-        testCase.actions.flatMap((action) =>
-          action.kind === `mutate` ? [action.id] : [],
-        ),
-      )
-      expect(actual.states).toEqual(
-        testCase.sameTransaction.flatMap((group) =>
-          group.map(() => `completed`),
-        ),
-      )
-      expect(actual.persistence).toEqual(
-        testCase.sameTransaction.map(([id]) => ({
-          id,
-          outcome: `fulfilled`,
-          returnedSame: true,
-        })),
-      )
+      await runProduction(testCase, (actual) => {
+        expect(actual.starts).toEqual(testCase.expected)
+        expect(actual.sameTransaction).toEqual(testCase.sameTransaction)
+        expect(actual.optimistic).toEqual(
+          testCase.actions.flatMap((action) =>
+            action.kind === `mutate` ? [action.id] : [],
+          ),
+        )
+        expect(actual.states).toEqual(
+          testCase.sameTransaction.flatMap((group) =>
+            group.map(() => `completed`),
+          ),
+        )
+        expect(actual.persistence).toEqual(
+          testCase.sameTransaction.map(([id]) => ({
+            id,
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })),
+        )
+      })
     })
   }
 
@@ -374,47 +421,78 @@ describe(`paced mutation timeline oracle`, () => {
       strategy,
     })
 
-    try {
-      const first = mutate(1)
-      const second = mutate(2)
-      const third = mutate(3)
-      expect(collection.get(1)?.id).toBe(1)
-      expect(collection.get(2)?.id).toBe(2)
-      expect(collection.get(3)?.id).toBe(3)
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        const second = mutate(2)
+        const third = mutate(3)
+        expect(collection.get(1)?.id).toBe(1)
+        expect(collection.get(2)?.id).toBe(2)
+        expect(collection.get(3)?.id).toBe(3)
 
-      await vi.advanceTimersByTimeAsync(30)
-      expect(started).toEqual([1])
-      expect([first.state, second.state, third.state]).toEqual([
-        `persisting`,
-        `pending`,
-        `pending`,
-      ])
+        await vi.advanceTimersByTimeAsync(30)
+        expect(started).toEqual([1])
+        expect([first.state, second.state, third.state]).toEqual([
+          `persisting`,
+          `pending`,
+          `pending`,
+        ])
 
-      releases.get(1)?.()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(started).toEqual([1, 2])
-      expect([first.state, second.state, third.state]).toEqual([
-        `completed`,
-        `persisting`,
-        `pending`,
-      ])
+        releases.get(1)?.()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(started).toEqual([1, 2])
+        expect([first.state, second.state, third.state]).toEqual([
+          `completed`,
+          `persisting`,
+          `pending`,
+        ])
 
-      releases.get(2)?.()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(started).toEqual([1, 2, 3])
-      for (const transaction of [first, second, third]) {
-        expect(await transaction.isPersisted.promise).toBe(transaction)
-      }
-    } finally {
-      releaseFutureWrites = true
-      for (const resolve of releases.values()) resolve()
-      await vi.advanceTimersByTimeAsync(0)
-      try {
-        strategy.cleanup()
-      } finally {
-        await collection.cleanup()
-      }
+        releases.get(2)?.()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(started).toEqual([1, 2, 3])
+        for (const transaction of [first, second, third]) {
+          expect(await transaction.isPersisted.promise).toBe(transaction)
+        }
+      },
+      async () => {
+        releaseFutureWrites = true
+        for (const resolve of releases.values()) resolve()
+        await vi.advanceTimersByTimeAsync(0)
+      },
+    )
+  })
+
+  it(`preserves a trace failure and cleanup failure separately`, async () => {
+    const collection = await createReadyCollection()
+    const cleanupCollection = vi.spyOn(collection, `cleanup`)
+    const cleanupError = new Error(`strategy cleanup failed`)
+    const strategy: Strategy = {
+      _type: `queue`,
+      execute: () => {},
+      cleanup: () => {
+        throw cleanupError
+      },
     }
+    const caught: unknown = await withCleanup(strategy, collection, () => {
+      expect([{ at: 0, ids: [1] }], `final execution trace`).toEqual([
+        { at: 10, ids: [1] },
+      ])
+      return Promise.resolve()
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+
+    expect(caught).toBeInstanceOf(AggregateError)
+    const aggregate = caught as AggregateError
+    expect(aggregate.cause).toMatchObject({ name: `AssertionError` })
+    expect((aggregate.cause as Error).message).toContain(
+      `final execution trace`,
+    )
+    expect(aggregate.errors).toEqual([cleanupError])
+    expect(cleanupCollection).toHaveBeenCalledTimes(1)
   })
 
   it(`rejects front/back, trailing, and leading-edge mutants`, async () => {
@@ -445,8 +523,11 @@ describe(`paced mutation timeline oracle`, () => {
     for (const { caseName, strategy } of wrongStrategies) {
       const lawful = cases.find((testCase) => testCase.name === caseName)
       if (!lawful) throw new Error(`Missing calibration case`)
-      const actual = await runProduction({ ...lawful, strategy })
-      expect(() => expect(actual.starts).toEqual(lawful.expected)).toThrow()
+      await expect(
+        runProduction({ ...lawful, strategy }, (actual) => {
+          expect(actual.starts).toEqual(lawful.expected)
+        }),
+      ).rejects.toMatchObject({ name: `AssertionError` })
     }
   })
 })
