@@ -158,3 +158,52 @@ The repaired claim covers finite local joined-filter windows, the named
 joined-demand and window-move histories, Collection and Effect public rows,
 and the specified settlement checkpoints. It does not claim all legal demand
 interleavings. The coverage map owns the two remaining witnesses above.
+
+## Shipped-byte consolidation
+
+Code target: `b69c189c`. Three independent scouts inspected graph scheduling,
+ordered demand, Effect state, package exports, and dependency drag. They
+measured proposed cuts in isolated builds before the final edit. The chosen
+changes remove two unused scheduler extension paths, two redundant Effect
+fields, and unused Collection scheduler overrides. The core scheduler and D2
+graph remain necessary for variable query dependencies and coherent
+publication.
+
+`Scheduler.onClear()` had no production caller, and no production dependency
+implemented `hasPendingGraphRun()`. `Scheduler` is absent from the package root
+exports. The change retires those internal extension contracts. A direct
+unsupported source import can no longer attach a clear listener or provide an
+out-of-queue pending dependency. The scheduler test now checks queued-job
+cancellation, reuse of a cleared context, prerequisite requeue, exact failure
+identity, and later successful work. Existing Collection and Effect tests still
+check coherent public batches, rollback, stale settlement, and loader failure.
+The architecture now says that only queued jobs block scheduler dependencies.
+The [second field-lab loss audit](pr-1909-code-weight-loss-audit.md) preserves
+source details omitted by this short reduction.
+
+The byte assay built the same package path with Vite 7.3.2 `--minify`, then
+bundled selected ESM exports with esbuild 0.27.7. It used gzip level 9 and
+Brotli quality 11. Every row compares the identical absolute path and toolchain.
+Values are bytes; negative deltas save bytes.
+
+| Consumer import | Change from prior PR head: min / gzip / Brotli | Final PR against merge base: min / gzip / Brotli |
+| --- | ---: | ---: |
+| Full `@tanstack/db` index | −484 / −112 / −44 | +93 / −75 / −330 |
+| `createLiveQueryCollection` | −325 / −81 / −113 | +638 / +44 / +19 |
+| `createEffect` | −457 / −97 / −244 | +318 / +104 / −71 |
+| Both query exports | −489 / −106 / +8 | +89 / −58 / +118 |
+
+The named query imports remain slightly larger than the merge base under some
+byte measures. The full import has fewer compressed bytes but 93 more minified
+bytes. These receipts do not establish a universal net-negative shipped size.
+`@tanstack/pacer-lite` contributes no bytes to the measured query imports, so
+the scouts found no query-path dependency drag to remove. The remaining
+optional scheduler dependency argument saved only 15 gzip bytes in a trial and
+would retire another internal test contract; it was left intact.
+
+The DB oracle campaign passed 2,627 tests across 42 files with no type errors.
+The full DB runtime suite passed 6,605 tests across 186 files with Vitest
+typechecking disabled. Package TypeScript, changed-file ESLint, Prettier, and
+diff checks passed. Against the merge base, production TypeScript is **−156
+raw lines** and **−35 nonblank, noncomment lines**. This count includes the
+scheduler file; it excludes tests and documentation.
