@@ -3,7 +3,7 @@
 ## Reviewed state and claim
 
 - Base: `f09868ff` (`origin/main` at investigation).
-- Reviewed implementation commit: `875b6f470013df2791dd018aeee7b8e8b0ea66be`.
+- Reviewed implementation head: `4645dc927d6855ff99f18ed17a9294511fff5102`.
 - Owner: `packages/db/tests/change-event-history-oracle.test.ts`.
 
 Issue #1912 reports that a same-tick delete and reinsert can leave an eager
@@ -58,9 +58,12 @@ This record supplies ORC-012 evidence for the reviewed implementation commit.
 
 ## Verification and remaining scope
 
-The change-event owner and replay tests passed: 403 tests, with no type errors.
-Changed-file ESLint, Prettier, and `git diff --check` passed. The direct replay
-completed with the requested property, seed, and shrink path.
+The change-event owner and replay tests passed: 403 tests. CI exposed type
+inference errors in the owner file at the first reviewed commit. The follow-up
+commit fixed the generic key type. The owner then passed 376 focused tests, and
+the package TypeScript check reported no owner-file errors. Changed-file
+ESLint, Prettier, and `git diff --check` passed. The direct replay completed
+with the requested property, seed, and shrink path.
 
 The oracle does not inspect an index during a change callback. It does not
 cover adapter cancellation, non-local-only persistence, or the issue's original
