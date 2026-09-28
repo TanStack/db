@@ -58,6 +58,21 @@ async function reach(page: Page): Promise<HydrationStraddleReach> {
   return page.evaluate(() => window.__electricHydrationStraddleProbe!.reach())
 }
 
+async function expectReach(
+  page: Page,
+  expected: Partial<HydrationStraddleReach>,
+  timeout = 60_000,
+): Promise<void> {
+  try {
+    await expect.poll(() => reach(page), { timeout }).toMatchObject(expected)
+  } catch (error) {
+    throw new Error(
+      `${errorMessage(error)}\ndiagnostic: ${await diagnostic(page)}`,
+      { cause: error },
+    )
+  }
+}
+
 async function observe(page: Page): Promise<HydrationStraddleObservation> {
   return page.evaluate(() => window.__electricHydrationStraddleProbe!.observe())
 }
@@ -66,20 +81,27 @@ async function expectExactRow(
   page: Page,
   row: { id: string; label: string },
 ): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const { phase, status, publicRows, durableRows } = await observe(page)
-        return { phase, status, publicRows, durableRows }
-      },
-      { timeout: 60_000, message: await diagnostic(page) },
+  try {
+    await expect
+      .poll(
+        async () => {
+          const { phase, status, publicRows, durableRows } = await observe(page)
+          return { phase, status, publicRows, durableRows }
+        },
+        { timeout: 60_000 },
+      )
+      .toEqual({
+        phase: `ready`,
+        status: `ready`,
+        publicRows: [row],
+        durableRows: [row],
+      })
+  } catch (error) {
+    throw new Error(
+      `${errorMessage(error)}\ndiagnostic: ${await diagnostic(page)}`,
+      { cause: error },
     )
-    .toEqual({
-      phase: `ready`,
-      status: `ready`,
-      publicRows: [row],
-      durableRows: [row],
-    })
+  }
 }
 
 test(`a live Electric row commits after OPFS hydration closes and survives handoff and reopen`, async ({
@@ -118,41 +140,30 @@ test(`a live Electric row commits after OPFS hydration closes and survives hando
     await leader.evaluate(() =>
       window.__electricHydrationStraddleProbe!.startHydration(),
     )
-    await expect
-      .poll(() => reach(leader), {
-        timeout: 60_000,
-        message: await diagnostic(leader),
-      })
-      .toMatchObject({
-        hydrationLoadReturned: true,
-        hydrationHeld: true,
-        hydrationScopeExited: false,
-        rowCommitApplied: false,
-      })
+    await expectReach(leader, {
+      hydrationLoadReturned: true,
+      hydrationHeld: true,
+      hydrationScopeExited: false,
+      rowCommitApplied: false,
+    })
     await postgres.query(
       `UPDATE public.${table} SET label = $1 WHERE id = $2`,
       [updatedRow.label, updatedRow.id],
     )
-    await expect
-      .poll(() => reach(leader), {
-        timeout: 60_000,
-        message: await diagnostic(leader),
-      })
-      .toMatchObject({
-        sourceBeginDuringHydration: true,
-        rowCommitParked: true,
-        hydrationScopeExited: false,
-        rowCommitApplied: false,
-      })
+    await expectReach(leader, {
+      sourceBeginDuringHydration: true,
+      rowCommitParked: true,
+      hydrationScopeExited: false,
+      rowCommitApplied: false,
+    })
     await leader.evaluate(() =>
       window.__electricHydrationStraddleProbe!.releaseHydration(),
     )
-    await expect
-      .poll(() => reach(leader), {
-        timeout: 30_000,
-        message: await diagnostic(leader),
-      })
-      .toMatchObject({ hydrationScopeExited: true, rowCommitApplied: false })
+    await expectReach(
+      leader,
+      { hydrationScopeExited: true, rowCommitApplied: false },
+      30_000,
+    )
     const beforeCommit = await observe(leader)
     expect(beforeCommit.publicRows).toEqual([initialRow])
     expect(beforeCommit.durableRows).toEqual([initialRow])
@@ -161,12 +172,7 @@ test(`a live Electric row commits after OPFS hydration closes and survives hando
     )
     await expectExactRow(leader, updatedRow)
     expect((await reach(leader)).rowCommitApplied).toBe(true)
-    await expect
-      .poll(async () => (await reach(leader)).subsetDemandSettled, {
-        timeout: 30_000,
-        message: await diagnostic(leader),
-      })
-      .toBe(true)
+    await expectReach(leader, { subsetDemandSettled: true }, 30_000)
     expect((await observe(leader)).phase).toBe(`ready`)
     expect((await observe(leader)).isLeader).toBe(true)
 
