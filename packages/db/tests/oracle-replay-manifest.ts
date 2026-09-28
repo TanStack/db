@@ -69,7 +69,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/change-event-history-oracle.test.ts`,
     `collection-state`,
-    `change-event-history`,
+    `change-event-history eager-index-history`,
   ],
   [
     `db/tests/collection-metadata-publication-oracle.property.test.ts`,
