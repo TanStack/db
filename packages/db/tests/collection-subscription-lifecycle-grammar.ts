@@ -37,6 +37,26 @@ import { fc } from '@fast-check/vitest'
  */
 
 export type DemandName = `a` | `b`
+
+/**
+ * A bounded callback-reentry grammar for direct snapshots. The callback phase
+ * is an observation cut, not a second subscription state machine. A released
+ * or unsubscribed request has no authority to publish its local snapshot.
+ * A caller can retain the requested predicate and release from every phase,
+ * including callbacks that do not receive a release function.
+ */
+export const reentrantSnapshotHistories = [
+  { phase: `loadSubset`, action: `release` },
+  { phase: `loadSubset`, action: `unsubscribe` },
+  { phase: `onLoadSubsetResult`, action: `release` },
+  { phase: `onLoadSubsetResult`, action: `unsubscribe` },
+  { phase: `statusLoadingSubset`, action: `release` },
+  { phase: `onUnoptimized`, action: `release` },
+  { phase: `onUnoptimized`, action: `unsubscribe` },
+  { phase: `snapshotEvaluation`, action: `release` },
+  { phase: `snapshotEvaluation`, action: `unsubscribe` },
+] as const
+
 export type AttemptScope = `current` | `obsolete`
 export type AttemptAge = `oldest` | `newest`
 export type LifecycleCommand =
