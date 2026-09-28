@@ -976,6 +976,12 @@ class LiveQueryWindowControllerImpl<
   }
 
   private onObserverNotify(): void {
+    if (
+      this.hasPaginationError &&
+      this.observer.getSnapshot().status === `ready`
+    ) {
+      this.failedHasNextPage = this.getComputedHasNextPage()
+    }
     this.notify()
   }
 

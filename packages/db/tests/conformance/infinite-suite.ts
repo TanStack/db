@@ -33,7 +33,7 @@ interface InfiniteRow {
  * A settled page extends the committed prefix. A failed request leaves that
  * prefix alone and keeps its error visible until explicit recovery.
  * Source length, not the controller's failed-window cache, decides whether the
- * newly committed prefix has a continuation.
+ * committed prefix has a continuation, including after later source writes.
  */
 function expectedOverlappingWindow(
   source: ReadonlyArray<InfiniteRow>,
@@ -643,12 +643,13 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
     scenario(
       `overlapping-window-outcomes`,
-      `retains a window failure and recomputes continuation after a concurrent page succeeds`,
+      `retains a window failure while continuation follows committed pages and live source changes`,
       async () => {
         // Contract: after overlapping window requests settle, the latest
         // committed page count determines continuation. A prior failure remains
         // visible until explicit recovery. The bounded grammar crosses an
-        // exhausted versus remaining source with both settlement orders.
+        // exhausted versus remaining source with both settlement orders, then
+        // changes source extent while the earlier error remains visible.
         // This drives the exported DB controller in each package realm. Hooks
         // expose no preload operation, so their scheduling is outside this cell.
         const pageSize = 2
@@ -656,6 +657,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         for (const rowCount of [4, 5]) {
           for (const settleFailureFirst of [true, false]) {
             const sourceRows = rows(rowCount)
+            let currentRows = sourceRows
             const source = driver.makeSource(sourceRows)
             const collection = rawDriver.makePrecreated((q) =>
               q
@@ -699,7 +701,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             let fetch: Promise<unknown> | undefined
             const check = (pageSucceeded: boolean, preloadFailed: boolean) => {
               const expected = expectedOverlappingWindow(
-                sourceRows,
+                currentRows,
                 pageSize,
                 pageSucceeded,
                 preloadFailed,
@@ -751,6 +753,23 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
                 expect(await preload).toBe(failure)
                 check(true, true)
               }
+              const unsubscribe = controller.subscribe(() => {})
+              try {
+                if (rowCount === 4) {
+                  const next = { id: `5`, label: `row-5`, rank: -1 }
+                  source.insert(next)
+                  currentRows = [...currentRows, next]
+                } else {
+                  source.remove(sourceRows[4]!)
+                  currentRows = currentRows.slice(0, 4)
+                }
+                await waitForAsync(
+                  () => collection.toArray.length === currentRows.length,
+                )
+                check(true, true)
+              } finally {
+                unsubscribe()
+              }
               await controller.preload()
               check(true, false)
             } finally {
@@ -762,7 +781,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             }
           }
         }
-        expect(checked).toBe(12)
+        expect(checked).toBe(16)
       },
     )
 
