@@ -99,6 +99,11 @@ describe(`guarded oracle replay`, () => {
       `varies safe aliases and payloads, seed=undefined`,
     ],
     [
+      `query-identity.typed-array-subclass`,
+      `tests/query/identity-output-shape-oracle.test.ts`,
+      `uses built-in element type and bytes for inherited typed-array behavior, seed=undefined`,
+    ],
+    [
       `load-subset.rejected-waiter`,
       `tests/query/load-subset-oracle.property.test.ts`,
       `retries failed exact demand histories through fresh success for a random or replayed seed`,

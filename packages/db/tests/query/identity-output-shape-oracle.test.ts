@@ -4,12 +4,19 @@ import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
-import { getQueryIdentity } from '../../src/query/ir-stable-identity.js'
+import { compileExpression } from '../../src/query/compiler/evaluators.js'
+import {
+  getLoadSubsetDemandKey,
+  getQueryIdentity,
+  getStableValueHash,
+} from '../../src/query/ir-stable-identity.js'
 import {
   CollectionRef,
+  Func,
   PropRef,
   QueryRef,
   UnionFrom,
+  Value,
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
@@ -323,6 +330,190 @@ describe('query identity agrees with compiled lexical output shape', () => {
           fault,
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+})
+
+/**
+ * Views with the same element type, bytes, and inherited conversion denote the
+ * same ordering operand. A changed conversion can change `gt` and must keep
+ * the demand and query identities distinct. The model uses native relational
+ * comparison on finite row values. The grammar varies bytes and tag ownership,
+ * then checks explicit conversion overrides. The driver compiles the predicate
+ * and computes identities. It compares those observations after each call.
+ * Constructor names do not belong to the denotation.
+ */
+describe('binary ordering value identity', () => {
+  it.each([101610, undefined])(
+    'uses built-in element type and bytes for inherited typed-array behavior, seed=%s',
+    async (seed) => {
+      class InheritedUint8Array extends Uint8Array {}
+      class InheritedInt16Array extends Int16Array {}
+      class TaggedUint8Array extends Uint8Array {
+        constructor(bytes: Uint8Array) {
+          super(bytes)
+          Object.defineProperty(this, Symbol.toStringTag, {
+            value: 'custom-view-tag',
+          })
+        }
+      }
+      const collection = createCollection<{ id: number; value: Uint8Array }>({
+        getKey: (row) => row.id,
+        sync: { sync: () => {} },
+      })
+      const source = new CollectionRef(
+        collection as unknown as CollectionImpl,
+        'row',
+      )
+      const field = new PropRef<ArrayBufferView>(['row', 'value'])
+      const predicate = (value: ArrayBufferView) =>
+        new Func<boolean>('gt', [field, new Value(value)])
+      const query = (value: ArrayBufferView): QueryIR => ({
+        from: source,
+        where: [predicate(value)],
+      })
+
+      await withHistoryCleanup(
+        async () => {
+          await fc.assert(
+            fc.asyncProperty(
+              fc.uint8Array({ minLength: 0, maxLength: 8 }),
+              fc.boolean(),
+              (bytes, customTag) => {
+                const base = new Uint8Array(bytes)
+                const inherited = customTag
+                  ? new TaggedUint8Array(bytes)
+                  : new InheritedUint8Array(bytes)
+                for (const row of [
+                  new Uint8Array([0]),
+                  bytes,
+                  new Uint8Array([255]),
+                ]) {
+                  const expected = row > base
+                  expect(row > inherited).toBe(expected)
+                  expect(
+                    compileExpression(predicate(base))({ row: { value: row } }),
+                  ).toBe(expected)
+                  expect(
+                    compileExpression(predicate(inherited))({
+                      row: { value: row },
+                    }),
+                  ).toBe(expected)
+                }
+
+                expect(getStableValueHash(inherited)).toBe(
+                  getStableValueHash(base),
+                )
+                expect(getQueryIdentity(query(inherited))).toBe(
+                  getQueryIdentity(query(base)),
+                )
+                expect(
+                  getLoadSubsetDemandKey({ where: predicate(inherited) }),
+                ).toBe(getLoadSubsetDemandKey({ where: predicate(base) }))
+                expect(getStableValueHash(Buffer.from(bytes))).not.toBe(
+                  getStableValueHash(base),
+                )
+                return Promise.resolve()
+              },
+            ),
+            seed === undefined
+              ? oraclePropertyOptions(60, 'query-identity.typed-array-subclass')
+              : { numRuns: oracleRuns(60), seed },
+          )
+
+          const data = new ArrayBuffer(2)
+          new Uint8Array(data).set([1, 2])
+          const baseInt16 = new Int16Array([257])
+          const inheritedInt16 = new InheritedInt16Array([257])
+          expect(getStableValueHash(inheritedInt16)).toBe(
+            getStableValueHash(baseInt16),
+          )
+          expect(getQueryIdentity(query(inheritedInt16))).toBe(
+            getQueryIdentity(query(baseInt16)),
+          )
+          expect(
+            getLoadSubsetDemandKey({ where: predicate(inheritedInt16) }),
+          ).toBe(getLoadSubsetDemandKey({ where: predicate(baseInt16) }))
+
+          class ConvertedUint8Array extends Uint8Array {
+            override toString(): string {
+              return '9'
+            }
+          }
+          const base = new Uint8Array([1])
+          const converted = new ConvertedUint8Array([1])
+          const row = new Uint8Array([5])
+          expect(
+            compileExpression(predicate(base))({ row: { value: row } }),
+          ).toBe(true)
+          expect(
+            compileExpression(predicate(converted))({ row: { value: row } }),
+          ).toBe(false)
+          expect(getQueryIdentity(query(converted))).not.toBe(
+            getQueryIdentity(query(base)),
+          )
+          expect(
+            getLoadSubsetDemandKey({ where: predicate(converted) }),
+          ).not.toBe(getLoadSubsetDemandKey({ where: predicate(base) }))
+          expect(getLoadSubsetDemandKey({ where: predicate(converted) })).toBe(
+            getLoadSubsetDemandKey({ where: predicate(converted) }),
+          )
+          expect(() => getStableValueHash(converted)).toThrow(
+            'view with custom conversion',
+          )
+
+          class JoinedUint8Array extends Uint8Array {
+            override join(): string {
+              return '9'
+            }
+          }
+          const joined = new JoinedUint8Array([1])
+          expect(
+            compileExpression(predicate(joined))({ row: { value: row } }),
+          ).toBe(false)
+          expect(getLoadSubsetDemandKey({ where: predicate(joined) })).not.toBe(
+            getLoadSubsetDemandKey({ where: predicate(base) }),
+          )
+          for (const method of ['valueOf', Symbol.toPrimitive] as const) {
+            const altered = new Uint8Array([1])
+            Object.defineProperty(altered, method, { value: () => 9 })
+            expect(
+              compileExpression(predicate(altered))({ row: { value: row } }),
+            ).toBe(false)
+            expect(
+              getLoadSubsetDemandKey({ where: predicate(altered) }),
+            ).not.toBe(getLoadSubsetDemandKey({ where: predicate(base) }))
+          }
+
+          const plainDataView = new DataView(data)
+          const taggedDataView = new DataView(data)
+          Object.defineProperty(taggedDataView, Symbol.toStringTag, {
+            value: 'AAA',
+          })
+          expect(
+            compileExpression(predicate(plainDataView))({
+              row: { value: plainDataView },
+            }),
+          ).toBe(false)
+          expect(
+            compileExpression(predicate(taggedDataView))({
+              row: { value: plainDataView },
+            }),
+          ).toBe(true)
+          expect(getQueryIdentity(query(taggedDataView))).not.toBe(
+            getQueryIdentity(query(plainDataView)),
+          )
+          expect(
+            getLoadSubsetDemandKey({ where: predicate(taggedDataView) }),
+          ).not.toBe(
+            getLoadSubsetDemandKey({ where: predicate(plainDataView) }),
+          )
+          expect(() => getStableValueHash(taggedDataView)).toThrow(
+            'view with custom conversion',
+          )
+        },
+        () => [() => collection.cleanup()],
+      )
     },
   )
 })

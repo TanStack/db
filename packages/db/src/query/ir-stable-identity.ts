@@ -42,6 +42,11 @@ type AliasScope = {
   parent: AliasScope | undefined
 }
 
+const typedArrayTag = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  Symbol.toStringTag,
+)!.get!
+
 declare const queryIdentityBrand: unique symbol
 declare const demandKeyBrand: unique symbol
 
@@ -992,9 +997,42 @@ function canonicalizeRuntimeValue(
   }
 
   if (ArrayBuffer.isView(value)) {
+    const tag = typedArrayTag.call(value) as string | undefined
+    const isBuffer = typeof Buffer !== `undefined` && Buffer.isBuffer(value)
+    let prototype: object | null = value
+    let rootPrototype: object | undefined
+    let typedArrayPrototype: object | undefined
+    // Read the built-in methods from the view's realm, not this module's realm.
+    while ((prototype = Object.getPrototypeOf(prototype)) !== null) {
+      rootPrototype = prototype
+      if (Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag)?.get) {
+        typedArrayPrototype = prototype
+      }
+    }
+    const defaultToString =
+      tag === undefined
+        ? rootPrototype?.toString
+        : isBuffer
+          ? Buffer.prototype.toString
+          : typedArrayPrototype?.toString
+    if (
+      defaultToString === undefined ||
+      value.toString !== defaultToString ||
+      value.valueOf !== rootPrototype?.valueOf ||
+      (tag !== undefined &&
+        !isBuffer &&
+        (value as Uint8Array).join !==
+          (typedArrayPrototype as Uint8Array | undefined)?.join) ||
+      Symbol.toPrimitive in value ||
+      (tag === undefined &&
+        Object.prototype.toString.call(value) !== `[object DataView]`)
+    ) {
+      throw new UnhashableQueryIRError(path, `view with custom conversion`)
+    }
+
     return [
       `binary`,
-      value.constructor.name,
+      isBuffer ? `Buffer` : (tag ?? `DataView`),
       Array.from(
         new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
       ),
