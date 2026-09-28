@@ -808,7 +808,13 @@ export const deferralCleanupHistories = (
 // reference ignores production depth, revision, queue, and discard fields.
 export function expectedDeferralBatches(
   commands: ReadonlyArray<DeferralLifecycleCommand>,
-): Array<Array<`c` | `d`>> {
+): Array<
+  Array<{
+    type: `insert`
+    key: `c` | `d`
+    value: { id: `c` | `d`; value: number }
+  }>
+> {
   const restart = commands.findIndex(({ type }) => type === `restart`)
   const writes = commands
     .slice(restart + 1)
@@ -818,5 +824,13 @@ export function expectedDeferralBatches(
   const close = commands.find(
     (command) => command.type === `close` && command.handle === `current`,
   )
-  return close?.type === `close` && close.outcome === `publish` ? [writes] : []
+  return close?.type === `close` && close.outcome === `publish`
+    ? [
+        writes.map((key) => ({
+          type: `insert`,
+          key,
+          value: { id: key, value: key.charCodeAt(0) },
+        })),
+      ]
+    : []
 }

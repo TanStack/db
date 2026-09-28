@@ -40,9 +40,10 @@ import type {
  * A deferral interrupted by cleanup belongs to the ended sync run. Its prior
  * discard cannot suppress a later sync run's subscriber batches. The bounded
  * deferral histories in the shared grammar compare one or two later inserts
- * at the new deferral's close. They also check that an old handle closing
- * during the new deferral cannot publish early or suppress its batch. A
- * compiled live-query includes path remains outside this model.
+ * at the new deferral's close: callback grouping, change type, key, row value,
+ * and prior value. Virtual fields are outside this bounded law. An old handle
+ * closing during the new deferral cannot publish early or suppress its batch.
+ * A compiled live-query includes path remains outside this model.
  *
  * Ownership and caller-promise outcomes stay in the lifecycle-history driver.
  * This separation keeps the row model small while the shared command grammar
@@ -1289,7 +1290,7 @@ async function runDeferralCleanupHistory(
       },
     },
   })
-  const batches: Array<Array<RowKey>> = []
+  const batches: Array<Array<PublicationChange>> = []
   const handles = new Map<
     `outer` | `inner` | `current`,
     ReturnType<typeof collection._deferPublication>
@@ -1326,7 +1327,17 @@ async function runDeferralCleanupHistory(
         expect(collection.get(`a`)).toBeUndefined()
       } else {
         subscription = collection.subscribeChanges(
-          (changes) => batches.push(changes.map(({ key }) => key)),
+          (changes) =>
+            batches.push(
+              changes.map(({ type, key, value, previousValue }) => ({
+                type,
+                key,
+                value: cloneRow(value),
+                ...(previousValue === undefined
+                  ? {}
+                  : { previousValue: cloneRow(previousValue) }),
+              })),
+            ),
           { includeInitialState: false },
         )
       }
