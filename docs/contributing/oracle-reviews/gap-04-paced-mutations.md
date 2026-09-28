@@ -5,6 +5,7 @@
 - Starting head: `33a194941c8d51f8f98babb999fef2987dd6ff8b`.
 - Initial implementation commit: `1b844588bc18e96a4c18c0de6bb1edadcad85332`.
 - Reviewed implementation commit: `ccdeaa5ba61f94e7cf81930987d728769266a1cd`.
+- Maintainer-decision implementation commit: `baf6cf27`.
 - Owner: `packages/db/tests/paced-mutations-oracle.test.ts`.
 - Public authority: strategy option types, `createPacedMutations` reference, and `docs/guides/mutations.md`.
 
@@ -45,3 +46,5 @@ The original audit accurately found absent queue option coverage and no paced-mu
 The source ledger has six claims. GAP04-1, GAP04-3, and GAP04-4 are fixed for the finite domain described above, including bounded capacity and hostile capacity controls. GAP04-2 has a maintainer decision and a tested implementation. GAP04-5 is accepted and implemented: the copied pacer-lite differential is not the oracle. GAP04-6 is deferred to the proposed MUT-05 replacement. The source claims stay distinct in the task-local ledger.
 
 The follow-up review found two oracle gaps: the same-key witness did not observe the admitted update after the first write settled, and direct receipt awaits could hang before cleanup. Both were fixed by holding writes across a settlement cut and recording receipt outcomes before asserting them. A simplifier removed a duplicate queue transaction reference; a separate non-leading timer remains necessary because pacer-lite 0.2.1 measures its first wait from epoch zero.
+
+The repair adds 37 net production lines across the queue admission result, a named rejection reason, targeted rollback, caller-option cloning, and the trailing-only timer. The tests and contract documents grow separately. Each added production branch supports a public law demonstrated by a RED witness and a GREEN oracle run.
