@@ -119,6 +119,14 @@ comment and the current API/architecture contract before extending its model.
 | Boundary refinements | [cleanup/restart](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-cleanup-restart-oracle.test.ts), [issue #1891 async-cleanup review](oracle-reviews/issue-1891-async-cleanup.md), [issue #1891 cleanup-start follow-up](oracle-reviews/issue-1891-cleanup-start-followup.md), [metadata publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-oracle.test.ts), [D2 source reconciliation](https://github.com/TanStack/db/blob/main/packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/includes-work-counter-oracle.test.ts) | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them. |
 | Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue.property.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and appointment-list models with executed target/seed/path checks. Callback-reentrant scheduling is outside the initial cleanup-queue domain. |
 
+The ordered-work owner also checks that an Effect with `skipInitial` waits for
+joined demand before ending initial callback suppression. A deterministic work
+counter rejects an extra joined-filter graph schedule on root readiness while
+preserving the joined-source wake-up. Nonterminal per-demand failure recovery
+is outside this owner: `failDemand` enters terminal live-query error while its
+plan record remains unsettled until sync teardown. A future recovery contract
+must reconcile plan and subscription pending state before reopening publication.
+
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
 also covers one-pass queued-sync cancellation, partial-update dependencies on
 queued source rows, and focused late-hydration cases in

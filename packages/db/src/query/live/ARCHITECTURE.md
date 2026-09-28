@@ -1055,7 +1055,9 @@ dispose the still-live Effect. Any unhandled participant failure never exposes
 the private intermediate state: source-error handling disposes the Effect and
 clears the retained delta and participants. With `skipInitial`, an asynchronous
 initial ordered chain also stays behind the gate until all initial participants
-settle, so its rows do not become later `enter` callbacks. Other ordinary
+settle, so its rows do not become later `enter` callbacks. A joined-filter
+window also waits for joined demand before ending initial callback suppression,
+even if that source Collection already reports ready. Other ordinary
 initial/refinement requests keep their existing callback timing.
 
 ### Replay participants and failure

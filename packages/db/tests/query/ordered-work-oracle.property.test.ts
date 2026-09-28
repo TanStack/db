@@ -5,6 +5,7 @@ import { createDeferred } from '../../src/deferred.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
+import { getCollectionBuilder } from '../../src/query/live/collection-registry.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
@@ -36,6 +37,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * publishing an anti-join result.
  * Demand for a separate include cannot hold the ordered root continuation.
  * An empty joined replay still wakes held Effect deltas.
+ * An initial Effect with skipInitial waits for joined demand before it starts
+ * publishing callbacks. Only joined-source readiness rechecks that demand.
  * A window move started during existing joined demand waits for its later root
  * refill and publication. Joined demand cannot discard a repair continuation.
  *
@@ -1789,6 +1792,142 @@ describe(`ordered source work oracle`, () => {
       initialEvents: [],
       laterEvents: expect.arrayContaining([`enter:3`, `exit:1`]),
     })
+  })
+
+  it(`suppresses the initial joined-filter window while child demand settles`, async () => {
+    type Root = { id: number; rank: number; label: string }
+    const initial = { id: 1, rank: 1, label: `initial` }
+    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+    const root = createCollection<Root, number>({
+      id: `ordered-skip-joined-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.begin()
+          operations.write({ type: `insert`, value: initial })
+          operations.commit()
+          operations.markReady()
+        },
+      },
+    })
+    const childGate = createDeferred<void>()
+    let childLoads = 0
+    const child = createCollection<Marker, number>({
+      id: `ordered-skip-joined-child-${harnessId++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              childLoads++
+              return childGate.promise
+            },
+          }
+        },
+      },
+    })
+    const events: Array<string> = []
+    const effect = createEffect<{ id: number; label: string }>({
+      query: (q) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: child }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(1)
+          .select(({ row }) => ({ id: row.id, label: row.label })),
+      skipInitial: true,
+      onBatch: (batch) => {
+        events.push(...batch.map((event) => event.type))
+      },
+    })
+    try {
+      await vi.waitFor(() => expect(childLoads).toBeGreaterThan(0))
+      await flushPromises()
+      expect(events).toEqual([])
+      childGate.resolve()
+      await flushPromises()
+      expect(events).toEqual([])
+
+      rootSync.begin({ immediate: true })
+      rootSync.write({
+        type: `update`,
+        value: { ...initial, label: `later` },
+      })
+      const receipt = rootSync.commit()
+      if (receipt !== true) await receipt
+      await vi.waitFor(() => expect(events).toContain(`update`))
+    } finally {
+      childGate.resolve()
+      await Promise.all([effect.dispose(), root.cleanup(), child.cleanup()])
+    }
+  })
+
+  it(`avoids an extra joined-filter graph turn when the root becomes ready`, async () => {
+    type Root = { id: number; rank: number }
+    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+    let joinedSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
+    const root = createCollection<Root, number>({
+      id: `ordered-ready-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: { sync: (operations) => void (rootSync = operations) },
+    })
+    const joined = createCollection<Marker, number>({
+      id: `ordered-ready-joined-${harnessId++}`,
+      getKey: ({ id }) => id,
+      startSync: true,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          joinedSync = operations
+          return { loadSubset: () => true }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `ordered-ready-live-${harnessId++}`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: joined }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(0)
+          .select(({ row }) => ({ id: row.id })),
+    })
+    try {
+      const builder = getCollectionBuilder(live)!
+      expect(
+        Object.values(builder.optimizableOrderByCollections).some(
+          (info) => info.joinedFilterSourceId !== undefined,
+        ),
+      ).toBe(true)
+      const scheduled = vi.spyOn(builder, `scheduleGraphRun`)
+      rootSync.markReady()
+      // Root readiness already schedules its ordinary graph turn.
+      expect(scheduled).toHaveBeenCalledTimes(1)
+      joinedSync.markReady()
+      // Joined readiness also rechecks the joined-filter demand gate.
+      expect(scheduled).toHaveBeenCalledTimes(3)
+    } finally {
+      await Promise.all([live.cleanup(), root.cleanup(), joined.cleanup()])
+    }
   })
 
   it(`restarts bounded repair when another order mutation arrives during its tie request`, async () => {

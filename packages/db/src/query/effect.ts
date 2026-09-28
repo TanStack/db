@@ -926,13 +926,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       return
     }
 
-    if (
-      Object.values(this.optimizableOrderByCollections).some(
-        (info) =>
-          info.joinedFilterSourceId !== undefined &&
-          this.hasPendingJoinedWork(info.joinedFilterSourceId),
-      )
-    ) {
+    if (this.hasPendingJoinedFilterWork()) {
       return
     }
 
@@ -975,7 +969,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     return (
       !this.orderedPublicationFailed &&
       this.pendingOrderedPublications.size === 0 &&
+      !this.hasPendingJoinedFilterWork() &&
       this.checkAllCollectionsReady()
+    )
+  }
+
+  private hasPendingJoinedFilterWork(): boolean {
+    return Object.values(this.optimizableOrderByCollections).some(
+      (info) =>
+        info.joinedFilterSourceId !== undefined &&
+        this.hasPendingJoinedWork(info.joinedFilterSourceId),
     )
   }
 

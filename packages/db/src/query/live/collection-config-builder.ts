@@ -425,12 +425,6 @@ export class CollectionConfigBuilder<
     )
   }
 
-  private hasJoinedFilterWindow(): boolean {
-    return Object.values(this.optimizableOrderByCollections).some(
-      (info) => info.joinedFilterSourceId !== undefined,
-    )
-  }
-
   failDemand(planId: string, generation: number, error: unknown): void {
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
@@ -1092,7 +1086,13 @@ export class CollectionConfigBuilder<
         this.isInErrorState = false
         this.maybeRunGraphFn?.()
       }
-      if (this.hasJoinedFilterWindow()) this.maybeRunGraphFn?.()
+      if (
+        Object.values(this.optimizableOrderByCollections).some(
+          (info) => info.joinedFilterSourceId === sourceId,
+        )
+      ) {
+        this.maybeRunGraphFn?.()
+      }
     }
 
     // Update ready status based on all source collections
