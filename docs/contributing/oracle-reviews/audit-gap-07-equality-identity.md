@@ -97,3 +97,13 @@ The clean oracle passed 56 tests, the guarded replay and manifest suite passed
 27 tests, and ESLint, Prettier, and `git diff --check` passed. The additional
 public path covers the fixed value pairs at initial publication; it does not
 close the mapped subset-demand reuse cell.
+
+## Main merge verification
+
+Reviewed merged executable commit: `d4f0507892584a2e59e96baea498989c41a2ae21`.
+The merge kept the query-identity coverage note and main's SQLite coverage
+notes. It changed no query-identity oracle or runtime source from the
+follow-up reviewed above. At the merged commit, the oracle passed 56 tests,
+the direct seed `20260928` and path `8:0:0` replay completed one execution,
+and Prettier and `git diff --check` passed. The next record-only commit adds
+this entry and changes no executable code.
