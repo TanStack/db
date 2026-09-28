@@ -119,6 +119,23 @@ comment and the current API/architecture contract before extending its model.
 | Boundary refinements | [cleanup/restart](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-cleanup-restart-oracle.test.ts), [issue #1891 async-cleanup review](oracle-reviews/issue-1891-async-cleanup.md), [issue #1891 cleanup-start follow-up](oracle-reviews/issue-1891-cleanup-start-followup.md), [metadata publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-oracle.test.ts), [D2 source reconciliation](https://github.com/TanStack/db/blob/main/packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/includes-work-counter-oracle.test.ts) | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them. |
 | Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue.property.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and appointment-list models with executed target/seed/path checks. Callback-reentrant scheduling is outside the initial cleanup-queue domain. |
 
+The Collection lifecycle change-event history owner also checks eager auto-index
+equality buckets and fresh indexed `eq` live queries against its independent
+row Map. Its required same-turn delete/reinsert prefix reaches an already-built
+index for both BasicIndex and BTreeIndex. In the batched lane, public rows and
+equality buckets are checked after each mutation returns, before any transaction
+is awaited; the batched final state and each sequential settled prefix are also
+checked. Fresh indexed queries are checked at the final checkpoint.
+Fixed and random tails check nearby legal histories. One temporary mutant that
+skipped index updates failed the fixed batched final count: one indexed key
+versus two model rows. Another fault that preserved the final keys failed the
+new returned-mutation check. The direct index refinement owner does not prove
+this Collection mutation path. Callback-time index agreement,
+the reported insert-seeded string-key setup, adapter cancellation, and
+non-local-only persistence remain outside this lane.
+The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
+records the grammar controls, exact reviewed commit, and ORC audit.
+
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
 also covers one-pass queued-sync cancellation, partial-update dependencies on
 queued source rows, and focused late-hydration cases in
