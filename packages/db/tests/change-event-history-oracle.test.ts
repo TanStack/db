@@ -191,7 +191,8 @@ function expectedEventTrace(
       if (!before || after) throw new Error(`model delete requires a row`)
       event = { type: `delete`, value: before.name }
     } else if (op.kind === `insert`) {
-      if (before || !after) throw new Error(`model insert requires an absent key`)
+      if (before || !after)
+        throw new Error(`model insert requires an absent key`)
       event = { type: `insert`, value: after.name }
     } else {
       if (!before || !after) throw new Error(`model update requires a row`)
