@@ -45,6 +45,7 @@ const staticOracleProperties = [
   `collection-state.optimistic-outcomes`,
   `collection-state.same-key`,
   `query-identity.compiled-output`,
+  `query-identity.equality-partition`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
