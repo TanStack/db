@@ -277,6 +277,16 @@ When merging predicates or combining queries, ensure the semantics are correct:
 
 **Key Principle:** Think carefully about what operations like intersection, union, and subset mean for your specific use case. Consider edge cases with limits, ordering, and predicates.
 
+### Reject Multiple Copies of `@tanstack/db`
+
+TanStack DB does not support multiple copies of `@tanstack/db` in one runtime.
+Each copy has its own transaction stack and IR classes. Do not add cross-copy
+expression support or shape-based fallbacks to make the copies interoperate.
+When a duplicate copy is detected, throw a clear error such as
+`DuplicateDbInstanceError`. A warning, silent literal conversion, or wrong
+query result is not acceptable. Tests for this case should expect rejection,
+not a successful query across copies.
+
 ## Abstraction Design
 
 ### Avoid Leaky Abstractions
