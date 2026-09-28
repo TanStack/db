@@ -129,12 +129,21 @@ const typeMarkerValues = fc.uniqueArray(fc.integer(), {
 
 const typeMarkerReplaySeed = process.env.TANSTACK_DB_IVM_HASH_TYPE_SEED
 const typeMarkerReplayPath = process.env.TANSTACK_DB_IVM_HASH_TYPE_PATH
-if (typeMarkerReplayPath !== undefined && typeMarkerReplaySeed === undefined)
-  throw new Error(`TANSTACK_DB_IVM_HASH_TYPE_PATH requires a seed`)
 const typeMarkerCampaigns =
-  typeMarkerReplaySeed === undefined
-    ? [1659001, undefined]
-    : [Number(typeMarkerReplaySeed)]
+  typeMarkerReplaySeed === undefined && typeMarkerReplayPath === undefined
+    ? [
+        { name: `1659001`, seed: 1659001 },
+        { name: `random`, seed: undefined },
+      ]
+    : [
+        {
+          name: `replay`,
+          seed:
+            typeMarkerReplaySeed === undefined
+              ? undefined
+              : Number(typeMarkerReplaySeed),
+        },
+      ]
 
 describe(`hash property-based tests`, () => {
   describe(`determinism`, () => {
@@ -351,7 +360,6 @@ describe(`hash property-based tests`, () => {
     // These sampled hash distinctions do not claim collision freedom.
     for (const carrier of [`Set`, `Map`] as const) {
       const property = fc.property(typeMarkerValues, (values) => {
-        const entries = values.map((value) => [String(value), value] as const)
         if (carrier === `Set`) {
           expectDistinctHashes(
             `set-object`,
@@ -360,6 +368,7 @@ describe(`hash property-based tests`, () => {
             Object.fromEntries(values.map((value, index) => [index, value])),
           )
         } else {
+          const entries = values.map((value) => [String(value), value] as const)
           expectDistinctHashes(
             `map-object`,
             entries,
@@ -368,8 +377,15 @@ describe(`hash property-based tests`, () => {
           )
         }
       })
-      for (const seed of typeMarkerCampaigns) {
-        it(`${carrier} differs from an object with matching entries (${seed ?? `random`})`, () => {
+      for (const { name, seed } of typeMarkerCampaigns) {
+        it(`${carrier} differs from an object with matching entries (${name})`, () => {
+          if (typeMarkerReplayPath !== undefined && typeMarkerReplaySeed === undefined)
+            throw new Error(`TANSTACK_DB_IVM_HASH_TYPE_PATH requires a seed`)
+          if (
+            typeMarkerReplaySeed !== undefined &&
+            (typeMarkerReplaySeed.trim() === `` || !Number.isSafeInteger(seed))
+          )
+            throw new Error(`TANSTACK_DB_IVM_HASH_TYPE_SEED must be an integer`)
           fc.assert(property, {
             numRuns: 100,
             ...(seed === undefined ? {} : { seed }),
