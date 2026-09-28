@@ -132,30 +132,19 @@ afterEach(() => {
 describe(`Scheduler dependency reentry`, () => {
   it.each(
     [false, true].flatMap((sourceFirst) =>
-      [false, true].flatMap((pendingAware) =>
-        [false, true].map((requeue) => ({
-          sourceFirst,
-          pendingAware,
-          requeue,
-        })),
-      ),
+      [false, true].map((requeue) => ({ sourceFirst, requeue })),
     ),
   )(
-    `waits for current source work: sourceFirst=$sourceFirst pendingAware=$pendingAware requeue=$requeue`,
-    ({ sourceFirst, pendingAware, requeue }) => {
+    `waits for queued source work: sourceFirst=$sourceFirst requeue=$requeue`,
+    ({ sourceFirst, requeue }) => {
       const scheduler = new Scheduler()
       const contextId = Symbol(`source-reentry`)
       let sourceRuns = 0
-      let pending = true
-      const source = pendingAware
-        ? { hasPendingGraphRun: () => pending }
-        : Symbol(`source`)
+      const source = Symbol(`source`)
       const observedRuns: Array<number> = []
       const runSource = () => {
         sourceRuns++
-        pending = false
         if (requeue && sourceRuns === 1) {
-          pending = true
           scheduler.schedule({ contextId, jobId: source, run: runSource })
         }
       }
@@ -277,39 +266,19 @@ describe(`Collection publication scheduler context`, () => {
     expect(thrown).toBeUndefined()
   })
 
-  it(`attempts every clear listener and preserves its first failure`, () => {
+  it(`clears queued jobs and permits a fresh job in the same context`, () => {
     const scheduler = new Scheduler()
-    const firstFailure = new Error(`first clear listener failed`)
-    const laterFailure = new Error(`later clear listener failed`)
-    const calls: Array<string> = []
-    let firstClear = true
-    let removeAdded: (() => void) | undefined
-    scheduler.onClear(() => {
-      calls.push(`first`)
-      if (!firstClear) return
-      removeSecond()
-      removeAdded ??= scheduler.onClear(() => calls.push(`added`))
-      throw firstFailure
-    })
-    const removeSecond = scheduler.onClear(() => {
-      calls.push(`second`)
-      if (firstClear) throw laterFailure
-    })
+    const canceled = vi.fn()
+    const fresh = vi.fn()
+    scheduler.schedule({ contextId: `context`, jobId: `job`, run: canceled })
+    scheduler.clear(`context`)
+    scheduler.clear(`context`)
+    scheduler.flush(`context`)
+    expect(canceled).not.toHaveBeenCalled()
 
-    let thrown: unknown
-    try {
-      scheduler.clear(`context`)
-    } catch (error) {
-      thrown = error
-    }
-
-    expect(thrown).toBe(firstFailure)
-    expect(calls).toEqual([`first`, `second`])
-
-    firstClear = false
-    expect(() => scheduler.clear(`next context`)).not.toThrow()
-    expect(calls).toEqual([`first`, `second`, `first`, `added`])
-    removeAdded?.()
+    scheduler.schedule({ contextId: `context`, jobId: `job`, run: fresh })
+    scheduler.flush(`context`)
+    expect(fresh).toHaveBeenCalledOnce()
   })
 
   it.each([
@@ -318,24 +287,18 @@ describe(`Collection publication scheduler context`, () => {
     { source: `graph`, failureKind: `Error` },
     { source: `graph`, failureKind: `undefined` },
   ] as const)(
-    `does not replace a $failureKind $source failure with a clear-listener failure`,
+    `preserves a $failureKind $source failure and clears later graph jobs`,
     ({ source, failureKind }) => {
       const primaryFailure =
         failureKind === `Error` ? new Error(`${source} failed`) : undefined
-      const clearFailure = new Error(`clear listener failed`)
-      const laterClear = vi.fn()
-      const removeThrowingClear = transactionScopedScheduler.onClear(() => {
-        throw clearFailure
-      })
-      const removeLaterClear = transactionScopedScheduler.onClear(laterClear)
-
+      const discarded = vi.fn()
+      let contextId: ReturnType<typeof getActivePublicationContext>
+      let didThrow = false
+      let thrown: unknown
       try {
-        let didThrow = false
-        let thrown: unknown
-        try {
-          withPublicationContext(() => {
-            if (source === `publication`) throw primaryFailure
-            const contextId = getActivePublicationContext()
+        withPublicationContext(() => {
+          contextId = getActivePublicationContext()
+          if (source === `graph`) {
             transactionScopedScheduler.schedule({
               contextId,
               jobId: `failing graph`,
@@ -343,19 +306,32 @@ describe(`Collection publication scheduler context`, () => {
                 throw primaryFailure
               },
             })
+          }
+          transactionScopedScheduler.schedule({
+            contextId,
+            jobId: `discarded`,
+            run: discarded,
           })
-        } catch (error) {
-          didThrow = true
-          thrown = error
-        }
-
-        expect(didThrow).toBe(true)
-        expect(Object.is(thrown, primaryFailure)).toBe(true)
-        expect(laterClear).toHaveBeenCalledOnce()
-      } finally {
-        removeThrowingClear()
-        removeLaterClear()
+          if (source === `publication`) throw primaryFailure
+        })
+      } catch (error) {
+        didThrow = true
+        thrown = error
       }
+
+      expect(didThrow).toBe(true)
+      expect(Object.is(thrown, primaryFailure)).toBe(true)
+      expect(discarded).not.toHaveBeenCalled()
+      expect(contextId).toBeDefined()
+      const fresh = vi.fn()
+      transactionScopedScheduler.schedule({
+        contextId,
+        jobId: `fresh`,
+        run: fresh,
+      })
+      transactionScopedScheduler.flush(contextId!)
+      expect(fresh).toHaveBeenCalledOnce()
+      expect(discarded).not.toHaveBeenCalled()
     },
   )
 })

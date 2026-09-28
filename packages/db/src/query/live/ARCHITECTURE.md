@@ -85,6 +85,9 @@ generation fences jobs left over from an older run. The loaders' request
 latches, rather than per-job loader callbacks, stop repeated acquisitions.
 The turn processes synchronous loader writes through the graph before it
 publishes, including when the turn started without graph input.
+The scheduler waits for a dependency only while that dependency has a queued
+job in the same context. Source demand and ordered loading use their own
+settlement barriers outside the scheduler.
 
 ## Concrete implementation map
 

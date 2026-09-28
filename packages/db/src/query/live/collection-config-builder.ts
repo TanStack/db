@@ -654,20 +654,14 @@ export class CollectionConfigBuilder<
    * to run parent queries before child queries. Outside a transaction, runs immediately.
    *
    * Multiple calls during a transaction are coalesced into a single execution.
-   * Dependencies are auto-discovered from subscribed live queries, or can be overridden.
+   * Dependencies are discovered from subscribed live queries.
    *
    * Uses the current sync run's config and syncState from instance properties.
    *
    * @param options - Optional scheduling configuration
    * @param options.contextId - Transaction ID to group work; defaults to active transaction
-   * @param options.jobId - Unique identifier for this job; defaults to this builder instance
-   * @param options.dependencies - Explicit dependency list; overrides auto-discovered dependencies
    */
-  scheduleGraphRun(options?: {
-    contextId?: SchedulerContextId
-    jobId?: unknown
-    dependencies?: Array<CollectionConfigBuilder<any, any>>
-  }) {
+  scheduleGraphRun(options?: { contextId?: SchedulerContextId }) {
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
         `scheduleGraphRun called without active sync run. This should not happen.`,
@@ -676,8 +670,8 @@ export class CollectionConfigBuilder<
 
     const syncRunGeneration = this.syncRunGeneration
     scheduleQueryGraphRun(
-      options?.jobId ?? this,
-      options?.dependencies ?? this.builderDependencies,
+      this,
+      this.builderDependencies,
       () => {
         if (
           syncRunGeneration === this.syncRunGeneration &&

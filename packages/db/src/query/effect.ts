@@ -37,7 +37,6 @@ import type {
 import type {
   ChangeMessage,
   KeyedStream,
-  ResultStream,
   StringCollationConfig,
 } from '../types.js'
 
@@ -385,7 +384,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   private graph: D2 | undefined
   private inputs: Record<string, RootStreamBuilder<unknown>> | undefined
-  private pipeline: ResultStream | undefined
   private sourceWhereClauses: Map<string, BasicExpression<boolean>> | undefined
 
   // Mutable objects passed to compileQuery by reference.
@@ -425,7 +423,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Callback-visible result. Held repair deltas are classified against this
   // last coherent membership rather than their net multiplicity alone.
   private readonly publishedRows = new Map<unknown, TRow>()
-  private tracksPublishedRows = false
 
   // skipInitial state
   private readonly skipInitial: boolean
@@ -488,11 +485,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       () => {}, // setWindowFn (no-op — effects don't paginate)
     )
 
-    this.pipeline = compilation.pipeline
     this.sourceWhereClauses = compilation.sourceWhereClauses
 
     // Attach the output operator that accumulates changes
-    this.pipeline.pipe(
+    compilation.pipeline.pipe(
       output((data) => {
         const messages = data.getInner()
         messages.reduce(accumulateEffectChanges<TRow>, this.pendingChanges)
@@ -570,7 +566,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
       // Check if this alias has orderBy optimization (cursor-based loading)
       const orderByInfo = this.optimizableOrderByCollections[sourceId]
-      if (orderByInfo) this.tracksPublishedRows = true
 
       const changeCallback = (
         changes: Array<ChangeMessage<any, string | number>>,
@@ -942,6 +937,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
 
     const shouldPublish = !this.skipInitial || this.initialLoadComplete
+    const tracksPublishedRows = this.orderedLoaders.size > 0
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
@@ -949,10 +945,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const event = classifyDelta<TRow, TKey>(
         key as TKey,
         changes,
-        this.tracksPublishedRows ? this.publishedRows : undefined,
+        tracksPublishedRows ? this.publishedRows : undefined,
       )
       if (event) {
-        if (this.tracksPublishedRows) {
+        if (tracksPublishedRows) {
           if (event.type === `exit`) this.publishedRows.delete(key)
           else this.publishedRows.set(key, event.value)
         }
@@ -1078,7 +1074,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.publishedRows.clear()
     this.pendingOrderedPublications.clear()
     this.orderedPublicationFailed = false
-    this.tracksPublishedRows = false
     this.lazySources.clear()
     this.demand.clear()
     this.builderDependencies.clear()
@@ -1097,7 +1092,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // another step or new input; clearing our references does not destroy it.
     this.graph = undefined
     this.inputs = undefined
-    this.pipeline = undefined
     this.sourceWhereClauses = undefined
   }
 }
