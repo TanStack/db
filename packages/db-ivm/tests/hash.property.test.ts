@@ -120,6 +120,22 @@ function expectPermutedHashes(
   expectEqualHashes(original, reversed, hashValue)
 }
 
+// The generated values supply the same numeric entries to each pair. Only the
+// container kind may distinguish Set/Map from the corresponding plain object.
+const typeMarkerValues = fc.uniqueArray(fc.integer(), {
+  minLength: 1,
+  maxLength: 5,
+})
+
+const typeMarkerReplaySeed = process.env.TANSTACK_DB_IVM_HASH_TYPE_SEED
+const typeMarkerReplayPath = process.env.TANSTACK_DB_IVM_HASH_TYPE_PATH
+if (typeMarkerReplayPath !== undefined && typeMarkerReplaySeed === undefined)
+  throw new Error(`TANSTACK_DB_IVM_HASH_TYPE_PATH requires a seed`)
+const typeMarkerCampaigns =
+  typeMarkerReplaySeed === undefined
+    ? [1659001, undefined]
+    : [Number(typeMarkerReplaySeed)]
+
 describe(`hash property-based tests`, () => {
   describe(`determinism`, () => {
     fcTest.prop([arbitraryPrimitive])(
@@ -331,6 +347,39 @@ describe(`hash property-based tests`, () => {
         expectDistinctHashes(`array-set`, arr, arr, set)
       },
     )
+
+    // These sampled hash distinctions do not claim collision freedom.
+    for (const carrier of [`Set`, `Map`] as const) {
+      const property = fc.property(typeMarkerValues, (values) => {
+        const entries = values.map((value) => [String(value), value] as const)
+        if (carrier === `Set`) {
+          expectDistinctHashes(
+            `set-object`,
+            values,
+            new Set(values),
+            Object.fromEntries(values.map((value, index) => [index, value])),
+          )
+        } else {
+          expectDistinctHashes(
+            `map-object`,
+            entries,
+            new Map(entries),
+            Object.fromEntries(entries.map((entry, index) => [index, entry])),
+          )
+        }
+      })
+      for (const seed of typeMarkerCampaigns) {
+        it(`${carrier} differs from an object with matching entries (${seed ?? `random`})`, () => {
+          fc.assert(property, {
+            numRuns: 100,
+            ...(seed === undefined ? {} : { seed }),
+            ...(typeMarkerReplayPath === undefined
+              ? {}
+              : { path: typeMarkerReplayPath }),
+          })
+        })
+      }
+    }
   })
 
   describe(`nested structures`, () => {
