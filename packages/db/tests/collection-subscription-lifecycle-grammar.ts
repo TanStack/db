@@ -51,6 +51,7 @@ export const reentrantSnapshotHistories = [
   { phase: `onLoadSubsetResult`, action: `release` },
   { phase: `onLoadSubsetResult`, action: `unsubscribe` },
   { phase: `statusLoadingSubset`, action: `release` },
+  { phase: `statusLoadingSubset`, action: `unsubscribe` },
   { phase: `onUnoptimized`, action: `release` },
   { phase: `onUnoptimized`, action: `unsubscribe` },
   { phase: `snapshotEvaluation`, action: `release` },

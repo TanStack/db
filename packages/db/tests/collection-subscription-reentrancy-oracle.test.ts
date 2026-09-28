@@ -86,7 +86,9 @@ describe(`Collection subscription callback reentry oracle`, () => {
       if (phase === `statusLoadingSubset`) {
         subscription.on(`status:loadingSubset`, () => {
           reentries++
-          subscription.releaseSnapshot(requestedWhere)
+          if (action === `release`)
+            subscription.releaseSnapshot(requestedWhere)
+          else subscription.unsubscribe()
         })
       }
       const reads = vi.spyOn(collection, `currentStateAsChanges`)

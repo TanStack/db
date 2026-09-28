@@ -86,10 +86,16 @@ code had not yet registered the predicate mapping, so it recorded no unload,
 returned `true`, and published a row. A pinned oracle case failed at the exact
 unload assertion. Registering the mapping before loader entry makes it pass.
 
-The final companion has 19 passing tests. The three new cases are product-bug
+The final companion has 20 passing tests. The three new cases are product-bug
 witnesses. The initial 11 mutant kills and three survivor arguments remain
 claims about the reviewed head. The final production diff retains all guards
 from that mutation sweep.
+
+A later external review described both ownership actions as covered at every
+callback phase. Its claim exposed one omitted cell: `status:loadingSubset`
+unsubscribe. A controlled probe reached that callback on the repaired head and
+observed `false`, no publication, and one exact acquisition unload. The matrix
+now preserves that already-correct history as its tenth cell.
 
 ## Oracle guide review
 
@@ -98,7 +104,7 @@ from that mutation sweep.
 | ORC-001 | The existing lifecycle grammar and Collection cleanup/replay contract authorize the ownership, status, and publication laws above. The companion's limits are stated above and in the coverage map. |
 | ORC-002 | Expected results come from owner retirement, sync-run fencing, and resource symmetry. The assertions do not call production classifiers or transition helpers. The M25 retention check observes an internal reference but does not derive its expected value from that field. |
 | ORC-003 | The contract and expected law appear in the companion's opening prose; the bounded snapshot matrix is in the lifecycle grammar; each test drives a real Collection; assertions name the return, callback, resource, or microtask checkpoint. Replay histories are pinned in the companion. |
-| ORC-004 | Not triggered: the matrix is bounded enumeration, not an important generated property. It reconstructs nine callback/action cells shown in the grammar. A separate case crosses loader reentry with a combined predicate. The existing generated lifecycle owner retains its fixed and random campaigns. |
+| ORC-004 | Not triggered: the matrix is bounded enumeration, not an important generated property. It reconstructs ten callback/action cells shown in the grammar. A separate case crosses loader reentry with a combined predicate. The existing generated lifecycle owner retains its fixed and random campaigns. |
 | ORC-005 | Positive callback counters, load counts, and nested-replay flags prove reach. Exact return values, callbacks, resource effects, and status are compared at synchronous or queued-microtask cuts. The retention test states its white-box limit. |
 | ORC-006 | Eleven separate wrong production mutants failed by assertion. M1 and M6 branch probes reached their guards but the deletion mutants survived. The M8 true-branch probe stayed unreached in 538 focused tests. None of these outcomes was a timeout or setup failure. |
 | ORC-007 | Not triggered: this companion adds no important generated property. The primary lifecycle-history owner already runs fixed and random campaigns with direct replay. |
