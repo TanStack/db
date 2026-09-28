@@ -56,3 +56,49 @@ belong to this Temporal law. An independent reviewer reproduced another
 boundary: two ZonedDateTimes with `[UTC]` and `[Etc/UTC]` satisfy native
 `.equals()` but have different kind-and-string keys. The coverage map records
 the native-equality decision. This PR does not change that hash behavior.
+
+## External-review follow-up on `f25fff0d3eeb655075ecc9743d693c541f7bf92d`
+
+The review of PR #1919 found that the first oracle model classified inputs with
+the same `Symbol.toStringTag` and `toString()` calls as production. This could
+hide a collision between a real Temporal value and a plain object with a
+spoofed tag. On starting head `c08a3201b3cf166ac25494302ea92ea1d8b2bcb6`,
+a plain object with an own `Temporal.PlainDate` tag, a non-enumerable date-like
+`toString()`, and an `extra` property entered the Temporal branch. Public
+`groupBy` emitted one count-2 group for that object and a genuine PlainDate.
+The new oracle case failed at the group-count assertion: expected two groups,
+observed one. The original model would have expected that one group too.
+
+The follow-up model counts fixture-assigned identity classes. It no longer calls
+`Symbol.toStringTag` or `toString()` to derive expected groups. The detector now
+requires the accepted tag to exist on the input's prototype. The same oracle
+case passes, and a second case proves that a genuine Temporal value with its
+own matching tag still joins its matching group. This check prevents the
+original plain-object collision without treating a matching own tag as proof of
+Temporal identity. The entire db-ivm suite passed: 578 tests in 40 files.
+TypeScript, changed-file ESLint, Prettier, Vite build, and diff checks passed.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001 | The law remains two distinct group-key identities and one matching identity after one batch. The established kind-and-string domain stays the authority. |
+| ORC-002 | Fixture labels define expected classes. The model does not use the production Temporal classifier. |
+| ORC-003 | The opening contract, `temporalCases`, `expectedGroupCounts`, `observedGroupCounts`, and assertions expose the five oracle responsibilities. |
+| ORC-004 | Not applicable: the finite Temporal-kind matrix is not a generated property. |
+| ORC-005 | The public `groupBy` output supplies group counts after `graph.run()`. The recorder also checks positive weights and unique emitted keys. |
+| ORC-006 | The original detector survived the old classifier but failed the new spoofed-object case at the public group-count checkpoint. The repaired detector passed the same case. |
+| ORC-007 | Not applicable: no generated property or replay campaign changed. |
+| ORC-008 | Not applicable: the reference counts one stateless input batch. |
+| ORC-009 | Fixture labels represent expected group-key identity classes. They do not represent a production hash or serialized key. |
+| ORC-010 | Not applicable: the in-memory graph has no acquired resource or shrinking path. |
+| ORC-011 | The fixture-label formulation is independent of the kind-and-string classifier. It rejects the named shared fault. |
+| ORC-012 | This addendum records each applicable requirement for the exact follow-up head. |
+
+The current detector still accepts a custom prototype that advertises a
+Temporal tag and supplies a matching `toString()` method. A direct probe found
+that such an object still serializes to the same key as a genuine PlainDate.
+The coverage map owns that remaining counterfeit-prototype witness and the
+native/polyfill brand decision. No claim of complete spoofing resistance follows
+from this change. Also, `Temporal.Duration.compare(PT1H, PT60M)` returns zero,
+but `groupBy` emits two count-1 groups under the established string-key domain.
+The coverage map retains that equality-policy decision with the ZonedDateTime
+alias example.
