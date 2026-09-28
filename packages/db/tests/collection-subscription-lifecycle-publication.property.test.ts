@@ -1295,6 +1295,7 @@ async function runDeferralCleanupHistory(
     ReturnType<typeof collection._deferPublication>
   >()
   let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+  const failures: Array<unknown> = []
 
   try {
     for (const command of commands) {
@@ -1331,10 +1332,25 @@ async function runDeferralCleanupHistory(
       }
     }
     expect(syncRuns).toBe(2)
+  } catch (error) {
+    failures.push(error)
   } finally {
-    subscription?.unsubscribe()
-    await collection.cleanup()
+    try {
+      subscription?.unsubscribe()
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
   }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1)
+    throw new AggregateError(failures, `Deferral history and cleanup failed`, {
+      cause: failures[0],
+    })
 }
 
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
