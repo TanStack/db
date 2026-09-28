@@ -1,11 +1,13 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
 import {
+  LoadSubsetOperationAbortedError,
   MissingAliasInputsError,
   SetWindowReentrancyError,
   SetWindowRequiresOrderByError,
 } from '../../errors.js'
 import { withPublicationContext } from '../../scheduler.js'
+import { createDeferred } from '../../deferred.js'
 import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
@@ -40,6 +42,7 @@ import type {
 import type { Context, GetResult } from '../builder/types.js'
 import type { BasicExpression, QueryIR } from '../ir.js'
 import type { LazyCollectionCallbacks } from '../compiler/joins.js'
+import type { Deferred } from '../../deferred.js'
 import type {
   Changes,
   FullSyncState,
@@ -150,6 +153,7 @@ export class CollectionConfigBuilder<
     {
       generation: number
       settled: boolean
+      participant?: Deferred<void>
     }
   >()
   private demandGeneration = 0
@@ -305,6 +309,16 @@ export class CollectionConfigBuilder<
     const windowOperationGeneration = ++this.windowOperationGeneration
     const loadOperation =
       this.liveQueryCollection?._sync.beginLoadSubsetOperation()
+    for (const info of Object.values(this.optimizableOrderByCollections)) {
+      if (!info.joinedFilterSourceId) continue
+      for (const plan of this.lazySourcesCallbacks[info.joinedFilterSourceId]
+        ?.plans ?? []) {
+        const participant = this.activeDemands.get(plan.id)?.participant
+        if (participant?.isPending()) {
+          this.trackSubsetLoadOperationPromise(participant.promise)
+        }
+      }
+    }
     const previousOperation = this.activeWindowOperation
     const operation: {
       generation: number
@@ -372,12 +386,20 @@ export class CollectionConfigBuilder<
     return this.lazySources.has(sourceId)
   }
 
-  beginDemand(planId: string): number {
+  beginDemand(planId: string, pending = false): number {
     const generation = ++this.demandGeneration
+    const previous = this.activeDemands.get(planId)
+    const participant = pending ? createDeferred<void>() : undefined
+    if (participant) {
+      void participant.promise.catch(() => {})
+      this.trackSubsetLoadOperationPromise(participant.promise)
+    }
     this.activeDemands.set(planId, {
       generation,
       settled: false,
+      participant,
     })
+    previous?.participant?.resolve()
     return generation
   }
 
@@ -385,7 +407,13 @@ export class CollectionConfigBuilder<
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation || demand.settled) return
     demand.settled = true
-    this.maybeRunGraphFn?.()
+    try {
+      this.maybeRunGraphFn?.()
+      demand.participant?.resolve()
+    } catch (error) {
+      demand.participant?.reject(error)
+      throw error
+    }
   }
 
   hasPendingJoinedWork(joinedSourceId: string): boolean {
@@ -407,6 +435,7 @@ export class CollectionConfigBuilder<
     const demand = this.activeDemands.get(planId)
     if (!demand || demand.generation !== generation) return
     const normalized = this.recordSubsetError(error)
+    demand.participant?.reject(normalized)
     this.transitionToError(
       `Subset demand '${planId}' failed: ${normalized.message}`,
       normalized,
@@ -499,7 +528,9 @@ export class CollectionConfigBuilder<
   }
 
   retireDemand(planId: string): void {
+    const demand = this.activeDemands.get(planId)
     this.activeDemands.delete(planId)
+    demand?.participant?.resolve()
   }
 
   hasPendingSourceRecovery(): boolean {
@@ -573,8 +604,8 @@ export class CollectionConfigBuilder<
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
         let checkedLoaders = false
-        const drainGraph = () => {
-          while (syncState.graph.pendingWork()) {
+        while (syncState.graph.pendingWork() || !checkedLoaders) {
+          if (syncState.graph.pendingWork()) {
             try {
               syncState.graph.run()
             } catch (error) {
@@ -583,30 +614,14 @@ export class CollectionConfigBuilder<
               }
               throw error
             }
-            if (!isCurrentSyncRun()) return false
-            this.loadMoreFn?.()
-            if (!isCurrentSyncRun()) return false
-            checkedLoaders = true
+            if (!isCurrentSyncRun()) return
           }
-          return true
-        }
-
-        if (!drainGraph()) return
-
-        // Ensure loaders run at least once even when the graph has no pending work.
-        // This handles lazy loading scenarios where setWindow() increases the limit or
-        // an async loadSubset completes and we need to re-check if more data is needed.
-        // drainGraph changes this flag inside its closure.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (!checkedLoaders) {
+          // A synchronous loader can write while this graph run is active.
+          // Process that input before publishing, even if this turn began empty.
           this.loadMoreFn?.()
           if (!isCurrentSyncRun()) return
+          checkedLoaders = true
         }
-
-        // A synchronous loader can write while this graph run is active. Its
-        // nested schedule is intentionally coalesced, so drain that new input
-        // here before publishing the transaction.
-        if (!drainGraph()) return
 
         // Publish only after every operator has reached quiescence. A source
         // change can reach sibling materializations in different graph steps;
@@ -785,6 +800,9 @@ export class CollectionConfigBuilder<
 
     // Reset lazy source alias state
     this.lazySources.clear()
+    for (const demand of this.activeDemands.values()) {
+      demand.participant?.reject(new LoadSubsetOperationAbortedError())
+    }
     this.activeDemands.clear()
     this.pendingOrderedLoads.clear()
     this.orderedLoadFailed = false

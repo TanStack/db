@@ -83,6 +83,8 @@ source loaders. It checks them after graph steps and once when a turn starts
 without graph input. The transaction scheduler coalesces graph jobs; a sync
 generation fences jobs left over from an older run. The loaders' request
 latches, rather than per-job loader callbacks, stop repeated acquisitions.
+The turn processes synchronous loader writes through the graph before it
+publishes, including when the turn started without graph input.
 
 ## Concrete implementation map
 
@@ -940,6 +942,9 @@ If an explicit window operation consumes a staged boundary continuation and
 that continuation has no boundary row, it starts no acquisition. The operation
 must continue normal demand selection for the enlarged window; consuming the
 empty continuation does not settle that window operation.
+If joined demand blocks an explicit retry, the loader retains its window
+generation and repair intent until it can select the request. A new failure or
+cursor reset discards that blocked intent.
 
 For no-index prefix loading, an unrelated new key does not reacquire an already
 full window. An explicit window move, an underfilled window, or a settled
@@ -986,6 +991,10 @@ have advanced, so core does not try to reconstruct the old window over that
 new state. A later successful retry publishes the coherent replacement. A
 superseding window also waits for older source work that still gates
 publication; it does not report success until its own chosen window is visible.
+A joined demand already pending when the move begins is part of this operation
+if it blocks the ordered continuation. Retiring that demand releases its
+participant; a later failure from the obsolete request cannot fail the move.
+The resumed root page and refill still belong to the operation.
 Window controllers treat `getWindow()` as settled state, not the current lease
 request. An overlapping preload joins its lease's pending window promise rather
 than replacing it with the smaller committed page count. Lease release may also

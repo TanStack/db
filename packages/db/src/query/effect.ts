@@ -569,33 +569,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const isLazy = this.lazySources.has(sourceId)
 
       // Check if this alias has orderBy optimization (cursor-based loading)
-      const orderByInfo = this.getOrderByInfoForSource(sourceId)
+      const orderByInfo = this.optimizableOrderByCollections[sourceId]
       if (orderByInfo) this.tracksPublishedRows = true
 
-      // Build the change callback — for ordered aliases, split updates into
-      // delete+insert and invalidate loading state from changed contributions.
-      const changeCallback = orderByInfo
-        ? (changes: Array<ChangeMessage<any, string | number>>) => {
-            if (pendingBuffers.has(sourceId)) {
-              pendingBuffers.get(sourceId)!.push(changes)
-            } else {
-              this.orderedLoaders
-                .get(sourceId)
-                ?.onSourceChanges(
-                  changes,
-                  this.sentToD2RowsBySource.get(sourceId),
-                )
-              const split = [...splitUpdates(changes)]
-              this.handleSourceChanges(sourceId, split)
-            }
-          }
-        : (changes: Array<ChangeMessage<any, string | number>>) => {
-            if (pendingBuffers.has(sourceId)) {
-              pendingBuffers.get(sourceId)!.push(changes)
-            } else {
-              this.handleSourceChanges(sourceId, changes)
-            }
-          }
+      const changeCallback = (
+        changes: Array<ChangeMessage<any, string | number>>,
+      ) => {
+        const bufferedChanges = pendingBuffers.get(sourceId)
+        if (bufferedChanges) bufferedChanges.push(changes)
+        else this.handleSourceChanges(sourceId, changes)
+      }
 
       // Subscribe to source changes
       const subscription = collection.subscribeChanges(changeCallback, {
@@ -745,24 +728,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // switches that alias to direct-processing mode. Any new callbacks that
     // fire during the drain (e.g. from requestLimitedSnapshot) will go
     // through handleSourceChanges directly instead of being lost.
-    for (const [sourceId] of pendingBuffers) {
-      const buffer = pendingBuffers.get(sourceId)!
+    for (const [sourceId, buffer] of pendingBuffers) {
       pendingBuffers.delete(sourceId)
-      const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Drain all buffered batches. Since we deleted the alias from
       // pendingBuffers above, any new changes arriving during drain go
       // through handleSourceChanges directly (not back into this buffer).
       for (const changes of buffer) {
-        if (orderByInfo) {
-          this.orderedLoaders
-            .get(sourceId)
-            ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
-          const split = [...splitUpdates(changes)]
-          this.sendChangesToD2(sourceId, split)
-        } else {
-          this.sendChangesToD2(sourceId, changes)
-        }
+        this.handleSourceChanges(sourceId, changes, false)
       }
     }
 
@@ -786,9 +759,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private handleSourceChanges(
     sourceId: string,
     changes: Array<ChangeMessage<any, string | number>>,
+    scheduleGraph = true,
   ): void {
+    if (this.optimizableOrderByCollections[sourceId]) {
+      this.orderedLoaders
+        .get(sourceId)
+        ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
+      changes = [...splitUpdates(changes)]
+    }
     this.sendChangesToD2(sourceId, changes)
-    this.scheduleGraphRun()
+    if (scheduleGraph) this.scheduleGraphRun()
   }
 
   private setDemand(
@@ -1044,17 +1024,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       ...(hints.orderBy ? { orderBy: hints.orderBy } : {}),
       ...(hints.limit !== undefined ? { limit: hints.limit } : {}),
     }
-  }
-
-  /** Get orderBy optimization info for one lexical source. */
-  private getOrderByInfoForSource(
-    sourceId: string,
-  ): OrderByOptimizationInfo | undefined {
-    const info = this.optimizableOrderByCollections[sourceId]
-    if (info?.sourceId === sourceId) {
-      return info
-    }
-    return undefined
   }
 
   /**

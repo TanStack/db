@@ -81,6 +81,12 @@ export class OrderedSourceLoader {
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
   private stagedContinuation: OrderedContinuation | undefined
+  private blockedLoadMore:
+    | {
+        windowOperationGeneration?: number
+        continuesOrderedPrefixRepair: boolean
+      }
+    | undefined
   private drainingNoInputContinuations = false
 
   constructor(
@@ -143,8 +149,23 @@ export class OrderedSourceLoader {
     continuesOrderedPrefixRepair = false,
   ): Promise<void> | undefined {
     if (!this.active || this.info.limit === 0 || this.requesting) return
-    if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork())
+    windowOperationGeneration ??=
+      this.blockedLoadMore?.windowOperationGeneration
+    continuesOrderedPrefixRepair ||=
+      this.blockedLoadMore?.continuesOrderedPrefixRepair ?? false
+    if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+      if (
+        windowOperationGeneration !== undefined ||
+        continuesOrderedPrefixRepair
+      ) {
+        this.blockedLoadMore = {
+          windowOperationGeneration,
+          continuesOrderedPrefixRepair,
+        }
+      }
       return this.pending
+    }
+    this.blockedLoadMore = undefined
     if (this.stagedContinuation) {
       // A synchronous finite request can deliver an order-changing mutation.
       // Its continuation is staged after that mutation invalidates ordering,
@@ -336,8 +357,10 @@ export class OrderedSourceLoader {
     if (this.authoritativeRequestState === `complete`)
       this.authoritativeRequestState = `held`
     this.pending = undefined
+    this.blockedLoadMore = undefined
     this.lastBoundary = undefined
     this.settledSourceBoundary = undefined
+    this.stagedContinuation = undefined
     this.invalidateCursor()
   }
 
@@ -399,7 +422,9 @@ export class OrderedSourceLoader {
   }
 
   invalidateCursor(): void {
-    this.stagedContinuation = undefined
+    if (!this.stagedContinuation?.isAuthoritativeRepair) {
+      this.stagedContinuation = undefined
+    }
     this.lastPage = undefined
     this.lastPrefixCount = undefined
   }
@@ -801,6 +826,10 @@ export class OrderedSourceLoader {
         continuation.continuesOrderedPrefixRepair,
       )
     } else {
+      if (this.info.joinedFilterSourceId && this.hasPendingJoinedWork()) {
+        this.stagedContinuation = continuation
+        return
+      }
       this.loadMore(
         windowOperationGeneration,
         continuation.continuesOrderedPrefixRepair,
@@ -985,6 +1014,8 @@ export class OrderedSourceLoader {
   /** A failed request blocks ordinary refinement until a new operation. */
   private recordRequestFailure(windowOperationGeneration?: number): void {
     this.failedRequest = { windowOperationGeneration }
+    this.stagedContinuation = undefined
+    this.blockedLoadMore = undefined
     this.invalidateCursor()
     this.lastBoundary = undefined
   }

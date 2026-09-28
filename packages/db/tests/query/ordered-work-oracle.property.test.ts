@@ -36,6 +36,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * publishing an anti-join result.
  * Demand for a separate include cannot hold the ordered root continuation.
  * An empty joined replay still wakes held Effect deltas.
+ * A window move started during existing joined demand waits for its later root
+ * refill and publication. Joined demand cannot discard a repair continuation.
  *
  * The value model is a plain sorted array. The work model records normalized
  * page and boundary requests, examined source rows, publications, and errors.
@@ -2678,6 +2680,427 @@ describe(`ordered source work oracle`, () => {
       `none`,
     )
     expect(observed.rows.map(({ id }) => id)).toEqual([2])
+  })
+
+  it(`processes a synchronous root refill before joined publication`, async () => {
+    type Root = { id: number; rank: number }
+    type Child = { id: number; rootId: number }
+    const truth: Array<Root> = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+    ]
+    const installed = new Set<number>()
+    const rootRequests: Array<LoadSubsetOptions> = []
+    const firstChildGate = createDeferred<void>()
+    let childLoads = 0
+    const rootCollection = createCollection<Root, number>({
+      id: `ordered-synchronous-refill-root`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              rootRequests.push(options)
+              let selected = truth
+                .filter(
+                  (row) =>
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, row) === true,
+                )
+                .filter(
+                  (row) =>
+                    !options.cursor ||
+                    evaluateReferenceExpression(
+                      options.cursor.whereFrom,
+                      row,
+                    ) === true,
+                )
+                .sort((left, right) => left.rank - right.rank)
+              if (!options.cursor && options.offset) {
+                selected = selected.slice(options.offset)
+              }
+              if (options.limit !== undefined) {
+                selected = selected.slice(0, options.limit)
+              }
+              const fresh = selected.filter(({ id }) => !installed.has(id))
+              if (fresh.length > 0) {
+                operations.begin()
+                for (const row of fresh) {
+                  installed.add(row.id)
+                  operations.write({ type: `insert`, value: row })
+                }
+                const receipt = operations.commit(options.signal)
+                if (receipt !== true) {
+                  throw new Error(`Expected synchronous root application`)
+                }
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const childCollection = createCollection<Child, number>({
+      id: `ordered-synchronous-refill-child`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.begin()
+          operations.write({
+            type: `insert`,
+            value: { id: 20, rootId: 2 },
+          })
+          if (operations.commit() !== true) {
+            throw new Error(`Expected synchronous child application`)
+          }
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              childLoads++
+              return childLoads === 1 ? firstChildGate.promise : true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `ordered-synchronous-refill-live`,
+      startSync: false,
+      query: (q) =>
+        q
+          .from({ root: rootCollection })
+          .leftJoin({ child: childCollection }, ({ root, child }) =>
+            eq(root.id, child.rootId),
+          )
+          .where(({ child }) => not(isUndefined(child.rootId)))
+          .orderBy(({ root }) => root.rank)
+          .limit(1)
+          .select(({ root }) => ({ id: root.id })),
+    })
+
+    try {
+      const preload = live.preload()
+      await vi.waitFor(() => {
+        expect(childLoads).toBe(1)
+        expect(rootRequests).toHaveLength(1)
+      })
+      expect(live.toArray).toEqual([])
+
+      firstChildGate.resolve()
+      await preload
+      expect(childLoads).toBe(2)
+      expect(live.toArray.map(({ id }) => id)).toEqual([2])
+      expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(true)
+    } finally {
+      firstChildGate.resolve()
+      await Promise.all([
+        live.cleanup(),
+        rootCollection.cleanup(),
+        childCollection.cleanup(),
+      ])
+    }
+  })
+
+  it.each([`resolve`, `reject`, `retire`] as const)(
+    `keeps a widened window aligned with existing joined demand (%s)`,
+    async (outcome) => {
+      type Root = { id: number; rank: number }
+      type Child = { id: number; rootId: number }
+      const childGate = createDeferred<void>()
+      const rootContinuationGate = createDeferred<void>()
+      const rootRequests: Array<LoadSubsetOptions> = []
+      let childLoads = 0
+      let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+      const rootCollection = createCollection<Root, number>({
+        id: `ordered-held-window-root`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            rootSync = operations
+            const { begin, write, commit, markReady } = operations
+            markReady()
+            let delivered = false
+            return {
+              loadSubset: async (options) => {
+                rootRequests.push(options)
+                if (options.cursor) await rootContinuationGate.promise
+                if (!delivered && options.orderBy) {
+                  delivered = true
+                  begin()
+                  write({ type: `insert`, value: { id: 1, rank: 1 } })
+                  const receipt = commit(options.signal)
+                  if (receipt !== true) await receipt
+                }
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const childCollection = createCollection<Child, number>({
+        id: `ordered-held-window-child`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                childLoads++
+                return childGate.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection({
+        id: `ordered-held-window-live`,
+        startSync: false,
+        query: (q) =>
+          q
+            .from({ root: rootCollection })
+            .leftJoin({ child: childCollection }, ({ root, child }) =>
+              eq(root.id, child.rootId),
+            )
+            .where(({ child }) => isUndefined(child.rootId))
+            .orderBy(({ root }) => root.rank)
+            .limit(1)
+            .select(({ root }) => ({ id: root.id })),
+      })
+
+      try {
+        const preload = live.preload()
+        void preload.catch(() => {})
+        await vi.waitFor(() => {
+          expect(childLoads).toBe(1)
+          expect(rootRequests).toHaveLength(2)
+        })
+
+        let moveSettled = false
+        const move = Promise.resolve(
+          live.utils.setWindow({ offset: 0, limit: 2 }),
+        ).then(() => {
+          moveSettled = true
+        })
+        await flushPromises()
+        expect(moveSettled).toBe(false)
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+        expect(live.toArray.map(({ id }) => id)).toEqual([])
+
+        if (outcome === `reject`) {
+          childGate.reject(new Error(`joined demand failed`))
+          await expect(move).rejects.toThrow(`joined demand failed`)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+          await Promise.allSettled([preload])
+          return
+        }
+
+        if (outcome === `retire`) {
+          rootSync.begin()
+          rootSync.write({
+            type: `delete`,
+            value: { id: 1, rank: 1 },
+          })
+          const receipt = rootSync.commit()
+          if (receipt !== true) await receipt
+          rootContinuationGate.resolve()
+          await vi.waitFor(() => expect(moveSettled).toBe(true))
+          expect(rootRequests.length).toBeGreaterThan(2)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+          expect(live.toArray).toEqual([])
+          childGate.reject(new Error(`obsolete joined demand failed`))
+          await flushPromises()
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+          return
+        }
+
+        childGate.resolve()
+        await vi.waitFor(() =>
+          expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
+            true,
+          ),
+        )
+        await flushPromises()
+        expect(moveSettled).toBe(false)
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+        rootContinuationGate.resolve()
+        await Promise.all([move, preload])
+        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+        expect(live.toArray.map(({ id }) => id)).toEqual([1])
+        expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
+          true,
+        )
+      } finally {
+        childGate.resolve()
+        rootContinuationGate.resolve()
+        await Promise.all([
+          live.cleanup(),
+          rootCollection.cleanup(),
+          childCollection.cleanup(),
+        ])
+      }
+    },
+  )
+
+  it(`resumes bounded ordered repair after joined demand settles`, async () => {
+    type Root = { id: number; rank: number }
+    type Child = { id: number; rootId: number }
+    const truth: Array<Root> = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 3, rank: 3 },
+    ]
+    const installed = new Set<number>()
+    const rootRequests: Array<LoadSubsetOptions> = []
+    const secondChildGate = createDeferred<void>()
+    let childLoads = 0
+    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+    const rootCollection = createCollection<Root, number>({
+      id: `ordered-held-repair-root`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.markReady()
+          return {
+            loadSubset: async (options) => {
+              rootRequests.push(options)
+              let selected = truth
+                .filter(
+                  (row) =>
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, row) === true,
+                )
+                .filter(
+                  (row) =>
+                    !options.cursor ||
+                    evaluateReferenceExpression(
+                      options.cursor.whereFrom,
+                      row,
+                    ) === true,
+                )
+                .sort((left, right) => left.rank - right.rank)
+              if (!options.cursor && options.offset) {
+                selected = selected.slice(options.offset)
+              }
+              if (options.limit !== undefined) {
+                selected = selected.slice(0, options.limit)
+              }
+              const fresh = selected.filter(({ id }) => !installed.has(id))
+              if (fresh.length > 0) {
+                operations.begin()
+                for (const row of fresh) {
+                  installed.add(row.id)
+                  operations.write({ type: `insert`, value: row })
+                }
+                const receipt = operations.commit(options.signal)
+                if (receipt !== true) await receipt
+              }
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const childCollection = createCollection<Child, number>({
+      id: `ordered-held-repair-child`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              childLoads++
+              return childLoads === 2 ? secondChildGate.promise : true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `ordered-held-repair-live`,
+      startSync: false,
+      query: (q) =>
+        q
+          .from({ root: rootCollection })
+          .leftJoin({ child: childCollection }, ({ root, child }) =>
+            eq(root.id, child.rootId),
+          )
+          .where(({ child }) => isUndefined(child.rootId))
+          .orderBy(({ root }) => root.rank)
+          .limit(1)
+          .select(({ root }) => ({ id: root.id })),
+    })
+
+    const deleteRoot = async (id: number) => {
+      const row = truth.find((candidate) => candidate.id === id)!
+      truth.splice(truth.indexOf(row), 1)
+      installed.delete(id)
+      rootSync.begin()
+      rootSync.write({ type: `delete`, value: row })
+      const receipt = rootSync.commit()
+      if (receipt !== true) await receipt
+    }
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      await deleteRoot(1)
+      await vi.waitFor(() => {
+        expect(childLoads).toBe(2)
+        expect(rootRequests.filter(({ refetch }) => refetch)).toHaveLength(2)
+      })
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      secondChildGate.resolve()
+      await vi.waitFor(() =>
+        expect(live.toArray.map(({ id }) => id)).toEqual([2]),
+      )
+
+      await deleteRoot(2)
+      await vi.waitFor(() =>
+        expect(live.toArray.map(({ id }) => id)).toEqual([3]),
+      )
+      expect(
+        rootRequests.filter(({ refetch }) => refetch).length,
+      ).toBeGreaterThan(2)
+    } finally {
+      secondChildGate.resolve()
+      await Promise.all([
+        live.cleanup(),
+        rootCollection.cleanup(),
+        childCollection.cleanup(),
+      ])
+    }
   })
 
   it(`bounds ordered root acquisition for a none left-join filter`, async () => {

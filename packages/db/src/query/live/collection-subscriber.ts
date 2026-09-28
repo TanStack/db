@@ -52,18 +52,18 @@ export class CollectionSubscriber<
   ) {}
 
   subscribe(): CollectionSubscription {
-    const whereClause = this.getWhereClause()
-
-    if (whereClause) {
-      const whereExpression = normalizeExpressionPaths(whereClause, this.alias)
-      return this.subscribeToChanges(whereExpression)
-    }
-
-    return this.subscribeToChanges()
+    const whereClause =
+      this.collectionConfigBuilder.sourceWhereClausesCache?.get(this.sourceId)
+    return this.subscribeToChanges(
+      whereClause
+        ? normalizeExpressionPaths(whereClause, this.alias)
+        : undefined,
+    )
   }
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
-    const orderByInfo = this.getOrderByInfo()
+    const orderByInfo =
+      this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId]
 
     // Direct load promise tracking: pipes loadSubset results straight to the
     // live query collection, avoiding the multi-hop deferred promise chain that
@@ -201,9 +201,11 @@ export class CollectionSubscriber<
       return
     }
 
-    const generation = this.collectionConfigBuilder.beginDemand(plan.id)
+    const generation = this.collectionConfigBuilder.beginDemand(
+      plan.id,
+      update.ready instanceof Promise,
+    )
     if (update.ready instanceof Promise) {
-      this.collectionConfigBuilder.trackSubsetLoadOperationPromise(update.ready)
       void update.ready.then(
         () => this.collectionConfigBuilder.settleDemand(plan.id, generation),
         (error) =>
@@ -395,7 +397,8 @@ export class CollectionSubscriber<
       return
     }
 
-    const orderByInfo = this.getOrderByInfo()
+    const orderByInfo =
+      this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId]
 
     if (!orderByInfo) {
       // This query has no orderBy operator
@@ -413,24 +416,6 @@ export class CollectionSubscriber<
     } catch (error) {
       if (!Object.is(subscription.lastError, error)) throw error
     }
-  }
-
-  private getWhereClause(): BasicExpression<boolean> | undefined {
-    const sourceWhereClausesCache =
-      this.collectionConfigBuilder.sourceWhereClausesCache
-    if (!sourceWhereClausesCache) {
-      return undefined
-    }
-    return sourceWhereClausesCache.get(this.sourceId)
-  }
-
-  private getOrderByInfo(): OrderByOptimizationInfo | undefined {
-    const info =
-      this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId]
-    if (info?.sourceId === this.sourceId) {
-      return info
-    }
-    return undefined
   }
 
   private ensureLoadingPromise(subscription: CollectionSubscription) {
