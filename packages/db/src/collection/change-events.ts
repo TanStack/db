@@ -335,7 +335,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
   // Sort using makeComparator
   const compare = (a: { key: TKey; value: T }, b: { key: TKey; value: T }) => {
     for (const clause of orderBy) {
-      const compareFn = makeComparator(clause.compareOptions)
+      const compareFn = makeComparator(buildCompareOptions(clause, collection))
 
       // Extract values for comparison
       const aValue = extractValueFromItem(a.value, clause.expression)
