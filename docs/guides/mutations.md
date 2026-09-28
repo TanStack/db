@@ -1229,7 +1229,7 @@ function FileUploader() {
 - Processes sequentially in order (FIFO by default)
 - Can configure to LIFO by setting `getItemsFrom: 'back'`
 - Every admitted mutation is attempted (unlike debounce/throttle which may merge intermediate mutations)
-- `maxSize` limits waiting items; overflow fails the returned transaction and rolls back its optimistic state
+- `maxSize` limits waiting items; overflow fails the returned transaction and rolls back its optimistic state. Admission happens before processing, so `maxSize: 0` rejects even the first mutation.
 - Waits for each transaction to complete before starting the next
 
 **Error handling**:

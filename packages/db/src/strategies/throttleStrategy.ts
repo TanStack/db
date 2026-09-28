@@ -50,7 +50,7 @@ export function throttleStrategy(
 ): ThrottleStrategy {
   // Pacer-lite measures the first non-leading wait from epoch zero. Own this
   // trailing-only window so its first execution waits from the first call.
-  const trailingOnly = options.leading === false && options.trailing === true
+  const trailingOnly = options.leading !== true && options.trailing === true
   let trailingTimeout: ReturnType<typeof setTimeout> | undefined
   const throttler = trailingOnly
     ? undefined

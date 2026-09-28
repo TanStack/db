@@ -50,7 +50,7 @@ export interface DebounceStrategy extends BaseStrategy<`debounce`> {
 export interface QueueStrategyOptions {
   /** Wait time between processing queue items (milliseconds) */
   wait?: number
-  /** Maximum number of waiting items; overflow rejects its transaction */
+  /** Maximum waiting items. Overflow rejects its transaction; 0 rejects every mutation. */
   maxSize?: number
   /** Where to add new items in the queue */
   addItemsTo?: `front` | `back`

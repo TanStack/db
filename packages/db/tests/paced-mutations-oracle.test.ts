@@ -25,10 +25,11 @@ import type { Transaction } from '../src/transactions'
  * recorded times, and returned transaction states must agree with the model.
  * It settles every admitted call. Queue capacity counts waiting items; an
  * overflow rejects its transaction and removes its optimistic row. An explicit
- * non-leading throttle waits for its first trailing edge. Strategy factories
+ * non-leading throttle waits for its first trailing edge, including when
+ * `leading` is omitted and `trailing` is true. Strategy factories
  * leave caller-owned options unchanged. A custom queue strategy may admit work
  * and return void, as the original public execute contract allowed. Omitted
- * edge defaults and failed persistence remain outside this owner's grammar.
+ * edge combinations and failed persistence remain outside this owner's grammar.
  *
  * Model `pendingIds` combines the production active optimistic transaction's
  * mutations. Model `ready` is an ordered list of queue calls, not pacer-lite's
@@ -434,12 +435,26 @@ const cases: Array<Case> = [
       throttleStrategy({ wait: 10, leading: true, trailing: true }),
   },
   {
+    name: `default throttle persists leading and trailing transactions`,
+    actions: throttleActions,
+    expected: throttleStarts(throttleActions, 10),
+    sameTransaction: [[1], [2, 3], [4]],
+    strategy: () => throttleStrategy({ wait: 10 }),
+  },
+  {
     name: `explicit non-leading throttle waits for each trailing edge`,
     actions: nonLeadingThrottleActions,
     expected: nonLeadingThrottleStarts(nonLeadingThrottleActions, 10),
     sameTransaction: [[1, 2], [3]],
     strategy: () =>
       throttleStrategy({ wait: 10, leading: false, trailing: true }),
+  },
+  {
+    name: `omitted leading throttle waits for each trailing edge`,
+    actions: nonLeadingThrottleActions,
+    expected: nonLeadingThrottleStarts(nonLeadingThrottleActions, 10),
+    sameTransaction: [[1, 2], [3]],
+    strategy: () => throttleStrategy({ wait: 10, trailing: true }),
   },
 ]
 

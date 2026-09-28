@@ -147,7 +147,7 @@ export function createPacedMutations<
     // Save reference before calling strategy.execute
     const txToReturn = activeTransaction
 
-    // For queue strategy, pass a function that commits the captured transaction
+    // For queue strategy, pass a function that commits txToReturn
     // This prevents the error when commitCallback tries to access the cleared activeTransaction
     if (strategy._type === `queue`) {
       activeTransaction = null // Clear so next mutation creates a new transaction
