@@ -73,3 +73,25 @@ From `packages/db-ivm`, the package Vitest binary ran all 39 test files:
 `git diff --check` passed. The package uses the normal full test campaign;
 the four new hash campaigns run as part of that command. The test environment
 used Node `v24.19.0`, Vitest `3.2.4`, and fast-check `3.23.2` on Darwin arm64.
+
+## Replay-harness follow-up
+
+Reviewed executable revision: `8653d2a9`. This follow-up changes only the hash
+oracle's replay configuration and avoids building Map entries during Set runs.
+The contract, generator, native hash driver, and comparison above stay the same.
+
+Before the follow-up, `TANSTACK_DB_IVM_HASH_TYPE_SEED=garbage` ran a selected
+carrier test successfully. `Number('garbage')` produced `NaN`, which fast-check
+coerced to seed `0`. A large integer such as `4294967297` also changed seed
+through fast-check's 32-bit conversion. A path without a seed failed during
+module collection, so Vitest ran no tests from the file. After the follow-up,
+these invalid settings fail only the Set and Map replay tests with a direct
+configuration error. A replay seed must be a 32-bit integer. The other 40 hash
+tests still run and pass. A valid seed and path pass both replay tests, and the
+ordinary file run passes all 44 tests. This strengthens the direct-replay
+interface required by ORC-007 without changing the oracle law.
+
+The full db-ivm run at `8653d2a9` passed all 564 tests in 39 files with no type
+errors. The package TypeScript check and `git diff --check` passed. The earlier
+wrong-result controls remain the ORC-006 calibration for the unchanged hash
+comparison and empty-window assertion.
