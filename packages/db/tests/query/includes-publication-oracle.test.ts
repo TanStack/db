@@ -914,7 +914,7 @@ describe(`held include publication`, () => {
                         type: change.type,
                         key: change.key,
                         value: change.value.value,
-                        previousValue: change.previousValue.value,
+                        previousValue: change.previousValue?.value,
                       }
                     : { type: change.type, key: change.key },
                 ),
