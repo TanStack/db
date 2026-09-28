@@ -127,3 +127,11 @@ demand keys at synchronous checkpoints. It kills the original iterator,
 length, Buffer-copy, and foreign-prototype candidates. Mutable byte histories,
 external conversion state, and explicit-key hook behavior remain outside that
 claim. The coverage map assigns those remaining witnesses and decision.
+
+The executable follow-up commit is
+`123af67bcde8bb8bbb557332e7b9151cec961718`. Its tree passed 84 focused
+identity and live-query-option tests, the `@tanstack/db` TypeScript check,
+changed-file ESLint, Prettier, and `git diff --check`. This record-only addition
+does not change that executable tree. The earlier ORC-012 receipt for
+`d03b6879` applies only to that older head; the witnesses and checkpoints above
+are the follow-up evidence for the current executable commit.
