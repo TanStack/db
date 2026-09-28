@@ -1860,17 +1860,10 @@ function processFrom(
   }
 }
 
-// Helper to check if a value is a Value expression
-function isValue(raw: any): boolean {
-  return (
-    raw instanceof ValClass ||
-    (raw && typeof raw === `object` && `type` in raw && raw.type === `val`)
-  )
-}
-
-// Helper to unwrap a Value expression or return the value itself
+// Only compiler-created Value instances are wrappers; user rows may have
+// ordinary `type` and `value` fields with the same shape.
 function unwrapValue(value: any): any {
-  return isValue(value) ? value.value : value
+  return value instanceof ValClass ? value.value : value
 }
 
 function attachVirtualPropsToSelected(

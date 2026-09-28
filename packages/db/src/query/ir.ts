@@ -239,47 +239,16 @@ export class ConditionalSelect extends BaseExpression {
   }
 }
 
-/**
- * Runtime helper to detect IR expression-like objects.
- * Prefer this over ad-hoc local implementations to keep behavior consistent.
- */
-export function isExpressionLike(value: any): boolean {
-  if (
+/** Distinguish compiler expressions from user objects with IR-like fields. */
+export function isExpressionLike(value: unknown): boolean {
+  return (
     value instanceof Aggregate ||
     value instanceof ConditionalSelect ||
     value instanceof Func ||
     value instanceof PropRef ||
     value instanceof Value ||
     value instanceof IncludesSubquery
-  ) {
-    return true
-  }
-
-  if (!value || typeof value !== `object`) {
-    return false
-  }
-
-  if (value.type === `conditionalSelect`) {
-    return Array.isArray(value.branches)
-  }
-
-  if (value.type === `agg` || value.type === `func`) {
-    return typeof value.name === `string` && Array.isArray(value.args)
-  }
-
-  if (value.type === `ref`) {
-    return Array.isArray(value.path)
-  }
-
-  if (value.type === `val`) {
-    return `value` in value
-  }
-
-  if (value.type === `includesSubquery`) {
-    return `query` in value && `fieldName` in value
-  }
-
-  return false
+  )
 }
 
 /** Returns each lexical Collection source in a query tree once. */

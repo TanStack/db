@@ -1,4 +1,4 @@
-import { PropRef, Value } from '../ir.js'
+import { Aggregate, Func, PropRef, Value } from '../ir.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
@@ -385,17 +385,14 @@ export function toExpression(value: any): BasicExpression<any> {
         `Use ${name} directly as a select field value instead.`,
     )
   }
-  // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
+  // Only constructed expressions are IR; user values may have the same fields.
   if (
-    value &&
-    typeof value === `object` &&
-    `type` in value &&
-    (value.type === `func` ||
-      value.type === `ref` ||
-      value.type === `val` ||
-      value.type === `agg`)
+    value instanceof Func ||
+    value instanceof PropRef ||
+    value instanceof Value ||
+    value instanceof Aggregate
   ) {
-    return value
+    return value as BasicExpression
   }
   return new Value(value)
 }

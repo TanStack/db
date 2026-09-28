@@ -6,7 +6,7 @@ import {
   toExpression,
   val,
 } from '../../../src/query/builder/ref-proxy.js'
-import { PropRef, Value } from '../../../src/query/ir.js'
+import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
 
 describe(`ref-proxy`, () => {
   describe(`createSingleRowRefProxy`, () => {
@@ -214,12 +214,20 @@ describe(`ref-proxy`, () => {
       expect(toExpression(valExpr)).toBe(valExpr)
     })
 
-    it(`handles expressions with different types`, () => {
-      const funcExpr = { type: `func` as const, name: `upper`, args: [] }
-      const aggExpr = { type: `agg` as const, name: `count`, args: [] }
+    it(`preserves constructed functions and aggregates`, () => {
+      const funcExpr = new Func(`upper`, [])
+      const aggExpr = new Aggregate(`count`, [])
 
       expect(toExpression(funcExpr)).toBe(funcExpr)
       expect(toExpression(aggExpr)).toBe(aggExpr)
+    })
+
+    it(`wraps user objects with expression-like fields as values`, () => {
+      const literal = { type: `val`, value: 42 }
+      const expression = toExpression(literal)
+
+      expect(expression).toBeInstanceOf(Value)
+      expect((expression as Value).value).toBe(literal)
     })
   })
 

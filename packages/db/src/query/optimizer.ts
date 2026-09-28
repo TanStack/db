@@ -791,25 +791,16 @@ function applyOptimizations(
         ]
       : remainingWhereClauses
 
-  // Create a completely new query object to ensure immutability
+  // Preserve untouched query options while replacing the optimized clauses.
   const optimizedQuery: QueryIR = {
-    // Copy all non-optimized fields as-is
-    select: query.select,
+    ...query,
     groupBy: query.groupBy ? [...query.groupBy] : undefined,
     having: query.having ? [...query.having] : undefined,
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
-    limit: query.limit,
-    offset: query.offset,
-    distinct: query.distinct,
-    fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
-
-    // Use the optimized FROM and JOIN clauses
     from: optimizedFrom,
     join: optimizedJoins,
-
-    // Include combined WHERE clauses
     where: finalWhere.length > 0 ? finalWhere : [],
   }
 
@@ -827,11 +818,8 @@ function applyOptimizations(
  */
 function deepCopyQuery(query: QueryIR): QueryIR {
   return {
-    // Recursively copy the FROM clause
+    ...query,
     from: deepCopyFrom(query.from),
-
-    // Copy all other fields, creating new arrays where necessary
-    select: query.select,
     join: query.join
       ? query.join.map((joinClause) => ({
           type: joinClause.type,
@@ -844,9 +832,6 @@ function deepCopyQuery(query: QueryIR): QueryIR {
     groupBy: query.groupBy ? [...query.groupBy] : undefined,
     having: query.having ? [...query.having] : undefined,
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
-    limit: query.limit,
-    offset: query.offset,
-    fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
   }
