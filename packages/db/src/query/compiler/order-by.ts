@@ -279,12 +279,8 @@ export function processOrderBy(
             ({ type }) => type === `inner` || type === `right`,
           ) ??
             false) ||
-          (rawQuery.where?.some(
-            (where) =>
-              isResidualWhere(where) ||
-              (!canPageJoinedFilter && hasCrossAliasWhere),
-          ) ??
-            false) ||
+          (rawQuery.where?.some(isResidualWhere) ?? false) ||
+          (hasCrossAliasWhere && !canPageJoinedFilter) ||
           (rawQuery.fnWhere?.length ?? 0) > 0 ||
           rawQuery.groupBy !== undefined ||
           rawQuery.having !== undefined ||
