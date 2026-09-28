@@ -122,13 +122,17 @@ comment and the current API/architecture contract before extending its model.
 The Collection lifecycle change-event history owner also checks eager auto-index
 equality buckets and fresh indexed `eq` live queries against its independent
 row Map. Its required same-turn delete/reinsert prefix reaches an already-built
-index for both BasicIndex and BTreeIndex. Equality buckets are checked after
-each settled prefix; fresh indexed queries are checked at the final checkpoint.
-Fixed and random tails check nearby legal histories. A temporary mutant that skipped
-index updates failed the fixed batched case at that checkpoint: one indexed key
-versus two model rows. The direct index refinement owner
-does not prove this Collection mutation path. Callback-time index agreement,
-adapter cancellation, and non-local-only persistence remain outside this lane.
+index for both BasicIndex and BTreeIndex. In the batched lane, public rows and
+equality buckets are checked after each mutation returns, before any transaction
+is awaited; the batched final state and each sequential settled prefix are also
+checked. Fresh indexed queries are checked at the final checkpoint.
+Fixed and random tails check nearby legal histories. One temporary mutant that
+skipped index updates failed the fixed batched final count: one indexed key
+versus two model rows. Another fault that preserved the final keys failed the
+new returned-mutation check. The direct index refinement owner does not prove
+this Collection mutation path. Callback-time index agreement,
+the reported insert-seeded string-key setup, adapter cancellation, and
+non-local-only persistence remain outside this lane.
 The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
 records the grammar controls, exact reviewed commit, and ORC audit.
 
