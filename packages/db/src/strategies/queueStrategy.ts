@@ -10,6 +10,8 @@ import type { Transaction } from '../transactions'
  * the next one starts. Useful when data consistency is critical and
  * every admitted operation must be attempted in order. When a bounded queue is
  * full, the returned transaction fails and its optimistic mutation rolls back.
+ * Cleanup stops new admission. The existing timer drains admitted waiting work
+ * at its configured pace behind earlier writes. Cleanup does not wait for settlement.
  *
  * **Error handling behavior:**
  * - If a mutation fails, it is NOT automatically retried - the transaction transitions to "failed" state
@@ -56,6 +58,7 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
   // primitives and concurrency control. We compensate by manually chaining promises
   // to ensure each transaction completes before the next one starts.
   let processingChain = Promise.resolve()
+  let disposed = false
 
   const queuer = new LiteQueuer<() => Transaction>(
     (fn) => {
@@ -86,10 +89,10 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
-    ) => queuer.addItem(fn as () => Transaction),
+    ) => !disposed && queuer.addItem(fn as () => Transaction),
     cleanup: () => {
-      queuer.stop()
-      queuer.clear()
+      disposed = true
+      if (queuer.isEmpty) queuer.stop()
     },
   }
 }

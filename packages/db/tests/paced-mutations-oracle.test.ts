@@ -30,6 +30,8 @@ import type { Transaction } from '../src/transactions'
  * leave caller-owned options unchanged. A custom queue strategy may admit work
  * and return void, as the original public execute contract allowed. Omitted
  * edge combinations and failed persistence remain outside this owner's grammar.
+ * Cleanup stops new admission and drains admitted queue work at its regular
+ * wait intervals. The final cut waits for every admitted receipt.
  *
  * Model `pendingIds` combines the production active optimistic transaction's
  * mutations. Model `ready` is an ordered list of queue calls, not pacer-lite's
@@ -459,6 +461,115 @@ const cases: Array<Case> = [
 ]
 
 describe(`paced mutation timeline oracle`, () => {
+  it(`keeps queue wait spacing while draining after cleanup`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = queueStrategy({ wait: 10 })
+    const starts: Array<number> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: () => {
+        starts.push(Date.now() - origin)
+        return Promise.resolve()
+      },
+      strategy,
+    })
+    await withCleanup(strategy, collection, async () => {
+      const first = mutate(1)
+      const second = mutate(2)
+      const firstReceipt = observeReceipt(first)
+      const secondReceipt = observeReceipt(second)
+      strategy.cleanup()
+      strategy.cleanup()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(starts, `starts before wait`).toEqual([0])
+      expect(second.state).toBe(`pending`)
+      expect(secondReceipt.outcome).toBe(`pending`)
+      expect(collection.get(2)?.id).toBe(2)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(starts).toEqual([0, 10])
+      expect([first.state, second.state]).toEqual([`completed`, `completed`])
+      expect([firstReceipt.outcome, secondReceipt.outcome]).toEqual([
+        `fulfilled`,
+        `fulfilled`,
+      ])
+    })
+  })
+
+  for (const getItemsFrom of [`front`, `back`] as const) {
+    it(`drains admitted queue work in ${getItemsFrom} order after cleanup`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = queueStrategy({ wait: 10, getItemsFrom })
+      const started: Array<number> = []
+      let releaseFirst: (() => void) | undefined
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          const id = transaction.mutations[0].changes.id
+          if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+          started.push(id)
+          if (id === 1) {
+            return new Promise<void>((resolve) => {
+              releaseFirst = resolve
+            })
+          }
+          return Promise.resolve()
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          const second = mutate(2)
+          const third = mutate(3)
+          const firstReceipt = observeReceipt(first)
+          const secondReceipt = observeReceipt(second)
+          const thirdReceipt = observeReceipt(third)
+          await vi.advanceTimersByTimeAsync(0)
+          expect(started).toEqual([1])
+          strategy.cleanup()
+          strategy.cleanup()
+          await vi.advanceTimersByTimeAsync(20)
+          expect(started).toEqual([1])
+          expect(second.state).toBe(`pending`)
+          expect(collection.get(2)?.id).toBe(2)
+          expect(collection.get(3)?.id).toBe(3)
+
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(started, `admitted work after cleanup`).toEqual(
+            getItemsFrom === `front` ? [1, 2, 3] : [1, 3, 2],
+          )
+          expect([first.state, second.state, third.state]).toEqual([
+            `completed`,
+            `completed`,
+            `completed`,
+          ])
+          expect([
+            firstReceipt.outcome,
+            secondReceipt.outcome,
+            thirdReceipt.outcome,
+          ]).toEqual([`fulfilled`, `fulfilled`, `fulfilled`])
+          await vi.advanceTimersByTimeAsync(10)
+          expect(started, `no write after drain`).toEqual(
+            getItemsFrom === `front` ? [1, 2, 3] : [1, 3, 2],
+          )
+
+          const admittedAfterCleanup = strategy.execute(() => {
+            throw new Error(`Disposed queue ran a new callback`)
+          })
+          expect(admittedAfterCleanup).toBe(false)
+        },
+        async () => {
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
   for (const testCase of cases) {
     it(testCase.name, async () => {
       await runProduction(testCase, (actual) => {

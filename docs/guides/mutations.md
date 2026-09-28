@@ -1187,6 +1187,8 @@ function VolumeSlider() {
 
 The queue strategy creates a separate transaction for each mutation and processes admitted transactions sequentially in queue order. Unlike debounce/throttle, **every admitted mutation is attempted**. When `maxSize` is set, overflow is rejected at admission rather than silently dropped.
 
+Calling `strategy.cleanup()` stops new admission. The existing timer drains admitted waiting mutations at the configured `wait` interval and in queue order. Cleanup returns before those writes settle.
+
 ```tsx
 import { usePacedMutations, queueStrategy } from "@tanstack/react-db"
 
