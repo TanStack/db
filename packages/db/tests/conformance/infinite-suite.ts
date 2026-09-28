@@ -657,13 +657,14 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           for (const settleFailureFirst of [true, false]) {
             const sourceRows = rows(rowCount)
             const source = driver.makeSource(sourceRows)
-            const collection = driver.makePrecreated((q) =>
+            const collection = rawDriver.makePrecreated((q) =>
               q
                 .from({ items: source.collection })
                 .orderBy(({ items }: any) => items.rank, `desc`)
                 .limit(pageSize + 1)
                 .offset(0),
             ).collection
+            lifetime!.defer(() => collection.cleanup())
             await collection.preload()
 
             const controller = driver.makeWindowController(collection, {
@@ -758,7 +759,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
               await Promise.allSettled([preload, fetch])
               controller.dispose()
               windowSpy.mockRestore()
-              await collection.cleanup()
             }
           }
         }
