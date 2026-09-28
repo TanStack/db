@@ -48,3 +48,52 @@ collision freedom. Ref proxies are expressions, not literal values here.
   executable commit.
 - The three temporary mutants failed by assertion. None timed out or failed
   during setup.
+
+## External-review follow-up
+
+Reviewed executable commit: `f83aaedb9cf267f1997152641442bc6f29bce453`.
+The earlier record above applies to `7f8617a4`. The later PR head
+`ff90c360` added only that record. The external review then called the PR
+test-only and clean with zero findings. The production diff remains zero, but
+the zero-finding verdict missed four oracle evidence gaps:
+
+- **ORC-004:** The generated string branch originally compared a string only
+  with itself. A mutant that collapsed all primitive strings to one D2 key
+  passed all 20 equality checks. The first repair added unequal strings but
+  only with different lengths. A first-character-plus-length key mutant then
+  passed all 40 equality checks. The final grammar includes empty/equal strings,
+  different strings, and same-prefix, same-length unequal strings. The fixed
+  `ab`/`ac` pair and generated unequal pairs both reject that mutant.
+- **ORC-005:** Fixed pairs now run a public live-query `groupBy`. After initial
+  publication, the check compares group count and row multiplicity with the
+  declared pair relation. Under the first-character-plus-length mutant, the
+  `ab`/`ac` public result had one group instead of two. The generated key check
+  still observes internal identity, and no end-to-end subscription test proves
+  subset-demand reuse. The coverage map assigns that witness to this owner.
+- **ORC-007:** The original replay evidence omitted its command and test-name
+  filter. The direct command below selected one property execution. With the
+  first-character-plus-length mutant it reported `failed:true`, at the D2-key
+  assertion, for seed `20260928` and path `8:0:0`. After reverting the mutant,
+  the same command reported `failed:false`.
+- **ORC-012:** This entry identifies the exact executable commit reviewed for
+  the follow-up. Any subsequent record-only commit does not change that code.
+
+From `packages/db`, the direct replay command is:
+
+```sh
+TANSTACK_DB_ORACLE_PROPERTY=query-identity.equality-partition \
+TANSTACK_DB_ORACLE_SEED=20260928 \
+TANSTACK_DB_ORACLE_PATH=8:0:0 \
+node --import tsx tests/oracle-replay.ts \
+  tests/query/identity-output-shape-oracle.test.ts \
+  -t 'agrees across the supported value grammar, seed=undefined' \
+  --maxWorkers=1 --coverage.enabled=false
+```
+
+The fixed-seed mutant campaign failed after nine cases and shrank to
+`left: "  "`, `right: " a"`. The guarded replay reached one execution and
+preserved the same failure class. All temporary mutants were reverted.
+The clean oracle passed 56 tests, the guarded replay and manifest suite passed
+27 tests, and ESLint, Prettier, and `git diff --check` passed. The additional
+public path covers the fixed value pairs at initial publication; it does not
+close the mapped subset-demand reuse cell.
