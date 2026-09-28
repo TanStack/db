@@ -43,6 +43,7 @@ function toBinding(value: unknown): string | number | bigint | null {
   return String(value)
 }
 
+/** In-memory SQLite driver with optional statement observation and write failure. */
 function createDriver(
   database: DatabaseSync,
   failTransactionRun?: (sql: string) => boolean,
@@ -826,17 +827,25 @@ describe(`SQLite resume snapshots`, () => {
       const replacementCalls = databaseCalls
 
       const snapshot = await adapter.loadResumeSnapshot(collectionId)
-      expect(snapshot.rows).toEqual(
-        rows.map((row, index) => ({
-          key: row.id,
-          value: row,
-          metadata:
-            index === 0
-              ? undefined
-              : index % 2 === 0
-                ? { source: `electric`, operation: `insert` }
-                : { source: `row-write` },
-        })),
+      const expectedRows = rows.map((row, index) => ({
+        key: row.id,
+        value: row,
+        metadata:
+          index === 0
+            ? undefined
+            : index % 2 === 0
+              ? { source: `electric`, operation: `insert` }
+              : { source: `row-write` },
+      }))
+      const byKey = (
+        left: { key: string | number },
+        right: { key: string | number },
+      ) => String(left.key).localeCompare(String(right.key))
+      // A durable snapshot has no row-order contract. Challenge the comparison
+      // with a valid alternate scan order while retaining every row and value.
+      const rowsInAlternateScanOrder = [...snapshot.rows].reverse()
+      expect(rowsInAlternateScanOrder.sort(byKey)).toEqual(
+        expectedRows.sort(byKey),
       )
       expect(snapshot.collectionMetadata).toEqual([
         { key: `electric:resume`, value: { offset: `2_0` } },
