@@ -1,5 +1,3 @@
-import { runAllCallbacks } from './utils/callbacks.js'
-
 /**
  * Identifier used to scope scheduled work. Maps to a transaction id for live queries.
  */
@@ -27,18 +25,6 @@ interface SchedulerContextState {
   dependencies: Map<unknown, Set<unknown>>
 }
 
-interface PendingAwareJob {
-  hasPendingGraphRun: (contextId: SchedulerContextId) => boolean
-}
-
-function isPendingAwareJob(dep: any): dep is PendingAwareJob {
-  return (
-    typeof dep === `object` &&
-    dep !== null &&
-    typeof dep.hasPendingGraphRun === `function`
-  )
-}
-
 /**
  * Scoped scheduler that coalesces work by context and job.
  *
@@ -50,8 +36,6 @@ function isPendingAwareJob(dep: any): dep is PendingAwareJob {
  */
 export class Scheduler {
   private contexts = new Map<SchedulerContextId, SchedulerContextState>()
-  private clearListeners = new Set<(contextId: SchedulerContextId) => void>()
-
   /**
    * Get or create the state bucket for a context.
    */
@@ -130,14 +114,8 @@ export class Scheduler {
           for (const dep of deps) {
             if (dep === jobId) continue
 
-            const depHasPending =
-              isPendingAwareJob(dep) && dep.hasPendingGraphRun(contextId)
-
-            // Treat dependencies as blocking if the dep has a pending run in this
-            // context or if it's enqueued. If the dep is
-            // neither pending nor enqueued, consider it satisfied to avoid deadlocks
-            // on lazy sources that never schedule work.
-            if (jobs.has(dep) || depHasPending) {
+            // A dependency blocks only while its job is queued in this context.
+            if (jobs.has(dep)) {
               ready = false
               break
             }
@@ -171,15 +149,6 @@ export class Scheduler {
   /** Clear all scheduled jobs for a context. */
   clear(contextId: SchedulerContextId): void {
     this.contexts.delete(contextId)
-    runAllCallbacks(
-      [...this.clearListeners].map((listener) => () => listener(contextId)),
-    )
-  }
-
-  /** Register a listener to be notified when a context is cleared. */
-  onClear(listener: (contextId: SchedulerContextId) => void): () => void {
-    this.clearListeners.add(listener)
-    return () => this.clearListeners.delete(listener)
   }
 }
 

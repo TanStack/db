@@ -1,17 +1,16 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { createDeferred } from '../deferred.js'
-import {
-  getActivePublicationContext,
-  transactionScopedScheduler,
-} from '../scheduler.js'
-import { getActiveTransaction } from '../transactions.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
-import { SubsetDemandController } from './live/subset-demand-controller.js'
+import { scheduleQueryGraphRun } from './live/graph-scheduler.js'
+import {
+  SubsetDemandController,
+  hasPendingJoinedWork as hasPendingJoinedSourceWork,
+} from './live/subset-demand-controller.js'
 import { OrderedSourceLoader } from './live/ordered-source-loader.js'
 import {
   buildQueryFromConfig,
@@ -30,6 +29,7 @@ import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
 import type { Context } from './builder/types.js'
 import type { BasicExpression, QueryIR } from './ir.js'
 import type { OrderByOptimizationInfo } from './compiler/order-by.js'
+import type { GraphDependency } from './live/graph-scheduler.js'
 import type {
   LazyCollectionCallbacks,
   LazyDemandPlan,
@@ -37,7 +37,6 @@ import type {
 import type {
   ChangeMessage,
   KeyedStream,
-  ResultStream,
   StringCollationConfig,
 } from '../types.js'
 
@@ -385,7 +384,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   private graph: D2 | undefined
   private inputs: Record<string, RootStreamBuilder<unknown>> | undefined
-  private pipeline: ResultStream | undefined
   private sourceWhereClauses: Map<string, BasicExpression<boolean>> | undefined
 
   // Mutable objects passed to compileQuery by reference.
@@ -425,8 +423,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Callback-visible result. Held repair deltas are classified against this
   // last coherent membership rather than their net multiplicity alone.
   private readonly publishedRows = new Map<unknown, TRow>()
-  private tracksPublishedRows = false
-  private classifyPendingChangesAgainstPublishedRows = false
 
   // skipInitial state
   private readonly skipInitial: boolean
@@ -434,7 +430,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   // Scheduler integration
   private subscribedToAllCollections = false
-  private readonly builderDependencies = new Set<unknown>()
+  private readonly builderDependencies = new Set<GraphDependency>()
 
   // Reentrance guard
   private isGraphRunning = false
@@ -489,11 +485,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       () => {}, // setWindowFn (no-op — effects don't paginate)
     )
 
-    this.pipeline = compilation.pipeline
     this.sourceWhereClauses = compilation.sourceWhereClauses
 
     // Attach the output operator that accumulates changes
-    this.pipeline.pipe(
+    compilation.pipeline.pipe(
       output((data) => {
         const messages = data.getInner()
         messages.reduce(accumulateEffectChanges<TRow>, this.pendingChanges)
@@ -570,33 +565,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const isLazy = this.lazySources.has(sourceId)
 
       // Check if this alias has orderBy optimization (cursor-based loading)
-      const orderByInfo = this.getOrderByInfoForSource(sourceId)
-      if (orderByInfo) this.tracksPublishedRows = true
+      const orderByInfo = this.optimizableOrderByCollections[sourceId]
 
-      // Build the change callback — for ordered aliases, split updates into
-      // delete+insert and invalidate loading state from changed contributions.
-      const changeCallback = orderByInfo
-        ? (changes: Array<ChangeMessage<any, string | number>>) => {
-            if (pendingBuffers.has(sourceId)) {
-              pendingBuffers.get(sourceId)!.push(changes)
-            } else {
-              this.orderedLoaders
-                .get(sourceId)
-                ?.onSourceChanges(
-                  changes,
-                  this.sentToD2RowsBySource.get(sourceId),
-                )
-              const split = [...splitUpdates(changes)]
-              this.handleSourceChanges(sourceId, split)
-            }
-          }
-        : (changes: Array<ChangeMessage<any, string | number>>) => {
-            if (pendingBuffers.has(sourceId)) {
-              pendingBuffers.get(sourceId)!.push(changes)
-            } else {
-              this.handleSourceChanges(sourceId, changes)
-            }
-          }
+      const changeCallback = (
+        changes: Array<ChangeMessage<any, string | number>>,
+      ) => {
+        const bufferedChanges = pendingBuffers.get(sourceId)
+        if (bufferedChanges) bufferedChanges.push(changes)
+        else this.handleSourceChanges(sourceId, changes)
+      }
 
       // Subscribe to source changes
       const subscription = collection.subscribeChanges(changeCallback, {
@@ -632,6 +609,18 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // dispose, so start() must be able to release every acquired source.
       this.unsubscribeCallbacks.add(unsubscribe)
 
+      if (
+        Object.values(this.optimizableOrderByCollections).some(
+          (info) => info.joinedFilterSourceId === sourceId,
+        )
+      ) {
+        this.unsubscribeCallbacks.add(
+          subscription.on(`status:ready`, () => {
+            if (!this.disposed) this.scheduleGraphRun()
+          }),
+        )
+      }
+
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {
         lazyCallbacks.setDemand = (plan: LazyDemandPlan, keys: Set<unknown>) =>
@@ -660,6 +649,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
               )
             }
           },
+          () => false,
+          undefined,
+          () =>
+            orderByInfo.joinedFilterSourceId !== undefined &&
+            this.hasPendingJoinedWork(orderByInfo.joinedFilterSourceId),
         )
         this.orderedLoaders.set(sourceId, loader)
         loader.start()
@@ -729,24 +723,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // switches that alias to direct-processing mode. Any new callbacks that
     // fire during the drain (e.g. from requestLimitedSnapshot) will go
     // through handleSourceChanges directly instead of being lost.
-    for (const [sourceId] of pendingBuffers) {
-      const buffer = pendingBuffers.get(sourceId)!
+    for (const [sourceId, buffer] of pendingBuffers) {
       pendingBuffers.delete(sourceId)
-      const orderByInfo = this.getOrderByInfoForSource(sourceId)
 
       // Drain all buffered batches. Since we deleted the alias from
       // pendingBuffers above, any new changes arriving during drain go
       // through handleSourceChanges directly (not back into this buffer).
       for (const changes of buffer) {
-        if (orderByInfo) {
-          this.orderedLoaders
-            .get(sourceId)
-            ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
-          const split = [...splitUpdates(changes)]
-          this.sendChangesToD2(sourceId, split)
-        } else {
-          this.sendChangesToD2(sourceId, changes)
-        }
+        this.handleSourceChanges(sourceId, changes, false)
       }
     }
 
@@ -770,9 +754,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private handleSourceChanges(
     sourceId: string,
     changes: Array<ChangeMessage<any, string | number>>,
+    scheduleGraph = true,
   ): void {
+    if (this.optimizableOrderByCollections[sourceId]) {
+      this.orderedLoaders
+        .get(sourceId)
+        ?.onSourceChanges(changes, this.sentToD2RowsBySource.get(sourceId))
+      changes = [...splitUpdates(changes)]
+    }
     this.sendChangesToD2(sourceId, changes)
-    this.scheduleGraphRun()
+    if (scheduleGraph) this.scheduleGraphRun()
   }
 
   private setDemand(
@@ -795,7 +786,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // Each segment reports its own failure through the subscription. Consume
       // the aggregate rejection so Promise.all does not create a second,
       // detached error channel.
-      void update.ready.then(undefined, () => {})
+      void update.ready.then(
+        () => {
+          if (!this.disposed) this.scheduleGraphRun()
+        },
+        () => {},
+      )
     }
   }
 
@@ -810,42 +806,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * live query collections, ensuring parent queries run before effects.
    */
   private scheduleGraphRun(): void {
-    const contextId =
-      getActiveTransaction()?.id ?? getActivePublicationContext()
-
-    // Snapshot before scheduling parents, which can reenter source setup.
-    const deps = [...this.builderDependencies]
-
-    // Ensure dependent builders are scheduled in this context so that
-    // dependency edges always point to a real job.
-    if (contextId) {
-      for (const dep of deps) {
-        if (
-          typeof dep === `object` &&
-          dep !== null &&
-          `scheduleGraphRun` in dep &&
-          typeof (dep as any).scheduleGraphRun === `function`
-        ) {
-          ;(dep as any).scheduleGraphRun(undefined, { contextId })
-        }
-      }
-    }
-
-    transactionScopedScheduler.schedule({
-      contextId,
-      jobId: this,
-      dependencies: deps,
-      run: () => this.executeScheduledGraphRun(),
+    scheduleQueryGraphRun(this, this.builderDependencies, () => {
+      if (!this.disposed && this.subscribedToAllCollections) this.runGraph()
     })
-  }
-
-  /**
-   * Called by the scheduler when dependencies are satisfied.
-   * Checks that the effect is still active before running.
-   */
-  private executeScheduledGraphRun(): void {
-    if (this.disposed || !this.subscribedToAllCollections) return
-    this.runGraph()
   }
 
   /** Hold Effect callback publication across one authoritative repair chain. */
@@ -854,7 +817,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     replacementAfterFailure: () => Promise<void> | undefined,
   ): void {
     if (this.disposed) return
-    this.classifyPendingChangesAgainstPublishedRows = true
     if (this.pendingOrderedPublications.size === 0) {
       this.orderedPublicationFailed = false
     }
@@ -924,6 +886,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.isGraphRunning = true
     try {
+      if (!this.graph.pendingWork()) this.loadMoreIfNeeded()
       // Ordered refill can also dispose the runner between graph steps.
       while (!this.isDisposed() && this.graph.pendingWork()) {
         this.graph.run()
@@ -963,20 +926,23 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       return
     }
 
+    if (this.hasPendingJoinedFilterWork()) {
+      return
+    }
+
     const shouldPublish = !this.skipInitial || this.initialLoadComplete
+    const tracksPublishedRows = this.orderedLoaders.size > 0
 
     const events: Array<DeltaEvent<TRow, TKey>> = []
 
     for (const [key, changes] of this.pendingChanges) {
-      const event = this.classifyPendingChangesAgainstPublishedRows
-        ? classifyHeldDelta<TRow, TKey>(
-            key as TKey,
-            changes,
-            this.publishedRows,
-          )
-        : classifyImmediateDelta<TRow, TKey>(key as TKey, changes)
+      const event = classifyDelta<TRow, TKey>(
+        key as TKey,
+        changes,
+        tracksPublishedRows ? this.publishedRows : undefined,
+      )
       if (event) {
-        if (this.tracksPublishedRows) {
+        if (tracksPublishedRows) {
           if (event.type === `exit`) this.publishedRows.delete(key)
           else this.publishedRows.set(key, event.value)
         }
@@ -985,7 +951,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
 
     this.pendingChanges = new Map()
-    this.classifyPendingChangesAgainstPublishedRows = false
 
     if (events.length > 0) {
       this.onBatchProcessed(events)
@@ -1004,7 +969,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     return (
       !this.orderedPublicationFailed &&
       this.pendingOrderedPublications.size === 0 &&
+      !this.hasPendingJoinedFilterWork() &&
       this.checkAllCollectionsReady()
+    )
+  }
+
+  private hasPendingJoinedFilterWork(): boolean {
+    return Object.values(this.optimizableOrderByCollections).some(
+      (info) =>
+        info.joinedFilterSourceId !== undefined &&
+        this.hasPendingJoinedWork(info.joinedFilterSourceId),
     )
   }
 
@@ -1051,17 +1025,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
-  /** Get orderBy optimization info for one lexical source. */
-  private getOrderByInfoForSource(
-    sourceId: string,
-  ): OrderByOptimizationInfo | undefined {
-    const info = this.optimizableOrderByCollections[sourceId]
-    if (info?.sourceId === sourceId) {
-      return info
-    }
-    return undefined
-  }
-
   /**
    * After each graph run step, check if any ordered query's topK operator
    * needs more data. If so, load more rows via requestLimitedSnapshot.
@@ -1080,6 +1043,15 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           throw error
       }
     }
+  }
+
+  private hasPendingJoinedWork(joinedSourceId: string): boolean {
+    return hasPendingJoinedSourceWork(
+      joinedSourceId,
+      this.lazySourcesCallbacks,
+      this.subscriptions,
+      (planId) => this.demand.hasPendingDemand(planId),
+    )
   }
 
   /** Tear down subscriptions and clear state */
@@ -1105,8 +1077,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.publishedRows.clear()
     this.pendingOrderedPublications.clear()
     this.orderedPublicationFailed = false
-    this.tracksPublishedRows = false
-    this.classifyPendingChangesAgainstPublishedRows = false
     this.lazySources.clear()
     this.demand.clear()
     this.builderDependencies.clear()
@@ -1125,7 +1095,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // another step or new input; clearing our references does not destroy it.
     this.graph = undefined
     this.inputs = undefined
-    this.pipeline = undefined
     this.sourceWhereClauses = undefined
   }
 }
@@ -1181,43 +1150,18 @@ function accumulateEffectChanges<T>(
   return acc
 }
 
-/** Classify accumulated per-key changes into a DeltaEvent */
-function classifyImmediateDelta<
-  TRow extends object,
-  TKey extends string | number,
->(key: TKey, changes: EffectChanges<TRow>): DeltaEvent<TRow, TKey> | undefined {
-  const { inserts, deletes, insertValue, deleteValue } = changes
-
-  if (inserts > 0 && deletes === 0) {
-    return { type: `enter`, key, value: insertValue! }
-  }
-
-  if (deletes > 0 && inserts === 0) {
-    return { type: `exit`, key, value: deleteValue! }
-  }
-
-  if (inserts > 0 && deletes > 0) {
-    return {
-      type: `update`,
-      key,
-      value: insertValue!,
-      previousValue: deleteValue!,
-    }
-  }
-
-  return undefined
-}
-
-function classifyHeldDelta<TRow extends object, TKey extends string | number>(
+/** Interpret a D2 batch against callback-visible state when a window holds it. */
+function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
-  publishedRows: ReadonlyMap<unknown, TRow>,
+  publishedRows?: ReadonlyMap<unknown, TRow>,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
-  const wasPresent = publishedRows.has(key)
-  const previousValue = publishedRows.get(key)
-  const nextMultiplicity = Number(wasPresent) + inserts - deletes
-  const isPresent = nextMultiplicity > 0
+  const wasPresent = publishedRows ? publishedRows.has(key) : deletes > 0
+  const previousValue = publishedRows?.get(key) ?? deleteValue
+  const isPresent = publishedRows
+    ? Number(wasPresent) + inserts - deletes > 0
+    : inserts > 0
 
   if (!wasPresent && isPresent) {
     // Row entered the query result
@@ -1234,7 +1178,7 @@ function classifyHeldDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
-    !deepEquals(previousValue, insertValue)
+    (!publishedRows || !deepEquals(previousValue, insertValue))
   ) {
     // Row updated within the query result
     return {

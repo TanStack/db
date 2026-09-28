@@ -98,6 +98,45 @@ function fakeSubscription(
 }
 
 describe(`Ordered source request ownership`, () => {
+  it(`retains an explicit failed-request retry blocked by joined demand`, async () => {
+    const requests: Array<Observed> = []
+    const releases: Array<LoadSubsetOptions> = []
+    let joinedPending = false
+    const loader = new OrderedSourceLoader(
+      createOrderByInfo({
+        joinedFilterSourceId: `child`,
+        requiresFullSource: true,
+      }),
+      fakeSubscription(requests, releases),
+      `row`,
+      undefined,
+      undefined,
+      undefined,
+      () => joinedPending,
+    )
+
+    try {
+      loader.start()
+      const first = (loader as unknown as { pending: Promise<void> }).pending
+      const failure = new Error(`initial full-source request failed`)
+      requests[0]!.deferred.reject(failure)
+      await expect(first).rejects.toBe(failure)
+
+      joinedPending = true
+      expect(loader.loadMore(1)).toBeUndefined()
+      expect(requests).toHaveLength(1)
+
+      joinedPending = false
+      const retry = loader.loadMore()
+      expect(requests).toHaveLength(2)
+      requests[1]!.deferred.resolve()
+      await retry
+    } finally {
+      for (const request of requests) request.deferred.resolve()
+      loader.dispose()
+    }
+  })
+
   it(`keeps nested refinement pending when successful cleanup reports an error`, async () => {
     const requests: Array<Observed> = []
     const releases: Array<number> = []

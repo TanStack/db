@@ -78,6 +78,16 @@ and results move in opposite conceptual directions.
 
 The graph owns the data plane. A small adapter owns asynchronous demand. The
 normal Collection transaction boundary owns public publication.
+For each active sync run, the Collection builder keeps one set of ordered
+source loaders. It checks them after graph steps and once when a turn starts
+without graph input. The transaction scheduler coalesces graph jobs; a sync
+generation fences jobs left over from an older run. The loaders' request
+latches, rather than per-job loader callbacks, stop repeated acquisitions.
+The turn processes synchronous loader writes through the graph before it
+publishes, including when the turn started without graph input.
+The scheduler waits for a dependency only while that dependency has a queued
+job in the same context. Source demand and ordered loading use their own
+settlement barriers outside the scheduler.
 
 ## Concrete implementation map
 
@@ -86,14 +96,15 @@ model. They are not a second set of runtime objects, nor does every name need a
 matching TypeScript type. The implementation maps this model onto existing D2
 operators and a few boundary adapters:
 
-| Architectural role                        | Concrete implementation                                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Compile relation IDs and demand plans     | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
-| Reduce public keys and build routes       | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
-| Run the graph and publish root rows       | `packages/db/src/query/live/collection-config-builder.ts`                                              |
-| Publish Collection-valued buckets         | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
-| Start and release asynchronous demand     | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
-| Ordered provider loading and continuation | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
+| Architectural role                         | Concrete implementation                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Compile relation IDs and demand plans      | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
+| Reduce public keys and build routes        | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
+| Run the graph and publish root rows        | `packages/db/src/query/live/collection-config-builder.ts`                                              |
+| Schedule Collection and Effect graph turns | `packages/db/src/query/live/graph-scheduler.ts`                                                        |
+| Publish Collection-valued buckets          | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
+| Start and release asynchronous demand      | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
+| Ordered provider loading and continuation  | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
@@ -857,7 +868,18 @@ local plan. Core requires full-source recovery for an indirect order
 expression, a non-root ordered source, an inner or right join, a residual or
 cross-alias predicate, a functional predicate, grouping, `having`, functional
 `having`, or `distinct`. These cases can discard or reorder an otherwise valid
-provider prefix even when a cursor value itself is expressible.
+provider prefix even when a cursor value itself is expressible. A single direct
+LEFT join to a Collection is an exception for a cross-alias filter when every order
+term comes from the root source. Its joined filter can remove root rows, but
+cannot make a later root precede an earlier root. Before loading another root
+page, core waits for the current lazy join demand and any joined subset load to
+settle, then reruns the graph. Joined-side changes also recheck ordered demand
+so a removed match can refill a short window. An empty joined replay still
+releases held Effect callbacks. The adapter receives ordinary
+finite root requests; this contract does not imply that it can evaluate the
+relation filter remotely.
+Finite continuation still requires an order index; an underfilled unindexed
+prefix retains the established full-source fallback.
 
 A custom string comparator is a local ordering contract. If any resolved
 source order term uses `stringSort: 'custom'`, bounded and unbounded queries
@@ -923,6 +945,9 @@ If an explicit window operation consumes a staged boundary continuation and
 that continuation has no boundary row, it starts no acquisition. The operation
 must continue normal demand selection for the enlarged window; consuming the
 empty continuation does not settle that window operation.
+If joined demand blocks an explicit retry, the loader retains its window
+generation and repair intent until it can select the request. A new failure or
+cursor reset discards that blocked intent.
 
 For no-index prefix loading, an unrelated new key does not reacquire an already
 full window. An explicit window move, an underfilled window, or a settled
@@ -969,6 +994,10 @@ have advanced, so core does not try to reconstruct the old window over that
 new state. A later successful retry publishes the coherent replacement. A
 superseding window also waits for older source work that still gates
 publication; it does not report success until its own chosen window is visible.
+A joined demand already pending when the move begins is part of this operation
+if it blocks the ordered continuation. Retiring that demand releases its
+participant; a later failure from the obsolete request cannot fail the move.
+The resumed root page and refill still belong to the operation.
 Window controllers treat `getWindow()` as settled state, not the current lease
 request. An overlapping preload joins its lease's pending window promise rather
 than replacing it with the smaller committed page count. Lease release may also
@@ -1026,7 +1055,9 @@ dispose the still-live Effect. Any unhandled participant failure never exposes
 the private intermediate state: source-error handling disposes the Effect and
 clears the retained delta and participants. With `skipInitial`, an asynchronous
 initial ordered chain also stays behind the gate until all initial participants
-settle, so its rows do not become later `enter` callbacks. Other ordinary
+settle, so its rows do not become later `enter` callbacks. A joined-filter
+window also waits for joined demand before ending initial callback suppression,
+even if that source Collection already reports ready. Other ordinary
 initial/refinement requests keep their existing callback timing.
 
 ### Replay participants and failure
