@@ -148,6 +148,10 @@ pre-publication tick. This bounded history does not prove Windows/Edge behavior,
 offline recovery, arbitrary later re-inserts, or a durable-acknowledgment
 contract for `awaitTxId`.
 
+The [PR #1914 follow-up review record](oracle-reviews/pr-1914-immediate-reload-follow-up.md)
+preserves the held-checkpoint and extra-POST mutant results at the exact
+reviewed executable commit.
+
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
 also covers one-pass queued-sync cancellation, partial-update dependencies on
 queued source rows, and focused late-hydration cases in
