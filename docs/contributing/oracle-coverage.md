@@ -155,6 +155,21 @@ ownership topology. Their
 [review record](oracle-reviews/issue-1589-live-electric-opfs.md) preserves the
 RED and GREEN host observations.
 
+The [live Electric hydration-straddle oracle](../../packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
+owns one #1754 host history: an on-demand Collection has an initial durable row;
+an OPFS subset hydration is held after its local read; a PostgreSQL update
+begins an Electric source transaction during that hold; and the row-bearing
+commit is released only after the hydration scope exits. It checks the old row
+before release and the exact new public and durable row afterward, then after
+follower takeover and reopen. A late-buffer mutant leaves the old row in both
+observations. The [core persistence tests](../../packages/db-sqlite-persistence-core/tests/persisted.test.ts)
+own the adjacent during/straddling/after settlement, FIFO, abort, and failure
+histories. The live oracle does not prove eager-startup overlap, other mutation
+shapes, arbitrary Electric fetch schedules, Firefox/Zen, React rendering, or
+exclusive OPFS ownership. The
+[review record](oracle-reviews/issue-1754-live-electric-hydration-straddle.md)
+preserves the live-host and mutant evidence.
+
 ## Acceptance map
 
 The post-merge review added three missing domains to existing owners:
