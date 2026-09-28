@@ -86,8 +86,7 @@ describe(`Collection subscription callback reentry oracle`, () => {
       if (phase === `statusLoadingSubset`) {
         subscription.on(`status:loadingSubset`, () => {
           reentries++
-          if (action === `release`)
-            subscription.releaseSnapshot(requestedWhere)
+          if (action === `release`) subscription.releaseSnapshot(requestedWhere)
           else subscription.unsubscribe()
         })
       }
