@@ -417,7 +417,7 @@ describe('binary ordering value identity', () => {
               },
             ),
             seed === undefined
-              ? oraclePropertyOptions(60, 'query-identity.typed-array-subclass')
+              ? oraclePropertyOptions(60, `query-identity.typed-array-subclass`)
               : { numRuns: oracleRuns(60), seed },
           )
 
