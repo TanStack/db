@@ -113,3 +113,41 @@ it opened. Cleanup retires that handle's authority over later publications.
 The focused publication and lifecycle suites passed 334 tests with no Vitest
 type errors. Changed-file ESLint, Prettier, and `git diff --check` passed. The
 compiled includes witness remains open with the same coverage-map owner.
+
+## Follow-up review: retired queue ownership and null prior values
+
+- Reviewed executable head: `cda3e71fbf900d1bcdab0bd28be027fca8c605ac`.
+- This record follows that immutable commit. The production change releases
+  queued messages from deferrals retired by cleanup or their final close.
+
+A later CodeRabbit review of `9b069242` identified a retained queue. A stale
+handle remains reachable after cleanup and captures the old deferral record.
+Cleanup removed the manager's reference, but left its queued publications in
+the captured record. `changes.ts` was byte-identical at the later `4e615774`
+head, so the same finding applied there. A focused test queued one publication,
+held the old handle, and checked the retired record after cleanup. Before the
+repair it failed with one retained publication at the queue-cardinality
+assertion. The adjacent final-close case retained the queue as well. The repair
+empties each retired queue while preserving the messages needed for a normal
+`publish()`. Both cases pass, and stale handles still cannot affect a new run.
+
+Queue retention has no public subscriber observation: a subscriber sees the
+same messages whether a retired, reachable handle retains an array or releases
+it. The focused internal invariant test is the appropriate witness for this
+memory-ownership law. The 32 public publication histories remain the oracle
+for delivery and isolation. The direct Collection path still does not prove
+the compiled includes witness named above.
+
+A separate checker control exposed a null-value observation gap. A temporary
+subject mutant injected `previousValue: null` at the final subscriber callback.
+The first payload recorder treated that prior value as absent, and all 32
+histories stayed green. The corrected recorder preserves `null` and omits only
+`undefined`; the mutant then failed 16 of 32 histories at the subscriber
+equality assertion. Unmutated production passed all 32. This control changes
+the oracle's observation fidelity, not the product contract or history grammar.
+
+The focused publication, sync reentrancy, and lifecycle suites passed 361 of
+361 tests with no Vitest type errors. Changed-file ESLint, Prettier, and
+`git diff --check` passed. Against `origin/main`, production `changes.ts` is
+36 lines added and 30 removed, a net increase of six lines. Tests and review
+documentation are accounted for separately.
