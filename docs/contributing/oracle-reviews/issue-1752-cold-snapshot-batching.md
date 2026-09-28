@@ -58,3 +58,26 @@ warnings about missing Expo example tsconfigs in the filtered install.
 This record supplies the ORC-012 audit for the executable commit above. An
 actual Chromium/OPFS run with the reported multi-collection workload is still
 needed before claiming a user-visible latency improvement or closing #1752.
+
+## PR #1916 scan-order review follow-up
+
+- CodeRabbit review `5343977574` targeted `d850cfc27795be1b0cdcf7dfc1da8c5d0409a6b4` and posted one inline finding, `4126510406`.
+- Reviewed follow-up executable commit: `ae7048d8bdbd26c707fc626bf865dd4f073f866e`.
+
+The review correctly found that the 205-row value assertion depended on scan
+order even though `loadResumeSnapshot` issues no `ORDER BY` for this request.
+A temporary reversal of the correct observed rows failed the original
+assertion at its value checkpoint, with all rows and metadata unchanged.
+The follow-up sorts exact observed and expected arrays by key. It retains the
+alternate-scan-order challenge in the executable test; the same reversed
+rows then passed. The complete snapshot test file passed 36 tests with two
+TODOs and clean type checks. This is a test-integrity fix, not a change to
+SQLite row ordering or product behavior.
+
+The task-local loss audit accounts for the one inline finding, an optional
+CodeRabbit CLI suggestion, and two advisory PR-summary warnings. The PR body
+now follows the repository template, a patch changeset records the published
+core change, and the touched test driver's purpose has a JSDoc. The optional
+extra CLI review remains deferred to the normal PR review process. No
+reviewed item remains unclassified; later CodeRabbit reviews at new heads
+require separate evaluation.
