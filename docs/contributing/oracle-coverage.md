@@ -127,6 +127,23 @@ is outside this owner: `failDemand` enters terminal live-query error while its
 plan record remains unsettled until sync teardown. A future recovery contract
 must reconcile plan and subscription pending state before reopening publication.
 
+The Collection lifecycle change-event history owner also checks eager auto-index
+equality buckets and fresh indexed `eq` live queries against its independent
+row Map. Its required same-turn delete/reinsert prefix reaches an already-built
+index for both BasicIndex and BTreeIndex. In the batched lane, public rows and
+equality buckets are checked after each mutation returns, before any transaction
+is awaited; the batched final state and each sequential settled prefix are also
+checked. Fresh indexed queries are checked at the final checkpoint.
+Fixed and random tails check nearby legal histories. One temporary mutant that
+skipped index updates failed the fixed batched final count: one indexed key
+versus two model rows. Another fault that preserved the final keys failed the
+new returned-mutation check. The direct index refinement owner does not prove
+this Collection mutation path. Callback-time index agreement,
+the reported insert-seeded string-key setup, adapter cancellation, and
+non-local-only persistence remain outside this lane.
+The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
+records the grammar controls, exact reviewed commit, and ORC audit.
+
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
 also covers one-pass queued-sync cancellation, partial-update dependencies on
 queued source rows, and focused late-hydration cases in
@@ -147,6 +164,36 @@ transport. A raw-options mutant fails with browser `DataCloneError`. The
 exact reviewed commit. The test does not run React, Firefox/Zen, or a live
 backend, and it does not settle exclusive OPFS ownership during leadership
 transfer.
+
+The [two-tab live Electric OPFS oracle](../../packages/browser-db-sqlite-persistence/e2e/electric-resume-two-tab.opfs.spec.ts)
+crosses real Chromium tabs, Web Locks, OPFS workers, PostgreSQL, and the
+installed Electric SDK. It checks distinct per-Collection schema versions,
+unchanged public and durable rows when a follower opens, leadership transfer
+with later source rows, and recovery of partial-row loss or a fully empty
+pre-key-ledger baseline with a stale resume marker. A wrapped source-commit
+test in `packages/browser-db-sqlite-persistence/tests/browser-coordinator.test.ts`
+checks scheduler entry before the writer-lock request; the old bypass fails at
+that order assertion. The live recovery histories also guard the resulting
+progress. These bounded histories do not prove Firefox/Zen,
+React rendering, React Native, arbitrary large datasets, or an exclusive-OPFS
+ownership topology. Their
+[review record](oracle-reviews/issue-1589-live-electric-opfs.md) preserves the
+RED and GREEN host observations.
+
+The [live Electric hydration-straddle oracle](../../packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
+owns one #1754 host history: an on-demand Collection has an initial durable row;
+an OPFS subset hydration is held after its local read; a PostgreSQL update
+begins an Electric source transaction during that hold; and the row-bearing
+commit is released only after the hydration scope exits. It checks the old row
+before release and the exact new public and durable row afterward, then after
+follower takeover and reopen. A late-buffer mutant leaves the old row in both
+observations. The [core persistence tests](../../packages/db-sqlite-persistence-core/tests/persisted.test.ts)
+own the adjacent during/straddling/after settlement, FIFO, abort, and failure
+histories. The live oracle does not prove eager-startup overlap, other mutation
+shapes, arbitrary Electric fetch schedules, Firefox/Zen, React rendering, or
+exclusive OPFS ownership. The
+[review record](oracle-reviews/issue-1754-live-electric-hydration-straddle.md)
+preserves the live-host and mutant evidence.
 
 ## Acceptance map
 

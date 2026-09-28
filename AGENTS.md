@@ -61,6 +61,7 @@ pull request. Do not update only the assertions to match new production output.
 9. [Modern JavaScript Patterns](#modern-javascript-patterns)
 10. [Edge Cases and Corner Cases](#edge-cases-and-corner-cases)
 11. [Git and PR Hygiene](#git-and-pr-hygiene)
+12. [Code Weight and Fail-Fast Design](#code-weight-and-fail-fast-design)
 
 ## Type Safety
 
@@ -777,6 +778,53 @@ return allDone
 ### Remove Outdated Comments
 
 **Key Principle:** When refactoring code, update or remove comments that reference old function names or outdated logic.
+
+## Code Weight and Fail-Fast Design
+
+Treat each line of production code as a continuing cost. Bug fixes should start
+with a net-neutral production-code budget. Prefer a negative production diff
+when the change makes the existing design simpler.
+
+Tests and contract documentation can grow to prove the behavior. Report their
+weight separately from production code. Do not compress code or weaken names
+to reduce a line count. Reduce states, branches, helpers, and recovery paths.
+
+Use the test-first and bug-class guidance above to reproduce the failure and
+identify the violated contract. Strengthen or simplify existing control flow
+before adding state or recovery machinery.
+
+### Separate Valid Edge Cases from Contract Contradictions
+
+A rare but valid operation is not an invariant violation. The implementation
+must support it.
+
+An impossible internal state or a contradictory collaborator signal is an
+invariant violation. Throw or reject immediately at the boundary. Check the
+invariant before the code releases established state or publishes success.
+
+Do not convert an invariant violation into false readiness, partial success,
+or a silent fallback. In library code, "crash" means a synchronous throw or a
+rejected promise. It does not require process termination.
+
+### Recovery Must Earn Its Code Weight
+
+Add retries, generations, queues, fallback states, or rollback paths only when
+all these conditions are true:
+
+- The condition can occur during valid operation.
+- The public contract defines recovery behavior.
+- Recovery protects user-visible behavior.
+- A test or oracle proves the recovery law.
+
+If a condition requires a programming error or contract breach, detect it and
+fail loudly. Do not build a second lifecycle to recover from it.
+
+Prefer a small change to the current abstraction over a replacement state
+machine. A new state machine requires an explicit architectural reason and an
+oracle law that the existing design cannot express.
+
+For reviewer-proposed defensive machinery based only on contradictory mocks,
+add an invariant witness that fails before mutation instead.
 
 ## General Principles
 
