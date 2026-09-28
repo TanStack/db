@@ -46,6 +46,35 @@ interface Row {
   a: { b: number }
 }
 
+type Release = () => void | Promise<void>
+
+async function checkWithCleanup(
+  check: (register: (release: Release) => void) => void | Promise<void>,
+) {
+  const releases: Array<Release> = []
+  let primaryFailure: { error: unknown } | undefined
+  try {
+    await check((release) => releases.unshift(release))
+  } catch (error) {
+    primaryFailure = { error }
+  }
+
+  const cleanupErrors: Array<unknown> = []
+  for (const release of releases) {
+    try {
+      await release()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  if (cleanupErrors.length) {
+    throw new AggregateError(cleanupErrors, `Path oracle cleanup failed`, {
+      cause: primaryFailure?.error,
+    })
+  }
+  if (primaryFailure) throw primaryFailure.error
+}
+
 const flat = new PropRef([`a.b`])
 const nested = new PropRef([`a`, `b`])
 const rows: Array<Row> = [0, 10, 25].flatMap((flatValue) =>
@@ -56,7 +85,10 @@ const rows: Array<Row> = [0, 10, 25].flatMap((flatValue) =>
   })),
 )
 
-async function readyCollection(name: string) {
+async function readyCollection(
+  name: string,
+  register: (release: Release) => void,
+) {
   const collection = createCollection(
     mockSyncCollectionOptions<Row>({
       id: `index-path-collision-${name}`,
@@ -66,6 +98,7 @@ async function readyCollection(name: string) {
       defaultIndexType: BTreeIndex,
     }),
   )
+  register(() => collection.cleanup())
   await collection.stateWhenReady()
   return collection
 }
@@ -105,86 +138,127 @@ const cases: Array<{
 it.each(cases)(
   `keeps dotted scalar and nested predicates distinct: $name`,
   async ({ name, where, accepts }) => {
-    const collection = await readyCollection(name)
-    const expected = rows
-      .filter(accepts)
-      .map((row) => row.id)
-      .sort()
-    const queryKeys = () =>
-      collection
-        .currentStateAsChanges({ where })!
-        .map((change) => change.key)
+    await checkWithCleanup(async (register) => {
+      const collection = await readyCollection(name, register)
+      const expected = rows
+        .filter(accepts)
+        .map((row) => row.id)
         .sort()
+      const queryKeys = () =>
+        collection
+          .currentStateAsChanges({ where })!
+          .map((change) => change.key)
+          .sort()
 
-    expect(queryKeys(), `scan result`).toEqual(expected)
-    const index = collection.createIndex((row) => row.a.b)
-    const lookup = vi.spyOn(index, `lookup`)
-    expect(queryKeys(), `indexed result`).toEqual(expected)
-    expect(lookup, `indexed path reached`).toHaveBeenCalled()
+      expect(queryKeys(), `scan result`).toEqual(expected)
+      const index = collection.createIndex((row) => row.a.b)
+      const lookup = vi.spyOn(index, `lookup`)
+      expect(queryKeys(), `indexed result`).toEqual(expected)
+      expect(lookup, `indexed path reached`).toHaveBeenCalled()
+    })
   },
 )
 
 it.each([false, true])(
   `preserves distinct fields in a Collection subscription callback (indexed=%s)`,
   async (indexed) => {
-    const collection = await readyCollection(`subscription-${indexed}`)
-    if (indexed) collection.createIndex((row) => row.a.b)
-    const changes: Array<string | number> = []
-    const subscription = collection.subscribeChanges(
-      (batch) => changes.push(...batch.map((change) => change.key)),
-      {
-        includeInitialState: true,
-        where: (row) => and(gt(row[`a.b`], 5), lt(row.a.b, 20)),
-      },
-    )
-    expect(changes.sort()).toEqual(expectedKeys)
-    subscription.unsubscribe()
+    await checkWithCleanup(async (register) => {
+      const collection = await readyCollection(
+        `subscription-${indexed}`,
+        register,
+      )
+      if (indexed) collection.createIndex((row) => row.a.b)
+      const changes: Array<string | number> = []
+      const subscription = collection.subscribeChanges(
+        (batch) => changes.push(...batch.map((change) => change.key)),
+        {
+          includeInitialState: true,
+          where: (row) => and(gt(row[`a.b`], 5), lt(row.a.b, 20)),
+        },
+      )
+      register(() => subscription.unsubscribe())
+      expect(changes.sort()).toEqual(expectedKeys)
+    })
   },
 )
 
 it(`keeps selected dotted and nested paths distinct in a public order`, async () => {
-  const collection = await readyCollection(`selected-order`)
-  const result = createLiveQueryCollection({
-    query: (q) =>
-      q
-        .from({ item: collection })
-        .fn.select(({ item }) => ({
-          id: item.id,
-          'a.b': item[`a.b`],
-          a: { b: item.a.b },
-        }))
-        .orderBy(({ $selected }) => add($selected[`a.b`], $selected.a.b))
-        .orderBy(({ $selected }) => $selected.id),
-    startSync: true,
-  })
+  await checkWithCleanup(async (register) => {
+    const collection = await readyCollection(`selected-order`, register)
+    const result = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: collection })
+          .fn.select(({ item }) => ({
+            id: item.id,
+            'a.b': item[`a.b`],
+            a: { b: item.a.b },
+          }))
+          .orderBy(({ $selected }) => add($selected[`a.b`], $selected.a.b))
+          .orderBy(({ $selected }) => $selected.id),
+      startSync: true,
+    })
+    register(() => result.cleanup())
 
-  await result.stateWhenReady()
-  const expected = [...rows]
-    .sort(
-      (left, right) =>
-        left[`a.b`] + left.a.b - (right[`a.b`] + right.a.b) ||
-        left.id.localeCompare(right.id),
-    )
-    .map((row) => row.id)
-  expect(result.toArray.map((row) => row.id)).toEqual(expected)
-  await result.cleanup()
+    await result.stateWhenReady()
+    const expected = [...rows]
+      .sort(
+        (left, right) =>
+          left[`a.b`] + left.a.b - (right[`a.b`] + right.a.b) ||
+          left.id.localeCompare(right.id),
+      )
+      .map((row) => row.id)
+    expect(result.toArray.map((row) => row.id)).toEqual(expected)
+  })
 })
 
 it.each([false, true])(
   `preserves distinct fields in a live-query callback (indexed=%s)`,
   async (indexed) => {
-    const collection = await readyCollection(`live-query-${indexed}`)
-    if (indexed) collection.createIndex((row) => row.a.b)
-    const result = createLiveQueryCollection({
-      query: (q) =>
-        q
-          .from({ item: collection })
-          .where(({ item }) => and(gt(item[`a.b`], 5), lt(item.a.b, 20)))
-          .select(({ item }) => ({ id: item.id })),
-      startSync: true,
+    await checkWithCleanup(async (register) => {
+      const collection = await readyCollection(
+        `live-query-${indexed}`,
+        register,
+      )
+      if (indexed) collection.createIndex((row) => row.a.b)
+      const result = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => and(gt(item[`a.b`], 5), lt(item.a.b, 20)))
+            .select(({ item }) => ({ id: item.id })),
+        startSync: true,
+      })
+      register(() => result.cleanup())
+      await result.stateWhenReady()
+      expect(result.toArray.map((row) => row.id).sort()).toEqual(expectedKeys)
     })
-    await result.stateWhenReady()
-    expect(result.toArray.map((row) => row.id).sort()).toEqual(expectedKeys)
-    await result.cleanup()
   },
 )
+
+it(`preserves a mismatch and secondary cleanup error`, async () => {
+  const primary = new Error(`wrong public rows`)
+  const cleanup = new Error(`cleanup failed`)
+  const released: Array<string> = []
+  let failure: unknown
+
+  try {
+    await checkWithCleanup((register) => {
+      register(() => {
+        released.push(`source`)
+        throw cleanup
+      })
+      register(() => {
+        released.push(`query`)
+      })
+      throw primary
+    })
+  } catch (error) {
+    failure = error
+  }
+
+  expect(released).toEqual([`query`, `source`])
+  expect(failure).toBeInstanceOf(AggregateError)
+  expect((failure as AggregateError).cause).toBe(primary)
+  expect((failure as AggregateError).errors).toEqual([cleanup])
+})
