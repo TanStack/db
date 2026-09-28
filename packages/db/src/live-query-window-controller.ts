@@ -486,7 +486,7 @@ export interface LiveQueryWindowSnapshot<
   pageParams: ReadonlyArray<number>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  /** The last pagination failure, cleared when a retry begins. */
+  /** Last pagination failure, retained through an earlier-started success until recovery begins. */
   error: unknown
   /** Keyed results for the physical window, or `undefined` when disabled. */
   state: ReadonlyMap<TKey, T> | undefined
@@ -887,7 +887,7 @@ class LiveQueryWindowControllerImpl<
           this.pendingWindowGeneration = undefined
           this.committedPageCount = requestedPageCount
           this.isFetchingNextPage = false
-          this.failedHasNextPage = false
+          this.failedHasNextPage = this.getComputedHasNextPage()
           this.notify()
           this.endTransition()
         },

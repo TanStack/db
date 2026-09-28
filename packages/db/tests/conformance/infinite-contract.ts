@@ -15,9 +15,11 @@
  * Svelte's public fetch can start before its queued effect attaches, then waits
  * internally. Preserve those distinct measured cuts, not a universal timing
  * law. This is why each driver remains separate even though the semantic model
- * and scenario grammar are shared.
+ * and scenario grammar are shared. The overlapping window-operation law below
+ * uses each driver's DB controller directly: hooks expose fetchNextPage but not
+ * controller preload, so that cell does not claim framework scheduling reach.
  */
-import type { Collection } from '@tanstack/db'
+import type { Collection, LiveQueryWindowController } from '@tanstack/db'
 import type { QueryBuild, SourceHandle } from './contract'
 
 export interface InfiniteQueryConfig {
@@ -82,6 +84,10 @@ export interface InfiniteQueryDriver {
   makePrecreated: (build: QueryBuild) => {
     collection: Collection<any, any, any>
   }
+  makeWindowController: <T extends object, TKey extends string | number>(
+    collection: Collection<T, TKey, any>,
+    config: InfiniteQueryConfig,
+  ) => LiveQueryWindowController<T, TKey>
   mount: (
     build: QueryBuild,
     config?: InfiniteQueryConfig,
