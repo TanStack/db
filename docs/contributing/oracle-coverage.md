@@ -166,7 +166,9 @@ observations. The [core persistence tests](../../packages/db-sqlite-persistence-
 own the adjacent during/straddling/after settlement, FIFO, abort, and failure
 histories. The live oracle does not prove eager-startup overlap, other mutation
 shapes, arbitrary Electric fetch schedules, Firefox/Zen, React rendering, or
-exclusive OPFS ownership.
+exclusive OPFS ownership. The
+[review record](oracle-reviews/issue-1754-live-electric-hydration-straddle.md)
+preserves the live-host and mutant evidence.
 
 ## Acceptance map
 
