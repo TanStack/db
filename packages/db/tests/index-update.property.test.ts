@@ -702,6 +702,7 @@ function createCollationCollection(
   collation: (typeof collationCases)[number][`collation`],
   autoIndex: `off` | `eager`,
   defaultIndexType?: typeof BasicIndex | typeof BTreeIndex,
+  labels: ReadonlyArray<string> = [`item10`, `item2`],
 ) {
   return createCollection<{ id: string; label: string }>({
     getKey: (row) => row.id,
@@ -712,7 +713,7 @@ function createCollationCollection(
     sync: {
       sync: ({ begin, write, commit, markReady }) => {
         begin()
-        for (const label of [`item10`, `item2`]) {
+        for (const label of labels) {
           write({ type: `insert`, value: { id: label, label } })
         }
         commit()
@@ -786,3 +787,39 @@ test.each(collationCases)(
     }
   },
 )
+
+test(`ordered scan resolves inherited collation outside each comparison`, async () => {
+  const collection = createCollationCollection(
+    { stringSort: `lexical` },
+    `off`,
+    undefined,
+    [`f`, `e`, `d`, `c`, `b`, `a`],
+  )
+
+  try {
+    await collection.stateWhenReady()
+    const optionReads = vi.spyOn(collection, `compareOptions`, `get`)
+    const rows = collection.currentStateAsChanges({
+      orderBy: [
+        {
+          expression: new PropRef([`label`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+    })
+
+    expect(rows?.map(({ value }) => value.label)).toEqual([
+      `a`,
+      `b`,
+      `c`,
+      `d`,
+      `e`,
+      `f`,
+    ])
+    // One resolution can check the index path; the scan needs only one more.
+    expect(optionReads.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(collection.indexes.size).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
