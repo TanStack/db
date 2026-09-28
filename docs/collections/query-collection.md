@@ -739,8 +739,11 @@ todosCollection.utils.writeBatch(() => {
 
 ### Real-World Example: WebSocket Integration
 
+This example assumes the collection stays loaded for the app's lifetime, so the
+listener can live at module scope.
+
 ```typescript
-// Handle real-time updates from WebSocket without triggering full refetches
+// Apply real-time changes from a WebSocket as direct writes
 ws.on("todos:update", (changes) => {
   todosCollection.utils.writeBatch(() => {
     changes.forEach((change) => {
@@ -759,6 +762,14 @@ ws.on("todos:update", (changes) => {
   })
 })
 ```
+
+- In eager mode, these writes patch the cached query result without a
+  refetch. In on-demand mode, each direct write refetches the active queries.
+  See [Direct Writes and Query Sync](#direct-writes-and-query-sync).
+- `writeUpdate` and `writeDelete` throw if the row is not in the synced store.
+  An event can arrive before the first load finishes, or for a row the
+  collection has not loaded. Guard for this, or use `writeUpsert` when events
+  carry the full row.
 
 ### Example: Incremental Updates
 
