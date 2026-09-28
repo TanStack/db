@@ -157,7 +157,7 @@ export function createPacedMutations<
         })
         return txToReturn
       })
-      if (!admitted) {
+      if (admitted === false) {
         // Admission failure belongs to this call; admitted same-key writes
         // must remain in the queue and keep their optimistic state.
         txToReturn.rollback({

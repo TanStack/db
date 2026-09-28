@@ -15,7 +15,7 @@ The maintainer chose the documented pacing behavior: factories preserve caller-o
 
 ## Verification on the reviewed commit
 
-- The expanded oracle passed 17 tests. The existing paced-mutation suite passed 13 tests, and the React hook suite passed 6 tests under jsdom.
+- The expanded oracle passed 18 tests. The existing paced-mutation suite passed 13 tests, and the React hook suite passed 6 tests under jsdom.
 - The DB package typecheck, changed-file ESLint, Prettier, and `git diff --check` passed.
 - Hostile controls for queue extraction, debounce trailing, throttle leading and non-leading timing, ignored capacity, false-green overflow admission, and caller option mutation each failed their intended checker.
 - A hostile cleanup control threw after an assertion failure. The result retained the assertion as `cause` and the cleanup error in `AggregateError.errors`. Collection cleanup still ran.
@@ -28,7 +28,7 @@ The maintainer chose the documented pacing behavior: factories preserve caller-o
 | ORC-001 authority and limits | Pass for documented queue order and bounded admission, explicit debounce trailing and throttle edges, optimistic rows, and persistence settlement. Omitted defaults, failed writes, and broader generated schedules remain outside this finite owner. |
 | ORC-002 independent judgment | Pass. The expected trace is computed from a virtual appointment list, a quiet-period grouping rule, and a leading/trailing window rule. No pacer-lite code or production scheduler enters the model. |
 | ORC-003 five responsibilities | Pass. The opening states the law and limits; `queueStarts`, `debounceStarts`, and `throttleStarts` are the model; action arrays are the finite grammar; `runProduction` is the real driver; exact trace and receipt assertions are the refinement check. |
-| ORC-004 grammar controls | Bounded enumeration, not an important generated property. It reconstructs all four queue position combinations, zero queue wait, queue capacity zero/one with waiting and in-flight writes, debounce reset, both throttle edge forms, and held queue settlement. Distinct IDs isolate queue admission; a focused same-key witness checks that overflow rollback leaves an admitted update intact through first-write settlement. Negative waits and broader capacities are outside the claimed grammar. |
+| ORC-004 grammar controls | Bounded enumeration, not an important generated property. It reconstructs all four queue position combinations, zero queue wait, queue capacity zero/one with waiting and in-flight writes, debounce reset, both throttle edge forms, and held queue settlement. Distinct IDs isolate queue admission; a focused same-key witness checks that overflow rollback leaves an admitted update intact through first-write settlement. A deferred custom queue checks the void-return compatibility boundary. Negative waits and broader capacities are outside the claimed grammar. |
 | ORC-005 path and observation | Pass. Real strategy instances drive the public manager and Collection; callback times and payloads, public rows, returned transaction identity/state, and persistence receipts are observed at virtual-clock cuts. Rejected receipts carry `QueueCapacityExceededError`; admitted same-key state survives the preceding write's settlement. |
 | ORC-006 checker calibration | Pass for hostile queue extraction, disabled debounce trailing, disabled throttle leading, early non-leading throttle, ignored capacity, false-green overflow admission, and caller-option mutation controls. Each reaches and fails its corresponding checker. |
 | ORC-007 fixed/random campaigns | Not triggered: this owner is bounded finite enumeration, not an important generated property. |
@@ -48,3 +48,13 @@ The source ledger has six claims. GAP04-1, GAP04-3, and GAP04-4 are fixed for th
 The follow-up review found two oracle gaps: the same-key witness did not observe the admitted update after the first write settled, and direct receipt awaits could hang before cleanup. Both were fixed by holding writes across a settlement cut and recording receipt outcomes before asserting them. A simplifier removed a duplicate queue transaction reference; a separate non-leading timer remains necessary because pacer-lite 0.2.1 measures its first wait from epoch zero.
 
 The repair adds 37 net production lines across the queue admission result, a named rejection reason, targeted rollback, caller-option cloning, and the trailing-only timer. The tests and contract documents grow separately. Each added production branch supports a public law demonstrated by a RED witness and a GREEN oracle run.
+
+## CodeRabbit review 5345009177
+
+CodeRabbit reviewed `abf7740b921de88589c5b4a1ef53d6ea832a9145` and posted one inline finding. Its claim was accurate: `if (!admitted)` rejected a custom queue strategy that admitted work and returned `void`. The previous `QueueStrategy.execute` contract allowed that return. The new Boolean-only type also broke source compatibility for that strategy.
+
+The permanent deferred-callback witness failed on the reviewed commit at the admission checkpoint: the returned transaction was `failed` instead of `pending`. DB typecheck rejected the void-returning strategy. The repair treats only explicit `false` as rejection and restores the prior void and promise return types. The same witness then passed, and the bounded queue witnesses still rejected overflow. The focused DB suite passed 18 oracle and 13 existing tests. DB typecheck, ESLint, Prettier, and diff checks passed.
+
+The review had one actionable finding and one non-blocking suggestion to run a local CodeRabbit CLI review. The finding is `fixed-now` in the task ledger. The CLI suggestion is `deferred` to the normal CodeRabbit PR re-review after push. No other technical item appeared in the raw review body, inline comments, or footnotes. Loss audit: 2 raw items = 1 fixed-now + 1 deferred. No evidence gap remains.
+
+Reviewer assessment: 1 of 1 actionable findings was correct and specific. The suggested conditional fixes the runtime bug. The reviewer did not mention the related type compatibility break, which the RED typecheck exposed. The review had high signal and a narrow but useful analysis. Hire recommendation: hire for targeted PR review, with an oracle and typecheck gate before accepting fixes.

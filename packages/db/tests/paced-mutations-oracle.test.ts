@@ -26,8 +26,9 @@ import type { Transaction } from '../src/transactions'
  * It settles every admitted call. Queue capacity counts waiting items; an
  * overflow rejects its transaction and removes its optimistic row. An explicit
  * non-leading throttle waits for its first trailing edge. Strategy factories
- * leave caller-owned options unchanged. Omitted edge defaults and failed
- * persistence remain outside this owner's finite grammar.
+ * leave caller-owned options unchanged. A custom queue strategy may admit work
+ * and return void, as the original public execute contract allowed. Omitted
+ * edge defaults and failed persistence remain outside this owner's grammar.
  *
  * Model `pendingIds` combines the production active optimistic transaction's
  * mutations. Model `ready` is an ordered list of queue calls, not pacer-lite's
@@ -695,6 +696,42 @@ describe(`paced mutation timeline oracle`, () => {
         await vi.advanceTimersByTimeAsync(0)
       },
     )
+  })
+
+  it(`keeps a void-returning custom queue transaction pending until its callback`, async () => {
+    const collection = await createReadyCollection()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const strategy: Strategy = {
+      _type: `queue`,
+      execute: (fn) => {
+        timer = setTimeout(() => fn(), 10)
+      },
+      cleanup: () => {
+        if (timer !== undefined) clearTimeout(timer)
+      },
+    }
+    const starts: Array<number> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: () => {
+        starts.push(Date.now() - origin)
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(strategy, collection, async () => {
+      const transaction = mutate(1)
+      const receipt = observeReceipt(transaction)
+      expect(transaction.state, `custom queue admission`).toBe(`pending`)
+      expect(collection.get(1)?.id).toBe(1)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(starts).toEqual([10])
+      expect(receipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    })
   })
 
   it(`strategy factories preserve frozen caller options`, () => {

@@ -65,10 +65,10 @@ export interface QueueStrategyOptions {
  */
 export interface QueueStrategy extends BaseStrategy<`queue`> {
   options?: QueueStrategyOptions
-  /** Returns whether the transaction was admitted to the queue. */
+  /** Explicit false rejects the transaction; void preserves custom strategies. */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
-  ) => boolean
+  ) => boolean | void | Promise<void>
 }
 
 /**
