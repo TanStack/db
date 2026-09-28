@@ -6,6 +6,7 @@ export default defineConfig({
   testMatch: [
     `electric-resume-two-tab.opfs.spec.ts`,
     `electric-hydration-straddle.opfs.spec.ts`,
+    `electric-immediate-reload.opfs.spec.ts`,
   ],
   timeout: 180_000,
 })
