@@ -220,6 +220,8 @@ export class CollectionChangesManager<
 
       if (--deferral.depth > 0) return
 
+      const publications = deferral.publications
+      deferral.publications = []
       this.deferral = undefined
       if (deferral.discard) {
         this.stateRevision = deferral.stateRevision
@@ -227,8 +229,8 @@ export class CollectionChangesManager<
         return
       }
       this.publishEvents(
-        deferral.publications.flatMap(({ changes }) => changes),
-        deferral.publications.some(({ layoutChanged }) => layoutChanged),
+        publications.flatMap(({ changes }) => changes),
+        publications.some(({ layoutChanged }) => layoutChanged),
       )
     }
 
@@ -419,6 +421,7 @@ export class CollectionChangesManager<
     this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false
+    if (this.deferral) this.deferral.publications.length = 0
     this.deferral = undefined
   }
 }

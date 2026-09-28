@@ -1290,7 +1290,11 @@ async function runDeferralCleanupHistory(
       },
     },
   })
-  const batches: Array<Array<PublicationChange>> = []
+  const batches: Array<
+    Array<
+      Omit<PublicationChange, `previousValue`> & { previousValue?: Row | null }
+    >
+  > = []
   const handles = new Map<
     `outer` | `inner` | `current`,
     ReturnType<typeof collection._deferPublication>
@@ -1333,9 +1337,7 @@ async function runDeferralCleanupHistory(
                 type,
                 key,
                 value: cloneRow(value),
-                ...(previousValue === undefined
-                  ? {}
-                  : { previousValue: cloneRow(previousValue) }),
+                ...(previousValue === undefined ? {} : { previousValue }),
               })),
             ),
           { includeInitialState: false },
