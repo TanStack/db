@@ -34,6 +34,10 @@ import type {
 
 type SqliteSupportedValue = null | number | string
 
+// Four row bindings and two key-evidence bindings per item stay below SQLite's
+// older 999-variable limit while keeping host round trips bounded.
+const REPLACEMENT_BATCH_SIZE = 100
+
 type CollectionTableMapping = {
   tableName: string
   tombstoneTableName: string
@@ -1653,7 +1657,69 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       }
 
-      for (const mutation of tx.mutations) {
+      const replacementKeys = replacesPersistedBaseline
+        ? tx.mutations.map((mutation) =>
+            encodePersistedStorageKey(mutation.key),
+          )
+        : []
+      const batchReplacement =
+        replacesPersistedBaseline &&
+        tx.mutations.length > 0 &&
+        tx.mutations.every((mutation) => mutation.type !== `delete`) &&
+        new Set(replacementKeys).size === replacementKeys.length
+
+      if (batchReplacement) {
+        const finalRowMetadata = new Map<string, unknown>()
+        for (const mutation of tx.rowMetadataMutations ?? []) {
+          finalRowMetadata.set(
+            encodePersistedStorageKey(mutation.key),
+            mutation.type === `delete` ? undefined : mutation.value,
+          )
+        }
+
+        for (
+          let start = 0;
+          start < tx.mutations.length;
+          start += REPLACEMENT_BATCH_SIZE
+        ) {
+          const mutations = tx.mutations.slice(
+            start,
+            start + REPLACEMENT_BATCH_SIZE,
+          )
+          const keys = replacementKeys.slice(
+            start,
+            start + REPLACEMENT_BATCH_SIZE,
+          )
+          await transactionDriver.run(
+            `INSERT INTO collection_expected_keys (collection_id, key)
+             VALUES ${keys.map(() => `(?, ?)`).join(`, `)}`,
+            keys.flatMap((key) => [collectionId, key]),
+          )
+          await transactionDriver.run(
+            `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
+             VALUES ${keys.map(() => `(?, ?, ?, ?)`).join(`, `)}`,
+            mutations.flatMap((mutation, index) => {
+              const key = keys[index]!
+              const metadata = finalRowMetadata.has(key)
+                ? finalRowMetadata.get(key)
+                : mutation.type !== `delete` &&
+                    mutation.metadataChanged === true
+                  ? mutation.metadata
+                  : undefined
+              return [
+                key,
+                serializePersistedRowValue(mutation.value),
+                metadata === undefined
+                  ? null
+                  : serializePersistedRowValue(metadata),
+                nextRowVersion,
+              ]
+            }),
+          )
+        }
+      }
+
+      for (const mutation of batchReplacement ? [] : tx.mutations) {
         const encodedKey = encodePersistedStorageKey(mutation.key)
         if (mutation.type === `delete`) {
           if (tracksPersistedKeySet) {
@@ -1742,7 +1808,9 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
-      for (const rowMetadataMutation of tx.rowMetadataMutations ?? []) {
+      for (const rowMetadataMutation of batchReplacement
+        ? []
+        : (tx.rowMetadataMutations ?? [])) {
         const encodedKey = encodePersistedStorageKey(rowMetadataMutation.key)
         if (rowMetadataMutation.type === `delete`) {
           await transactionDriver.run(

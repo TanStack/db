@@ -47,6 +47,7 @@ function createDriver(
   database: DatabaseSync,
   failTransactionRun?: (sql: string) => boolean,
   observeQuery?: (sql: string) => void,
+  observeRun?: (sql: string) => void,
 ): SQLiteDriver {
   const driver: SQLiteDriver = {
     exec: (sql) => {
@@ -63,6 +64,7 @@ function createDriver(
       )
     },
     run: (sql, params = []) => {
+      observeRun?.(sql)
       database.prepare(sql).run(...params.map(toBinding))
       return Promise.resolve()
     },
@@ -237,12 +239,18 @@ async function observeCachedSchemaState(
  * The focused work law first executes one controlled expected-key table read to
  * prove its SQL observer can detect the forbidden membership work, then resets
  * the counters before measuring the public position and snapshot operations.
+ * A second value-and-work law applies a 205-row full replacement through
+ * `applyCommittedTx`. It compares exact durable rows, row metadata, key evidence,
+ * resume metadata, and applied position after return while bounding driver
+ * query/run calls. A later-batch fault must roll the whole replacement back.
+ * Duplicate-key and delete histories retain their ordered sequential meaning.
  *
  * Known omissions: this narrow fixture supplies the same-connection
  * concurrency seam that the serialized copy-on-commit CLI harness cannot. It
  * does not claim native host execution or judge whether a consumer such as
  * Electric may use the certified cursor; those remain separate driver-contract
- * and Electric recovery owners.
+ * and Electric recovery owners. The work bound is a driver-call measure in
+ * node:sqlite, not an elapsed-time or browser OPFS latency guarantee.
  */
 describe(`SQLite resume snapshots`, () => {
   const startupHistoryArbitrary = fc.record({
@@ -749,6 +757,247 @@ describe(`SQLite resume snapshots`, () => {
       const substituted = await adapter.loadResumeSnapshot(collectionId)
       expect(substituted.rows).toHaveLength(2)
       expect(substituted.keySet).toEqual({ status: `incompatible` })
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  it(`writes a cold replacement with exact values and bounded database calls`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      let databaseCalls = 0
+      const driver = createDriver(
+        database,
+        undefined,
+        () => databaseCalls++,
+        () => databaseCalls++,
+      )
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+      const collectionId = `cold-replacement-work`
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `previous-generation`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          { type: `insert`, key: `old`, value: { id: `old`, title: `old` } },
+        ],
+        collectionMetadataMutations: [
+          { type: `set`, key: `electric:resume`, value: { offset: `old` } },
+        ],
+      })
+
+      const rows = Array.from({ length: 205 }, (_, index) => {
+        const id = `row-${String(index).padStart(3, `0`)}`
+        return { id, title: `Title ${index}` }
+      })
+      databaseCalls = 0
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `cold-replacement`,
+        term: 1,
+        seq: 2,
+        rowVersion: 2,
+        truncate: true,
+        mutations: rows.map((row) => ({
+          type: `update` as const,
+          key: row.id,
+          value: row,
+          metadataChanged: true,
+          metadata: { source: `row-write` },
+        })),
+        rowMetadataMutations: [
+          ...rows
+            .filter((_, index) => index % 2 === 0)
+            .map((row) => ({
+              type: `set` as const,
+              key: row.id,
+              value: { source: `electric`, operation: `insert` },
+            })),
+          { type: `delete`, key: rows[0]!.id },
+          { type: `set`, key: `absent`, value: { ignored: true } },
+        ],
+        collectionMetadataMutations: [
+          { type: `set`, key: `electric:resume`, value: { offset: `2_0` } },
+        ],
+      })
+      const replacementCalls = databaseCalls
+
+      const snapshot = await adapter.loadResumeSnapshot(collectionId)
+      expect(snapshot.rows).toEqual(
+        rows.map((row, index) => ({
+          key: row.id,
+          value: row,
+          metadata:
+            index === 0
+              ? undefined
+              : index % 2 === 0
+                ? { source: `electric`, operation: `insert` }
+                : { source: `row-write` },
+        })),
+      )
+      expect(snapshot.collectionMetadata).toEqual([
+        { key: `electric:resume`, value: { offset: `2_0` } },
+      ])
+      expect(snapshot.keySet).toEqual({ status: `consistent` })
+      expect(snapshot.latestTerm).toBe(1)
+      expect(snapshot.latestSeq).toBe(2)
+      expect(snapshot.latestRowVersion).toBe(2)
+      expect(
+        await driver.query<{ key: string }>(
+          `SELECT key FROM collection_expected_keys WHERE collection_id = ? ORDER BY key`,
+          [collectionId],
+        ),
+      ).toEqual(rows.map((row) => ({ key: encodePersistedStorageKey(row.id) })))
+      expect(
+        await driver.query<{ tx_id: string }>(
+          `SELECT tx_id FROM applied_tx WHERE collection_id = ? ORDER BY seq`,
+          [collectionId],
+        ),
+      ).toEqual([
+        { tx_id: `previous-generation` },
+        { tx_id: `cold-replacement` },
+      ])
+      // The host-dependent cost is a database call, not the in-process timing.
+      expect(replacementCalls).toBeLessThanOrEqual(40)
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  it(`rolls back every cold replacement chunk when a later chunk fails`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const collectionId = `cold-replacement-rollback`
+      const tableName = createPersistedTableName(collectionId, `c`)
+      let bulkRowInserts = 0
+      let injectFailure = false
+      const driver = createDriver(database, (sql) => {
+        if (
+          !injectFailure ||
+          !sql.includes(`INSERT INTO "${tableName}"`) ||
+          !sql.includes(`), (`)
+        ) {
+          return false
+        }
+        bulkRowInserts++
+        return bulkRowInserts === 2
+      })
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `old`,
+            value: { id: `old` },
+            metadataChanged: true,
+            metadata: { source: `previous-generation` },
+          },
+        ],
+        collectionMetadataMutations: [
+          { type: `set`, key: `electric:resume`, value: { offset: `old` } },
+        ],
+      })
+      const before = await observeCachedSchemaState(
+        adapter,
+        driver,
+        collectionId,
+      )
+      const beforeSnapshot = await adapter.loadResumeSnapshot(collectionId)
+      injectFailure = true
+      await expect(
+        adapter.applyCommittedTx(collectionId, {
+          txId: `failed-replacement`,
+          term: 1,
+          seq: 2,
+          rowVersion: 2,
+          truncate: true,
+          mutations: Array.from({ length: 205 }, (_, index) => ({
+            type: `update` as const,
+            key: `row-${index}`,
+            value: { id: `row-${index}` },
+          })),
+          collectionMetadataMutations: [
+            { type: `set`, key: `electric:resume`, value: { offset: `2_0` } },
+          ],
+        }),
+      ).rejects.toThrow(`injected transaction failure`)
+      injectFailure = false
+      expect(bulkRowInserts).toBe(2)
+      expect(
+        await observeCachedSchemaState(adapter, driver, collectionId),
+      ).toEqual(before)
+      expect(await adapter.loadResumeSnapshot(collectionId)).toEqual(
+        beforeSnapshot,
+      )
+    } catch (error) {
+      primaryFailure = error
+    } finally {
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  it(`keeps ordered duplicate and delete histories on the sequential path`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    try {
+      const driver = createDriver(database)
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+      await adapter.applyCommittedTx(`duplicate-replacement`, {
+        txId: `duplicate`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        truncate: true,
+        mutations: [
+          { type: `insert`, key: `same`, value: { id: `same`, first: true } },
+          { type: `update`, key: `same`, value: { last: true } },
+        ],
+      })
+      const duplicate = await adapter.loadResumeSnapshot(
+        `duplicate-replacement`,
+      )
+      expect(duplicate.rows).toEqual([
+        {
+          key: `same`,
+          value: { id: `same`, first: true, last: true },
+          metadata: undefined,
+        },
+      ])
+      expect(duplicate.keySet).toEqual({ status: `consistent` })
+
+      await adapter.applyCommittedTx(`delete-replacement`, {
+        txId: `delete`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        truncate: true,
+        mutations: [
+          { type: `insert`, key: `removed`, value: { id: `removed` } },
+          { type: `delete`, key: `removed`, value: { id: `removed` } },
+          { type: `insert`, key: `kept`, value: { id: `kept` } },
+        ],
+      })
+      const deleted = await adapter.loadResumeSnapshot(`delete-replacement`)
+      expect(deleted.rows).toEqual([
+        { key: `kept`, value: { id: `kept` }, metadata: undefined },
+      ])
+      expect(deleted.keySet).toEqual({ status: `consistent` })
+      const tombstoneTable = createPersistedTableName(`delete-replacement`, `t`)
+      expect(
+        await driver.query<{ key: string }>(
+          `SELECT key FROM "${tombstoneTable}" ORDER BY key`,
+        ),
+      ).toEqual([{ key: encodePersistedStorageKey(`removed`) }])
     } catch (error) {
       primaryFailure = error
     } finally {
