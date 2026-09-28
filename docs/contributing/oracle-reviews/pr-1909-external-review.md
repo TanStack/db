@@ -91,3 +91,70 @@ The full `packages/db/tests` run passed 6,603 tests across 186 files after the
 production refactor. The ordered-work oracle passed 93 cells, including the
 unrelated-demand and empty-replay repairs. The scheduler test exercised 81
 cases, including repeated-alias failure ownership across falsy failures.
+
+## Ordered continuation and window follow-up
+
+Code target: `0cbc7ae0` (production change `450b9d3c`). The later CodeRabbit comment at
+`https://github.com/TanStack/db/pull/1909#discussion_r4124008382` identified
+three additional failure mechanisms. Its suggestion to run the local CodeRabbit
+CLI is separate from those findings.
+
+| ID | Disposition | Public or state-level witness |
+| --- | --- | --- |
+| CR2-1 | fixed-now | A bounded ordered repair paused for joined demand and then stopped before it refilled the public window. The ordered-work oracle failed on the missing third row before the fix. An explicit retry also lost its window generation at the same gate. The loader-state test failed on the missing retry request before the fix. Both tests pass with retained continuation and retry intent. |
+| CR2-2 | fixed-now | `setWindow()` settled while an existing joined demand still held a required root continuation. The public ordered-work oracle failed before the fix. It now holds joined and root work separately. Its resolve, failure, retirement, and stale-rejection cells pass. |
+| CR2-3 | fixed-now | Cursor invalidation erased an authoritative repair continuation. A later public-row deletion exposed an underfilled window before the fix. The oracle now observes the refill after joined settlement. Reset and request failure still clear the continuation. |
+| CR2-4 | deferred | The `coderabbit` executable is unavailable locally. The PR check will run on the pushed commit. |
+
+The follow-up also simplified Effect source ingestion and Collection graph
+scheduling. Collection now checks ordered loaders inside one fixed-point loop.
+A public-query oracle observes a synchronous root refill before its second
+joined demand. Deleting the post-loader graph step made that oracle fail at the
+second-demand assertion. This was an assertion failure, not a timeout or setup
+failure. The step remains in production. The [field-lab loss audit](pr-1909-final-graph-loss-audit.md)
+records source-supported distinctions that the short refactor summary omitted.
+It does not treat those omissions as product regressions.
+
+Against merge base `afbeb44eef48d92b6e30ae5fd2843b938ee9163c`, the
+seven production TypeScript files have 318 added and 431 deleted lines. Net
+production size is **−113 raw lines**. Excluding blank and comment-only diff
+lines gives 299 added and 303 deleted, or **−4 executable lines**. The DB
+oracle campaign passed 2,627 tests across 42 files. The DB runtime suite
+passed 6,609 tests across 186 files with Vitest typechecking disabled. Package
+TypeScript, changed-file ESLint, Prettier, and `git diff --check` passed.
+
+### Oracle guide review for this follow-up
+
+- **ORC-001–003:** The ordered-work oracle names the ordered-window and
+  publication contract, uses an independent filter/sort/window reference, and
+  keeps its grammar, driver, and public checkpoint visible. The loader-state
+  case is a focused state refinement of explicit retry admission.
+- **ORC-004:** This follow-up adds bounded deterministic cells and makes no new
+  generated-grammar claim. The existing generated grammar is unchanged. The
+  new cells reconstruct the named joined-demand, repair, window-move, failure,
+  retirement, and refill witnesses. Multiple simultaneous joined plans and a
+  public-query failed-retry overlap remain outside this coverage, as the
+  coverage map states.
+- **ORC-005–006:** The driver uses public live-query Collections and Effects.
+  It checks rows, requests, window settlement, and callback batches at named
+  checkpoints. The pre-fix runs failed at those observations. The graph-step
+  mutant failed at a public second-demand assertion.
+- **ORC-007:** The existing important generated property runs fixed and random
+  campaigns with direct seed/path replay. These follow-up cells are bounded
+  deterministic controls, so they add no separate generated campaign.
+- **ORC-008–009:** The reference model gains no state or new vocabulary.
+  Window participants in production remain distinct from reference rows.
+- **ORC-010:** Each new async control resolves its held promises during cleanup.
+  `withHistoryCleanup` retains the primary assertion and reports cleanup
+  failures separately.
+- **ORC-011:** No new shared semantic fault hypothesis requires a second
+  formulation in this follow-up. The independent filter/sort/window reference
+  remains the primary result model. Remote relation hints remain a separate
+  feature.
+- **ORC-012:** This versioned section records outcomes for ORC-001 through
+  ORC-011 against the code target and names the remaining in-scope witnesses.
+
+The repaired claim covers finite local joined-filter windows, the named
+joined-demand and window-move histories, Collection and Effect public rows,
+and the specified settlement checkpoints. It does not claim all legal demand
+interleavings. The coverage map owns the two remaining witnesses above.
