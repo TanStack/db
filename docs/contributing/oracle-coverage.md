@@ -119,6 +119,16 @@ comment and the current API/architecture contract before extending its model.
 | Boundary refinements | [cleanup/restart](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-cleanup-restart-oracle.test.ts), [issue #1891 async-cleanup review](oracle-reviews/issue-1891-async-cleanup.md), [issue #1891 cleanup-start follow-up](oracle-reviews/issue-1891-cleanup-start-followup.md), [metadata publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-oracle.test.ts), [D2 source reconciliation](https://github.com/TanStack/db/blob/main/packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/includes-work-counter-oracle.test.ts) | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them. |
 | Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue.property.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and appointment-list models with executed target/seed/path checks. Callback-reentrant scheduling is outside the initial cleanup-queue domain. |
 
+The [Temporal group-key oracle](../../packages/db-ivm/tests/temporal-group-key-oracle.test.ts)
+owns the db-ivm `groupBy` value boundary for the eight Temporal kinds recognized
+by structural hashing. It compares public groups with independent kind-and-value
+counts after one input batch, including distinct and matching fresh values. Nested
+serialization controls cover records, arrays, Maps, and Sets. Incremental
+retractions and unsupported symbols, cycles, and mutable RegExp state are outside
+this owner's bounded domain. The owner uses db-ivm's established kind-and-string
+Temporal key domain. Whether native `.equals()` aliases, such as ZonedDateTime
+`[UTC]` and `[Etc/UTC]`, should coalesce needs a separate contract decision.
+
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work
 counter rejects an extra joined-filter graph schedule on root readiness while
