@@ -3,7 +3,7 @@
 ## Reviewed state and bounded claim
 
 - Original reviewed PR head: `04d8b8a87583bdf3ea9e8931f20fa9661e7c6a01`.
-- Reviewed executable repair head: `224a17c2d56caf5af421086b33b92f7e9e7ab14e`.
+- Reviewed executable repair head: `8bfc800c873073bb8c06e841e69ec69d153a95a7`.
 - Base: `origin/main` at `6e151b0e57d63e2535cdf8e02518690d453214bc`.
 - Executable owners: `packages/db/tests/query/index-path-collision-oracle.test.ts` and the focused compiler witness in `packages/db/tests/query/compiler/lazy-targets.test.ts`.
 
@@ -47,9 +47,9 @@ recommendation for independent high-stakes review: **no** on this sample.
 | ORC-007 fixed/random campaigns | Not triggered: these are bounded enumerations and a focused compiler test, not important generated properties. |
 | ORC-008 model minimality | Not triggered: the reference recomputes from fixed rows and adds no stateful model state. |
 | ORC-009 vocabulary mapping | Not triggered: the model's flat and nested field reads are local data descriptions, not combined or split production concepts. |
-| ORC-010 failure fidelity and cleanup | **Open harness gap:** subscription unsubscribe and live-query cleanup remain after assertions, so a mismatch can skip release. The current tests do not preserve secondary cleanup diagnostics. No shrinker or capture process is used. |
+| ORC-010 failure fidelity and cleanup | Pass. The harness registers each acquired resource and attempts cleanup in reverse order after success or failure. If an assertion and cleanup both fail, `AggregateError.cause` preserves the primary mismatch and `errors` retains cleanup failures. A hostile control proves both diagnostics survive and both releases run. No shrinker or capture process is used. |
 | ORC-011 second formulation | Not triggered: this review named no plausible semantic fault shared by production and the direct JavaScript model that a second formulation would separate. |
-| ORC-012 review evidence | This versioned record identifies outcomes and limits for ORC-001–011 against executable head `224a17c2`. The coverage map owns the focused compiler boundary and public adapter omission. |
+| ORC-012 review evidence | This versioned record identifies outcomes and limits for ORC-001–011 against executable head `8bfc800c`. The coverage map owns the focused compiler boundary and public adapter omission. |
 
 The bounded claim is: complete property-path identity × the fixed numeric rows
 and coalesced target pair × direct query/index, selected proxy, callbacks, and
@@ -64,10 +64,10 @@ every path-key use in the query compiler.
 ## Verification and remaining scope
 
 - Before repair: the compiler target test failed with one target where two were expected. The `$selected` exact-order oracle failed when its cache key was restored to dotted joining.
-- After repair: 68 tests passed across the collision oracle, lazy-target unit tests, ref-proxy tests, and union-all tests.
+- After repair: 69 tests passed across the collision oracle, lazy-target unit tests, ref-proxy tests, and union-all tests.
 - Changed-file ESLint, Prettier, and `git diff --check` passed.
 - Package `tsc --noEmit` reported 41 worktree-wide errors, including db-ivm source files outside the db package's `rootDir`; none named changed files. This run is not a clean typecheck receipt.
 
 The remaining public on-demand adapter witness is assigned to the lazy-target
-coverage-map row. The ORC-010 cleanup gap is assigned to the indexed-predicate
-oracle owner. No request to extract a shared serializer is part of this repair.
+coverage-map row. No request to extract a shared serializer is part of this
+repair.
