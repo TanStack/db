@@ -1858,10 +1858,9 @@ describe(`ordered source work oracle`, () => {
     let changedDuringStart = false
     vi.spyOn(marker, `subscribeChanges`).mockImplementation(((...args) => {
       const subscription = originalSubscribe(...args)
-      expect(
-        requests.length,
-        `ordered request precedes sibling subscription`,
-      ).toBeGreaterThan(0)
+      // Only the first subscription after the ordered page can drive this
+      // history; other subscribers must not repeat or preempt the update.
+      if (changedDuringStart || requests.length === 0) return subscription
       expect(requests[0]?.orderBy, `first request is ordered`).toBeDefined()
       expect(requests[0]?.limit, `first request loads one row`).toBe(1)
       expect(delivered.has(1), `first page installed row 1`).toBe(true)
@@ -1879,40 +1878,49 @@ describe(`ordered source work oracle`, () => {
 
     const batches: Array<Array<DeltaEvent<Row, string>>> = []
     let effect: ReturnType<typeof createEffect> | undefined
-    await withHistoryCleanup(
-      async () => {
-        effect = createEffect<Row, string>({
-          query: (q) =>
-            q
-              .from({ row: root })
-              .leftJoin({ marker }, ({ row, marker: child }) =>
-                eq(row.id, child.rowId),
-              )
-              .orderBy(({ row }) => row.rank)
-              .limit(1)
-              .select(({ row }) => ({
-                id: row.id,
-                rank: row.rank,
-                eligible: row.eligible,
-                label: row.label,
-              })),
-          onBatch: (events) => {
-            batches.push(events)
-          },
-        })
-        expect(changedDuringStart).toBe(true)
-        await flushPromises()
-        expect(batches).toEqual([
-          [{ type: `enter`, key: `[2,undefined]`, value: truth.get(2) }],
-        ])
-        expect(requests.some((options) => options.refetch === true)).toBe(true)
-      },
-      () => [
-        () => effect?.dispose(),
-        () => root.cleanup(),
-        () => marker.cleanup(),
-      ],
-    )
+    // Drain the scheduled callback queue at the assertion checkpoint. A single
+    // event-loop turn can miss a later duplicate batch.
+    vi.useFakeTimers()
+    try {
+      await withHistoryCleanup(
+        async () => {
+          effect = createEffect<Row, string>({
+            query: (q) =>
+              q
+                .from({ row: root })
+                .leftJoin({ marker }, ({ row, marker: child }) =>
+                  eq(row.id, child.rowId),
+                )
+                .orderBy(({ row }) => row.rank)
+                .limit(1)
+                .select(({ row }) => ({
+                  id: row.id,
+                  rank: row.rank,
+                  eligible: row.eligible,
+                  label: row.label,
+                })),
+            onBatch: (events) => {
+              batches.push(events)
+            },
+          })
+          expect(changedDuringStart).toBe(true)
+          await vi.runAllTimersAsync()
+          expect(batches).toEqual([
+            [{ type: `enter`, key: `[2,undefined]`, value: truth.get(2) }],
+          ])
+          expect(requests.some((options) => options.refetch === true)).toBe(
+            true,
+          )
+        },
+        () => [
+          () => effect?.dispose(),
+          () => root.cleanup(),
+          () => marker.cleanup(),
+        ],
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it(`keeps an Effect live when truncate replay aborts an obsolete repair participant`, async () => {

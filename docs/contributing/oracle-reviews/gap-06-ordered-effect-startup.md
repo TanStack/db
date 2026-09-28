@@ -57,3 +57,25 @@ On the unmodified production code, the focused witness passes. Both ordered
 owners pass 340 tests. The `@tanstack/db-ivm` and `@tanstack/db` builds,
 `tsc --noEmit -p packages/db/tsconfig.json`, and changed-file ESLint pass.
 The temporary mutant was restored before the green run.
+
+## External review follow-up
+
+The review of local and remote-tracking commit
+`72aa5af26513e725dfdaae84e11d810cf42b8070` found three test/release
+hygiene issues. The PR adds no published code, so the patch changeset was
+removed under the repository's release guidance.
+
+The startup test used one `flushPromises()` turn before comparing batches. An
+adversarial callback that queued a duplicate batch through two nested timers
+passed that comparison. Draining the controlled timer queue before the exact
+batch comparison made the same wrong callback fail. The synchronous provider
+fixture schedules no later external work, so that queue drain is the test's
+callback observation cut.
+
+The sibling-subscription hook also applied its rank update on every call.
+One extra subscription after Effect startup failed at the row-rank setup
+assertion, and one before startup failed at the ordered-request setup assertion.
+The hook now applies the update only on its first invocation after the initial
+ordered request. Both extra-subscription probes pass with that guard, while
+the existing `changedDuringStart` and exact batch assertions still require the
+intended history and public result.
