@@ -39,6 +39,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * An empty joined replay still wakes held Effect deltas.
  * An initial Effect with skipInitial waits for joined demand before it starts
  * publishing callbacks. Only joined-source readiness rechecks that demand.
+ * If another source changes an ordered source during Effect startup, the
+ * buffered change still invalidates its settled prefix before callbacks run.
  * A window move started during existing joined demand waits for its later root
  * refill and publication. Joined demand cannot discard a repair continuation.
  *
@@ -1776,6 +1778,141 @@ describe(`ordered source work oracle`, () => {
 
   it(`publishes one Effect replacement when ordered repair settles synchronously`, async () => {
     await expect(observeHeldEffectRepair(`synchronous`)).resolves.toEqual([[2]])
+  })
+
+  it(`publishes the repaired ordered Effect delta when a source changes during startup`, async () => {
+    // Fixed history: the first ordered page contains row 1. Subscribing to
+    // the sibling updates row 1 before the Effect can run its initial graph.
+    // The independent final rank order is row 2, then row 1. At the first
+    // callback checkpoint, only row 2 may enter the width-one result.
+    type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    const truth = new Map<number, Row>([
+      [1, { id: 1, rank: 1, eligible: true, label: `first` }],
+      [2, { id: 2, rank: 2, eligible: true, label: `second` }],
+    ])
+    let rootSync!: Sync
+    const delivered = new Set<number>()
+    const requests: Array<LoadSubsetOptions> = []
+    const root = createCollection<Row, number>({
+      id: `ordered-effect-start-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              requests.push(options)
+              const selected = [...truth.values()]
+                .filter(
+                  (row) =>
+                    (!options.where ||
+                      evaluateReferenceExpression(options.where, row) ===
+                        true) &&
+                    (!options.cursor ||
+                      evaluateReferenceExpression(
+                        options.cursor.whereFrom,
+                        row,
+                      ) === true),
+                )
+                .sort((a, b) => a.rank - b.rank || a.id - b.id)
+                .slice(
+                  options.offset ?? 0,
+                  options.limit === undefined
+                    ? undefined
+                    : (options.offset ?? 0) + options.limit,
+                )
+              operations.begin()
+              for (const row of selected) {
+                if (!delivered.has(row.id)) {
+                  delivered.add(row.id)
+                  operations.write({ type: `insert`, value: { ...row } })
+                }
+              }
+              expect(
+                operations.commit(),
+                `ordered page applies synchronously`,
+              ).toBe(true)
+              return true
+            },
+          }
+        },
+      },
+    })
+    const marker = createCollection<Marker, number>({
+      id: `ordered-effect-start-marker-${harnessId++}`,
+      getKey: ({ id }) => id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+        },
+      },
+    })
+    const originalSubscribe = marker.subscribeChanges.bind(marker)
+    let changedDuringStart = false
+    vi.spyOn(marker, `subscribeChanges`).mockImplementation(((...args) => {
+      const subscription = originalSubscribe(...args)
+      expect(
+        requests.length,
+        `ordered request precedes sibling subscription`,
+      ).toBeGreaterThan(0)
+      expect(requests[0]?.orderBy, `first request is ordered`).toBeDefined()
+      expect(requests[0]?.limit, `first request loads one row`).toBe(1)
+      expect(delivered.has(1), `first page installed row 1`).toBe(true)
+      expect(root.get(1)?.rank, `row 1 is present before its update`).toBe(1)
+      changedDuringStart = true
+      const updated = { ...truth.get(1)!, rank: 3, label: `moved` }
+      truth.set(1, updated)
+      rootSync.begin()
+      rootSync.write({ type: `update`, value: updated })
+      expect(rootSync.commit(), `startup update applies synchronously`).toBe(
+        true,
+      )
+      return subscription
+    }) as typeof marker.subscribeChanges)
+
+    const batches: Array<Array<DeltaEvent<Row, string>>> = []
+    let effect: ReturnType<typeof createEffect> | undefined
+    await withHistoryCleanup(
+      async () => {
+        effect = createEffect<Row, string>({
+          query: (q) =>
+            q
+              .from({ row: root })
+              .leftJoin({ marker }, ({ row, marker: child }) =>
+                eq(row.id, child.rowId),
+              )
+              .orderBy(({ row }) => row.rank)
+              .limit(1)
+              .select(({ row }) => ({
+                id: row.id,
+                rank: row.rank,
+                eligible: row.eligible,
+                label: row.label,
+              })),
+          onBatch: (events) => {
+            batches.push(events)
+          },
+        })
+        expect(changedDuringStart).toBe(true)
+        await flushPromises()
+        expect(batches).toEqual([
+          [{ type: `enter`, key: `[2,undefined]`, value: truth.get(2) }],
+        ])
+        expect(requests.some((options) => options.refetch === true)).toBe(true)
+      },
+      () => [
+        () => effect?.dispose(),
+        () => root.cleanup(),
+        () => marker.cleanup(),
+      ],
+    )
   })
 
   it(`keeps an Effect live when truncate replay aborts an obsolete repair participant`, async () => {
