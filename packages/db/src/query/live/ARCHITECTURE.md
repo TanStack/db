@@ -91,15 +91,15 @@ model. They are not a second set of runtime objects, nor does every name need a
 matching TypeScript type. The implementation maps this model onto existing D2
 operators and a few boundary adapters:
 
-| Architectural role                        | Concrete implementation                                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Compile relation IDs and demand plans     | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
-| Reduce public keys and build routes       | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
-| Run the graph and publish root rows       | `packages/db/src/query/live/collection-config-builder.ts`                                              |
-| Schedule Collection and Effect graph turns | `packages/db/src/query/live/graph-scheduler.ts`                                                         |
-| Publish Collection-valued buckets         | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
-| Start and release asynchronous demand     | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
-| Ordered provider loading and continuation | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
+| Architectural role                         | Concrete implementation                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Compile relation IDs and demand plans      | `packages/db/src/query/compiler/index.ts`, `packages/db/src/query/compiler/joins.ts`                   |
+| Reduce public keys and build routes        | `packages/db/src/query/live/materialized-pipeline.ts`                                                  |
+| Run the graph and publish root rows        | `packages/db/src/query/live/collection-config-builder.ts`                                              |
+| Schedule Collection and Effect graph turns | `packages/db/src/query/live/graph-scheduler.ts`                                                        |
+| Publish Collection-valued buckets          | `packages/db/src/query/live/bucket-facade-adapter.ts`                                                  |
+| Start and release asynchronous demand      | `packages/db/src/query/live/subset-demand-controller.ts`, `packages/db/src/collection/subscription.ts` |
+| Ordered provider loading and continuation  | `packages/db/src/query/live/ordered-source-loader.ts`                                                  |
 
 Queries without includes keep the original compiled pipeline and do not pay
 for facade state. The one exception is a joined query with a custom public-key
