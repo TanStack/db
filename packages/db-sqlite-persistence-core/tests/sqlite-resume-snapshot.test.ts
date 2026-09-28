@@ -48,7 +48,7 @@ function createDriver(
   database: DatabaseSync,
   failTransactionRun?: (sql: string) => boolean,
   observeQuery?: (sql: string) => void,
-  observeRun?: (sql: string) => void,
+  observeRun?: (sql: string, params: ReadonlyArray<unknown>) => void,
 ): SQLiteDriver {
   const driver: SQLiteDriver = {
     exec: (sql) => {
@@ -65,7 +65,7 @@ function createDriver(
       )
     },
     run: (sql, params = []) => {
-      observeRun?.(sql)
+      observeRun?.(sql, params)
       database.prepare(sql).run(...params.map(toBinding))
       return Promise.resolve()
     },
@@ -770,11 +770,18 @@ describe(`SQLite resume snapshots`, () => {
     let primaryFailure: unknown
     try {
       let databaseCalls = 0
+      let maxReplacementBoundParameters = 0
       const driver = createDriver(
         database,
         undefined,
         () => databaseCalls++,
-        () => databaseCalls++,
+        (_sql, params) => {
+          databaseCalls++
+          maxReplacementBoundParameters = Math.max(
+            maxReplacementBoundParameters,
+            params.length,
+          )
+        },
       )
       const adapter = new SQLiteCorePersistenceAdapter({ driver })
       const collectionId = `cold-replacement-work`
@@ -796,6 +803,7 @@ describe(`SQLite resume snapshots`, () => {
         return { id, title: `Title ${index}` }
       })
       databaseCalls = 0
+      maxReplacementBoundParameters = 0
       await adapter.applyCommittedTx(collectionId, {
         txId: `cold-replacement`,
         term: 1,
@@ -871,6 +879,7 @@ describe(`SQLite resume snapshots`, () => {
       ])
       // The host-dependent cost is a database call, not the in-process timing.
       expect(replacementCalls).toBeLessThanOrEqual(40)
+      expect(maxReplacementBoundParameters).toBe(400)
     } catch (error) {
       primaryFailure = error
     } finally {

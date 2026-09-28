@@ -127,6 +127,11 @@ whole transaction. Duplicate-key and delete histories keep their sequential
 semantics. This in-memory driver-call law does not measure Chromium OPFS
 latency, worker scheduling, or an end-to-end Electric snapshot.
 
+The Cloudflare Durable Object replacement test applies 25-, 26-, and 205-row
+full replacements through the actual Cloudflare driver. A storage seam enforces
+Cloudflare's documented 100-bound-parameter query limit and checks the durable
+keys after each transaction. This Node SQLite seam does not execute in Workers.
+
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work
 counter rejects an extra joined-filter graph schedule on root readiness while

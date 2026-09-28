@@ -34,8 +34,8 @@ import type {
 
 type SqliteSupportedValue = null | number | string
 
-// Four row bindings and two key-evidence bindings per item stay below SQLite's
-// older 999-variable limit while keeping host round trips bounded.
+// The default stays below SQLite's older 999-variable limit. Drivers with a
+// lower binding cap use smaller chunks; each replacement row binds four values.
 const REPLACEMENT_BATCH_SIZE = 100
 
 type CollectionTableMapping = {
@@ -1198,6 +1198,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly appliedTxPruneMaxRows: number | undefined
   private readonly appliedTxPruneMaxAgeSeconds: number | undefined
   private readonly pullSinceReloadThreshold: number
+  private readonly replacementBatchSize: number
 
   private initialized = false
   private readonly collectionTableCache = new Map<
@@ -1210,6 +1211,20 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   >()
 
   constructor(options: SQLiteCoreAdapterOptions) {
+    const maxBoundParameters = options.driver.maxBoundParameters
+    if (
+      maxBoundParameters !== undefined &&
+      (!Number.isInteger(maxBoundParameters) || maxBoundParameters < 4)
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite driver maxBoundParameters must be an integer of at least 4`,
+      )
+    }
+    this.replacementBatchSize =
+      maxBoundParameters === undefined
+        ? REPLACEMENT_BATCH_SIZE
+        : Math.min(REPLACEMENT_BATCH_SIZE, Math.floor(maxBoundParameters / 4))
+
     const schemaVersion = options.schemaVersion ?? DEFAULT_SCHEMA_VERSION
     if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
       throw new InvalidPersistedCollectionConfigError(
@@ -1680,15 +1695,15 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         for (
           let start = 0;
           start < tx.mutations.length;
-          start += REPLACEMENT_BATCH_SIZE
+          start += this.replacementBatchSize
         ) {
           const mutations = tx.mutations.slice(
             start,
-            start + REPLACEMENT_BATCH_SIZE,
+            start + this.replacementBatchSize,
           )
           const keys = replacementKeys.slice(
             start,
-            start + REPLACEMENT_BATCH_SIZE,
+            start + this.replacementBatchSize,
           )
           await transactionDriver.run(
             `INSERT INTO collection_expected_keys (collection_id, key)
