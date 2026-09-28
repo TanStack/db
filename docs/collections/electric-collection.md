@@ -316,6 +316,11 @@ await todosCollection.utils.awaitTxId(12345, 10000)
 
 This is useful when you need to ensure a mutation has been synchronized before proceeding with other operations.
 
+For a collection wrapped with SQLite persistence, `awaitTxId` observes the
+transaction in the Electric stream. It can resolve before the local SQLite
+write completes. Do not use it as a local durability acknowledgment: if the
+page closes in that gap, reopening may need Electric to recover the row.
+
 ### `awaitMatch(matchFn, timeout?)`
 
 Wait for a custom match function to find a matching message:

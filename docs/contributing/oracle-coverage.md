@@ -136,6 +136,22 @@ non-local-only persistence remain outside this lane.
 The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
 records the grammar controls, exact reviewed commit, and ORC audit.
 
+The [live Electric immediate-reload witness](../../packages/browser-db-sqlite-persistence/e2e/electric-immediate-reload.opfs.spec.ts)
+checks one Chromium/OPFS history: an `onInsert` handler receives PostgreSQL
+transaction evidence, `awaitTxId` and the optimistic transaction settle while
+the source row's adapter write is held, and a hard page close is followed by
+an empty raw OPFS snapshot before the recovering Collection or Electric starts.
+After release, the witness checks the exact public and durable row from live
+Electric and records that the reopened page sent no user-insert request. Public
+rows are polled before durable snapshots to avoid a full OPFS read on every
+pre-publication tick. This bounded history does not prove Windows/Edge behavior,
+offline recovery, arbitrary later re-inserts, or a durable-acknowledgment
+contract for `awaitTxId`.
+
+The [PR #1914 follow-up review record](oracle-reviews/pr-1914-immediate-reload-follow-up.md)
+preserves the held-checkpoint and extra-POST mutant results at the exact
+reviewed executable commit.
+
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
 also covers one-pass queued-sync cancellation, partial-update dependencies on
 queued source rows, and focused late-hydration cases in
