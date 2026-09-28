@@ -1186,6 +1186,10 @@ Classify root deltas against authoritative membership, including earlier queued
 sync writes, not the optimistic public view. An optimistic delete must not turn
 a balanced graph update into an authoritative delete. This does not bypass the
 normal sync queue or publish part of a graph-output transaction early.
+When a publication hold spans several graph steps, compare the final row and
+position with the last subscriber-visible snapshot.
+If the value returns to its prior value at a new position, publish a layout
+notification even when private intermediate rows had different values.
 Build queued membership lazily on the first balanced delta in an output flush,
 preserving committed last-write and truncate semantics. Insert-only flushes do
 not scan the queue, and balanced rows share that flush's lookup.

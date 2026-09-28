@@ -1309,11 +1309,11 @@ function accumulateChanges<T>(
     orderByIndex,
   }
   if (multiplicity < 0) {
+    if (changes.deletes === 0) {
+      changes.previousValue = value
+      changes.previousOrderByIndex = orderByIndex
+    }
     changes.deletes += Math.abs(multiplicity)
-    // Remember the retracted (old) value + position so the flush can tell an
-    // order-only move apart from a real value change.
-    changes.previousValue = value
-    changes.previousOrderByIndex = orderByIndex
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
     // Update value to the latest version for this key
