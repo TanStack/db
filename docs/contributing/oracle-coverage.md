@@ -129,6 +129,8 @@ index updates failed the fixed batched case at that checkpoint: one indexed key
 versus two model rows. The direct index refinement owner
 does not prove this Collection mutation path. Callback-time index agreement,
 adapter cancellation, and non-local-only persistence remain outside this lane.
+The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
+records the grammar controls, exact reviewed commit, and ORC audit.
 
 The [PR #1902 review record](oracle-reviews/pr-1902-change-event-history.md)
 also covers one-pass queued-sync cancellation, partial-update dependencies on
