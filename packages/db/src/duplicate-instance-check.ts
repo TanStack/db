@@ -1,18 +1,23 @@
-import { DuplicateDbInstanceError } from './errors'
+import { DuplicateDbInstanceError } from './errors.js'
 
-// The marker belongs to the runtime, not a browser window. A second module
-// instance would have separate IR classes and transaction state.
-const DB_INSTANCE_MARKER = Symbol.for(`@tanstack/db/instance-marker`)
+// Independent module evaluation is valid in SSR. Constructed DB values cannot
+// cross evaluations because their IR classes and transaction state differ.
+const DB_INSTANCE_REGISTRY = Symbol.for(`@tanstack/db/constructed-instances`)
 const instanceToken = {}
-const DISABLED =
-  typeof process !== `undefined` &&
-  process.env.TANSTACK_DB_DISABLE_DUP_CHECK === `1`
+const runtime = globalThis as unknown as Record<
+  symbol,
+  WeakMap<object, object> | undefined
+>
+const owners = (runtime[DB_INSTANCE_REGISTRY] ??= new WeakMap<object, object>())
 
-export function assertSingleDbInstance(): void {
-  if (DISABLED) return
-  const current = (globalThis as any)[DB_INSTANCE_MARKER]
-  if (current !== undefined && current !== instanceToken) {
+export function markDbInstance(value: object): void {
+  owners.set(value, instanceToken)
+}
+
+export function assertLocalDbInstance(value: unknown): void {
+  if (value === null || typeof value !== `object`) return
+  const owner = owners.get(value)
+  if (owner !== undefined && owner !== instanceToken) {
     throw new DuplicateDbInstanceError()
   }
-  ;(globalThis as any)[DB_INSTANCE_MARKER] = instanceToken
 }

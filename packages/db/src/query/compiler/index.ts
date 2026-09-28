@@ -30,6 +30,7 @@ import {
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { BaseQueryBuilder } from '../builder/index.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
@@ -2261,7 +2262,7 @@ function isNestedSelectObject(value: any): value is Record<string, any> {
     typeof value === `object` &&
     !Array.isArray(value) &&
     !isExpressionLike(value) &&
-    value.__refProxy !== true
+    !isRefProxy(value)
   )
 }
 

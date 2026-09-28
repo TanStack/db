@@ -1,5 +1,11 @@
-import { Aggregate, Func, PropRef, Value } from '../ir'
+import { Aggregate, Func, isBasicOrAggregateExpression } from '../ir'
 import { isRefProxy, toExpression } from './ref-proxy.js'
+import {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from './wrappers.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
 import type { SingleResult } from '../../types.js'
@@ -10,6 +16,13 @@ import type {
   StringifiableScalar,
 } from './types.js'
 import type { QueryBuilder } from './index.js'
+
+export {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from './wrappers.js'
 
 type StringRef =
   | RefLeaf<string>
@@ -59,7 +72,7 @@ type ExpressionLike =
   | undefined
   | Array<unknown>
 
-type CaseWhenValue =
+export type CaseWhenValue =
   | ExpressionLike
   | QueryBuilder<any>
   | ToArrayWrapper<any>
@@ -763,38 +776,6 @@ export const operators = [
 
 export type OperatorName = (typeof operators)[number]
 
-export class ToArrayWrapper<_T = unknown> {
-  readonly __brand = `ToArrayWrapper` as const
-  declare readonly _type: `toArray`
-  declare readonly _result: _T
-  constructor(public readonly query: QueryBuilder<any>) {}
-}
-
-export class ConcatToArrayWrapper<_T = unknown> {
-  readonly __brand = `ConcatToArrayWrapper` as const
-  declare readonly _type: `concatToArray`
-  declare readonly _result: _T
-  constructor(public readonly query: QueryBuilder<any>) {}
-}
-
-export class CaseWhenWrapper<_T = any> {
-  readonly __brand = `CaseWhenWrapper` as const
-  declare readonly _type: `caseWhen`
-  readonly _result?: _T
-  constructor(public readonly args: Array<CaseWhenValue>) {}
-}
-
-export class MaterializeWrapper<
-  _T = unknown,
-  _IsSingle extends boolean = boolean,
-> {
-  readonly __brand = `MaterializeWrapper` as const
-  declare readonly _type: `materialize`
-  declare readonly _result: _T
-  declare readonly _isSingle: _IsSingle
-  constructor(public readonly query: QueryBuilder<any>) {}
-}
-
 export function toArray<TContext extends Context>(
   query: QueryBuilder<TContext>,
 ): ToArrayWrapper<GetInlineResult<TContext>> {
@@ -824,13 +805,7 @@ function getCaseWhenValueIndexes(argCount: number): Array<number> {
 
 function isExpressionValue(value: CaseWhenValue | undefined): boolean {
   if (isRefProxy(value)) return true
-  if (
-    value instanceof Aggregate ||
-    value instanceof Func ||
-    value instanceof PropRef ||
-    value instanceof Value
-  )
-    return true
+  if (isBasicOrAggregateExpression(value)) return true
   if (value == null) return true
   if (
     typeof value === `string` ||

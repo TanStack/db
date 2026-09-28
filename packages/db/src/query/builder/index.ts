@@ -1,4 +1,8 @@
 import { CollectionImpl } from '../../collection/index.js'
+import {
+  assertLocalDbInstance,
+  markDbInstance,
+} from '../../duplicate-instance-check.js'
 import { hasCollectionOptionsBrand } from '../../collection-options.js'
 import { isPlainObject as isRecord } from '../../utils/type-guards.js'
 import {
@@ -142,6 +146,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     private readonly resolveCollection?: CollectionResolver,
   ) {
     this.query = { ...query }
+    markDbInstance(this)
   }
 
   private _clone<TNextContext extends Context = Context>(
@@ -202,6 +207,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refs: Array<[string, CollectionRef | QueryRef]> = []
     for (const alias of keys) {
       const sourceValue = source[alias]
+      assertLocalDbInstance(sourceValue)
 
       // Validate the value is a Collection or QueryBuilder
       let ref: CollectionRef | QueryRef
@@ -1049,8 +1055,13 @@ function toExpr(value: any): BasicExpression | Aggregate {
   return toExpression(value ?? null)
 }
 
-function isPlainObject(value: any): value is Record<string, any> {
-  return isRecord(value) && !isExpressionLike(value) && !isRefProxy(value)
+function isNestedSelectRecord(value: any): value is Record<string, any> {
+  return (
+    isRecord(value) &&
+    !Array.isArray(value) &&
+    !isExpressionLike(value) &&
+    !isRefProxy(value)
+  )
 }
 
 function buildNestedSelect(
@@ -1058,6 +1069,15 @@ function buildNestedSelect(
   parentAliases: Array<string> = [],
   fieldName?: string,
 ): any {
+  assertLocalDbInstance(obj)
+  if (Array.isArray(obj)) {
+    return obj.some((value) => isRefProxy(value) || isExpressionLike(value))
+      ? new FuncExpr(
+          `array`,
+          obj.map((value) => toExpression(value ?? null)),
+        )
+      : toExpr(obj)
+  }
   if (obj instanceof BaseQueryBuilder) {
     if (!fieldName) {
       throw new Error(`Conditional include branch is missing a field name`)
@@ -1087,7 +1107,7 @@ function buildNestedSelect(
   if (obj instanceof CaseWhenWrapper) {
     return buildConditionalSelect(obj, parentAliases, fieldName)
   }
-  if (!isPlainObject(obj)) return toExpr(obj)
+  if (!isNestedSelectRecord(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
   for (const [k, v] of Object.entries(obj)) {
     if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
@@ -1210,7 +1230,7 @@ function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
       ...collectExternalRefsFromQuery(value.query),
     ]
   }
-  if (!isPlainObject(value)) return []
+  if (!isNestedSelectRecord(value)) return []
   return Object.values(value).flatMap(collectRefsFromSelectValue)
 }
 
@@ -1509,7 +1529,7 @@ function buildIncludesSubquery(
 
   const rawChildSelect = modifiedQuery.select as any
   const hasObjectSelect =
-    rawChildSelect === undefined || isPlainObject(rawChildSelect)
+    rawChildSelect === undefined || isNestedSelectRecord(rawChildSelect)
   let includesQuery = modifiedQuery
   let scalarField: string | undefined
 

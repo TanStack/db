@@ -11,7 +11,8 @@ import { createControlledCollection } from './includes-oracle-helpers.js'
  * A QueryRef is a relational boundary: DISTINCT and aggregate results are
  * formed before an outer join and WHERE. Renaming a no-select QueryRef keeps
  * its source bound. Source rows and selected objects remain user data even
- * when their fields resemble query IR or contain empty arrays. The query API
+ * when their fields resemble query IR or proxy markers. Selected arrays of
+ * references evaluate to arrays of row values. The query API
  * and the live-query architecture's public surface law authorize these rules.
  *
  * The finite DISTINCT model uses ordinary array filtering, equality, and a Set.
@@ -170,6 +171,89 @@ describe('subquery boundaries preserve operators and user rows', () => {
         await live.cleanup()
       }
     } finally {
+      await source.collection.cleanup()
+    }
+  })
+
+  it('evaluates selected arrays of references as arrays of row values', async () => {
+    const source = createControlledCollection('array-selection', [
+      { id: 1, name: 'Ada' },
+    ])
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ item: source.collection }).select(({ item }) => ({
+          pair: [item.id, item.name],
+        })),
+      getKey: () => 1,
+    })
+    try {
+      await live.preload()
+      expect(live.toArray[0]?.pair.map((value) => typeof value)).toEqual([
+        'number',
+        'string',
+      ])
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { pair: [1, 'Ada'] },
+      ])
+      expect(JSON.stringify(live.toArray.map(stripVirtualProps))).toBe(
+        '[{"pair":[1,"Ada"]}]',
+      )
+    } finally {
+      await live.cleanup()
+      await source.collection.cleanup()
+    }
+  })
+
+  it('keeps a top-level proxy-shaped selected field as user data', async () => {
+    const source = createControlledCollection('proxy-field-selection', [
+      { id: 1 },
+    ])
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ item: source.collection }).select(({ item }) => ({
+          __refProxy: true,
+          id: item.id,
+        })),
+      getKey: () => 1,
+    })
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { __refProxy: true, id: 1 },
+      ])
+    } finally {
+      await live.cleanup()
+      await source.collection.cleanup()
+    }
+  })
+
+  it('keeps proxy-shaped fields in aggregate subqueries', async () => {
+    const source = createControlledCollection('proxy-field-aggregate', [
+      { id: 1 },
+      { id: 2 },
+    ])
+    const live = createLiveQueryCollection({
+      query: (q) => {
+        const summary = q
+          .from({ item: source.collection })
+          .select(({ item }) => ({
+            __refProxy: true,
+            total: count(item.id),
+          }))
+        return q.from({ result: summary }).select(({ result }) => ({
+          __refProxy: result.__refProxy,
+          total: result.total,
+        }))
+      },
+      getKey: () => 1,
+    })
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { __refProxy: true, total: 2 },
+      ])
+    } finally {
+      await live.cleanup()
       await source.collection.cleanup()
     }
   })

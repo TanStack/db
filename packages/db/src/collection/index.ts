@@ -1,5 +1,6 @@
 import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
+import { markDbInstance } from '../duplicate-instance-check.js'
 import {
   CollectionConfigurationError,
   CollectionRequiresConfigError,
@@ -408,6 +409,8 @@ export class CollectionImpl<
     if (!config.sync) {
       throw new CollectionRequiresSyncConfigError()
     }
+
+    markDbInstance(this)
 
     if (config.id) {
       this.id = config.id

@@ -1,4 +1,8 @@
-import { assertSingleDbInstance } from '../duplicate-instance-check.js'
+import {
+  assertLocalDbInstance,
+  markDbInstance,
+} from '../duplicate-instance-check.js'
+import { isRefProxy } from './builder/ref-proxy-identity.js'
 
 /*
 This is the intermediate representation of the query.
@@ -7,8 +11,6 @@ This is the intermediate representation of the query.
 import type { CompareOptions } from './builder/types'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { NamespacedRow } from '../types'
-
-assertSingleDbInstance()
 
 export interface QueryIR {
   from: From
@@ -86,6 +88,9 @@ abstract class BaseExpression<T = any> {
   public abstract type: string
   /** @internal - Type brand for TypeScript inference */
   declare readonly __returnType: T
+  constructor() {
+    markDbInstance(this)
+  }
 }
 
 export class CollectionRef extends BaseExpression {
@@ -244,13 +249,22 @@ export class ConditionalSelect extends BaseExpression {
 }
 
 /** Distinguish compiler expressions from user objects with IR-like fields. */
-export function isExpressionLike(value: unknown): boolean {
+export function isBasicOrAggregateExpression(
+  value: unknown,
+): value is BasicExpression | Aggregate {
+  assertLocalDbInstance(value)
   return (
     value instanceof Aggregate ||
-    value instanceof ConditionalSelect ||
     value instanceof Func ||
     value instanceof PropRef ||
-    value instanceof Value ||
+    value instanceof Value
+  )
+}
+
+export function isExpressionLike(value: unknown): boolean {
+  return (
+    isBasicOrAggregateExpression(value) ||
+    value instanceof ConditionalSelect ||
     value instanceof IncludesSubquery
   )
 }
@@ -288,7 +302,7 @@ export function collectCollectionSources(query: QueryIR): Array<CollectionRef> {
       typeof value === `object` &&
       !Array.isArray(value) &&
       !isExpressionLike(value) &&
-      value.__refProxy !== true
+      !isRefProxy(value)
     ) {
       Object.values(value).forEach(visitSelectValue)
     }

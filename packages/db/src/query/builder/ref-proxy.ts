@@ -1,13 +1,16 @@
-import { Aggregate, Func, PropRef, Value } from '../ir.js'
+import { PropRef, Value, isBasicOrAggregateExpression } from '../ir.js'
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
   MaterializeWrapper,
   ToArrayWrapper,
-} from './functions.js'
+} from './wrappers.js'
+import { isRefProxy, registerRefProxy } from './ref-proxy-identity.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
+
+export { isRefProxy } from './ref-proxy-identity.js'
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -19,8 +22,6 @@ export interface RefProxy<T = any> {
   /** @internal */
   readonly __type: T
 }
-
-const refProxies = new WeakSet<object>()
 
 /**
  * Virtual properties available on all row ref proxies.
@@ -124,7 +125,7 @@ export function createSingleRowRefProxy<
       },
     })
 
-    refProxies.add(proxy)
+    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -198,7 +199,7 @@ export function createRefProxy<T extends Record<string, any>>(
       },
     })
 
-    refProxies.add(proxy)
+    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -252,7 +253,7 @@ export function createRefProxy<T extends Record<string, any>>(
     },
   })
 
-  refProxies.add(rootProxy)
+  registerRefProxy(rootProxy)
   return rootProxy
 }
 
@@ -321,7 +322,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
       },
     })
 
-    refProxies.add(proxy)
+    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -360,7 +361,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
     T & {
       $selected: SingleRowRefProxy<any, string | number, true>
     }
-  refProxies.add(selectedRootProxy)
+  registerRefProxy(selectedRootProxy)
   return selectedRootProxy
 }
 
@@ -398,22 +399,10 @@ export function toExpression(value: any): BasicExpression<any> {
     )
   }
   // Only constructed expressions are IR; user values may have the same fields.
-  if (
-    value instanceof Func ||
-    value instanceof PropRef ||
-    value instanceof Value ||
-    value instanceof Aggregate
-  ) {
+  if (isBasicOrAggregateExpression(value)) {
     return value as BasicExpression
   }
   return new Value(value)
-}
-
-/**
- * Type guard to check if a value is a RefProxy
- */
-export function isRefProxy(value: any): value is RefProxy {
-  return value && typeof value === `object` && refProxies.has(value)
 }
 
 /**

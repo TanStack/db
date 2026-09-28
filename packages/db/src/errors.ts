@@ -46,8 +46,8 @@ export class DuplicateDbInstanceError extends TanStackDBError {
   constructor() {
     super(
       `Multiple instances of @tanstack/db detected!\n\n` +
-        `This causes transaction context to be lost because each instance maintains ` +
-        `its own transaction stack.\n\n` +
+        `A value from one copy cannot be used with another copy because each ` +
+        `has its own IR classes and transaction stack.\n\n` +
         `Common causes:\n` +
         `1. Different versions of @tanstack/db installed\n` +
         `2. Incompatible peer dependency versions in packages\n` +
@@ -59,8 +59,6 @@ export class DuplicateDbInstanceError extends TanStackDBError {
         `   - pnpm: "pnpm.overrides" in package.json\n` +
         `   - yarn: "resolutions" in package.json\n` +
         `3. Clear node_modules and lockfile, then reinstall\n\n` +
-        `To temporarily disable this check (not recommended):\n` +
-        `Set environment variable: TANSTACK_DB_DISABLE_DUP_CHECK=1\n\n` +
         `See: https://tanstack.com/db/latest/docs/troubleshooting#duplicate-instances`,
     )
     this.name = `DuplicateDbInstanceError`

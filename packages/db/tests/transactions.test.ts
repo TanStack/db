@@ -9,6 +9,8 @@ import {
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from '../src/errors'
+import { eq } from '../src/query/builder/functions.js'
+import { buildQuery } from '../src/query/builder/index.js'
 import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
 
@@ -893,16 +895,56 @@ describe(`Transactions`, () => {
   })
 
   describe(`duplicate instance detection`, () => {
-    it(`marks the current runtime in Node as well as browsers`, () => {
-      const marker = Symbol.for(`@tanstack/db/instance-marker`)
-      expect((globalThis as any)[marker]).toBeDefined()
+    it(`allows a second module evaluation until values cross copies`, async () => {
+      vi.resetModules()
+      const foreignIr = await import(`../src/query/ir.js`)
+      expect(new foreignIr.Value(1).value).toBe(1)
     })
 
-    it(`rejects a second module evaluation in the same runtime`, async () => {
+    it(`rejects expressions and references from a second module evaluation`, async () => {
       vi.resetModules()
-      await expect(import(`../src/query/ir.js`)).rejects.toThrow(
+      const foreign = await import(`../src/query/builder/functions.js`)
+      const foreignRefs = await import(`../src/query/builder/ref-proxy.js`)
+      expect(() => eq(`a`, foreign.lower(`A`))).toThrow(
         /Multiple instances of @tanstack\/db detected/,
       )
+      const refs = foreignRefs.createRefProxy<{ item: { id: number } }>([
+        `item`,
+      ])
+      expect(() => eq(refs.item.id, 1)).toThrow(
+        /Multiple instances of @tanstack\/db detected/,
+      )
+    })
+
+    it(`rejects a collection from a second module evaluation as a query source`, async () => {
+      vi.resetModules()
+      const foreign = await import(`../src/collection/index.js`)
+      const collection = foreign.createCollection({
+        id: `foreign-query-source`,
+        getKey: (row: { id: number }) => row.id,
+        startSync: false,
+        sync: { sync: () => {} },
+      })
+      try {
+        expect(() => buildQuery((q) => q.from({ item: collection }))).toThrow(
+          /Multiple instances of @tanstack\/db detected/,
+        )
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`keeps rejecting foreign expressions when the old bypass flag is set`, async () => {
+      vi.stubEnv(`TANSTACK_DB_DISABLE_DUP_CHECK`, `1`)
+      try {
+        vi.resetModules()
+        const foreign = await import(`../src/query/builder/functions.js`)
+        expect(() => eq(`a`, foreign.lower(`A`))).toThrow(
+          /Multiple instances of @tanstack\/db detected/,
+        )
+      } finally {
+        vi.unstubAllEnvs()
+      }
     })
   })
 })
