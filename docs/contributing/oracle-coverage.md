@@ -239,6 +239,18 @@ The post-merge review added three missing domains to existing owners:
   The [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
   preserves the exact RED/GREEN evidence and reviewed commits.
 
+The [queued same-key sync review](oracle-reviews/gap-05-settled-delete-suppression.md)
+pins the public event trace for a failed optimistic insert while another
+transaction keeps its same-key sync write queued. The failure publishes a
+delete; the later sync application publishes an insert. This fixed history does
+not reject removal of the settled-delete filter in
+`recomputeOptimisticState`. The current call graph makes that filter redundant
+for this history: batching stays off while a sibling persists, and the batch
+path marks every queued key as recently synced before its earlier event filter.
+STATE-07/STATE-15 remain a separate code-weight decision. Any new recompute
+entry point or queue mutation between capture and filtering needs a fresh
+reach witness before that production filter is removed.
+
 | Issue obligation | Implemented evidence | Limit |
 | --- | --- | --- |
 | Metamorphic laws | Includes cross-formulation/partition, D2 independent-key commutation, DBSP incremental/full recomputation, pagination provider/UI boundaries, optimistic snapshot stability | Equivalence premises are explicit; not arbitrary query rewrites. |

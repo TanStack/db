@@ -70,6 +70,74 @@ it.each([true, false])(
   },
 )
 
+it(`publishes a failed insert before draining a queued same-key sync write`, async () => {
+  const failed = { id: 2, a: 2, b: 0, c: 0 }
+  const synced = { id: 2, a: 3, b: 0, c: 0 }
+  const steps: Array<OptimisticStep> = [
+    { type: `edit`, key: 1, fields: { a: 1 }, optimistic: false },
+    { type: `edit`, key: 2, fields: { a: 2 }, optimistic: true },
+    {
+      type: `sync`,
+      rows: [synced],
+      truncate: false,
+      immediate: false,
+      copies: 1,
+    },
+    {
+      type: `settle`,
+      slot: 1,
+      success: false,
+      cascade: false,
+      failure: `reject`,
+    },
+    { type: `settle`, slot: 0, success: true, cascade: false },
+  ]
+  const result = await runOptimisticHistory([], steps)
+
+  expect(result).toMatchObject({ edits: 2, failures: 1, queued: 1 })
+  expect(result.eventTrace).toStrictEqual([
+    {
+      step: 1,
+      changes: [
+        {
+          type: `insert`,
+          key: 2,
+          value: { ...failed, $origin: `local`, $synced: false },
+          previousValue: undefined,
+          metadata: undefined,
+        },
+      ],
+    },
+    {
+      step: 3,
+      changes: [
+        {
+          type: `delete`,
+          key: 2,
+          value: { ...failed, $origin: `local`, $synced: false },
+          previousValue: undefined,
+          metadata: undefined,
+        },
+      ],
+    },
+    {
+      step: 4,
+      changes: [
+        {
+          type: `insert`,
+          key: 2,
+          value: { ...synced, $origin: `remote`, $synced: true },
+          previousValue: undefined,
+          metadata: undefined,
+        },
+      ],
+    },
+  ])
+  await expect(
+    runOptimisticHistory([], steps, `missing-delete`),
+  ).rejects.toThrow(/3: .*whole forward publication/)
+})
+
 it.each([
   `wrong-key`,
   `transient-field`,

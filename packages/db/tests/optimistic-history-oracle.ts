@@ -420,6 +420,7 @@ export async function runOptimisticHistory(
     | `backwards-cuts`
     | `previous-value`
     | `update-as-insert`
+    | `missing-delete`
     | `retained-default`,
   options: { insertDefault?: number } = {},
 ) {
@@ -481,6 +482,15 @@ export async function runOptimisticHistory(
     failures: 0,
     snapshotOverrides: 0,
   }
+  const eventTrace: Array<{
+    step: number
+    changes: Array<{
+      key: unknown
+      type: string
+      value: ObservedRow
+      previousValue?: ObservedRow
+    }>
+  }> = []
   return withHistoryCleanup(
     async () => {
       await downstream.preload()
@@ -503,6 +513,7 @@ export async function runOptimisticHistory(
       let injected = false
       let initialPublication = true
       let settling = false
+      let currentStep = -1
       sub = collection.subscribeChanges(
         (batch) => {
           deliveries += batch.length
@@ -518,6 +529,9 @@ export async function runOptimisticHistory(
                 }
               : {}),
           }))
+          if (!initialPublication) {
+            eventTrace.push({ step: currentStep, changes: captured })
+          }
           const record = (entries: typeof captured) => {
             const before = new Map(replica)
             for (const change of entries) {
@@ -565,6 +579,13 @@ export async function runOptimisticHistory(
             injected = true
             record(captured.slice(0, 1))
             record(captured)
+          } else if (
+            !injected &&
+            fault === `missing-delete` &&
+            captured.some((change) => change.type === `delete`)
+          ) {
+            injected = true
+            record(captured.filter((change) => change.type !== `delete`))
           } else if (
             !injected &&
             (fault === `previous-value` || fault === `update-as-insert`) &&
@@ -683,6 +704,7 @@ export async function runOptimisticHistory(
       check(`initial`)
       initialPublication = false
       for (const [position, step] of steps.entries()) {
+        currentStep = position
         settling = step.type === `settle`
         const before = sorted(model.visible().values())
         const deliveredBefore = deliveries
@@ -813,7 +835,7 @@ export async function runOptimisticHistory(
       }
       if (fault)
         expect(injected, `fault reached an actual publication`).toBe(true)
-      return counts
+      return { ...counts, eventTrace }
     },
     () => [
       ...operations.flatMap((op, index) => [
