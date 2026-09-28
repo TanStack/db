@@ -122,10 +122,19 @@ comment and the current API/architecture contract before extending its model.
 The query-identity owner checks inherited Uint8Array and Int16Array subclasses,
 Buffer, and DataView ordering values. It compares compiled predicate results,
 query identities, exact subset demand keys, and structural value hashes.
+For `eq` and `in`, it also checks that indexed bytes and the publicly observed
+length distinguish predicates despite an overridden iterator. Separate views
+with nonreflexive lengths retain separate identities, matching equality's
+same-reference behavior. Recognized Buffer copies from different realms stay
+hashable; implementations with different conversion functions retain distinct
+identities. Foreign realm typed arrays and DataViews with untrusted prototype
+conversion fall back to reference identity in ordering predicates.
 Conversion-overriding views receive runtime reference identity in ordering
 predicates; `getStableValueHash` rejects them. The owner checks custom
 `toString`, `join`, `valueOf`, `Symbol.toPrimitive`, DataView tag behavior,
 and spoofed `buffer`, `byteOffset`, and `byteLength` accessors on views.
+An explicit live-query key can still reject a custom-conversion view contained
+inside the key; that hook compatibility boundary needs a product decision.
 Conversion with mutable external state and byte mutation after demand creation
 still need a history witness in this owner. The Collection index-events test
 checks stable built-in resolver names through `index:added` and

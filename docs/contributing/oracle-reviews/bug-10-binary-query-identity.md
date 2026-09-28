@@ -60,3 +60,70 @@ An independent review caught a bundle cost in the first candidate: eager imports
 Review 5344982200 had one finding: overridable `buffer`, `byteOffset`, and `byteLength` properties could make a typed-array subclass with internal bytes `[9]` hash like a base view with bytes `[1]`. The two operands gave different native and compiled `gt` results. The expanded oracle failed at the structural hash checkpoint on the reviewed head in both fixed-seed and random runs. It also exercises spoofed offsets, lengths, DataView bytes, and Buffer bytes so a partial getter repair remains RED.
 
 The repair captures the built-in byte getters for typed arrays and DataView before user code can override them. The same oracle passes 14 tests after the fix. This rejects the reported collision for static view bytes; held-value byte mutation and conversion based on external mutable state remain outside this owner's current history grammar and stay recorded in the coverage map.
+
+## External review of PR #1927 and follow-up
+
+The external review at `pr-1918-1934-review-summary.md` raised four points about
+this PR. The task-local append-only ledger records the summary prose, each
+finding, and its adjacent independent-review and CodeRabbit items separately.
+
+The reported `eq`/`in` gap was real. On the published head `60bbc0fd`, an own
+`Symbol.iterator` made different indexed bytes produce the same query identity
+and exact demand key. The generated property failed in both fixed-seed and
+seedless campaigns at the identity checkpoint. A changed iterator on identical
+bytes remained an equal control. A spoofed public `byteLength` then exposed a
+second collision, and separate views with `byteLength = NaN` exposed a third:
+compiled equality distinguishes the same reference from a different reference.
+Each witness failed against its preceding implementation and passes after the
+follow-up. The repair reads bytes through captured intrinsic getters and records
+the public equality length, using reference identity for nonreflexive lengths.
+
+The Buffer finding was also real as a hashability failure. The installed
+`buffer@5.7.1` recognizes a Buffer from `buffer@6.0.3`, but the published head
+rejected the latter because its `toString` function is not this realm's Buffer
+method. A controlled Buffer-copy witness was RED at structural hashing. The
+repair accepts a recognized Buffer's own base-prototype conversion. A hostile
+base-prototype conversion then demonstrated that merging distinct methods by
+bytes alone was unsafe; the repaired identity includes the foreign conversion
+function's runtime identity. Copies with identical conversion behavior can
+therefore have different keys. This is conservative and does not promise a
+cross-implementation cache hit.
+
+An independent review found another ordering collision. Foreign realm typed
+array and DataView prototypes can change conversion while the published head
+still trusts their methods as built-ins. A controlled witness showed different
+compiled `gt` results but the same structural hash and demand key. The follow-up
+trusts only captured local built-ins for non-Buffer views. It gives foreign
+ordering views reference identity and rejects them for direct structural
+hashing. The fixed witness passes. This conservative behavior also applies to
+foreign views whose conversion has not changed.
+
+The explicit-key hook warning is narrower than the external review stated.
+`getLiveQueryHash(undefined, ['stable'])` succeeds regardless of a custom view
+in the query, while a custom-conversion view *inside* the explicit key throws
+`UnhashableQueryIRError`. React and Svelte hooks rethrow an unhashable explicit
+key. The existing hook suites assert the same throw for function-valued keys;
+this Buffer/view compatibility decision remains open. A React hook probe could
+not run in this worktree because its testing-library link is absent. The
+coverage map names the boundary rather than presenting it as fixed.
+
+The external review's code-weight concern remains valid. Against this PR's
+merge base, the follow-up has 104 added and 9 deleted production lines across
+five files, net +95. The extra equality and realm checks close witnessed
+identity collisions, but this exceeds the repository's net-neutral starting
+budget. A simplification review found no safe deletion without losing the
+verified distinctions. A later design pass should seek a smaller identity
+abstraction; code weight is not recorded as a correctness failure.
+
+CodeRabbit review 5344982200 targeted `86d36a7e` and reported spoofable view
+byte accessors. Its RED oracle witness is recorded above. The published head
+`60bbc0fd` had already replaced those reads with captured getters, and this
+follow-up retains them. CodeRabbit's suggestion to run its agent review is an
+optional process step, not a product law.
+
+The widened owner covers bounded static-byte `gt`, `eq`, and `in` values,
+compiled predicate results, structural hashes, query identities, and exact
+demand keys at synchronous checkpoints. It kills the original iterator,
+length, Buffer-copy, and foreign-prototype candidates. Mutable byte histories,
+external conversion state, and explicit-key hook behavior remain outside that
+claim. The coverage map assigns those remaining witnesses and decision.

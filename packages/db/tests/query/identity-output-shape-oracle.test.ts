@@ -1,8 +1,10 @@
 import { isDeepStrictEqual } from 'node:util'
+import { runInNewContext } from 'node:vm'
 import { D2, MultiSet, output } from '@tanstack/db-ivm'
 import fc from 'fast-check'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { getLiveQueryHash } from '../../src/live-query-options.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { compileExpression } from '../../src/query/compiler/evaluators.js'
 import {
@@ -340,11 +342,98 @@ describe('query identity agrees with compiled lexical output shape', () => {
  * the demand and query identities distinct. The model uses native relational
  * comparison on finite row values. The grammar varies bytes and tag ownership,
  * then checks explicit conversion overrides and spoofed byte accessors. The
- * driver compiles the predicate and computes identities. It compares those
- * observations after each call.
+ * driver compiles the predicate and computes identities. Equality has a
+ * separate law: equal keys must not combine candidates with different indexed
+ * bytes, even when a custom iterator reports the same values. It compares
+ * those observations after each call.
  * Constructor names do not belong to the denotation.
  */
-describe('binary ordering value identity', () => {
+describe('binary query value identity', () => {
+  it('does not trust conversion methods changed in another realm', () => {
+    const foreignArray = runInNewContext(`
+      Object.getPrototypeOf(Uint8Array.prototype).toString = () => '9'
+      new Uint8Array([1])
+    `) as Uint8Array
+    const foreignDataView = runInNewContext(`
+      Object.prototype.toString = () => '9'
+      new DataView(new Uint8Array([1]).buffer)
+    `) as DataView
+    const field = new PropRef<ArrayBufferView>(['row', 'value'])
+    const predicate = (value: ArrayBufferView) =>
+      new Func<boolean>('gt', [field, new Value(value)])
+
+    for (const [host, foreign, row, hostResult, foreignResult] of [
+      [new Uint8Array([1]), foreignArray, new Uint8Array([5]), true, false],
+      [
+        new DataView(new Uint8Array([1]).buffer),
+        foreignDataView,
+        new DataView(new Uint8Array([1]).buffer),
+        false,
+        true,
+      ],
+    ] as const) {
+      const input = { row: { value: row } }
+      expect(compileExpression(predicate(host))(input)).toBe(hostResult)
+      expect(compileExpression(predicate(foreign))(input)).toBe(foreignResult)
+      expect(() => getStableValueHash(foreign)).toThrow(
+        'view with custom conversion',
+      )
+      expect(getLoadSubsetDemandKey({ where: predicate(foreign) })).not.toBe(
+        getLoadSubsetDemandKey({ where: predicate(host) }),
+      )
+    }
+  })
+
+  it('keeps recognized Buffer copies hashable without merging conversions', () => {
+    const createRealmBuffer = () =>
+      runInNewContext(`
+        class RealmBuffer extends Uint8Array {
+          toString() { return Array.prototype.join.call(this, ',') }
+        }
+        RealmBuffer
+      `) as typeof Uint8Array
+    const firstRealmBuffer = createRealmBuffer()
+    const secondRealmBuffer = createRealmBuffer()
+    const changedRealmBuffer = createRealmBuffer()
+    changedRealmBuffer.prototype.toString = () => '9'
+    const first = new firstRealmBuffer([1])
+    const second = new secondRealmBuffer([1])
+    const changed = new changedRealmBuffer([1])
+    class CustomConversion extends secondRealmBuffer {
+      override toString(): string {
+        return '9'
+      }
+    }
+
+    // Browser Buffer polyfills can recognize Buffers from another realm or
+    // bundled copy while their prototype methods are different objects.
+    vi.stubGlobal('Buffer', {
+      isBuffer: (value: unknown) =>
+        value instanceof firstRealmBuffer ||
+        value instanceof secondRealmBuffer ||
+        value instanceof changedRealmBuffer,
+      prototype: firstRealmBuffer.prototype,
+    })
+    try {
+      expect(new Uint8Array([5]) > first).toBe(new Uint8Array([5]) > second)
+      expect(new Uint8Array([5]) > first).toBe(true)
+      expect(new Uint8Array([5]) > changed).toBe(false)
+      expect(getStableValueHash(second)).not.toBe(getStableValueHash(first))
+      expect(getStableValueHash(changed)).not.toBe(getStableValueHash(first))
+      expect(getLiveQueryHash(undefined, [second])).not.toBe(
+        getLiveQueryHash(undefined, [first]),
+      )
+      expect(getLiveQueryHash(undefined, [second])).toBe(
+        getLiveQueryHash(undefined, [second]),
+      )
+      expect(() => getStableValueHash(new CustomConversion([1]))).toThrow(
+        'view with custom conversion',
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it.each([101610, undefined])(
     'uses built-in element type and bytes for inherited typed-array behavior, seed=%s',
     async (seed) => {
@@ -414,6 +503,84 @@ describe('binary ordering value identity', () => {
                 expect(getStableValueHash(Buffer.from(bytes))).not.toBe(
                   getStableValueHash(base),
                 )
+
+                // Equality reads indexed bytes. Iteration is user-overridable
+                // and must not give unequal predicates the same identity.
+                const equalCandidate = new Uint8Array([...bytes, 1])
+                const differentCandidate = new Uint8Array([...bytes, 9])
+                Object.defineProperty(differentCandidate, Symbol.iterator, {
+                  value: function* () {
+                    yield* equalCandidate
+                  },
+                })
+                const sameCandidate = new Uint8Array(equalCandidate)
+                Object.defineProperty(sameCandidate, Symbol.iterator, {
+                  value: function* () {
+                    yield 9
+                  },
+                })
+                const equalBuffer = Buffer.from(equalCandidate)
+                const differentBuffer = Buffer.from(differentCandidate)
+                Object.defineProperty(differentBuffer, Symbol.iterator, {
+                  value: function* () {
+                    yield* equalCandidate
+                  },
+                })
+                const differentLength = new Uint8Array(equalCandidate)
+                Object.defineProperty(differentLength, 'byteLength', {
+                  value: 0,
+                })
+                const nanLengthA = new Uint8Array(equalCandidate)
+                const nanLengthB = new Uint8Array(equalCandidate)
+                Object.defineProperty(nanLengthA, 'byteLength', { value: NaN })
+                Object.defineProperty(nanLengthB, 'byteLength', { value: NaN })
+                for (const operator of ['eq', 'in'] as const) {
+                  const equalityPredicate = (candidate: Uint8Array) =>
+                    new Func<boolean>(operator, [
+                      field,
+                      new Value(operator === 'in' ? [candidate] : candidate),
+                    ])
+                  const expectedRow = { row: { value: equalCandidate } }
+                  const matches = (candidate: Uint8Array) =>
+                    compileExpression(equalityPredicate(candidate))(expectedRow)
+                  const identity = (candidate: Uint8Array) =>
+                    getQueryIdentity({
+                      from: source,
+                      where: [equalityPredicate(candidate)],
+                    })
+                  const demandKey = (candidate: Uint8Array) =>
+                    getLoadSubsetDemandKey({
+                      where: equalityPredicate(candidate),
+                    })
+                  const baseIdentity = identity(equalCandidate)
+                  const baseDemandKey = demandKey(equalCandidate)
+
+                  expect(matches(equalCandidate)).toBe(true)
+                  expect(matches(sameCandidate)).toBe(true)
+                  expect(matches(equalBuffer)).toBe(true)
+                  expect(matches(differentCandidate)).toBe(false)
+                  expect(matches(differentBuffer)).toBe(false)
+                  expect(matches(differentLength)).toBe(false)
+                  const nanRow = { row: { value: nanLengthA } }
+                  expect(
+                    compileExpression(equalityPredicate(nanLengthA))(nanRow),
+                  ).toBe(true)
+                  expect(
+                    compileExpression(equalityPredicate(nanLengthB))(nanRow),
+                  ).toBe(false)
+                  expect(identity(sameCandidate)).toBe(baseIdentity)
+                  expect(identity(equalBuffer)).toBe(baseIdentity)
+                  expect(identity(differentCandidate)).not.toBe(baseIdentity)
+                  expect(identity(differentBuffer)).not.toBe(baseIdentity)
+                  expect(identity(differentLength)).not.toBe(baseIdentity)
+                  expect(identity(nanLengthA)).not.toBe(identity(nanLengthB))
+                  expect(demandKey(sameCandidate)).toBe(baseDemandKey)
+                  expect(demandKey(equalBuffer)).toBe(baseDemandKey)
+                  expect(demandKey(differentCandidate)).not.toBe(baseDemandKey)
+                  expect(demandKey(differentBuffer)).not.toBe(baseDemandKey)
+                  expect(demandKey(differentLength)).not.toBe(baseDemandKey)
+                  expect(demandKey(nanLengthA)).not.toBe(demandKey(nanLengthB))
+                }
                 return Promise.resolve()
               },
             ),

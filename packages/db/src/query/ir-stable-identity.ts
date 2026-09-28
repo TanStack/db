@@ -43,6 +43,8 @@ type AliasScope = {
 }
 
 const intrinsicTypedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype)
+const intrinsicTypedArrayToString = intrinsicTypedArrayPrototype.toString
+const intrinsicObjectToString = Object.prototype.toString
 const typedArrayTag = Object.getOwnPropertyDescriptor(
   intrinsicTypedArrayPrototype,
   Symbol.toStringTag,
@@ -58,6 +60,16 @@ function captureViewGetters(prototype: object) {
 
 const typedArrayGetters = captureViewGetters(intrinsicTypedArrayPrototype)
 const dataViewGetters = captureViewGetters(DataView.prototype)
+
+function intrinsicViewBytes(
+  value: ArrayBufferView,
+  getters: ReturnType<typeof captureViewGetters>,
+): Array<number> {
+  const buffer = getters.buffer.call(value) as ArrayBufferLike
+  const byteOffset = getters.byteOffset.call(value) as number
+  const byteLength = getters.byteLength.call(value) as number
+  return Array.from(new Uint8Array(buffer, byteOffset, byteLength))
+}
 
 declare const queryIdentityBrand: unique symbol
 declare const demandKeyBrand: unique symbol
@@ -1014,20 +1026,32 @@ function canonicalizeRuntimeValue(
     let prototype: object | null = value
     let rootPrototype: object | undefined
     let typedArrayPrototype: object | undefined
-    // Read the built-in methods from the view's realm, not this module's realm.
+    let bufferPrototype: object | undefined
+    // A recognized Buffer copy has its own base prototype. Other views use
+    // this module's captured built-ins because foreign prototypes can change.
     while ((prototype = Object.getPrototypeOf(prototype)) !== null) {
       rootPrototype = prototype
       if (Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag)?.get) {
         typedArrayPrototype = prototype
       }
+      if (
+        typedArrayPrototype === undefined &&
+        Object.hasOwn(prototype, `toString`)
+      ) {
+        bufferPrototype = prototype
+      }
     }
     const defaultToString =
       tag === undefined
-        ? rootPrototype?.toString
+        ? intrinsicObjectToString
         : isBuffer
-          ? Buffer.prototype.toString
-          : typedArrayPrototype?.toString
+          ? bufferPrototype?.toString
+          : intrinsicTypedArrayToString
     if (
+      (tag === undefined && rootPrototype !== Object.prototype) ||
+      (tag !== undefined &&
+        !isBuffer &&
+        typedArrayPrototype !== intrinsicTypedArrayPrototype) ||
       defaultToString === undefined ||
       value.toString !== defaultToString ||
       value.valueOf !== rootPrototype?.valueOf ||
@@ -1037,20 +1061,19 @@ function canonicalizeRuntimeValue(
           (typedArrayPrototype as Uint8Array | undefined)?.join) ||
       Symbol.toPrimitive in value ||
       (tag === undefined &&
-        Object.prototype.toString.call(value) !== `[object DataView]`)
+        intrinsicObjectToString.call(value) !== `[object DataView]`)
     ) {
       throw new UnhashableQueryIRError(path, `view with custom conversion`)
     }
 
     const getters = tag === undefined ? dataViewGetters : typedArrayGetters
-    const buffer = getters.buffer.call(value) as ArrayBufferLike
-    const byteOffset = getters.byteOffset.call(value) as number
-    const byteLength = getters.byteLength.call(value) as number
-    return [
-      `binary`,
-      isBuffer ? `Buffer` : (tag ?? `DataView`),
-      Array.from(new Uint8Array(buffer, byteOffset, byteLength)),
-    ]
+    // Distinct Buffer implementations can convert the same bytes differently.
+    const kind = isBuffer
+      ? defaultToString === Buffer.prototype.toString
+        ? `Buffer`
+        : [`Buffer`, getRuntimeReferenceIdentity(defaultToString)]
+      : (tag ?? `DataView`)
+    return [`binary`, kind, intrinsicViewBytes(value, getters)]
   }
 
   if (value instanceof Map) {
@@ -1126,7 +1149,16 @@ function canonicalizeEqualityRuntimeValue(
     (typeof Buffer !== `undefined` && value instanceof Buffer) ||
     value instanceof Uint8Array
   if (isUint8Array) {
-    return [`binary`, `Uint8Array`, Array.from(value as Uint8Array)]
+    const view = value as Uint8Array
+    const length = view.byteLength
+    // Equality's reference fast path distinguishes two views with NaN lengths.
+    if (Number.isNaN(length)) return getRuntimeReferenceIdentity(view)
+    return [
+      `binary`,
+      `Uint8Array`,
+      canonicalizeExactOutputRuntimeValue(length, `${path}.byteLength`, seen),
+      intrinsicViewBytes(view, typedArrayGetters),
+    ]
   }
 
   const normalized = normalizeValue(value)
