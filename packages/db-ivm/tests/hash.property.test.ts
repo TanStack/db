@@ -379,13 +379,22 @@ describe(`hash property-based tests`, () => {
       })
       for (const { name, seed } of typeMarkerCampaigns) {
         it(`${carrier} differs from an object with matching entries (${name})`, () => {
-          if (typeMarkerReplayPath !== undefined && typeMarkerReplaySeed === undefined)
+          if (
+            typeMarkerReplayPath !== undefined &&
+            typeMarkerReplaySeed === undefined
+          )
             throw new Error(`TANSTACK_DB_IVM_HASH_TYPE_PATH requires a seed`)
           if (
             typeMarkerReplaySeed !== undefined &&
-            (typeMarkerReplaySeed.trim() === `` || !Number.isSafeInteger(seed))
+            (typeMarkerReplaySeed.trim() === `` ||
+              typeof seed !== `number` ||
+              !Number.isSafeInteger(seed) ||
+              seed < -2147483648 ||
+              seed > 2147483647)
           )
-            throw new Error(`TANSTACK_DB_IVM_HASH_TYPE_SEED must be an integer`)
+            throw new Error(
+              `TANSTACK_DB_IVM_HASH_TYPE_SEED must be a 32-bit integer`,
+            )
           fc.assert(property, {
             numRuns: 100,
             ...(seed === undefined ? {} : { seed }),
