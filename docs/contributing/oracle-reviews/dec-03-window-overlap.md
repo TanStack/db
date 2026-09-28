@@ -83,3 +83,44 @@ second-page success on finite ordered local rows at the stated checkpoints.
 The coverage map retains framework hook scheduling and other acquisition
 paths outside this owner; a reachable counterexample there would require a
 separate witness.
+
+## Follow-up: subscribed source updates under a retained error
+
+Reviewed semantic head: `29d46e184981a2841d60e814904571642c81a021`.
+This section preserves the earlier exact-head decision above. It extends the
+same direct-controller boundary after both overlap settlements, while the
+earlier pagination error remains visible and a controller subscriber is active.
+
+The source-length model now checks a later insertion of the fifth row after a
+four-row overlap and a later removal of the fifth row after a five-row overlap.
+The observer must first publish the changed rows in the live-query Collection.
+At that checkpoint, the public controller snapshot must retain the original
+error and update `hasNextPage` to match the committed two-page prefix and the
+current source extent. Both settlement orders are included, followed by
+explicit recovery: four histories and 16 public checkpoints per receiving
+driver. An unsubscribed controller has no observer-update claim.
+
+On the prior head, insertion produced five published rows and retained the
+error but reported `hasNextPage: false` instead of `true`; removal produced
+four rows and reported `true` instead of `false`. Both were public assertion
+failures. The permanent shared conformance cell failed on the original
+implementation at the first insertion checkpoint. The fix refreshes the
+cached continuation on a ready observer notification while a pagination error
+is visible, without changing the error lifetime. After the fix, targeted
+overlap cells passed in React, Vue, and Svelte; the DB controller suite passed
+75/75, and full receiving suites passed React 36/36, Vue 38/38, and Svelte
+38/38. Changed-file ESLint, Prettier, and `git diff --check` passed.
+
+Two temporary synchronous-success probes also reached literal-`true` page
+success. One held an earlier preload failure until after synchronous page
+commit; that later failure recomputed continuation correctly. The other began
+with a visible error, which cleared before synchronous page commit. Both
+passed and were removed. They support the earlier record's narrow statement
+that the surviving synchronous-assignment mutant does not cause the reported
+retained-error failure; they do not claim complete synchronous-path coverage.
+
+This follow-up supplies ORC-012 evidence for semantic head
+`29d46e184981a2841d60e814904571642c81a021`. It closes the subscribed,
+ready-observer source-update cell for these finite ordered rows and public
+checkpoints. Framework hook overlap scheduling and other acquisition paths
+remain outside the claim, as recorded in the coverage map.
