@@ -3,7 +3,8 @@
 ## Reviewed state and authority
 
 - Starting head: `33a194941c8d51f8f98babb999fef2987dd6ff8b`.
-- Reviewed implementation commit: `1b844588bc18e96a4c18c0de6bb1edadcad85332`.
+- Initial implementation commit: `1b844588bc18e96a4c18c0de6bb1edadcad85332`.
+- Reviewed implementation commit: `ccdeaa5ba61f94e7cf81930987d728769266a1cd`.
 - Owner: `packages/db/tests/paced-mutations-oracle.test.ts`.
 - Public authority: strategy option types, `createPacedMutations` reference, and `docs/guides/mutations.md`.
 
@@ -13,9 +14,10 @@ Queue `maxSize` and omitted leading/trailing defaults await maintainer decisions
 
 ## Verification on the reviewed commit
 
-- The new oracle passed 9 tests. The existing paced-mutation suite passed 13 tests in the same run.
+- The new oracle passed 10 tests. The existing paced-mutation suite passed 13 tests in the same run.
 - The DB package typecheck, changed-file ESLint, Prettier, and `git diff --check` passed.
 - The three hostile strategy controls each failed the exact execution-trace checker at its intended cut. They are permanent calibration tests.
+- A hostile cleanup control threw after an assertion failure. The result retained the assertion as `cause` and the cleanup error in `AggregateError.errors`. Collection cleanup still ran.
 - The capacity and non-leading throttle probes failed on the unchanged baseline. They remain in the task ledger and coverage map as open decisions. The temporary tests are not in this commit.
 
 ## ORC-001 through ORC-011
@@ -31,10 +33,10 @@ Queue `maxSize` and omitted leading/trailing defaults await maintainer decisions
 | ORC-007 fixed/random campaigns | Not triggered: this owner is bounded finite enumeration, not an important generated property. |
 | ORC-008 model minimality | Pass. The queue's ready-list order distinguishes later extraction; due time distinguishes a call before/after eligibility. Debounce pending IDs and quiet-period due distinguish which transaction persists and when. Throttle pending IDs and next edge distinguish merged trailing output from a fresh leading call. |
 | ORC-009 vocabulary mapping | Pass. The opening maps model pending IDs, ready list, and due appointment to production concepts without importing their implementation. It uses the glossary terms optimistic transaction and settlement. |
-| ORC-010 failure fidelity | Partial. The driver records the complete trace before cleanup. Finally blocks stop strategy timers and clean the Collection, even if strategy cleanup throws. No shrinking or external capture occurs. A cleanup throw can still supersede a pending comparison, so an oracle cleanup-failure control remains open. |
+| ORC-010 failure fidelity | Pass. The driver compares the complete trace before cleanup. `withCleanup` stops strategy timers and cleans the Collection. When comparison and cleanup both fail, it retains the comparison as the cause and reports cleanup errors separately. A hostile cleanup test checks both errors and Collection cleanup. No shrinking or external capture occurs. |
 | ORC-011 second formulation | Not triggered for the documented finite schedule laws: the model's appointment/list formulation differs from pacer-lite's timers and promise chain, and no named shared semantic fault has a meaningful second formulation. Capacity/defaults remain open. |
 
-ORC-012 is this versioned record, tied to the reviewed implementation commit and the coverage-map owner. The sampled finite histories do not prove every legal schedule. The partial ORC-010 cleanup diagnostic remains open in this owner.
+ORC-012 is this versioned record, tied to the reviewed implementation commit and the coverage-map owner. The sampled finite histories do not prove every legal schedule.
 
 ## Review and loss audit
 
