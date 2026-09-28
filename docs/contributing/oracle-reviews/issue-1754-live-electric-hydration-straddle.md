@@ -63,3 +63,34 @@ ORC-012 is satisfied by this versioned record and the exact reviewed oracle
 commit. The bounded host witness does not by itself close every environment or
 history in #1754. The coverage map assigns adjacent settlement histories to
 the core persistence tests and names the remaining live-host limits.
+
+## Fixture failure-fidelity follow-up
+
+- Follow-up code commit: `7c149f25efb825d32e4ef65c42a3f1c458640724`.
+- The accepted review findings were diagnostic, not production-code defects.
+  The parked source commit now records the first failure and rethrows its
+  applied receipt. A terminal probe failure stops the row poll immediately.
+  Empty error messages receive a nonempty fallback, and page errors remain
+  available to diagnostics after probe startup.
+- Before the change, a controlled probe of the exact fixture interceptor made
+  `params.commit` throw and reject after release. Both receipts rejected, but
+  the probe still reported `phase: ready` with no failure cause. After the
+  change, both receipts still reject while the probe reports `phase: failed`
+  and the original cause. An empty `Error` retains its name. The same probe
+  showed a late page error missing from diagnostics before the change and
+  present afterward.
+- Three focused Playwright checks cover empty failure messages, immediate
+  reporting of a terminal commit failure, and page errors after startup. The
+  terminal-failure check observes one failed row read and one fresh diagnostic
+  read, rather than repeated row polling. The live Electric/OPFS straddle
+  history passed two focused repeats; the full live suite passed 8 of 8 tests.
+  Package TypeScript, changed-file ESLint, Prettier, and `git diff --check`
+  passed.
+- No exactly-one row-bearing commit assertion was added. A second eligible
+  commit can bypass the fixture's park, but no legal Electric trace has shown
+  the exact old/new row assertions passing while the target update bypasses
+  the intended straddle. A no-write commit is deliberately excluded. The
+  per-poll resume snapshot remains unchanged: it is one full-row read per
+  observation, but the one-row fixture has no demonstrated slow-host failure.
+  These two questions remain limits of this fixed history, not evidence of
+  product correctness bugs.
