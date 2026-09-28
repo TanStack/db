@@ -295,7 +295,7 @@ async function runHistory(
     number,
     LocalOnlyCollectionUtils
   >(
-    localOnlyCollectionOptions({
+    localOnlyCollectionOptions<TestItem, number>({
       id,
       getKey: (item: TestItem) => item.id,
       ...(initialRows.length > 0 ? { initialData: initialRows } : {}),
