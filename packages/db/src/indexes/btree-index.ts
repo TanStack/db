@@ -44,6 +44,8 @@ type OrderedBucket<TKey> = {
 export class BTreeIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
+  static readonly resolverMetadataName = `BTreeIndex`
+
   public readonly supportedOperations = new Set<IndexOperation>([
     `eq`,
     `gt`,

@@ -126,8 +126,11 @@ Conversion-overriding views receive runtime reference identity in ordering
 predicates; `getStableValueHash` rejects them. The owner checks custom
 `toString`, `join`, `valueOf`, `Symbol.toPrimitive`, and DataView tag behavior.
 Conversion with mutable external state and byte mutation after demand creation
-still need a history witness in this owner. GAP-08 owns the general minified
-public-API CI lane, including index resolver metadata.
+still need a history witness in this owner. The Collection index-events test
+checks stable built-in resolver names through `index:added` and
+`getIndexMetadata()` while constructor names change. Custom resolver names remain
+diagnostic and may change with bundling. GAP-08 owns the general minified
+public-API CI lane; BUG-10's review record has the focused resolver witness.
 
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work

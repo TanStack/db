@@ -31,9 +31,15 @@ function compareStringsCodePoint(left: string, right: string): number {
 function resolveResolverMetadata<TKey extends string | number>(
   resolver: IndexConstructor<TKey>,
 ): CollectionIndexResolverMetadata {
+  // An own tag keeps subclasses' constructor names as diagnostic metadata.
+  const stableName: unknown = Object.getOwnPropertyDescriptor(
+    resolver,
+    `resolverMetadataName`,
+  )?.value
+  const name = typeof stableName === `string` ? stableName : resolver.name
   return {
     kind: `constructor`,
-    ...(resolver.name ? { name: resolver.name } : {}),
+    ...(name ? { name } : {}),
   }
 }
 

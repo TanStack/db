@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { EventEmitter } from '../src/event-emitter.js'
+import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import type { Collection } from '../src/collection/index.js'
 
@@ -161,6 +162,45 @@ describe(`Collection Events System`, () => {
   })
 
   describe(`Index Lifecycle Events`, () => {
+    it(`keeps built-in resolver names stable when constructor names change`, () => {
+      class CustomBasicIndex extends BasicIndex {}
+      const basicName = Object.getOwnPropertyDescriptor(BasicIndex, `name`)!
+      const btreeName = Object.getOwnPropertyDescriptor(BTreeIndex, `name`)!
+      const added: Array<string | undefined> = []
+      collection.on(`index:added`, (event) => {
+        added.push(event.index.resolver.name)
+      })
+
+      try {
+        Object.defineProperty(BasicIndex, `name`, {
+          value: `a`,
+          configurable: true,
+        })
+        Object.defineProperty(BTreeIndex, `name`, {
+          value: `b`,
+          configurable: true,
+        })
+
+        collection.createIndex((row: any) => row.id, {
+          indexType: BasicIndex,
+        })
+        collection.createIndex((row: any) => row.id, {
+          indexType: BTreeIndex,
+        })
+        collection.createIndex((row: any) => row.id, {
+          indexType: CustomBasicIndex,
+        })
+
+        expect(added).toEqual([`BasicIndex`, `BTreeIndex`, `CustomBasicIndex`])
+        expect(
+          collection.getIndexMetadata().map(({ resolver }) => resolver.name),
+        ).toEqual(added)
+      } finally {
+        Object.defineProperty(BasicIndex, `name`, basicName)
+        Object.defineProperty(BTreeIndex, `name`, btreeName)
+      }
+    })
+
     it(`should emit index:added with stable serializable metadata`, () => {
       const indexAddedListener = vi.fn()
       collection.on(`index:added`, indexAddedListener)

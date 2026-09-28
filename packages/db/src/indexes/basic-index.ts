@@ -45,6 +45,8 @@ export interface BasicIndexOptions {
 export class BasicIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
+  static readonly resolverMetadataName = `BasicIndex`
+
   public readonly supportedOperations = new Set<IndexOperation>([
     `eq`,
     `gt`,
