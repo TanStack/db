@@ -42,10 +42,22 @@ type AliasScope = {
   parent: AliasScope | undefined
 }
 
+const intrinsicTypedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype)
 const typedArrayTag = Object.getOwnPropertyDescriptor(
-  Object.getPrototypeOf(Uint8Array.prototype),
+  intrinsicTypedArrayPrototype,
   Symbol.toStringTag,
 )!.get!
+
+function captureViewGetters(prototype: object) {
+  return {
+    buffer: Object.getOwnPropertyDescriptor(prototype, `buffer`)!.get!,
+    byteOffset: Object.getOwnPropertyDescriptor(prototype, `byteOffset`)!.get!,
+    byteLength: Object.getOwnPropertyDescriptor(prototype, `byteLength`)!.get!,
+  }
+}
+
+const typedArrayGetters = captureViewGetters(intrinsicTypedArrayPrototype)
+const dataViewGetters = captureViewGetters(DataView.prototype)
 
 declare const queryIdentityBrand: unique symbol
 declare const demandKeyBrand: unique symbol
@@ -1030,12 +1042,14 @@ function canonicalizeRuntimeValue(
       throw new UnhashableQueryIRError(path, `view with custom conversion`)
     }
 
+    const getters = tag === undefined ? dataViewGetters : typedArrayGetters
+    const buffer = getters.buffer.call(value) as ArrayBufferLike
+    const byteOffset = getters.byteOffset.call(value) as number
+    const byteLength = getters.byteLength.call(value) as number
     return [
       `binary`,
       isBuffer ? `Buffer` : (tag ?? `DataView`),
-      Array.from(
-        new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
-      ),
+      Array.from(new Uint8Array(buffer, byteOffset, byteLength)),
     ]
   }
 

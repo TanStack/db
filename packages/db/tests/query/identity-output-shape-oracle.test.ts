@@ -339,8 +339,9 @@ describe('query identity agrees with compiled lexical output shape', () => {
  * same ordering operand. A changed conversion can change `gt` and must keep
  * the demand and query identities distinct. The model uses native relational
  * comparison on finite row values. The grammar varies bytes and tag ownership,
- * then checks explicit conversion overrides. The driver compiles the predicate
- * and computes identities. It compares those observations after each call.
+ * then checks explicit conversion overrides and spoofed byte accessors. The
+ * driver compiles the predicate and computes identities. It compares those
+ * observations after each call.
  * Constructor names do not belong to the denotation.
  */
 describe('binary ordering value identity', () => {
@@ -483,6 +484,81 @@ describe('binary ordering value identity', () => {
             expect(
               getLoadSubsetDemandKey({ where: predicate(altered) }),
             ).not.toBe(getLoadSubsetDemandKey({ where: predicate(base) }))
+          }
+
+          class SpoofedBufferUint8Array extends Uint8Array {
+            constructor() {
+              super([9])
+              Object.defineProperty(this, 'buffer', {
+                value: new Uint8Array([1]).buffer,
+              })
+            }
+          }
+          const spoofedBuffer = new SpoofedBufferUint8Array()
+          const spoofedOffset = new Uint8Array(
+            new Uint8Array([9, 1]).buffer,
+            0,
+            1,
+          )
+          Object.defineProperty(spoofedOffset, 'byteOffset', { value: 1 })
+          const spoofedLength = new Uint8Array([1, 9])
+          Object.defineProperty(spoofedLength, 'byteLength', { value: 1 })
+          const byteBase = new Uint8Array([1])
+          const byteRow = new Uint8Array([1, 5])
+          for (const spoofed of [spoofedBuffer, spoofedOffset, spoofedLength]) {
+            expect(byteRow > byteBase).toBe(true)
+            expect(byteRow > spoofed).toBe(false)
+            expect(
+              compileExpression(predicate(spoofed))({
+                row: { value: byteRow },
+              }),
+            ).toBe(false)
+            expect(getStableValueHash(spoofed)).not.toBe(
+              getStableValueHash(byteBase),
+            )
+            expect(getQueryIdentity(query(spoofed))).not.toBe(
+              getQueryIdentity(query(byteBase)),
+            )
+            expect(
+              getLoadSubsetDemandKey({ where: predicate(spoofed) }),
+            ).not.toBe(getLoadSubsetDemandKey({ where: predicate(byteBase) }))
+          }
+
+          const nodeBuffer = Buffer.alloc(1, 9)
+          Object.defineProperty(nodeBuffer, 'buffer', {
+            value: Buffer.alloc(1, 1).buffer,
+          })
+          expect(getStableValueHash(nodeBuffer)).not.toBe(
+            getStableValueHash(Buffer.alloc(1, 1)),
+          )
+
+          const spoofedDataView = new DataView(new Uint8Array([9]).buffer)
+          Object.defineProperty(spoofedDataView, 'buffer', {
+            value: new Uint8Array([1]).buffer,
+          })
+          const spoofedDataViewOffset = new DataView(
+            new Uint8Array([9, 1]).buffer,
+            0,
+            1,
+          )
+          Object.defineProperty(spoofedDataViewOffset, 'byteOffset', {
+            value: 1,
+          })
+          const spoofedDataViewLength = new DataView(
+            new Uint8Array([1, 9]).buffer,
+          )
+          Object.defineProperty(spoofedDataViewLength, 'byteLength', {
+            value: 1,
+          })
+          const dataViewBase = new DataView(new Uint8Array([1]).buffer)
+          for (const spoofed of [
+            spoofedDataView,
+            spoofedDataViewOffset,
+            spoofedDataViewLength,
+          ]) {
+            expect(getStableValueHash(spoofed)).not.toBe(
+              getStableValueHash(dataViewBase),
+            )
           }
 
           const plainDataView = new DataView(data)

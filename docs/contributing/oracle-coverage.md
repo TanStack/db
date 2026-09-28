@@ -124,7 +124,8 @@ Buffer, and DataView ordering values. It compares compiled predicate results,
 query identities, exact subset demand keys, and structural value hashes.
 Conversion-overriding views receive runtime reference identity in ordering
 predicates; `getStableValueHash` rejects them. The owner checks custom
-`toString`, `join`, `valueOf`, `Symbol.toPrimitive`, and DataView tag behavior.
+`toString`, `join`, `valueOf`, `Symbol.toPrimitive`, DataView tag behavior,
+and spoofed `buffer`, `byteOffset`, and `byteLength` accessors on views.
 Conversion with mutable external state and byte mutation after demand creation
 still need a history witness in this owner. The Collection index-events test
 checks stable built-in resolver names through `index:added` and

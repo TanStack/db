@@ -54,3 +54,9 @@ A focused Node 20 esbuild bundle exercises the public Collection API with minifi
 The package's Vite `build:minified` output supplies a second production-build witness. Its exported constructors have runtime names `m` and `l`, while public `index:added` events and `getIndexMetadata()` snapshots both report `BasicIndex` and `BTreeIndex`.
 
 An independent review caught a bundle cost in the first candidate: eager imports of both built-in classes made a minified `createCollection`-only bundle grow from 129,070 to 145,512 bytes. The final implementation stores an own static resolver metadata name on each built-in and reads that property through the supplied constructor. The same bundle is 129,161 bytes, a 91-byte increase over the reviewed head, and retains neither built-in index module. The subclass test rejects an inherited stable name for custom resolvers.
+
+## CodeRabbit review at `86d36a7e`
+
+Review 5344982200 had one finding: overridable `buffer`, `byteOffset`, and `byteLength` properties could make a typed-array subclass with internal bytes `[9]` hash like a base view with bytes `[1]`. The two operands gave different native and compiled `gt` results. The expanded oracle failed at the structural hash checkpoint on the reviewed head in both fixed-seed and random runs. It also exercises spoofed offsets, lengths, DataView bytes, and Buffer bytes so a partial getter repair remains RED.
+
+The repair captures the built-in byte getters for typed arrays and DataView before user code can override them. The same oracle passes 14 tests after the fix. This rejects the reported collision for static view bytes; held-value byte mutation and conversion based on external mutable state remain outside this owner's current history grammar and stay recorded in the coverage map.
