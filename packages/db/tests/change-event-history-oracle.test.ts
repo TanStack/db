@@ -32,8 +32,9 @@ import type { ChangeMessage } from '../src/types'
  * sequentially. After optimistic-transaction persistence, the public rows
  * and a change-message mirror must equal the reference rows. An eager-index
  * lane additionally builds an index before the history and compares both its
- * equality buckets after each settled prefix and fresh indexed live queries
- * at the final checkpoint against the same Map model. The indexed field stays
+ * equality buckets after each settled prefix and each synchronous operation
+ * in the batched lane, plus fresh indexed live queries at the final checkpoint
+ * against the same Map model. The indexed field stays
  * stable when a key is reused. Sequential histories check every settled prefix.
  * Every delivered batch records
  * the public rows visible during its callback and the mirror after applying
@@ -357,9 +358,19 @@ async function runHistory(
         : collection.subscribeChanges(onChanges)
 
     if (mode === `batched`) {
-      await Promise.all(
-        sequence.map((op) => applyOp(collection, op)).map(settle),
-      )
+      const transactions = sequence.map((op, operationIndex) => {
+        const transaction = applyOp(collection, op)
+        if (index) {
+          const expected = expectedRowsAfter(
+            initialKeys,
+            sequence.slice(0, operationIndex + 1),
+          )
+          expect(publicRows(collection)).toEqual(mirrorRows(expected))
+          assertIndexAgreement(index, expected)
+        }
+        return transaction
+      })
+      await Promise.all(transactions.map(settle))
       const expected = expectedRowsAfter(initialKeys, sequence)
       assertFinalAgreement(collection, mirror, expected)
       if (index) assertIndexAgreement(index, expected)
