@@ -1,6 +1,7 @@
 # Queued same-key sync and settled-delete suppression
 
 Reviewed production head: `33a194941c8d51f8f98babb999fef2987dd6ff8b`.
+Reviewed executable oracle head: `e2517f15d96252e0382a3ba79cc832c5332b4bb8b`.
 Source finding: GAP-05 in the local code-weight audit, lines 497-511.
 
 ## Contract and witness
@@ -69,6 +70,22 @@ settlements, and source batches. Neither this test nor mutant survival proves
 equivalence under arbitrary future reentry or a changed recompute call graph.
 The coverage map assigns that remaining reach question to this owner before
 STATE-07/STATE-15 changes production.
+
+The exact `eventTrace` assertion requires an own `metadata` property whose
+value is `undefined`. `ChangeMessage.metadata` is optional, so omitting that
+property is allowed by the public type. A temporary trace-only normalization
+that omitted only undefined metadata left the production callback and the
+shared driver's checks intact, but failed the strict trace assertion. This is
+a test-shape limit, not evidence of a wrong public publication. `$origin` and
+`$synced` remain useful assertions: they are documented public virtual row
+properties, not internal markers.
+
+The shared history driver appends to `eventTrace` for every noninitial callback
+on every `runOptimisticHistory` invocation. Only this fixed history asserts
+the returned trace. The extra work and storage grow with callback count; no
+product effect or work threshold was measured. Any later harness cleanup must
+retain the ordered insert/delete/insert observation and the missing-delete
+fault's failed-settlement checkpoint.
 
 ## Oracle guide audit
 
