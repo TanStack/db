@@ -80,3 +80,36 @@ are fixed now. The missing lifecycle transition is covered by the bounded
 grammar. The proposed one-record shape was useful but needed an identity check
 to isolate old handles. No finding is refuted or silently deferred. The
 compiled includes witness is an explicit remaining coverage item.
+
+## Follow-up review: subscriber change payloads
+
+- Reviewed executable head: `126ee08789d1146dcb1db3b173c66a39e8933701`.
+- The review record follows that immutable commit. This follow-up changes the
+  oracle only; the Collection implementation and 32-history grammar are the
+  same as in the first review.
+
+The [Collection API](../../reference/interfaces/Collection.md) says that
+`_deferPublication()` delays subscriber events until a coherent commit ends,
+`cleanup()` clears the Collection and permits a later sync run, and
+`subscribeChanges()` delivers change messages. The [glossary](../glossary.md)
+defines cleanup as the end of a sync run. This PR makes one explicit design
+decision at their boundary: a deferral handle belongs to the sync run in which
+it opened. Cleanup retires that handle's authority over later publications.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass with the API, glossary, and design decision above. The direct Collection path and finite-history limits remain as stated above. |
+| ORC-002 independent judgment | Pass. The reference still selects only post-restart fixture writes and the current handle's close action. It now describes each expected insert's key and row value. |
+| ORC-003 distinct responsibilities | Pass. The existing opening, shared grammar, real Collection driver, and subscriber comparison remain visible. |
+| ORC-004 grammar controls | Pass. The same 32 histories, ablations, range, and exclusions apply. |
+| ORC-005 path and observation | Pass. The callback recorder now preserves each change's type, key, row value, and prior value. It keeps callback boundaries and excludes virtual fields from this bounded comparison. |
+| ORC-006 checker calibration | Pass. A temporary mutant changed deferred callback row values to `-1`. Before this follow-up, all 32 histories survived. With the stronger recorder, 16 histories failed at the new-handle subscriber assertion. The original base and reset-only controls remain rejected. |
+| ORC-007 campaigns and replay | Not applicable to the bounded enumeration, as above. |
+| ORC-008 model minimality | Pass. The reference remains a stateless projection of fixture writes and the current close action. |
+| ORC-009 vocabulary | Pass. The command-to-production mapping above remains unchanged. |
+| ORC-010 failure fidelity | Pass. The driver still preserves the primary assertion and secondary cleanup errors separately. |
+| ORC-011 second formulation | Not triggered. No new shared-fault hypothesis arose from the payload observation. |
+
+The focused publication and lifecycle suites passed 334 tests with no Vitest
+type errors. Changed-file ESLint, Prettier, and `git diff --check` passed. The
+compiled includes witness remains open with the same coverage-map owner.
