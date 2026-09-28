@@ -16,5 +16,10 @@ export interface TemporalLike {
 
 export function isTemporal(input: object): input is TemporalLike {
   const tag = (input as Record<symbol, unknown>)[Symbol.toStringTag]
-  return typeof tag === `string` && temporalTypes.has(tag)
+  // An own tag on a plain object does not make it a Temporal value.
+  return (
+    typeof tag === `string` &&
+    temporalTypes.has(tag) &&
+    Object.getPrototypeOf(input)?.[Symbol.toStringTag] === tag
+  )
 }

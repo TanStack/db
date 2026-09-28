@@ -121,13 +121,19 @@ comment and the current API/architecture contract before extending its model.
 
 The [Temporal group-key oracle](../../packages/db-ivm/tests/temporal-group-key-oracle.test.ts)
 owns the db-ivm `groupBy` value boundary for the eight Temporal kinds recognized
-by structural hashing. It compares public groups with independent kind-and-value
-counts after one input batch, including distinct and matching fresh values. Nested
+by structural hashing. It compares public group counts with fixture-defined
+identity classes after one input batch, including distinct and matching fresh
+values and a plain object with its own spoofed Temporal tag. Nested
 serialization controls cover records, arrays, Maps, and Sets. Incremental
 retractions and unsupported symbols, cycles, and mutable RegExp state are outside
 this owner's bounded domain. The owner uses db-ivm's established kind-and-string
 Temporal key domain. Whether native `.equals()` aliases, such as ZonedDateTime
-`[UTC]` and `[Etc/UTC]`, should coalesce needs a separate contract decision.
+`[UTC]` and `[Etc/UTC]`, or Durations such as `PT1H` and `PT60M` that compare
+equal, should coalesce needs a separate contract decision.
+The structural Temporal detector still trusts a custom prototype that advertises
+a Temporal tag. Closing that separate spoofing class requires a brand policy
+that works for native Temporal and supported polyfills, plus a `groupBy` witness
+with a counterfeit prototype at this oracle owner.
 
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work

@@ -15,7 +15,7 @@ import {
  * distinct groups; fresh keys with the same kind and representation coalesce.
  * The public groupBy key is a record, so each Temporal value is nested in it.
  *
- * The model below counts independently by Temporal kind and value. The bounded
+ * The model below counts fixture-defined identity classes. The bounded
  * grammar crosses all Temporal kinds recognized by structural hashing with a
  * different value and a matching fresh value. One initial batch reaches the
  * public groupBy operator; its output is checked after graph.run(). This owner
@@ -66,25 +66,19 @@ const temporalCases = [
   },
 ] as const
 
-function valueIdentity(value: object): string {
-  return `${Object.prototype.toString.call(value)}:${value.toString()}`
-}
-
-function expectedGroups(rows: ReadonlyArray<{ date: object }>) {
+function expectedGroupCounts(classes: ReadonlyArray<string>): Array<number> {
   const counts = new Map<string, number>()
-  for (const { date } of rows) {
-    const identity = valueIdentity(date)
-    counts.set(identity, (counts.get(identity) ?? 0) + 1)
+  for (const group of classes) {
+    counts.set(group, (counts.get(group) ?? 0) + 1)
   }
-  return [...counts].sort(([left], [right]) => left.localeCompare(right))
+  return [...counts.values()].sort((left, right) => left - right)
 }
 
-function observedGroups(rows: Array<{ date: object }>) {
+function observedGroupCounts(rows: Array<{ date: object }>): Array<number> {
   const graph = new D2()
   const input = graph.newInput<{ date: object }>()
   const observed: Array<{
     key: string
-    identity: string
     count: number
     weight: number
   }> = []
@@ -96,7 +90,6 @@ function observedGroups(rows: Array<{ date: object }>) {
       for (const [[key, group], weight] of message.getInner()) {
         observed.push({
           key,
-          identity: valueIdentity(group.date),
           count: group.count,
           weight,
         })
@@ -108,9 +101,7 @@ function observedGroups(rows: Array<{ date: object }>) {
   graph.run()
   expect(observed.every(({ weight }) => weight === 1)).toBe(true)
   expect(new Set(observed.map(({ key }) => key)).size).toBe(observed.length)
-  return observed
-    .map(({ identity, count }) => [identity, count] as const)
-    .sort(([left], [right]) => left.localeCompare(right))
+  return observed.map(({ count }) => count).sort((left, right) => left - right)
 }
 
 describe('Temporal group keys', () => {
@@ -118,7 +109,9 @@ describe('Temporal group keys', () => {
     '$name keeps distinct values in distinct groups',
     ({ first, second }) => {
       const rows = [{ date: first() }, { date: second() }]
-      expect(observedGroups(rows)).toEqual(expectedGroups(rows))
+      expect(observedGroupCounts(rows)).toEqual(
+        expectedGroupCounts(['first', 'second']),
+      )
       expect(serializeValue(rows[0]!.date)).not.toBe(
         serializeValue(rows[1]!.date),
       )
@@ -130,7 +123,9 @@ describe('Temporal group keys', () => {
     ({ first }) => {
       const rows = [{ date: first() }, { date: first() }]
       expect(serializeValue(rows[0]!.date)).toBe(serializeValue(rows[1]!.date))
-      expect(observedGroups(rows)).toEqual(expectedGroups(rows))
+      expect(observedGroupCounts(rows)).toEqual(
+        expectedGroupCounts(['first', 'first']),
+      )
     },
   )
 
@@ -148,6 +143,38 @@ describe('Temporal group keys', () => {
     )
     expect(serializeValue(new Set([date]))).not.toBe(
       serializeValue(new Set([anotherDate])),
+    )
+  })
+
+  it('keeps a plain object with a Temporal tag distinct from a Temporal value', () => {
+    const date = Temporal.PlainDate.from('2024-01-15')
+    const taggedObject = {
+      [Symbol.toStringTag]: 'Temporal.PlainDate',
+      extra: 1,
+    }
+    Object.defineProperty(taggedObject, 'toString', {
+      value: () => '2024-01-15',
+    })
+    expect(observedGroupCounts([{ date }, { date: taggedObject }])).toEqual(
+      expectedGroupCounts(['Temporal', 'plain object']),
+    )
+    expect(serializeValue({ date })).not.toBe(
+      serializeValue({ date: taggedObject }),
+    )
+  })
+
+  it('still groups a Temporal value with an own matching tag', () => {
+    const date = Temporal.PlainDate.from('2024-01-15')
+    const matchingDate = Temporal.PlainDate.from('2024-01-15')
+    Object.defineProperty(matchingDate, Symbol.toStringTag, {
+      value: 'Temporal.PlainDate',
+    })
+
+    expect(observedGroupCounts([{ date }, { date: matchingDate }])).toEqual(
+      expectedGroupCounts(['same date', 'same date']),
+    )
+    expect(serializeValue({ date })).toBe(
+      serializeValue({ date: matchingDate }),
     )
   })
 })
