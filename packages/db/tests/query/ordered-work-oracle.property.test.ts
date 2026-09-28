@@ -1851,26 +1851,31 @@ describe(`ordered source work oracle`, () => {
         events.push(...batch.map((event) => event.type))
       },
     })
-    try {
-      await vi.waitFor(() => expect(childLoads).toBeGreaterThan(0))
-      await flushPromises()
-      expect(events).toEqual([])
-      childGate.resolve()
-      await flushPromises()
-      expect(events).toEqual([])
+    await withHistoryCleanup(
+      async () => {
+        await vi.waitFor(() => expect(childLoads).toBeGreaterThan(0))
+        await flushPromises()
+        expect(events).toEqual([])
+        childGate.resolve()
+        await flushPromises()
+        expect(events).toEqual([])
 
-      rootSync.begin({ immediate: true })
-      rootSync.write({
-        type: `update`,
-        value: { ...initial, label: `later` },
-      })
-      const receipt = rootSync.commit()
-      if (receipt !== true) await receipt
-      await vi.waitFor(() => expect(events).toContain(`update`))
-    } finally {
-      childGate.resolve()
-      await Promise.all([effect.dispose(), root.cleanup(), child.cleanup()])
-    }
+        rootSync.begin({ immediate: true })
+        rootSync.write({
+          type: `update`,
+          value: { ...initial, label: `later` },
+        })
+        const receipt = rootSync.commit()
+        if (receipt !== true) await receipt
+        await vi.waitFor(() => expect(events).toContain(`update`))
+      },
+      () => [
+        () => childGate.resolve(),
+        () => effect.dispose(),
+        () => root.cleanup(),
+        () => child.cleanup(),
+      ],
+    )
   })
 
   it(`avoids an extra joined-filter graph turn when the root becomes ready`, async () => {
@@ -1911,23 +1916,29 @@ describe(`ordered source work oracle`, () => {
           .limit(0)
           .select(({ row }) => ({ id: row.id })),
     })
-    try {
-      const builder = getCollectionBuilder(live)!
-      expect(
-        Object.values(builder.optimizableOrderByCollections).some(
-          (info) => info.joinedFilterSourceId !== undefined,
-        ),
-      ).toBe(true)
-      const scheduled = vi.spyOn(builder, `scheduleGraphRun`)
-      rootSync.markReady()
-      // Root readiness already schedules its ordinary graph turn.
-      expect(scheduled).toHaveBeenCalledTimes(1)
-      joinedSync.markReady()
-      // Joined readiness also rechecks the joined-filter demand gate.
-      expect(scheduled).toHaveBeenCalledTimes(3)
-    } finally {
-      await Promise.all([live.cleanup(), root.cleanup(), joined.cleanup()])
-    }
+    await withHistoryCleanup(
+      () => {
+        const builder = getCollectionBuilder(live)!
+        expect(
+          Object.values(builder.optimizableOrderByCollections).some(
+            (info) => info.joinedFilterSourceId !== undefined,
+          ),
+        ).toBe(true)
+        const scheduled = vi.spyOn(builder, `scheduleGraphRun`)
+        rootSync.markReady()
+        // Root readiness already schedules its ordinary graph turn.
+        expect(scheduled).toHaveBeenCalledTimes(1)
+        joinedSync.markReady()
+        // Joined readiness also rechecks the joined-filter demand gate.
+        expect(scheduled).toHaveBeenCalledTimes(3)
+        return Promise.resolve()
+      },
+      () => [
+        () => live.cleanup(),
+        () => root.cleanup(),
+        () => joined.cleanup(),
+      ],
+    )
   })
 
   it(`restarts bounded repair when another order mutation arrives during its tie request`, async () => {
