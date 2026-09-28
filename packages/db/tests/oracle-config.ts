@@ -38,6 +38,7 @@ const staticOracleProperties = [
   `collection-state.retention`,
   `collection-state.queued-update-dependency`,
   `collection-state.change-event-history`,
+  `collection-state.eager-index-history`,
   `collection-state.optimistic-history`,
   `collection-state.truncate-capture-ownership`,
   `collection-state.mixed-transaction`,

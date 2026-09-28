@@ -1,10 +1,18 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
-import { createCollection } from '../src/index'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  BTreeIndex,
+  BasicIndex,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
+import { PropRef } from '../src/query/ir'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
+import type { BaseIndex } from '../src/indexes/base-index'
 import type { ChangeMessage } from '../src/types'
 
 /**
@@ -22,13 +30,18 @@ import type { ChangeMessage } from '../src/types'
  * twenty actions across four keys. The production driver applies each history
  * through a local-only Collection, either in one same-turn batch or
  * sequentially. After optimistic-transaction persistence, the public rows
- * and a change-message mirror must equal the reference rows. Sequential
- * histories check every settled prefix. Every delivered batch also records
+ * and a change-message mirror must equal the reference rows. An eager-index
+ * lane additionally builds an index before the history and compares both its
+ * equality buckets after each settled prefix and fresh indexed live queries
+ * at the final checkpoint against the same Map model. The indexed field stays
+ * stable when a key is reused. Sequential histories check every settled prefix.
+ * Every delivered batch records
  * the public rows visible during its callback and the mirror after applying
  * that batch.
  *
  * This partial oracle does not cover failed persistence, sync-transaction
- * cancellation, callback batch shape, or publications without change messages.
+ * cancellation, callback batch shape, callback-time index agreement, or
+ * publications without change messages.
  * The collection-state retention oracle owns queued source admission and
  * cancellation histories.
  */
@@ -36,10 +49,15 @@ import type { ChangeMessage } from '../src/types'
 interface TestItem extends Record<string, unknown> {
   id: number
   name: string
+  fileId: `f1` | `f2`
 }
 
 type OpKind = `insert` | `update` | `delete`
 type Key = 1 | 2 | 3 | 4
+type IndexType = typeof BasicIndex | typeof BTreeIndex
+
+const fileIdForKey = (key: number): TestItem[`fileId`] =>
+  key % 2 === 1 ? `f1` : `f2`
 
 interface Op {
   kind: OpKind
@@ -51,6 +69,26 @@ type GeneratedHistory = {
   initialKeys: ReadonlyArray<Key>
   sequence: ReadonlyArray<Op>
   mode: `batched` | `sequential`
+}
+
+type GeneratedStep = { key: Key; deleteWhenPresent: boolean }
+
+function opsFromPresence(
+  initialKeys: ReadonlyArray<Key>,
+  steps: ReadonlyArray<GeneratedStep>,
+  firstStep: number,
+): Array<Op> {
+  const present = new Set(initialKeys)
+  return steps.map(({ key, deleteWhenPresent }, index): Op => {
+    const kind: OpKind = present.has(key)
+      ? deleteWhenPresent
+        ? `delete`
+        : `update`
+      : `insert`
+    if (kind === `delete`) present.delete(key)
+    else present.add(key)
+    return { kind, key, step: firstStep + index }
+  })
 }
 
 /**
@@ -88,11 +126,19 @@ function expectedRowsAfter(
   sequence: ReadonlyArray<Op>,
 ): Map<number, TestItem> {
   const rows = new Map<number, TestItem>(
-    initialKeys.map((key) => [key, { id: key, name: `initial-${key}` }]),
+    initialKeys.map((key) => [
+      key,
+      { id: key, name: `initial-${key}`, fileId: fileIdForKey(key) },
+    ]),
   )
   for (const op of sequence) {
     if (op.kind === `delete`) rows.delete(op.key)
-    else rows.set(op.key, { id: op.key, name: `v${op.step}` })
+    else
+      rows.set(op.key, {
+        id: op.key,
+        name: `v${op.step}`,
+        fileId: fileIdForKey(op.key),
+      })
   }
   return rows
 }
@@ -103,7 +149,11 @@ function applyOp(
 ): { isPersisted: { promise: Promise<unknown> } } {
   switch (op.kind) {
     case `insert`:
-      return collection.insert({ id: op.key, name: `v${op.step}` })
+      return collection.insert({
+        id: op.key,
+        name: `v${op.step}`,
+        fileId: fileIdForKey(op.key),
+      })
     case `update`:
       return collection.update(op.key, (draft) => {
         draft.name = `v${op.step}`
@@ -120,7 +170,10 @@ function publicRows(
   collection: Collection<TestItem, number, LocalOnlyCollectionUtils>,
 ): Array<readonly [number, TestItem]> {
   return [...collection.state]
-    .map(([key, row]) => [key, { id: row.id, name: row.name }] as const)
+    .map(
+      ([key, row]) =>
+        [key, { id: row.id, name: row.name, fileId: row.fileId }] as const,
+    )
     .sort(([left], [right]) => left - right)
 }
 
@@ -128,7 +181,10 @@ function mirrorRows(
   mirror: ReadonlyMap<number, TestItem>,
 ): Array<readonly [number, TestItem]> {
   return [...mirror]
-    .map(([key, row]) => [key, { id: row.id, name: row.name }] as const)
+    .map(
+      ([key, row]) =>
+        [key, { id: row.id, name: row.name, fileId: row.fileId }] as const,
+    )
     .sort(([left], [right]) => left - right)
 }
 
@@ -142,16 +198,98 @@ function assertFinalAgreement(
   expect(mirrorRows(mirror)).toEqual(expectedRows)
 }
 
+function assertIndexAgreement(
+  index: BaseIndex<number>,
+  expected: ReadonlyMap<number, TestItem>,
+): void {
+  expect(index.keyCount).toBe(expected.size)
+  for (const fileId of [`f1`, `f2`] as const) {
+    const expectedKeys = new Set(
+      [...expected]
+        .filter(([, row]) => row.fileId === fileId)
+        .map(([key]) => key),
+    )
+    expect(index.lookup(`eq`, fileId)).toEqual(expectedKeys)
+  }
+}
+
+async function runWithQueryCleanup(
+  check: () => Promise<void>,
+  cleanup: () => Promise<unknown>,
+): Promise<void> {
+  let primaryFailure: unknown
+  let hasPrimaryFailure = false
+  try {
+    await check()
+  } catch (error) {
+    primaryFailure = error
+    hasPrimaryFailure = true
+  }
+  try {
+    await cleanup()
+  } catch (error) {
+    if (hasPrimaryFailure) {
+      throw new AggregateError(
+        [primaryFailure, error],
+        `Query check and cleanup failed`,
+        {
+          cause: primaryFailure,
+        },
+      )
+    }
+    throw error
+  }
+  if (hasPrimaryFailure) throw primaryFailure
+}
+
+async function assertIndexedQueryAgreement(
+  collection: Collection<TestItem, number, LocalOnlyCollectionUtils>,
+  index: BaseIndex<number>,
+  expected: ReadonlyMap<number, TestItem>,
+): Promise<void> {
+  const lookup = vi.spyOn(index, `lookup`)
+  try {
+    for (const fileId of [`f1`, `f2`] as const) {
+      lookup.mockClear()
+      const query = createLiveQueryCollection((q) =>
+        q.from({ row: collection }).where(({ row }) => eq(row.fileId, fileId)),
+      )
+      await runWithQueryCleanup(
+        async () => {
+          await query.preload()
+          expect(
+            query.toArray
+              .map((row) => ({
+                id: row.id,
+                name: row.name,
+                fileId: row.fileId,
+              }))
+              .sort((left, right) => left.id - right.id),
+          ).toEqual(
+            [...expected.values()]
+              .filter((row) => row.fileId === fileId)
+              .sort((left, right) => left.id - right.id),
+          )
+          expect(lookup).toHaveBeenCalledWith(`eq`, fileId)
+        },
+        () => query.cleanup(),
+      )
+    }
+  } finally {
+    lookup.mockRestore()
+  }
+}
+
 async function runHistory(
   sequence: ReadonlyArray<Op>,
   initialKeys: ReadonlyArray<Key>,
   mode: `batched` | `sequential`,
   id: string,
+  indexType?: IndexType,
 ): Promise<void> {
-  const initialRows: Array<TestItem> = initialKeys.map((key) => ({
-    id: key,
-    name: `initial-${key}`,
-  }))
+  const initialRows = [...expectedRowsAfter(initialKeys, [])].map(
+    ([, row]) => row,
+  )
   const collection = createCollection<
     TestItem,
     number,
@@ -161,6 +299,9 @@ async function runHistory(
       id,
       getKey: (item: TestItem) => item.id,
       ...(initialRows.length > 0 ? { initialData: initialRows } : {}),
+      ...(indexType
+        ? { autoIndex: `eager` as const, defaultIndexType: indexType }
+        : {}),
     }),
   )
   const mirror = expectedRowsAfter(initialKeys, [])
@@ -169,6 +310,7 @@ async function runHistory(
     mirrorRows: Array<readonly [number, TestItem]>
   }> = []
   let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+  let index: BaseIndex<number> | undefined
   let primaryFailure: unknown
   let hasPrimaryFailure = false
 
@@ -177,6 +319,23 @@ async function runHistory(
       await collection.preload()
       expect(publicRows(collection)).toEqual(mirrorRows(mirror))
     }
+    if (indexType) {
+      const initialQuery = createLiveQueryCollection((q) =>
+        q.from({ row: collection }).where(({ row }) => eq(row.fileId, `f1`)),
+      )
+      await runWithQueryCleanup(
+        async () => {
+          await initialQuery.preload()
+        },
+        () => initialQuery.cleanup(),
+      )
+      index = [...collection.indexes.values()].find(
+        (candidate) => candidate.name === `auto:fileId`,
+      )
+      if (!index) throw new Error(`eager fileId index was not built`)
+      expect(index).toBeInstanceOf(indexType)
+      assertIndexAgreement(index, expectedRowsAfter(initialKeys, []))
+    }
     const onChanges = (changes: Array<ChangeMessage<TestItem, number>>) => {
       for (const change of changes) {
         if (change.type === `delete`) mirror.delete(change.key)
@@ -184,6 +343,7 @@ async function runHistory(
           mirror.set(change.key, {
             id: change.value.id,
             name: change.value.name,
+            fileId: change.value.fileId,
           })
       }
       publications.push({
@@ -200,22 +360,25 @@ async function runHistory(
       await Promise.all(
         sequence.map((op) => applyOp(collection, op)).map(settle),
       )
-      assertFinalAgreement(
-        collection,
-        mirror,
-        expectedRowsAfter(initialKeys, sequence),
-      )
+      const expected = expectedRowsAfter(initialKeys, sequence)
+      assertFinalAgreement(collection, mirror, expected)
+      if (index) assertIndexAgreement(index, expected)
     } else {
       const settled: Array<Op> = []
       for (const op of sequence) {
         await settle(applyOp(collection, op))
         settled.push(op)
-        assertFinalAgreement(
-          collection,
-          mirror,
-          expectedRowsAfter(initialKeys, settled),
-        )
+        const expected = expectedRowsAfter(initialKeys, settled)
+        assertFinalAgreement(collection, mirror, expected)
+        if (index) assertIndexAgreement(index, expected)
       }
+    }
+    if (index) {
+      await assertIndexedQueryAgreement(
+        collection,
+        index,
+        expectedRowsAfter(initialKeys, sequence),
+      )
     }
     for (const publication of publications) {
       expect(publication.mirrorRows).toEqual(publication.publicRows)
@@ -265,6 +428,16 @@ async function verifyGeneratedHistory({
 }
 
 describe(`change-event history oracle`, () => {
+  const indexTypes: Array<readonly [string, IndexType]> = [
+    [`BasicIndex`, BasicIndex],
+    [`BTreeIndex`, BTreeIndex],
+  ]
+  const replacement: ReadonlyArray<Op> = [
+    { kind: `delete`, key: 1, step: 1 },
+    { kind: `delete`, key: 2, step: 2 },
+    { kind: `insert`, key: 1, step: 3 },
+    { kind: `insert`, key: 2, step: 4 },
+  ]
   const oneKeyCases = generateSequences(4, [1]).flatMap((sequence, index) =>
     ([`batched`, `sequential`] as const).map((mode) => ({
       mode,
@@ -307,18 +480,26 @@ describe(`change-event history oracle`, () => {
       mode: fc.constantFrom(`batched` as const, `sequential` as const),
     })
     .map(({ initialKeys, steps, mode }) => {
-      const present = new Set(initialKeys)
-      const sequence = steps.map(({ key, deleteWhenPresent }, index): Op => {
-        const kind: OpKind = present.has(key)
-          ? deleteWhenPresent
-            ? `delete`
-            : `update`
-          : `insert`
-        if (kind === `delete`) present.delete(key)
-        else present.add(key)
-        return { kind, key, step: index + 1 }
-      })
+      const sequence = opsFromPresence(initialKeys, steps, 1)
       return { initialKeys, sequence, mode }
+    })
+
+  // The fixed prefix forces reused keys through an already-built index.
+  // The tail varies legal follow-up edits on two existing and two new keys.
+  const indexedHistory: fc.Arbitrary<GeneratedHistory> = fc
+    .record({
+      steps: fc.array(
+        fc.record({
+          key: fc.constantFrom<Key>(1, 2, 3, 4),
+          deleteWhenPresent: fc.boolean(),
+        }),
+        { maxLength: 12 },
+      ),
+      mode: fc.constantFrom(`batched` as const, `sequential` as const),
+    })
+    .map(({ steps, mode }) => {
+      const tail = opsFromPresence([1, 2], steps, replacement.length + 1)
+      return { initialKeys: [1, 2], sequence: [...replacement, ...tail], mode }
     })
 
   it(`reaches reinsertion and rejects missing or extra mirrored rows`, () => {
@@ -339,20 +520,78 @@ describe(`change-event history oracle`, () => {
       generateSequences(3, [1, 2], [], new Set<Key>([1])),
     ).not.toContainEqual([{ kind: `insert`, key: 1, step: 1 }])
     expect(new Set(cases.map(({ id }) => id)).size).toBe(cases.length)
-    const expected = [[1, { id: 1, name: `v3` }]]
+    const expected = [[1, { id: 1, name: `v3`, fileId: `f1` }]]
     expect(mirrorRows(new Map())).not.toEqual(expected)
-    expect(mirrorRows(new Map([[1, { id: 1, name: `wrong` }]]))).not.toEqual(
-      expected,
-    )
+    expect(
+      mirrorRows(new Map([[1, { id: 1, name: `wrong`, fileId: `f1` }]])),
+    ).not.toEqual(expected)
     expect(
       mirrorRows(
         new Map([
-          [1, { id: 1, name: `v3` }],
-          [2, { id: 2, name: `ghost` }],
+          [1, { id: 1, name: `v3`, fileId: `f1` }],
+          [2, { id: 2, name: `ghost`, fileId: `f2` }],
         ]),
       ),
     ).not.toEqual(expected)
   })
+
+  it(`rejects a missing live key in the index checker`, () => {
+    expect(replacement.map(({ kind, key }) => [kind, key])).toEqual([
+      [`delete`, 1],
+      [`delete`, 2],
+      [`insert`, 1],
+      [`insert`, 2],
+    ])
+    const expected = expectedRowsAfter([1, 2], replacement)
+    const index = new BasicIndex<number>(1, new PropRef([`fileId`]))
+    index.build([...expected])
+    assertIndexAgreement(index, expected)
+    index.remove(1, expected.get(1))
+    expect(() => assertIndexAgreement(index, expected)).toThrowError(/expected/)
+  })
+
+  for (const [name, IndexType] of indexTypes) {
+    it.each([`batched`, `sequential`] as const)(
+      `keeps ${name} and indexed queries aligned after %s replacement`,
+      async (mode) => {
+        await runHistory(
+          replacement,
+          [1, 2],
+          mode,
+          `indexed-${name}-${mode}`,
+          IndexType,
+        )
+      },
+    )
+  }
+
+  const verifyIndexedHistory = async ({
+    initialKeys,
+    sequence,
+    mode,
+  }: GeneratedHistory): Promise<void> => {
+    for (const [name, IndexType] of indexTypes) {
+      await runHistory(
+        sequence,
+        initialKeys,
+        mode,
+        `indexed-history-${name}-${mode}-${describeSequence(sequence)}`,
+        IndexType,
+      )
+    }
+  }
+
+  fcTest.prop([indexedHistory], { numRuns: oracleRuns(35), seed: 1_912 })(
+    `keeps eager indexes and indexed queries aligned across fixed-seed histories`,
+    verifyIndexedHistory,
+  )
+  fcTest.prop(
+    [indexedHistory],
+    oraclePropertyOptions(35, `collection-state.eager-index-history`),
+  )(
+    `keeps eager indexes and indexed queries aligned across random histories`,
+    verifyIndexedHistory,
+  )
 
   it.each(cases)(
     `$id: $label reconstructs every public row`,
