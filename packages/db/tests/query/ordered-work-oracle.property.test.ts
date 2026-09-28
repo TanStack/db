@@ -2641,21 +2641,25 @@ describe(`ordered source work oracle`, () => {
       { includeInitialState: false },
     )
 
-    try {
-      await live.preload()
-      await live.utils.setWindow({ offset: 0, limit: 2 })
-      await flushPromises()
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        await flushPromises()
 
-      // Each page turn is followed by a tie-boundary request. The source
-      // returns one row at a time while honoring both predicates.
-      expect(loads).toBe(4)
-      expect(readIds()).toEqual([1, 2])
-      expect(batches).toEqual([[1, 2]])
-      expect(callbackReads).toEqual([[1, 2]])
-    } finally {
-      subscription.unsubscribe()
-      await Promise.all([live.cleanup(), source.cleanup()])
-    }
+        // Each page turn is followed by a tie-boundary request. The source
+        // returns one row at a time while honoring both predicates.
+        expect(loads).toBe(4)
+        expect(readIds()).toEqual([1, 2])
+        expect(batches).toEqual([[1, 2]])
+        expect(callbackReads).toEqual([[1, 2]])
+      },
+      () => [
+        () => subscription.unsubscribe(),
+        () => live.cleanup(),
+        () => source.cleanup(),
+      ],
+    )
   })
 
   it(`keeps live collections and Effects equal across the exhaustive small domain`, async () => {
@@ -2789,27 +2793,30 @@ describe(`ordered source work oracle`, () => {
           .select(({ root }) => ({ id: root.id })),
     })
 
-    try {
-      const preload = live.preload()
-      await vi.waitFor(() => {
-        expect(childLoads).toBe(1)
-        expect(rootRequests).toHaveLength(1)
-      })
-      expect(live.toArray).toEqual([])
+    await withHistoryCleanup(
+      async () => {
+        const preload = live.preload()
+        await vi.waitFor(() => {
+          expect(childLoads).toBe(1)
+          expect(rootRequests).toHaveLength(1)
+        })
+        expect(live.toArray).toEqual([])
 
-      firstChildGate.resolve()
-      await preload
-      expect(childLoads).toBe(2)
-      expect(live.toArray.map(({ id }) => id)).toEqual([2])
-      expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(true)
-    } finally {
-      firstChildGate.resolve()
-      await Promise.all([
-        live.cleanup(),
-        rootCollection.cleanup(),
-        childCollection.cleanup(),
-      ])
-    }
+        firstChildGate.resolve()
+        await preload
+        expect(childLoads).toBe(2)
+        expect(live.toArray.map(({ id }) => id)).toEqual([2])
+        expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
+          true,
+        )
+      },
+      () => [
+        () => firstChildGate.resolve(),
+        () => live.cleanup(),
+        () => rootCollection.cleanup(),
+        () => childCollection.cleanup(),
+      ],
+    )
   })
 
   it.each([`resolve`, `reject`, `retire`] as const)(
@@ -2887,77 +2894,78 @@ describe(`ordered source work oracle`, () => {
             .select(({ root }) => ({ id: root.id })),
       })
 
-      try {
-        const preload = live.preload()
-        void preload.catch(() => {})
-        await vi.waitFor(() => {
-          expect(childLoads).toBe(1)
-          expect(rootRequests).toHaveLength(2)
-        })
-
-        let moveSettled = false
-        const move = Promise.resolve(
-          live.utils.setWindow({ offset: 0, limit: 2 }),
-        ).then(() => {
-          moveSettled = true
-        })
-        await flushPromises()
-        expect(moveSettled).toBe(false)
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-        expect(live.toArray.map(({ id }) => id)).toEqual([])
-
-        if (outcome === `reject`) {
-          childGate.reject(new Error(`joined demand failed`))
-          await expect(move).rejects.toThrow(`joined demand failed`)
-          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-          await Promise.allSettled([preload])
-          return
-        }
-
-        if (outcome === `retire`) {
-          rootSync.begin()
-          rootSync.write({
-            type: `delete`,
-            value: { id: 1, rank: 1 },
+      await withHistoryCleanup(
+        async () => {
+          const preload = live.preload()
+          void preload.catch(() => {})
+          await vi.waitFor(() => {
+            expect(childLoads).toBe(1)
+            expect(rootRequests).toHaveLength(2)
           })
-          const receipt = rootSync.commit()
-          if (receipt !== true) await receipt
-          rootContinuationGate.resolve()
-          await vi.waitFor(() => expect(moveSettled).toBe(true))
-          expect(rootRequests.length).toBeGreaterThan(2)
-          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-          expect(live.toArray).toEqual([])
-          childGate.reject(new Error(`obsolete joined demand failed`))
-          await flushPromises()
-          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-          return
-        }
 
-        childGate.resolve()
-        await vi.waitFor(() =>
+          let moveSettled = false
+          const move = Promise.resolve(
+            live.utils.setWindow({ offset: 0, limit: 2 }),
+          ).then(() => {
+            moveSettled = true
+          })
+          await flushPromises()
+          expect(moveSettled).toBe(false)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+          expect(live.toArray.map(({ id }) => id)).toEqual([])
+
+          if (outcome === `reject`) {
+            childGate.reject(new Error(`joined demand failed`))
+            await expect(move).rejects.toThrow(`joined demand failed`)
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+            await Promise.allSettled([preload])
+            return
+          }
+
+          if (outcome === `retire`) {
+            rootSync.begin()
+            rootSync.write({
+              type: `delete`,
+              value: { id: 1, rank: 1 },
+            })
+            const receipt = rootSync.commit()
+            if (receipt !== true) await receipt
+            rootContinuationGate.resolve()
+            await vi.waitFor(() => expect(moveSettled).toBe(true))
+            expect(rootRequests.length).toBeGreaterThan(2)
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+            expect(live.toArray).toEqual([])
+            childGate.reject(new Error(`obsolete joined demand failed`))
+            await flushPromises()
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+            return
+          }
+
+          childGate.resolve()
+          await vi.waitFor(() =>
+            expect(
+              rootRequests.some(({ cursor }) => cursor !== undefined),
+            ).toBe(true),
+          )
+          await flushPromises()
+          expect(moveSettled).toBe(false)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+          rootContinuationGate.resolve()
+          await Promise.all([move, preload])
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+          expect(live.toArray.map(({ id }) => id)).toEqual([1])
           expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
             true,
-          ),
-        )
-        await flushPromises()
-        expect(moveSettled).toBe(false)
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
-        rootContinuationGate.resolve()
-        await Promise.all([move, preload])
-        expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
-        expect(live.toArray.map(({ id }) => id)).toEqual([1])
-        expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
-          true,
-        )
-      } finally {
-        childGate.resolve()
-        rootContinuationGate.resolve()
-        await Promise.all([
-          live.cleanup(),
-          rootCollection.cleanup(),
-          childCollection.cleanup(),
-        ])
-      }
+          )
+        },
+        () => [
+          () => childGate.resolve(),
+          () => rootContinuationGate.resolve(),
+          () => live.cleanup(),
+          () => rootCollection.cleanup(),
+          () => childCollection.cleanup(),
+        ],
+      )
     },
   )
 
@@ -3070,37 +3078,38 @@ describe(`ordered source work oracle`, () => {
       if (receipt !== true) await receipt
     }
 
-    try {
-      await live.preload()
-      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        expect(live.toArray.map(({ id }) => id)).toEqual([1])
 
-      await deleteRoot(1)
-      await vi.waitFor(() => {
-        expect(childLoads).toBe(2)
-        expect(rootRequests.filter(({ refetch }) => refetch)).toHaveLength(2)
-      })
-      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+        await deleteRoot(1)
+        await vi.waitFor(() => {
+          expect(childLoads).toBe(2)
+          expect(rootRequests.filter(({ refetch }) => refetch)).toHaveLength(2)
+        })
+        expect(live.toArray.map(({ id }) => id)).toEqual([1])
 
-      secondChildGate.resolve()
-      await vi.waitFor(() =>
-        expect(live.toArray.map(({ id }) => id)).toEqual([2]),
-      )
+        secondChildGate.resolve()
+        await vi.waitFor(() =>
+          expect(live.toArray.map(({ id }) => id)).toEqual([2]),
+        )
 
-      await deleteRoot(2)
-      await vi.waitFor(() =>
-        expect(live.toArray.map(({ id }) => id)).toEqual([3]),
-      )
-      expect(
-        rootRequests.filter(({ refetch }) => refetch).length,
-      ).toBeGreaterThan(2)
-    } finally {
-      secondChildGate.resolve()
-      await Promise.all([
-        live.cleanup(),
-        rootCollection.cleanup(),
-        childCollection.cleanup(),
-      ])
-    }
+        await deleteRoot(2)
+        await vi.waitFor(() =>
+          expect(live.toArray.map(({ id }) => id)).toEqual([3]),
+        )
+        expect(
+          rootRequests.filter(({ refetch }) => refetch).length,
+        ).toBeGreaterThan(2)
+      },
+      () => [
+        () => secondChildGate.resolve(),
+        () => live.cleanup(),
+        () => rootCollection.cleanup(),
+        () => childCollection.cleanup(),
+      ],
+    )
   })
 
   it(`bounds ordered root acquisition for a none left-join filter`, async () => {
