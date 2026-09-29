@@ -25,9 +25,10 @@ inline child for row 1. An ordered repair holds publication while the source
 writes row 1 with rank 2.5 and values `A → B → A`. The final public order is
 `[2,1]`; the payload returns to `A`. On the baseline, the subscriber receives
 no callback. The new exact test failed at the final callback comparison:
-expected one layout-only callback with the final rows, actual `[]`. Its
-single-step `A → A` reorder and `A → B → C` value-change controls passed in
-the same RED run (1 failed, 2 passed, process exit 1).
+expected one layout-only callback with the final rows and `changes: []`,
+actual no callback. The unchanged final value does not require a value-update
+event. The single-step `A → A` reorder and `A → B → C` value-change controls
+passed in the same RED run (1 failed, 2 passed, process exit 1).
 
 The builder had retained the last retracted value and position, `B` at the
 new position. It now retains the first pair, `A` at the old position, in the

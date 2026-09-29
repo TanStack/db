@@ -762,11 +762,10 @@ describe(`layered-query publication oracle`, () => {
 
 /**
  * A held ordered repair can run the graph several times before one public
- * publication. The expected public snapshot comes from sorting the source
- * rows, not from the graph's intermediate retractions. Subscribers observe
- * one final change when that snapshot changes, even if a row's payload
- * returns to its original value. This bounded grammar varies the private
- * payload history and final payload while the same row moves past a peer.
+ * publication. Row 1 moves behind row 2 while its payload changes A→B→A.
+ * The expected public snapshot comes from sorting source rows, not from
+ * intermediate retractions. Subscribers receive one layout notification
+ * with no value-change message. A final-value C cell checks a value update.
  */
 describe(`held include publication`, () => {
   it.each([
