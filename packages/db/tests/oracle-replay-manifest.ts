@@ -29,7 +29,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/identity-output-shape-oracle.test.ts`,
     `query-identity`,
-    `compiled-output`,
+    `compiled-output equality-partition`,
   ],
   [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
