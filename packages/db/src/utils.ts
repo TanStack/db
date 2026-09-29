@@ -270,9 +270,9 @@ export interface TemporalLike {
   equals?: (other: unknown) => boolean
 }
 
-/** Checks the public Temporal tag while keeping binary views in their own domain. */
+/** Checks if the value is a Temporal object by checking for the Temporal brand */
 export function isTemporal(a: unknown): a is TemporalLike {
-  if (a == null || typeof a !== `object` || ArrayBuffer.isView(a)) return false
+  if (a == null || typeof a !== `object`) return false
   const tag = (a as Record<symbol, unknown>)[Symbol.toStringTag]
   return typeof tag === `string` && temporalTypes.has(tag)
 }

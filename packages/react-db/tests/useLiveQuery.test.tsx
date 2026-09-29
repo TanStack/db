@@ -1,4 +1,3 @@
-import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
@@ -3365,30 +3364,6 @@ describe(`Query Collections`, () => {
           }),
         ),
       ).toThrow(/queryKey.*function value/)
-    })
-
-    it(`rethrows view hash failures from an explicit queryKey`, () => {
-      const collection = createCollection(
-        mockSyncCollectionOptions<Person>({
-          id: `unhashable-view-explicit-query-key`,
-          getKey: (person: Person) => person.id,
-          initialData: initialPersons,
-        }),
-      )
-      const foreign = runInNewContext('new Uint8Array([1])') as Uint8Array
-      const custom = new Uint8Array([1])
-      Object.defineProperty(custom, 'toString', { value: () => '9' })
-
-      for (const view of [foreign, custom]) {
-        expect(() =>
-          renderHook(() =>
-            useLiveQuery({
-              queryKey: [collection.id, view],
-              query: (q) => q.from({ people: collection }),
-            }),
-          ),
-        ).toThrow(/queryKey.*view with custom conversion/)
-      }
     })
 
     it(`keeps an explicit queryKey stable across structurally equal values`, async () => {

@@ -42,40 +42,6 @@ type AliasScope = {
   parent: AliasScope | undefined
 }
 
-const intrinsicTypedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype)
-const intrinsicDataViewPrototype = DataView.prototype
-const intrinsicDataViewTagGetter = Object.getOwnPropertyDescriptor(
-  intrinsicDataViewPrototype,
-  Symbol.toStringTag,
-)?.get
-const intrinsicTypedArrayToString = intrinsicTypedArrayPrototype.toString
-const intrinsicObjectToString = Object.prototype.toString
-const typedArrayTag = Object.getOwnPropertyDescriptor(
-  intrinsicTypedArrayPrototype,
-  Symbol.toStringTag,
-)!.get!
-
-function captureViewGetters(prototype: object) {
-  return {
-    buffer: Object.getOwnPropertyDescriptor(prototype, `buffer`)!.get!,
-    byteOffset: Object.getOwnPropertyDescriptor(prototype, `byteOffset`)!.get!,
-    byteLength: Object.getOwnPropertyDescriptor(prototype, `byteLength`)!.get!,
-  }
-}
-
-const typedArrayGetters = captureViewGetters(intrinsicTypedArrayPrototype)
-const dataViewGetters = captureViewGetters(DataView.prototype)
-
-function intrinsicViewBytes(
-  value: ArrayBufferView,
-  getters: ReturnType<typeof captureViewGetters>,
-): Array<number> {
-  const buffer = getters.buffer.call(value) as ArrayBufferLike
-  const byteOffset = getters.byteOffset.call(value) as number
-  const byteLength = getters.byteLength.call(value) as number
-  return Array.from(new Uint8Array(buffer, byteOffset, byteLength))
-}
-
 declare const queryIdentityBrand: unique symbol
 declare const demandKeyBrand: unique symbol
 
@@ -1026,86 +992,13 @@ function canonicalizeRuntimeValue(
   }
 
   if (ArrayBuffer.isView(value)) {
-    const tag = typedArrayTag.call(value) as string | undefined
-    const isBuffer = typeof Buffer !== `undefined` && Buffer.isBuffer(value)
-    let prototype: object | null = value
-    let rootPrototype: object | undefined
-    let typedArrayPrototype: object | undefined
-    let bufferPrototype: object | undefined
-    let bufferLengthShadowed = isBuffer && Object.hasOwn(value, `length`)
-    if (
-      tag === undefined &&
-      Object.getOwnPropertyDescriptor(value, Symbol.toStringTag)?.get
-    ) {
-      throw new UnhashableQueryIRError(path, `view with custom conversion`)
-    }
-    // A recognized Buffer copy has its own base prototype. Other views use
-    // this module's captured built-ins because foreign prototypes can change.
-    while ((prototype = Object.getPrototypeOf(prototype)) !== null) {
-      rootPrototype = prototype
-      const tagGetter = Object.getOwnPropertyDescriptor(
-        prototype,
-        Symbol.toStringTag,
-      )?.get
-      if (tagGetter) {
-        typedArrayPrototype = prototype
-      }
-      if (
-        isBuffer &&
-        typedArrayPrototype === undefined &&
-        Object.hasOwn(prototype, `length`)
-      ) {
-        bufferLengthShadowed = true
-      }
-      if (
-        tag === undefined &&
-        tagGetter !== undefined &&
-        (prototype !== intrinsicDataViewPrototype ||
-          tagGetter !== intrinsicDataViewTagGetter)
-      ) {
-        throw new UnhashableQueryIRError(path, `view with custom conversion`)
-      }
-      if (
-        typedArrayPrototype === undefined &&
-        Object.hasOwn(prototype, `toString`)
-      ) {
-        bufferPrototype = prototype
-      }
-    }
-    const defaultToString =
-      tag === undefined
-        ? intrinsicObjectToString
-        : isBuffer
-          ? bufferPrototype?.toString
-          : intrinsicTypedArrayToString
-    if (
-      bufferLengthShadowed ||
-      (tag === undefined && rootPrototype !== Object.prototype) ||
-      (tag !== undefined &&
-        !isBuffer &&
-        typedArrayPrototype !== intrinsicTypedArrayPrototype) ||
-      defaultToString === undefined ||
-      value.toString !== defaultToString ||
-      value.valueOf !== rootPrototype?.valueOf ||
-      (tag !== undefined &&
-        !isBuffer &&
-        (value as Uint8Array).join !==
-          (typedArrayPrototype as Uint8Array | undefined)?.join) ||
-      Symbol.toPrimitive in value ||
-      (tag === undefined &&
-        intrinsicObjectToString.call(value) !== `[object DataView]`)
-    ) {
-      throw new UnhashableQueryIRError(path, `view with custom conversion`)
-    }
-
-    const getters = tag === undefined ? dataViewGetters : typedArrayGetters
-    // Distinct Buffer implementations can convert the same bytes differently.
-    const kind = isBuffer
-      ? defaultToString === Buffer.prototype.toString
-        ? `Buffer`
-        : [`Buffer`, getRuntimeReferenceIdentity(defaultToString)]
-      : (tag ?? `DataView`)
-    return [`binary`, kind, intrinsicViewBytes(value, getters)]
+    return [
+      `binary`,
+      value.constructor.name,
+      Array.from(
+        new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+      ),
+    ]
   }
 
   if (value instanceof Map) {
@@ -1181,16 +1074,7 @@ function canonicalizeEqualityRuntimeValue(
     (typeof Buffer !== `undefined` && value instanceof Buffer) ||
     value instanceof Uint8Array
   if (isUint8Array) {
-    const view = value as Uint8Array
-    const length = view.byteLength
-    // Equality's reference fast path distinguishes two views with NaN lengths.
-    if (Number.isNaN(length)) return getRuntimeReferenceIdentity(view)
-    return [
-      `binary`,
-      `Uint8Array`,
-      canonicalizeExactOutputRuntimeValue(length, `${path}.byteLength`, seen),
-      intrinsicViewBytes(view, typedArrayGetters),
-    ]
+    return [`binary`, `Uint8Array`, Array.from(value as Uint8Array)]
   }
 
   const normalized = normalizeValue(value)
@@ -1222,10 +1106,8 @@ function canonicalizeOrderingRuntimeValue(
     return canonicalizeRuntimeValue(Number.NaN, path, seen)
   }
 
-  // View conversion is validated below before user-controlled tag accessors
-  // can run in normalizeValue.
-  const normalized = ArrayBuffer.isView(value) ? value : normalizeValue(value)
-  if (normalized !== value) {
+  const normalized = normalizeValue(value)
+  if (normalized !== value && !(value instanceof Uint8Array)) {
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 
