@@ -1,5 +1,7 @@
 import { MurmurHashStream, getSymbolIdentity, randomHash } from './murmur.js'
+import { isTemporal } from './temporal.js'
 import type { Hasher } from './murmur.js'
+import type { TemporalLike } from './temporal.js'
 
 /*
  * Implementation of structural hashing based on the Composites polyfill implementation:
@@ -26,27 +28,6 @@ const TEMPORAL_MARKER = randomHash()
 // cached; cycles are rejected rather than given context-dependent hashes.
 const MAX_STRUCTURAL_HASH_WORK = 1_000_000
 const MAX_STRUCTURAL_HASH_DEPTH = 768
-
-const temporalTypes = new Set([
-  `Temporal.Duration`,
-  `Temporal.Instant`,
-  `Temporal.PlainDate`,
-  `Temporal.PlainDateTime`,
-  `Temporal.PlainMonthDay`,
-  `Temporal.PlainTime`,
-  `Temporal.PlainYearMonth`,
-  `Temporal.ZonedDateTime`,
-])
-
-interface TemporalLike {
-  [Symbol.toStringTag]: string
-  toString: () => string
-}
-
-function isTemporal(input: object): input is TemporalLike {
-  const tag = (input as Record<symbol, unknown>)[Symbol.toStringTag]
-  return typeof tag === `string` && temporalTypes.has(tag)
-}
 
 // Maximum byte length for Uint8Arrays to hash by content instead of reference
 // Arrays smaller than this will be hashed by content, allowing proper equality comparisons
