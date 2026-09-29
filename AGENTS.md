@@ -283,12 +283,11 @@ TanStack DB does not support interoperability between multiple copies of
 `@tanstack/db` in one runtime.
 Each copy has its own transaction stack and IR classes. Do not add cross-copy
 expression support or shape-based fallbacks to make the copies interoperate.
-SSR and test runners may evaluate the package twice without exchanging values.
-Reject constructed DB values when they cross copies, rather than rejecting an
-independent module load. When cross-copy use is detected, throw a clear error such as
-`DuplicateDbInstanceError`. A warning, silent literal conversion, or wrong
-query result is not acceptable. Tests for this case should expect rejection,
-not a successful query across copies.
+Keep the existing duplicate-instance check, which throws
+`DuplicateDbInstanceError` for duplicate development browser loads. Do not
+replace its error with a warning. SSR and test runners may evaluate the
+package twice without exchanging values; do not reject those independent
+loads or add per-value tracking solely to detect unsupported cross-copy use.
 
 ## Abstraction Design
 

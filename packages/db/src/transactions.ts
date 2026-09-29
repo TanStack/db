@@ -2,6 +2,7 @@ import { createDeferred } from './deferred'
 import { deepEquals } from './utils'
 import { safeRandomUUID } from './utils/uuid'
 import { normalizeError } from './utils/error.js'
+import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,

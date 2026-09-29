@@ -1,8 +1,4 @@
 import { CollectionImpl } from '../../collection/index.js'
-import {
-  assertLocalDbInstance,
-  markDbInstance,
-} from '../../duplicate-instance-check.js'
 import { hasCollectionOptionsBrand } from '../../collection-options.js'
 import { isPlainObject as isRecord } from '../../utils/type-guards.js'
 import {
@@ -146,7 +142,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     private readonly resolveCollection?: CollectionResolver,
   ) {
     this.query = { ...query }
-    markDbInstance(this)
   }
 
   private _clone<TNextContext extends Context = Context>(
@@ -207,7 +202,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refs: Array<[string, CollectionRef | QueryRef]> = []
     for (const alias of keys) {
       const sourceValue = source[alias]
-      assertLocalDbInstance(sourceValue)
 
       // Validate the value is a Collection or QueryBuilder
       let ref: CollectionRef | QueryRef
@@ -1069,7 +1063,6 @@ function buildNestedSelect(
   parentAliases: Array<string> = [],
   fieldName?: string,
 ): any {
-  assertLocalDbInstance(obj)
   if (Array.isArray(obj)) {
     return obj.some((value) => isRefProxy(value) || isExpressionLike(value))
       ? new FuncExpr(

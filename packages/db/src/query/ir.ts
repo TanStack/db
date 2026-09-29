@@ -1,7 +1,3 @@
-import {
-  assertLocalDbInstance,
-  markDbInstance,
-} from '../duplicate-instance-check.js'
 import { isRefProxy } from './builder/ref-proxy-identity.js'
 
 /*
@@ -88,9 +84,6 @@ abstract class BaseExpression<T = any> {
   public abstract type: string
   /** @internal - Type brand for TypeScript inference */
   declare readonly __returnType: T
-  constructor() {
-    markDbInstance(this)
-  }
 }
 
 export class CollectionRef extends BaseExpression {
@@ -252,7 +245,6 @@ export class ConditionalSelect extends BaseExpression {
 export function isBasicOrAggregateExpression(
   value: unknown,
 ): value is BasicExpression | Aggregate {
-  assertLocalDbInstance(value)
   return (
     value instanceof Aggregate ||
     value instanceof Func ||
