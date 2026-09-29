@@ -107,3 +107,22 @@ follow-up reviewed above. At the merged commit, the oracle passed 56 tests,
 the direct seed `20260928` and path `8:0:0` replay completed one execution,
 and Prettier and `git diff --check` passed. The next record-only commit adds
 this entry and changes no executable code.
+
+## Current-main merge verification
+
+Reviewed merged executable commit: `c795bf24f417ac6342e8c45c19e5175d8a625e13`.
+This normal merge brought in `origin/main` at `63362dc8` and retained both
+the query-identity coverage note and the newer coverage and oracle
+registrations from main. It made no query-identity runtime or oracle changes.
+The merged oracle passed 56 tests. Direct seed `20260928`, path `8:0:0`
+replay selected one property execution and reported `failed:false`. ESLint,
+Prettier, and `git diff --check` passed.
+
+For calibration, I temporarily changed the D2 equality key for primitive
+strings to either one constant or the first character plus length. Each
+mutant made the generated seed check fail at the D2-key assertion. Each also
+made the public `ab`/`ac` grouping check show one group instead of two. A
+direct replay of the first-character-plus-length mutant selected one property
+execution and reported `failed:true` at the same-prefix string assertion.
+Both mutants were removed after their RED runs. The later record-only commit
+changes no executable code.
