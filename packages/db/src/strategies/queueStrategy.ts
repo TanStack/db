@@ -1,4 +1,5 @@
 import { LiteQueuer } from '@tanstack/pacer-lite/lite-queuer'
+import { QueueDisposedError } from '../errors'
 import type { QueueStrategy, QueueStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -89,7 +90,10 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
-    ) => !disposed && queuer.addItem(fn as () => Transaction),
+    ) => {
+      if (disposed) throw new QueueDisposedError()
+      return queuer.addItem(fn as () => Transaction)
+    },
     cleanup: () => {
       disposed = true
       if (queuer.isEmpty) queuer.stop()

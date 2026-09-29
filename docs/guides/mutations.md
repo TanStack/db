@@ -1181,13 +1181,19 @@ function VolumeSlider() {
 - Guarantees minimum spacing between persists
 - Can execute on leading edge, trailing edge, or both
 - With `leading: false, trailing: true`, the first write waits until the first trailing edge
+- With `leading: false`, omitting `trailing` also enables the trailing edge
+- With `trailing: false`, calls inside a throttle window fail immediately with `ThrottleCallDroppedError` and roll back their optimistic changes. Omitting `leading` in this case enables the leading edge.
+- With both edges disabled, every call fails with `ThrottleCallDroppedError`
 - Mutations between executions are merged
+
+Calling `strategy.cleanup()` leaves an already scheduled trailing write at its regular edge, so its optimistic transaction and persistence promise can settle. Cleanup returns before that write settles. Stop invoking the mutation function when its strategy is no longer needed; throttle admission after cleanup is not a defined cancellation boundary.
 
 ### Queue Strategy
 
 The queue strategy creates a separate transaction for each mutation and processes admitted transactions sequentially in queue order. Unlike debounce/throttle, **every admitted mutation is attempted**. When `maxSize` is set, overflow is rejected at admission rather than silently dropped.
 
 Calling `strategy.cleanup()` stops new admission. The existing timer drains admitted waiting mutations at the configured `wait` interval and in queue order. Cleanup returns before those writes settle.
+If the Collection is cleaned up separately, admitted persistence callbacks still run; callers should await the returned transactions when they need those writes to settle before finishing their own teardown.
 
 ```tsx
 import { usePacedMutations, queueStrategy } from "@tanstack/react-db"
@@ -1238,6 +1244,7 @@ function FileUploader() {
 - If a mutation fails, **it is not automatically retried** - the transaction transitions to "failed" state
 - Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
 - Queue overflow rejects `transaction.isPersisted.promise` with `QueueCapacityExceededError`
+- A call after queue cleanup rejects `transaction.isPersisted.promise` with `QueueDisposedError` and rolls back its optimistic mutation
 - **Subsequent mutations continue processing** - a single failure does not block the queue
 - Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
 - To implement retry logic, see [Retry Behavior](#retry-behavior)

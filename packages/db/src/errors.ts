@@ -319,6 +319,20 @@ export class QueueCapacityExceededError extends TransactionError {
   }
 }
 
+export class QueueDisposedError extends TransactionError {
+  constructor() {
+    super(`Queue has been cleaned up; the mutation was not admitted`)
+    this.name = `QueueDisposedError`
+  }
+}
+
+export class ThrottleCallDroppedError extends TransactionError {
+  constructor() {
+    super(`Throttle call was dropped because trailing execution is disabled`)
+    this.name = `ThrottleCallDroppedError`
+  }
+}
+
 export class MissingMutationFunctionError extends TransactionError {
   constructor() {
     super(`mutationFn is required when creating a transaction`)

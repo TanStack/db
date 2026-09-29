@@ -1,4 +1,3 @@
-import { LiteThrottler } from '@tanstack/pacer-lite/lite-throttler'
 import type { ThrottleStrategy, ThrottleStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -48,15 +47,13 @@ import type { Transaction } from '../transactions'
 export function throttleStrategy(
   options: ThrottleStrategyOptions,
 ): ThrottleStrategy {
-  // Pacer-lite measures the first non-leading wait from epoch zero. Own this
-  // trailing-only window so its first execution waits from the first call.
-  const trailingOnly = options.leading !== true && options.trailing === true
+  const leading =
+    options.leading === true ||
+    (options.leading === undefined && options.trailing !== true)
+  const trailing = options.trailing !== false
+  let nextAllowedAt = Number.NEGATIVE_INFINITY
   let trailingTimeout: ReturnType<typeof setTimeout> | undefined
-  const throttler = trailingOnly
-    ? undefined
-    : new LiteThrottler((callback: () => Transaction) => callback(), {
-        ...options,
-      })
+  let pendingCallback: (() => Transaction) | undefined
 
   return {
     _type: `throttle`,
@@ -64,18 +61,28 @@ export function throttleStrategy(
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
     ) => {
-      if (trailingOnly) {
-        trailingTimeout ??= setTimeout(() => {
-          trailingTimeout = undefined
-          fn()
-        }, options.wait)
-      } else {
-        throttler?.maybeExecute(fn as () => Transaction)
+      const now = Date.now()
+      if (leading && trailingTimeout === undefined && now >= nextAllowedAt) {
+        nextAllowedAt = now + options.wait
+        fn()
+        return
       }
+      if (!trailing) return false
+      pendingCallback = fn as () => Transaction
+      if (trailingTimeout === undefined) {
+        const delay = leading ? Math.max(0, nextAllowedAt - now) : options.wait
+        trailingTimeout = setTimeout(() => {
+          trailingTimeout = undefined
+          nextAllowedAt = Date.now() + options.wait
+          const callback = pendingCallback
+          pendingCallback = undefined
+          callback?.()
+        }, delay)
+      }
+      return
     },
     cleanup: () => {
-      if (trailingTimeout !== undefined) clearTimeout(trailingTimeout)
-      throttler?.cancel()
+      // Pending work keeps its timer until the scheduled callback runs.
     },
   }
 }

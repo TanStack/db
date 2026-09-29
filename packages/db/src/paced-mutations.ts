@@ -1,5 +1,9 @@
 import { createTransaction } from './transactions'
-import { QueueCapacityExceededError } from './errors'
+import {
+  QueueCapacityExceededError,
+  QueueDisposedError,
+  ThrottleCallDroppedError,
+} from './errors'
 import type { MutationFn, Transaction } from './types'
 import type { Strategy } from './strategies/types'
 
@@ -151,12 +155,19 @@ export function createPacedMutations<
     // This prevents the error when commitCallback tries to access the cleared activeTransaction
     if (strategy._type === `queue`) {
       activeTransaction = null // Clear so next mutation creates a new transaction
-      const admitted = strategy.execute(() => {
-        txToReturn.commit().catch(() => {
-          // Errors are handled via transaction.isPersisted.promise
+      let admitted: ReturnType<typeof strategy.execute>
+      try {
+        admitted = strategy.execute(() => {
+          txToReturn.commit().catch(() => {
+            // Errors are handled via transaction.isPersisted.promise
+          })
+          return txToReturn
         })
+      } catch (error) {
+        if (!(error instanceof QueueDisposedError)) throw error
+        txToReturn.rollback({ error, isSecondaryRollback: true })
         return txToReturn
-      })
+      }
       if (admitted === false) {
         // Admission failure belongs to this call; admitted same-key writes
         // must remain in the queue and keep their optimistic state.
@@ -166,8 +177,16 @@ export function createPacedMutations<
         })
       }
     } else {
-      // For debounce/throttle, use commitCallback which manages activeTransaction
-      strategy.execute(commitCallback)
+      // Debounce/throttle share pending work until commitCallback runs. A
+      // throttle with trailing disabled can reject a skipped optimistic call.
+      const executed = strategy.execute(commitCallback)
+      if (strategy._type === `throttle` && executed === false) {
+        txToReturn.rollback({
+          error: new ThrottleCallDroppedError(),
+          isSecondaryRollback: true,
+        })
+        activeTransaction = null
+      }
     }
 
     return txToReturn

@@ -78,9 +78,9 @@ export interface QueueStrategy extends BaseStrategy<`queue`> {
 export interface ThrottleStrategyOptions {
   /** Minimum wait time between executions (milliseconds) */
   wait: number
-  /** Execute immediately on the first call */
+  /** Execute immediately on the first call. Defaults to true unless trailing is explicitly true. */
   leading?: boolean
-  /** Execute on the last call after wait period */
+  /** Execute on the last call after wait period. Defaults to true. Disabled trailing rejects skipped optimistic calls. */
   trailing?: boolean
 }
 

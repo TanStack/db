@@ -172,10 +172,13 @@ import { throttleStrategy } from "@tanstack/db"
 
 throttleStrategy({
   wait: number,           // minimum ms between commits
-  leading?: boolean,      // execute on the leading edge
-  trailing?: boolean,     // execute on the trailing edge
+  leading?: boolean,      // defaults true unless trailing is explicitly true
+  trailing?: boolean,     // defaults true; false rejects skipped optimistic calls
 })
 ```
+
+Throttle cleanup lets an already scheduled trailing write run at its configured
+edge. It returns before that transaction settles.
 
 ### queueStrategy
 
@@ -192,7 +195,8 @@ queueStrategy({
 
 Queue creates a **separate transaction per call** (unlike debounce/throttle
 which merge). Each transaction commits and awaits `isPersisted` before the next
-starts. Failed transactions do not block subsequent ones.
+starts. Failed transactions do not block subsequent ones. Cleanup drains admitted
+work at the configured pace but rejects later calls with `QueueDisposedError`.
 
 ## Transaction.isPersisted.promise
 
