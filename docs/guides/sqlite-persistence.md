@@ -228,7 +228,7 @@ Use `nodePersistence` in the Collection options shown above. Clean up each Colle
 
 By default, a synced Collection resets its persisted data after a schema mismatch. Its sync adapter must then load current data. A Collection without `sync` reports an error instead. It has no source that can restore deleted local rows.
 
-Runtime factories also accept `schemaMismatchPolicy`. An explicit `reset` policy can delete local data, so use it only when your application can restore that data.
+All runtime factories listed above except the Electron renderer factory accept `schemaMismatchPolicy`. An explicit `reset` policy can delete local data, so use it only when your application can restore that data.
 
 The Node package prunes its applied transaction log by default. Its [README](https://github.com/TanStack/db/tree/main/packages/node-db-sqlite-persistence#applied-transaction-pruning) lists the limits and options. If a resume position is older than the retained log, persistence loads a full snapshot.
 

@@ -327,7 +327,12 @@ const offline = startOfflineExecutor({
   },
 })
 
-const tx = offline.createOfflineTransaction({ mutationFnName: 'syncTodos' })
+await offline.waitForInit()
+
+const tx = offline.createOfflineTransaction({
+  mutationFnName: 'syncTodos',
+  autoCommit: false,
+})
 tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
 await tx.commit() // Remains pending until the mutation function succeeds.
 ```
