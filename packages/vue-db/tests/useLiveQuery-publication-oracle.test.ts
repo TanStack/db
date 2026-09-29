@@ -121,11 +121,11 @@ it.each(cases)(
 
       const expectedAfter = snapshot(source.values())
       expect(expectedAfter).not.toEqual(expectedBefore)
-      expect(observed).toHaveLength(1)
       for (const { publicData, sourceAtCallback } of observed) {
         expect(sourceAtCallback).toEqual(expectedAfter)
         expect([expectedBefore, expectedAfter]).toContainEqual(publicData)
       }
+      expect(observed).toHaveLength(1)
       expect(snapshot(result.data.value)).toEqual(expectedAfter)
       expect(observed.at(-1)?.publicData).toEqual(expectedAfter)
     } catch (error) {

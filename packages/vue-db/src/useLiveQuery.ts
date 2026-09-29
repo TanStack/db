@@ -372,13 +372,6 @@ export function useLiveQuery(
     collection.value ? collection.value.status : (`disabled` as const),
   )
 
-  // Helper to sync data array from collection in correct order
-  const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
-  ) => {
-    internalData.value = Array.from(currentCollection.values())
-  }
-
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
   let currentObserver: LiveQueryObserver<any, any> | null = null
@@ -388,7 +381,7 @@ export function useLiveQuery(
     currentCollection: Collection<any, any, any>,
   ) => {
     status.value = observer.getSnapshot().status as CollectionStatus
-    syncDataFromCollection(currentCollection)
+    internalData.value = Array.from(currentCollection.values())
   }
 
   // Watch for collection changes and subscribe to updates
