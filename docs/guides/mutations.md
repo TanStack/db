@@ -1135,6 +1135,10 @@ function AutoSaveForm({ formId }: { formId: string }) {
 - Timer resets on each mutation
 - Only the final merged state persists
 - Reduces backend writes significantly for rapid changes
+- Omitted `trailing` enables trailing execution, even when `leading` is set
+- With `trailing: false`, calls skipped inside the leading window reject with `DebounceCallDroppedError` and roll back their optimistic changes. Both edges disabled reject every call.
+
+Calling `strategy.cleanup()` leaves a pending debounce write scheduled for the quiet edge after its last call. Cleanup returns before the write settles. Await its persistence promise before releasing an external client that the write needs. New debounce calls after cleanup have no defined admission rule.
 
 ### Throttle Strategy
 

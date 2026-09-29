@@ -333,6 +333,13 @@ export class ThrottleCallDroppedError extends TransactionError {
   }
 }
 
+export class DebounceCallDroppedError extends TransactionError {
+  constructor() {
+    super(`Debounce call was dropped because trailing execution is disabled`)
+    this.name = `DebounceCallDroppedError`
+  }
+}
+
 export class MissingMutationFunctionError extends TransactionError {
   constructor() {
     super(`mutationFn is required when creating a transaction`)

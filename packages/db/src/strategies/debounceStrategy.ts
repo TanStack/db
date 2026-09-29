@@ -28,9 +28,14 @@ import type { Transaction } from '../transactions'
 export function debounceStrategy(
   options: DebounceStrategyOptions,
 ): DebounceStrategy {
+  const trailing = options.trailing ?? true
   const debouncer = new LiteDebouncer(
     (callback: () => Transaction) => callback(),
-    { ...options },
+    {
+      ...options,
+      leading: options.leading ?? false,
+      trailing,
+    },
   )
 
   return {
@@ -39,10 +44,16 @@ export function debounceStrategy(
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
     ) => {
-      debouncer.maybeExecute(fn as () => Transaction)
+      const execution = { happened: false }
+      debouncer.maybeExecute(() => {
+        execution.happened = true
+        return (fn as () => Transaction)()
+      })
+      if (!trailing && !execution.happened) return false
+      return
     },
     cleanup: () => {
-      debouncer.cancel()
+      // Keep pending work scheduled until its quiet-period callback runs.
     },
   }
 }

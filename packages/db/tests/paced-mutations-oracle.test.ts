@@ -24,20 +24,24 @@ import type { Transaction } from '../src/transactions'
  * The final advance is the observation cut: persistence calls retain their
  * recorded times, and returned transaction states must agree with the model.
  * It settles every admitted call. Queue capacity counts waiting items; an
- * overflow rejects its transaction and removes its optimistic row. An explicit
- * non-leading throttle waits for its first trailing edge, including when
+ * overflow rejects its transaction and removes its optimistic row. A
+ * non-leading debounce waits for its quiet edge when `trailing` is omitted.
+ * A non-leading throttle waits for its first trailing edge, including when
  * `leading` or `trailing` is omitted individually. Leading-only throttle
- * rejects calls dropped inside a window, including when `leading` is omitted;
- * disabling both edges rejects every call. Strategy factories leave
+ * rejects calls dropped inside a window, including when `leading` is omitted.
+ * Leading-only debounce rejects skipped calls too; disabling both edges
+ * rejects every call. Strategy factories leave
  * caller-owned options unchanged. A custom queue strategy may admit work
- * and return void, as the original public execute contract allowed.
- * Failed persistence and new throttle calls after cleanup remain outside this
- * owner's grammar.
+ * and return void. A custom batch strategy may return false while retaining
+ * its callback, as the original public execute contract allowed.
+ * Failed persistence and new debounce/throttle calls after cleanup remain
+ * outside this owner's grammar.
  * Cleanup stops new admission and drains admitted queue work at its regular
  * wait intervals, even if a separate Collection cleanup has finished. The
  * throttle's pending trailing timer also drains after cleanup at its regular
- * edge. A call after queue cleanup rejects with a disposal reason. The final
- * cut waits for every admitted receipt.
+ * edge. A pending debounce timer drains after the last call's quiet period.
+ * A call after queue cleanup rejects with a disposal reason. The final cut
+ * waits for every admitted receipt.
  *
  * Model `pendingIds` combines the production active optimistic transaction's
  * mutations. Model `ready` is an ordered list of queue calls, not pacer-lite's
@@ -435,6 +439,13 @@ const cases: Array<Case> = [
       debounceStrategy({ wait: 10, leading: false, trailing: true }),
   },
   {
+    name: `explicit non-leading debounce defaults to trailing persistence`,
+    actions: debounceActions,
+    expected: debounceStarts(debounceActions, 10),
+    sameTransaction: [[1, 2, 3], [4]],
+    strategy: () => debounceStrategy({ wait: 10, leading: false }),
+  },
+  {
     name: `throttle persists leading and trailing transactions`,
     actions: throttleActions,
     expected: throttleStarts(throttleActions, 10),
@@ -624,75 +635,89 @@ describe(`paced mutation timeline oracle`, () => {
     })
   })
 
-  it(`a dropped throttle update preserves the prior same-row write`, async () => {
-    const collection = createCollection(
-      mockSyncCollectionOptionsNoInitialState<{ id: number; value: number }>({
-        id: `paced-throttle-same-row`,
-        getKey: (item) => item.id,
-      }),
-    )
-    const preload = collection.preload()
-    collection.utils.begin()
-    collection.utils.commit()
-    collection.utils.markReady()
-    await preload
-    const strategy = throttleStrategy({
-      wait: 10,
-      leading: true,
-      trailing: false,
-    })
-    const starts: Array<number> = []
-    let releaseFirst: (() => void) | undefined
-    const mutate = createPacedMutations<number, { id: number; value: number }>({
-      onMutate: (value) => {
-        if (value === 1) collection.insert({ id: 1, value })
-        else
-          collection.update(1, (draft) => {
-            draft.value = value
+  for (const { name, strategyFactory, errorName } of [
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: false }),
+      errorName: `ThrottleCallDroppedError`,
+    },
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: false }),
+      errorName: `DebounceCallDroppedError`,
+    },
+  ]) {
+    it(`a dropped ${name} update preserves the prior same-row write`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<{ id: number; value: number }>({
+          id: `paced-${name}-same-row`,
+          getKey: (item) => item.id,
+        }),
+      )
+      const preload = collection.preload()
+      collection.utils.begin()
+      collection.utils.commit()
+      collection.utils.markReady()
+      await preload
+      const strategy = strategyFactory()
+      const starts: Array<number> = []
+      let releaseFirst: (() => void) | undefined
+      const mutate = createPacedMutations<
+        number,
+        { id: number; value: number }
+      >({
+        onMutate: (value) => {
+          if (value === 1) collection.insert({ id: 1, value })
+          else
+            collection.update(1, (draft) => {
+              draft.value = value
+            })
+        },
+        mutationFn: ({ transaction }) => {
+          const value = transaction.mutations[0].changes.value
+          if (typeof value !== `number`) throw new Error(`Missing value`)
+          starts.push(value)
+          if (value === 1)
+            return new Promise<void>((resolve) => {
+              releaseFirst = resolve
+            })
+          return Promise.resolve()
+        },
+        strategy,
+      })
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          const firstReceipt = observeReceipt(first)
+          await vi.advanceTimersByTimeAsync(4)
+          expect(first.state).toBe(`persisting`)
+          const dropped = mutate(2)
+          const droppedReceipt = observeReceipt(dropped)
+          await vi.advanceTimersByTimeAsync(0)
+          expect(droppedReceipt).toMatchObject({
+            outcome: `rejected`,
+            error: { name: errorName },
           })
-      },
-      mutationFn: ({ transaction }) => {
-        const value = transaction.mutations[0].changes.value
-        if (typeof value !== `number`) throw new Error(`Missing value`)
-        starts.push(value)
-        if (value === 1)
-          return new Promise<void>((resolve) => {
-            releaseFirst = resolve
+          expect(collection.get(1)?.value).toBe(1)
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts).toEqual([1])
+          expect(firstReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
           })
-        return Promise.resolve()
-      },
-      strategy,
+        },
+        async () => {
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
     })
-    await withCleanup(
-      strategy,
-      collection,
-      async () => {
-        const first = mutate(1)
-        const firstReceipt = observeReceipt(first)
-        await vi.advanceTimersByTimeAsync(4)
-        expect(first.state).toBe(`persisting`)
-        const dropped = mutate(2)
-        const droppedReceipt = observeReceipt(dropped)
-        await vi.advanceTimersByTimeAsync(0)
-        expect(droppedReceipt).toMatchObject({
-          outcome: `rejected`,
-          error: { name: `ThrottleCallDroppedError` },
-        })
-        expect(collection.get(1)?.value).toBe(1)
-        releaseFirst?.()
-        await vi.advanceTimersByTimeAsync(0)
-        expect(starts).toEqual([1])
-        expect(firstReceipt).toMatchObject({
-          outcome: `fulfilled`,
-          returnedSame: true,
-        })
-      },
-      async () => {
-        releaseFirst?.()
-        await vi.advanceTimersByTimeAsync(0)
-      },
-    )
-  })
+  }
 
   it(`drains an admitted trailing throttle write after cleanup at its regular edge`, async () => {
     const collection = await createReadyCollection()
@@ -730,6 +755,171 @@ describe(`paced mutation timeline oracle`, () => {
       })
     })
   })
+
+  it(`drains a pending debounce write after cleanup at its quiet edge`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = debounceStrategy({ wait: 10 })
+    const starts: Array<Start> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        starts.push({
+          at: Date.now() - origin,
+          ids: transaction.mutations.map((mutation) => {
+            const id = mutation.changes.id
+            if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+            return id
+          }),
+        })
+        return Promise.resolve()
+      },
+      strategy,
+    })
+    await withCleanup(strategy, collection, async () => {
+      const transaction = mutate(1)
+      const receipt = observeReceipt(transaction)
+      expect(collection.get(1)?.id).toBe(1)
+      await vi.advanceTimersByTimeAsync(4)
+      expect(mutate(2)).toBe(transaction)
+      expect(collection.get(2)?.id).toBe(2)
+      await vi.advanceTimersByTimeAsync(4)
+      strategy.cleanup()
+      await collection.cleanup()
+      await vi.advanceTimersByTimeAsync(5)
+      expect(starts).toEqual([])
+      expect(transaction.state).toBe(`pending`)
+      expect(receipt.outcome).toBe(`pending`)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(starts).toEqual([{ at: 14, ids: [1, 2] }])
+      expect(transaction.state).toBe(`completed`)
+      expect(receipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    })
+  })
+
+  it(`drains a second leading debounce transaction when trailing is omitted`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = debounceStrategy({ wait: 10, leading: true })
+    const starts: Array<Start> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        starts.push({
+          at: Date.now() - origin,
+          ids: transaction.mutations.map((mutation) => {
+            const id = mutation.changes.id
+            if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+            return id
+          }),
+        })
+        return Promise.resolve()
+      },
+      strategy,
+    })
+    await withCleanup(strategy, collection, async () => {
+      const first = mutate(1)
+      const firstReceipt = observeReceipt(first)
+      await vi.advanceTimersByTimeAsync(4)
+      expect(starts).toEqual([{ at: 0, ids: [1] }])
+      expect(firstReceipt.outcome).toBe(`fulfilled`)
+      const second = mutate(2)
+      const secondReceipt = observeReceipt(second)
+      expect(collection.get(2)?.id).toBe(2)
+      await vi.advanceTimersByTimeAsync(4)
+      strategy.cleanup()
+      await collection.cleanup()
+      await vi.advanceTimersByTimeAsync(5)
+      expect(starts).toEqual([{ at: 0, ids: [1] }])
+      expect(second.state).toBe(`pending`)
+      expect(secondReceipt.outcome).toBe(`pending`)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(starts).toEqual([
+        { at: 0, ids: [1] },
+        { at: 14, ids: [2] },
+      ])
+      expect(secondReceipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    })
+  })
+
+  it(`rejects a debounce call dropped inside a leading-only window`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = debounceStrategy({
+      wait: 10,
+      leading: true,
+      trailing: false,
+    })
+    const starts: Array<number> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        const id = transaction.mutations[0].changes.id
+        if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+        starts.push(id)
+        return Promise.resolve()
+      },
+      strategy,
+    })
+    await withCleanup(strategy, collection, async () => {
+      const first = mutate(1)
+      const firstReceipt = observeReceipt(first)
+      await vi.advanceTimersByTimeAsync(4)
+      expect(starts).toEqual([1])
+      expect(firstReceipt.outcome).toBe(`fulfilled`)
+      const dropped = mutate(2)
+      const droppedReceipt = observeReceipt(dropped)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(dropped.state).toBe(`failed`)
+      expect(collection.get(2)).toBeUndefined()
+      expect(droppedReceipt).toMatchObject({
+        outcome: `rejected`,
+        error: { name: `DebounceCallDroppedError` },
+      })
+      await vi.advanceTimersByTimeAsync(10)
+      const next = mutate(3)
+      const nextReceipt = observeReceipt(next)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(starts).toEqual([1, 3])
+      expect(nextReceipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    })
+  })
+
+  for (const leading of [false, undefined] as const) {
+    it(`rejects debounce calls when both edges are disabled and leading is ${String(leading)}`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = debounceStrategy({ wait: 10, leading, trailing: false })
+      let starts = 0
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: () => {
+          starts++
+          return Promise.resolve()
+        },
+        strategy,
+      })
+      await withCleanup(strategy, collection, async () => {
+        for (const id of [1, 2]) {
+          const transaction = mutate(id)
+          const receipt = observeReceipt(transaction)
+          await vi.advanceTimersByTimeAsync(10)
+          expect(transaction.state).toBe(`failed`)
+          expect(collection.get(id)).toBeUndefined()
+          expect(receipt).toMatchObject({
+            outcome: `rejected`,
+            error: { name: `DebounceCallDroppedError` },
+          })
+        }
+        expect(starts).toBe(0)
+      })
+    })
+  }
 
   for (const trailing of [true, false] as const) {
     it(`starts the first leading throttle call at epoch zero with trailing ${String(trailing)}`, async () => {
@@ -1155,6 +1345,79 @@ describe(`paced mutation timeline oracle`, () => {
         outcome: `fulfilled`,
         returnedSame: true,
       })
+    })
+  })
+
+  it(`keeps a false-returning custom batch transaction pending until its callback`, async () => {
+    const collection = await createReadyCollection()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const strategy: Strategy = {
+      _type: `batch`,
+      execute: (fn) => {
+        timer = setTimeout(() => fn(), 10)
+        return false
+      },
+      cleanup: () => {
+        if (timer !== undefined) clearTimeout(timer)
+      },
+    }
+    const starts: Array<number> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: () => {
+        starts.push(Date.now() - origin)
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(strategy, collection, async () => {
+      const transaction = mutate(1)
+      const receipt = observeReceipt(transaction)
+      expect(transaction.state, `custom batch admission`).toBe(`pending`)
+      expect(collection.get(1)?.id).toBe(1)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(starts).toEqual([10])
+      expect(receipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    })
+  })
+
+  it(`uses captured debounce options when reporting a dropped call`, async () => {
+    const collection = await createReadyCollection()
+    const options = { wait: 10, leading: true, trailing: false }
+    const strategy = debounceStrategy(options)
+    const starts: Array<number> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        const id = transaction.mutations[0].changes.id
+        if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+        starts.push(id)
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(strategy, collection, async () => {
+      const first = mutate(1)
+      const firstReceipt = observeReceipt(first)
+      await vi.advanceTimersByTimeAsync(4)
+      expect(firstReceipt.outcome).toBe(`fulfilled`)
+      options.trailing = true
+      const dropped = mutate(2)
+      const droppedReceipt = observeReceipt(dropped)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(dropped.state).toBe(`failed`)
+      expect(collection.get(2)).toBeUndefined()
+      expect(droppedReceipt).toMatchObject({
+        outcome: `rejected`,
+        error: { name: `DebounceCallDroppedError` },
+      })
+      await vi.advanceTimersByTimeAsync(10)
+      expect(starts).toEqual([1])
     })
   })
 

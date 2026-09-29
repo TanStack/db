@@ -1,5 +1,6 @@
 import { createTransaction } from './transactions'
 import {
+  DebounceCallDroppedError,
   QueueCapacityExceededError,
   QueueDisposedError,
   ThrottleCallDroppedError,
@@ -177,12 +178,18 @@ export function createPacedMutations<
         })
       }
     } else {
-      // Debounce/throttle share pending work until commitCallback runs. A
-      // throttle with trailing disabled can reject a skipped optimistic call.
+      // Debounce/throttle share pending work until commitCallback runs. With
+      // trailing disabled, a skipped optimistic call must be rejected.
       const executed = strategy.execute(commitCallback)
-      if (strategy._type === `throttle` && executed === false) {
+      if (
+        (strategy._type === `debounce` || strategy._type === `throttle`) &&
+        executed === false
+      ) {
         txToReturn.rollback({
-          error: new ThrottleCallDroppedError(),
+          error:
+            strategy._type === `debounce`
+              ? new DebounceCallDroppedError()
+              : new ThrottleCallDroppedError(),
           isSecondaryRollback: true,
         })
         activeTransaction = null

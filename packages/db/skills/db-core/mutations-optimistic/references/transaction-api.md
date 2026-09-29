@@ -165,6 +165,10 @@ debounceStrategy({
 })
 ```
 
+Debounce cleanup lets a pending write run after the last call's quiet period.
+It returns before that transaction settles.
+With `trailing: false`, a skipped call rejects with `DebounceCallDroppedError`.
+
 ### throttleStrategy
 
 ```ts
