@@ -617,6 +617,9 @@ class LiveQueryWindowControllerImpl<
 
   getSnapshot(): LiveQueryWindowSnapshot<T, TKey> {
     const observerSnapshot = this.observer.getSnapshot()
+    if (this.hasPaginationError && observerSnapshot.status === `ready`) {
+      this.failedHasNextPage = this.getComputedHasNextPage(observerSnapshot)
+    }
     const cached = this.cachedSnapshot
     if (
       cached &&
@@ -696,7 +699,7 @@ class LiveQueryWindowControllerImpl<
         // compile or restart the live-query pipeline.
         const windowResult = this.ensureLeaseActive(this.committedPageCount)
         const leaseGeneration = this.leaseGeneration
-        observerUnsub = this.observer.subscribe(() => this.onObserverNotify())
+        observerUnsub = this.observer.subscribe(() => this.notify())
         this.observerUnsub = observerUnsub
         if (windowResult !== true) {
           this.trackAttachmentFailure(windowResult, leaseGeneration)
@@ -966,23 +969,14 @@ class LiveQueryWindowControllerImpl<
     })
   }
 
-  private getComputedHasNextPage(): boolean {
-    const snapshot: LiveQuerySnapshot<T, TKey> = this.observer.getSnapshot()
+  private getComputedHasNextPage(
+    snapshot: LiveQuerySnapshot<T, TKey> = this.observer.getSnapshot(),
+  ): boolean {
     return (
       snapshot.isEnabled &&
       Array.isArray(snapshot.data) &&
       snapshot.data.length > this.committedPageCount * this.pageSize
     )
-  }
-
-  private onObserverNotify(): void {
-    if (
-      this.hasPaginationError &&
-      this.observer.getSnapshot().status === `ready`
-    ) {
-      this.failedHasNextPage = this.getComputedHasNextPage()
-    }
-    this.notify()
   }
 
   private beginTransition(): void {

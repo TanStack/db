@@ -663,7 +663,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
               q
                 .from({ items: source.collection })
                 .orderBy(({ items }: any) => items.rank, `desc`)
-                .limit(pageSize + 1)
+                // Keep the peek-ahead row in the collection after the
+                // controller releases its lease for the detached read.
+                .limit(pageSize * 2 + 1)
                 .offset(0),
             ).collection
             lifetime!.defer(() => collection.cleanup())
@@ -753,14 +755,17 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
                 expect(await preload).toBe(failure)
                 check(true, true)
               }
+              const fifthRow =
+                rowCount === 4
+                  ? { id: `5`, label: `row-5`, rank: -1 }
+                  : sourceRows[4]!
               const unsubscribe = controller.subscribe(() => {})
               try {
                 if (rowCount === 4) {
-                  const next = { id: `5`, label: `row-5`, rank: -1 }
-                  source.insert(next)
-                  currentRows = [...currentRows, next]
+                  source.insert(fifthRow)
+                  currentRows = [...currentRows, fifthRow]
                 } else {
-                  source.remove(sourceRows[4]!)
+                  source.remove(fifthRow)
                   currentRows = currentRows.slice(0, 4)
                 }
                 await waitForAsync(
@@ -770,6 +775,18 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
               } finally {
                 unsubscribe()
               }
+              // Detached observers refresh their rows when getSnapshot reads
+              // them; continuation must use that same current source extent.
+              if (rowCount === 4) {
+                source.remove(fifthRow)
+              } else {
+                source.insert(fifthRow)
+              }
+              currentRows = sourceRows
+              await waitForAsync(
+                () => collection.toArray.length === currentRows.length,
+              )
+              check(true, true)
               await controller.preload()
               check(true, false)
             } finally {
@@ -781,7 +798,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             }
           }
         }
-        expect(checked).toBe(16)
+        expect(checked).toBe(20)
       },
     )
 
