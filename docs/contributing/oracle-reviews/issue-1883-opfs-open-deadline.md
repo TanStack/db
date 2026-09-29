@@ -56,3 +56,46 @@ held-lock histories × the public browser OPFS open path × rejected open,
 worker disposal, and absence of a later queued lock. A signal-abort history is
 also covered by the controlled worker. The coverage map owns the remaining
 frozen-tab and browser-matrix witness gaps.
+
+## Follow-up review at `b1c615868974273e1b2dfb9bd5e5e0e45b01fc9d`
+
+The external review of PR #1936 raised an untested synchronous-abort cut and a
+possible false failure in the Chromium lock fixture. This follow-up changes no
+production code. It adds an abort history to the lifecycle oracle, gives the
+Chromium fixture a 10-second pending-lock setup window before its 15-second
+open deadline, and clarifies the previously unbounded default in the changeset.
+
+The new history aborts a real `AbortSignal` while reading the caller's
+`vfsName` option. This happens after the initial signal check and before the
+abort listener is installed. A silent init response and `timeoutMs: 0` make a
+missed abort observable: the open would remain pending. The oracle checks the
+exact rejection, one worker termination, listener removal, one init request,
+and no second settlement after a late response. Removing the post-registration
+abort check caused an assertion failure at the expected settlement checkpoint
+(`[]` instead of the `AbortError` rejection). Restoring it made the focused test
+pass.
+
+A controlled Chromium timing probe on the prior fixture queued a lock at 4.6
+seconds, before its 5-second open deadline. The 4.5-second pending-lock poll
+had already failed, even though the open later rejected with `TimeoutError`.
+The revised fixture gives worker startup more room without changing the
+timeout, queued-lock disappearance, or successful-reopen assertions. Its new
+window reduces this timing risk; it does not establish a maximum worker startup
+time on every CI host. The native Chromium fixture passed with the revised
+deadlines. The browser package suite passed with 382 runtime tests and no type
+errors; changed-file ESLint, Prettier, and `git diff --check` passed.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001: authority and limits | The README's pending-open cancellation contract remains the authority. The added getter history covers a valid synchronous abort; the lock fixture remains one Chromium history. |
+| ORC-002: independent judgment | The expected abort reason and resource release come from the public abort contract, not the production request map. |
+| ORC-003: responsibilities | The existing lifecycle oracle retains its contract, model, fixed-history grammar, production driver, and settlement/refinement checks. |
+| ORC-004: generated grammar | Not triggered. The generated pagehide grammar is unchanged; the new abort history is fixed. |
+| ORC-005: path and observation | The new history calls the public opener and observes exact settlement, init reach, worker termination, and late-response behavior. The Chromium fixture still observes the native queued Web Lock and reopen. |
+| ORC-006: calibration | Deleting the post-registration abort check failed the new oracle at the intended settlement assertion. The earlier native queued-lock disposal mutant remains recorded above. |
+| ORC-007: fixed/random replay | Not triggered by this fixed history. Existing generated campaigns and replay controls are unchanged. |
+| ORC-008: model minimality | Not triggered. No reference-model state changed. |
+| ORC-009: vocabulary | Abort, open settlement, worker disposal, and queued Web Lock retain their production/browser meanings. |
+| ORC-010: failure fidelity | The oracle's cleanup still releases held responses and restores globals. The Chromium fixture still preserves its primary failure and cleanup diagnostics. |
+| ORC-011: second formulation | The controlled abort history and native lock fixture judge different boundaries; no new shared semantic fault requires another formulation. |
+| ORC-012: review evidence | This addendum ties the focused mutant, suite receipts, and remaining timing limit to the exact executable commit above. |
