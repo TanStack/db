@@ -138,6 +138,21 @@ check observes internal identity only. The identity owner needs a subscription
 witness that compares public rows and acquisition counts after equivalent and
 distinct predicate demands settle.
 
+The subscription callback-reentry companion kills eleven guard-deletion mutants
+at the named request, resource, status, replay, or retention checkpoint on the
+reviewed production head. It also checks that releasing a direct snapshot
+during an unoptimized callback or snapshot evaluation prevents publication.
+A combined-predicate loader case checks release by the original request
+predicate before the loader returns. Three
+guards remain for a separate code-weight review (SUBS-09): M1's generation
+check after `loadSubset` is followed by demand-membership and generation checks
+after cleanup removes a starting demand; M6's replaced-state check before
+restart setup is followed by detached-demand and replay-state checks; M8's
+`releaseAttempted` true branch was unreached in 538 focused tests and its callers
+remove or detach ownership before invoking adapter unload. These are bounded
+equivalence arguments, not permission to delete the guards without a separate
+review. The companion does not establish arbitrary provider callback behavior.
+
 The Collection lifecycle publication owner checks 32 bounded histories in which
 cleanup interrupts nested publication deferrals and a restarted sync run later
 publishes or discards one or two source rows. It compares the next subscriber's
