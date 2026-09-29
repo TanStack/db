@@ -17,6 +17,18 @@ permissions:
   contents: read
 
 jobs:
+  minified-db:
+    name: Minified DB public API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Check minified public API
+        run: pnpm run test:minified-db
   test:
     name: Test
     runs-on: ubuntu-latest
