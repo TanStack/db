@@ -1056,6 +1056,8 @@ export class CollectionImpl<
 
   /**
    * Subscribe to changes in the collection
+   * Changes to the same key retain their causal order within a callback.
+   * Changes to different keys have no promised order within a callback.
    * @param callback - Function called when items change
    * @param options - Subscription options including includeInitialState and where filter
    * @returns Unsubscribe function - Call this to stop listening for changes

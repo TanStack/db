@@ -167,9 +167,11 @@ async function checkCollectionsAndQueries(db) {
     assert.equal(metadata[0].indexId, index.id)
     assert.equal(metadata[0].name, 'by-age')
     assert.equal(metadata[0].resolver.kind, 'constructor')
+    assert.equal(metadata[0].resolver.name, 'BasicIndex')
     assert.equal(indexEvents.length, 1)
     assert.equal(indexEvents[0].index.signature, metadata[0].signature)
     assert.equal(indexEvents[0].index.name, 'by-age')
+    assert.equal(indexEvents[0].index.resolver.name, 'BasicIndex')
 
     await source.preload()
     assert.deepEqual(
