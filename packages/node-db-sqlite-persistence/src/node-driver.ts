@@ -35,6 +35,34 @@ type TransactionContext = {
   depth: number
 }
 
+type DatabaseExecutionState = {
+  transactionContext: AsyncLocalStorage<TransactionContext>
+  queue: Promise<void>
+  nextSavepointId: number
+}
+
+const databaseExecutionStates = new WeakMap<
+  BetterSqlite3Database,
+  DatabaseExecutionState
+>()
+
+function getDatabaseExecutionState(
+  database: BetterSqlite3Database,
+): DatabaseExecutionState {
+  const existing = databaseExecutionStates.get(database)
+  if (existing) {
+    return existing
+  }
+
+  const state: DatabaseExecutionState = {
+    transactionContext: new AsyncLocalStorage<TransactionContext>(),
+    queue: Promise.resolve(),
+    nextSavepointId: 1,
+  }
+  databaseExecutionStates.set(database, state)
+  return state
+}
+
 function assertTransactionCallbackHasDriverArg(
   fn: (transactionDriver: SQLiteDriver) => Promise<unknown>,
 ): void {
@@ -56,15 +84,13 @@ function hasExistingDatabase(
 export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
   private readonly database: BetterSqlite3Database
   private readonly ownsDatabase: boolean
-  private readonly transactionContext =
-    new AsyncLocalStorage<TransactionContext>()
-  private queue: Promise<void> = Promise.resolve()
-  private nextSavepointId = 1
+  private readonly executionState: DatabaseExecutionState
 
   constructor(options: BetterSqlite3DriverOptions) {
     if (hasExistingDatabase(options)) {
       this.database = options.database
       this.ownsDatabase = false
+      this.executionState = getDatabaseExecutionState(this.database)
       this.applyPragmas(options.pragmas ?? DEFAULT_PRAGMAS)
       return
     }
@@ -77,6 +103,7 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
 
     this.database = new BetterSqlite3(options.filename, options.options)
     this.ownsDatabase = true
+    this.executionState = getDatabaseExecutionState(this.database)
     this.applyPragmas(options.pragmas ?? DEFAULT_PRAGMAS)
   }
 
@@ -125,7 +152,7 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
     return this.enqueue(async () => {
       this.database.exec(`BEGIN IMMEDIATE`)
       try {
-        const result = await this.transactionContext.run(
+        const result = await this.executionState.transactionContext.run(
           { depth: 1 },
           async () => fn(this),
         )
@@ -178,7 +205,7 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
   }
 
   private isInsideTransaction(): boolean {
-    return this.transactionContext.getStore() !== undefined
+    return this.executionState.transactionContext.getStore() !== undefined
   }
 
   private executeQuery<T>(
@@ -204,8 +231,8 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
   }
 
   private enqueue<T>(operation: () => Promise<T> | T): Promise<T> {
-    const queuedOperation = this.queue.then(operation, operation)
-    this.queue = queuedOperation.then(
+    const queuedOperation = this.executionState.queue.then(operation, operation)
+    this.executionState.queue = queuedOperation.then(
       () => undefined,
       () => undefined,
     )
@@ -215,17 +242,17 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
   private async runNestedTransaction<T>(
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
-    const context = this.transactionContext.getStore()
+    const context = this.executionState.transactionContext.getStore()
     if (!context) {
       return fn(this)
     }
 
-    const savepointName = `tsdb_sp_${this.nextSavepointId}`
-    this.nextSavepointId++
+    const savepointName = `tsdb_sp_${this.executionState.nextSavepointId}`
+    this.executionState.nextSavepointId++
     this.database.exec(`SAVEPOINT ${savepointName}`)
 
     try {
-      const result = await this.transactionContext.run(
+      const result = await this.executionState.transactionContext.run(
         { depth: context.depth + 1 },
         async () => fn(this),
       )

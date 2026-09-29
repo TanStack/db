@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-sqlite-persistence-core",
-  "version": "0.1.9",
+  "version": "0.2.23",
   "description": "SQLite persisted collection core for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -35,6 +35,16 @@
       "require": {
         "types": "./dist/cjs/index.d.cts",
         "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./broadcast-coordinator": {
+      "import": {
+        "types": "./dist/esm/broadcast-coordinator.d.ts",
+        "default": "./dist/esm/broadcast-coordinator.js"
+      },
+      "require": {
+        "types": "./dist/cjs/broadcast-coordinator.d.cts",
+        "default": "./dist/cjs/broadcast-coordinator.cjs"
       }
     },
     "./package.json": "./package.json"

@@ -3,8 +3,6 @@ id: QueueStrategyOptions
 title: QueueStrategyOptions
 ---
 
-# Interface: QueueStrategyOptions
-
 Defined in: [packages/db/src/strategies/types.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L50)
 
 Options for queue strategy
@@ -44,7 +42,7 @@ optional maxSize: number;
 
 Defined in: [packages/db/src/strategies/types.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L54)
 
-Maximum queue size (items are dropped if exceeded)
+Maximum number of waiting items; overflow rejects its transaction. A value of `0` rejects every mutation, including the first.
 
 ***
 

@@ -43,6 +43,117 @@ export class InvalidPersistenceAdapterError extends InvalidPersistedCollectionCo
   }
 }
 
+export type PersistedCollectionDurabilityErrorOptions = {
+  cause?: unknown
+  code?: unknown
+  path?: unknown
+}
+
+export class PersistedCollectionDurabilityError extends PersistedCollectionCoreError {
+  override readonly cause: unknown
+  readonly code: unknown
+  readonly path: unknown
+
+  constructor(
+    message: string,
+    options: PersistedCollectionDurabilityErrorOptions = {},
+  ) {
+    super(message)
+    this.name = `PersistedCollectionDurabilityError`
+    this.cause = options.cause
+    this.code = options.code
+    this.path = options.path
+  }
+}
+
+export function toPersistedCollectionDurabilityError(
+  collectionId: string,
+  cause: unknown,
+): PersistedCollectionDurabilityError {
+  if (cause instanceof PersistedCollectionDurabilityError) {
+    return cause
+  }
+
+  const details =
+    typeof cause === `object` && cause !== null
+      ? (cause as Record<string, unknown>)
+      : undefined
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return new PersistedCollectionDurabilityError(
+    `Failed to durably persist collection "${collectionId}": ${message}`,
+    {
+      cause,
+      code: details?.code,
+      path: details?.path,
+    },
+  )
+}
+
+export type IndeterminateCommitRequestType =
+  | `rpc:applyLocalMutations:req`
+  | `rpc:applyCommittedTx:req`
+
+export type IndeterminateCommitErrorOptions = {
+  collectionId: string
+  requestType: IndeterminateCommitRequestType
+  previousLeaderId: string | null
+  previousTerm: number | null
+  currentLeaderId: string | null
+  currentTerm: number | null
+  cause: unknown
+}
+
+export class IndeterminateCommitError extends PersistedCollectionCoreError {
+  readonly code: `INDETERMINATE_COMMIT` = `INDETERMINATE_COMMIT`
+  readonly collectionId: string
+  readonly requestType: IndeterminateCommitRequestType
+  readonly previousLeaderId: string | null
+  readonly previousTerm: number | null
+  readonly currentLeaderId: string | null
+  readonly currentTerm: number | null
+  override readonly cause: unknown
+
+  constructor(options: IndeterminateCommitErrorOptions) {
+    super(
+      `Commit outcome is indeterminate for collection "${options.collectionId}": ${options.requestType} crossed leadership from ${formatLeader(options.previousLeaderId, options.previousTerm)} to ${formatLeader(options.currentLeaderId, options.currentTerm)}`,
+    )
+    this.name = `IndeterminateCommitError`
+    this.collectionId = options.collectionId
+    this.requestType = options.requestType
+    this.previousLeaderId = options.previousLeaderId
+    this.previousTerm = options.previousTerm
+    this.currentLeaderId = options.currentLeaderId
+    this.currentTerm = options.currentTerm
+    this.cause = options.cause
+  }
+}
+
+function formatLeader(leaderId: string | null, term: number | null): string {
+  return `${leaderId ?? `unknown leader`} (term ${term ?? `unknown`})`
+}
+
+export class DuplicateRemoteSubsetOwnerError extends PersistedCollectionCoreError {
+  readonly collectionId: string
+
+  constructor(collectionId: string) {
+    super(
+      `A remote subset owner is already registered for collection "${collectionId}"`,
+    )
+    this.name = `DuplicateRemoteSubsetOwnerError`
+    this.collectionId = collectionId
+  }
+}
+
+export class RetryableRemoteSubsetAcquisitionError extends PersistedCollectionCoreError {
+  override readonly cause: unknown
+
+  constructor(message: string, cause?: unknown) {
+    super(message)
+    this.name = `RetryableRemoteSubsetAcquisitionError`
+    this.cause = cause
+  }
+}
+
 export class InvalidPersistedStorageKeyError extends InvalidPersistedCollectionConfigError {
   constructor(key: string | number) {
     super(
@@ -58,6 +169,15 @@ export class InvalidPersistedStorageKeyEncodingError extends InvalidPersistedCol
       `Invalid persisted storage key encoding "${encoded}": expected prefix "n:" or "s:"`,
     )
     this.name = `InvalidPersistedStorageKeyEncodingError`
+  }
+}
+
+export class SQLiteBigIntOutOfRangeError extends PersistedCollectionCoreError {
+  constructor(value: bigint, minimum: bigint, maximum: bigint) {
+    super(
+      `SQLite BigInt value ${value} is outside the signed 64-bit range [${minimum}, ${maximum}]`,
+    )
+    this.name = `SQLiteBigIntOutOfRangeError`
   }
 }
 

@@ -3,8 +3,6 @@ id: NegativeActiveSubscribersError
 title: NegativeActiveSubscribersError
 ---
 
-# Class: NegativeActiveSubscribersError
-
 Defined in: [packages/db/src/errors.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L132)
 
 ## Extends

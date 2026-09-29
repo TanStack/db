@@ -3,8 +3,6 @@ id: parseOrderByExpression
 title: parseOrderByExpression
 ---
 
-# Function: parseOrderByExpression()
-
 ```ts
 function parseOrderByExpression(orderBy): ParsedOrderBy[];
 ```

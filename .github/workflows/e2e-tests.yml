@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22.13'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -45,6 +45,7 @@ jobs:
         run: |
           pnpm --filter @tanstack/db-ivm build
           pnpm --filter @tanstack/db build
+          pnpm --filter @tanstack/react-db build
           pnpm --filter @tanstack/electric-db-collection build
           pnpm --filter @tanstack/offline-transactions build
           pnpm --filter @tanstack/query-db-collection build
@@ -67,6 +68,33 @@ jobs:
           pnpm test:e2e
         env:
           ELECTRIC_URL: http://localhost:3000
+
+      - name: Install Playwright browsers
+        run: |
+          cd examples/react/start-ssr-e2e
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Run Browser SQLite OPFS fairness E2E tests
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:opfs-fairness
+
+      - name: Run Browser SQLite OPFS with live Electric E2E tests
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:opfs-electric
+        env:
+          ELECTRIC_URL: http://localhost:3000
+
+      - name: Run React Start SSR E2E tests
+        run: |
+          cd examples/react/start-ssr-e2e
+          pnpm test:e2e
+
+      - name: Run Next.js SSR E2E tests
+        run: |
+          cd examples/react/next-ssr-e2e
+          pnpm test:e2e
 
       - name: Run Node SQLite persisted collection E2E tests
         run: |

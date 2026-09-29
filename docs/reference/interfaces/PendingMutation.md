@@ -3,8 +3,6 @@ id: PendingMutation
 title: PendingMutation
 ---
 
-# Interface: PendingMutation\<T, TOperation, TCollection\>
-
 Defined in: [packages/db/src/types.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L91)
 
 Represents a pending mutation within a transaction

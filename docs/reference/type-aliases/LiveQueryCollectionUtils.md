@@ -3,8 +3,6 @@ id: LiveQueryCollectionUtils
 title: LiveQueryCollectionUtils
 ---
 
-# Type Alias: LiveQueryCollectionUtils
-
 ```ts
 type LiveQueryCollectionUtils = UtilsRecord & object;
 ```
@@ -18,16 +16,6 @@ Defined in: [packages/db/src/query/live/collection-config-builder.ts:54](https:/
 ```ts
 [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils;
 ```
-
-### getRunCount()
-
-```ts
-getRunCount: () => number;
-```
-
-#### Returns
-
-`number`
 
 ### getWindow()
 
@@ -51,6 +39,14 @@ Gets the current window (offset and limit) for an ordered query.
   \| `undefined`
 
 The current window settings, or `undefined` if the query is not windowed
+
+### lastSubsetError
+
+```ts
+readonly lastSubsetError: unknown | undefined;
+```
+
+Most recent subset-load failure observed by this live query.
 
 ### setWindow()
 

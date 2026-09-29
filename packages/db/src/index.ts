@@ -6,14 +6,25 @@ import * as IR from './query/ir.js'
 export * from './collection/index.js'
 export * from './SortedMap'
 export * from './transactions'
+export * from './client.js'
+export { withCollectionConfigFactory } from './client.js'
 export * from './types'
 export * from './proxy'
 export * from './query/index.js'
 export * from './optimistic-action'
+export * from './live-query-adapter'
+export * from './live-query-observer'
+export * from './live-query-options'
+/** @internal Unstable adapter primitive for RFC #1623. */
+export * from './live-query-window-controller'
 export * from './local-only'
 export * from './local-storage'
 export * from './errors'
+/** @internal Unstable protocol for persistence-aware collection adapters. */
+export * from './sync-persistence'
 export { deepEquals } from './utils'
+/** @internal Used by first-party collection adapters. */
+export { warnOnce, resetWarnings } from './utils'
 export * from './paced-mutations'
 export * from './strategies/index.js'
 
@@ -31,8 +42,8 @@ export { BaseIndex } from './indexes/base-index.js'
 export type {
   IndexInterface,
   IndexConstructor,
-  IndexStats,
   IndexOperation,
+  IndexReader,
 } from './indexes/base-index.js'
 export { type IndexOptions } from './indexes/index-options.js'
 
@@ -79,6 +90,9 @@ export {
   type Effect,
   type EffectQueryInput,
 } from './query/effect.js'
+
+// UUID helper (safe in non-secure browser contexts, see #1541)
+export { safeRandomUUID } from './utils/uuid.js'
 
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from './collection/index.js'

@@ -3,8 +3,6 @@ id: UtilsRecord
 title: UtilsRecord
 ---
 
-# Type Alias: UtilsRecord
-
 ```ts
 type UtilsRecord = Record<string, any>;
 ```

@@ -1,3 +1,5 @@
+import { safeRandomUUID } from './utils/uuid'
+import { withCollectionConfigFactory } from './client.js'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -182,7 +184,7 @@ export function localOnlyCollectionOptions<
   const { initialData, onInsert, onUpdate, onDelete, id, ...restConfig } =
     config
 
-  const collectionId = id ?? crypto.randomUUID()
+  const collectionId = id ?? safeRandomUUID()
 
   // Create the sync configuration with transaction confirmation capability
   const syncResult = createLocalOnlySync<T, TKey>(initialData)
@@ -263,7 +265,7 @@ export function localOnlyCollectionOptions<
     )
   }
 
-  return {
+  const options = {
     ...restConfig,
     id: collectionId,
     sync: syncResult.sync,
@@ -278,6 +280,17 @@ export function localOnlyCollectionOptions<
   } as LocalOnlyCollectionOptionsResult<T, TKey, TSchema> & {
     schema?: StandardSchemaV1
   }
+
+  return withCollectionConfigFactory(options, () =>
+    (
+      localOnlyCollectionOptions as (
+        nextConfig: LocalOnlyCollectionConfig<T, TSchema, TKey>,
+      ) => typeof options
+    )({
+      ...config,
+      id: collectionId,
+    }),
+  )
 }
 
 /**
@@ -301,6 +314,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
   let collection: Collection<T, TKey, LocalOnlyCollectionUtils> | null = null
 
   const sync: SyncConfig<T, TKey> = {
+    rowUpdateMode: `full`,
     /**
      * Sync function that captures sync parameters and applies initial data
      * @param params - Sync parameters containing begin, write, and commit functions

@@ -695,8 +695,9 @@ describe(`Collection.subscribeChanges`, () => {
     expect(callback).not.toHaveBeenCalled()
   })
 
-  it(`should correctly handle filtered updates that transition between filter states`, () => {
+  it(`should correctly handle filtered updates that transition between filter states`, async () => {
     const callback = vi.fn()
+    const emitter = mitt()
 
     // Create collection with items that have a status field
     const collection = createCollection<{
@@ -708,6 +709,21 @@ describe(`Collection.subscribeChanges`, () => {
       getKey: (item) => item.id,
       sync: {
         sync: ({ begin, write, commit }) => {
+          // Feed persisted mutations back through the real sync transaction
+          // path so this test also observes applied-receipt failures.
+          // @ts-expect-error don't trust Mitt's typing and this works.
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error TODO type changes
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+
           // Start with some initial data
           begin()
           write({
@@ -723,38 +739,8 @@ describe(`Collection.subscribeChanges`, () => {
       },
     })
 
-    const mutationFn: MutationFn = async () => {
-      // Simulate sync by writing the mutations back
-      const syncCollection = collection as any
-      syncCollection.config.sync.sync({
-        collection: syncCollection,
-        begin: () => {
-          syncCollection._state.pendingSyncedTransactions.push({
-            committed: false,
-            operations: [],
-          })
-        },
-        write: (messageWithoutKey: any) => {
-          const pendingTransaction =
-            syncCollection._state.pendingSyncedTransactions[
-              syncCollection._state.pendingSyncedTransactions.length - 1
-            ]
-          const key = syncCollection.getKeyFromItem(messageWithoutKey.value)
-          const message = { ...messageWithoutKey, key }
-          pendingTransaction.operations.push(message)
-        },
-        commit: () => {
-          const pendingTransaction =
-            syncCollection._state.pendingSyncedTransactions[
-              syncCollection._state.pendingSyncedTransactions.length - 1
-            ]
-          pendingTransaction.committed = true
-          syncCollection.commitPendingTransactions()
-        },
-        markReady: () => {
-          syncCollection.markReady()
-        },
-      })
+    const mutationFn: MutationFn = ({ transaction }) => {
+      emitter.emit(`sync`, transaction.mutations)
       return Promise.resolve()
     }
 
@@ -857,6 +843,15 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Should not emit any events for inactive items
     expect(callback).not.toHaveBeenCalled()
+
+    // Keep the immediate optimistic assertions isolated above, then prove that
+    // every auto-commit also completes through applied-receipt settlement.
+    await Promise.all([
+      tx1.isPersisted.promise,
+      tx2.isPersisted.promise,
+      tx3.isPersisted.promise,
+      tx4.isPersisted.promise,
+    ])
 
     // Clean up
     subscription.unsubscribe()
@@ -2151,6 +2146,74 @@ describe(`Collection.subscribeChanges`, () => {
         whereExpression: eq(new PropRef([`status`]), `active`),
       })
     }).toThrow(`Cannot specify both 'where' and 'whereExpression' options`)
+    expect(collection.subscriberCount).toBe(0)
+  })
+
+  it(`releases subscriber ownership when a where callback throws`, () => {
+    const failure = new Error(`where callback failed`)
+    const collection = createCollection<{ id: number; status: string }>({
+      id: `where-callback-error-test`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        where: () => {
+          throw failure
+        },
+      }),
+    ).toThrow(failure)
+    expect(collection.subscriberCount).toBe(0)
+  })
+
+  it(`rolls back subscriber ownership when starting sync throws`, () => {
+    const failure = new Error(`sync setup failed`)
+    const collection = createCollection<{ id: number }>({
+      id: `subscriber-start-sync-error-test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: () => {
+          throw failure
+        },
+      },
+    })
+
+    expect(() => collection.subscribeChanges(() => {})).toThrow(failure)
+    expect(collection.subscriberCount).toBe(0)
+    expect(collection.status).toBe(`error`)
+  })
+
+  it(`preserves setup failure when subscription cleanup also throws`, () => {
+    const loadFailure = new Error(`initial subset failed`)
+    const unloadFailure = new Error(`subset cleanup failed`)
+    const collection = createCollection<{ id: number }>({
+      id: `subscriber-load-and-unload-error-test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {
+              throw unloadFailure
+            },
+          }
+        },
+      },
+    })
+
+    expect(() =>
+      collection.subscribeChanges(() => {}, {
+        includeInitialState: true,
+        onLoadSubsetResult: () => {
+          throw loadFailure
+        },
+      }),
+    ).toThrow(loadFailure)
+    expect(collection.subscriberCount).toBe(0)
   })
 })
 
@@ -2608,6 +2671,123 @@ describe(`Virtual properties`, () => {
     expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
   })
 
+  it.each([false, true])(
+    `keeps a completed reinsert visible before its sync echo (delete echoed: %s)`,
+    async (deleteEchoed) => {
+      let echoDelete!: () => void
+      const collection = createCollection<
+        { id: string; value: string },
+        string
+      >({
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `row`, value: `original` } })
+            commit()
+            markReady()
+            echoDelete = () => {
+              begin()
+              write({ type: `delete`, value: { id: `row`, value: `original` } })
+              commit()
+            }
+          },
+        },
+        onDelete: () => Promise.resolve(),
+        onInsert: () => Promise.resolve(),
+      })
+      try {
+        await collection.delete(`row`).isPersisted.promise
+        expect(collection.has(`row`)).toBe(false)
+        if (deleteEchoed) echoDelete()
+        await collection.insert({ id: `row`, value: `replacement` }).isPersisted
+          .promise
+        expect(collection.get(`row`)?.value).toBe(`replacement`)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`before`, `after`] as const)(
+    `replaces a direct mutation settling %s truncate with its authoritative row`,
+    async (settlement) => {
+      let finishMutation!: () => void
+      const mutation = new Promise<void>((resolve) => {
+        finishMutation = resolve
+      })
+      let syncFns:
+        | {
+            begin: () => void
+            write: (change: {
+              type: `insert`
+              value: { id: string; value: string }
+            }) => void
+            commit: () => true | Promise<void>
+            truncate: () => void
+          }
+        | undefined
+
+      const collection = createCollection<
+        { id: string; value: string },
+        string
+      >({
+        id: `truncate-replaces-completed-direct-mutation`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, truncate, markReady }) => {
+            syncFns = { begin, write, commit, truncate }
+            markReady()
+          },
+        },
+        onInsert: () => mutation,
+      })
+
+      await collection.stateWhenReady()
+      const transaction = collection.insert({ id: `row-1`, value: `client` })
+      if (settlement === `before`) {
+        finishMutation()
+        await transaction.isPersisted.promise
+      }
+      expect(collection.get(`row-1`)).toMatchObject({
+        id: `row-1`,
+        value: `client`,
+      })
+
+      if (!syncFns) throw new Error(`Sync not ready`)
+      syncFns.begin()
+      syncFns.truncate()
+      syncFns.write({
+        type: `insert`,
+        value: { id: `row-1`, value: `server` },
+      })
+      const applied = syncFns.commit()
+      if (settlement === `after`) {
+        // An unrelated mutation recomputes the optimistic overlay before the
+        // acknowledged insertion completes; it must not erase that evidence.
+        const peer = collection.insert({ id: `other`, value: `peer` })
+        finishMutation()
+        await transaction.isPersisted.promise
+        await peer.isPersisted.promise
+      }
+      if (applied !== true) await applied
+      await waitForChanges()
+
+      expect(collection.get(`row-1`)).toMatchObject({
+        id: `row-1`,
+        value: `server`,
+      })
+      expect(collection.state.get(`row-1`)?.$synced).toBe(true)
+      // A same-key sync during the active mutation is a local acknowledgement;
+      // after completion, truncate is an independent remote replacement.
+      expect(collection.state.get(`row-1`)?.$origin).toBe(
+        settlement === `after` ? `local` : `remote`,
+      )
+    },
+  )
+
   it(`should preserve local origin for rows confirmed in the same truncate batch`, async () => {
     let syncFns:
       | {
@@ -2650,6 +2830,7 @@ describe(`Virtual properties`, () => {
           })
         })
         syncFns.commit()
+        return Promise.resolve()
       },
     })
 

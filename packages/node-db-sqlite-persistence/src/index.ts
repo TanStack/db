@@ -1,4 +1,8 @@
-export { createNodeSQLitePersistence } from './node-persistence'
+export {
+  createNodeSQLitePersistence,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+} from './node-persistence'
 export type {
   BetterSqlite3Database,
   NodeSQLitePersistenceOptions,

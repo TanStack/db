@@ -3,8 +3,6 @@ id: NonRetriableError
 title: NonRetriableError
 ---
 
-# Class: NonRetriableError
-
 Defined in: [packages/db/src/errors.ts:10](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L10)
 
 ## Extends

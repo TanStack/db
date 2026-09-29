@@ -6,7 +6,7 @@
 import { createTransaction } from "@tanstack/db"
 
 const tx = createTransaction<T>({
-  id?: string,                        // defaults to crypto.randomUUID()
+  id?: string,                        // defaults to safeRandomUUID()
   autoCommit?: boolean,               // default true -- commit after mutate()
   mutationFn: MutationFn<T>,          // (params: { transaction }) => Promise<any>
   metadata?: Record<string, unknown>, // custom data attached to the transaction
@@ -26,7 +26,8 @@ interface Transaction<T> {
   metadata: Record<string, unknown>
   error?: { message: string; error: Error }
 
-  // Deferred promise -- resolves when mutationFn completes, rejects on failure
+  // Deferred promise -- resolves when the transaction settles, rejects on
+  // mutation failure or rollback
   isPersisted: {
     promise: Promise<Transaction<T>>
     resolve: (value: Transaction<T>) => void
@@ -51,6 +52,7 @@ interface Transaction<T> {
 - `rollback()` allowed in `pending` or `persisting` (throws `TransactionAlreadyCompletedRollbackError` if completed)
 - Failed `mutationFn` automatically triggers `rollback()`
 - Rollback cascades to other pending transactions sharing the same item keys
+- An empty or fully cancelled transaction completes without calling `mutationFn`
 
 ## PendingMutation Type
 
@@ -102,6 +104,11 @@ stack. Any `collection.insert/update/delete` call automatically joins the
 topmost ambient transaction. This is how `createOptimisticAction` and
 `createPacedMutations` wire collection operations into their transactions.
 
+The ambient scope lasts only for the synchronous `mutate()` callback. A
+collection operation after an `await` does not join that transaction. Put async
+work in `mutationFn`, or call `mutate()` again while the transaction is still
+pending.
+
 ## createOptimisticAction
 
 ```ts
@@ -116,7 +123,7 @@ const action = createOptimisticAction<TVariables>({
 
   // Optional: same as createTransaction config
   id?: string,
-  autoCommit?: boolean,    // always true (commit happens after mutate)
+  autoCommit?: boolean,    // default true; false requires manual commit()
   metadata?: Record<string, unknown>,
 })
 
@@ -158,6 +165,10 @@ debounceStrategy({
 })
 ```
 
+Debounce cleanup lets a pending write run after the last call's quiet period.
+It returns before that transaction settles.
+With `trailing: false`, a skipped call rejects with `DebounceCallDroppedError`.
+
 ### throttleStrategy
 
 ```ts
@@ -165,10 +176,13 @@ import { throttleStrategy } from "@tanstack/db"
 
 throttleStrategy({
   wait: number,           // minimum ms between commits
-  leading?: boolean,      // execute on the leading edge
-  trailing?: boolean,     // execute on the trailing edge
+  leading?: boolean,      // defaults true unless trailing is explicitly true
+  trailing?: boolean,     // defaults true; false rejects skipped optimistic calls
 })
 ```
+
+Throttle cleanup lets an already scheduled trailing write run at its configured
+edge. It returns before that transaction settles.
 
 ### queueStrategy
 
@@ -177,7 +191,7 @@ import { queueStrategy } from "@tanstack/db"
 
 queueStrategy({
   wait?: number,                      // ms between processing items (default 0)
-  maxSize?: number,                   // drop items if queue exceeds this
+  maxSize?: number,                   // reject overflow when waiting queue is full
   addItemsTo?: "front" | "back",     // default "back" (FIFO)
   getItemsFrom?: "front" | "back",   // default "front" (FIFO)
 })
@@ -185,7 +199,8 @@ queueStrategy({
 
 Queue creates a **separate transaction per call** (unlike debounce/throttle
 which merge). Each transaction commits and awaits `isPersisted` before the next
-starts. Failed transactions do not block subsequent ones.
+starts. Failed transactions do not block subsequent ones. Cleanup drains admitted
+work at the configured pace but rejects later calls with `QueueDisposedError`.
 
 ## Transaction.isPersisted.promise
 
@@ -203,5 +218,10 @@ try {
 
 The promise is a `Deferred` -- it is created at transaction construction time
 and settled when `commit()` completes or `rollback()` is called. For
-`autoCommit: true` transactions, the promise settles shortly after `mutate()`
-returns (the commit runs asynchronously).
+`autoCommit: true` transactions, commit starts after `mutate()` returns; the
+promise can remain pending as long as `mutationFn` does.
+
+For a non-empty commit, `mutationFn` is the normal success boundary.
+`isPersisted.promise` does not by itself prove that a backend uploaded,
+confirmed, or read back the write. It proves those stronger guarantees only
+when `mutationFn` waits for them before returning.

@@ -99,6 +99,27 @@ async function waitFor(fn: () => void, timeout = 2000, interval = 20) {
 }
 
 describe(`Query Collections`, () => {
+  it(`keeps data and keyed state aligned after collection cleanup`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `cleanup-alignment-vue`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+    const result = useLiveQuery(collection)
+
+    await waitForVueUpdate()
+    expect(result.data.value).toHaveLength(3)
+    expect(result.state.value.size).toBe(3)
+
+    await collection.cleanup()
+    await nextTick()
+
+    expect(result.data.value).toHaveLength(0)
+    expect(result.state.value.size).toBe(0)
+  })
+
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
@@ -1911,6 +1932,47 @@ describe(`Query Collections`, () => {
       })
       expect(result.data.value).toHaveLength(1)
       expect(result.isReady.value).toBe(true)
+    })
+
+    /**
+     * Driver: public `useLiveQuery` with a Vue ref. The initial read and each
+     * `waitFor` completion are observation cuts for disabled, enabled, and
+     * disabled-again public results. Collection/state behavior remains in
+     * shared conformance; this test isolates conditional `findOne` data.
+     */
+    it(`keeps conditional findOne data empty while disabled`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-find-one-vue`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) =>
+          enabled.value
+            ? q
+                .from({ collection })
+                .where(({ collection: person }) => eq(person.id, `3`))
+                .findOne()
+            : null,
+        [() => enabled.value],
+      )
+
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.data.value).toEqual([])
+
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.data.value).toMatchObject({ id: `3` })
+      })
+
+      enabled.value = false
+      await waitFor(() => {
+        expect(result.status.value).toBe(`disabled`)
+      })
+      expect(result.data.value).toEqual([])
     })
   })
 })

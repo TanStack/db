@@ -3,13 +3,11 @@ id: createChangeProxy
 title: createChangeProxy
 ---
 
-# Function: createChangeProxy()
-
 ```ts
 function createChangeProxy<T>(target, parent?): object;
 ```
 
-Defined in: [packages/db/src/proxy.ts:628](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L628)
+Defined in: [packages/db/src/proxy.ts:472](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L472)
 
 Creates a proxy that tracks changes to the target object
 
@@ -29,15 +27,9 @@ The object to proxy
 
 ### parent?
 
+`ChangeParent`
+
 Optional parent information
-
-#### prop
-
-`string` \| `symbol`
-
-#### tracker
-
-`ChangeTracker`\<`Record`\<`string` \| `symbol`, `unknown`\>\>
 
 ## Returns
 

@@ -1,13 +1,9 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
-import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import { hasVirtualPropPath } from '../virtual-props'
+import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
-
-export interface AutoIndexConfig {
-  autoIndex?: `off` | `eager`
-}
 
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
@@ -71,7 +67,7 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
+        options: { compareFn, compareOptions: compareOpts },
       },
     )
   } catch (error) {

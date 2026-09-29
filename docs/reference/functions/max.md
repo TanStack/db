@@ -3,13 +3,11 @@ id: max
 title: max
 ---
 
-# Function: max()
-
 ```ts
 function max<T>(arg): AggregateReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:382](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L382)
+Defined in: [packages/db/src/query/builder/functions.ts:659](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L659)
 
 ## Type Parameters
 

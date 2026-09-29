@@ -3,15 +3,13 @@ id: concat
 title: concat
 ---
 
-# Function: concat()
-
 ## Call Signature
 
 ```ts
 function concat<T>(arg): ConcatToArrayWrapper<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L297)
+Defined in: [packages/db/src/query/builder/functions.ts:301](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L301)
 
 ### Type Parameters
 
@@ -35,7 +33,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:297](https://github.com/
 function concat(...args): BasicExpression<string>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L300)
+Defined in: [packages/db/src/query/builder/functions.ts:304](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L304)
 
 ### Parameters
 

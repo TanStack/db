@@ -3,8 +3,6 @@ id: parseWhereExpression
 title: parseWhereExpression
 ---
 
-# Function: parseWhereExpression()
-
 ```ts
 function parseWhereExpression<T>(expr, options): T | null;
 ```

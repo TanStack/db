@@ -3,8 +3,6 @@ id: CollectionIndexMetadata
 title: CollectionIndexMetadata
 ---
 
-# Interface: CollectionIndexMetadata
-
 Defined in: [packages/db/src/collection/events.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/collection/events.ts#L70)
 
 ## Properties

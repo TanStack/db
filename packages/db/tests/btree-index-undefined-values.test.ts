@@ -16,6 +16,7 @@ import { createLiveQueryCollection } from '../src/query/live-query-collection.js
 import { eq } from '../src/query/builder/functions.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
+import { orderedEntriesArray, valueMapData } from './utils'
 import type { Collection } from '../src/collection/index.js'
 
 interface TaskItem {
@@ -195,7 +196,7 @@ describe(`BTreeIndex - undefined value handling`, () => {
       index.add(`num2`, { value: 2 })
       index.add(`num0`, { value: 0 })
 
-      const ordered = index.orderedEntriesArray
+      const ordered = orderedEntriesArray(index)
       expect(ordered[0]![0]).toBe(undefined)
       expect(ordered[0]![1]).toContain(`undef`)
     })
@@ -206,7 +207,7 @@ describe(`BTreeIndex - undefined value handling`, () => {
       index.add(`undef`, { name: undefined })
       index.add(`str2`, { name: `banana` })
 
-      expect(index.orderedEntriesArray[0]![0]).toBe(undefined)
+      expect(orderedEntriesArray(index)[0]![0]).toBe(undefined)
     })
 
     it(`should handle mixed undefined and null values`, () => {
@@ -246,6 +247,24 @@ describe(`BTreeIndex - undefined value handling`, () => {
 
       const withoutFrom = index.rangeQuery({ to: 2, toInclusive: true })
       expect(withoutFrom.size).toBe(3)
+    })
+
+    it(`should not drop the minimum key when an upper-only range is exclusive on the (absent) lower bound`, () => {
+      // When no `from` bound is provided, `fromInclusive` must not cause the
+      // smallest key to be excluded: there is no lower bound to exclude
+      // against. Only an explicitly provided exclusive lower bound should
+      // drop its boundary value.
+      const index = createIndex(`value`)
+      index.add(`a`, { value: 1 })
+      index.add(`b`, { value: 5 })
+      index.add(`c`, { value: 10 })
+
+      const result = index.rangeQuery({ to: 10, fromInclusive: false })
+
+      expect(result.size).toBe(3)
+      expect(result).toContain(`a`)
+      expect(result).toContain(`b`)
+      expect(result).toContain(`c`)
     })
 
     it(`should handle range query from undefined to undefined`, () => {
@@ -294,7 +313,7 @@ describe(`BTreeIndex - undefined value handling`, () => {
       )
       expect(undefinedComparisons.length).toBeGreaterThan(0)
 
-      const ordered = index.orderedEntriesArray
+      const ordered = orderedEntriesArray(index)
       expect(ordered[0]![0]).toBe(1)
       expect(ordered[1]![0]).toBe(undefined)
     })
@@ -390,7 +409,7 @@ describe(`BTreeIndex - undefined value handling`, () => {
       index.add(`a`, { value: undefined })
       index.add(`b`, { value: 1 })
 
-      const mapData = index.valueMapData
+      const mapData = valueMapData(index)
 
       expect(mapData.has(undefined)).toBe(true)
       expect(mapData.has(`__TS_DB_BTREE_UNDEFINED_VALUE__`)).toBe(false)

@@ -49,3 +49,9 @@ export const todosCollection = createCollection(
 - `createReactNativeSQLitePersistence` is shared across collections.
 - Mode defaults (`sync-present` vs `sync-absent`) are inferred from whether a
   `sync` config is present in `persistedCollectionOptions`.
+- Published OP-SQLite methods return self-describing object envelopes and need
+  no result-shape option. If a custom database wrapper instead returns a bare
+  array, set `arrayResultMode: 'rows'` for an array of data rows or
+  `arrayResultMode: 'statement-results'` for an array containing one statement
+  result. Undeclared arrays that also look like statement envelopes are rejected
+  rather than being reshaped heuristically.

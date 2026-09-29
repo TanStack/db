@@ -3,9 +3,7 @@ id: BaseQueryBuilder
 title: BaseQueryBuilder
 ---
 
-# Class: BaseQueryBuilder\<TContext\>
-
-Defined in: [packages/db/src/query/builder/index.ts:63](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L63)
+Defined in: [packages/db/src/query/builder/index.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L136)
 
 ## Type Parameters
 
@@ -18,16 +16,20 @@ Defined in: [packages/db/src/query/builder/index.ts:63](https://github.com/TanSt
 ### Constructor
 
 ```ts
-new BaseQueryBuilder<TContext>(query): BaseQueryBuilder<TContext>;
+new BaseQueryBuilder<TContext>(query, resolveCollection?): BaseQueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L66)
+Defined in: [packages/db/src/query/builder/index.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L139)
 
 #### Parameters
 
 ##### query
 
 `Partial`\<[`QueryIR`](../@tanstack/namespaces/IR/interfaces/QueryIR.md)\> = `{}`
+
+##### resolveCollection?
+
+`CollectionResolver`
 
 #### Returns
 
@@ -43,7 +45,7 @@ Defined in: [packages/db/src/query/builder/index.ts:66](https://github.com/TanSt
 get fn(): object;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:770](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L770)
+Defined in: [packages/db/src/query/builder/index.ts:924](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L924)
 
 Functional variants of the query builder
 These are imperative function that are called for ery row.
@@ -98,7 +100,7 @@ query
 ###### select()
 
 ```ts
-select<TFuncSelectResult>(callback): QueryBuilder<WithResult<TContext, TFuncSelectResult>>;
+select<TFuncSelectResult>(callback): FnSelectQueryResult<TContext, TFuncSelectResult>;
 ```
 
 Select fields using a function that operates on each row
@@ -120,7 +122,7 @@ A function that receives a row and returns the selected value
 
 ###### Returns
 
-[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<[`WithResult`](../type-aliases/WithResult.md)\<`TContext`, `TFuncSelectResult`\>\>
+`FnSelectQueryResult`\<`TContext`, `TFuncSelectResult`\>
 
 A QueryBuilder with functional selection applied
 
@@ -135,6 +137,16 @@ query
     age: row.users.age + 1,
   }))
 ```
+
+Child query builders, query expressions, and helpers such as eq(),
+toArray(), and materialize() cannot be returned from fn.select(). Use
+them as fields in select() so the compiler can add them to the query
+graph.
+
+Compiled Collection-valued includes cannot be inputs to fn.select(),
+including nested descendants. Use toArray() or materialize() in the
+upstream select(), or do parent-only functional work before adding
+live Collection includes with select().
 
 ###### where()
 
@@ -176,7 +188,7 @@ query
 _getQuery(): QueryIR;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:857](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L857)
+Defined in: [packages/db/src/query/builder/index.ts:1021](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L1021)
 
 #### Returns
 
@@ -190,7 +202,7 @@ Defined in: [packages/db/src/query/builder/index.ts:857](https://github.com/TanS
 distinct(): QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:709](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L709)
+Defined in: [packages/db/src/query/builder/index.ts:857](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L857)
 
 Specify that the query should return distinct rows.
 Deduplicates rows based on the selected columns.
@@ -219,7 +231,7 @@ query
 findOne(): QueryBuilder<TContext & SingleResult>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:729](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L729)
+Defined in: [packages/db/src/query/builder/index.ts:877](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L877)
 
 Specify that the query should return a single result
 
@@ -244,15 +256,10 @@ query
 ### from()
 
 ```ts
-from<TSource>(source): QueryBuilder<{
-  baseSchema: SchemaFromSource<TSource>;
-  fromSourceName: keyof TSource & string;
-  hasJoins: false;
-  schema: SchemaFromSource<TSource>;
-}>;
+from<TSource>(source): QueryBuilder<ContextFromSource<TSource>>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L145)
+Defined in: [packages/db/src/query/builder/index.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L249)
 
 Specify the source table or subquery for the query
 
@@ -266,18 +273,13 @@ Specify the source table or subquery for the query
 
 ##### source
 
-`TSource`
+[`SingleSource`](../type-aliases/SingleSource.md)\<`TSource`\>
 
 An object with a single key-value pair where the key is the table alias and the value is a Collection or subquery
 
 #### Returns
 
-[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<\{
-  `baseSchema`: [`SchemaFromSource`](../type-aliases/SchemaFromSource.md)\<`TSource`\>;
-  `fromSourceName`: keyof `TSource` & `string`;
-  `hasJoins`: `false`;
-  `schema`: [`SchemaFromSource`](../type-aliases/SchemaFromSource.md)\<`TSource`\>;
-\}\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<[`ContextFromSource`](../type-aliases/ContextFromSource.md)\<`TSource`\>\>
 
 A QueryBuilder with the specified source
 
@@ -300,7 +302,7 @@ query.from({ activeUsers })
 fullJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "full">>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:336](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L336)
+Defined in: [packages/db/src/query/builder/index.ts:484](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L484)
 
 Perform a FULL JOIN with another table or subquery
 
@@ -320,7 +322,7 @@ An object with a single key-value pair where the key is the table alias and the 
 
 ##### onCallback
 
-[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? \{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \} : never \}\[K\] \}\>\>
+[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends CollectionOptionsIdentity\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? ResultValue\<TContext\> : never \}\[K\] \}\>\>
 
 A function that receives table references and returns the join condition
 
@@ -347,7 +349,7 @@ query
 groupBy(callback): QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:631](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L631)
+Defined in: [packages/db/src/query/builder/index.ts:779](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L779)
 
 Group rows by one or more columns for aggregation
 
@@ -396,7 +398,7 @@ query
 having(callback): QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:430](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L430)
+Defined in: [packages/db/src/query/builder/index.ts:578](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L578)
 
 Filter grouped rows based on aggregate conditions
 
@@ -445,7 +447,7 @@ query
 innerJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "inner">>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:310](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L310)
+Defined in: [packages/db/src/query/builder/index.ts:458](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L458)
 
 Perform an INNER JOIN with another table or subquery
 
@@ -465,7 +467,7 @@ An object with a single key-value pair where the key is the table alias and the 
 
 ##### onCallback
 
-[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? \{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \} : never \}\[K\] \}\>\>
+[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends CollectionOptionsIdentity\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? ResultValue\<TContext\> : never \}\[K\] \}\>\>
 
 A function that receives table references and returns the join condition
 
@@ -495,7 +497,7 @@ join<TSource, TJoinType>(
 type): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, TJoinType>>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:188](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L188)
+Defined in: [packages/db/src/query/builder/index.ts:336](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L336)
 
 Join another table or subquery to the current query
 
@@ -519,7 +521,7 @@ An object with a single key-value pair where the key is the table alias and the 
 
 ##### onCallback
 
-[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? \{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \} : never \}\[K\] \}\>\>
+[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends CollectionOptionsIdentity\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? ResultValue\<TContext\> : never \}\[K\] \}\>\>
 
 A function that receives table references and returns the join condition
 
@@ -563,7 +565,7 @@ query
 leftJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "left">>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:258](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L258)
+Defined in: [packages/db/src/query/builder/index.ts:406](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L406)
 
 Perform a LEFT JOIN with another table or subquery
 
@@ -583,7 +585,7 @@ An object with a single key-value pair where the key is the table alias and the 
 
 ##### onCallback
 
-[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? \{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \} : never \}\[K\] \}\>\>
+[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends CollectionOptionsIdentity\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? ResultValue\<TContext\> : never \}\[K\] \}\>\>
 
 A function that receives table references and returns the join condition
 
@@ -610,7 +612,7 @@ query
 limit(count): QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:664](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L664)
+Defined in: [packages/db/src/query/builder/index.ts:812](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L812)
 
 Limit the number of rows returned by the query
 `orderBy` is required for `limit`
@@ -647,7 +649,7 @@ query
 offset(count): QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:688](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L688)
+Defined in: [packages/db/src/query/builder/index.ts:836](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L836)
 
 Skip a number of rows before returning results
 `orderBy` is required for `offset`
@@ -685,7 +687,7 @@ query
 orderBy(callback, options): QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:555](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L555)
+Defined in: [packages/db/src/query/builder/index.ts:703](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L703)
 
 Sort the query results by one or more columns
 
@@ -735,7 +737,7 @@ query
 rightJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "right">>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:284](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L284)
+Defined in: [packages/db/src/query/builder/index.ts:432](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L432)
 
 Perform a RIGHT JOIN with another table or subquery
 
@@ -755,7 +757,7 @@ An object with a single key-value pair where the key is the table alias and the 
 
 ##### onCallback
 
-[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? \{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \} : never \}\[K\] \}\>\>
+[`JoinOnCallback`](../type-aliases/JoinOnCallback.md)\<[`MergeContextForJoinCallback`](../type-aliases/MergeContextForJoinCallback.md)\<`TContext`, \{ \[K in string \| number \| symbol\]: \{ \[K in string \| number \| symbol\]: TSource\[K\] extends CollectionImpl\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends CollectionOptionsIdentity\<any, any, any, any, any\> ? InferCollectionType\<any\[any\]\> : TSource\[K\] extends QueryBuilder\<TContext\> ? ResultValue\<TContext\> : never \}\[K\] \}\>\>
 
 A function that receives table references and returns the join condition
 
@@ -784,7 +786,7 @@ query
 select<TSelectObject>(callback): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:496](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L496)
+Defined in: [packages/db/src/query/builder/index.ts:644](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L644)
 
 Select specific columns or computed values from the query
 
@@ -843,7 +845,7 @@ query
 select<TSelectValue>(callback): QueryBuilder<WithResult<TContext, ResultTypeFromSelectValue<TSelectValue>>>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:501](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L501)
+Defined in: [packages/db/src/query/builder/index.ts:649](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L649)
 
 Select specific columns or computed values from the query
 
@@ -898,13 +900,95 @@ query
 
 ***
 
+### unionAll()
+
+#### Call Signature
+
+```ts
+unionAll<TSource>(source): QueryBuilder<ContextFromUnionSource<TSource>>;
+```
+
+Defined in: [packages/db/src/query/builder/index.ts:275](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L275)
+
+Union multiple independent source streams in one query.
+
+##### Type Parameters
+
+###### TSource
+
+`TSource` *extends* [`Source`](../type-aliases/Source.md)
+
+##### Parameters
+
+###### source
+
+`TSource`
+
+An object with one or more aliases mapped to collections or subqueries
+
+##### Returns
+
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<[`ContextFromUnionSource`](../type-aliases/ContextFromUnionSource.md)\<`TSource`\>\>
+
+A QueryBuilder with the unioned sources available
+
+##### Example
+
+```ts
+query
+  .unionAll({ message: messagesCollection, toolCall: toolCallsCollection })
+  .orderBy(({ message, toolCall }) =>
+    coalesce(message.timestamp, toolCall.timestamp)
+  )
+```
+
+#### Call Signature
+
+```ts
+unionAll<TBranches>(...branches): QueryBuilder<ContextFromUnionBranches<TBranches>>;
+```
+
+Defined in: [packages/db/src/query/builder/index.ts:278](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L278)
+
+Union multiple independent source streams in one query.
+
+##### Type Parameters
+
+###### TBranches
+
+`TBranches` *extends* readonly \[[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\>, [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`any`\>\]
+
+##### Parameters
+
+###### branches
+
+...`TBranches`
+
+##### Returns
+
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<[`ContextFromUnionBranches`](../type-aliases/ContextFromUnionBranches.md)\<`TBranches`\>\>
+
+A QueryBuilder with the unioned sources available
+
+##### Example
+
+```ts
+query
+  .unionAll({ message: messagesCollection, toolCall: toolCallsCollection })
+  .orderBy(({ message, toolCall }) =>
+    coalesce(message.timestamp, toolCall.timestamp)
+  )
+```
+
+***
+
 ### where()
 
 ```ts
 where(callback): QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/builder/index.ts:375](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L375)
+Defined in: [packages/db/src/query/builder/index.ts:523](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L523)
 
 Filter rows based on a condition
 

@@ -1,5 +1,376 @@
 # @tanstack/db
 
+## 0.9.2
+
+### Patch Changes
+
+- Preserve fractional top-k replacements regardless of delta order, including left-join updates, and honor B-tree lookup fallbacks after node splits. Preserve own JSON data properties such as `__proto__` during mutation detachment and offline transaction serialization. ([#1816](https://github.com/TanStack/db/pull/1816))
+
+  Compare same-key top-k values directly instead of hashing every replacement. This preserves cyclic payloads and avoids unnecessary full-payload traversal for ordinary updates.
+
+  Cancel structurally equal mapped top-k deltas before applying replacements. Escape Date-marker-shaped user objects in new offline records while retaining read support for the original record format.
+
+  Offline storage compatibility: new records use `valueEncoding: 2`. Older clients
+  cannot decode escaped marker-shaped objects correctly, so do not mix old and
+  new clients against the same pending outbox or downgrade while new records
+  remain. New clients still read the original unversioned format. Unknown
+  encodings and corrupt records are reported through warnings and left in
+  storage, not silently discarded; recovery policy is tracked in RFC #1659.
+
+  Reject malformed escaped-object markers rather than inventing empty mutation
+  data. Avoid redundant transfer work for zero-width fractional top-k windows
+  and avoid descriptor writes for ordinary keys during draft copying.
+
+- Updated dependencies [[`3c4c35d`](https://github.com/TanStack/db/commit/3c4c35d5868c908979058c4dbeae7c4ac9eab88b), [`3c4c35d`](https://github.com/TanStack/db/commit/3c4c35d5868c908979058c4dbeae7c4ac9eab88b)]:
+  - @tanstack/db-ivm@0.1.22
+
+## 0.9.1
+
+### Patch Changes
+
+- Harden Electric resume and lifecycle handling so partial updates cannot materialize unknown or moved-out rows, stale async work and waiters cannot cross cleanup or restart—including automatic garbage collection—and valid batches behave the same across callback partitions and persistence hydration. ([#1785](https://github.com/TanStack/db/pull/1785))
+
+  Preserve hydrated baseline rows during persistence reloads, accept complete-row updates from explicit full-replica resumes, retain committed match evidence until reset, and restart persisted resumes when hydration completion cannot be verified.
+
+  Replace stale cached rows atomically when an invalid resume falls back to a fresh snapshot. Keep subset acquisitions from restoring logically removed rows, and isolate utilities and tag visibility when collection options are reused while preserving compatible same-collection resume state.
+
+  Accept partial updates to complete rows published independently by persistence, while preserving pending removal and reset boundaries. Avoid copying all applied keys at startup or each subset acquisition; presence checks overlay queued writes and buffered messages once per stream callback. Warn once when an older persistence adapter cannot verify hydration for safe resume.
+
+  Keep buffered tag move-outs inside the progressive snapshot's existing transaction so later live updates are not discarded behind an orphaned truncate.
+
+  Keep copied materialized configs and reentrant match callbacks scoped to their owning collection session. Cold tagged or legacy persisted state now recovers with a full snapshot behind cached rows, including in on-demand mode. Keep the reset marker through interrupted recovery and publish the replacement only after the full snapshot completes; known untagged and compatible warm resumes retain their saved offset.
+
+- Preserve native values, arbitrary class references, and draft cycles during mutation detachment; keep transaction persistence receipts settled after publication errors and avoid restoring an acknowledged direct insert over its server row. Keep a delete/reinsert visible when the old synced row has not yet been replaced. ([#1800](https://github.com/TanStack/db/pull/1800))
+
+  Retire replaced ordered prefixes without interrupting successful-load bookkeeping if release throws. Retry automatic ordered repair at most twice while retaining stale results and exposing the error; cleanup cancels retries and explicit window retry remains available.
+
+  Keep persisted acquisitions independent, avoid retaining one-shot refreshes as permanent demand, and reject upstream load failures without discarding cached rows. Restore PowerSync readiness only after the recovered baseline also removes rows deleted or moved outside active filters during the tracking outage.
+
+- Preserve whole-row optimistic snapshots through sync and truncate. Fix insert-dependent update settlement, local origin tracking, and rollback publication while sibling requests remain pending. Keep source updates beneath an optimistic live-query delete when queued sync batches apply, without changing sync queue timing. ([#1807](https://github.com/TanStack/db/pull/1807))
+
+- Reclaim collections that start syncing without subscribers, releasing unused live-query subscriptions after a minimum 50ms grace period. Keep pending preloads alive until they settle and refresh retention when preloading ready data; `gcTime: 0` continues to disable automatic GC. Keep detached observer snapshots fresh after empty reloads and allow Node processes to exit while background collection cleanup is pending. ([#1810](https://github.com/TanStack/db/pull/1810))
+
+- Updated dependencies [[`257d446`](https://github.com/TanStack/db/commit/257d4462c98f6fdb846cf54f2a8be7090ec4dd31)]:
+  - @tanstack/db-ivm@0.1.21
+
+## 0.9.0
+
+### Minor Changes
+
+- Fix on-demand load settlement, ordered pagination, and replay to preserve coherent results across cancellation, failure, cleanup, and restart. Preserve subset results and ownership across Electric, PowerSync, Query, and SQLite persistence adapters. Correct live-query grouping, include projections, value identity, and indexed comparisons. D2 hashing now rejects structural cycles and excessive traversal depth or work with an explicit error; Collection handles retain object-reference identity without traversing their mutable contents. ([#1797](https://github.com/TanStack/db/pull/1797))
+
+  Remove the unused public subset-algebra helpers: `isWhereSubset`, `unionWherePredicates`, `minusWherePredicates`, `isOrderBySubset`, `isLimitSubset`, `isOffsetLimitSubset`, `isPredicateSubset`, and `isLoadSubsetRequestSubsumedBy`. Apps that import these helpers must remove those imports; normal queries and adapters are unaffected. `DeduplicatedLoadSubset` remains available and shares only exact demand identities.
+
+  Reject compiled Collection-valued includes as `fn.select()` inputs, including nested descendants, before invoking the callback. Use `toArray()` or `materialize()` in the upstream `.select()` for child-value calculations. To keep live child Collections, use expression `.select()` or perform parent-only functional work before adding the includes. Ordinary Collection-valued includes remain supported.
+
+  Remove proxy `DEBUG` logging and automatic index timing statistics to avoid diagnostic work on reads and writes. Remove `getStats()` and `IndexStats`; use `index.keyCount` for the current entry count, and instrument index methods externally when profiling. Custom index subclasses must remove calls to the retired `trackLookup()` and `updateTimestamp()` helpers.
+
+  Fix mutation drafts so Map/Set `forEach` calls each callback once and read-only iteration reports no changes. Track nested Map `for...of` edits through `collection.update()`. Keep Set entries in place during nested edits, preserving live iteration and usable `has`, `delete`, and `add` handles without duplicate entries or repeated visits. Reverting one entry no longer discards another entry's pending changes.
+
+  Preserve shared values within a row's draft. Newly supplied objects use normal shared references during the update callback, including Map values and Set members; editing through either handle changes the same new object. Copy completed changes at callback return so later caller edits cannot mutate stored data. Existing collection values remain isolated. Copy a new caller-owned value before insertion if it must remain untouched during the callback.
+
+  Keep rejected local-storage mutations out of later successful saves. Stage insert, update, delete, and manual transaction writes before persisting, then promote the shared cache only after storage succeeds.
+
+  Deliver live-query observer publications to peer listeners even when one listener throws. Preserve queued publication order and stop delivery on disposal; report the first listener failure after delivery.
+
+  Wait for PowerSync demands admitted during tracking finalization before reporting them loaded. Preserve untouched object and array key identity when they contain `NaN`. Retire every failed ordered acquisition on explicit retry, while retaining a full-source demand repaired by replay.
+
+  After authoritative ordered recovery succeeds, retire settled page and tie demands so later truncate replay fetches only the full-source replacement. Keep unfinished requests observed until settlement and preserve independent query ownership.
+
+  Remove the live-query `utils.getRunCount()` diagnostic and its runtime counter. Apps that call this diagnostic must remove those calls. Query scheduling and results are unchanged.
+
+  Remove test-only index inspection getters (`indexedKeysSet`, `valueMapData`, `orderedEntriesArray`, and `orderedEntriesArrayReversed`) and unused scheduler diagnostics. `ReverseIndex` now exposes only the `IndexReader` lookup, range, and forward traversal surface returned by `findIndexForField`; mutate the original index instead. Export `IndexReader` for callers that name this return type. Remove the unused subscription `releaseLoadSubset()` method; request owners use the release callback supplied by `onLoadSubsetResult`. Ordinary query and adapter APIs remain unchanged by these removals.
+
+  Remove unused internal helpers and the unused public error classes `WhereClauseConversionError`, `SubscriptionNotFoundError`, and `AggregateNotSupportedError`. These classes have no remaining runtime throw sites; remove any imports of them. Keep the existing query and index behavior and exercise identity/evaluation tests through the production entry points.
+
+  Ensure failed mutations roll back even when their rejection value cannot be converted to a string. Preserve ordinary Error instances; report unprintable rejection values as `Unknown error`.
+
+  Make reentrant effect disposal share the active cleanup result, including calls from abort listeners or source release callbacks. A release failure reaches every waiting disposer while each source still receives one release attempt.
+
+  Reject starting or preloading a collection from inside its active cleanup callbacks with a clear `CollectionStateError`. Nested cleanup cannot admit replacement work that the old teardown would discard. Restart after cleanup completes, or from its final `cleaned-up` status event, remains supported.
+
+  Prevent older page or tie-boundary completions from clearing a newer full-source failure or starting redundant loading. Failed window moves retain their settled public snapshot; an explicit retry releases the failed acquisition once and publishes the completed replacement.
+
+  Restrict direct subscription `requestLimitedSnapshot()` cursor inputs to one order term and one `minValues` entry. Composite and partial-composite cursor inputs now throw before local delivery or adapter work. Use normal live-query ordering and window APIs for multi-column pagination; those remain supported through prefix-and-tie loading. Existing adapters need no changes.
+
+  Treat `LoadSubsetOptions` and their nested request data as immutable from submission onward. Core no longer copies expression trees or mutable constant payloads at the sync and deduplication boundaries. Create a new Date, byte array, membership array, or options object when changing a demand instead of mutating submitted data. Adapters must also leave request data unchanged. Use stable data properties rather than stateful getters. `AbortSignal` cancellation and subscription release remain live.
+
+  Replace replay acquisitions sequentially: release the prior physical lease before starting its replacement. The logical demand and last complete public result remain retained. A failed release prevents replacement startup; failed startup leaves demand available for a later authoritative replay. Custom adapters must support a release/load gap and preserve resources still held by other owners; a sole underlying resource may stop and restart.
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db-ivm@0.1.20
+
+## 0.8.7
+
+### Patch Changes
+
+- Match index collation options by their effective values so indexes remain reusable when optional locale fields are omitted, set to `undefined`, or use equivalent locale identifiers. ([#1788](https://github.com/TanStack/db/pull/1788))
+
+## 0.8.6
+
+### Patch Changes
+
+- Lazily initialize runtime reference identities to avoid generating random values during Cloudflare Worker module evaluation. ([#1782](https://github.com/TanStack/db/pull/1782))
+
+## 0.8.5
+
+### Patch Changes
+
+- Canonicalize equivalent loadSubset queries to one demand identity while preserving observable output aliases, exact projected values, and distinct ordered windows. Query DB now reuses the same canonical identity for its on-demand cache keys. ([#1768](https://github.com/TanStack/db/pull/1768))
+
+- Reuse materialized collections when new collection descriptors have the same id. This lets callers recreate dynamic descriptors without creating duplicate collections. ([#1770](https://github.com/TanStack/db/pull/1770))
+
+- Settle subset loads only after their committed rows and events are visible. A ([#1769](https://github.com/TanStack/db/pull/1769))
+  commit receipt now rejects with `AbortError` when cancellation wins before
+  application and ignores later aborts. Preserve causal publication,
+  cancellation, persistence, and error handling across the affected sync
+  adapters.
+
+## 0.8.4
+
+### Patch Changes
+
+- Preserve parent-specific include results through nested includes, subqueries, unions, joins, ordering, projections, aggregates, and having clauses. ([#1761](https://github.com/TanStack/db/pull/1761))
+
+- Report incremental subset-load failures through subscriptions, live-query utilities, and effects while keeping cached source rows available. Recover cleanly from failed or overlapping must-refetch replays, collection cleanup, effect teardown errors, and cooperative adapter cancellation. Electric's shared-stream snapshot path still depends on upstream request identity or cancellation support to prevent rows from an aborted request from arriving before the request Promise settles. ([#1756](https://github.com/TanStack/db/pull/1756))
+
+## 0.8.3
+
+### Patch Changes
+
+- Reject child query builders and query-construction helpers returned from `fn.select()` with type and runtime errors instead of exposing internal query objects. ([#1760](https://github.com/TanStack/db/pull/1760))
+
+- Support disabling live queries declared with the `{ query }` config syntax by returning `undefined` or `null` from the query callback. ([#1757](https://github.com/TanStack/db/pull/1757))
+
+## 0.8.2
+
+### Patch Changes
+
+- Propagate initial query sync failures through dependent live queries and readiness promises, including recovery and late subscribers, while preserving a ready cached snapshot on later refetch failures. Let sync adapters pass the original failure to `markError(error)` so readiness promises reject with that cause. Isolate adapter callbacks by sync session, preserve synchronous startup errors, and prevent rejected deduplicated subset requests from creating detached promise rejections. ([#1751](https://github.com/TanStack/db/pull/1751))
+
+## 0.8.1
+
+### Patch Changes
+
+- Rebuild correlated include materialization as one D2 graph, fixing stale or missing nested results across route changes, batching, lazy loading, optimistic updates, and layered queries. Add canonical structural relation keys, abortable subset demand, and coherent publication for Collection-valued includes. Dispose delayed PowerSync subset hooks after cleanup, and prevent released Query Collection cache results from reaching the collection. ([#1740](https://github.com/TanStack/db/pull/1740))
+
+- Support Temporal values in the `gt`/`gte`/`lt`/`lte` query operators. Comparisons now dispatch to the Temporal types' static `compare()` instead of the native relational operators, which throw on Temporal objects (`valueOf()` is designed to throw). `orderBy` uses the same logic, so filtering and ordering now agree — previously `orderBy` compared Temporal values lexicographically by their `toString()`, which mis-ordered equivalent `Duration` forms (`PT60M` vs `PT1H`) and same-instant `ZonedDateTime` values in different zones. ([#1519](https://github.com/TanStack/db/pull/1519))
+
+  Note two intentional behavior changes for `orderBy` over Temporal columns:
+  - Ordering `Temporal.PlainMonthDay` values now throws a `TypeError`, since the type has no defined ordering (previously they were silently ordered by string).
+  - Ordering mixed Temporal types (e.g. `PlainDate` vs `PlainDateTime`) now throws a `TypeError` instead of comparing their string forms.
+
+  Equality (`eq`) is unchanged: `ZonedDateTime` equality still treats the zone as part of identity, and equivalent `Duration` forms remain unequal, mirroring Temporal's `.equals()` vs `.compare()` semantics.
+
+- Updated dependencies [[`5d9335d`](https://github.com/TanStack/db/commit/5d9335d0d42c1cc1ec2b92be8ce40ae8abe42827)]:
+  - @tanstack/db-ivm@0.1.19
+
+## 0.8.0
+
+### Minor Changes
+
+- Add SSR through request-scoped `DbClient` instances, collection descriptors, ([#1564](https://github.com/TanStack/db/pull/1564))
+  explicit collection-row hydration, live-query result snapshots, adapter sync
+  metadata, and React and Svelte descriptor resolution.
+
+  React live queries now derive identity from structured query IR. Opaque queries
+  can provide `queryKey`; legacy dependency arrays and unkeyed opaque queries keep
+  working with development warnings until 1.0.
+
+  Add TanStack Router integration that streams live queries discovered during a
+  Suspense render as pending promises which resolve to ordered result snapshots.
+  The browser starts normal source sync and atomically replaces the snapshot when
+  its live result is ready.
+
+## 0.7.2
+
+### Patch Changes
+
+- Update agent skills to match current APIs and behavior. ([#1696](https://github.com/TanStack/db/pull/1696))
+
+## 0.7.1
+
+### Patch Changes
+
+- Add `useLiveInfiniteQuery` as a Vue binding over the shared live-query window controller. Align infinite-query behavior across React, Vue, and Svelte, including awaitable page fetches, safe page sizes, reactive page-depth preservation, ordered collection validation, shared input resolution, and shared-window cleanup. ([#1724](https://github.com/TanStack/db/pull/1724))
+
+## 0.7.0
+
+### Minor Changes
+
+- Add an internal shared live-query observer and migrate all five framework adapters to it ([#1642](https://github.com/TanStack/db/pull/1642))
+
+  Introduces `createLiveQueryObserver` in `@tanstack/db`: given a resolved live-query collection (or `null` for a disabled query) it owns the subscription lifecycle every adapter used to re-implement — change and status subscriptions, a snapshot with stable identity per state revision for wholesale consumers, and delivery of the raw `ChangeMessage[]` for granular consumers. React, Vue, Svelte, Solid, and Angular's live-query hooks now materialize from the observer instead of their own hand-rolled subscription/status/snapshot machinery, keeping each adapter's native reactivity and each adapter's data-loading policy (wholesale adapters subscribe without initial state; granular adapters seed from it).
+
+  The observer is an **internal, unstable contract** for TanStack DB's official adapters — it is exported so the adapter packages can consume it, but it is not a public extension point yet and its API may change in any release.
+
+  The migration also fixes several live-query lifecycle defects: status-only transitions (`error`, `cleaned-up`) now reach mounted consumers; snapshot identity is stable across unsubscribe/resubscribe and stays fresh while detached; dispatch is FIFO and non-reentrant with subscriptions identified by record rather than callback; disposing during the synchronous initial replay no longer leaks the collection subscription; subscribing after dispose throws instead of registering a dead listener; Solid guards its async resource continuations against superseded collections; and constructing an observer no longer activates sync. Observers activate on their first committed subscription unless an adapter has already started a pre-created collection supplied directly or returned from a callback.
+
+### Patch Changes
+
+- fix(db): republish ordered live queries on an order-only move ([#1669](https://github.com/TanStack/db/pull/1669))
+
+  An `orderBy` live query that reordered its rows without changing any projected
+  row value (an "order-only move") previously emitted nothing, so `useLiveQuery`
+  kept rendering the stale order. The live-query collection now publishes an
+  explicit layout-change notification when this happens, and the shared live-query
+  observer snapshot exposes a `layoutRevision` that increments on any visible
+  membership, ordering, or order-only-move change. All five framework adapters
+  pick this up via their existing wholesale re-read.
+
+- Add the unstable, internal `createLiveQueryWindowController` primitive for ([#1675](https://github.com/TanStack/db/pull/1675))
+  forward pagination. It coordinates collection-scoped window leases, commits
+  pages only after subset loads succeed, restores windows after failures and
+  cleanup, and lets React's `useLiveInfiniteQuery` become a thin binding without
+  changing its public API or resetting pages for structurally equal dependencies.
+
+## 0.6.17
+
+### Patch Changes
+
+- Skip unchanged index writes while preserving index bookkeeping after failed ([#1691](https://github.com/TanStack/db/pull/1691))
+  removals. Cache index evaluators and avoid object normalization work for
+  primitive values to reduce update overhead.
+
+## 0.6.16
+
+### Patch Changes
+
+- Fix queries failing to typecheck when the collection's row type is a generic type parameter. Refs inside where/join/select callbacks now expose the properties guaranteed by the type parameter's constraint, and subqueries over generic collections can be used as join sources again (regression introduced in 0.6.6). ([#1678](https://github.com/TanStack/db/pull/1678))
+
+- Preserve an explicit `gcTime: 0` on live query collections. The live query config builder used `this.config.gcTime || 5000`, so a `gcTime` of `0` (which disables garbage collection) was treated as unset and silently replaced by the 5s default, causing the collection to be garbage collected instead of kept alive. Use `??` so only `undefined` falls back to the default. ([#1660](https://github.com/TanStack/db/pull/1660))
+
+## 0.6.15
+
+### Patch Changes
+
+- Clarify local write status documentation for `$synced` and `isPersisted.promise`, and add core coverage for queued ambiguous server-key sync while optimistic temp-key inserts are pending. ([#1652](https://github.com/TanStack/db/pull/1652))
+
+- Extract shared live-query adapter helpers into `@tanstack/db` ([#1641](https://github.com/TanStack/db/pull/1641))
+
+  Adds `isCollection`, `isSingleResultCollection`, and `getLiveQueryStatusFlags` to `@tanstack/db` and migrates all five framework adapters to use them. `isCollection` replaces the per-adapter duck-typing and Solid's `instanceof CollectionImpl` with one structural, multi-realm-safe guard (the `instanceof` form gave false negatives across dual-package boundaries). No behavior change; internal deduplication only.
+
+## 0.6.14
+
+### Patch Changes
+
+- Avoid full row origin snapshots during incremental collection updates and make bulk mutation merging linear. ([#1640](https://github.com/TanStack/db/pull/1640))
+
+## 0.6.13
+
+### Patch Changes
+
+- Fix `.select()` collapsing discriminated-union fields to the intersection of common keys (#1511). `Ref<T>` now distributes over `T` so `keyof (A | B | C)` no longer reduces the union to its common keys, and `ExtractRef<T>` now distinguishes a real branded `Ref` (where the underlying user type `U` can be returned directly) from a spread-produced inline object (which still needs to be projected through `ResultTypeFromSelect`). This preserves discriminated unions both when the field is selected at the top level and when the field is nested inside another selected object. The real-`Ref` detection uses a strict structural equivalence against the canonical `Ref<U>` shape, so spread-derived objects that keep the same keys but change a field's type (e.g. `{ ...u, code: u.slug }`) or drop an optional key (e.g. `const { nickname, ...rest } = u`) are projected through `ResultTypeFromSelect` instead of being collapsed back to `U`. ([#1597](https://github.com/TanStack/db/pull/1597))
+
+- fix(db): keep deeply nested includes in sync when sibling groups share nested correlation keys ([#1607](https://github.com/TanStack/db/pull/1607))
+
+  Deeply nested includes could drop or stop updating nested rows when sibling parent groups shared the same nested correlation key, especially when one sibling group was inserted after the initial load. Shared nested pipeline buffers were being drained through route state that was scoped too narrowly, so one branch could consume a buffered update before other branches that referenced the same nested row received it.
+
+  Nested route state is now shared at the same scope as the nested buffer and routes updates to every concrete destination branch before clearing the buffer. Snapshot replay still seeds late-arriving sibling groups with already-materialized rows, and recursive pending-change detection ensures deeper routed updates are flushed back up through the result tree.
+
+## 0.6.12
+
+### Patch Changes
+
+- Fix live query includes reconciliation so updates that re-emit existing child rows update internal child collections instead of attempting duplicate inserts, and ensure duplicate-key sync errors handle collection configs without live query internals. ([#1600](https://github.com/TanStack/db/pull/1600))
+
+## 0.6.11
+
+### Patch Changes
+
+- Fix incorrect results from index-optimized `where` clauses that combine indexed and non-indexed conditions. ([#1582](https://github.com/TanStack/db/pull/1582))
+  - `OR` expressions are now only served from indexes when every disjunct can use an index; otherwise the query falls back to a full scan. Previously, rows matched only by a non-indexed disjunct were missing from the result.
+  - `AND` expressions still use indexes for the conditions that have them, but the remaining conditions are now enforced by re-checking each candidate row against the full expression. Previously, non-indexed conditions were silently dropped, returning rows that did not match the query.
+  - Compound range conditions (e.g. `age > 5 AND age < 10`) combined with conditions on other fields no longer ignore those other conditions.
+  - Compound range conditions sharing the same boundary value (e.g. `age >= 5 AND age > 5`) now apply the strictest bound regardless of the order the conditions appear in, using the same value comparison semantics as the indexes (dates, locale strings, ...).
+  - Compound range conditions that only bound one side (e.g. `age > 5 AND age >= 8`) no longer return an empty result.
+  - Strict range comparisons (`gt`/`lt`) on BTree-indexed fields holding normalized values such as dates now correctly exclude the boundary value.
+  - Compound range conditions with a `null`/`undefined` bound (e.g. `gt(score, undefined)`) now re-filter against the full expression instead of returning index-ordered rows, matching the semantics of a full scan (a comparison against `null`/`undefined` is never true).
+  - Index-optimized `eq`, `IN`, and range queries on a field that has rows with `null`/`undefined` values no longer leak those rows into results. BTree indexes store and return such rows (they sort as the smallest key), but a comparison against `null`/`undefined` is never true, so these results are now re-filtered against the full expression to stay equivalent to a full scan.
+  - String range conditions (`gt`/`gte`/`lt`/`lte`) on a collection using locale string collation (the default) are no longer served by the index. The index orders strings with `localeCompare` while the `where` evaluator compares them with standard relational operators, so an index range lookup could omit matching rows; these conditions now fall back to a full scan.
+  - Range conditions whose operand is not ordered the same way by the index and the `where` evaluator (arrays, plain objects, Temporal values) now fall back to a full scan instead of using the index, which could otherwise omit matching rows.
+  - Range conditions on an index created with a custom comparator now fall back to a full scan, since the comparator's ordering may not match the `where` evaluator's relational operators.
+
+- fix(query): drive lazy-join loading through the collection the join key resolves to ([#1614](https://github.com/TanStack/db/pull/1614))
+
+  When a subquery used in a JOIN clause selects its join key from a _joined_ source rather than from its own `from` clause, the lazy-join loader subscribed to the wrong inner source: it used the subquery's `from` alias while computing the index requirement against the collection the key actually resolves to. This produced a misleading `Join requires an index` warning naming an already-indexed collection and an unnecessary full-load fallback. `followRef` now reports the resolved source alias, so lazy loading subscribes to the correct collection and loads through its index.
+
+- Adopt PostgreSQL float semantics for `NaN` in `where` clauses and ordering. ([#1582](https://github.com/TanStack/db/pull/1582))
+
+  `NaN` (and invalid `Date` values, whose timestamp is `NaN`) previously had no consistent order — `NaN === NaN` is `false` in JavaScript, so `NaN` compared unequal to everything and could not be sorted or indexed deterministically. Following PostgreSQL, `NaN` is now treated as **equal to itself** and **greater than every other non-null value**:
+  - `eq(row.value, NaN)` matches rows whose value is `NaN`; `inArray(row.value, [NaN, ...])` matches them too.
+  - Range comparisons treat `NaN` as the greatest value: `gt`/`gte` include it, `lt`/`lte` exclude it.
+  - Ordering by a field containing `NaN` is now deterministic, with `NaN` sorting last (and `null` still ordered by `NULLS FIRST`/`NULLS LAST`).
+
+  `null`/`undefined` are unaffected: they continue to use three-valued logic (a comparison with `null` yields `UNKNOWN`).
+
+  This makes results independent of whether a query is served from an index or a full scan.
+
+- Fix prototype pollution via `select()` alias paths. Aliases were split on `.` and walked into the result object without sanitization, so a query like `select(() => ({ ['__proto__.polluted']: ... }))` (or any segment matching `__proto__`, `prototype`, or `constructor`) could mutate `Object.prototype`. The select compiler now rejects unsafe alias path segments with a new `UnsafeAliasPathError`. Fixes #1584. ([#1595](https://github.com/TanStack/db/pull/1595))
+
+## 0.6.10
+
+### Patch Changes
+
+- Fix live query `preload()` hanging forever after a source collection was cleaned up (#1576) ([#1606](https://github.com/TanStack/db/pull/1606))
+
+  When a source collection is cleaned up while a live query depends on it, the live query transitions to an error state and latches an internal `isInErrorState` flag. That flag was never reset, so restarting sync (e.g. calling `preload()` again after cleanup when switching profiles) left the live query unable to become ready and the returned promise never resolved. The flag is now cleared at the start of each sync session so the live query can recover.
+
+## 0.6.9
+
+### Patch Changes
+
+- Add `subtract`, `multiply`, and `divide` math functions for computed columns ([#1151](https://github.com/TanStack/db/pull/1151))
+
+  These functions enable complex calculations in `select` and `orderBy` clauses, such as ranking algorithms that combine multiple factors (e.g., HN-style scoring that balances recency and rating).
+
+  ```ts
+  import { subtract, multiply, divide } from '@tanstack/db'
+
+  // Example: Sort by computed ranking score
+  const ranked = createLiveQueryCollection((q) =>
+    q
+      .from({ r: recipesCollection })
+      .orderBy(
+        ({ r }) =>
+          subtract(
+            multiply(r.rating, r.timesMade),
+            divide(r.ageInMs, 86400000),
+          ),
+        'desc',
+      ),
+  )
+  ```
+
+  - `subtract(a, b)` - Subtraction
+  - `multiply(a, b)` - Multiplication
+  - `divide(a, b)` - Division (returns `null` on divide-by-zero)
+
+- Use a safe `randomUUID` helper that falls back to `crypto.getRandomValues` when `crypto.randomUUID` is unavailable (non-secure browser contexts such as dev servers reached via a LAN IP over HTTP). Fixes #1541. ([#1593](https://github.com/TanStack/db/pull/1593))
+
+## 0.6.8
+
+### Patch Changes
+
+- Added the `materialize()` helper for includes subqueries. Multi-row subqueries produce an `Array<T>` snapshot on the parent row (equivalent to `toArray()`), and `findOne()` subqueries produce a single `T | undefined` value. The snapshot updates reactively as the underlying children change. ([#1569](https://github.com/TanStack/db/pull/1569))
+
+## 0.6.7
+
+### Patch Changes
+
+- Clarify documentation for caseWhen, coalesce, manual transactions, and multi-endpoint Query Collection behavior. Add utility function categorization and fix reference index ordering. ([#1544](https://github.com/TanStack/db/pull/1544))
+
+- Fix stale optimistic rows persisting when sync confirms a different server-generated key. Previously, direct transactions (from `collection.insert()` etc.) had their optimistic rows exempted from stale-row cleanup, which prevented temp-key rows from being removed when the server returned a different primary key. ([#1547](https://github.com/TanStack/db/pull/1547))
+
+## 0.6.6
+
+### Patch Changes
+
+- Added the `caseWhen` query operator for scalar conditional expressions and conditional select projections with guarded includes. ([#1536](https://github.com/TanStack/db/pull/1536))
+  Added `unionAll()` support to combine independent sources or built query branches in a single query.
+
 ## 0.6.5
 
 ### Patch Changes

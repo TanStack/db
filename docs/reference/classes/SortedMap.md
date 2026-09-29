@@ -3,8 +3,6 @@ id: SortedMap
 title: SortedMap
 ---
 
-# Class: SortedMap\<TKey, TValue\>
-
 Defined in: [packages/db/src/SortedMap.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L8)
 
 A Map implementation that keeps its entries sorted based on a comparator function

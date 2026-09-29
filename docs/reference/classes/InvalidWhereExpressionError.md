@@ -3,9 +3,7 @@ id: InvalidWhereExpressionError
 title: InvalidWhereExpressionError
 ---
 
-# Class: InvalidWhereExpressionError
-
-Defined in: [packages/db/src/errors.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L409)
+Defined in: [packages/db/src/errors.ts:436](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L436)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:409](https://github.com/TanStack/db/blob/
 new InvalidWhereExpressionError(valueType): InvalidWhereExpressionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:410](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L410)
+Defined in: [packages/db/src/errors.ts:437](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L437)
 
 #### Parameters
 

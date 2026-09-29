@@ -18,6 +18,9 @@
     "lint-all": "eslint . --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test",
+    "test:oracles": "pnpm --filter @tanstack/db test:oracles && pnpm --filter @tanstack/query-db-collection test:oracles",
+    "test:minified-db": "node scripts/test-minified-db.mjs",
+    "typecheck:tests": "pnpm --filter @tanstack/db-ivm --filter @tanstack/offline-transactions typecheck",
     "test:docs": "node scripts/verify-links.ts",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
     "generate-docs": "node scripts/generate-docs.ts"
@@ -38,6 +41,7 @@
     "@typescript-eslint/eslint-plugin": "^8.55.0",
     "@typescript-eslint/parser": "^8.55.0",
     "@vitejs/plugin-react": "^5.1.3",
+    "esbuild": "0.27.7",
     "eslint": "^9.39.2",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-react": "^7.37.5",

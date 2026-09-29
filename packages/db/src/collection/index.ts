@@ -1,3 +1,5 @@
+import { registerOpaqueHash } from '@tanstack/db-ivm'
+import { safeRandomUUID } from '../utils/uuid'
 import {
   CollectionConfigurationError,
   CollectionRequiresConfigError,
@@ -12,6 +14,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
 import type {
   AllCollectionEvents,
@@ -25,7 +28,6 @@ import type {
   CollectionConfig,
   CollectionStatus,
   CurrentStateAsChangesOptions,
-  Fn,
   InferSchemaInput,
   InferSchemaOutput,
   InsertConfig,
@@ -41,8 +43,85 @@ import type {
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { WithVirtualProps } from '../virtual-props.js'
+import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
+
+const collectionSyncConfigFactory: unique symbol = Symbol.for(
+  `@tanstack/db.collectionSyncConfig.factory`,
+) as never
+const collectionSyncConfigCleanup: unique symbol = Symbol.for(
+  `@tanstack/db.collectionSyncConfig.cleanup`,
+) as never
+
+type CollectionSyncConfigWithFactory<TSync extends object> = TSync & {
+  readonly [collectionSyncConfigFactory]: (
+    source: TSync,
+    utilities: object,
+    startSyncIfIdle: () => void,
+  ) => TSync
+}
+
+/** @internal The factory must defer `startSyncIfIdle` until construction ends. */
+export function withCollectionSyncConfigFactory<TSync extends object>(
+  sync: TSync,
+  factory: (
+    source: TSync,
+    utilities: object,
+    startSyncIfIdle: () => void,
+  ) => TSync,
+): CollectionSyncConfigWithFactory<TSync> {
+  Object.defineProperty(sync, collectionSyncConfigFactory, {
+    value: factory,
+    // Preserve the hook when callers wrap a sync config with object spread.
+    enumerable: true,
+  })
+  return sync as CollectionSyncConfigWithFactory<TSync>
+}
+
+/** @internal Registers work owned before an adapter sync starts. */
+export function withCollectionSyncConfigCleanup<TSync extends object>(
+  sync: TSync,
+  cleanup: () => void,
+): TSync {
+  Object.defineProperty(sync, collectionSyncConfigCleanup, {
+    value: cleanup,
+    enumerable: false,
+  })
+  return sync
+}
+
+function materializeCollectionSyncConfig<
+  TSync extends object,
+  TUtils extends object,
+>(
+  sync: TSync,
+  utilities: TUtils,
+  startSyncIfIdle: () => void,
+): { sync: TSync; utilities: TUtils } {
+  const factory = (
+    sync as unknown as Partial<CollectionSyncConfigWithFactory<TSync>>
+  )[collectionSyncConfigFactory]
+  if (!factory) return { sync, utilities }
+  // Binding mutates adapter utilities. Reused/spread descriptors must not
+  // retarget helpers that already belong to another Collection. Preserve
+  // accessors and the prototype rather than evaluating them during a spread.
+  const ownedUtilities = Object.create(
+    Object.getPrototypeOf(utilities),
+    Object.getOwnPropertyDescriptors(utilities),
+  ) as TUtils
+  return {
+    sync: factory(sync, ownedUtilities, startSyncIfIdle),
+    utilities: ownedUtilities,
+  }
+}
+
+function cleanupCollectionSyncConfig(sync: object): void {
+  const cleanup = (
+    sync as unknown as { [collectionSyncConfigCleanup]?: () => void }
+  )[collectionSyncConfigCleanup]
+  cleanup?.()
+}
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -258,16 +337,20 @@ export function createCollection(
   const collection = new CollectionImpl<any, string | number, any, any, any>(
     options,
   )
-
-  // Attach utils to collection
-  if (options.utils) {
-    collection.utils = options.utils
-  } else {
-    collection.utils = {}
-  }
-
   return collection
 }
+
+type CollectionImplConfig<
+  TOutput extends object,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+  TSchema extends StandardSchemaV1,
+> = CollectionConfig<TOutput, TKey, TSchema, TUtils> &
+  (string extends keyof TUtils
+    ? object
+    : keyof TUtils extends never
+      ? object
+      : { utils: TUtils })
 
 export class CollectionImpl<
   TOutput extends object = Record<string, unknown>,
@@ -277,11 +360,11 @@ export class CollectionImpl<
   TInput extends object = TOutput,
 > {
   public id: string
-  public config: CollectionConfig<TOutput, TKey, TSchema>
+  public config: CollectionConfig<TOutput, TKey, TSchema, TUtils>
 
   // Utilities namespace
   // This is populated by createCollection
-  public utils: Record<string, Fn> = {}
+  public utils: TUtils = {} as TUtils
 
   // Managers
   private _events: CollectionEventsManager
@@ -315,7 +398,7 @@ export class CollectionImpl<
    * @param config - Configuration object for the collection
    * @throws Error if sync config is missing
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
+  constructor(config: CollectionImplConfig<TOutput, TKey, TUtils, TSchema>) {
     // eslint-disable-next-line
     if (!config) {
       throw new CollectionRequiresConfigError()
@@ -329,14 +412,27 @@ export class CollectionImpl<
     if (config.id) {
       this.id = config.id
     } else {
-      this.id = crypto.randomUUID()
+      this.id = safeRandomUUID()
     }
 
     // Set default values for optional config properties
+    const { sync: collectionSync, utilities: collectionUtils } =
+      materializeCollectionSyncConfig(
+        config.sync,
+        config.utils ?? ({} as TUtils),
+        () => {
+          if (this._lifecycle.status === `idle`) this._sync.startSync()
+        },
+      )
     this.config = {
       ...config,
+      sync: collectionSync,
       autoIndex: config.autoIndex ?? `off`,
+      utils: collectionUtils,
     }
+    // Attach utilities before eager sync starts so adapters can bind helpers
+    // during sync setup. Preserve the adapter's object identity by default.
+    this.utils = collectionUtils
 
     if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
       throw new CollectionConfigurationError(
@@ -347,13 +443,18 @@ export class CollectionImpl<
       )
     }
 
+    // Collections are mutable handles, not structural rows. Downstream queries
+    // must not hash their internal state or follow its ownership cycles.
+    registerOpaqueHash(this)
     this._changes = new CollectionChangesManager()
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
-    this._lifecycle = new CollectionLifecycleManager(config, this.id)
-    this._mutations = new CollectionMutationsManager(config, this.id)
-    this._state = new CollectionStateManager(config)
-    this._sync = new CollectionSyncManager(config, this.id)
+    this._lifecycle = new CollectionLifecycleManager(this.config, this.id, () =>
+      cleanupCollectionSyncConfig(this.config.sync),
+    )
+    this._mutations = new CollectionMutationsManager(this.config, this.id)
+    this._state = new CollectionStateManager(this.config)
+    this._sync = new CollectionSyncManager(this.config, this.id)
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
@@ -420,8 +521,45 @@ export class CollectionImpl<
   }
 
   /**
+   * Monotonic revision of the collection's visible state; advances once per
+   * committed batch of changes and cleanup, even while nothing is subscribed.
+   * Internal — used by the live-query observer's snapshot cache.
+   */
+  public get _stateRevision(): number {
+    return this._changes.stateRevision
+  }
+
+  /**
+   * Monotonic revision of explicit layout-only publications.
+   * Internal — used to distinguish them from empty ready events.
+   */
+  public get _layoutRevision(): number {
+    return this._changes.layoutRevision
+  }
+
+  /** Subscribe to layout-only publications. Internal observer channel. */
+  public _subscribeLayoutChanges(listener: () => void): () => void {
+    return this._changes.subscribeLayoutChanges(listener)
+  }
+
+  /** Mark the active sync transaction as layout-changing. Internal. */
+  public _markLayoutChange(): void {
+    this._sync.markLayoutChange()
+  }
+
+  /** Defer subscriber events until a coherent multi-Collection commit ends. */
+  public _deferPublication(): PublicationDeferral {
+    return this._changes.deferPublication()
+  }
+
+  /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
+   * Every callback queued before the transition runs. Because ready state is
+   * established first, callbacks registered during or after delivery run
+   * immediately. If one throws, the collection remains ready. Direct sync
+   * startup rethrows the first failure; preload resolves from ready state.
+   * Cleanup discards pending callbacks without invoking them.
    * @param callback Function to call when the collection first becomes ready
    * @example
    * collection.onFirstReady(() => {
@@ -429,7 +567,7 @@ export class CollectionImpl<
    *   // Safe to access collection.state now
    * })
    */
-  public onFirstReady(callback: () => void): void {
+  public onFirstReady(callback: () => void): () => void {
     return this._lifecycle.onFirstReady(callback)
   }
 
@@ -460,9 +598,35 @@ export class CollectionImpl<
   /**
    * Start sync immediately - internal method for compiled queries
    * This bypasses lazy loading for special cases like live query results
+   * Throws during active cleanup; restart after cleanup completes instead.
    */
   public startSyncImmediate(): void {
     this._sync.startSync()
+  }
+
+  /** @internal Subscribe to the synchronous cleanup-start boundary. */
+  public _onCleanupStart(callback: () => void): () => void {
+    return this._lifecycle.onCleanupStart(callback)
+  }
+
+  /** @internal */
+  public _setTransactionScope(transactionScope: TransactionScope): void {
+    this._mutations.setTransactionScope(transactionScope)
+  }
+
+  /** @internal */
+  public _hasHydratedKey(key: TKey): boolean {
+    return this._state.hydratedKeys.has(key)
+  }
+
+  /** @internal */
+  public _deferSyncStart(): boolean {
+    return this._sync.deferStart()
+  }
+
+  /** @internal */
+  public _resumeSyncStart(): void {
+    this._sync.resumeStart()
   }
 
   /**
@@ -595,7 +759,7 @@ export class CollectionImpl<
    * ```
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
-    indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
+    indexCallback: (row: SingleRowRefProxy<TOutput, TKey, true>) => any,
     config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     return this._indexes.createIndex(indexCallback, config)
@@ -727,32 +891,32 @@ export class CollectionImpl<
 
   // Overload 1: Update multiple items with a callback
   update(
-    key: Array<TKey | unknown>,
+    key: Array<TKey>,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update(
-    keys: Array<TKey | unknown>,
+    keys: Array<TKey>,
     config: OperationConfig,
     callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update(
-    id: TKey | unknown,
+    id: TKey,
     config: OperationConfig,
     callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   update(
-    keys: (TKey | unknown) | Array<TKey | unknown>,
+    keys: TKey | Array<TKey>,
     configOrCallback:
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
@@ -886,12 +1050,14 @@ export class CollectionImpl<
    */
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions = {},
-  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>> | void {
+  ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>> | void {
     return currentStateAsChanges(this, options)
   }
 
   /**
    * Subscribe to changes in the collection
+   * Changes to the same key retain their causal order within a callback.
+   * Changes to different keys have no promised order within a callback.
    * @param callback - Function called when items change
    * @param options - Subscription options including includeInitialState and where filter
    * @returns Unsubscribe function - Call this to stop listening for changes
@@ -934,11 +1100,36 @@ export class CollectionImpl<
    */
   public subscribeChanges(
     callback: (
-      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
     ) => void,
+    options?: SubscribeChangesOptions<TOutput, TKey>,
+  ): CollectionSubscription
+  // Keep the pre-existing wider callback in the callable surface so Collection
+  // utility specializations remain structurally assignable to Collection.
+  public subscribeChanges(
+    callback:
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+        ) => void)
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+        ) => void),
+    options?: SubscribeChangesOptions<TOutput, TKey>,
+  ): CollectionSubscription
+  public subscribeChanges(
+    callback:
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+        ) => void)
+      | ((
+          changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>>,
+        ) => void),
     options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
-    return this._changes.subscribeChanges(callback, options)
+    return this._changes.subscribeChanges(
+      (changes) => callback(changes),
+      options,
+    )
   }
 
   /**
@@ -984,27 +1175,39 @@ export class CollectionImpl<
   /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
+   * Cleanup callbacks must not restart this collection or call its preload().
+   * Wait until cleanup completes before starting a new sync run. If adapter
+   * cleanup rejects, this promise rejects after the Collection reaches its
+   * final cleaned-up state.
    */
-  public async cleanup(): Promise<void> {
-    this._lifecycle.cleanup()
-    return Promise.resolve()
+  public cleanup(): Promise<void> {
+    return this._lifecycle.cleanup()
   }
 }
 
 function buildCompareOptionsFromConfig(
-  config: CollectionConfig<any, any, any>,
+  config: CollectionConfig<any, any, any, any>,
 ): StringCollationConfig {
-  if (config.defaultStringCollation) {
-    const options = config.defaultStringCollation
-    return {
-      stringSort: options.stringSort ?? `locale`,
-      locale: options.stringSort === `locale` ? options.locale : undefined,
-      localeOptions:
-        options.stringSort === `locale` ? options.localeOptions : undefined,
-    }
-  } else {
-    return {
-      stringSort: `locale`,
-    }
+  const options = config.defaultStringCollation
+  if (!options) {
+    return { stringSort: `locale` }
+  }
+
+  if (options.stringSort === `lexical`) {
+    return { stringSort: `lexical` }
+  }
+
+  if (options.stringSort === `custom`) {
+    return { stringSort: `custom`, compare: options.compare }
+  }
+
+  return {
+    stringSort: `locale`,
+    ...(`locale` in options &&
+      options.locale !== undefined && { locale: options.locale }),
+    ...(`localeOptions` in options &&
+      options.localeOptions !== undefined && {
+        localeOptions: options.localeOptions,
+      }),
   }
 }

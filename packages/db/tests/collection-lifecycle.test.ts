@@ -1,12 +1,151 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { CleanupQueue } from '../src/collection/cleanup-queue.js'
+import { InvalidCollectionStatusTransitionError } from '../src/errors.js'
+import {
+  getActivePublicationContext,
+  transactionScopedScheduler,
+  withPublicationContext,
+} from '../src/scheduler.js'
+import { resetCleanupQueue } from './utils'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
 const originalClearTimeout = global.clearTimeout
 
+function getChangesManager(collection: object): {
+  emitEmptyReadyEvent: () => void
+} {
+  return (
+    collection as unknown as {
+      _changes: { emitEmptyReadyEvent: () => void }
+    }
+  )._changes
+}
+
 describe(`Collection Lifecycle Management`, () => {
+  it.each(
+    ([`same`, `missing`, `changed`, `empty`] as const).flatMap((shape) =>
+      ([`atomic`, `split`] as const).map((delivery) => ({ shape, delivery })),
+    ),
+  )(
+    `keeps eager restart messages coherent for $shape keys with $delivery commits`,
+    async ({ shape, delivery }) => {
+      type Row = { id: string; version: number }
+      let rows: Array<Row> = [
+        { id: `a`, version: 1 },
+        { id: `b`, version: 1 },
+      ]
+      const collection = createCollection<Row>({
+        getKey: ({ id }) => id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            const batches =
+              delivery === `atomic` ? [rows] : rows.map((row) => [row])
+            for (const batch of batches) {
+              begin()
+              for (const value of batch) write({ type: `insert`, value })
+              commit()
+            }
+            markReady()
+          },
+        },
+      })
+      await collection.preload()
+      const delivered = new Map<string | number, Row>()
+      const read = () =>
+        collection.toArray.map(({ id, version }) => ({ id, version }))
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) {
+              expect(delivered.get(change.key)).toEqual({
+                id: change.value.id,
+                version: change.value.version,
+              })
+              delivered.delete(change.key)
+            } else {
+              if (change.type === `insert`)
+                expect(delivered.has(change.key)).toBe(false)
+              else
+                expect(change.previousValue).toMatchObject(
+                  delivered.get(change.key)!,
+                )
+              delivered.set(change.key, {
+                id: change.value.id,
+                version: change.value.version,
+              })
+            }
+          }
+          expect([...delivered.values()]).toEqual(read())
+        },
+        { includeInitialState: true },
+      )
+      try {
+        expect([...delivered.values()]).toEqual(rows)
+        await collection.cleanup()
+        rows =
+          shape === `empty`
+            ? []
+            : shape === `changed`
+              ? [
+                  { id: `c`, version: 2 },
+                  { id: `d`, version: 2 },
+                ]
+              : shape === `missing`
+                ? [{ id: `a`, version: 2 }]
+                : [
+                    { id: `a`, version: 2 },
+                    { id: `b`, version: 2 },
+                  ]
+        await collection.preload()
+        expect(collection.status).toBe(`ready`)
+        expect([...delivered.values()]).toEqual(rows)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`pending`, `starting`, `ready`, `failed`] as const)(
+    `cleanup settles a %s preload without inventing first readiness`,
+    async (phase) => {
+      let starts = 0
+      const failure = new Error(`initial failure`)
+      const ready = vi.fn()
+      const collection = createCollection<{ id: string }>({
+        getKey: ({ id }) => id,
+        sync: {
+          sync: ({ collection: source, markReady, markError }) => {
+            starts++
+            if (starts > 1 || phase === `ready`) markReady()
+            else if (phase === `failed`) markError(failure)
+            else if (phase === `starting`) void source.cleanup()
+          },
+        },
+      })
+      collection.onFirstReady(ready)
+      const preload = collection.preload().then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      if (phase !== `starting`) await collection.cleanup()
+      const result = await preload
+      if (phase === `ready`) expect(result).toBeUndefined()
+      else if (phase === `failed`) expect(result).toBe(failure)
+      else expect(result).toMatchObject({ name: `AbortError` })
+      expect(ready).toHaveBeenCalledTimes(phase === `ready` ? 1 : 0)
+      const restartedReady = vi.fn()
+      collection.onFirstReady(restartedReady)
+      await collection.preload()
+      expect(starts).toBe(2)
+      expect(restartedReady).toHaveBeenCalledOnce()
+      expect(ready).toHaveBeenCalledTimes(phase === `ready` ? 1 : 0)
+      await collection.cleanup()
+    },
+  )
+
   let mockSetTimeout: ReturnType<typeof vi.fn>
   let mockClearTimeout: ReturnType<typeof vi.fn>
   let timeoutCallbacks: Map<number, () => void>
@@ -47,7 +186,7 @@ describe(`Collection Lifecycle Management`, () => {
     global.setTimeout = originalSetTimeout
     global.clearTimeout = originalClearTimeout
     vi.clearAllMocks()
-    CleanupQueue.resetInstance()
+    resetCleanupQueue()
   })
 
   const triggerAllTimeouts = () => {
@@ -131,6 +270,38 @@ describe(`Collection Lifecycle Management`, () => {
 
       await collection.cleanup()
       expect(collection.status).toBe(`cleaned-up`)
+    })
+
+    it(`clears terminal state without publishing one delete per row`, async () => {
+      const collection = createCollection<{ id: number; name: string }>({
+        id: `cleanup-without-row-publication`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (let id = 0; id < 100; id++) {
+              write({ type: `insert`, value: { id, name: `row-${id}` } })
+            }
+            commit()
+            markReady()
+          },
+        },
+      })
+      const onChanges = vi.fn()
+      const subscription = collection.subscribeChanges(onChanges, {
+        includeInitialState: false,
+      })
+
+      try {
+        await collection.cleanup()
+
+        expect(collection.toArray).toEqual([])
+        expect(onChanges).not.toHaveBeenCalled()
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
     })
 
     it(`should transition when subscribing to changes`, () => {
@@ -509,6 +680,919 @@ describe(`Collection Lifecycle Management`, () => {
       expect(callbacks).toHaveLength(2)
 
       subscription.unsubscribe()
+    })
+
+    it(`freezes first-ready callback membership before delivery`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const calls: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `first-ready-membership-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {})
+      let removeLater = () => {}
+
+      collection.onFirstReady(() => {
+        calls.push(`first`)
+        removeLater()
+        collection.onFirstReady(() => calls.push(`nested`))
+      })
+      removeLater = collection.onFirstReady(() => calls.push(`later`))
+
+      try {
+        markReadyCallback!()
+
+        expect(calls).toEqual([`first`, `nested`, `later`])
+
+        collection.onFirstReady(() => calls.push(`after`))
+        expect(calls).toEqual([`first`, `nested`, `later`, `after`])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+        expect(calls).toEqual([`first`, `nested`, `later`, `after`])
+      }
+    })
+
+    it.each([
+      {
+        from: `ready`,
+        expectedStatus: `ready`,
+        expectedFirstReadyCalls: 1,
+        invalid: false,
+      },
+      {
+        from: `error`,
+        expectedStatus: `ready`,
+        expectedFirstReadyCalls: 1,
+        invalid: false,
+      },
+      {
+        from: `idle`,
+        expectedStatus: `idle`,
+        expectedFirstReadyCalls: 0,
+        invalid: true,
+      },
+      {
+        from: `cleaned-up`,
+        expectedStatus: `cleaned-up`,
+        expectedFirstReadyCalls: 0,
+        invalid: true,
+      },
+    ] as const)(
+      `defines the $from -> ready transition`,
+      async ({ from, expectedStatus, expectedFirstReadyCalls, invalid }) => {
+        const syncFailure = new Error(`sync failed before recovery`)
+        let firstReadyCalls = 0
+        let recoveryFirstReadyCalls = 0
+        const collection = createCollection<{ id: string; name: string }>({
+          id: `mark-ready-from-${from}`,
+          getKey: (item) => item.id,
+          startSync: false,
+          sync: { sync: () => {} },
+        })
+        collection.onFirstReady(() => {
+          firstReadyCalls++
+        })
+
+        if (from === `ready` || from === `error`) {
+          collection._lifecycle.setStatus(`loading`)
+          collection._lifecycle.markReady()
+        }
+        if (from === `error`) {
+          collection._lifecycle.markError(syncFailure)
+          expect(collection._lifecycle.getSyncError()).toBe(syncFailure)
+        } else if (from === `cleaned-up`) {
+          collection._lifecycle.setStatus(`cleaned-up`)
+        }
+        expect(collection.status).toBe(from)
+
+        if (from === `error`) {
+          collection.onFirstReady(() => {
+            recoveryFirstReadyCalls++
+          })
+          expect(recoveryFirstReadyCalls).toBe(1)
+        }
+
+        const transitionTrace: Array<
+          | {
+              kind: `status`
+              previousStatus: string
+              status: string
+              syncError: unknown
+            }
+          | {
+              kind: `dependent-ready`
+              status: string
+              syncError: unknown
+            }
+        > = []
+        collection.on(`status:change`, ({ previousStatus, status }) => {
+          transitionTrace.push({
+            kind: `status`,
+            previousStatus,
+            status,
+            syncError: collection._lifecycle.getSyncError(),
+          })
+        })
+        const changes = getChangesManager(collection)
+        const originalEmitEmptyReadyEvent =
+          changes.emitEmptyReadyEvent.bind(changes)
+        vi.spyOn(changes, `emitEmptyReadyEvent`).mockImplementation(() => {
+          transitionTrace.push({
+            kind: `dependent-ready`,
+            status: collection.status,
+            syncError: collection._lifecycle.getSyncError(),
+          })
+          originalEmitEmptyReadyEvent()
+        })
+
+        let didThrow = false
+        let thrown: unknown
+        try {
+          collection._lifecycle.markReady()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(invalid)
+        if (invalid) {
+          expect(thrown).toBeInstanceOf(InvalidCollectionStatusTransitionError)
+          expect((thrown as Error).message).toBe(
+            `Invalid collection status transition from "${from}" to "ready" for collection "mark-ready-from-${from}"`,
+          )
+        }
+        expect(collection.status).toBe(expectedStatus)
+        expect(firstReadyCalls).toBe(expectedFirstReadyCalls)
+        expect(recoveryFirstReadyCalls).toBe(from === `error` ? 1 : 0)
+        expect(transitionTrace).toEqual(
+          from === `error`
+            ? [
+                {
+                  kind: `status`,
+                  previousStatus: `error`,
+                  status: `ready`,
+                  syncError: undefined,
+                },
+                {
+                  kind: `dependent-ready`,
+                  status: `ready`,
+                  syncError: undefined,
+                },
+              ]
+            : [],
+        )
+        expect(collection._lifecycle.getSyncError()).toBeUndefined()
+
+        await collection.cleanup()
+      },
+    )
+
+    it(`does not resume ready effects after a status listener cleans up`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-listener-cleanup-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: { sync: () => {} },
+      })
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
+      const firstReadyStatuses: Array<string> = []
+      collection.onFirstReady(() => {
+        firstReadyStatuses.push(collection.status)
+      })
+      collection.on(`status:ready`, () => {
+        void collection.cleanup()
+      })
+      collection._lifecycle.setStatus(`loading`)
+
+      collection._lifecycle.markReady()
+
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(collection._lifecycle.hasBeenReady).toBe(false)
+      expect(firstReadyStatuses).toEqual([])
+      expect(readyEvent).not.toHaveBeenCalled()
+
+      const laterFirstReady = vi.fn()
+      const removeLater = collection.onFirstReady(laterFirstReady)
+      expect(laterFirstReady).not.toHaveBeenCalled()
+      removeLater()
+    })
+
+    it(`does not resume ready effects after a status listener enters error`, async () => {
+      const failure = new Error(`ready listener failed the sync`)
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-listener-error-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: { sync: () => {} },
+      })
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
+      const firstReady = vi.fn()
+      collection.onFirstReady(firstReady)
+      collection.on(`status:ready`, () => {
+        collection._lifecycle.markError(failure)
+      })
+      collection._lifecycle.setStatus(`loading`)
+
+      collection._lifecycle.markReady()
+
+      expect(collection.status).toBe(`error`)
+      expect(collection._lifecycle.getSyncError()).toBe(failure)
+      expect(collection._lifecycle.hasBeenReady).toBe(false)
+      expect(firstReady).not.toHaveBeenCalled()
+      expect(readyEvent).not.toHaveBeenCalled()
+      await collection.cleanup()
+    })
+
+    it(`does not resume an outer ready transition after a synchronous restart`, async () => {
+      let syncStarts = 0
+      let restartedPreload: Promise<void> | undefined
+      let restartOnce = true
+      let lateSubscription: { unsubscribe: () => void } | undefined
+      const lateReadyBatches: Array<Array<unknown>> = []
+      const firstReadyStatuses: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-listener-aba-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            syncStarts++
+            markReady()
+          },
+        },
+      })
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
+      collection.onFirstReady(() => {
+        firstReadyStatuses.push(collection.status)
+      })
+      collection.on(`status:ready`, () => {
+        if (!restartOnce) return
+        restartOnce = false
+        void collection.cleanup()
+        restartedPreload = collection.preload()
+        lateSubscription = collection.subscribeChanges((batch) => {
+          lateReadyBatches.push(batch)
+        })
+      })
+      collection._lifecycle.setStatus(`loading`)
+
+      collection._lifecycle.markReady()
+      await restartedPreload
+
+      expect(syncStarts).toBe(1)
+      expect(collection.status).toBe(`ready`)
+      expect(firstReadyStatuses).toEqual([])
+      expect(lateReadyBatches).toEqual([])
+      expect(readyEvent).toHaveBeenCalledOnce()
+      lateSubscription!.unsubscribe()
+      await collection.cleanup()
+    })
+
+    it(`starts a fresh first-ready cycle after cleanup of a failed ready effect`, async () => {
+      const readyCallbacks: Array<() => void> = []
+      const firstFailure = new Error(`first ready cycle failed exactly`)
+      const trace: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-effect-restart-test`,
+        getKey: (item) => item.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            readyCallbacks.push(markReady)
+          },
+        },
+      })
+      const readyEvent = vi.spyOn(
+        getChangesManager(collection),
+        `emitEmptyReadyEvent`,
+      )
+      collection.onFirstReady(() => {
+        trace.push(`first failure:${collection.status}`)
+        throw firstFailure
+      })
+      collection.onFirstReady(() => {
+        trace.push(`first later:${collection.status}`)
+      })
+      const firstPreload = collection.preload()
+      let firstPreloadSettled = false
+      void firstPreload.then(() => {
+        firstPreloadSettled = true
+      })
+      await Promise.resolve()
+      expect(collection.status).toBe(`loading`)
+      expect(firstPreloadSettled).toBe(false)
+
+      let thrown: unknown
+      try {
+        readyCallbacks[0]!()
+      } catch (error) {
+        thrown = error
+      }
+      expect(thrown).toBe(firstFailure)
+      await expect(firstPreload).resolves.toBeUndefined()
+      expect(trace).toEqual([`first failure:ready`, `first later:ready`])
+      expect(readyEvent).toHaveBeenCalledOnce()
+
+      await collection.cleanup()
+      expect(collection.status).toBe(`cleaned-up`)
+      expect(collection._lifecycle.hasBeenReady).toBe(false)
+
+      collection.onFirstReady(() => {
+        trace.push(`second:${collection.status}`)
+      })
+      expect(trace).toEqual([`first failure:ready`, `first later:ready`])
+
+      const secondPreload = collection.preload()
+      let secondPreloadSettled = false
+      void secondPreload.then(() => {
+        secondPreloadSettled = true
+      })
+      expect(secondPreload).not.toBe(firstPreload)
+      expect(readyCallbacks).toHaveLength(2)
+      await Promise.resolve()
+      expect(collection.status).toBe(`loading`)
+      expect(secondPreloadSettled).toBe(false)
+
+      readyCallbacks[0]!()
+      await Promise.resolve()
+      expect(collection.status).toBe(`loading`)
+      expect(secondPreloadSettled).toBe(false)
+      expect(trace).toEqual([`first failure:ready`, `first later:ready`])
+      expect(readyEvent).toHaveBeenCalledOnce()
+
+      readyCallbacks[1]!()
+      await expect(secondPreload).resolves.toBeUndefined()
+      expect(secondPreloadSettled).toBe(true)
+
+      expect(trace).toEqual([
+        `first failure:ready`,
+        `first later:ready`,
+        `second:ready`,
+      ])
+      expect(readyEvent).toHaveBeenCalledTimes(2)
+
+      await collection.cleanup()
+    })
+
+    it(`attempts every first-ready effect before rethrowing the first failure`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const readyBatches: Array<Array<unknown>> = []
+      const readyTrace: Array<string> = []
+      const laterFailure = new Error(`later first-ready failure`)
+      const laterCallback = vi.fn(() => {
+        readyTrace.push(`later:${collection.status}`)
+        throw laterFailure
+      })
+      let preloadSettled = false
+
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `first-ready-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady as () => void
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges((batch) => {
+        readyTrace.push(`dependent:${collection.status}`)
+        readyBatches.push(batch)
+      })
+      collection.onFirstReady(() => {
+        readyTrace.push(`first:${collection.status}`)
+        throw undefined
+      })
+      collection.onFirstReady(laterCallback)
+      void collection.preload().then(() => {
+        preloadSettled = true
+      })
+
+      try {
+        let didThrow = false
+        let thrown: unknown
+        try {
+          markReadyCallback!()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+        await Promise.resolve()
+
+        expect(didThrow).toBe(true)
+        expect(thrown).toBeUndefined()
+        expect(laterCallback).toHaveBeenCalledOnce()
+        expect(preloadSettled).toBe(true)
+        expect(readyBatches).toEqual([[]])
+        expect(readyTrace).toEqual([
+          `first:ready`,
+          `later:ready`,
+          `dependent:ready`,
+        ])
+        expect(collection.status).toBe(`ready`)
+
+        expect(() => markReadyCallback!()).not.toThrow()
+        expect(laterCallback).toHaveBeenCalledOnce()
+        expect(readyBatches).toEqual([[]])
+        expect(readyTrace).toEqual([
+          `first:ready`,
+          `later:ready`,
+          `dependent:ready`,
+        ])
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`does not classify synchronous first-ready callback failures as sync failures`, async () => {
+      const laterFailure = new Error(`later synchronous first-ready failure`)
+      const callbackTrace: Array<string> = []
+      let syncContinued = false
+
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `synchronous-first-ready-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            syncContinued = true
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        callbackTrace.push(`first`)
+        throw undefined
+      })
+      collection.onFirstReady(() => {
+        callbackTrace.push(`later`)
+        throw laterFailure
+      })
+
+      try {
+        let didThrow = false
+        let thrown: unknown
+        try {
+          collection._sync.startSync()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(thrown).toBeUndefined()
+        expect(syncContinued).toBe(true)
+        expect(callbackTrace).toEqual([`first`, `later`])
+        expect(collection.status).toBe(`ready`)
+        await expect(collection.preload()).resolves.toBeUndefined()
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`rejects a pending preload when the adapter fails after marking ready`, async () => {
+      const adapterFailure = new Error(`adapter failed after ready`)
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-then-adapter-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            throw adapterFailure
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        throw undefined
+      })
+
+      try {
+        await expect(collection.preload()).rejects.toBe(adapterFailure)
+        expect(collection.status).toBe(`error`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`ends the synchronous sync-entry boundary after an adapter failure`, async () => {
+      const adapterFailure = new Error(`adapter entry failed`)
+      let markReadyCallback: (() => void) | undefined
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `failed-sync-entry-boundary-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+            throw adapterFailure
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        throw undefined
+      })
+
+      try {
+        expect(() => collection._sync.startSync()).toThrow(adapterFailure)
+        expect(collection.status).toBe(`error`)
+
+        let didThrow = false
+        let thrown: unknown
+        try {
+          markReadyCallback!()
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(thrown).toBeUndefined()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`attempts every dependent ready listener before rethrowing`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const firstFailure = new Error(`first dependent failed`)
+      const firstBatches: Array<Array<unknown>> = []
+      const secondBatches: Array<Array<unknown>> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady as () => void
+          },
+        },
+      })
+      const first = collection.subscribeChanges((batch) => {
+        firstBatches.push(batch)
+        throw firstFailure
+      })
+      const second = collection.subscribeChanges((batch) => {
+        secondBatches.push(batch)
+      })
+
+      try {
+        let thrown: unknown
+        try {
+          markReadyCallback!()
+        } catch (error) {
+          thrown = error
+        }
+
+        expect(thrown).toBe(firstFailure)
+        expect(firstBatches).toEqual([[]])
+        expect(secondBatches).toEqual([[]])
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`flushes work queued by a ready listener when a sibling throws`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const firstFailure = new Error(`dependent failed after sibling queued`)
+      const scheduledJob = vi.fn()
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-scheduler-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        expect(contextId).toBeDefined()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw firstFailure
+      })
+
+      try {
+        expect(() => markReadyCallback!()).toThrow(firstFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`flushes ready work before rethrowing at an outer publication boundary`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const listenerFailure = new Error(`nested dependent failed`)
+      const scheduledJob = vi.fn()
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `nested-dependent-ready-scheduler-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw listenerFailure
+      })
+
+      try {
+        expect(() =>
+          withPublicationContext(() => markReadyCallback!()),
+        ).toThrow(listenerFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`preserves a falsy ready failure through a nested publication`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const scheduledJob = vi.fn()
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `nested-falsy-ready-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw undefined
+      })
+
+      try {
+        let didThrow = false
+        let thrown: unknown
+        try {
+          withPublicationContext(() => markReadyCallback!())
+        } catch (error) {
+          didThrow = true
+          thrown = error
+        }
+
+        expect(didThrow).toBe(true)
+        expect(thrown).toBeUndefined()
+        expect(scheduledJob).toHaveBeenCalledOnce()
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`surfaces a ready graph failure after running its job`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const graphFailure = new Error(`ready graph failed`)
+      const scheduledJob = vi.fn(() => {
+        throw graphFailure
+      })
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-graph-failure-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const subscription = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+
+      try {
+        expect(() => markReadyCallback!()).toThrow(graphFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`keeps the ready listener failure when its queued graph job also fails`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const listenerFailure = new Error(`ready listener failed first`)
+      const graphFailure = new Error(`ready graph also failed`)
+      const scheduledJob = vi.fn(() => {
+        throw graphFailure
+      })
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-failure-priority-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        const contextId = getActivePublicationContext()
+        transactionScopedScheduler.schedule({
+          contextId,
+          jobId: scheduledJob,
+          run: scheduledJob,
+        })
+      })
+      const second = collection.subscribeChanges(() => {
+        throw listenerFailure
+      })
+
+      try {
+        expect(() => markReadyCallback!()).toThrow(listenerFailure)
+        expect(scheduledJob).toHaveBeenCalledOnce()
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`resolves a pending preload after a ready callback failure alone`, async () => {
+      let syncContinued = false
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `ready-callback-preload-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            syncContinued = true
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        throw undefined
+      })
+
+      try {
+        await expect(collection.preload()).resolves.toBeUndefined()
+        expect(syncContinued).toBe(true)
+        expect(collection.status).toBe(`ready`)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`skips a ready listener unsubscribed during the same delivery`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      const calls: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-membership-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        calls.push(`first`)
+        second.unsubscribe()
+      })
+      const second = collection.subscribeChanges(() => {
+        calls.push(`second`)
+      })
+
+      try {
+        markReadyCallback!()
+        expect(calls).toEqual([`first`])
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`excludes a dependent added during ready delivery until the next batch`, async () => {
+      let beginCallback: (() => void) | undefined
+      let writeCallback:
+        | ((message: {
+            type: `insert`
+            value: { id: string; name: string }
+          }) => void)
+        | undefined
+      let commitCallback: (() => void) | undefined
+      let markReadyCallback: (() => void) | undefined
+      let added: { unsubscribe: () => void } | undefined
+      const calls: Array<string> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `dependent-ready-addition-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            beginCallback = begin
+            writeCallback = write
+            commitCallback = () => {
+              commit()
+            }
+            markReadyCallback = markReady
+          },
+        },
+      })
+      const first = collection.subscribeChanges(() => {
+        calls.push(`first`)
+        added ??= collection.subscribeChanges(() => calls.push(`added`))
+      })
+      const second = collection.subscribeChanges(() => calls.push(`second`))
+
+      try {
+        markReadyCallback!()
+        expect(calls).toEqual([`first`, `second`])
+
+        beginCallback!()
+        writeCallback!({
+          type: `insert`,
+          value: { id: `one`, name: `One` },
+        })
+        commitCallback!()
+        expect(calls).toEqual([`first`, `second`, `first`, `second`, `added`])
+      } finally {
+        first.unsubscribe()
+        second.unsubscribe()
+        added?.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`notifies a dependent added during the first-ready fan-out`, async () => {
+      let markReadyCallback: (() => void) | undefined
+      let dependent: { unsubscribe: () => void } | undefined
+      const readyBatches: Array<Array<unknown>> = []
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `nested-dependent-ready-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReadyCallback = markReady as () => void
+          },
+        },
+      })
+      collection.onFirstReady(() => {
+        dependent = collection.subscribeChanges((batch) => {
+          readyBatches.push(batch)
+        })
+      })
+      const preload = collection.preload()
+
+      try {
+        markReadyCallback!()
+        await preload
+        expect(readyBatches).toEqual([[]])
+      } finally {
+        dependent?.unsubscribe()
+        await collection.cleanup()
+      }
     })
 
     it(`should fire status:change event with 'cleaned-up' status before clearing event handlers`, () => {

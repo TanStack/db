@@ -2,6 +2,52 @@
 
 This guide provides principles and patterns for AI agents contributing to the TanStack DB codebase. These guidelines are derived from PR review patterns and reflect the quality standards expected in this project.
 
+## Required reading: live-query materialization
+
+Before reading, analyzing, or modifying correlated live-query materialization
+code under `packages/db/src/query/live/`, read
+`packages/db/src/query/live/ARCHITECTURE.md` in full. Read it before changing
+the related includes oracle tests as well.
+
+Treat that document's component boundaries and normative laws as constraints.
+If a change intentionally revises an architectural contract, update the
+architecture document in the same pull request.
+
+## Required reading: executable subsystem models
+
+Read `docs/contributing/glossary.md` before naming or renaming a subsystem
+state, action, boundary, or observation. Production code, executable models,
+tests, and design documents must use the same term for the same concept. A
+model may stay structurally independent, but it must declare any abstraction
+that combines, splits, or does not correspond to production concepts.
+
+Some oracle files are also the shortest documentation for their subsystem.
+Before changing a covered contract or its machinery, use
+`docs/contributing/oracle-coverage.md` to find the primary executable owner and
+read its stated limits. Do not infer authority from a filename alone.
+
+Read these stable entry points before the narrower owner:
+
+- For correlated live-query materialization, read the architecture document
+  required above.
+- For Collection mutation admission, subscription ownership, replay,
+  publication, or disposal, read
+  `packages/db/tests/collection-subscription-lifecycle-grammar.ts`.
+- For optimistic snapshots and settlement, read
+  `packages/db/tests/optimistic-history-oracle.ts`.
+- For opaque cursor pagination, read
+  `packages/query-db-collection/tests/cursor-pagination/model.ts`.
+- For TrailBase lifecycle work, read
+  `packages/trailbase-db-collection/tests/ORACLE.md`.
+- For cross-framework behavior, read the shared contract under
+  `packages/db/tests/conformance/` and the receiving framework's driver. One
+  framework's scheduling cut does not prove another's.
+
+The opening prose states the contract. The small model states the expected
+behavior. The production driver proves that the implementation refines the
+model. If a change revises one of these contracts, update all three in the same
+pull request. Do not update only the assertions to match new production output.
+
 ## Table of Contents
 
 1. [Type Safety](#type-safety)
@@ -14,6 +60,8 @@ This guide provides principles and patterns for AI agents contributing to the Ta
 8. [Function Design](#function-design)
 9. [Modern JavaScript Patterns](#modern-javascript-patterns)
 10. [Edge Cases and Corner Cases](#edge-cases-and-corner-cases)
+11. [Git and PR Hygiene](#git-and-pr-hygiene)
+12. [Code Weight and Fail-Fast Design](#code-weight-and-fail-fast-design)
 
 ## Type Safety
 
@@ -229,6 +277,18 @@ When merging predicates or combining queries, ensure the semantics are correct:
 
 **Key Principle:** Think carefully about what operations like intersection, union, and subset mean for your specific use case. Consider edge cases with limits, ordering, and predicates.
 
+### Reject Multiple Copies of `@tanstack/db`
+
+TanStack DB does not support interoperability between multiple copies of
+`@tanstack/db` in one runtime.
+Each copy has its own transaction stack and IR classes. Do not add cross-copy
+expression support or shape-based fallbacks to make the copies interoperate.
+Keep the existing duplicate-instance check, which throws
+`DuplicateDbInstanceError` for duplicate development browser loads. Do not
+replace its error with a warning. SSR and test runners may evaluate the
+package twice without exchanging values; do not reject those independent
+loads or add per-value tracking solely to detect unsupported cross-copy use.
+
 ## Abstraction Design
 
 ### Avoid Leaky Abstractions
@@ -348,9 +408,26 @@ const dependentBuilders = [] // Accurately describes dependents
 
 ## Testing Requirements
 
+### Required reading: oracle tests
+
+Before designing, changing, or reviewing an oracle or generated-history test,
+read [Writing reliable oracle tests](docs/contributing/oracle-tests.md).
+Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
+owner and its limits before adding another model. The guide explains testing
+methods; it does not authorize new product behavior or retire existing laws.
+
+Write every oracle and generated-history test as executable subsystem
+documentation. Follow the guide's section on literate oracle files. Keep the
+contract, model, generated history grammar, production driver, and refinement
+check—including its public observations and checkpoint—visible and close enough
+that a reviewer can compare them directly. A focused regression may remain
+short, but it does not waive this structure for an oracle and cannot replace
+applicable oracle coverage.
+
 ### Always Add Tests for Bugs
 
-**Key Principle:** If you're fixing a bug, add a unit test that reproduces the bug before fixing it. This ensures:
+**Key Principle:** Reproduce a bug in a test before fixing it. Prefer extending
+an oracle as described below over adding an isolated unit test. This ensures:
 
 - The bug is actually fixed
 - The bug doesn't regress in the future
@@ -366,6 +443,78 @@ test('ignores snapshot that resolves after up-to-date message', async () => {
   // Verify it's handled correctly
 })
 ```
+
+### Treat Every Review Bug as a Test Gap
+
+When a reviewer agent confirms a bug, it must also ask why the existing tests
+did not catch it. The finding should name the missing test law, state
+transition, generator dimension, adapter boundary, or assertion. If a test or
+oracle should already have caught the bug, identify the false-green model,
+classifier, fixture, or assertion that let it pass. Use that analysis to suggest
+the smallest test or oracle improvement that would catch the same class of bug,
+not only the reported example.
+
+### Close the Declared Bug Class
+
+A passing reproduction fixes one trace; it does not establish that the bug
+class is closed. Before claiming closure, name the violated product law and
+bound the claim by legal histories, production paths, and public observations
+at specific checkpoints.
+
+Extend the primary oracle so it reaches the reported trace and nearby legal
+histories that distinguish the repair from plausible wrong designs. Use a
+separate oracle owner when another boundary needs a different model. Show that
+the check fails on the original implementation or a hostile mutant at the
+intended checkpoint, then passes with the fix.
+
+At closeout, state what the evidence covers. Record remaining in-scope
+histories or paths in the oracle coverage map with an owner and needed witness.
+A reachable in-scope counterexample keeps the class open. Passing random runs
+is not a universal proof.
+
+### Keep Oracles Independent
+
+An oracle is useful only when its expected result comes from a source independent
+of the implementation under test. Do not translate production branches, state
+machines, classifiers, or helper functions into a second implementation and call
+that an oracle. Both copies can encode the same wrong assumption.
+
+- Derive expected behavior from public contracts, documented prior behavior,
+  mathematical laws, or a separately specified reference model.
+- Keep the reference model structurally different from production. Do not import
+  the production helper or reuse its classifications to compute expected results.
+- Preserve existing contract tests unless a product or design decision explicitly
+  changes the contract. Rewriting a passing expectation to match new production
+  behavior is a design review, not routine test maintenance.
+- When production work suggests an oracle change, compare the old and new
+  semantics with counterexamples before editing the oracle.
+- Use hostile mutants to prove the oracle rejects plausible wrong designs,
+  including the mistake production currently makes. A green oracle without a
+  demonstrated kill is weak evidence.
+- Use process grammar to explore lifecycle paths, and design grammar to challenge
+  the oracle's reference semantics. More generated traces cannot repair a wrong
+  reference model.
+
+### Prefer Oracle Coverage Over Isolated Regressions
+
+An oracle that checks general laws across generated states and histories is a
+stronger form of coverage than a unit test for one specific example. Prefer
+extending an existing oracle when it can cover the behavior. Add the missing
+model rule, generator dimension, state transition, or observable assertion;
+adding more pinned examples alone does not generalize the oracle.
+
+Use a focused regression to isolate and shrink a failure, then keep it as a
+replay example for the broader oracle where possible. Verify that the expanded
+oracle fails without the fix and passes with it. Keep valuable unit tests, but
+do not treat them as a substitute for applicable oracle coverage. If an oracle
+is not practical for the behavior, explain why a focused test is sufficient.
+
+### Name Tests After Behavior
+
+Test names should state the behavior they prove. Do not put issue or pull
+request numbers in test names; those references become stale and make the test
+suite harder to read. When an external report contains essential context that
+the test cannot express, link it in a nearby comment instead.
 
 ### Test Corner Cases
 
@@ -563,6 +712,37 @@ const filtered = items.filter((item) => item.value > 0)
    // Should ignore the stale snapshot
    ```
 
+## Git and PR Hygiene
+
+### Never Rewrite Published Branch History
+
+**Do not amend, rebase, squash, or force-push a branch after it has been pushed or has an open PR.** This includes `git push --force` and `git push --force-with-lease`.
+
+Once a branch is visible to others, treat its history as shared. If CI fails or follow-up changes are needed, add a normal follow-up commit and push normally.
+
+**❌ Bad:**
+
+```bash
+git commit --amend --no-edit
+git push --force-with-lease
+```
+
+**✅ Good:**
+
+```bash
+git add <files>
+git commit -m "fix: address CI failure"
+git push
+```
+
+**Key Principles:**
+
+- Never force-push unless the user explicitly asks for it in that moment.
+- Do not assume `--force-with-lease` is acceptable; it still rewrites shared history.
+- Prefer small follow-up commits over rewritten history on PR branches.
+- If a clean history is desired, let the human maintainer squash or rebase during merge.
+- If you think history rewriting is necessary, stop and ask for explicit confirmation before running any command.
+
 ## Package Versioning
 
 ### Understand Semantic Versioning
@@ -610,6 +790,53 @@ return allDone
 ### Remove Outdated Comments
 
 **Key Principle:** When refactoring code, update or remove comments that reference old function names or outdated logic.
+
+## Code Weight and Fail-Fast Design
+
+Treat each line of production code as a continuing cost. Bug fixes should start
+with a net-neutral production-code budget. Prefer a negative production diff
+when the change makes the existing design simpler.
+
+Tests and contract documentation can grow to prove the behavior. Report their
+weight separately from production code. Do not compress code or weaken names
+to reduce a line count. Reduce states, branches, helpers, and recovery paths.
+
+Use the test-first and bug-class guidance above to reproduce the failure and
+identify the violated contract. Strengthen or simplify existing control flow
+before adding state or recovery machinery.
+
+### Separate Valid Edge Cases from Contract Contradictions
+
+A rare but valid operation is not an invariant violation. The implementation
+must support it.
+
+An impossible internal state or a contradictory collaborator signal is an
+invariant violation. Throw or reject immediately at the boundary. Check the
+invariant before the code releases established state or publishes success.
+
+Do not convert an invariant violation into false readiness, partial success,
+or a silent fallback. In library code, "crash" means a synchronous throw or a
+rejected promise. It does not require process termination.
+
+### Recovery Must Earn Its Code Weight
+
+Add retries, generations, queues, fallback states, or rollback paths only when
+all these conditions are true:
+
+- The condition can occur during valid operation.
+- The public contract defines recovery behavior.
+- Recovery protects user-visible behavior.
+- A test or oracle proves the recovery law.
+
+If a condition requires a programming error or contract breach, detect it and
+fail loudly. Do not build a second lifecycle to recover from it.
+
+Prefer a small change to the current abstraction over a replacement state
+machine. A new state machine requires an explicit architectural reason and an
+oracle law that the existing design cannot express.
+
+For reviewer-proposed defensive machinery based only on contradictory mocks,
+add an invariant witness that fails before mutation instead.
 
 ## General Principles
 

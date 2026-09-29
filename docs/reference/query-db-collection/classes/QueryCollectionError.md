@@ -3,8 +3,6 @@ id: QueryCollectionError
 title: QueryCollectionError
 ---
 
-# Class: QueryCollectionError
-
 Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L4)
 
 ## Extends
@@ -17,6 +15,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/Ta
 - [`QueryFnRequiredError`](QueryFnRequiredError.md)
 - [`QueryClientRequiredError`](QueryClientRequiredError.md)
 - [`GetKeyRequiredError`](GetKeyRequiredError.md)
+- [`InitialDataInOnDemandModeError`](InitialDataInOnDemandModeError.md)
 - [`SyncNotInitializedError`](SyncNotInitializedError.md)
 - [`InvalidItemStructureError`](InvalidItemStructureError.md)
 - [`ItemNotFoundError`](ItemNotFoundError.md)

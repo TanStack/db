@@ -3,8 +3,6 @@ id: ConfigWithArbitraryCollectionTypes
 title: ConfigWithArbitraryCollectionTypes
 ---
 
-# Type Alias: ConfigWithArbitraryCollectionTypes\<TTable, TSchema\>
-
 ```ts
 type ConfigWithArbitraryCollectionTypes<TTable, TSchema> = SerializerConfig<StandardSchemaV1.InferOutput<TSchema>, ExtractedTable<TTable>> & object;
 ```

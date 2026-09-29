@@ -3,13 +3,11 @@ id: TransactionWithMutations
 title: TransactionWithMutations
 ---
 
-# Type Alias: TransactionWithMutations\<T, TOperation\>
-
 ```ts
 type TransactionWithMutations<T, TOperation> = Omit<Transaction<T>, "mutations"> & object;
 ```
 
-Defined in: [packages/db/src/types.ts:142](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L142)
+Defined in: [packages/db/src/types.ts:148](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L148)
 
 Utility type for a Transaction with at least one mutation
 This is used internally by the Transaction.commit method

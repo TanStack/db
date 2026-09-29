@@ -3,8 +3,6 @@ id: powerSyncCollectionOptions
 title: powerSyncCollectionOptions
 ---
 
-# Function: powerSyncCollectionOptions()
-
 Implementation of powerSyncCollectionOptions that handles both schema and non-schema configurations.
 
 ## Call Signature
@@ -13,7 +11,7 @@ Implementation of powerSyncCollectionOptions that handles both schema and non-sc
 function powerSyncCollectionOptions<TTable>(config): EnhancedPowerSyncCollectionConfig<TTable, OptionalExtractedTable<TTable>, never>;
 ```
 
-Defined in: [powersync.ts:78](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L78)
+Defined in: [powersync.ts:79](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L79)
 
 Creates a PowerSync collection configuration with basic default validation.
 Input and Output types are the SQLite column types.
@@ -66,7 +64,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, PowerSyncCollectionUtils<TTable>> & object & object;
 ```
 
-Defined in: [powersync.ts:135](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L135)
+Defined in: [powersync.ts:136](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L136)
 
 Creates a PowerSync collection configuration with schema validation.
 
@@ -141,7 +139,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, PowerSyncCollectionUtils<TTable>> & object & object;
 ```
 
-Defined in: [powersync.ts:203](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L203)
+Defined in: [powersync.ts:204](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L204)
 
 Creates a PowerSync collection configuration with schema validation.
 

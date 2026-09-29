@@ -3,8 +3,6 @@ id: DeltaEvent
 title: DeltaEvent
 ---
 
-# Type Alias: DeltaEvent\<TRow, TKey\>
-
 ```ts
 type DeltaEvent<TRow, TKey> = 
   | {
@@ -28,7 +26,7 @@ type DeltaEvent<TRow, TKey> =
 };
 ```
 
-Defined in: [packages/db/src/query/effect.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L38)
+Defined in: [packages/db/src/query/effect.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L45)
 
 Delta event emitted when a row enters, exits, or updates within a query result
 

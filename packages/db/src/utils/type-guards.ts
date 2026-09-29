@@ -1,3 +1,11 @@
+export function isPlainObject(
+  value: unknown,
+): value is Record<PropertyKey, unknown> {
+  if (value === null || typeof value !== `object`) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 /**
  * Type guard to check if a value is promise-like (has a `.then` method)
  * @param value - The value to check
