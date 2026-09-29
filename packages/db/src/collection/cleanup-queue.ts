@@ -13,8 +13,7 @@ export class CleanupQueue {
 
   private timeoutId: ReturnType<typeof setTimeout> | null = null
   private microtaskScheduled = false
-  private readonly clock: Performance | undefined = globalThis.performance
-  private readonly now = () => this.clock?.now() ?? Date.now()
+  private readonly now = () => globalThis.performance?.now() ?? Date.now()
 
   private constructor() {}
 
