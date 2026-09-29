@@ -215,9 +215,11 @@ export function injectLiveQuery(opts: any) {
 
   const state = signal(new Map<string | number, any>())
   const internalData = signal<Array<any>>([])
-  const status = signal<CollectionStatus | `disabled`>(
-    collection() ? `idle` : `disabled`,
-  )
+  const statusValue = signal<CollectionStatus | `disabled`>(`idle`)
+  const status = computed(() => {
+    const value = statusValue()
+    return value === `idle` && !collection() ? `disabled` : value
+  })
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -238,7 +240,7 @@ export function injectLiveQuery(opts: any) {
 
     state.set(newState)
     internalData.set(newData)
-    status.set(currentCollection.status)
+    statusValue.set(currentCollection.status)
   }
 
   let unsub: (() => void) | null = null
@@ -252,7 +254,7 @@ export function injectLiveQuery(opts: any) {
 
     // Handle null collection (disabled query)
     if (!currentCollection) {
-      status.set(`disabled` as const)
+      statusValue.set(`disabled` as const)
       state.set(new Map())
       internalData.set([])
       cleanup()
