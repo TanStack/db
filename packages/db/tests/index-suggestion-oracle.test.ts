@@ -59,10 +59,13 @@ describe(`collection-size index suggestions`, () => {
         onSuggestion: (suggestion) => suggestions.push(suggestion),
       })
 
-      const rows = Array.from({ length: scenario.size }, (_, id): Row => ({
-        id,
-        url: `url-${id}`,
-      }))
+      const rows = Array.from(
+        { length: scenario.size },
+        (_, id): Row => ({
+          id,
+          url: `url-${id}`,
+        }),
+      )
       const source = createCollection(
         mockSyncCollectionOptions<Row>({
           id: `suggestion-${scenario.mode}-${scenario.size}-${scenario.index}`,
@@ -130,7 +133,10 @@ describe(`collection-size index suggestions`, () => {
       }
       if (primaryFailure) throw primaryFailure.error
       if (cleanupFailures.length > 0) {
-        throw new AggregateError(cleanupFailures, `Index suggestion cleanup failed`)
+        throw new AggregateError(
+          cleanupFailures,
+          `Index suggestion cleanup failed`,
+        )
       }
     })
   }
