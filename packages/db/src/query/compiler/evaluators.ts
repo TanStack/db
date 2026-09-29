@@ -253,6 +253,8 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   )
 
   switch (func.name) {
+    case `array`:
+      return (data) => compiledArgs.map((evaluate) => evaluate(data))
     // Comparison operators
     case `eq`: {
       const argA = compiledArgs[0]!
