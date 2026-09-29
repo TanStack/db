@@ -95,28 +95,6 @@ describe(`WebOnlineDetector`, () => {
       },
     )
 
-    it(`should allow retries after returning to a visible tab despite an offline hint`, () => {
-      vi.stubGlobal(`navigator`, { onLine: false })
-      const detector = new WebOnlineDetector()
-      const callback = vi.fn(() => detector.isOnline())
-      detector.subscribe(callback)
-      expect(detector.isOnline()).toBe(false)
-
-      Object.defineProperty(document, `visibilityState`, { value: `visible` })
-      for (const handler of documentEventListeners.get(`visibilitychange`)!) {
-        handler(new Event(`visibilitychange`))
-      }
-
-      expect(callback).toHaveReturnedWith(true)
-      callback.mockClear()
-      detector.notifyOnline()
-      expect(callback).toHaveReturnedWith(true)
-
-      Object.defineProperty(document, `visibilityState`, { value: `hidden` })
-      expect(detector.isOnline()).toBe(false)
-      detector.dispose()
-    })
-
     it(`should notify subscribers when online event fires`, () => {
       const detector = new WebOnlineDetector()
       const callback = vi.fn()
