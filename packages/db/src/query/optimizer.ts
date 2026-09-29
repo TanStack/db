@@ -122,8 +122,8 @@
 
 import { deepEquals } from '../utils.js'
 import { CannotCombineEmptyExpressionListError } from '../errors.js'
+import { containsAggregate } from './compiler/group-by.js'
 import {
-  Aggregate,
   CollectionRef as CollectionRefClass,
   Func,
   PropRef,
@@ -133,7 +133,6 @@ import {
   createResidualWhere,
   getFromSources,
   getWhereExpression,
-  isExpressionLike,
   isResidualWhere,
 } from './ir.js'
 import type { BasicExpression, From, QueryIR, Select, Where } from './ir.js'
@@ -1045,7 +1044,7 @@ function unsafeSelect(
   if (!query.select) return false
 
   return (
-    selectHasAggregates(query.select) ||
+    containsAggregate(query.select) ||
     whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
   )
 }
@@ -1087,27 +1086,6 @@ function isSafeToPushIntoExistingSubquery(
     unsafeOrderBy(query) ||
     unsafeFnSelect(query)
   )
-}
-
-/**
- * Detects whether a SELECT projection contains any aggregate expressions.
- * Recursively traverses nested select objects.
- *
- * @param select - The SELECT object from the IR
- * @returns True if any field is an aggregate, false otherwise
- */
-function selectHasAggregates(select: Select): boolean {
-  for (const value of Object.values(select)) {
-    if (value instanceof Aggregate) return true
-    if (
-      value !== null &&
-      typeof value === `object` &&
-      !isExpressionLike(value)
-    ) {
-      if (selectHasAggregates(value as Select)) return true
-    }
-  }
-  return false
 }
 
 /**

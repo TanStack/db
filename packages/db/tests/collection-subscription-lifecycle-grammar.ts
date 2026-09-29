@@ -753,3 +753,105 @@ export const releasedObsoleteResolveHistory: ReadonlyArray<LifecycleCommand> = [
   { type: `release`, demand: `a` },
   settle(`a`, `obsolete`, `oldest`, `resolve`),
 ]
+
+/**
+ * Publication deferral is outside acquisition ownership above. These commands
+ * project only its sync-run boundary and later subscriber batches. The first
+ * run's nested handles can outlive cleanup; the restarted run is independent.
+ */
+export type DeferralLifecycleCommand =
+  | { type: `open`; handle: `outer` | `inner` | `current` }
+  | {
+      type: `close`
+      handle: `outer` | `inner` | `current`
+      outcome: `publish` | `discard`
+    }
+  | { type: `write`; key: `a` | `c` | `d` }
+  | { type: `cleanup` }
+  | { type: `restart` }
+  | { type: `subscribe` }
+
+type OldHandleClose =
+  | `never`
+  | `before-current`
+  | `during-current-publish`
+  | `during-current-discard`
+
+export const deferralCleanupHistories = (
+  [`publish`, `discard`] as const
+).flatMap((innerOutcome) =>
+  (
+    [
+      `never`,
+      `before-current`,
+      `during-current-publish`,
+      `during-current-discard`,
+    ] as ReadonlyArray<OldHandleClose>
+  ).flatMap((oldHandleClose) =>
+    ([`publish`, `discard`] as const).flatMap((currentOutcome) =>
+      ([1, 2] as const).map((rowCount) => ({
+        name: `${innerOutcome}:old-${oldHandleClose}:${currentOutcome}:${rowCount}-rows`,
+        commands: [
+          { type: `open`, handle: `outer` },
+          { type: `write`, key: `a` },
+          { type: `open`, handle: `inner` },
+          { type: `close`, handle: `inner`, outcome: innerOutcome },
+          { type: `cleanup` },
+          { type: `restart` },
+          ...(oldHandleClose === `before-current`
+            ? [{ type: `close`, handle: `outer`, outcome: `publish` }]
+            : []),
+          { type: `subscribe` },
+          { type: `open`, handle: `current` },
+          { type: `write`, key: `c` },
+          ...(rowCount === 2 ? [{ type: `write`, key: `d` }] : []),
+          ...(oldHandleClose === `during-current-publish` ||
+          oldHandleClose === `during-current-discard`
+            ? [
+                {
+                  type: `close`,
+                  handle: `outer`,
+                  outcome:
+                    oldHandleClose === `during-current-publish`
+                      ? `publish`
+                      : `discard`,
+                },
+              ]
+            : []),
+          { type: `close`, handle: `current`, outcome: currentOutcome },
+        ] as ReadonlyArray<DeferralLifecycleCommand>,
+      })),
+    ),
+  ),
+)
+
+// A fresh run publishes only its own writes when its deferral closes. This
+// reference ignores production depth, revision, queue, and discard fields.
+export function expectedDeferralBatches(
+  commands: ReadonlyArray<DeferralLifecycleCommand>,
+): Array<
+  Array<{
+    type: `insert`
+    key: `c` | `d`
+    value: { id: `c` | `d`; value: number }
+  }>
+> {
+  const restart = commands.findIndex(({ type }) => type === `restart`)
+  const writes = commands
+    .slice(restart + 1)
+    .flatMap((command) =>
+      command.type === `write` && command.key !== `a` ? [command.key] : [],
+    )
+  const close = commands.find(
+    (command) => command.type === `close` && command.handle === `current`,
+  )
+  return close?.type === `close` && close.outcome === `publish`
+    ? [
+        writes.map((key) => ({
+          type: `insert`,
+          key,
+          value: { id: key, value: key.charCodeAt(0) },
+        })),
+      ]
+    : []
+}
