@@ -2,6 +2,9 @@
 
 Thin SQLite persistence for React Native apps (including Expo runtime).
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+For pending server mutations, see the [React Native recipe with offline transactions](../../docs/guides/offline-transactions.md#use-sqlite-persistence-with-the-outbox).
+
 ## Public API
 
 - `createReactNativeSQLitePersistence(...)`

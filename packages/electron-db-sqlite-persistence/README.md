@@ -2,6 +2,8 @@
 
 Thin Electron bridge for TanStack DB SQLite persistence.
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+
 ## Public API
 
 - `exposeElectronSQLitePersistence(...)` (main process)

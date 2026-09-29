@@ -161,7 +161,7 @@ or during that deferral. The includes publication owner still needs a
 compiled includes witness for cleanup during a discarded source deferral,
 followed by a parent or child publication at its callback boundary.
 
-The [Temporal group-key oracle](../../packages/db-ivm/tests/temporal-group-key-oracle.test.ts)
+The [Temporal group-key oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/temporal-group-key-oracle.test.ts)
 owns the db-ivm `groupBy` value boundary for the eight Temporal kinds recognized
 by structural hashing. It compares public group counts with fixture-defined
 identity classes after one input batch, including distinct and matching fresh
@@ -178,7 +178,7 @@ can split from an equal value. Both altered-prototype cases and separately
 loaded polyfill copies are outside this contract. The oracle still protects a
 plain object's own spoofed tag without a custom prototype.
 
-The [includes publication oracle](../../packages/db/tests/query/includes-publication-oracle.test.ts)
+The [includes publication oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/includes-publication-oracle.test.ts)
 now checks one held ordered repair with two public parent rows and one inline
 child. Its bounded history crosses a single-step row move, a private value
 change that returns to the prior value, and a final value change. It compares
@@ -248,7 +248,7 @@ non-local-only persistence remain outside this lane.
 The [issue #1912 review record](oracle-reviews/issue-1912-eager-index-history.md)
 records the grammar controls, exact reviewed commit, and ORC audit.
 
-The [live Electric immediate-reload witness](../../packages/browser-db-sqlite-persistence/e2e/electric-immediate-reload.opfs.spec.ts)
+The [live Electric immediate-reload witness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-immediate-reload.opfs.spec.ts)
 checks one Chromium/OPFS history: an `onInsert` handler receives PostgreSQL
 transaction evidence, `awaitTxId` and the optimistic transaction settle while
 the source row's adapter write is held, and a hard page close is followed by
@@ -269,13 +269,13 @@ also covers one-pass queued-sync cancellation, partial-update dependencies on
 queued source rows, and focused late-hydration cases in
 `packages/db/tests/db-client.test.ts`. Those cases cross queued adapter insert
 and delete with a held local mutation. The
-[DbClient hydration authority oracle](../../packages/db/tests/db-client-hydration-authority-oracle.test.ts)
+[DbClient hydration authority oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/db-client-hydration-authority-oracle.test.ts)
 crosses applied adapter insert, update, delete, and truncate with hydration
 before and after the applied receipt. It includes delete/reinsert and
 truncate/reinsert controls. These owners do not establish arbitrary hydration
 stream order, a later authoritative hydration epoch, or unbounded retention.
 
-The [two-tab OPFS remote-subset oracle](../../packages/browser-db-sqlite-persistence/e2e/remote-subset-two-tab.opfs.spec.ts)
+The [two-tab OPFS remote-subset oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/remote-subset-two-tab.opfs.spec.ts)
 now exercises a real Chromium follower with a QueryClient-backed, filtered
 on-demand live query. It checks the function-bearing local request, clone-safe
 follower post, public row, and rejection of an invalid nested wire value before
@@ -285,7 +285,7 @@ exact reviewed commit. The test does not run React, Firefox/Zen, or a live
 backend, and it does not settle exclusive OPFS ownership during leadership
 transfer.
 
-The [two-tab live Electric OPFS oracle](../../packages/browser-db-sqlite-persistence/e2e/electric-resume-two-tab.opfs.spec.ts)
+The [two-tab live Electric OPFS oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-resume-two-tab.opfs.spec.ts)
 crosses real Chromium tabs, Web Locks, OPFS workers, PostgreSQL, and the
 installed Electric SDK. It checks distinct per-Collection schema versions,
 unchanged public and durable rows when a follower opens, leadership transfer
@@ -300,14 +300,14 @@ ownership topology. Their
 [review record](oracle-reviews/issue-1589-live-electric-opfs.md) preserves the
 RED and GREEN host observations.
 
-The [live Electric hydration-straddle oracle](../../packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
+The [live Electric hydration-straddle oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
 owns one #1754 host history: an on-demand Collection has an initial durable row;
 an OPFS subset hydration is held after its local read; a PostgreSQL update
 begins an Electric source transaction during that hold; and the row-bearing
 commit is released only after the hydration scope exits. It checks the old row
 before release and the exact new public and durable row afterward, then after
 follower takeover and reopen. A late-buffer mutant leaves the old row in both
-observations. The [core persistence tests](../../packages/db-sqlite-persistence-core/tests/persisted.test.ts)
+observations. The [core persistence tests](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted.test.ts)
 own the adjacent during/straddling/after settlement, FIFO, abort, and failure
 histories. The live oracle does not prove eager-startup overlap, other mutation
 shapes, arbitrary Electric fetch schedules, Firefox/Zen, React rendering, or
