@@ -4362,9 +4362,11 @@ describe(`query collection ownership lifecycle`, () => {
    *
    * The bounded history crosses a failed initial load, a failed background
    * refetch, or a failed Collection application with a held retry. One retry
-   * holds Collection application after Query fetch success. A repeated
-   * error at clock time zero distinguishes consecutive failures from duplicate
-   * observer notifications. The real QueryClient and `clearError()` are the driver.
+   * holds Collection application after Query fetch success. A background
+   * failure crosses an intermediate Query retry attempt before a held final
+   * attempt. A repeated error at clock time zero distinguishes consecutive
+   * failures from duplicate observer notifications. The real QueryClient and
+   * `clearError()` are the driver.
    * The refinement check reads the public utils
    * when the retry starts but before its result settles, then after settlement.
    *
@@ -4374,7 +4376,9 @@ describe(`query collection ownership lifecycle`, () => {
    * ORC-004/007: this is a bounded fixed matrix, not a generated property.
    * ORC-006: the original `clearError()` fails both initial pending cases;
    * an observer-success reset fails the application-error and held-application
-   * cases; a zero timestamp sentinel fails the epoch-zero repeated-error case.
+   * cases; an unconditional error-result classifier recounts the old error
+   * during a Query retry attempt; a zero timestamp sentinel fails the
+   * epoch-zero repeated-error case.
    * ORC-008:
    * no model state is combined or removed. ORC-009: `retry pending` maps to
    * a held Query result; no new production concept is named. ORC-010: cleanup
@@ -4627,6 +4631,82 @@ describe(`query collection ownership lifecycle`, () => {
       persistedScan.resolve([])
     }
   })
+
+  it.each([`success`, `failure`] as const)(
+    `does not recount the previous error during a Query retry attempt ending in %s`,
+    async (outcome) => {
+      const id = `held-query-retry-attempt-${outcome}`
+      const previousError = new Error(`previous fetch failed`)
+      const attemptError = new Error(`retry attempt failed`)
+      const finalError = new Error(`retry finally failed`)
+      const heldResult = createDeferred<Array<Item>>()
+      const queryFn = vi
+        .fn<() => Promise<Array<Item>>>()
+        .mockResolvedValueOnce([shared])
+        .mockRejectedValueOnce(previousError)
+        .mockRejectedValueOnce(attemptError)
+        .mockImplementationOnce(() => heldResult.promise)
+      const queryClient = createQueryClient()
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `eager`,
+          startSync: true,
+          retry: (count, error) => error === attemptError && count < 2,
+          retryDelay: 0,
+        }),
+      )
+      cleanups.push(async () => {
+        heldResult.resolve([shared])
+        try {
+          await collection.cleanup()
+        } finally {
+          queryClient.clear()
+          consoleError.mockRestore()
+        }
+      })
+
+      await collection.stateWhenReady()
+      await expect(
+        collection.utils.refetch({ throwOnError: true }),
+      ).rejects.toBe(previousError)
+      expect(collection.utils.errorCount).toBe(1)
+      const retry = collection.utils.clearError().then(
+        () => ({ outcome: `fulfilled` as const }),
+        (error: unknown) => ({ outcome: `rejected` as const, error }),
+      )
+      try {
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(4))
+        // Query retains its old error while its first retry attempt has failed.
+        expect(collection.utils.lastError).toBe(previousError)
+        expect(collection.utils.errorCount).toBe(1)
+        if (outcome === `success`) {
+          heldResult.resolve([shared])
+          expect(await retry).toEqual({ outcome: `fulfilled` })
+          expect(collection.utils.lastError).toBeUndefined()
+          expect(collection.utils.errorCount).toBe(0)
+        } else {
+          heldResult.reject(finalError)
+          expect(await retry).toEqual({
+            outcome: `rejected`,
+            error: finalError,
+          })
+          expect(collection.utils.lastError).toBe(finalError)
+          expect(collection.utils.errorCount).toBe(2)
+        }
+      } finally {
+        heldResult.resolve([shared])
+        await retry
+      }
+    },
+  )
 
   it(`rejects an invalid retained revalidation before its persisted baseline loads`, async () => {
     const id = `retained-invalid-result-settlement`

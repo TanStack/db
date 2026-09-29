@@ -2434,7 +2434,8 @@ export function queryCollectionOptions(
           manualWriteSnapshots.delete(hashedQueryKey)
         }
 
-        if (result.isError) {
+        // Retry attempts can re-notify the previous error before the fetch settles.
+        if (result.isError && result.fetchStatus === `idle`) {
           const isNewError =
             result.errorUpdatedAt !== state.lastErrorUpdatedAt ||
             result.error !== state.lastError
