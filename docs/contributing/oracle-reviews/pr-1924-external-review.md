@@ -71,3 +71,43 @@ every path-key use in the query compiler.
 The remaining public on-demand adapter witness is assigned to the lazy-target
 coverage-map row. No request to extract a shared serializer is part of this
 repair.
+
+## Second external review: correlated reference paths
+
+This follow-up checked the later review against PR head `b602188f` before
+editing. The review correctly noticed that the earlier repair did not cover two
+builder deduplication sites. The architecture's route-context law requires
+every distinct parent reference to reach the child query. A property path is a
+sequence of segments, so [`a.b`] and [`a`, `b`] cannot share a deduplication
+key.
+
+| ID | Review claim | Executable evidence | Disposition and destination |
+| --- | --- | --- | --- |
+| B1 | The lazy-target collision was fixed with RED/GREEN evidence. | The original reviewed head emitted only one of the two same-source targets. The existing compiler witness now requires both and passes. | **already-fixed** by `224a17c2`; keep the focused compiler owner and its public on-demand limit in the coverage map. |
+| B2 | `builder/index.ts:1275` still merges dotted and nested correlated refs. | With line 1336 repaired and line 1275 restored to dotted joining, a nested public include using ancestor aliases [`p.q`, `x`] and [`p`, `q`, `x`] lost the second value (`undefined` versus `22`). | **fixed-now** by segment-safe deduplication at this site. The route-context oracle owns the public witness. |
+| B3 | `builder/index.ts:1336` still merges dotted and nested parent refs. | At `b602188f`, a one-level public include returned `nested: undefined` rather than `22`. Changing only this key to `JSON.stringify(ref.path)` made the same assertion pass. | **fixed-now** at this site. The oracle also checks a parent update after initial materialization. |
+| B4 | `compiler/index.ts:2241` still merges dotted and nested include result routes. | A public conditional projection with result paths [`a.b`] and [`a`, `b`] returned both child results. A temporary mutant that bypassed `getUniqueIncludesRoutingKey` lost the flat child at the exact public assertion. The same allocator is used for projected source and direct include routes at lines 649 and 676. | **refuted for the stated public path**: this key is a unique internal routing name, and the allocator disambiguates equal dotted spellings. Preserve the public route test and its parent-key/child-insert checkpoints. |
+| B5 | A shared `serializePath` helper would close every remaining site. | The two true builder collisions are fixed in place. The compiler's routing names are already unique; its dotted spelling is display text for an allocator, while the builder keys represent path identity. The source also has dotted joins for warning text, not identity. | **deferred** helper extraction in this record. A coordinated path-encoding change can revisit it if further identity sites need the same rule. |
+| B6 | The dotted-path bug class was not globally closed. | B2 and B3 were reachable public failures at the reviewed head. Their fixed witnesses cover one-level and nested `toArray` includes, ancestor aliases, initial results, and selected updates. B4 is a passing public route control with a killed wrong allocator. | **fixed-now for the reported live sites, with bounded coverage**. Arbitrary path segments, other recursive source forms, every materialization form, and public on-demand adapter histories remain outside these witnesses in the coverage map. |
+
+The follow-up changes two existing production lines, net zero. Across the full
+PR relative to the reviewed `origin/main` base, physical production source is
+9 added and 8 deleted lines, net **+1** (one explanatory comment). This does
+not meet a net-negative production-code target; removing a useful comment to
+change the count would not simplify the implementation. Tests and contract
+documentation are reported separately.
+
+At the follow-up worktree, the includes route-context oracle, bounded indexed
+path oracle, and lazy-target compiler suite passed together: 114 tests. Changed
+production/test ESLint and `git diff --check` passed. The package typecheck
+could not resolve `@tanstack/db` in two existing conformance contracts in this
+isolated worktree; it named no changed file. The PR's CI is the remaining type
+validation gate.
+
+The second reviewer found two real public bugs beyond the original local fix
+and identified the correct class of collision. The compiler routing claim and
+shared-helper prescription overreached: they did not account for the allocator
+or distinguish identity keys from display keys. Accuracy is mixed; depth and
+signal are stronger than the first review because B2 and B3 were important
+omissions. Hire recommendation for independent high-stakes review remains
+**no** on this sample without executable same-path checks.
