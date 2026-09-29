@@ -165,6 +165,10 @@ debounceStrategy({
 })
 ```
 
+Debounce cleanup lets a pending write run after the last call's quiet period.
+It returns before that transaction settles.
+With `trailing: false`, a skipped call rejects with `DebounceCallDroppedError`.
+
 ### throttleStrategy
 
 ```ts
@@ -172,10 +176,13 @@ import { throttleStrategy } from "@tanstack/db"
 
 throttleStrategy({
   wait: number,           // minimum ms between commits
-  leading?: boolean,      // execute on the leading edge
-  trailing?: boolean,     // execute on the trailing edge
+  leading?: boolean,      // defaults true unless trailing is explicitly true
+  trailing?: boolean,     // defaults true; false rejects skipped optimistic calls
 })
 ```
+
+Throttle cleanup lets an already scheduled trailing write run at its configured
+edge. It returns before that transaction settles.
 
 ### queueStrategy
 
@@ -184,7 +191,7 @@ import { queueStrategy } from "@tanstack/db"
 
 queueStrategy({
   wait?: number,                      // ms between processing items (default 0)
-  maxSize?: number,                   // drop items if queue exceeds this
+  maxSize?: number,                   // reject overflow when waiting queue is full
   addItemsTo?: "front" | "back",     // default "back" (FIFO)
   getItemsFrom?: "front" | "back",   // default "front" (FIFO)
 })
@@ -192,7 +199,8 @@ queueStrategy({
 
 Queue creates a **separate transaction per call** (unlike debounce/throttle
 which merge). Each transaction commits and awaits `isPersisted` before the next
-starts. Failed transactions do not block subsequent ones.
+starts. Failed transactions do not block subsequent ones. Cleanup drains admitted
+work at the configured pace but rejects later calls with `QueueDisposedError`.
 
 ## Transaction.isPersisted.promise
 

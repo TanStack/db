@@ -11,6 +11,8 @@ import type {
 } from './opfs-worker-protocol'
 
 const DEFAULT_VFS_NAME = `opfs`
+const DEFAULT_OPEN_TIMEOUT_MS = 30_000
+const MAX_OPEN_TIMEOUT_MS = 2_147_483_647
 type BrowserOPFSFeatureGlobal = {
   navigator?: {
     storage?: {
@@ -23,6 +25,10 @@ type BrowserOPFSFeatureGlobal = {
 export type OpenBrowserWASQLiteOPFSDatabaseOptions = {
   databaseName: string
   vfsName?: string
+  /** Defaults to 30 seconds. Set to 0 to wait without a deadline. */
+  timeoutMs?: number
+  /** Cancels only the database open, not an established connection. */
+  signal?: AbortSignal
 }
 
 type BrowserOPFSWorkerLike = Pick<
@@ -99,6 +105,16 @@ function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
   return new (OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike)()
 }
 
+function getOpenAbortError(signal: AbortSignal): Error {
+  const reason: unknown = signal.reason
+  return reason instanceof Error
+    ? reason
+    : new DOMException(
+        `Opening browser OPFS database was aborted`,
+        `AbortError`,
+      )
+}
+
 /**
  * Creates a browser wa-sqlite database handle backed by OPFS and
  * OPFSCoopSyncVFS.
@@ -111,6 +127,22 @@ export async function openBrowserWASQLiteOPFSDatabase(
     throw new InvalidPersistedCollectionConfigError(
       `Browser wa-sqlite databaseName cannot be empty`,
     )
+  }
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_OPEN_TIMEOUT_MS
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 0 ||
+    timeoutMs > MAX_OPEN_TIMEOUT_MS
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Browser wa-sqlite timeoutMs must be an integer between 0 and ${MAX_OPEN_TIMEOUT_MS}`,
+    )
+  }
+
+  const signal = options.signal
+  if (signal?.aborted) {
+    throw getOpenAbortError(signal)
   }
 
   if (!hasOPFSBrowserPrerequisites(globalThis)) {
@@ -231,15 +263,40 @@ export async function openBrowserWASQLiteOPFSDatabase(
     })
   }
 
+  let openTimeout: ReturnType<typeof setTimeout> | undefined
+  const onAbort = (): void => {
+    if (!signal) return
+    rejectAllPendingRequests(getOpenAbortError(signal))
+    disposeWorker()
+  }
+  const onTimeout = (): void => {
+    rejectAllPendingRequests(
+      new DOMException(
+        `Opening browser OPFS database timed out after ${timeoutMs} ms`,
+        `TimeoutError`,
+      ),
+    )
+    disposeWorker()
+  }
+
   try {
-    await sendWorkerRequest<void>({
+    const initialization = sendWorkerRequest<void>({
       type: `init`,
       databaseName,
       vfsName,
     })
+    signal?.addEventListener(`abort`, onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+    if (timeoutMs > 0) {
+      openTimeout = setTimeout(onTimeout, timeoutMs)
+    }
+    await initialization
   } catch (error) {
     disposeWorker()
     throw error
+  } finally {
+    if (openTimeout !== undefined) clearTimeout(openTimeout)
+    signal?.removeEventListener(`abort`, onAbort)
   }
 
   return {

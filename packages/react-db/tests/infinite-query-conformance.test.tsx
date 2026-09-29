@@ -13,6 +13,7 @@ import {
   BTreeIndex,
   createCollection,
   createLiveQueryCollection,
+  createLiveQueryWindowController,
   gt,
 } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -196,6 +197,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
   makePrecreated,
+  makeWindowController: createLiveQueryWindowController,
   mount,
   mountControllable,
   mountCollection,

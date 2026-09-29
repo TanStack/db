@@ -155,6 +155,11 @@ duplicates inside that horizon remain idempotent.
 - `openBrowserWASQLiteOPFSDatabase(...)` starts a dedicated Web Worker and
   routes SQL operations through it. OPFS sync access handle APIs are used in
   that worker context.
+- Opening has a 30-second deadline by default. `timeoutMs` changes it; `0`
+  explicitly disables the deadline. A timed-out open rejects with
+  `TimeoutError` and terminates its pending worker, so it cannot acquire the
+  database later. Pass an `AbortSignal` to cancel earlier; the signal applies
+  only while opening, not to the established connection.
 - On `pagehide`, the connection terminates its worker synchronously and rejects
   pending initialization, queries, and close operations with `AbortError`. This
   also applies when the document enters the back/forward cache. Applications
