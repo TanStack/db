@@ -10,7 +10,7 @@ type Row = { id: number; rank: number }
 
 describe(`Ordered demand retirement`, () => {
   it.each([false, true])(
-    `replays only authoritative demand after repair, with peer=%s`,
+    `retains bounded repair until an authoritative truncate replay, with peer=%s`,
     async (withPeer) => {
       const truth: Array<Row> = [1, 2, 3, 4].map((id) => ({ id, rank: id }))
       const active = new Set<LoadSubsetOptions>()
@@ -94,10 +94,12 @@ describe(`Ordered demand retirement`, () => {
         await sync.commit()
         await flushPromises()
         expect(live.toArray.map((row) => row.id)).toEqual([2, 3])
-        expect.soft(active.size).toBe(owners)
+        expect.soft(active.size).toBe(owners * 2)
         expect
           .soft(
-            [...active].every((options) => !options.orderBy && !options.where),
+            [...active].every(
+              (options) => options.orderBy !== undefined || options.where,
+            ),
           )
           .toBe(true)
 
@@ -108,8 +110,14 @@ describe(`Ordered demand retirement`, () => {
         sync.truncate()
         await sync.commit()
         await flushPromises()
-        expect.soft(calls.length - beforeCalls).toBe(owners)
-        expect.soft(transferred - beforeRows).toBe(owners * truth.length)
+        expect.soft(calls.length - beforeCalls).toBe(owners * 3)
+        expect.soft(transferred - beforeRows).toBe(owners * (truth.length + 3))
+        expect.soft(active.size).toBe(owners)
+        expect
+          .soft(
+            [...active].every((options) => !options.orderBy && !options.where),
+          )
+          .toBe(true)
         expect(live.toArray.map((row) => row.id)).toEqual([2, 3])
         expect(live.isReady()).toBe(true)
         await live.cleanup()

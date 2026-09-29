@@ -1,18 +1,29 @@
 import { isDeepStrictEqual } from 'node:util'
-import { D2, MultiSet, output } from '@tanstack/db-ivm'
+import { D2, MultiSet, output, serializeValue } from '@tanstack/db-ivm'
+import { Temporal } from 'temporal-polyfill'
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { count as countRows } from '../../src/query/builder/functions.js'
+import { compileExpression } from '../../src/query/compiler/evaluators.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
-import { getQueryIdentity } from '../../src/query/ir-stable-identity.js'
+import { getEqualityValueIdentity } from '../../src/query/equality-value-identity.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import {
+  getLoadSubsetDemandKey,
+  getQueryIdentity,
+} from '../../src/query/ir-stable-identity.js'
 import {
   CollectionRef,
+  Func,
   PropRef,
   QueryRef,
   UnionFrom,
+  Value,
 } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import type { CollectionImpl } from '../../src/collection/index.js'
 import type { QueryIR } from '../../src/query/ir.js'
 
@@ -29,6 +40,12 @@ import type { QueryIR } from '../../src/query/ir.js'
  * Fault drivers remove peers, collapse identity, corrupt aliases or weights,
  * and require the checker to fail. This calibrates the implication that matters:
  * equal QueryIdentity implies equal compiled results, not merely equal hashes.
+ *
+ * Equality-value identity (D2 keyed state) and equality-operand identity
+ * (query IR) must partition supported values alike. The value-pair grammar
+ * declares expected equality independently, then checks both identity paths
+ * at key construction. Fixed pairs also check public group rows after initial
+ * publication. This law does not claim that SQL NULL matches a row.
  */
 
 type User = { id: number; label: string }
@@ -323,6 +340,270 @@ describe('query identity agrees with compiled lexical output shape', () => {
           fault,
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
+})
+
+type EqualityPair = {
+  label: string
+  left: unknown
+  right: unknown
+  equal: boolean
+}
+
+function equalityKey(value: unknown): string {
+  return serializeValue(getEqualityValueIdentity(value))
+}
+
+function equalityOperandKey(value: unknown): string {
+  const where = new Func(`eq`, [
+    new PropRef([`row`, `value`]),
+    new Value(value),
+  ])
+  const key = getLoadSubsetDemandKey({ where })
+  if (key === undefined) throw new Error(`equality predicate lost its key`)
+  return key
+}
+
+function assertEqualityPartition({ label, left, right, equal }: EqualityPair) {
+  expect(equalityKey(left) === equalityKey(right), `${label}: D2 key`).toBe(
+    equal,
+  )
+  expect(
+    equalityOperandKey(left) === equalityOperandKey(right),
+    `${label}: IR operand key`,
+  ).toBe(equal)
+  const predicate = new Func(`eq`, [new Value(left), new Value(right)])
+  expect(compileExpression(predicate)({}), `${label}: predicate result`).toBe(
+    left == null || right == null ? null : equal,
+  )
+}
+
+// These pairs state the relation before either identity function runs. Fresh
+// nested objects retain reference identity; only Date, Temporal and byte views
+// have the value equality promised by the query contract.
+const sharedSymbol = Symbol(`same`)
+const sharedFunction = () => 1
+const fixedEqualityPairs: Array<EqualityPair> = [
+  { label: `signed zero`, left: -0, right: 0, equal: true },
+  { label: `NaN`, left: NaN, right: NaN, equal: true },
+  {
+    label: `invalid Date and NaN`,
+    left: new Date(Number.NaN),
+    right: NaN,
+    equal: true,
+  },
+  {
+    label: `valid Date and timestamp`,
+    left: new Date(1_700_000_000_000),
+    right: 1_700_000_000_000,
+    equal: true,
+  },
+  { label: `null and undefined`, left: null, right: undefined, equal: false },
+  { label: `bigint and number`, left: 1n, right: 1, equal: false },
+  { label: `infinities`, left: Infinity, right: -Infinity, equal: false },
+  { label: `empty string`, left: ``, right: ``, equal: true },
+  { label: `different strings`, left: `alpha`, right: `beta`, equal: false },
+  { label: `same-prefix strings`, left: `ab`, right: `ac`, equal: false },
+  {
+    label: `binary and reserved-looking string`,
+    left: new Uint8Array([1]),
+    right: `\u0000tanstack-db:binary:\u0001`,
+    equal: false,
+  },
+  {
+    label: `different Temporal types`,
+    left: Temporal.PlainDate.from(`2024-01-15`),
+    right: Temporal.PlainDateTime.from(`2024-01-15T00:00`),
+    equal: false,
+  },
+  {
+    label: `different Temporal dates`,
+    left: Temporal.PlainDate.from(`2024-01-15`),
+    right: Temporal.PlainDate.from(`2024-01-16`),
+    equal: false,
+  },
+  {
+    label: `different Date timestamps`,
+    left: new Date(100),
+    right: new Date(101),
+    equal: false,
+  },
+  {
+    label: `different bytes`,
+    left: Buffer.from([1, 2]),
+    right: new Uint8Array([1, 3]),
+    equal: false,
+  },
+  {
+    label: `empty binary encodings`,
+    left: Buffer.from([]),
+    right: new Uint8Array(),
+    equal: true,
+  },
+  {
+    label: `different typed-array constructors`,
+    left: new Int8Array([1]),
+    right: new Uint8Array([1]),
+    equal: false,
+  },
+  {
+    label: `same symbol`,
+    left: sharedSymbol,
+    right: sharedSymbol,
+    equal: true,
+  },
+  {
+    label: `different symbols`,
+    left: Symbol(`same`),
+    right: Symbol(`same`),
+    equal: false,
+  },
+  {
+    label: `same function`,
+    left: sharedFunction,
+    right: sharedFunction,
+    equal: true,
+  },
+  {
+    label: `fresh functions`,
+    left: () => 1,
+    right: () => 1,
+    equal: false,
+  },
+]
+
+const equalityPairArbitrary: fc.Arbitrary<EqualityPair> = fc.oneof(
+  fc.integer().map((value) => ({
+    label: `number`,
+    left: value,
+    right: value + 1,
+    equal: false,
+  })),
+  fc.oneof(
+    fc.string().map((value) => ({
+      label: `equal string`,
+      left: value,
+      right: value,
+      equal: true,
+    })),
+    fc.string({ minLength: 2 }).map((value) => ({
+      label: `same-prefix strings`,
+      left: value,
+      right: `${value.slice(0, -1)}${value.endsWith(`a`) ? `b` : `a`}`,
+      equal: false,
+    })),
+  ),
+  fc.boolean().map((value) => ({
+    label: `boolean`,
+    left: value,
+    right: !value,
+    equal: false,
+  })),
+  fc
+    .tuple(
+      fc.integer({ min: -8_639_999_999_999_000, max: 8_639_999_999_999_000 }),
+      fc.constantFrom(0, 1, 1_000),
+    )
+    .map(([timestamp, delta]) => ({
+      label: `Date`,
+      left: new Date(timestamp),
+      right: new Date(timestamp + delta),
+      equal: delta === 0,
+    })),
+  fc
+    .tuple(fc.integer({ min: 1, max: 27 }), fc.constantFrom(0, 1, 12))
+    .map(([day, delta]) => ({
+      label: `Temporal.PlainDate`,
+      left: Temporal.PlainDate.from({ year: 2024, month: 1, day }),
+      right: Temporal.PlainDate.from({ year: 2024, month: 1, day }).add({
+        days: delta,
+      }),
+      equal: delta === 0,
+    })),
+  fc
+    .tuple(fc.uint8Array({ minLength: 1, maxLength: 140 }), fc.boolean())
+    .map(([bytes, equal]) => {
+      const right = new Uint8Array(bytes)
+      if (!equal) right[0] = right[0]! ^ 1
+      return {
+        label: `Buffer and Uint8Array`,
+        left: Buffer.from(bytes),
+        right,
+        equal,
+      }
+    }),
+  fc.array(fc.integer(), { maxLength: 5 }).map((values) => ({
+    label: `fresh nested arrays`,
+    left: [{ values }],
+    right: [{ values: [...values] }],
+    equal: false,
+  })),
+  fc.dictionary(fc.string(), fc.integer(), { maxKeys: 5 }).map((value) => {
+    const shared = { nested: value }
+    return {
+      label: `same nested object`,
+      left: shared,
+      right: shared,
+      equal: true,
+    }
+  }),
+)
+
+describe(`equality-value and IR operand identity agree`, () => {
+  it.each(fixedEqualityPairs)(`partitions $label as declared`, (pair) => {
+    assertEqualityPartition(pair)
+  })
+
+  it.each(fixedEqualityPairs)(
+    `materializes $label into the declared public groups`,
+    async ({ left, right, equal }) => {
+      const source = createCollection(
+        mockSyncCollectionOptions<{ id: number; value: unknown }>({
+          id: `equality-identity-public-groups`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: 1, value: left },
+            { id: 2, value: right },
+          ],
+        }),
+      )
+      const groups = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ source })
+            .groupBy(({ source: row }) => row.value)
+            .select(({ source: row }) => ({
+              value: row.value,
+              count: countRows(row.id),
+            })),
+      })
+      await withHistoryCleanup(
+        () => {
+          expect(groups.size).toBe(equal ? 1 : 2)
+          expect(groups.toArray.map((row) => row.count).sort()).toStrictEqual(
+            equal ? [2] : [1, 1],
+          )
+          return Promise.resolve()
+        },
+        () => [() => groups.cleanup(), () => source.cleanup()],
+      )
+    },
+  )
+
+  it.each([20260928, undefined])(
+    `agrees across the supported value grammar, seed=%s`,
+    async (seed) => {
+      await fc.assert(
+        fc.asyncProperty(equalityPairArbitrary, (pair) => {
+          assertEqualityPartition(pair)
+          return Promise.resolve()
+        }),
+        seed === undefined
+          ? oraclePropertyOptions(160, `query-identity.equality-partition`)
+          : { numRuns: oracleRuns(160), seed },
+      )
     },
   )
 })

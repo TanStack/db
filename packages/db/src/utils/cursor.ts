@@ -36,14 +36,17 @@ function followsBoundary(
     : comparison
 }
 
-/** Build a single-column cursor; multi-column queries use prefix loading. */
+/**
+ * Build a continuation cursor from the leading order term.
+ * Trailing terms order the complete leading-value tie loaded separately.
+ */
 export function buildCursor(
   orderBy: OrderBy,
   values: Array<unknown>,
 ): BasicExpression<boolean> | undefined {
   if (values.length === 0) return undefined
-  if (orderBy.length !== 1 || values.length !== 1) {
-    throw new Error(`Only single-column cursors are supported`)
+  if (orderBy.length === 0 || values.length !== 1) {
+    throw new Error(`Only leading-column cursors are supported`)
   }
   return followsBoundary(orderBy[0]!, values[0])
 }
@@ -77,7 +80,7 @@ export function canExpressCursorOrder(
   orderBy: OrderBy,
   values: ReadonlyArray<unknown>,
 ): boolean {
-  if (orderBy.length !== 1 || values.length !== 1) return false
+  if (orderBy.length === 0 || values.length !== 1) return false
   const value = values[0]
   if (value == null) return false
   if (value instanceof Date) return Number.isFinite(value.getTime())

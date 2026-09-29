@@ -8,7 +8,7 @@ import {
   makeComparator,
   normalizeForBTree,
 } from '../utils/comparison.js'
-import { BaseIndex } from './base-index.js'
+import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
 import type { IndexOperation } from './base-index.js'
@@ -442,3 +442,5 @@ export class BTreeIndex<
     return result
   }
 }
+
+builtInIndexResolverNames.set(BTreeIndex, `BTreeIndex`)

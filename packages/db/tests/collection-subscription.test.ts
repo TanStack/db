@@ -93,10 +93,9 @@ describe(`CollectionSubscription status tracking`, () => {
 
   it.each([
     { terms: 2, values: [0, 0] },
-    { terms: 2, values: [0] },
     { terms: 1, values: [0, 0] },
   ])(
-    `rejects a $terms-term composite cursor before delivery or acquisition`,
+    `rejects an invalid $terms-term cursor before delivery or acquisition`,
     async ({ terms, values }) => {
       const load = vi.fn(() => true as const)
       const unload = vi.fn()
@@ -134,7 +133,7 @@ describe(`CollectionSubscription status tracking`, () => {
             minValues: values,
             onLoadSubsetResult: observer,
           }),
-        ).toThrow(`Only single-column cursors are supported`)
+        ).toThrow(`Only leading-column cursors are supported`)
         expect(delivery).not.toHaveBeenCalled()
         expect(load).not.toHaveBeenCalled()
         expect(observer).not.toHaveBeenCalled()

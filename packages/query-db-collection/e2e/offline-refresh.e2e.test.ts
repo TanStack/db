@@ -253,16 +253,39 @@ describe(`offline transactions + query collection refresh`, () => {
     //   1. The offline executor replaying pending transactions (mutationFn called)
     //   2. TanStack Query potentially refetching (refetchOnReconnect default)
     onlineDetector.setOnline(true)
-    await flushMicrotasks()
+    await vi.waitFor(() => {
+      expect(resolveMutation).not.toBeNull()
+    })
+
+    const deferBarrier = collection.deferDataRefresh
+    expect(deferBarrier).not.toBeNull()
+    if (!deferBarrier) throw new Error(`Expected an active refresh barrier`)
+    let signalDeferredResult!: () => void
+    const deferredResultScheduled = new Promise<void>((resolve) => {
+      signalDeferredResult = resolve
+    })
+    const originalThen = deferBarrier.then.bind(deferBarrier)
+    deferBarrier.then = ((...args) => {
+      signalDeferredResult()
+      return originalThen(...args)
+    }) as typeof deferBarrier.then
 
     // Trigger a query refetch that returns stale server state.
     // The server doesn't have item-2 yet (the mutation is still in progress).
     // This simulates what refetchOnReconnect would do.
-    await collection.utils.refetch()
+    let refetchSettled = false
+    const refetchPromise = collection.utils.refetch().then((result) => {
+      refetchSettled = true
+      return result
+    })
+    await deferredResultScheduled
+    deferBarrier.then = originalThen
 
-    // The refetch returned stale data (only item-1), but item-2 should
-    // still be visible because the offline transaction is still pending
-    // and the optimistic state should cover the gap.
+    // The query returned stale data (only item-1), but item-2 should still be
+    // visible because the offline transaction is still pending
+    // and the optimistic state should cover the gap. Its public promise must
+    // remain pending until the barrier-triggered refresh applies fresh data.
+    expect(refetchSettled).toBe(false)
     expect(collection.get(`item-2`)?.value).toBe(`offline-insert`)
 
     // --- Complete the mutation (server processes it) ---
@@ -271,6 +294,7 @@ describe(`offline transactions + query collection refresh`, () => {
 
     // Wait for the transaction to fully complete
     await commitPromise
+    await refetchPromise
 
     // After the transaction completes, item-2 should remain visible.
     //

@@ -155,6 +155,71 @@ describe(`Collection truncate operations`, () => {
     expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `new-item` })
   })
 
+  it(`restores the captured accepted owner instead of a rolled-back same-key winner`, async () => {
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    let finishInsert!: () => void
+    let finishUpdate!: () => void
+    const insertGate = new Promise<void>((resolve) => {
+      finishInsert = resolve
+    })
+    const updateGate = new Promise<void>((resolve) => {
+      finishUpdate = resolve
+    })
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-captured-owner`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          syncOps = actions
+          actions.markReady()
+        },
+      },
+      onInsert: () => insertGate,
+      onUpdate: () => updateGate,
+    })
+
+    try {
+      await collection.stateWhenReady()
+      const accepted = collection.insert({ id: 1, value: `accepted` })
+      finishInsert()
+      await accepted.isPersisted.promise
+
+      const rolledBack = collection.update(1, (draft) => {
+        draft.value = `rolled back`
+      })
+      const rolledBackOutcome = rolledBack.isPersisted.promise.catch(
+        (error) => error,
+      )
+      expect(getStateValue(collection, 1)).toEqual({
+        id: 1,
+        value: `rolled back`,
+      })
+
+      syncOps!.begin()
+      syncOps!.truncate()
+      rolledBack.rollback()
+      finishUpdate()
+      await rolledBackOutcome
+      expect(getStateValue(collection, 1)).toEqual({
+        id: 1,
+        value: `accepted`,
+      })
+
+      expect(syncOps!.commit()).toBe(true)
+      expect(getStateValue(collection, 1)).toEqual({
+        id: 1,
+        value: `accepted`,
+      })
+    } finally {
+      finishInsert()
+      finishUpdate()
+      await collection.cleanup()
+    }
+  })
+
   it(`should handle truncate on empty collection followed by mutation sync`, async () => {
     const changeEvents: Array<any> = []
     let syncOps:

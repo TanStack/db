@@ -8,12 +8,20 @@ import {
   InvalidPersistedStorageKeyEncodingError,
 } from './errors'
 import {
+  SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   createPersistedTableName,
   decodePersistedStorageKey,
   encodePersistedStorageKey,
 } from './persisted'
+import {
+  PERSISTED_TYPE_TAG,
+  PERSISTED_VALUE_TAG,
+  assertSQLiteBigIntInRange,
+  serializeSQLiteBigInt,
+} from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  HydrationPersistenceAdapter,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
   PersistedRowScanOptions,
@@ -26,6 +34,10 @@ import type {
 
 type SqliteSupportedValue = null | number | string
 
+// The default stays below SQLite's older 999-variable limit. Drivers with a
+// lower binding cap use smaller chunks; each replacement row binds four values.
+const REPLACEMENT_BATCH_SIZE = 100
+
 type CollectionTableMapping = {
   tableName: string
   tombstoneTableName: string
@@ -37,6 +49,8 @@ type CompiledSqlFragment = {
   params: Array<SqliteSupportedValue>
   valueKind?: CompiledValueKind
 }
+
+type SqlExpressionCompilationContext = `predicate` | `index-expression`
 
 type StoredSqliteRow = {
   key: string
@@ -72,6 +86,159 @@ export type SQLitePullSinceResult<TKey extends string | number> =
       deltas: Array<ReplayableTxDelta<Record<string, unknown>, TKey>>
     }
 
+type ScheduledOperationKind = `regular` | `hydrate`
+
+type ScheduledOperation<T> = {
+  kind: ScheduledOperationKind
+  task: () => Promise<T>
+  resolve: (value: T) => void
+  reject: (error: unknown) => void
+}
+
+class SharedPersistenceScheduler {
+  private readonly regularQueue: Array<ScheduledOperation<unknown>> = []
+  private readonly hydrateQueue: Array<ScheduledOperation<unknown>> = []
+  private running = false
+  private lastCompletedKind: ScheduledOperationKind | undefined
+
+  runRegular<T>(task: () => Promise<T>): Promise<T> {
+    return this.enqueue(`regular`, task)
+  }
+
+  runHydrate<T>(task: () => Promise<T>): Promise<T> {
+    return this.enqueue(`hydrate`, task)
+  }
+
+  adoptRunningHydrate(completion: Promise<unknown>): void {
+    if (this.running) return
+    this.running = true
+    const finish = () => {
+      this.lastCompletedKind = `hydrate`
+      this.running = false
+      this.drain()
+    }
+    void completion.then(finish, finish)
+  }
+
+  private enqueue<T>(
+    kind: ScheduledOperationKind,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const result = new Promise<T>((resolve, reject) => {
+      const operation: ScheduledOperation<T> = {
+        kind,
+        task,
+        resolve,
+        reject,
+      }
+      const queue = kind === `hydrate` ? this.hydrateQueue : this.regularQueue
+      queue.push(operation as ScheduledOperation<unknown>)
+    })
+    this.drain()
+    return result
+  }
+
+  private drain(): void {
+    if (this.running) return
+
+    const operation = this.takeNext()
+    if (!operation) return
+
+    this.running = true
+    void this.execute(operation)
+  }
+
+  private async execute(operation: ScheduledOperation<unknown>): Promise<void> {
+    try {
+      operation.resolve(await operation.task())
+    } catch (error) {
+      operation.reject(error)
+    } finally {
+      this.lastCompletedKind = operation.kind
+      this.running = false
+      this.drain()
+    }
+  }
+
+  private takeNext(): ScheduledOperation<unknown> | undefined {
+    // Hydrates get priority after the currently running non-preemptible unit.
+    // While both lanes remain queued, alternate one regular operation after
+    // each hydrate (K=1), preserving FIFO order within each lane.
+    if (this.hydrateQueue.length > 0) {
+      if (
+        this.regularQueue.length > 0 &&
+        this.lastCompletedKind === `hydrate`
+      ) {
+        return this.regularQueue.shift()
+      }
+      return this.hydrateQueue.shift()
+    }
+    return this.regularQueue.shift()
+  }
+}
+
+const sharedPersistenceSchedulers = new WeakMap<
+  object,
+  SharedPersistenceScheduler
+>()
+const observedDriverSchedulingKeys = new WeakMap<object, object>()
+
+function getSharedPersistenceScheduler(
+  key: object,
+): SharedPersistenceScheduler {
+  let scheduler = sharedPersistenceSchedulers.get(key)
+  if (!scheduler) {
+    scheduler = new SharedPersistenceScheduler()
+    sharedPersistenceSchedulers.set(key, scheduler)
+  }
+  return scheduler
+}
+
+function getSharedLogicalSchedulingKey(value: unknown): object | undefined {
+  if ((typeof value !== `object` && typeof value !== `function`) || !value) {
+    return undefined
+  }
+  const key = (
+    value as {
+      [SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY]?: unknown
+    }
+  )[SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY]
+  return key !== null && (typeof key === `object` || typeof key === `function`)
+    ? key
+    : undefined
+}
+
+function observeSharedLogicalSchedulingSupport(
+  driver: SQLiteDriver,
+  onSupport: (key: object) => void,
+): SQLiteDriver {
+  let observationPending = true
+  const observe = <T>(promise: Promise<T>): Promise<T> => {
+    if (!observationPending) return promise
+    observationPending = false
+    const key = getSharedLogicalSchedulingKey(promise)
+    if (key) onSupport(key)
+    return promise
+  }
+
+  return {
+    exec: (sql) => observe(driver.exec(sql)),
+    query: <T>(sql: string, params: ReadonlyArray<unknown> = []) =>
+      observe(driver.query<T>(sql, params)),
+    run: (sql, params = []) => observe(driver.run(sql, params)),
+    transaction: <T>(fn: (transactionDriver: SQLiteDriver) => Promise<T>) =>
+      observe(driver.transaction(fn)),
+    transactionWithDriver: <T>(
+      fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+    ) =>
+      observe(
+        driver.transactionWithDriver
+          ? driver.transactionWithDriver(fn)
+          : driver.transaction(fn),
+      ),
+  }
+}
+
 const DEFAULT_SCHEMA_VERSION = 1
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
 
@@ -92,9 +259,6 @@ export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
 const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
-const PERSISTED_TYPE_TAG = `__tanstack_db_persisted_type__`
-const PERSISTED_VALUE_TAG = `value`
-
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
 type PersistedTaggedValueType =
   | `bigint`
@@ -122,17 +286,17 @@ function isDuplicateColumnAddError(
   error: unknown,
   columnName: string,
 ): boolean {
-  if (!(error instanceof Error)) {
+  if (typeof error !== `string` && !(error instanceof Error)) {
     return false
   }
 
-  const message = error.message.toLowerCase()
-  const normalizedColumnName = columnName.toLowerCase()
+  const normalizedMessage = (
+    typeof error === `string` ? error : error.message
+  ).toLowerCase()
   return (
-    (message.includes(`duplicate column name`) &&
-      message.includes(normalizedColumnName)) ||
-    (message.includes(`already exists`) &&
-      message.includes(normalizedColumnName))
+    normalizedMessage.includes(columnName.toLowerCase()) &&
+    (normalizedMessage.includes(`duplicate column name`) ||
+      normalizedMessage.includes(`already exists`))
   )
 }
 
@@ -172,10 +336,7 @@ function encodePersistedJsonValue(value: unknown): unknown {
   }
 
   if (typeof value === `bigint`) {
-    return {
-      [PERSISTED_TYPE_TAG]: `bigint`,
-      [PERSISTED_VALUE_TAG]: value.toString(),
-    } satisfies PersistedTaggedValue
+    return serializeSQLiteBigInt(value) satisfies PersistedTaggedValue
   }
 
   if (value instanceof Date) {
@@ -288,6 +449,7 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
   }
 
   if (typeof value === `bigint`) {
+    assertSQLiteBigIntInRange(value)
     return value.toString()
   }
 
@@ -318,78 +480,14 @@ function toSqliteLiteral(value: SqliteSupportedValue): string {
   return `'${value.replace(/'/g, `''`)}'`
 }
 
-function inlineSqlParams(
-  sql: string,
-  params: ReadonlyArray<SqliteSupportedValue>,
-): string {
-  let index = 0
-  const inlinedSql = sql.replace(/\?/g, () => {
-    const paramValue = params[index]
-    index++
-    return toSqliteLiteral(paramValue ?? null)
-  })
-
-  if (index !== params.length) {
-    throw new InvalidPersistedCollectionConfigError(
-      `Unable to inline SQL params; placeholder count did not match provided params`,
-    )
+function toSqliteExpressionLiteral(value: unknown): string {
+  if (typeof value === `bigint`) {
+    return assertSQLiteBigIntInRange(value).toString()
   }
-
-  return inlinedSql
+  return toSqliteLiteral(toSqliteParameterValue(value))
 }
 
 type CompiledRowExpressionEvaluator = (row: Record<string, unknown>) => unknown
-
-function collectAliasQualifiedRefSegments(
-  expression: IR.BasicExpression,
-  segments: Set<string> = new Set<string>(),
-): Set<string> {
-  if (expression.type === `ref`) {
-    if (expression.path.length > 1) {
-      const rootSegment = String(expression.path[0])
-      if (rootSegment.length > 0) {
-        segments.add(rootSegment)
-      }
-    }
-    return segments
-  }
-
-  if (expression.type === `func`) {
-    for (const arg of expression.args) {
-      collectAliasQualifiedRefSegments(arg, segments)
-    }
-  }
-
-  return segments
-}
-
-function createAliasAwareRowProxy(
-  row: Record<string, unknown>,
-  aliasSegments: ReadonlySet<string>,
-): Record<string, unknown> {
-  return new Proxy(row, {
-    get(target, prop, receiver) {
-      if (typeof prop !== `string`) {
-        return Reflect.get(target, prop, receiver)
-      }
-
-      if (Object.prototype.hasOwnProperty.call(target, prop)) {
-        const value = Reflect.get(target, prop, receiver)
-        if (value !== undefined || !aliasSegments.has(prop)) {
-          return value
-        }
-
-        return target
-      }
-
-      if (aliasSegments.has(prop)) {
-        return target
-      }
-
-      return undefined
-    },
-  })
-}
 
 function compileRowExpressionEvaluator(
   expression: IR.BasicExpression,
@@ -402,24 +500,7 @@ function compileRowExpressionEvaluator(
       `Unsupported expression for SQLite adapter fallback evaluator: ${(error as Error).message}`,
     )
   }
-
-  const aliasSegments = collectAliasQualifiedRefSegments(expression)
-  if (aliasSegments.size === 0) {
-    return (row) => baseEvaluator(row)
-  }
-
-  const proxyCache = new WeakMap<
-    Record<string, unknown>,
-    Record<string, unknown>
-  >()
-  return (row) => {
-    let proxy = proxyCache.get(row)
-    if (!proxy) {
-      proxy = createAliasAwareRowProxy(row, aliasSegments)
-      proxyCache.set(row, proxy)
-    }
-    return baseEvaluator(proxy)
-  }
+  return baseEvaluator
 }
 
 function getOrderByObjectId(value: object): number {
@@ -450,6 +531,9 @@ function compareOrderByValues(
   }
 
   if (typeof left === `string` && typeof right === `string`) {
+    if (compareOptions.stringSort === `custom`) {
+      return compareOptions.compare(left, right)
+    }
     if (compareOptions.stringSort === `locale`) {
       return left.localeCompare(
         right,
@@ -576,37 +660,50 @@ function resolveComparisonValueKind(
 
 function compileComparisonSql(
   operator: `=` | `>` | `>=` | `<` | `<=`,
+  leftExpression: IR.BasicExpression,
+  rightExpression: IR.BasicExpression,
   leftSql: string,
   rightSql: string,
   valueKind: CompiledValueKind,
+  leftKind: CompiledValueKind,
+  rightKind: CompiledValueKind,
 ): string {
-  if (valueKind === `bigint`) {
-    return `(CAST(${leftSql} AS NUMERIC) ${operator} CAST(${rightSql} AS NUMERIC))`
+  const compileOperand = (
+    expression: IR.BasicExpression,
+    sql: string,
+    otherKind: CompiledValueKind,
+  ): string => {
+    if (expression.type !== `val`) return sql
+    if (valueKind === `date` && otherKind === `date`) return `date(${sql})`
+    if (valueKind === `datetime` && otherKind === `datetime`) {
+      return `datetime(${sql})`
+    }
+    return sql
   }
-  if (valueKind === `date`) {
-    return `(date(${leftSql}) ${operator} date(${rightSql}))`
-  }
-  if (valueKind === `datetime`) {
-    return `(datetime(${leftSql}) ${operator} datetime(${rightSql}))`
-  }
-  return `(${leftSql} ${operator} ${rightSql})`
+
+  return `(${compileOperand(leftExpression, leftSql, rightKind)} ${operator} ${compileOperand(rightExpression, rightSql, leftKind)})`
 }
 
 function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
   const typePath = `${jsonPath}.${PERSISTED_TYPE_TAG}`
   const taggedValuePath = `${jsonPath}.${PERSISTED_VALUE_TAG}`
+  // createJsonPath has already validated every segment. Keep these paths as
+  // canonical SQL literals so runtime refs match persisted expression indexes.
+  const typePathSql = toSqliteLiteral(typePath)
+  const taggedValuePathSql = toSqliteLiteral(taggedValuePath)
+  const jsonPathSql = toSqliteLiteral(jsonPath)
 
   return {
     supported: true,
-    sql: `(CASE json_extract(value, ?)
-      WHEN 'bigint' THEN CAST(json_extract(value, ?) AS NUMERIC)
-      WHEN 'date' THEN json_extract(value, ?)
+    sql: `(CASE json_extract(value, ${typePathSql})
+      WHEN 'bigint' THEN CAST(json_extract(value, ${taggedValuePathSql}) AS NUMERIC)
+      WHEN 'date' THEN json_extract(value, ${taggedValuePathSql})
       WHEN 'nan' THEN NULL
       WHEN 'infinity' THEN NULL
       WHEN '-infinity' THEN NULL
-      ELSE json_extract(value, ?)
+      ELSE json_extract(value, ${jsonPathSql})
     END)`,
-    params: [typePath, taggedValuePath, taggedValuePath, jsonPath],
+    params: [],
     valueKind: `unknown`,
   }
 }
@@ -657,21 +754,64 @@ function stableStringify(value: unknown): string {
   return serializePersistedRowValue(value)
 }
 
+function argumentCompilationContext(
+  parentName: string,
+  argumentIndex: number,
+  argument: IR.BasicExpression,
+  parentContext: SqlExpressionCompilationContext,
+): SqlExpressionCompilationContext {
+  if (parentContext === `index-expression`) return `index-expression`
+
+  switch (parentName) {
+    case `and`:
+    case `or`:
+    case `not`:
+      return `predicate`
+    case `eq`:
+    case `gt`:
+    case `gte`:
+    case `lt`:
+    case `lte`:
+    case `like`:
+    case `ilike`:
+      if (argument.type !== `val`) return `index-expression`
+      return typeof argument.value === `bigint`
+        ? `index-expression`
+        : `predicate`
+    case `in`:
+      return argumentIndex === 0 ? `index-expression` : `predicate`
+    case `isNull`:
+    case `isUndefined`:
+      return `index-expression`
+    default:
+      return `index-expression`
+  }
+}
+
 function compileSqlExpression(
   expression: IR.BasicExpression,
+  context: SqlExpressionCompilationContext = `predicate`,
 ): CompiledSqlFragment {
   if (expression.type === `val`) {
     const valueKind = getLiteralValueKind(expression.value)
     return {
       supported: true,
-      sql: `?`,
-      params: [toSqliteParameterValue(expression.value)],
+      sql:
+        context === `index-expression`
+          ? toSqliteExpressionLiteral(expression.value)
+          : `?`,
+      params:
+        context === `predicate`
+          ? [toSqliteParameterValue(expression.value)]
+          : [],
       valueKind,
     }
   }
 
   if (expression.type === `ref`) {
-    const jsonPath = createJsonPath(expression.path.map(String))
+    const jsonPath = createJsonPath(
+      IR.getPropRefPropertyPath(expression).map(String),
+    )
     if (!jsonPath) {
       return {
         supported: false,
@@ -683,7 +823,12 @@ function compileSqlExpression(
     return compileRefExpressionSql(jsonPath)
   }
 
-  const compiledArgs = expression.args.map((arg) => compileSqlExpression(arg))
+  const compiledArgs = expression.args.map((arg, index) =>
+    compileSqlExpression(
+      arg,
+      argumentCompilationContext(expression.name, index, arg, context),
+    ),
+  )
   if (compiledArgs.some((arg) => !arg.supported)) {
     return {
       supported: false,
@@ -732,9 +877,13 @@ function compileSqlExpression(
         supported: true,
         sql: compileComparisonSql(
           operatorByName[expression.name],
+          expression.args[0]!,
+          expression.args[1]!,
           argSql[0],
           argSql[1],
           valueKind,
+          getCompiledValueKind(compiledArgs[0]),
+          getCompiledValueKind(compiledArgs[1]),
         ),
         params,
       }
@@ -789,13 +938,17 @@ function compileSqlExpression(
         return { supported: false, sql: ``, params: [] }
       }
 
+      if (context === `index-expression`) {
+        return {
+          supported: true,
+          sql: `(${leftSql} IN (${listValue
+            .map((value) => toSqliteExpressionLiteral(value))
+            .join(`, `)}))`,
+          params: leftParams,
+        }
+      }
+
       if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
-        const hasBigIntValues = listValue.some(
-          (value) => typeof value === `bigint`,
-        )
-        const inLeftSql = hasBigIntValues
-          ? `CAST(${leftSql} AS NUMERIC)`
-          : leftSql
         const chunkClauses: Array<string> = []
         const batchedParams: Array<SqliteSupportedValue> = []
 
@@ -808,13 +961,13 @@ function compileSqlExpression(
             startIndex,
             startIndex + SQLITE_MAX_IN_BATCH_SIZE,
           )
-          chunkClauses.push(
-            `(${inLeftSql} IN (${chunkValues.map(() => `?`).join(`, `)}))`,
-          )
-          batchedParams.push(...leftParams)
-          batchedParams.push(
-            ...chunkValues.map((value) => toSqliteParameterValue(value)),
-          )
+          const chunkParams: Array<SqliteSupportedValue> = []
+          const chunkValueSql = chunkValues.map((value) => {
+            chunkParams.push(toSqliteParameterValue(value))
+            return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
+          })
+          chunkClauses.push(`(${leftSql} IN (${chunkValueSql.join(`, `)}))`)
+          batchedParams.push(...leftParams, ...chunkParams)
         }
 
         return {
@@ -824,20 +977,15 @@ function compileSqlExpression(
         }
       }
 
-      const hasBigIntValues = listValue.some(
-        (value) => typeof value === `bigint`,
-      )
-      const inLeftSql = hasBigIntValues
-        ? `CAST(${leftSql} AS NUMERIC)`
-        : leftSql
-      const listPlaceholders = listValue.map(() => `?`).join(`, `)
+      const listParams: Array<SqliteSupportedValue> = []
+      const listValueSql = listValue.map((value) => {
+        listParams.push(toSqliteParameterValue(value))
+        return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
+      })
       return {
         supported: true,
-        sql: `(${inLeftSql} IN (${listPlaceholders}))`,
-        params: [
-          ...leftParams,
-          ...listValue.map((value) => toSqliteParameterValue(value)),
-        ],
+        sql: `(${leftSql} IN (${listValueSql.join(`, `)}))`,
+        params: [...leftParams, ...listParams],
       }
     }
     case `like`:
@@ -917,7 +1065,10 @@ function compileOrderByClauses(
   const params: Array<SqliteSupportedValue> = []
 
   for (const clause of orderBy) {
-    const compiledExpression = compileSqlExpression(clause.expression)
+    const compiledExpression = compileSqlExpression(
+      clause.expression,
+      `index-expression`,
+    )
     if (!compiledExpression.supported) {
       return {
         supported: false,
@@ -953,6 +1104,7 @@ function isExpressionLikeShape(value: unknown): value is IR.BasicExpression {
     path?: unknown
     name?: unknown
     args?: unknown
+    sourceAlias?: unknown
   }
 
   if (candidate.type === `val`) {
@@ -960,7 +1112,12 @@ function isExpressionLikeShape(value: unknown): value is IR.BasicExpression {
   }
 
   if (candidate.type === `ref`) {
-    return Array.isArray(candidate.path)
+    return (
+      Array.isArray(candidate.path) &&
+      (candidate.sourceAlias === undefined ||
+        (typeof candidate.sourceAlias === `string` &&
+          candidate.path[0] === candidate.sourceAlias))
+    )
   }
 
   if (candidate.type === `func`) {
@@ -990,14 +1147,22 @@ function normalizeIndexSqlFragment(fragment: string): string {
     // Non-JSON strings are treated as raw SQL fragments below.
   }
 
-  if (hasParsedJson && isExpressionLikeShape(parsedJson)) {
-    const compiled = compileSqlExpression(parsedJson)
+  const decodedJson = hasParsedJson
+    ? decodePersistedJsonValue(parsedJson)
+    : undefined
+  if (hasParsedJson && isExpressionLikeShape(decodedJson)) {
+    const compiled = compileSqlExpression(decodedJson, `index-expression`)
     if (!compiled.supported) {
       throw new InvalidPersistedCollectionConfigError(
         `Persisted index expression is not supported by the SQLite compiler`,
       )
     }
-    return inlineSqlParams(compiled.sql, compiled.params)
+    if (compiled.params.length !== 0) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted index expression cannot contain bound parameters`,
+      )
+    }
+    return compiled.sql
   }
 
   return sanitizeExpressionSqlFragment(fragment)
@@ -1024,11 +1189,16 @@ function buildIndexName(collectionId: string, signature: string): string {
 
 export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly driver: SQLiteDriver
+  private readonly schedulingIdentitySource: SQLiteDriver
+  private scheduler: SharedPersistenceScheduler | undefined
+  private activeUnscheduledHydration: Promise<unknown> | undefined
+  private readonly hydrationAdapter: HydrationPersistenceAdapter
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
   private readonly appliedTxPruneMaxRows: number | undefined
   private readonly appliedTxPruneMaxAgeSeconds: number | undefined
   private readonly pullSinceReloadThreshold: number
+  private readonly replacementBatchSize: number
 
   private initialized = false
   private readonly collectionTableCache = new Map<
@@ -1041,6 +1211,20 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   >()
 
   constructor(options: SQLiteCoreAdapterOptions) {
+    const maxBoundParameters = options.driver.maxBoundParameters
+    if (
+      maxBoundParameters !== undefined &&
+      (!Number.isInteger(maxBoundParameters) || maxBoundParameters < 4)
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite driver maxBoundParameters must be an integer of at least 4`,
+      )
+    }
+    this.replacementBatchSize =
+      maxBoundParameters === undefined
+        ? REPLACEMENT_BATCH_SIZE
+        : Math.min(REPLACEMENT_BATCH_SIZE, Math.floor(maxBoundParameters / 4))
+
     const schemaVersion = options.schemaVersion ?? DEFAULT_SCHEMA_VERSION
     if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
       throw new InvalidPersistedCollectionConfigError(
@@ -1079,13 +1263,93 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )
     }
 
-    this.driver = options.driver
+    this.schedulingIdentitySource = options.driver
+    const schedulingKey =
+      getSharedLogicalSchedulingKey(options.driver) ??
+      observedDriverSchedulingKeys.get(options.driver)
+    this.scheduler = schedulingKey
+      ? getSharedPersistenceScheduler(schedulingKey)
+      : undefined
+    this.driver = schedulingKey
+      ? options.driver
+      : observeSharedLogicalSchedulingSupport(options.driver, (key) => {
+          observedDriverSchedulingKeys.set(options.driver, key)
+          const scheduler = getSharedPersistenceScheduler(key)
+          this.scheduler ??= scheduler
+          if (this.activeUnscheduledHydration) {
+            scheduler.adoptRunningHydrate(this.activeUnscheduledHydration)
+          }
+        })
     this.schemaVersion = schemaVersion
     this.schemaMismatchPolicy =
       options.schemaMismatchPolicy ?? `sync-present-reset`
     this.appliedTxPruneMaxRows = options.appliedTxPruneMaxRows
     this.appliedTxPruneMaxAgeSeconds = options.appliedTxPruneMaxAgeSeconds
     this.pullSinceReloadThreshold = pullSinceReloadThreshold
+    this.hydrationAdapter = {
+      loadSubset: (collectionId, loadOptions, context) =>
+        this.loadSubsetUnscheduled(collectionId, loadOptions, context),
+      loadResumeSnapshot: (collectionId, context) =>
+        this.loadResumeSnapshotUnscheduled(collectionId, context),
+      applyCommittedTx: (collectionId, tx) =>
+        this.applyCommittedTxUnscheduled(collectionId, tx),
+      loadCollectionMetadata: (collectionId) =>
+        this.loadCollectionMetadataUnscheduled(collectionId),
+      scanRows: (collectionId, scanOptions) =>
+        this.scanRowsUnscheduled(collectionId, scanOptions),
+      ensureIndex: (collectionId, signature, spec) =>
+        this.ensureIndexUnscheduled(collectionId, signature, spec),
+      markIndexRemoved: (collectionId, signature) =>
+        this.markIndexRemovedUnscheduled(collectionId, signature),
+      getStreamPosition: (collectionId) =>
+        this.getStreamPositionUnscheduled(collectionId),
+      pullSince: (collectionId, fromRowVersion) =>
+        this.pullSinceUnscheduled(collectionId, fromRowVersion),
+      runInHydrationScope: async (task) => task(this.hydrationAdapter),
+    }
+  }
+
+  runInHydrationScope<T>(
+    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+  ): Promise<T> {
+    const scheduler = this.resolveScheduler()
+    if (scheduler) {
+      return scheduler.runHydrate(() => task(this.hydrationAdapter))
+    }
+
+    const hydration = Promise.resolve().then(() => task(this.hydrationAdapter))
+    this.activeUnscheduledHydration = hydration
+    const clear = () => {
+      if (this.activeUnscheduledHydration === hydration) {
+        this.activeUnscheduledHydration = undefined
+      }
+    }
+    void hydration.then(clear, clear)
+    return hydration
+  }
+
+  runInRegularScope<T>(
+    task: (adapter: HydrationPersistenceAdapter) => Promise<T>,
+  ): Promise<T> {
+    return this.runRegular(() => task(this.hydrationAdapter))
+  }
+
+  isHydrationScopeScheduled(): boolean {
+    return this.resolveScheduler() !== undefined
+  }
+
+  private runRegular<T>(task: () => Promise<T>): Promise<T> {
+    const scheduler = this.resolveScheduler()
+    return scheduler ? scheduler.runRegular(task) : task()
+  }
+
+  private resolveScheduler(): SharedPersistenceScheduler | undefined {
+    if (this.scheduler) return this.scheduler
+    const key = observedDriverSchedulingKeys.get(this.schedulingIdentitySource)
+    if (key) {
+      this.scheduler = getSharedPersistenceScheduler(key)
+    }
+    return this.scheduler
   }
 
   private runInTransaction<TResult>(
@@ -1120,7 +1384,23 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
-  async loadSubset(
+  loadSubset(
+    collectionId: string,
+    options: LoadSubsetOptions,
+    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+  ): Promise<
+    Array<{
+      key: string | number
+      value: Record<string, unknown>
+      metadata?: unknown
+    }>
+  > {
+    return this.runRegular(() =>
+      this.loadSubsetUnscheduled(collectionId, options, ctx),
+    )
+  }
+
+  private async loadSubsetUnscheduled(
     collectionId: string,
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
@@ -1205,7 +1485,19 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async loadResumeSnapshot(
+  loadResumeSnapshot(
+    collectionId: string,
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      includeRows?: boolean
+    },
+  ) {
+    return this.runRegular(() =>
+      this.loadResumeSnapshotUnscheduled(collectionId, ctx),
+    )
+  }
+
+  private async loadResumeSnapshotUnscheduled(
     collectionId: string,
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
@@ -1288,7 +1580,16 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
+  applyCommittedTx(collectionId: string, tx: PersistedTx): Promise<void> {
+    return this.runRegular(() =>
+      this.applyCommittedTxUnscheduled(collectionId, tx),
+    )
+  }
+
+  private async applyCommittedTxUnscheduled(
+    collectionId: string,
+    tx: PersistedTx,
+  ): Promise<void> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
@@ -1371,7 +1672,69 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       }
 
-      for (const mutation of tx.mutations) {
+      const replacementKeys = replacesPersistedBaseline
+        ? tx.mutations.map((mutation) =>
+            encodePersistedStorageKey(mutation.key),
+          )
+        : []
+      const batchReplacement =
+        replacesPersistedBaseline &&
+        tx.mutations.length > 0 &&
+        tx.mutations.every((mutation) => mutation.type !== `delete`) &&
+        new Set(replacementKeys).size === replacementKeys.length
+
+      if (batchReplacement) {
+        const finalRowMetadata = new Map<string, unknown>()
+        for (const mutation of tx.rowMetadataMutations ?? []) {
+          finalRowMetadata.set(
+            encodePersistedStorageKey(mutation.key),
+            mutation.type === `delete` ? undefined : mutation.value,
+          )
+        }
+
+        for (
+          let start = 0;
+          start < tx.mutations.length;
+          start += this.replacementBatchSize
+        ) {
+          const mutations = tx.mutations.slice(
+            start,
+            start + this.replacementBatchSize,
+          )
+          const keys = replacementKeys.slice(
+            start,
+            start + this.replacementBatchSize,
+          )
+          await transactionDriver.run(
+            `INSERT INTO collection_expected_keys (collection_id, key)
+             VALUES ${keys.map(() => `(?, ?)`).join(`, `)}`,
+            keys.flatMap((key) => [collectionId, key]),
+          )
+          await transactionDriver.run(
+            `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
+             VALUES ${keys.map(() => `(?, ?, ?, ?)`).join(`, `)}`,
+            mutations.flatMap((mutation, index) => {
+              const key = keys[index]!
+              const metadata = finalRowMetadata.has(key)
+                ? finalRowMetadata.get(key)
+                : mutation.type !== `delete` &&
+                    mutation.metadataChanged === true
+                  ? mutation.metadata
+                  : undefined
+              return [
+                key,
+                serializePersistedRowValue(mutation.value),
+                metadata === undefined
+                  ? null
+                  : serializePersistedRowValue(metadata),
+                nextRowVersion,
+              ]
+            }),
+          )
+        }
+      }
+
+      for (const mutation of batchReplacement ? [] : tx.mutations) {
         const encodedKey = encodePersistedStorageKey(mutation.key)
         if (mutation.type === `delete`) {
           if (tracksPersistedKeySet) {
@@ -1460,7 +1823,9 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
-      for (const rowMetadataMutation of tx.rowMetadataMutations ?? []) {
+      for (const rowMetadataMutation of batchReplacement
+        ? []
+        : (tx.rowMetadataMutations ?? [])) {
         const encodedKey = encodePersistedStorageKey(rowMetadataMutation.key)
         if (rowMetadataMutation.type === `delete`) {
           await transactionDriver.run(
@@ -1566,7 +1931,15 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async loadCollectionMetadata(
+  loadCollectionMetadata(
+    collectionId: string,
+  ): Promise<Array<{ key: string; value: unknown }>> {
+    return this.runRegular(() =>
+      this.loadCollectionMetadataUnscheduled(collectionId),
+    )
+  }
+
+  private async loadCollectionMetadataUnscheduled(
     collectionId: string,
   ): Promise<Array<{ key: string; value: unknown }>> {
     await this.ensureCollectionReady(collectionId)
@@ -1593,7 +1966,16 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async scanRows(
+  scanRows(
+    collectionId: string,
+    options?: PersistedRowScanOptions,
+  ): Promise<Array<PersistedScannedRow>> {
+    return this.runRegular(() =>
+      this.scanRowsUnscheduled(collectionId, options),
+    )
+  }
+
+  private async scanRowsUnscheduled(
     collectionId: string,
     options?: PersistedRowScanOptions,
   ): Promise<Array<PersistedScannedRow>> {
@@ -1622,7 +2004,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async ensureIndex(
+  ensureIndex(
+    collectionId: string,
+    signature: string,
+    spec: PersistedIndexSpec,
+  ): Promise<void> {
+    return this.runRegular(() =>
+      this.ensureIndexUnscheduled(collectionId, signature, spec),
+    )
+  }
+
+  private async ensureIndexUnscheduled(
     collectionId: string,
     signature: string,
     spec: PersistedIndexSpec,
@@ -1635,9 +2027,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       normalizeIndexSqlFragment(fragment),
     )
     const expressionSql = normalizedExpressionSql.join(`, `)
+    const persistedExpressionSql = JSON.stringify(normalizedExpressionSql)
     const whereSql = spec.whereSql
       ? normalizeIndexSqlFragment(spec.whereSql)
       : undefined
+    const persistedWhereSql = whereSql ?? null
 
     await this.runInTransaction(async (transactionDriver) => {
       await this.assertCurrentSchemaVersion(
@@ -1645,6 +2039,32 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         transactionDriver,
         `create a persisted index`,
       )
+
+      const existingRows = await transactionDriver.query<{
+        index_name: string
+        expression_sql: string
+        where_sql: string | null
+      }>(
+        `SELECT index_name, expression_sql, where_sql
+         FROM persisted_index_registry
+         WHERE collection_id = ? AND signature = ?
+         LIMIT 1`,
+        [collectionId, signature],
+      )
+      const existing = existingRows[0]
+      if (
+        existing &&
+        (existing.index_name !== indexName ||
+          existing.expression_sql !== persistedExpressionSql ||
+          existing.where_sql !== persistedWhereSql)
+      ) {
+        // A compiler upgrade can change normalized SQL without changing the
+        // logical index signature. Rebuild only that stale physical index so
+        // the registry and SQLite planner describe the same expression.
+        await transactionDriver.exec(
+          `DROP INDEX IF EXISTS ${quoteIdentifier(existing.index_name)}`,
+        )
+      }
       await transactionDriver.run(
         `INSERT INTO persisted_index_registry (
            collection_id,
@@ -1672,8 +2092,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           collectionId,
           signature,
           indexName,
-          JSON.stringify(normalizedExpressionSql),
-          whereSql ?? null,
+          persistedExpressionSql,
+          persistedWhereSql,
         ],
       )
 
@@ -1687,7 +2107,13 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async markIndexRemoved(
+  markIndexRemoved(collectionId: string, signature: string): Promise<void> {
+    return this.runRegular(() =>
+      this.markIndexRemovedUnscheduled(collectionId, signature),
+    )
+  }
+
+  private async markIndexRemovedUnscheduled(
     collectionId: string,
     signature: string,
   ): Promise<void> {
@@ -1724,7 +2150,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  async getStreamPosition(collectionId: string): Promise<{
+  getStreamPosition(collectionId: string): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    // Election must not queue behind a hydrate awaiting its first writer route.
+    // The stream-position snapshot still uses the driver's transaction admission.
+    return this.getStreamPositionUnscheduled(collectionId)
+  }
+
+  private async getStreamPositionUnscheduled(collectionId: string): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -1826,7 +2262,16 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
-  async pullSince(
+  pullSince(
+    collectionId: string,
+    fromRowVersion: number,
+  ): Promise<SQLitePullSinceResult<string | number>> {
+    return this.runRegular(() =>
+      this.pullSinceUnscheduled(collectionId, fromRowVersion),
+    )
+  }
+
+  private async pullSinceUnscheduled(
     collectionId: string,
     fromRowVersion: number,
   ): Promise<SQLitePullSinceResult<string | number>> {

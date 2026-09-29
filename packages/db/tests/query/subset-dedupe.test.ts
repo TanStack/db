@@ -42,6 +42,27 @@ describe(`DeduplicatedLoadSubset`, () => {
     expect(loadSubset).toHaveBeenCalledTimes(3)
   })
 
+  it(`refetches an exact demand without changing its completed identity`, () => {
+    const loadSubset = vi.fn<LoadSubsetFn>().mockReturnValue(true)
+    const onDeduplicate = vi.fn()
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset,
+      onDeduplicate,
+    })
+    const demand = { where: gt(ref(`age`), val(10)), limit: 2 }
+
+    expect(deduplicated.loadSubset(demand)).toBe(true)
+    expect(deduplicated.loadSubset({ ...demand })).toBe(true)
+    expect(loadSubset).toHaveBeenCalledTimes(1)
+    expect(onDeduplicate).toHaveBeenCalledTimes(1)
+
+    expect(deduplicated.loadSubset({ ...demand, refetch: true })).toBe(true)
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+    expect(onDeduplicate).toHaveBeenCalledTimes(1)
+    expect(deduplicated.loadSubset({ ...demand })).toBe(true)
+    expect(loadSubset).toHaveBeenCalledTimes(2)
+  })
+
   it(`does not infer coverage from a broader predicate or window`, async () => {
     const loadSubset = vi.fn<LoadSubsetFn>().mockResolvedValue(undefined)
     const deduplicated = new DeduplicatedLoadSubset({ loadSubset })

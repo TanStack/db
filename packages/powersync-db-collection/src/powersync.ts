@@ -33,6 +33,14 @@ import type { PendingOperation } from './PendingOperationStore'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { LockContext, Table, TriggerDiffRecord } from '@powersync/common'
 
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    !!value &&
+    (typeof value === `object` || typeof value === `function`) &&
+    typeof (value as { then?: unknown }).then === `function`
+  )
+}
+
 /**
  * Creates PowerSync collection options for use with a standard Collection.
  *
@@ -324,6 +332,8 @@ function createPowerSyncCollectionConfig<
         | ((options?: { context?: LockContext }) => Promise<void>)
         | null = null
       let trackingSetup: Promise<void> | null = null
+      let activeTrackingDisposal: Promise<void> | null = null
+      let abortTrackingDisposal: Promise<void> | null = null
 
       if (syncMode === `eager`) {
         return runEagerSync()
@@ -347,11 +357,35 @@ function createPowerSyncCollectionConfig<
 
         const dispose = disposeTracking
         if (!dispose) {
+          // Reconciliation may have claimed the disposer after this caller
+          // observed setup. Join that invocation instead of settling early.
+          await activeTrackingDisposal
           return
         }
 
         disposeTracking = null
-        await dispose(context ? { context } : undefined)
+        let disposal: Promise<void>
+        try {
+          disposal = Promise.resolve(dispose(context ? { context } : undefined))
+        } catch (error) {
+          disposal = Promise.reject(error)
+        }
+        activeTrackingDisposal = disposal
+        try {
+          await disposal
+        } finally {
+          if (activeTrackingDisposal === disposal) {
+            activeTrackingDisposal = null
+          }
+        }
+      }
+
+      function disposeTrackingAfterAbort(): Promise<void> {
+        const disposal = (abortTrackingDisposal ??= safelyDisposeTracking())
+        // Abort event dispatch does not observe a listener's returned promise.
+        // The eager cleanup callback awaits this same promise below.
+        void disposal.catch(() => undefined)
+        return disposal
       }
 
       async function establishTracking(
@@ -537,12 +571,12 @@ function createPowerSyncCollectionConfig<
 
         // If the abort controller was aborted while processing the request above
         if (abortController.signal.aborted) {
-          await safelyDisposeTracking()
+          await disposeTrackingAfterAbort()
         } else {
           abortController.signal.addEventListener(
             `abort`,
-            async () => {
-              await safelyDisposeTracking()
+            () => {
+              void disposeTrackingAfterAbort()
             },
             { once: true },
           )
@@ -553,14 +587,14 @@ function createPowerSyncCollectionConfig<
       // Registers a diff trigger for the entire table.
       function runEagerSync() {
         let onUnload: CleanupFn | void | null = null
+        let onUnloadStarted = false
 
-        start(async () => {
+        const startup = start(async () => {
           const cleanup = await restConfig.onLoad?.()
+          onUnload = cleanup
           if (abortController.signal.aborted) {
-            cleanup?.()
             return
           }
-          onUnload = cleanup
 
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
@@ -599,13 +633,51 @@ function createPowerSyncCollectionConfig<
           }
         })
 
-        return () => {
+        const invokeOnUnload = (): void | Promise<void> => {
+          if (onUnloadStarted || !onUnload) return
+          onUnloadStarted = true
+          const cleanup = onUnload
+          onUnload = null
+          return cleanup()
+        }
+
+        return async () => {
           database.logger.log({
             level: LogLevels.info,
             message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
           })
           abortController.abort()
-          onUnload?.()
+          const trackingDisposal = disposeTrackingAfterAbort()
+
+          let onUnloadFailure: { error: unknown } | undefined
+          const settleOnUnload = async () => {
+            try {
+              await invokeOnUnload()
+            } catch (error) {
+              onUnloadFailure ??= { error }
+            }
+          }
+
+          // Invoke an already-installed callback in this stack, but also wait
+          // for startup to publish a callback acquired concurrently with abort.
+          const settlements = await Promise.allSettled([
+            startup,
+            trackingDisposal,
+            settleOnUnload(),
+          ])
+          const disposalSettlement = settlements[1]
+          await settleOnUnload()
+          if (disposalSettlement.status === `rejected` && onUnloadFailure) {
+            throw new AggregateError(
+              [disposalSettlement.reason, onUnloadFailure.error],
+              `PowerSync tracking disposal and load-hook cleanup both failed`,
+              { cause: disposalSettlement.reason },
+            )
+          }
+          if (disposalSettlement.status === `rejected`) {
+            throw disposalSettlement.reason
+          }
+          if (onUnloadFailure) throw onUnloadFailure.error
         }
       }
 
@@ -621,16 +693,33 @@ function createPowerSyncCollectionConfig<
           options: LoadSubsetOptions
           failures: number
         }
+        type DemandCleanupTask = {
+          order: number
+          promise: Promise<unknown>
+        }
+        type DemandCleanupFailure = {
+          order: number
+          error: unknown
+        }
+        type DemandCleanupCollector = {
+          tasks: Array<DemandCleanupTask>
+          ownedTasks: Set<Promise<unknown>>
+          failures: Array<DemandCleanupFailure>
+          nextOrder: number
+        }
 
         const demands = new Map<LoadSubsetOptions, DemandRecord>()
         const releasedSubsets = new WeakSet<LoadSubsetOptions>()
         const pendingReleases: Array<PendingRelease> = []
+        const pendingDemandLoads = new Set<Promise<void>>()
+        const pendingDemandCleanups = new Set<Promise<unknown>>()
         let stopped = false
         let trackingRevision = 0
         let reconciledTrackingRevision = 0
         let rebuildPromise: Promise<void> | null = null
         let drainingReleases = false
         let releaseRetryTimer: ReturnType<typeof setTimeout> | undefined
+        let demandCleanupCollector: DemandCleanupCollector | null = null
         const startup = start()
         void startup.catch((error) =>
           database.logger.log({
@@ -769,6 +858,13 @@ function createPowerSyncCollectionConfig<
             if (cleanup) demand.cleanup = cleanup
           } catch (error) {
             demands.delete(options)
+            const collector = demandCleanupCollector
+            if (collector) {
+              collector.failures.push({
+                order: collector.nextOrder++,
+                error,
+              })
+            }
             throw error
           }
 
@@ -780,14 +876,21 @@ function createPowerSyncCollectionConfig<
             options.signal?.aborted ||
             demands.get(options) !== demand
           ) {
-            demands.delete(options)
-            demand.cleanup?.()
+            cleanupDemand(demand)
             return
           }
 
           demand.active = true
           trackingRevision++
           await rebuildTracking()
+        }
+
+        const trackLoadSubset = (options: LoadSubsetOptions): Promise<void> => {
+          const task = loadSubset(options)
+          pendingDemandLoads.add(task)
+          const finish = () => pendingDemandLoads.delete(task)
+          void task.then(finish, finish)
+          return task
         }
 
         const toInlinedWhereClause = (compiled: {
@@ -802,15 +905,63 @@ function createPowerSyncCollectionConfig<
           )
         }
 
+        const reportDemandCleanupFailure = (error: unknown): void => {
+          database.logger.log({
+            level: LogLevels.error,
+            message: `Could not clean up subset hook for ${viewName}`,
+            error,
+          })
+        }
+
         const cleanupDemand = (demand: DemandRecord): void => {
           demands.delete(demand.options)
+          const collector = demandCleanupCollector
+          const order = collector ? collector.nextOrder++ : undefined
           try {
-            demand.cleanup?.()
+            const cleanup = demand.cleanup
+            demand.cleanup = undefined
+            const result: unknown = cleanup?.()
+            if (!isPromiseLike(result)) return
+
+            const task = Promise.resolve(result)
+            pendingDemandCleanups.add(task)
+            const finish = () => pendingDemandCleanups.delete(task)
+            void task.then(finish, finish)
+            if (collector) {
+              collector.tasks.push({ order: order!, promise: task })
+              collector.ownedTasks.add(task)
+              void task.catch(() => undefined)
+            } else {
+              void task.catch((error) => {
+                if (!demandCleanupCollector?.ownedTasks.has(task)) {
+                  reportDemandCleanupFailure(error)
+                }
+              })
+            }
           } catch (error) {
-            database.logger.log({
-              level: LogLevels.error,
-              message: `Could not clean up subset hook for ${viewName}`,
-              error,
+            if (collector) {
+              collector.failures.push({ order: order!, error })
+            } else {
+              reportDemandCleanupFailure(error)
+            }
+          }
+        }
+
+        const throwDemandCleanupFailures = (
+          collector: DemandCleanupCollector,
+          primaryFailures: ReadonlyArray<unknown> = [],
+        ): void => {
+          const errors = [
+            ...primaryFailures,
+            ...collector.failures
+              .slice()
+              .sort((left, right) => left.order - right.order)
+              .map(({ error }) => error),
+          ]
+          if (errors.length === 1) throw errors[0]
+          if (errors.length > 1) {
+            throw new AggregateError(errors, `PowerSync cleanup failed`, {
+              cause: errors[0],
             })
           }
         }
@@ -930,12 +1081,57 @@ function createPowerSyncCollectionConfig<
               message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             })
             abortController.abort()
+            const trackingDisposal = disposeTrackingAfterAbort()
+            const pendingLoads = [...pendingDemandLoads]
+            const pendingTasks = [...pendingDemandCleanups]
+            const collector: DemandCleanupCollector = {
+              tasks: pendingTasks.map((promise, order) => ({ order, promise })),
+              ownedTasks: new Set(pendingTasks),
+              failures: [],
+              nextOrder: pendingTasks.length,
+            }
+            demandCleanupCollector = collector
             for (const demand of demands.values()) {
               cleanupDemand(demand)
             }
             pendingReleases.length = 0
+
+            return (async () => {
+              const ownershipSettlements = await Promise.allSettled([
+                trackingDisposal,
+                ...pendingLoads,
+              ])
+              const disposalSettlement = ownershipSettlements[0]
+
+              let settledTasks = 0
+              while (settledTasks < collector.tasks.length) {
+                const tasks = collector.tasks.slice(settledTasks)
+                settledTasks = collector.tasks.length
+                const outcomes = await Promise.allSettled(
+                  tasks.map(({ promise }) => promise),
+                )
+                for (const [index, outcome] of outcomes.entries()) {
+                  if (outcome.status === `rejected`) {
+                    collector.failures.push({
+                      order: tasks[index]!.order,
+                      error: outcome.reason,
+                    })
+                  }
+                }
+              }
+              throwDemandCleanupFailures(
+                collector,
+                disposalSettlement.status === `rejected`
+                  ? [disposalSettlement.reason]
+                  : [],
+              )
+            })().finally(() => {
+              if (demandCleanupCollector === collector) {
+                demandCleanupCollector = null
+              }
+            })
           },
-          loadSubset: (options: LoadSubsetOptions) => loadSubset(options),
+          loadSubset: trackLoadSubset,
           unloadSubset,
         }
       }

@@ -1,6 +1,6 @@
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq } from '../query/builder/functions.js'
-import { PropRef, Value } from '../query/ir.js'
+import { PropRef, Value, getPropRefPropertyPath } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor, buildCursorCurrent } from '../utils/cursor.js'
@@ -29,6 +29,7 @@ import type { CollectionImpl } from './index.js'
 import type { Deferred } from '../deferred.js'
 
 type RequestSnapshotOptions = {
+  refetch?: boolean
   where?: BasicExpression<boolean>
   signal?: AbortSignal
   optimizedOnly?: boolean
@@ -44,6 +45,7 @@ type RequestSnapshotOptions = {
 }
 
 type RequestLimitedSnapshotOptions = {
+  refetch?: boolean
   orderBy: OrderBy
   limit: number
   /** A single cursor value; composite cursor inputs are rejected. */
@@ -246,7 +248,7 @@ export class CollectionSubscription
     this.truncateCleanup = this.collection.on(`truncate`, () => {
       this.handleTruncate()
     })
-    this.collectionCleanup = this.collection.on(`status:cleaned-up`, () => {
+    this.collectionCleanup = this.collection._onCleanupStart(() => {
       this.handleCollectionCleanup()
     })
     this.collectionRestartCleanup = this.collection.on(
@@ -1159,6 +1161,7 @@ export class CollectionSubscription
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
     const loadOptions: LoadSubsetOptions = {
+      ...(opts?.refetch ? { refetch: true } : {}),
       where: stateOpts.where,
       signal: opts?.signal,
       subscription: this,
@@ -1166,6 +1169,8 @@ export class CollectionSubscription
       orderBy: opts?.orderBy,
       limit: opts?.limit,
     }
+    // The loader can reenter releaseSnapshot before startSubsetDemand returns.
+    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     const {
       demand,
@@ -1173,7 +1178,6 @@ export class CollectionSubscription
       started,
     } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return false
-    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Report the result synchronously, including a wait for an unavailable loader.
     opts?.onLoadSubsetResult?.(
@@ -1202,9 +1206,8 @@ export class CollectionSubscription
       })
       if (snapshot === undefined) {
         opts.onUnoptimized()
-        // The callback can unsubscribe; TypeScript retains the pre-call narrowing.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (this.unsubscribed) return false
+        // The callback can retire this demand before the fallback read.
+        if (!this.isDemandActive(demand)) return false
         snapshot = this.collection.currentStateAsChanges({
           ...stateOpts,
           optimizedOnly: false,
@@ -1213,9 +1216,8 @@ export class CollectionSubscription
     } else {
       snapshot = this.collection.currentStateAsChanges(stateOpts)
     }
-    // Snapshot evaluation may call user code that tears down the subscription.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (this.unsubscribed) return false
+    // Snapshot evaluation may call user code that retires this demand.
+    if (!this.isDemandActive(demand)) return false
 
     if (snapshot === undefined) {
       // Couldn't load from indexes
@@ -1349,14 +1351,16 @@ export class CollectionSubscription
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
    *
-   * Cursor requests support one order term and one minValue. Multi-column
-   * queries use the ordered loader's prefix-and-tie fallback instead.
+   * Cursor requests use one minValue for the leading order term. For a
+   * multi-column order, a separate equality request loads the complete
+   * leading-value tie before local ordering applies the trailing terms.
    *
    * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
    * Note 2: it does not send keys that have already been sent before.
    */
   requestLimitedSnapshot({
+    refetch,
     orderBy,
     limit,
     minValues,
@@ -1453,7 +1457,10 @@ export class CollectionSubscription
     const orderByExpression = orderBy[0]!.expression
     const valueExtractor =
       orderByExpression.type === `ref`
-        ? compileExpression(new PropRef(orderByExpression.path), true)
+        ? compileExpression(
+            new PropRef(getPropRefPropertyPath(orderByExpression)),
+            true,
+          )
         : null
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
@@ -1524,6 +1531,7 @@ export class CollectionSubscription
     // Note: `where` does NOT include cursor expressions - they are passed separately
     // The sync layer can choose to use cursor-based or offset-based pagination
     const loadOptions: LoadSubsetOptions = {
+      ...(refetch ? { refetch: true } : {}),
       where, // Main filter only, no cursor
       limit,
       orderBy,

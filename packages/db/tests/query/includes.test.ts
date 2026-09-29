@@ -3970,6 +3970,56 @@ describe(`includes subqueries`, () => {
       ])
     })
 
+    it(`keeps reused child builders independent across include placements`, async () => {
+      // This is a bounded query-plan-shape regression: the existing generated
+      // includes oracles vary rows and histories for a fixed plan, while
+      // generating builder-placement graphs would require a separate AST
+      // grammar and oracle driver.
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => {
+          const child = q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+
+          return {
+            id: p.id,
+            all: toArray(child.select(({ i }) => ({ id: i.id }))),
+            active: toArray(
+              child
+                .where(({ i }) => gte(i.id, 11))
+                .select(({ i }) => ({ id: i.id })),
+            ),
+          }
+        }),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        { id: 1, all: [{ id: 10 }, { id: 11 }], active: [{ id: 11 }] },
+        { id: 2, all: [{ id: 20 }], active: [{ id: 20 }] },
+        { id: 3, all: [], active: [] },
+      ])
+
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 12, projectId: 1, title: `New Alpha issue` },
+      })
+      issues.utils.commit()
+      await flushPromises()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          all: [{ id: 10 }, { id: 11 }, { id: 12 }],
+          active: [{ id: 11 }, { id: 12 }],
+        },
+        { id: 2, all: [{ id: 20 }], active: [{ id: 20 }] },
+        { id: 3, all: [], active: [] },
+      ])
+    })
+
     it(`adding a child to one sibling does not affect the other`, async () => {
       const milestones = createMilestonesCollection()
 

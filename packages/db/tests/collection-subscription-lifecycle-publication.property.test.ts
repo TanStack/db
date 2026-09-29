@@ -5,6 +5,8 @@ import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import {
   createLifecycleModel,
+  deferralCleanupHistories,
+  expectedDeferralBatches,
   greenLifecycleHistories,
   greenLifecycleHistoryArbitrary,
   reduceLifecycle,
@@ -13,6 +15,7 @@ import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { SyncConfig } from '../src/types.js'
 import type {
+  DeferralLifecycleCommand,
   DemandName,
   LifecycleAttempt,
   LifecycleCommand,
@@ -33,6 +36,14 @@ import type {
  * insert, update, and delete batches, visible rows, status, syncRuns, and
  * unloads. It also records the phase before each observation so a final-state
  * match cannot hide an early or duplicate publication.
+ *
+ * A deferral interrupted by cleanup belongs to the ended sync run. Its prior
+ * discard cannot suppress a later sync run's subscriber batches. The bounded
+ * deferral histories in the shared grammar compare one or two later inserts
+ * at the new deferral's close: callback grouping, change type, key, row value,
+ * and prior value. Virtual fields are outside this bounded law. An old handle
+ * closing during the new deferral cannot publish early or suppress its batch.
+ * A compiled live-query includes path remains outside this model.
  *
  * Ownership and caller-promise outcomes stay in the lifecycle-history driver.
  * This separation keeps the row model small while the shared command grammar
@@ -623,7 +634,7 @@ async function runPublicationHistory(
   const subscription = collection.subscribeChanges(
     (changes) => {
       const batch = changes.map((change): PublicationChange => {
-        const key = change.key
+        const key: unknown = change.key
         if (key !== `a` && key !== `b` && key !== `c` && key !== `d`) {
           throw new Error(`publication used an unknown row key`)
         }
@@ -1260,7 +1271,116 @@ function expectNoPublicationMismatches(
   ).toEqual([])
 }
 
+let deferralHistoryId = 0
+
+async function runDeferralCleanupHistory(
+  commands: ReadonlyArray<DeferralLifecycleCommand>,
+): Promise<void> {
+  let operations!: SyncOperations
+  let syncRuns = 0
+  const collection = createCollection<Row, RowKey>({
+    id: `publication-after-deferral-cleanup-${deferralHistoryId++}`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (next) => {
+        syncRuns++
+        operations = next
+        next.markReady()
+      },
+    },
+  })
+  const batches: Array<
+    Array<
+      Omit<PublicationChange, `previousValue`> & { previousValue?: Row | null }
+    >
+  > = []
+  const handles = new Map<
+    `outer` | `inner` | `current`,
+    ReturnType<typeof collection._deferPublication>
+  >()
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+  const failures: Array<unknown> = []
+
+  try {
+    for (const command of commands) {
+      if (command.type === `open`) {
+        handles.set(command.handle, collection._deferPublication())
+      } else if (command.type === `close`) {
+        const handle = handles.get(command.handle)
+        if (!handle) throw new Error(`missing ${command.handle} handle`)
+        handle[command.outcome]()
+        if (command.handle === `current`) {
+          expect(batches).toEqual(expectedDeferralBatches(commands))
+        } else if (command.handle === `outer` && subscription) {
+          expect(batches).toEqual([])
+        }
+      } else if (command.type === `write`) {
+        operations.begin({ immediate: true })
+        operations.write({
+          type: `insert`,
+          value: { id: command.key, value: command.key.charCodeAt(0) },
+        })
+        operations.commit()
+        if (subscription) expect(batches).toEqual([])
+      } else if (command.type === `cleanup`) {
+        await collection.cleanup()
+        expect(collection.status).toBe(`cleaned-up`)
+      } else if (command.type === `restart`) {
+        collection.startSyncImmediate()
+        expect(collection.get(`a`)).toBeUndefined()
+      } else {
+        subscription = collection.subscribeChanges(
+          (changes) =>
+            batches.push(
+              changes.map(({ type, key, value, previousValue }) => ({
+                type,
+                key,
+                value: cloneRow(value),
+                ...(previousValue === undefined ? {} : { previousValue }),
+              })),
+            ),
+          { includeInitialState: false },
+        )
+      }
+    }
+    expect(syncRuns).toBe(2)
+  } catch (error) {
+    failures.push(error)
+  } finally {
+    try {
+      subscription?.unsubscribe()
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1)
+    throw new AggregateError(failures, `Deferral history and cleanup failed`, {
+      cause: failures[0],
+    })
+}
+
 describe(`CollectionSubscription lifecycle publication oracle`, () => {
+  it(`reconstructs every bounded deferral cleanup history`, () => {
+    expect(deferralCleanupHistories).toHaveLength(32)
+    expect(new Set(deferralCleanupHistories.map(({ name }) => name)).size).toBe(
+      32,
+    )
+  })
+
+  it.each(deferralCleanupHistories)(
+    `publishes independent batches after deferral cleanup: $name`,
+    async ({ commands }) => {
+      await runDeferralCleanupHistory(commands)
+    },
+  )
+
   it.each(
     ([`initial`, `replay`, `restart`] as const).flatMap((phase) =>
       [1, 2].flatMap((demandCount) =>

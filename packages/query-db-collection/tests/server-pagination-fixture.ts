@@ -191,6 +191,7 @@ function captureSubset(
 export function createServerPaginationFixture(
   options: {
     rows: Array<ServerRow>
+    autoIndex?: `off` | `eager`
     cap?: number
     serverPageSize?: number
   } & (
@@ -257,7 +258,7 @@ export function createServerPaginationFixture(
         queryClient: client,
         queryKey: [`server-pagination-probe`],
         syncMode: options.syncMode,
-        autoIndex: `eager`,
+        autoIndex: options.autoIndex ?? `eager`,
         defaultIndexType: BTreeIndex,
         getKey: (row: ServerRow) => row.id,
         queryFn: (context) =>

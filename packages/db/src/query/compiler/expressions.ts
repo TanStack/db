@@ -1,4 +1,10 @@
-import { Func, PropRef, Value } from '../ir.js'
+import {
+  Func,
+  PropRef,
+  Value,
+  getPropRefPropertyPath,
+  getPropRefSourceAlias,
+} from '../ir.js'
 import type { BasicExpression, OrderBy } from '../ir.js'
 
 /** Extracts the source aliases referenced by an expression. */
@@ -6,8 +12,10 @@ export function getSourceAliasesFromExpression(
   expr: BasicExpression,
 ): Set<string> {
   switch (expr.type) {
-    case `ref`:
-      return new Set(expr.path[0] ? [expr.path[0]] : [])
+    case `ref`: {
+      const sourceAlias = getPropRefSourceAlias(expr) ?? expr.path[0]
+      return new Set(sourceAlias ? [sourceAlias] : [])
+    }
     case `func`: {
       const sourceAliases = new Set<string>()
       for (const arg of expr.args) {
@@ -48,8 +56,13 @@ export function normalizeExpressionPaths(
     return new Value(whereClause.value)
   } else if (tpe === `ref`) {
     const path = whereClause.path
+    const sourceAlias = getPropRefSourceAlias(whereClause)
     if (Array.isArray(path)) {
-      if (path[0] === collectionAlias && path.length > 1) {
+      if (sourceAlias === collectionAlias) {
+        return new PropRef(getPropRefPropertyPath(whereClause))
+      } else if (sourceAlias !== undefined) {
+        return new PropRef(path, sourceAlias)
+      } else if (path[0] === collectionAlias && path.length > 1) {
         // Remove the table alias from the path for single-collection queries
         return new PropRef(path.slice(1))
       } else if (path.length === 1 && path[0] !== undefined) {

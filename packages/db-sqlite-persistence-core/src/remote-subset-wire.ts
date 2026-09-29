@@ -40,7 +40,7 @@ export type RemoteSubsetWireValue =
   | RemoteSubsetWireRecord
 
 export type RemoteSubsetWireExpression =
-  | { type: `ref`; path: Array<string> }
+  | { type: `ref`; path: Array<string>; sourceAlias?: string }
   | { type: `val`; value: RemoteSubsetWireValue }
   | {
       type: `func`
@@ -232,11 +232,11 @@ function projectExpression(
   switch (type.value) {
     case `ref`: {
       assertExpressionPrototype(object, path, IR.PropRef.prototype)
-      assertAllowedProperties(object, path, [`type`, `path`])
-      const projected = {
+      assertAllowedProperties(object, path, [`type`, `path`, `sourceAlias`])
+      const projected: Extract<RemoteSubsetWireExpression, { type: `ref` }> = {
         type: `ref`,
-        path: [] as Array<string>,
-      } satisfies RemoteSubsetWireExpression
+        path: [],
+      }
       state.expressions.set(object, projected)
       const sourcePath = readRequiredDataProperty(
         object,
@@ -244,6 +244,23 @@ function projectExpression(
         `${path}.path`,
       )
       projected.path = projectStringArray(sourcePath, `${path}.path`, state)
+      const sourceAlias = readDataProperty(
+        object,
+        `sourceAlias`,
+        `${path}.sourceAlias`,
+      )
+      if (sourceAlias.present) {
+        if (
+          typeof sourceAlias.value !== `string` ||
+          projected.path[0] !== sourceAlias.value
+        ) {
+          throw new RemoteSubsetWireValueError(
+            `${path}.sourceAlias`,
+            `source alias must match the first path segment`,
+          )
+        }
+        projected.sourceAlias = sourceAlias.value
+      }
       return projected
     }
     case `val`: {

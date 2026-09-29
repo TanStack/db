@@ -172,6 +172,15 @@ export class InvalidPersistedStorageKeyEncodingError extends InvalidPersistedCol
   }
 }
 
+export class SQLiteBigIntOutOfRangeError extends PersistedCollectionCoreError {
+  constructor(value: bigint, minimum: bigint, maximum: bigint) {
+    super(
+      `SQLite BigInt value ${value} is outside the signed 64-bit range [${minimum}, ${maximum}]`,
+    )
+    this.name = `SQLiteBigIntOutOfRangeError`
+  }
+}
+
 export class PersistenceUnavailableError extends PersistedCollectionCoreError {
   constructor(details?: string) {
     super(

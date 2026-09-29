@@ -1,8 +1,12 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { DuplicateKeySyncError } from '../src/errors.js'
+import {
+  DuplicateKeySyncError,
+  SyncTransactionAbortedError,
+} from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { runOptimisticHistory } from './optimistic-history-oracle.js'
@@ -847,6 +851,217 @@ async function runImmutablePreviousValuePublication(
   }
 }
 
+it(`revalidates canceled-delete dependents in one queued-work pass`, async () => {
+  const rowCount = 64
+  const rows = Array.from({ length: rowCount }, (_, index) => ({
+    id: index + 10,
+    value: 0,
+  }))
+  await withParkedSync(
+    [...rows, { id: 5000, value: 0 }],
+    async ({ collection, sync, releasePersistence }) => {
+      const controller = new AbortController()
+      sync.begin()
+      for (const row of rows) sync.write({ type: `delete`, key: row.id })
+      const deleteReceipt = sync.commit(controller.signal)
+      if (deleteReceipt === true) throw new Error(`delete was not queued`)
+      const deleteOutcome = deleteReceipt.then(
+        () => `fulfilled` as const,
+        (error: unknown) =>
+          error instanceof SyncTransactionAbortedError
+            ? (`aborted` as const)
+            : (`other-error` as const),
+      )
+
+      const insertOutcomes: Array<Promise<`fulfilled` | `duplicate`>> = []
+      for (const row of rows) {
+        sync.begin()
+        sync.write({ type: `update`, value: { id: 5000, value: row.id } })
+        sync.write({
+          type: `insert`,
+          value: { id: row.id, value: row.value + 1 },
+        })
+        const receipt = sync.commit()
+        if (receipt === true) throw new Error(`dependent insert was not queued`)
+        insertOutcomes.push(
+          receipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) => {
+              if (!(error instanceof DuplicateKeySyncError)) throw error
+              return `duplicate` as const
+            },
+          ),
+        )
+      }
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1000, value: 7 } })
+      const siblingReceipt = sync.commit()
+      if (siblingReceipt === true) throw new Error(`sibling was not queued`)
+
+      let inspectedQueueEntries = 0
+      const pending = collection._state.pendingSyncedTransactions
+      collection._state.pendingSyncedTransactions = new Proxy(pending, {
+        get(target, property, receiver) {
+          if (typeof property === `string` && /^\d+$/.test(property)) {
+            inspectedQueueEntries++
+          }
+          return Reflect.get(target, property, receiver)
+        },
+      })
+
+      controller.abort()
+      expect(inspectedQueueEntries).toBeLessThanOrEqual(rowCount * 8)
+      await releasePersistence()
+      expect(await deleteOutcome).toBe(`aborted`)
+      expect(await Promise.all(insertOutcomes)).toEqual(
+        Array(rowCount).fill(`duplicate`),
+      )
+      await siblingReceipt
+      for (const row of rows) {
+        expect(collection.get(row.id)?.value).toBe(row.value)
+      }
+      expect(collection.get(5000)?.value).toBe(0)
+      expect(collection.get(1000)?.value).toBe(7)
+    },
+  )
+})
+
+it(`reports an invalidated open transaction on its applied receipt after another write`, async () => {
+  await withParkedSync(
+    [{ id: 1, value: 0 }],
+    async ({ collection, sync, releasePersistence }) => {
+      const controller = new AbortController()
+      sync.begin()
+      sync.write({ type: `delete`, key: 1 })
+      const deleteReceipt = sync.commit(controller.signal)
+      if (deleteReceipt === true) throw new Error(`delete was not queued`)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 2 } })
+      controller.abort()
+
+      expect(() =>
+        sync.write({ type: `insert`, value: { id: 1, value: 3 } }),
+      ).not.toThrow()
+      const insertReceipt = sync.commit()
+      if (insertReceipt === true)
+        throw new Error(`invalidated insert did not return a receipt`)
+
+      await releasePersistence()
+      await expect(deleteReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await expect(insertReceipt).rejects.toBeInstanceOf(DuplicateKeySyncError)
+      expect(collection.get(1)?.value).toBe(0)
+    },
+  )
+})
+
+it(`retires a committed-invalid transaction found by projection refresh`, async () => {
+  // Current callers cannot create this queue state. Exercise the internal
+  // recovery boundary so a future refresh caller cannot strand its receipt.
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { id: 1, value: 0 } })
+        commit()
+        markReady()
+      },
+    },
+  })
+  const applied = createDeferred<void>()
+  void applied.promise.catch(() => undefined)
+  const pending = {
+    committed: true,
+    applicationStarted: false,
+    layoutChanged: false,
+    operations: [
+      {
+        type: `insert` as const,
+        originalSyncType: `insert` as const,
+        key: 1,
+        value: { id: 1, value: 2 },
+      },
+    ],
+    rowMetadataWrites: new Map(),
+    collectionMetadataWrites: new Map(),
+    applied,
+    duplicateKeyError: (key: number) =>
+      new DuplicateKeySyncError(key, collection.id),
+  }
+  const validApplied = createDeferred<void>()
+  void validApplied.promise.catch(() => undefined)
+  const valid = {
+    ...pending,
+    operations: [
+      {
+        ...pending.operations[0]!,
+        key: 2,
+        value: { id: 2, value: 2 },
+      },
+    ],
+    applied: validApplied,
+  }
+
+  let primaryFailure: unknown
+  let hasPrimaryFailure = false
+  try {
+    await collection.stateWhenReady()
+    collection._state.pendingSyncedTransactions.push(valid, pending)
+    expect(() => collection._state.refreshPendingSyncedProjection()).toThrow(
+      DuplicateKeySyncError,
+    )
+    expect(collection._state.pendingSyncedTransactions).toContain(valid)
+    expect(collection._state.pendingSyncedTransactions).not.toContain(pending)
+    expect(applied.isPending()).toBe(false)
+    await expect(applied.promise).rejects.toBeInstanceOf(DuplicateKeySyncError)
+    expect(
+      collection._state.classifyPendingSyncedInsert(2, { id: 2, value: 3 }),
+    ).toBe(`duplicate`)
+    expect(collection.get(1)?.value).toBe(0)
+  } catch (error) {
+    primaryFailure = error
+    hasPrimaryFailure = true
+  }
+
+  const cleanupFailures: Array<unknown> = []
+  try {
+    for (const transaction of [pending, valid]) {
+      const index =
+        collection._state.pendingSyncedTransactions.indexOf(transaction)
+      if (index !== -1)
+        collection._state.pendingSyncedTransactions.splice(index, 1)
+    }
+    if (applied.isPending()) applied.resolve()
+    if (validApplied.isPending()) validApplied.resolve()
+    collection._state.refreshPendingSyncedProjection()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
+    await collection.cleanup()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  if (hasPrimaryFailure && cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [primaryFailure, ...cleanupFailures],
+      `Projection refresh and cleanup both failed`,
+      { cause: primaryFailure },
+    )
+  }
+  if (hasPrimaryFailure) throw primaryFailure
+  if (cleanupFailures.length > 0)
+    throw new AggregateError(
+      cleanupFailures,
+      `Projection refresh cleanup failed`,
+    )
+})
+
 it.each([
   { initial: 0, updates: [1] },
   { initial: 0, updates: [1, 2] },
@@ -960,6 +1175,818 @@ it(`keeps the first queued before-image when metadata reserves the key`, async (
     await Promise.allSettled(receipts)
   }
 })
+
+type ParkedSyncHarness = {
+  collection: Collection<RetainedRow, number>
+  sync: Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
+  releasePersistence: () => Promise<void>
+}
+
+async function withParkedSync(
+  initialRows: ReadonlyArray<RetainedRow>,
+  run: (harness: ParkedSyncHarness) => Promise<void>,
+  rowUpdateMode: `partial` | `full` = `full`,
+): Promise<void> {
+  let sync!: ParkedSyncHarness[`sync`]
+  let release!: () => void
+  const persistence = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode,
+      sync: (actions) => {
+        sync = actions
+        actions.begin()
+        for (const row of initialRows)
+          actions.write({ type: `insert`, value: row })
+        actions.write({ type: `insert`, value: { id: 2, value: 0 } })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  })
+  const blocker = createTransaction<RetainedRow>({
+    autoCommit: false,
+    mutationFn: () => persistence,
+  })
+  let blockerCommit: Promise<unknown> | undefined
+  let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+  const publicRows = () =>
+    [...collection.state]
+      .map(([key, row]) => [key, row.value] as const)
+      .sort(([left], [right]) => left - right)
+  const mirror = new Map<number, number>(
+    initialRows.map(({ id, value }) => [id, value]),
+  )
+  mirror.set(2, 0)
+  const publications: Array<{
+    publicRows: Array<readonly [number, number]>
+    mirrorRows: Array<[number, number]>
+  }> = []
+  const mirrorRows = () => [...mirror].sort(([left], [right]) => left - right)
+  let primaryFailure: unknown
+  let hasPrimaryFailure = false
+
+  try {
+    await collection.stateWhenReady()
+    expect(publicRows()).toEqual(mirrorRows())
+    subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          if (change.type === `delete`) mirror.delete(change.key)
+          else mirror.set(change.key, change.value.value)
+        }
+        publications.push({
+          publicRows: publicRows(),
+          mirrorRows: mirrorRows(),
+        })
+      },
+      { includeInitialState: false },
+    )
+    blocker.mutate(() =>
+      collection.update(2, (draft) => {
+        draft.value = 1
+      }),
+    )
+    blockerCommit = blocker.commit()
+    await Promise.resolve()
+    expect(blocker.state).toBe(`persisting`)
+    await run({
+      collection,
+      sync,
+      releasePersistence: async () => {
+        release()
+        await blockerCommit
+      },
+    })
+    for (const publication of publications) {
+      expect(publication.mirrorRows).toEqual(publication.publicRows)
+    }
+    expect(mirrorRows()).toEqual(publicRows())
+  } catch (error) {
+    primaryFailure = error
+    hasPrimaryFailure = true
+  }
+
+  const cleanupFailures: Array<unknown> = []
+  try {
+    release()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
+    if (blocker.state === `pending` || blocker.state === `persisting`)
+      blocker.rollback()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
+    await blockerCommit?.catch(() => undefined)
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
+    subscription?.unsubscribe()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  try {
+    await collection.cleanup()
+  } catch (error) {
+    cleanupFailures.push(error)
+  }
+  if (hasPrimaryFailure && cleanupFailures.length > 0) {
+    throw new AggregateError(
+      [primaryFailure, ...cleanupFailures],
+      `Queued sync oracle and cleanup both failed`,
+      { cause: primaryFailure },
+    )
+  }
+  if (hasPrimaryFailure) throw primaryFailure
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `Queued sync cleanup failed`, {
+      cause: cleanupFailures[0],
+    })
+  }
+}
+
+it(`keeps queued snapshot admission work linear in the row count`, async () => {
+  let sync!: ParkedSyncHarness[`sync`]
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    const pending = collection._state.pendingSyncedTransactions.at(-1)
+    if (!pending) throw new Error(`missing active sync transaction`)
+
+    let inspectedOperations = 0
+    const operations = pending.operations
+    pending.operations = new Proxy(operations, {
+      get(target, property, receiver) {
+        if (property !== Symbol.iterator)
+          return Reflect.get(target, property, receiver)
+        return function* () {
+          for (const operation of target) {
+            inspectedOperations++
+            yield operation
+          }
+        }
+      },
+    })
+
+    const rowCount = 64
+    for (let id = 0; id < rowCount; id++) {
+      sync.write({ type: `insert`, value: { id, value: id } })
+    }
+    const receipt = sync.commit()
+    if (receipt !== true) await receipt
+
+    // Application and publication each make one linear pass. Admission must
+    // not add a triangular scan over the rows already staged in this batch.
+    expect(inspectedOperations).toBeLessThanOrEqual(rowCount * 2)
+  } finally {
+    await collection.cleanup()
+  }
+})
+
+it.each([
+  {
+    label: `an identical echo`,
+    insertedValue: 0,
+    hydrationSeed: false,
+  },
+  {
+    label: `a hydration replacement`,
+    insertedValue: 2,
+    hydrationSeed: true,
+  },
+] as const)(
+  `keeps $label valid when its prerequisite delete is canceled`,
+  async ({ insertedValue, hydrationSeed }) => {
+    await withParkedSync(
+      [{ id: 1, value: 0 }],
+      async ({ collection, sync, releasePersistence }) => {
+        if (hydrationSeed) collection._state.hydrationSeedKeys.add(1)
+        collection._state.syncedMetadata.set(1, { source: `retained` })
+
+        const deleteController = new AbortController()
+        sync.begin()
+        sync.write({ type: `delete`, key: 1 })
+        const deleteReceipt = sync.commit(deleteController.signal)
+        if (deleteReceipt === true) throw new Error(`delete was not queued`)
+
+        sync.begin()
+        sync.write({
+          type: `insert`,
+          value: { id: 1, value: insertedValue },
+        })
+        const insertReceipt = sync.commit()
+        if (insertReceipt === true) throw new Error(`insert was not queued`)
+
+        deleteController.abort()
+        await releasePersistence()
+        const [deleteOutcome, insertOutcome] = await Promise.all([
+          deleteReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+          insertReceipt.then(
+            () => `fulfilled` as const,
+            () => `rejected` as const,
+          ),
+        ])
+
+        expect({
+          deleteOutcome,
+          insertOutcome,
+          retainedSourceValue: collection._state.syncedData.get(1)?.value,
+          retainedMetadata: collection._state.syncedMetadata.get(1),
+          publicValue: collection.get(1)?.value,
+        }).toEqual({
+          deleteOutcome: `aborted`,
+          insertOutcome: `fulfilled`,
+          retainedSourceValue: insertedValue,
+          retainedMetadata: { source: `retained` },
+          publicValue: insertedValue,
+        })
+      },
+    )
+  },
+)
+
+it(`keeps an invalidated active transaction addressable until commit`, async () => {
+  await withParkedSync(
+    [{ id: 1, value: 0 }],
+    async ({ collection, sync, releasePersistence }) => {
+      const deleteController = new AbortController()
+      sync.begin()
+      sync.write({ type: `delete`, key: 1 })
+      const deleteReceipt = sync.commit(deleteController.signal)
+      if (deleteReceipt === true) throw new Error(`delete was not queued`)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 2 } })
+      deleteController.abort()
+
+      let insertReceipt: true | Promise<void> | undefined
+      expect(() => {
+        insertReceipt = sync.commit()
+      }).not.toThrow()
+      if (insertReceipt === true || insertReceipt === undefined)
+        throw new Error(`invalidated insert did not return a queued receipt`)
+
+      await releasePersistence()
+      const [deleteOutcome, insertOutcome] = await Promise.all([
+        deleteReceipt.then(
+          () => `fulfilled` as const,
+          (error: unknown) =>
+            error instanceof SyncTransactionAbortedError
+              ? (`aborted` as const)
+              : (`other-error` as const),
+        ),
+        insertReceipt.then(
+          () => `fulfilled` as const,
+          (error: unknown) =>
+            error instanceof DuplicateKeySyncError
+              ? (`duplicate` as const)
+              : (`other-error` as const),
+        ),
+      ])
+
+      expect({
+        deleteOutcome,
+        insertOutcome,
+        retainedSourceValue: collection._state.syncedData.get(1)?.value,
+        publicValue: collection.get(1)?.value,
+      }).toEqual({
+        deleteOutcome: `aborted`,
+        insertOutcome: `duplicate`,
+        retainedSourceValue: 0,
+        publicValue: 0,
+      })
+    },
+  )
+})
+
+it.each([`committed`, `open`] as const)(
+  `cancels a %s update whose queued source insert is canceled`,
+  async (updatePhase) => {
+    // The update was admitted with a source row supplied by the queued insert.
+    // Canceling that insert cancels its dependent update, rather than turning
+    // the update into an unrelated missing-key upsert.
+    await withParkedSync(
+      [],
+      async ({ collection, sync, releasePersistence }) => {
+        const insertController = new AbortController()
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+        const insertReceipt = sync.commit(insertController.signal)
+        if (insertReceipt === true) throw new Error(`insert was not queued`)
+
+        sync.begin()
+        sync.write({ type: `update`, value: { id: 1, value: 2 } })
+        let updateReceipt: true | Promise<void> | undefined
+        if (updatePhase === `committed`) {
+          updateReceipt = sync.commit()
+          if (updateReceipt === true) throw new Error(`update was not queued`)
+        }
+
+        insertController.abort()
+        if (updatePhase === `open`) {
+          updateReceipt = sync.commit()
+          if (updateReceipt === true) throw new Error(`update was not queued`)
+        }
+        const pendingUpdateReceipt = updateReceipt
+        if (pendingUpdateReceipt === undefined || pendingUpdateReceipt === true)
+          throw new Error(`missing queued update receipt`)
+
+        await releasePersistence()
+        const [insertOutcome, updateOutcome] = await Promise.all([
+          insertReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+          pendingUpdateReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+        ])
+        expect({
+          insertOutcome,
+          updateOutcome,
+          retainedRow: collection._state.syncedData.get(1),
+          publicRow: collection.get(1),
+        }).toEqual({
+          insertOutcome: `aborted`,
+          updateOutcome: `aborted`,
+          retainedRow: undefined,
+          publicRow: undefined,
+        })
+
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 3 } })
+        expect(sync.commit()).toBe(true)
+        expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 3 })
+        expect(collection.get(1)?.value).toBe(3)
+      },
+      `partial`,
+    )
+  },
+)
+
+it.each([
+  { label: `no source row`, base: `absent` },
+  { label: `a same-transaction delete`, base: `deleted` },
+  { label: `a same-transaction truncate`, base: `truncated` },
+] as const)(
+  `keeps an independent partial upsert after $label`,
+  async ({ base }) => {
+    await withParkedSync(
+      base === `absent` ? [] : [{ id: 1, value: 0 }],
+      async ({ collection, sync, releasePersistence }) => {
+        sync.begin()
+        if (base === `deleted`) sync.write({ type: `delete`, key: 1 })
+        if (base === `truncated`) sync.truncate()
+        sync.write({ type: `update`, value: { id: 1, value: 2 } })
+        const receipt = sync.commit()
+        await releasePersistence()
+        if (receipt !== true) await receipt
+        expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+        expect(collection.get(1)?.value).toBe(2)
+      },
+      `partial`,
+    )
+  },
+)
+
+it(`applies a partial update after an insert in the same sync transaction`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      const receipt = sync.commit()
+      if (receipt === true) throw new Error(`sync was not queued`)
+      await releasePersistence()
+      await receipt
+      expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+      expect(collection.get(1)?.value).toBe(2)
+    },
+    `partial`,
+  )
+})
+
+/**
+ * A queued partial update depends on the row it observed at admission. If that
+ * row came only from canceled queued work, the update's whole transaction is
+ * canceled. An absent-row upsert and a full-row update remain independent.
+ *
+ * The reference below uses only the declared source history: a retained row
+ * survives cancellation, while a queued insert or upsert does not. It does
+ * not inspect the collection's pending projection or operation classifier.
+ * The grammar varies source ownership, update mode, cancellation timing,
+ * receipt phase, and row values. The driver parks adapter transactions behind
+ * an unrelated persisting mutation; the refinement compares both receipts,
+ * retained source rows, and public rows after the drain. It does not claim
+ * arbitrary nested begin/commit behavior or persistence-wrapper replay.
+ */
+type QueuedUpdateDependencyScenario = {
+  source: `queued-insert` | `queued-upsert` | `retained`
+  updateMode: `partial` | `full`
+  cancelSource: boolean
+  updatePhase: `committed` | `open`
+  sourceValue: number
+  updateValue: number
+}
+
+const queuedUpdateDependencyScenario = fc.record({
+  source: fc.constantFrom(
+    `queued-insert` as const,
+    `queued-upsert` as const,
+    `retained` as const,
+  ),
+  updateMode: fc.constantFrom(`partial` as const, `full` as const),
+  cancelSource: fc.boolean(),
+  updatePhase: fc.constantFrom(`committed` as const, `open` as const),
+  sourceValue: fc.integer({ min: -2, max: 2 }),
+  updateValue: fc.integer({ min: -2, max: 2 }),
+})
+
+async function runQueuedUpdateDependencyScenario(
+  scenario: QueuedUpdateDependencyScenario,
+): Promise<void> {
+  const sourceRow = {
+    id: 1,
+    value: scenario.sourceValue,
+    stable: `base`,
+  }
+  const losesRequiredRow =
+    scenario.cancelSource &&
+    scenario.source !== `retained` &&
+    scenario.updateMode === `partial`
+  const expectedRow = losesRequiredRow
+    ? undefined
+    : {
+        id: 1,
+        value: scenario.updateValue,
+        stable: scenario.updateMode === `full` ? `replacement` : `base`,
+      }
+
+  await withParkedSync(
+    scenario.source === `retained` ? [sourceRow] : [],
+    async ({ collection, sync, releasePersistence }) => {
+      const sourceController = new AbortController()
+      sync.begin()
+      sync.write({
+        type: scenario.source === `queued-insert` ? `insert` : `update`,
+        value: sourceRow,
+      })
+      const sourceReceipt = sync.commit(sourceController.signal)
+      if (sourceReceipt === true) throw new Error(`source was not queued`)
+
+      sync.begin()
+      const updateRow =
+        scenario.updateMode === `full`
+          ? { id: 1, value: scenario.updateValue, stable: `replacement` }
+          : { id: 1, value: scenario.updateValue }
+      sync.write({ type: `update`, value: updateRow })
+      let updateReceipt: true | Promise<void> | undefined
+      if (scenario.updatePhase === `committed`) {
+        updateReceipt = sync.commit()
+        if (updateReceipt === true) throw new Error(`update was not queued`)
+      }
+
+      if (scenario.cancelSource) sourceController.abort()
+      if (scenario.updatePhase === `open`) {
+        updateReceipt = sync.commit()
+        if (updateReceipt === true) throw new Error(`update was not queued`)
+      }
+      const pendingUpdateReceipt = updateReceipt
+      if (pendingUpdateReceipt === undefined || pendingUpdateReceipt === true)
+        throw new Error(`missing queued update receipt`)
+
+      await releasePersistence()
+      const [sourceOutcome, updateOutcome] = await Promise.all([
+        sourceReceipt.then(
+          () => `fulfilled` as const,
+          (error: unknown) =>
+            error instanceof SyncTransactionAbortedError
+              ? (`aborted` as const)
+              : (`other-error` as const),
+        ),
+        pendingUpdateReceipt.then(
+          () => `fulfilled` as const,
+          (error: unknown) =>
+            error instanceof SyncTransactionAbortedError
+              ? (`aborted` as const)
+              : (`other-error` as const),
+        ),
+      ])
+      const publicRow = collection.get(1)
+
+      expect({
+        sourceOutcome,
+        updateOutcome,
+        retainedRow: collection._state.syncedData.get(1),
+        publicRow:
+          publicRow === undefined
+            ? undefined
+            : {
+                id: publicRow.id,
+                value: publicRow.value,
+                stable: `stable` in publicRow ? publicRow.stable : undefined,
+              },
+      }).toEqual({
+        sourceOutcome: scenario.cancelSource ? `aborted` : `fulfilled`,
+        updateOutcome: losesRequiredRow ? `aborted` : `fulfilled`,
+        retainedRow: expectedRow,
+        publicRow: expectedRow,
+      })
+    },
+    scenario.updateMode,
+  )
+}
+
+it(`covers the queued-update dependency grammar's source, mode, cancel, and receipt cuts`, async () => {
+  for (const source of [
+    `queued-insert`,
+    `queued-upsert`,
+    `retained`,
+  ] as const) {
+    for (const updateMode of [`partial`, `full`] as const) {
+      for (const cancelSource of [false, true]) {
+        for (const updatePhase of [`committed`, `open`] as const) {
+          await runQueuedUpdateDependencyScenario({
+            source,
+            updateMode,
+            cancelSource,
+            updatePhase,
+            sourceValue: 1,
+            updateValue: 2,
+          })
+        }
+      }
+    }
+  }
+})
+
+fcTest.prop([queuedUpdateDependencyScenario], {
+  numRuns: oracleRuns(100),
+  seed: 190_201,
+})(
+  `preserves queued update dependencies with a fixed seed`,
+  async (scenario) => {
+    await runQueuedUpdateDependencyScenario(scenario)
+  },
+)
+fcTest.prop(
+  [queuedUpdateDependencyScenario],
+  oraclePropertyOptions(100, `collection-state.queued-update-dependency`),
+)(
+  `preserves queued update dependencies with a random or replayed seed`,
+  async (scenario) => {
+    await runQueuedUpdateDependencyScenario(scenario)
+  },
+)
+
+it(`cancels a dependent transaction atomically and its downstream update`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      const sourceController = new AbortController()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const sourceReceipt = sync.commit(sourceController.signal)
+      if (sourceReceipt === true) throw new Error(`source was not queued`)
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      sync.write({ type: `insert`, value: { id: 3, value: 3 } })
+      const dependentReceipt = sync.commit()
+      if (dependentReceipt === true) throw new Error(`dependent was not queued`)
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 3, value: 4 } })
+      const downstreamReceipt = sync.commit()
+      if (downstreamReceipt === true)
+        throw new Error(`downstream was not queued`)
+
+      sourceController.abort()
+      await releasePersistence()
+      const outcomes = await Promise.all(
+        [sourceReceipt, dependentReceipt, downstreamReceipt].map((receipt) =>
+          receipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+        ),
+      )
+      expect(outcomes).toEqual([`aborted`, `aborted`, `aborted`])
+      expect(collection._state.syncedData.has(1)).toBe(false)
+      expect(collection._state.syncedData.has(3)).toBe(false)
+      expect(collection.has(1)).toBe(false)
+      expect(collection.has(3)).toBe(false)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 5 } })
+      sync.write({ type: `insert`, value: { id: 3, value: 6 } })
+      expect(sync.commit()).toBe(true)
+      expect(collection._state.syncedData.get(1)?.value).toBe(5)
+      expect(collection._state.syncedData.get(3)?.value).toBe(6)
+    },
+    `partial`,
+  )
+})
+
+it(`keeps an update when a surviving insert echo replaces its canceled base`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      const firstController = new AbortController()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const firstReceipt = sync.commit(firstController.signal)
+      if (firstReceipt === true) throw new Error(`first insert was not queued`)
+
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const echoReceipt = sync.commit()
+      if (echoReceipt === true) throw new Error(`echo was not queued`)
+
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      const updateReceipt = sync.commit()
+      if (updateReceipt === true) throw new Error(`update was not queued`)
+
+      firstController.abort()
+      await releasePersistence()
+      await expect(firstReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await Promise.all([echoReceipt, updateReceipt])
+      expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+      expect(collection.get(1)?.value).toBe(2)
+    },
+    `partial`,
+  )
+})
+
+it(`keeps an update begun after an earlier insert was canceled as an upsert`, async () => {
+  await withParkedSync(
+    [],
+    async ({ collection, sync, releasePersistence }) => {
+      const firstController = new AbortController()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      const firstReceipt = sync.commit(firstController.signal)
+      if (firstReceipt === true) throw new Error(`first insert was not queued`)
+
+      firstController.abort()
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      const updateReceipt = sync.commit()
+      if (updateReceipt === true) throw new Error(`update was not queued`)
+
+      await releasePersistence()
+      await expect(firstReceipt).rejects.toBeInstanceOf(
+        SyncTransactionAbortedError,
+      )
+      await updateReceipt
+      expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
+      expect(collection.get(1)?.value).toBe(2)
+    },
+    `partial`,
+  )
+})
+
+it.each([`retained source row`, `earlier queued insert`] as const)(
+  `revalidates a queued insert when its prerequisite delete is canceled: %s`,
+  async (predecessor) => {
+    // Law: canceling a sync transaction before application abandons its writes.
+    // The independent source Map therefore retains row 1, making the later
+    // insert a duplicate. The production driver parks both receipts behind an
+    // unrelated mutation, cancels the delete, then observes receipt settlement
+    // and retained source/public rows after the mutation releases the drain.
+    await withParkedSync(
+      predecessor === `retained source row` ? [{ id: 1, value: 0 }] : [],
+      async ({ collection, sync, releasePersistence }) => {
+        let predecessorReceipt: Promise<void> | undefined
+        if (predecessor === `earlier queued insert`) {
+          sync.begin()
+          sync.write({ type: `insert`, value: { id: 1, value: 0 } })
+          const pendingPredecessor = sync.commit()
+          if (pendingPredecessor === true)
+            throw new Error(`predecessor was not queued`)
+          predecessorReceipt = pendingPredecessor
+        }
+
+        const deleteController = new AbortController()
+        sync.begin()
+        sync.write({ type: `delete`, key: 1 })
+        const deleteReceipt = sync.commit(deleteController.signal)
+        if (deleteReceipt === true) throw new Error(`delete was not queued`)
+
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 2 } })
+        const insertReceipt = sync.commit()
+        if (insertReceipt === true) throw new Error(`insert was not queued`)
+
+        deleteController.abort()
+        await releasePersistence()
+        await predecessorReceipt
+        const [deleteOutcome, insertOutcome] = await Promise.all([
+          deleteReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof SyncTransactionAbortedError
+                ? (`aborted` as const)
+                : (`other-error` as const),
+          ),
+          insertReceipt.then(
+            () => `fulfilled` as const,
+            (error: unknown) =>
+              error instanceof DuplicateKeySyncError
+                ? (`duplicate` as const)
+                : (`other-error` as const),
+          ),
+        ])
+
+        expect({
+          deleteOutcome,
+          insertOutcome,
+          retainedSourceValue: collection._state.syncedData.get(1)?.value,
+          publicValue: collection.get(1)?.value,
+        }).toEqual({
+          deleteOutcome: `aborted`,
+          insertOutcome: `duplicate`,
+          retainedSourceValue: 0,
+          publicValue: 0,
+        })
+      },
+    )
+  },
+)
+
+it.each([
+  { label: `an earlier queued insert`, predecessor: `earlier` },
+  { label: `an insert in the same transaction`, predecessor: `same` },
+] as const)(
+  `rejects a duplicate insert after $label`,
+  async ({ predecessor }) => {
+    // The source Map contains the first queued insert before the second write is
+    // admitted. The duplicate-key law is independent of whether the first row
+    // has already crossed the public publication boundary.
+    await withParkedSync(
+      [],
+      async ({ collection, sync, releasePersistence }) => {
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+        let firstReceipt: true | Promise<void> | undefined
+        if (predecessor === `earlier`) {
+          firstReceipt = sync.commit()
+          if (firstReceipt === true)
+            throw new Error(`first insert was not queued`)
+          sync.begin()
+        }
+        expect(() =>
+          sync.write({ type: `insert`, value: { id: 1, value: 2 } }),
+        ).toThrow(DuplicateKeySyncError)
+        firstReceipt ??= sync.commit()
+
+        await releasePersistence()
+        if (firstReceipt !== true) await firstReceipt
+        expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 1 })
+      },
+    )
+  },
+)
 
 it(`snapshots a buffered delete before its row object is reused`, async () => {
   const reusedRow: LivePreviousRow = { id: 1, value: 0 }
@@ -1488,11 +2515,22 @@ it(`does not carry previous-value state across a failed sync run`, async () => {
   }
 })
 
+const retentionHistory = fc.array(retentionActionArbitrary, {
+  minLength: 1,
+  maxLength: 20,
+})
+
+fcTest.prop([retentionHistory], { numRuns: oracleRuns(100), seed: 1_902 })(
+  `matches retained authoritative state with a fixed seed`,
+  async (actions) => {
+    await runRetentionHistory(actions)
+  },
+)
 fcTest.prop(
-  [fc.array(retentionActionArbitrary, { minLength: 1, maxLength: 20 })],
+  [retentionHistory],
   oraclePropertyOptions(100, `collection-state.retention`),
 )(
-  `matches retained authoritative state without optimistic overlays after every committed sync history`,
+  `matches retained authoritative state with a random or replayed seed`,
   async (actions) => {
     await runRetentionHistory(actions)
   },
@@ -1830,7 +2868,60 @@ it(`publishes the subscriber-visible row when a buffered optimistic update becom
     queued: 1,
   })
 })
-fcTest.prop([optimisticHistory], { numRuns: oracleRuns(60), seed: 86103 })(
+// The accepted delete survives a dependent reinsert's failure regardless of
+// whether the delete or the dependent edit settles first. A successful reinsert
+// instead leaves the accepted edit visible. Truncate must preserve both laws.
+it.each(
+  [false, true].flatMap((truncate) =>
+    [false, true].flatMap((editSettlesFirst) =>
+      [false, true].map((insertAccepted) => ({
+        truncate,
+        editSettlesFirst,
+        insertAccepted,
+      })),
+    ),
+  ),
+)(
+  `retains accepted delete and dependent edit across settlement orders: %j`,
+  async ({ truncate, editSettlesFirst, insertAccepted }) => {
+    const replacement: OptimisticStep = {
+      type: `sync`,
+      rows: [],
+      truncate: true,
+      immediate: false,
+      copies: 1,
+    }
+    const acceptedSettlements: Array<OptimisticStep> = editSettlesFirst
+      ? [
+          { type: `settle`, slot: 2, success: true, cascade: false },
+          { type: `settle`, slot: 0, success: true, cascade: false },
+        ]
+      : [
+          { type: `settle`, slot: 0, success: true, cascade: false },
+          { type: `settle`, slot: 1, success: true, cascade: false },
+        ]
+    const counts = await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `delete`, key: 1, optimistic: true },
+        { type: `edit`, key: 1, fields: { c: 0 }, optimistic: true },
+        { type: `edit`, key: 1, fields: { c: 1 }, optimistic: true },
+        ...acceptedSettlements,
+        ...(truncate ? [replacement] : []),
+        { type: `settle`, slot: 0, success: insertAccepted, cascade: false },
+      ],
+    )
+    expect(counts).toMatchObject({
+      edits: 3,
+      deletes: 1,
+      settlements: 3,
+      dependencies: 1,
+      failures: Number(!insertAccepted),
+      replacements: Number(truncate),
+    })
+  },
+)
+fcTest.prop([optimisticHistory], { numRuns: oracleRuns(100), seed: 86103 })(
   `matches optimistic ownership and publication histories with a fixed seed`,
   async ({ initial, steps }) => {
     await runOptimisticHistory(initial, steps)

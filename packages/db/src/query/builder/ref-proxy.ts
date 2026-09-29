@@ -1,13 +1,19 @@
-import { PropRef, Value } from '../ir.js'
+import { PropRef, Value, isBasicOrAggregateExpression } from '../ir.js'
+import { isRefProxy, registerRefProxy } from './ref-proxy-identity.js'
+import { getWrapperExpressionName } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
 import type { VirtualRowProps } from '../../virtual-props.js'
+
+export { isRefProxy } from './ref-proxy-identity.js'
 
 export interface RefProxy<T = any> {
   /** @internal */
   readonly __refProxy: true
   /** @internal */
   readonly __path: Array<string>
+  /** @internal */
+  readonly __sourceAlias?: string
   /** @internal */
   readonly __type: T
 }
@@ -69,7 +75,7 @@ export function createSingleRowRefProxy<
   const cache = new Map<string, any>()
 
   function createProxy(path: Array<string>): any {
-    const pathKey = path.join(`.`)
+    const pathKey = JSON.stringify(path)
     if (cache.has(pathKey)) {
       return cache.get(pathKey)
     }
@@ -78,6 +84,7 @@ export function createSingleRowRefProxy<
       get(target, prop, receiver) {
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
+        if (prop === `__sourceAlias`) return undefined
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
@@ -86,7 +93,12 @@ export function createSingleRowRefProxy<
       },
 
       has(target, prop) {
-        if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
+        if (
+          prop === `__refProxy` ||
+          prop === `__path` ||
+          prop === `__sourceAlias` ||
+          prop === `__type`
+        )
           return true
         return Reflect.has(target, prop)
       },
@@ -96,13 +108,19 @@ export function createSingleRowRefProxy<
       },
 
       getOwnPropertyDescriptor(target, prop) {
-        if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
+        if (
+          prop === `__refProxy` ||
+          prop === `__path` ||
+          prop === `__sourceAlias` ||
+          prop === `__type`
+        ) {
           return { enumerable: false, configurable: true }
         }
         return Reflect.getOwnPropertyDescriptor(target, prop)
       },
     })
 
+    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -122,7 +140,7 @@ export function createRefProxy<T extends Record<string, any>>(
   let accessId = 0 // Monotonic counter to record evaluation order
 
   function createProxy(path: Array<string>): any {
-    const pathKey = path.join(`.`)
+    const pathKey = JSON.stringify(path)
     if (cache.has(pathKey)) {
       return cache.get(pathKey)
     }
@@ -131,6 +149,7 @@ export function createRefProxy<T extends Record<string, any>>(
       get(target, prop, receiver) {
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
+        if (prop === `__sourceAlias`) return path[0]
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
@@ -139,7 +158,12 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       has(target, prop) {
-        if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
+        if (
+          prop === `__refProxy` ||
+          prop === `__path` ||
+          prop === `__sourceAlias` ||
+          prop === `__type`
+        )
           return true
         return Reflect.has(target, prop)
       },
@@ -158,13 +182,19 @@ export function createRefProxy<T extends Record<string, any>>(
       },
 
       getOwnPropertyDescriptor(target, prop) {
-        if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
+        if (
+          prop === `__refProxy` ||
+          prop === `__path` ||
+          prop === `__sourceAlias` ||
+          prop === `__type`
+        ) {
           return { enumerable: false, configurable: true }
         }
         return Reflect.getOwnPropertyDescriptor(target, prop)
       },
     })
 
+    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -174,6 +204,7 @@ export function createRefProxy<T extends Record<string, any>>(
     get(target, prop, receiver) {
       if (prop === `__refProxy`) return true
       if (prop === `__path`) return []
+      if (prop === `__sourceAlias`) return undefined
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
@@ -186,18 +217,28 @@ export function createRefProxy<T extends Record<string, any>>(
     },
 
     has(target, prop) {
-      if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
+      if (
+        prop === `__refProxy` ||
+        prop === `__path` ||
+        prop === `__sourceAlias` ||
+        prop === `__type`
+      )
         return true
       if (typeof prop === `string` && aliases.includes(prop)) return true
       return Reflect.has(target, prop)
     },
 
     ownKeys(_target) {
-      return [...aliases, `__refProxy`, `__path`, `__type`]
+      return [...aliases, `__refProxy`, `__path`, `__sourceAlias`, `__type`]
     },
 
     getOwnPropertyDescriptor(target, prop) {
-      if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
+      if (
+        prop === `__refProxy` ||
+        prop === `__path` ||
+        prop === `__sourceAlias` ||
+        prop === `__type`
+      ) {
         return { enumerable: false, configurable: true }
       }
       if (typeof prop === `string` && aliases.includes(prop)) {
@@ -207,6 +248,7 @@ export function createRefProxy<T extends Record<string, any>>(
     },
   })
 
+  registerRefProxy(rootProxy)
   return rootProxy
 }
 
@@ -230,7 +272,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
   const cache = new Map<string, any>()
 
   function createSelectedProxy(path: Array<string>): any {
-    const pathKey = path.join(`.`)
+    const pathKey = JSON.stringify(path)
     if (cache.has(pathKey)) {
       return cache.get(pathKey)
     }
@@ -239,6 +281,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
       get(target, prop, receiver) {
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return [`$selected`, ...path]
+        if (prop === `__sourceAlias`) return `$selected`
         if (prop === `__type`) return undefined
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
@@ -247,7 +290,12 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
       },
 
       has(target, prop) {
-        if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
+        if (
+          prop === `__refProxy` ||
+          prop === `__path` ||
+          prop === `__sourceAlias` ||
+          prop === `__type`
+        )
           return true
         return Reflect.has(target, prop)
       },
@@ -257,13 +305,19 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
       },
 
       getOwnPropertyDescriptor(target, prop) {
-        if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
+        if (
+          prop === `__refProxy` ||
+          prop === `__path` ||
+          prop === `__sourceAlias` ||
+          prop === `__type`
+        ) {
           return { enumerable: false, configurable: true }
         }
         return Reflect.getOwnPropertyDescriptor(target, prop)
       },
     })
 
+    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -271,7 +325,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
   const wrappedSelectedProxy = createSelectedProxy([])
 
   // Wrap the base proxy to also handle $selected access
-  return new Proxy(baseProxy, {
+  const selectedRootProxy = new Proxy(baseProxy, {
     get(target, prop, receiver) {
       if (prop === `$selected`) {
         return wrappedSelectedProxy
@@ -302,6 +356,8 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
     T & {
       $selected: SingleRowRefProxy<any, string | number, true>
     }
+  registerRefProxy(selectedRootProxy)
+  return selectedRootProxy
 }
 
 /**
@@ -314,51 +370,22 @@ export function toExpression<T = any>(value: T): BasicExpression<T>
 export function toExpression(value: RefProxy<any>): BasicExpression<any>
 export function toExpression(value: any): BasicExpression<any> {
   if (isRefProxy(value)) {
-    return new PropRef(value.__path)
+    return new PropRef(value.__path, value.__sourceAlias)
   }
   // toArray(), concat(toArray()), and materialize() must be used as direct
   // select fields, not inside expressions
-  if (
-    value &&
-    typeof value === `object` &&
-    (value.__brand === `ToArrayWrapper` ||
-      value.__brand === `ConcatToArrayWrapper` ||
-      value.__brand === `CaseWhenWrapper` ||
-      value.__brand === `MaterializeWrapper`)
-  ) {
-    const name =
-      value.__brand === `ToArrayWrapper`
-        ? `toArray()`
-        : value.__brand === `ConcatToArrayWrapper`
-          ? `concat(toArray())`
-          : value.__brand === `CaseWhenWrapper`
-            ? `caseWhen()`
-            : `materialize()`
+  const name = getWrapperExpressionName(value)
+  if (name) {
     throw new Error(
       `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
         `Use ${name} directly as a select field value instead.`,
     )
   }
-  // If it's already an Expression (Func, Ref, Value) or Agg, return it directly
-  if (
-    value &&
-    typeof value === `object` &&
-    `type` in value &&
-    (value.type === `func` ||
-      value.type === `ref` ||
-      value.type === `val` ||
-      value.type === `agg`)
-  ) {
-    return value
+  // Only constructed expressions are IR; user values may have the same fields.
+  if (isBasicOrAggregateExpression(value)) {
+    return value as BasicExpression
   }
   return new Value(value)
-}
-
-/**
- * Type guard to check if a value is a RefProxy
- */
-export function isRefProxy(value: any): value is RefProxy {
-  return value && typeof value === `object` && value.__refProxy === true
 }
 
 /**

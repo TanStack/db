@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
+import { CollectionChangesManager } from '../src/collection/changes.js'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
@@ -166,7 +167,7 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
   const subscription = collection.subscribeChanges((changes) => {
     listenerDepth++
     maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
-    batches.push(changes.map((change) => change.key as number))
+    batches.push(changes.map((change) => change.key))
 
     if (!ranActions && changes.some(({ key }) => key === 1)) {
       ranActions = true
@@ -219,6 +220,28 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
+  it.each([`cleanup`, `discard`] as const)(
+    `releases queued messages when %s retires a deferral`,
+    (ending) => {
+      const changes = new CollectionChangesManager<Row, number>()
+      const handle = changes.deferPublication()
+      changes.emitEvents([
+        { type: `insert`, key: 1, value: { id: 1, value: `queued` } },
+      ])
+
+      const retired = (
+        changes as unknown as { deferral?: { publications: Array<unknown> } }
+      ).deferral
+      if (!retired) throw new Error(`deferral did not open`)
+      expect(retired.publications).toHaveLength(1)
+
+      if (ending === `cleanup`) changes.cleanup()
+      else handle.discard()
+      expect(retired.publications).toHaveLength(0)
+      handle.publish()
+    },
+  )
+
   it(`publishes nested deferrals as one coherent batch`, async () => {
     const harness = createSyncHarness(`nested-publication-cycle`)
     const { collection } = harness
@@ -404,7 +427,7 @@ describe(`sync publication reentrancy`, () => {
     const subscription = collection.subscribeChanges(
       (changes) => {
         callbacks.push({
-          changes: changes.map(({ key }) => key as number),
+          changes: changes.map(({ key }) => key),
           keys: [...collection.keys()],
           values: collection.toArray.map(({ value }) => value),
           markedReceiptSettled: false,
@@ -481,7 +504,7 @@ describe(`sync publication reentrancy`, () => {
     const subscription = collection.subscribeChanges(
       (changes) => {
         callbacks.push({
-          changes: changes.map(({ key }) => key as number),
+          changes: changes.map(({ key }) => key),
           keys: [...collection.keys()],
           values: collection.toArray.map(({ value }) => value),
         })
@@ -573,7 +596,7 @@ describe(`sync publication reentrancy`, () => {
     const subscription = collection.subscribeChanges(
       (changes) => {
         callbacks.push({
-          changes: changes.map(({ key }) => key as number),
+          changes: changes.map(({ key }) => key),
           keys: [...collection.keys()],
           values: collection.toArray.map(({ value }) => value),
           markedReceiptSettled: parkedReceiptSettled,
@@ -656,7 +679,7 @@ describe(`sync publication reentrancy`, () => {
     const subscription = collection.subscribeChanges(
       (changes) => {
         callbacks.push({
-          changes: changes.map(({ key }) => key as number),
+          changes: changes.map(({ key }) => key),
           keys: [...collection.keys()],
           values: collection.toArray.map(({ value }) => value),
           markedReceiptSettled,
@@ -750,7 +773,7 @@ describe(`sync publication reentrancy`, () => {
       const subscription = collection.subscribeChanges(
         (changes) => {
           callbacks.push({
-            changes: changes.map(({ key }) => key as number),
+            changes: changes.map(({ key }) => key),
             keys: [...collection.keys()],
             values: collection.toArray.map(({ value }) => value),
             markedReceiptSettled: firstReceiptSettled,
@@ -879,7 +902,7 @@ describe(`sync publication reentrancy`, () => {
     const subscription = collection.subscribeChanges(
       (changes) => {
         callbacks.push({
-          changes: changes.map(({ key }) => key as number),
+          changes: changes.map(({ key }) => key),
           keys: [...collection.keys()],
           values: collection.toArray.map(({ value }) => value),
           markedReceiptSettled,
@@ -985,7 +1008,7 @@ describe(`sync publication reentrancy`, () => {
         listenerDepth++
         maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
         callbacks.push({
-          changes: changes.map(({ key }) => key as number),
+          changes: changes.map(({ key }) => key),
           keys: [...collection.keys()],
           values: collection.toArray.map(({ value }) => value),
           markedReceiptSettled: innerReceiptSettled,
@@ -1060,7 +1083,7 @@ describe(`sync publication reentrancy`, () => {
     const batches: Array<Array<number>> = []
 
     const subscription = collection.subscribeChanges((changes) => {
-      batches.push(changes.map((change) => change.key as number))
+      batches.push(changes.map((change) => change.key))
       if (!openedInnerTransaction && changes.some(({ key }) => key === 1)) {
         openedInnerTransaction = true
         stageInsert(harness.sync, { id: 2, value: `inner` })
@@ -1104,7 +1127,7 @@ describe(`sync publication reentrancy`, () => {
     const subscription = collection.subscribeChanges((changes) => {
       listenerDepth++
       maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
-      batches.push(changes.map((change) => change.key as number))
+      batches.push(changes.map((change) => change.key))
 
       if (!committedInnerTransaction && changes.some(({ key }) => key === 1)) {
         committedInnerTransaction = true
@@ -1135,7 +1158,7 @@ describe(`sync publication reentrancy`, () => {
     let ranListenerActions = false
 
     const subscription = collection.subscribeChanges((changes) => {
-      batches.push(changes.map((change) => change.key as number))
+      batches.push(changes.map((change) => change.key))
       if (ranListenerActions || !changes.some(({ key }) => key === 1)) return
       ranListenerActions = true
 
@@ -1184,7 +1207,7 @@ describe(`sync publication reentrancy`, () => {
     let stagedInnerTransactions = false
 
     const subscription = collection.subscribeChanges((changes) => {
-      batches.push(changes.map((change) => change.key as number))
+      batches.push(changes.map((change) => change.key))
       if (stagedInnerTransactions || !changes.some(({ key }) => key === 1)) {
         return
       }
@@ -1334,7 +1357,7 @@ describe(`sync publication reentrancy`, () => {
       (changes) => {
         listenerDepth++
         maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
-        batches.push(changes.map((change) => change.key as number))
+        batches.push(changes.map((change) => change.key))
         listenerDepth--
       },
       { includeInitialState: true },

@@ -11,7 +11,7 @@ Each supported framework comes with its own package. Each framework package re-e
 npm install @tanstack/react-db
 ```
 
-TanStack DB is compatible with React v16.8+
+TanStack DB is compatible with React v18+
 
 ## Solid
 

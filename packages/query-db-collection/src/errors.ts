@@ -45,6 +45,13 @@ export class InitialDataInOnDemandModeError extends QueryCollectionError {
   }
 }
 
+export class InvalidQueryResultError extends QueryCollectionError {
+  constructor(message: string) {
+    super(message)
+    this.name = `InvalidQueryResultError`
+  }
+}
+
 export class SyncNotInitializedError extends QueryCollectionError {
   constructor() {
     super(

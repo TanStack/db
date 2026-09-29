@@ -759,7 +759,7 @@ describe(`server pagination contract probes`, () => {
     )
   })
 
-  it(`on-demand prefixes grow through Query DB and retain earlier rows`, async () => {
+  it(`on-demand pages continue by leading cursor and retain earlier rows`, async () => {
     await withServerFixture(
       {
         rows,
@@ -789,11 +789,18 @@ describe(`server pagination contract probes`, () => {
           if (size < rows.length)
             await act(() => result.current.fetchNextPage())
         }
+        const limitedRequests = fixture.requests.filter(
+          (request) => request.subset?.limit !== undefined,
+        )
+        expect(limitedRequests.map((request) => request.subset!.limit)).toEqual(
+          [3, 2, 2, 2, 1],
+        )
+        expect(limitedRequests[0]?.subset?.cursor).toBeUndefined()
         expect(
-          fixture.requests.flatMap((request) =>
-            request.subset?.limit === undefined ? [] : [request.subset.limit],
-          ),
-        ).toEqual([3, 5, 7, 9])
+          limitedRequests
+            .slice(1)
+            .every((request) => request.subset?.cursor !== undefined),
+        ).toBe(true)
         expect(
           fixture.requests.every((request) => request.pageParam === undefined),
         ).toBe(true)
@@ -809,6 +816,7 @@ describe(`server pagination contract probes`, () => {
         rows,
         syncMode: `on-demand`,
         order: [`id`, `rank`],
+        autoIndex: `off`,
         cap: 2,
       },
       async (fixture, mount) => {

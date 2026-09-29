@@ -21,13 +21,15 @@ export interface CollectionLike<
 > {}
 
 /**
- * StringSortOpts - Options for string sorting behavior
+ * StringCollationConfig - Options for string sorting behavior
  *
- * This discriminated union allows for two types of string sorting:
- * - **Lexical**: Simple character-by-character comparison (default)
+ * This discriminated union allows for three types of string sorting:
+ * - **Lexical**: Simple character-by-character comparison
  * - **Locale**: Locale-aware sorting with optional customization
+ * - **Custom**: Local comparison by a stable user-provided function reference
  *
- * The union ensures that locale options are only available when locale sorting is selected.
+ * Custom comparators must remain deterministic and immutable for their lifetime.
+ * Runtime query and index identity uses the exact function reference.
  */
 export type StringCollationConfig =
   | {
@@ -37,6 +39,10 @@ export type StringCollationConfig =
       stringSort?: `locale`
       locale?: string
       localeOptions?: object
+    }
+  | {
+      stringSort: `custom`
+      compare: (a: string, b: string) => number
     }
 
 /**
@@ -292,8 +298,9 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
 export type CursorExpressions = {
   /**
    * Expression for rows greater than (after) the cursor value.
-   * Core emits cursors for a single order column. Multi-column queries use
-   * prefix-and-tie loading instead of constructing a composite cursor.
+   * Core emits this predicate from the leading order column. Multi-column
+   * queries load the complete leading-value tie separately instead of
+   * constructing a composite cursor.
    */
   whereFrom: BasicExpression<boolean>
   /**
@@ -319,6 +326,12 @@ export type CursorExpressions = {
  * live: aborting the signal or releasing the subscription is supported.
  */
 export type LoadSubsetOptions = {
+  /**
+   * Revalidate this exact semantic demand even when an adapter has already
+   * completed or cached it. This controls the acquisition attempt; it does
+   * not change demand identity or the matching unload operation.
+   */
+  refetch?: boolean
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
   /** The order by clause to sort the data */
@@ -371,8 +384,11 @@ export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 /**
  * Confirms whether a committed sync transaction is visible or is waiting for
  * its turn in the collection's causal queue. A pending receipt rejects with an
- * error named `AbortError` if cancellation wins before application. Once the
- * writes are visible, later cancellation has no effect.
+ * error named `AbortError` if its own cancellation wins before application or
+ * cancellation removes a row required by one of its partial updates. It
+ * rejects with `DuplicateKeySyncError` if cancellation of earlier queued work
+ * invalidates an insert admission. Once the writes are visible, later
+ * cancellation has no effect.
  */
 export type SyncAppliedReceipt = true | Promise<void>
 
@@ -386,7 +402,17 @@ export type SyncAppliedReceipt = true | Promise<void>
  */
 export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
 
-export type CleanupFn = () => void
+/**
+ * Ends one sync run and releases its adapter-owned resources.
+ *
+ * Collection cleanup waits for a returned promise before publishing the
+ * `cleaned-up` status or admitting a replacement sync run.
+ * TypeScript permits Promise-returning functions where `() => void` is
+ * expected, so the Promise branch must be explicit here to preserve and await
+ * it. Keeping the callable types separate also preserves contextual-void
+ * callbacks that return an incidental value.
+ */
+export type CleanupFn = (() => void) | (() => Promise<void>)
 
 export type SyncConfigRes = {
   cleanup?: CleanupFn
@@ -411,7 +437,11 @@ export interface SyncConfig<
      * Returns `true` when the writes and events are already visible. Otherwise
      * returns a receipt that resolves after they become visible. If collection
      * cleanup or an optional request abort abandons the transaction first, the
-     * receipt rejects with an error named `AbortError`.
+     * receipt rejects with an error named `AbortError`. If cancellation of an
+     * earlier transaction invalidates this transaction's insert admission, the
+     * receipt rejects with `DuplicateKeySyncError`.
+     * If cancellation removes a row required by this transaction's partial
+     * update, its receipt rejects with an error named `AbortError`.
      * Pass a signal only for request-scoped work that must not publish after
      * cancellation. Aborting after application has no effect.
      */
@@ -1114,6 +1144,8 @@ export interface CurrentStateAsChangesOptions {
 
 /**
  * Function type for listening to collection changes
+ * Changes to the same key retain their causal order within a callback.
+ * Changes to different keys have no promised order within a callback.
  * @param changes - Array of change messages describing what happened
  * @example
  * // Basic change listener

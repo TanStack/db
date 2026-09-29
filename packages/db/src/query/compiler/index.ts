@@ -30,6 +30,7 @@ import {
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { BaseQueryBuilder } from '../builder/index.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
@@ -59,6 +60,7 @@ import { containsAggregate, processGroupBy } from './group-by.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { processOrderBy } from './order-by.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
+import { queriesMatchForCaching } from './query-equivalence.js'
 import {
   INCLUDES_PUBLIC_KEY,
   INCLUDES_ROUTING,
@@ -358,7 +360,7 @@ function getCompilationValueIdentity(cache: QueryCache): ValueIdentity {
  * @param lazySources Set of source identities that should load data lazily
  * @param optimizableOrderByCollections Map of source IDs to order-by optimization info
  * @param cache Optional cache for compiled subqueries (used internally for recursion)
- * @param queryMapping Optional mapping from optimized queries to original queries
+ * @param queryMapping Optional lineage from optimized queries to user-defined queries
  * @returns A CompilationResult with the pipeline, source WHERE clauses, and alias metadata
  */
 export function compileQuery(
@@ -1749,12 +1751,16 @@ function processFrom(
       }
     }
     case `queryRef`: {
-      // Find the original query for caching purposes
-      const originalQuery = queryMapping.get(from.query) || from.query
-
-      // Recursively compile the sub-query with cache
+      // Preserve the user-defined query as the cache key when optimization
+      // only copied it. If the optimizer changed the query, compile that IR;
+      // substituting its origin would discard pushed predicates.
+      const originalQuery = queryMapping.get(from.query)
+      const queryToCompile =
+        originalQuery && queriesMatchForCaching(from.query, originalQuery)
+          ? originalQuery
+          : from.query
       const subQueryResult = compileQuery(
-        originalQuery,
+        queryToCompile,
         allInputs,
         collections,
         subscriptions,
@@ -1855,17 +1861,10 @@ function processFrom(
   }
 }
 
-// Helper to check if a value is a Value expression
-function isValue(raw: any): boolean {
-  return (
-    raw instanceof ValClass ||
-    (raw && typeof raw === `object` && `type` in raw && raw.type === `val`)
-  )
-}
-
-// Helper to unwrap a Value expression or return the value itself
+// Only compiler-created Value instances are wrappers; user rows may have
+// ordinary `type` and `value` fields with the same shape.
 function unwrapValue(value: any): any {
-  return isValue(value) ? value.value : value
+  return value instanceof ValClass ? value.value : value
 }
 
 function attachVirtualPropsToSelected(
@@ -1918,9 +1917,9 @@ function getIncludesPublicKey(
 }
 
 /**
- * Recursively maps optimized subqueries to their original queries for proper caching.
- * This ensures that when we encounter the same QueryRef object in different contexts,
- * we can find the original query to check the cache.
+ * Recursively records the user-defined origin of optimized subqueries.
+ * Compilation still consumes the optimized query; the mapping is lineage used
+ * to distinguish user-defined subqueries from optimizer-created wrappers.
  */
 function mapNestedQueries(
   optimizedQuery: QueryIR,
@@ -2263,7 +2262,7 @@ function isNestedSelectObject(value: any): value is Record<string, any> {
     typeof value === `object` &&
     !Array.isArray(value) &&
     !isExpressionLike(value) &&
-    value.__refProxy !== true
+    !isRefProxy(value)
   )
 }
 

@@ -604,6 +604,11 @@ export class CollectionImpl<
     this._sync.startSync()
   }
 
+  /** @internal Subscribe to the synchronous cleanup-start boundary. */
+  public _onCleanupStart(callback: () => void): () => void {
+    return this._lifecycle.onCleanupStart(callback)
+  }
+
   /** @internal */
   public _setTransactionScope(transactionScope: TransactionScope): void {
     this._mutations.setTransactionScope(transactionScope)
@@ -1051,6 +1056,8 @@ export class CollectionImpl<
 
   /**
    * Subscribe to changes in the collection
+   * Changes to the same key retain their causal order within a callback.
+   * Changes to different keys have no promised order within a callback.
    * @param callback - Function called when items change
    * @param options - Subscription options including includeInitialState and where filter
    * @returns Unsubscribe function - Call this to stop listening for changes
@@ -1169,11 +1176,12 @@ export class CollectionImpl<
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    * Cleanup callbacks must not restart this collection or call its preload().
-   * Wait until cleanup completes before starting a new sync run.
+   * Wait until cleanup completes before starting a new sync run. If adapter
+   * cleanup rejects, this promise rejects after the Collection reaches its
+   * final cleaned-up state.
    */
-  public async cleanup(): Promise<void> {
-    this._lifecycle.cleanup()
-    return Promise.resolve()
+  public cleanup(): Promise<void> {
+    return this._lifecycle.cleanup()
   }
 }
 
@@ -1187,6 +1195,10 @@ function buildCompareOptionsFromConfig(
 
   if (options.stringSort === `lexical`) {
     return { stringSort: `lexical` }
+  }
+
+  if (options.stringSort === `custom`) {
+    return { stringSort: `custom`, compare: options.compare }
   }
 
   return {

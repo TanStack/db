@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection, createTransaction } from '@tanstack/db'
+import { IR, createCollection, createTransaction } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import { stripVirtualProps } from '../../db/tests/utils'
 import { createDeferred } from '../../db/src/deferred'
@@ -618,6 +618,63 @@ describe(`TrailBase Integration`, () => {
     } finally {
       resolvePersistence()
       await transaction.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
+  it(`uses a cached cursor instead of also applying the fallback offset`, async () => {
+    const recordApi = new MockRecordApi<Data>()
+    recordApi.list
+      .mockResolvedValueOnce({
+        records: [{ id: 1, updated: 0, data: `first` }],
+        cursor: `after-1`,
+      })
+      .mockResolvedValue({ records: [] })
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi,
+        getKey: (item: Data) => item.id ?? -1,
+        startSync: true,
+        syncMode: `on-demand`,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    const id = new IR.PropRef([`id`])
+    const cursor = (lastKey: number) => ({
+      whereCurrent: new IR.Func(`eq`, [id, new IR.Value(lastKey)]),
+      whereFrom: new IR.Func(`gt`, [id, new IR.Value(lastKey)]),
+      lastKey,
+    })
+
+    try {
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      await collection._sync.loadSubset({ limit: 1 })
+      await collection._sync.loadSubset({
+        limit: 1,
+        offset: 1,
+        cursor: cursor(1),
+      })
+      await collection._sync.loadSubset({
+        limit: 1,
+        offset: 2,
+        cursor: cursor(99),
+      })
+
+      expect(recordApi.list).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          pagination: { limit: 1, offset: undefined, cursor: `after-1` },
+        }),
+      )
+      expect(recordApi.list).toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({
+          pagination: { limit: 1, offset: 2, cursor: undefined },
+        }),
+      )
+    } finally {
       await collection.cleanup()
     }
   })

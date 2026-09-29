@@ -2,12 +2,16 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createEffect } from '../../src/query/effect.js'
+import { getCollectionBuilder } from '../../src/query/live/collection-registry.js'
 import { getLoadSubsetDemandKey } from '../../src/query/ir-stable-identity.js'
+import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
-import { eq, gte } from '../../src/query/builder/functions.js'
+import { toArray } from '../../src/query/index.js'
+import { eq, gte, isUndefined, not } from '../../src/query/builder/functions.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -16,6 +20,7 @@ import { evaluateReferenceExpression } from '../reference-expression.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
+import type { DeltaEvent } from '../../src/query/effect.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -25,6 +30,19 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * independent filter/sort/window recomputation. It must also avoid duplicate
  * finite requests, repeated source scans, partial initial publications, and
  * cross-source suppression when joined loads overlap or replay.
+ * Direct LEFT-joined filters require a finite indexed root prefix, settlement
+ * of child demand before continuation, and one complete initial publication.
+ * Custom collation uses one full-source request, while an unindexed underfilled
+ * prefix falls back to full source. Both must wait for joined demand before
+ * publishing an anti-join result.
+ * Demand for a separate include cannot hold the ordered root continuation.
+ * An empty joined replay still wakes held Effect deltas.
+ * An initial Effect with skipInitial waits for joined demand before it starts
+ * publishing callbacks. Only joined-source readiness rechecks that demand.
+ * If another source changes an ordered source during Effect startup, the
+ * buffered change still invalidates its settled prefix before callbacks run.
+ * A window move started during existing joined demand waits for its later root
+ * refill and publication. Joined demand cannot discard a repair continuation.
  *
  * The value model is a plain sorted array. The work model records normalized
  * page and boundary requests, examined source rows, publications, and errors.
@@ -33,7 +51,9 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * direction, and middle-row count; generated runs vary the same grammar.
  *
  * Counts are contract bounds, not timing benchmarks. They pin established
- * request and scan behavior only where the test names that promise.
+ * request and scan behavior only where the test names that promise. These
+ * scenarios exercise local evaluation; they do not model a remote adapter
+ * applying a relation hint.
  */
 
 type Row = {
@@ -52,6 +72,8 @@ type Scenario = {
   tied: boolean
   direction: `asc` | `desc`
 }
+
+type JoinFilter = `two-alias` | `joined-only` | `some` | `none` | `to-one`
 
 type RequestObservation = {
   kind: `page` | `boundary`
@@ -123,18 +145,24 @@ function rowsForScenario(scenario: Scenario): Array<Row> {
   ]
 }
 
+function matchesJoinFilter(row: Row, joinFilter: JoinFilter): boolean {
+  return joinFilter === `none` ? !row.eligible : row.eligible
+}
+
 let harnessId = 0
 
 // A finite request recorder, not another production identity implementation.
 // Preserve fields and primitive kinds; reject opaque values rather than merging
-// them into an empty object. Signals/subscriptions are ownership, not demand.
+// them into an empty object. Signals/subscriptions are ownership, while
+// refetch controls the attempt; none of the three changes demand identity.
 function requestFingerprint(options: LoadSubsetOptions): string {
   const semantic = new Set([`where`, `orderBy`, `limit`, `offset`, `cursor`])
   for (const key of Reflect.ownKeys(options)) {
     if (
       !semantic.has(String(key)) &&
       key !== `signal` &&
-      key !== `subscription`
+      key !== `subscription` &&
+      key !== `refetch`
     )
       throw new Error(`Unsupported request field ${String(key)}`)
   }
@@ -236,22 +264,34 @@ function expectDistinctRequests(
 async function observeConsumer(
   kind: `collection` | `effect`,
   scenario: Scenario,
-  joinedOnlyPredicate = false,
+  joinFilter: JoinFilter = `two-alias`,
+  delayJoinedDemand = false,
+  removeJoinedMarker = false,
+  loadingMode: `indexed` | `unindexed` | `custom` = `indexed`,
 ): Promise<ConsumerObservation> {
   type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const truth = rowsForScenario(scenario).sort(compareRows(scenario.direction))
   const sourceSize = truth.length
-  const eligibleTruth = truth.filter(({ eligible }) => eligible)
+  // The reference evaluates relation existence from authoritative marker
+  // membership. It does not use the compiler's predicate classifier.
+  const matchingTruth = truth.filter((row) =>
+    matchesJoinFilter(row, joinFilter),
+  )
   const rowToDelete =
-    eligibleTruth.length >= 3 &&
-    eligibleTruth[0]!.rank !== eligibleTruth[1]!.rank
-      ? eligibleTruth[0]
+    !removeJoinedMarker &&
+    matchingTruth.length >= 3 &&
+    matchingTruth[0]!.rank !== matchingTruth[1]!.rank
+      ? matchingTruth[0]
       : undefined
   const delivered = new Set<number>()
   const requests: Array<RequestObservation> = []
   const errors: Array<string> = []
   const effectRows = new Map<number, Row>()
+  const joinedLoadGate = createDeferred<void>()
+  let joinedRequests = 0
+  const deliveredMarkers = new Set<number>()
   let sync!: Sync
+  let markerSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
 
   const apply = async (rows: ReadonlyArray<Row>) => {
     const fresh = rows.filter((row) => !delivered.has(row.id))
@@ -270,8 +310,8 @@ async function observeConsumer(
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
-    autoIndex: `eager`,
-    defaultIndexType: BTreeIndex,
+    autoIndex: loadingMode === `unindexed` ? `off` : `eager`,
+    defaultIndexType: loadingMode === `unindexed` ? undefined : BTreeIndex,
     sync: {
       sync: (operations) => {
         sync = operations
@@ -304,13 +344,16 @@ async function observeConsumer(
               return
             }
 
-            const start =
-              options.cursor?.lastKey === undefined
-                ? (options.offset ?? 0)
-                : matching.findIndex(
-                    ({ id }) => id === options.cursor?.lastKey,
-                  ) + 1
-            const page = matching.slice(start).slice(0, options.limit)
+            const candidates = options.cursor
+              ? matching.filter(
+                  (row) =>
+                    evaluateReferenceExpression(
+                      options.cursor!.whereFrom,
+                      row,
+                    ) === true,
+                )
+              : matching.slice(options.offset ?? 0)
+            const page = candidates.slice(0, options.limit)
             if (page.length > 0) {
               await apply(page)
             }
@@ -326,18 +369,45 @@ async function observeConsumer(
   const markerSource = createCollection<Marker, number>({
     id: `ordered-marker-${kind}-${harnessId++}`,
     getKey: ({ id }) => id,
-    syncMode: `eager`,
+    syncMode: delayJoinedDemand ? `on-demand` : `eager`,
     startSync: true,
     autoIndex: `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
-      sync: ({ begin, write, commit, markReady }) => {
+      sync: (operations) => {
+        markerSync = operations
+        const { begin, write, commit, markReady } = operations
+        if (delayJoinedDemand) {
+          markReady()
+          return {
+            loadSubset: async ({ where, signal }) => {
+              joinedRequests++
+              await joinedLoadGate.promise
+              const fresh = markers.filter(
+                (marker) =>
+                  !deliveredMarkers.has(marker.id) &&
+                  (!where ||
+                    evaluateReferenceExpression(where, marker) === true),
+              )
+              if (fresh.length === 0) return
+              begin()
+              for (const marker of fresh) {
+                deliveredMarkers.add(marker.id)
+                write({ type: `insert`, value: marker })
+              }
+              const receipt = commit(signal)
+              if (receipt !== true) await receipt
+            },
+            unloadSubset: () => {},
+          }
+        }
         begin()
         for (const marker of markers) {
           write({ type: `insert`, value: marker })
         }
         commit()
         markReady()
+        return undefined
       },
     },
   })
@@ -350,15 +420,33 @@ async function observeConsumer(
     | ReturnType<NonNullable<typeof live>[`subscribeChanges`]>
     | undefined
   const query = (q: InitialQueryBuilder) => {
-    const ordered = q
+    const joined = q
       .from({ row: source })
       .leftJoin({ marker: markerSource }, ({ row, marker }) =>
-        eq(row.id, marker.rowId),
+        eq(row.id, joinFilter === `to-one` ? marker.id : marker.rowId),
       )
-      .where(({ row, marker }) =>
-        joinedOnlyPredicate ? gte(marker.rowId, 0) : eq(row.id, marker.rowId),
-      )
-      .orderBy(({ row }) => row.rank, scenario.direction)
+      .where(({ row, marker }) => {
+        switch (joinFilter) {
+          case `joined-only`:
+          case `to-one`:
+            return gte(marker.rowId, 0)
+          case `some`:
+            return not(isUndefined(marker.rowId))
+          case `none`:
+            return isUndefined(marker.rowId)
+          case `two-alias`:
+            return eq(row.id, marker.rowId)
+        }
+      })
+    const labelRanks = new Map(truth.map(({ label, rank }) => [label, rank]))
+    const ordered =
+      loadingMode === `custom`
+        ? joined.orderBy(({ row }) => row.label, {
+            direction: scenario.direction,
+            stringSort: `custom`,
+            compare: (a, b) => labelRanks.get(a)! - labelRanks.get(b)!,
+          })
+        : joined.orderBy(({ row }) => row.rank, scenario.direction)
     return (rowToDelete ? ordered.orderBy(({ row }) => row.id, `asc`) : ordered)
       .limit(2)
       .select(({ row }) => ({
@@ -376,13 +464,14 @@ async function observeConsumer(
 
   return withHistoryCleanup(
     async () => {
+      let preload: Promise<void> | undefined
       if (kind === `collection`) {
         live = createLiveQueryCollection(query)
         subscription = live.subscribeChanges(() => {
           publications.push(visibleRows())
           rawPublications.push([...live!.values()].map(copiedRow))
         })
-        await live.preload()
+        preload = live.preload()
       } else {
         effect = createEffect<Row, number>({
           query,
@@ -397,15 +486,37 @@ async function observeConsumer(
         })
       }
 
+      if (delayJoinedDemand) {
+        await vi.waitFor(() => expect(joinedRequests).toBeGreaterThan(0))
+        for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
+          await flushPromises()
+        }
+        if (loadingMode === `indexed`)
+          expect(
+            requests.filter(({ kind: requestKind }) => requestKind === `page`),
+          ).toHaveLength(1)
+        else if (loadingMode === `custom`) expect(requests).toHaveLength(1)
+        else
+          expect(requests.some(({ limit }) => limit === undefined)).toBe(true)
+        joinedLoadGate.resolve()
+      }
+      await preload
+
       for (let turn = 0; turn < truth.length * 3 + 6; turn++) {
         await flushPromises()
       }
 
       const rows = visibleRows()
-      const expected = eligibleTruth.slice(0, 2)
-      expect(rows, JSON.stringify({ kind, scenario, requests })).toEqual(
-        expected,
-      )
+      if (joinFilter === `none` && !delayJoinedDemand) {
+        expect(
+          [...markerSource.values()].map(({ rowId }) => rowId).sort(),
+        ).toEqual(markers.map(({ rowId }) => rowId).sort())
+      }
+      const expected = matchingTruth.slice(0, 2)
+      expect(
+        rows,
+        JSON.stringify({ kind, scenario, requests, publications }),
+      ).toEqual(expected)
       if (live) {
         expectRawWindow(
           [...live.values()].map(copiedRow),
@@ -439,6 +550,22 @@ async function observeConsumer(
       // and tie refinements, so compare that path by rows and work bounds.
       let finalRows = rows
       const publicationsBeforeMutation = publications.length
+      if (removeJoinedMarker) {
+        const removed = markers[0]!
+        markerSync.begin({ immediate: true })
+        markerSync.write({ type: `delete`, value: removed })
+        const receipt = markerSync.commit()
+        if (receipt !== true) await receipt
+        for (let turn = 0; turn < sourceSize * 3 + 6; turn++) {
+          await flushPromises()
+        }
+        finalRows = visibleRows()
+        expect(finalRows).toEqual(
+          truth
+            .filter((row) => row.eligible && row.id !== removed.id)
+            .slice(0, 2),
+        )
+      }
       if (rowToDelete) {
         truth.splice(truth.indexOf(rowToDelete), 1)
         delivered.delete(rowToDelete.id)
@@ -451,12 +578,14 @@ async function observeConsumer(
         }
         finalRows = visibleRows()
         expect(finalRows, JSON.stringify({ kind, scenario, requests })).toEqual(
-          truth.filter(({ eligible }) => eligible).slice(0, 2),
+          truth.filter((row) => matchesJoinFilter(row, joinFilter)).slice(0, 2),
         )
         if (live)
           expectRawWindow(
             [...live.values()].map(copiedRow),
-            truth.filter(({ eligible }) => eligible).slice(0, 2),
+            truth
+              .filter((row) => matchesJoinFilter(row, joinFilter))
+              .slice(0, 2),
             scenario.direction,
             true,
           )
@@ -467,7 +596,10 @@ async function observeConsumer(
       expect(publications.at(-1) ?? []).toEqual(finalRows)
       // The explicit source deletion can publish without another provider call.
       expect(publications.length).toBeLessThanOrEqual(
-        requests.length + 1 + Number(rowToDelete !== undefined),
+        requests.length +
+          1 +
+          Number(rowToDelete !== undefined) +
+          Number(removeJoinedMarker),
       )
       expect(requests.length).toBeLessThanOrEqual(sourceSize * 3 + 2)
       expect(
@@ -489,6 +621,7 @@ async function observeConsumer(
       }
     },
     () => {
+      joinedLoadGate.resolve()
       const requestCount = requests.length
       return [
         () => subscription?.unsubscribe(),
@@ -692,7 +825,7 @@ async function observeFinitePrefixMutation(
       sync: (operations) => {
         sync = operations
         operations.markReady()
-        return {
+        const deduplicated = new DeduplicatedLoadSubset({
           loadSubset: async (options) => {
             requests++
             let selected = [...truth.values()].sort(
@@ -728,6 +861,9 @@ async function observeFinitePrefixMutation(
             const receipt = operations.commit()
             if (receipt !== true) await receipt
           },
+        })
+        return {
+          loadSubset: deduplicated.loadSubset,
           unloadSubset: () => {},
         }
       },
@@ -811,6 +947,752 @@ async function observeFinitePrefixMutation(
   )
 }
 
+async function observeMutationDuringBoundedRepair(): Promise<{
+  rows: Array<number>
+  requests: number
+  publications: Array<Array<number>>
+}> {
+  const truth = new Map<number, Row>([
+    [1, { id: 1, rank: 1, eligible: true, label: `first` }],
+    [2, { id: 2, rank: 2, eligible: true, label: `second` }],
+    [3, { id: 3, rank: 3, eligible: true, label: `third` }],
+  ])
+  const delivered = new Set<number>()
+  const repairPrefixStarted = createDeferred<void>()
+  const releaseRepairPrefix = createDeferred<void>()
+  const repairTieStarted = createDeferred<void>()
+  const releaseRepairTie = createDeferred<void>()
+  const publications: Array<Array<number>> = []
+  let heldRepairPrefix = false
+  let heldRepairTie = false
+  let requests = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let commit!: () => true | Promise<void>
+
+  const source = createCollection<Row, number>({
+    id: `ordered-mutation-during-repair-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        operations.markReady()
+        const apply = async (options: LoadSubsetOptions) => {
+          let selected = [...truth.values()].filter(
+            (row) =>
+              (!options.where ||
+                evaluateReferenceExpression(options.where, row) === true) &&
+              (!options.cursor ||
+                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                  true),
+          )
+          selected.sort(
+            (left, right) => left.rank - right.rank || left.id - right.id,
+          )
+          const offset = options.cursor ? 0 : (options.offset ?? 0)
+          selected = selected.slice(
+            offset,
+            options.limit === undefined ? undefined : offset + options.limit,
+          )
+          const additions = selected.filter(({ id }) => !delivered.has(id))
+          if (additions.length === 0) return
+          begin()
+          for (const row of additions) {
+            delivered.add(row.id)
+            write({ type: `insert`, value: { ...row } })
+          }
+          const receipt = commit()
+          if (receipt !== true) await receipt
+        }
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            requests++
+            const isRepairPrefix =
+              options.refetch === true &&
+              options.orderBy !== undefined &&
+              options.cursor === undefined
+            if (isRepairPrefix && !heldRepairPrefix) {
+              heldRepairPrefix = true
+              repairPrefixStarted.resolve()
+              return releaseRepairPrefix.promise.then(() => apply(options))
+            }
+            const isRepairTie =
+              options.refetch === true &&
+              options.orderBy === undefined &&
+              options.where !== undefined
+            if (isRepairTie && !heldRepairTie) {
+              heldRepairTie = true
+              repairTieStarted.resolve()
+              return releaseRepairTie.promise.then(() => apply(options))
+            }
+            return apply(options)
+          },
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ row: source })
+      .orderBy(({ row }) => row.rank)
+      .limit(1),
+  )
+  const subscription = live.subscribeChanges(() => {
+    publications.push(live.toArray.map(({ id }) => id))
+  })
+
+  return withHistoryCleanup(
+    async () => {
+      await live.preload()
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+      publications.length = 0
+
+      const first = { ...truth.get(1)!, rank: 10 }
+      truth.set(1, first)
+      begin()
+      write({ type: `update`, value: { ...first } })
+      const firstReceipt = commit()
+      if (firstReceipt !== true) await firstReceipt
+      await repairPrefixStarted.promise
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      releaseRepairPrefix.resolve()
+      await repairTieStarted.promise
+
+      const second = { ...truth.get(2)!, rank: 20 }
+      truth.set(2, second)
+      begin()
+      write({ type: `update`, value: { ...second } })
+      const secondReceipt = commit()
+      if (secondReceipt !== true) await secondReceipt
+      expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+      releaseRepairTie.resolve()
+      await vi.waitFor(() =>
+        expect(live.toArray.map(({ id }) => id)).toEqual([3]),
+      )
+      expect(publications).toEqual([[3]])
+      expect(requests).toBeGreaterThanOrEqual(6)
+      return {
+        rows: live.toArray.map(({ id }) => id),
+        requests,
+        publications: publications.map((rows) => [...rows]),
+      }
+    },
+    () => [
+      () => releaseRepairPrefix.resolve(),
+      () => releaseRepairTie.resolve(),
+      () => subscription.unsubscribe(),
+      () => live.cleanup(),
+      () => source.cleanup(),
+    ],
+  )
+}
+
+async function observeHeldEffectRepair(
+  repairPrefix: `synchronous` | `asynchronous`,
+): Promise<Array<Array<number>>> {
+  const truth: Array<Row> = [
+    { id: 1, rank: 1, eligible: true, label: `first` },
+    { id: 2, rank: 2, eligible: true, label: `second` },
+  ]
+  const repairStarted = createDeferred<void>()
+  const releaseRepair = createDeferred<void>()
+  const effectRows = new Set<number>()
+  const publications: Array<Array<number>> = []
+  let recovering = false
+  let loadCount = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let commit!: () => void
+
+  const source = createCollection<Row, number>({
+    id: `ordered-held-effect-repair-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        operations.markReady()
+        const apply = (options: LoadSubsetOptions) => {
+          const selected = truth
+            .filter(
+              (row) =>
+                (!options.where ||
+                  evaluateReferenceExpression(options.where, row) === true) &&
+                (!options.cursor ||
+                  evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                    true),
+            )
+            .sort((left, right) => left.rank - right.rank || left.id - right.id)
+            .slice(
+              options.offset ?? 0,
+              options.limit === undefined
+                ? undefined
+                : (options.offset ?? 0) + options.limit,
+            )
+          begin()
+          for (const row of selected) {
+            write({ type: `insert`, value: { ...row } })
+          }
+          commit()
+        }
+        return {
+          loadSubset: (options) => {
+            loadCount++
+            const isRepair =
+              recovering &&
+              options.orderBy !== undefined &&
+              options.limit === 1 &&
+              options.cursor === undefined
+            if (!isRepair) {
+              apply(options)
+              return true
+            }
+            if (repairPrefix === `synchronous`) {
+              apply(options)
+              return true
+            }
+            repairStarted.resolve()
+            return releaseRepair.promise.then(() => apply(options))
+          },
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    onBatch: (events) => {
+      for (const event of events) {
+        if (event.type === `exit`) effectRows.delete(event.key)
+        else effectRows.add(event.key)
+      }
+      publications.push([...effectRows].sort((left, right) => left - right))
+    },
+  })
+
+  return withHistoryCleanup(
+    async () => {
+      await vi.waitFor(() => expect([...effectRows]).toEqual([1]))
+      await vi.waitFor(() => expect(loadCount).toBeGreaterThanOrEqual(2))
+      await flushPromises()
+      publications.length = 0
+      recovering = true
+      const removed = truth.shift()!
+      begin()
+      write({ type: `delete`, value: removed })
+      commit()
+      if (repairPrefix === `asynchronous`) {
+        await repairStarted.promise
+        await flushPromises()
+
+        expect(
+          [...effectRows],
+          `last complete effect result while held`,
+        ).toEqual([1])
+        expect(publications, `no intermediate effect publication`).toEqual([])
+
+        releaseRepair.resolve()
+      }
+      await vi.waitFor(() => expect([...effectRows]).toEqual([2]))
+      expect(publications).toEqual([[2]])
+      return publications.map((rows) => [...rows])
+    },
+    () => [
+      () => releaseRepair.resolve(),
+      () => effect.dispose(),
+      () => source.cleanup(),
+    ],
+  )
+}
+
+async function observeEffectAfterObsoleteRepairAbort(): Promise<{
+  rows: Array<number>
+  batches: Array<Array<string>>
+  finalLabel: string | undefined
+}> {
+  const truth = new Map<number, Row>([
+    [1, { id: 1, rank: 1, eligible: true, label: `first` }],
+    [2, { id: 2, rank: 2, eligible: true, label: `second` }],
+  ])
+  const installed = new Set<number>()
+  const effectRows = new Map<number, Row>()
+  const batches: Array<Array<string>> = []
+  let repairHeld = false
+  let requests = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let truncate!: () => void
+  let commit!: () => true | Promise<void>
+
+  const source = createCollection<Row, number>({
+    id: `ordered-obsolete-effect-repair-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        truncate = operations.truncate
+        commit = operations.commit
+        operations.markReady()
+        const apply = async (options: LoadSubsetOptions) => {
+          let selected = [...truth.values()].filter(
+            (row) =>
+              (!options.where ||
+                evaluateReferenceExpression(options.where, row) === true) &&
+              (!options.cursor ||
+                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                  true),
+          )
+          selected.sort(
+            (left, right) => left.rank - right.rank || left.id - right.id,
+          )
+          const offset = options.cursor ? 0 : (options.offset ?? 0)
+          selected = selected.slice(
+            offset,
+            options.limit === undefined ? undefined : offset + options.limit,
+          )
+          const additions = selected.filter(({ id }) => !installed.has(id))
+          if (additions.length === 0) return
+          begin()
+          for (const row of additions) {
+            installed.add(row.id)
+            write({ type: `insert`, value: { ...row } })
+          }
+          const receipt = commit()
+          if (receipt !== true) await receipt
+        }
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            requests++
+            const isRepairPrefix =
+              options.refetch === true &&
+              options.orderBy !== undefined &&
+              options.cursor === undefined
+            if (isRepairPrefix && !repairHeld) {
+              repairHeld = true
+              return new Promise<void>((_resolve, reject) => {
+                const abort = () =>
+                  reject(new LoadSubsetOperationAbortedError())
+                if (options.signal?.aborted) abort()
+                else {
+                  options.signal?.addEventListener(`abort`, abort, {
+                    once: true,
+                  })
+                }
+              })
+            }
+            return apply(options)
+          },
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    onBatch: (events) => {
+      const labels: Array<string> = []
+      for (const event of events) {
+        labels.push(`${event.type}:${event.key}`)
+        if (event.type === `exit`) effectRows.delete(event.key)
+        else effectRows.set(event.key, copiedRow(event.value))
+      }
+      batches.push(labels)
+    },
+  })
+
+  return withHistoryCleanup(
+    async () => {
+      await vi.waitFor(() => expect([...effectRows.keys()]).toEqual([1]))
+      await vi.waitFor(() => expect(requests).toBeGreaterThanOrEqual(2))
+      await flushPromises()
+      batches.length = 0
+
+      const removed = truth.get(1)!
+      truth.delete(1)
+      installed.delete(1)
+      begin()
+      write({ type: `delete`, value: removed })
+      const deleteReceipt = commit()
+      if (deleteReceipt !== true) await deleteReceipt
+      await vi.waitFor(() => expect(repairHeld).toBe(true))
+
+      installed.clear()
+      begin()
+      truncate()
+      const truncateReceipt = commit()
+      if (truncateReceipt !== true) await truncateReceipt
+      await vi.waitFor(() => expect(requests).toBeGreaterThanOrEqual(5))
+      await flushPromises()
+
+      const replacement = truth.get(2)!
+      const updated = { ...replacement, label: `updated after replay` }
+      truth.set(2, updated)
+      begin()
+      write({ type: `update`, value: updated })
+      const updateReceipt = commit()
+      if (updateReceipt !== true) await updateReceipt
+      await vi.waitFor(() =>
+        expect(effectRows.get(2)?.label).toBe(`updated after replay`),
+      )
+
+      return {
+        rows: [...effectRows.keys()],
+        batches: batches.map((batch) => [...batch]),
+        finalLabel: effectRows.get(2)?.label,
+      }
+    },
+    () => [() => effect.dispose(), () => source.cleanup()],
+  )
+}
+
+async function observeSkipInitialOrderedLoad(): Promise<{
+  initialEvents: Array<string>
+  laterEvents: Array<string>
+}> {
+  const truth: Array<Row> = [
+    { id: 1, rank: 1, eligible: true, label: `first` },
+    { id: 2, rank: 2, eligible: true, label: `second` },
+  ]
+  const firstRequest = createDeferred<void>()
+  const installed = new Set<number>()
+  const events: Array<string> = []
+  let requests = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let commit!: () => true | Promise<void>
+
+  const source = createCollection<Row, number>({
+    id: `ordered-skip-initial-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        operations.markReady()
+        return {
+          loadSubset: async (options: LoadSubsetOptions) => {
+            requests++
+            if (requests === 1) await firstRequest.promise
+            let selected = truth.filter(
+              (row) =>
+                (!options.where ||
+                  evaluateReferenceExpression(options.where, row) === true) &&
+                (!options.cursor ||
+                  evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                    true),
+            )
+            selected.sort(
+              (left, right) => left.rank - right.rank || left.id - right.id,
+            )
+            const offset = options.cursor ? 0 : (options.offset ?? 0)
+            selected = selected.slice(
+              offset,
+              options.limit === undefined ? undefined : offset + options.limit,
+            )
+            const additions = selected.filter(({ id }) => !installed.has(id))
+            if (additions.length === 0) return
+            begin()
+            for (const row of additions) {
+              installed.add(row.id)
+              write({ type: `insert`, value: { ...row } })
+            }
+            const receipt = commit()
+            if (receipt !== true) await receipt
+          },
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(1),
+    skipInitial: true,
+    onBatch: (batch) => {
+      events.push(...batch.map((event) => `${event.type}:${event.key}`))
+    },
+  })
+
+  return withHistoryCleanup(
+    async () => {
+      await vi.waitFor(() => expect(requests).toBe(1))
+      firstRequest.resolve()
+      await vi.waitFor(() => expect(requests).toBeGreaterThanOrEqual(2))
+      await flushPromises()
+      const initialEvents = [...events]
+      events.length = 0
+
+      const inserted: Row = {
+        id: 3,
+        rank: 0,
+        eligible: true,
+        label: `later`,
+      }
+      truth.push(inserted)
+      installed.add(inserted.id)
+      begin()
+      write({ type: `insert`, value: inserted })
+      const receipt = commit()
+      if (receipt !== true) await receipt
+      await vi.waitFor(() => expect(events.length).toBeGreaterThan(0))
+
+      return { initialEvents, laterEvents: [...events] }
+    },
+    () => [
+      () => firstRequest.resolve(),
+      () => effect.dispose(),
+      () => source.cleanup(),
+    ],
+  )
+}
+
+async function observeHeldEffectDelta(
+  history: `absent-cycle` | `present-update-exit`,
+): Promise<{
+  batches: Array<Array<string>>
+  rows: Array<number>
+  exitedValues: Map<number, Row>
+}> {
+  const limit = history === `absent-cycle` ? 1 : 2
+  const truth = new Map<number, Row>(
+    (history === `absent-cycle`
+      ? [
+          { id: 1, rank: 1, eligible: true, label: `first` },
+          { id: 3, rank: 3, eligible: true, label: `third` },
+        ]
+      : [
+          { id: 1, rank: 1, eligible: true, label: `first` },
+          { id: 2, rank: 2, eligible: true, label: `second` },
+          { id: 3, rank: 3, eligible: true, label: `third` },
+          { id: 4, rank: 4, eligible: true, label: `fourth` },
+        ]
+    ).map((row) => [row.id, row]),
+  )
+  const delivered = new Set<number>()
+  const repairStarted = createDeferred<void>()
+  const releaseRepair = createDeferred<void>()
+  const effectRows = new Map<number, Row>()
+  const batches: Array<Array<string>> = []
+  const exitedValues = new Map<number, Row>()
+  let heldRepair = false
+  let loadCount = 0
+  let begin!: () => void
+  let write!: (message: {
+    type: `insert` | `update` | `delete`
+    value: Row
+  }) => void
+  let commit!: () => true | Promise<void>
+
+  const source = createCollection<Row, number>({
+    id: `ordered-held-effect-delta-${history}-${harnessId++}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (operations) => {
+        begin = operations.begin
+        write = operations.write
+        commit = operations.commit
+        operations.markReady()
+        const apply = async (options: LoadSubsetOptions) => {
+          let selected = [...truth.values()].filter(
+            (row) =>
+              (!options.where ||
+                evaluateReferenceExpression(options.where, row) === true) &&
+              (!options.cursor ||
+                evaluateReferenceExpression(options.cursor.whereFrom, row) ===
+                  true),
+          )
+          selected.sort(
+            (left, right) => left.rank - right.rank || left.id - right.id,
+          )
+          const offset = options.cursor ? 0 : (options.offset ?? 0)
+          selected = selected.slice(
+            offset,
+            options.limit === undefined ? undefined : offset + options.limit,
+          )
+          const additions = selected.filter(({ id }) => !delivered.has(id))
+          if (additions.length === 0) return
+          begin()
+          for (const row of additions) {
+            delivered.add(row.id)
+            write({ type: `insert`, value: { ...row } })
+          }
+          const receipt = commit()
+          if (receipt !== true) await receipt
+        }
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            loadCount++
+            const isRepairPrefix =
+              options.refetch === true &&
+              options.orderBy !== undefined &&
+              options.cursor === undefined
+            if (isRepairPrefix && !heldRepair) {
+              heldRepair = true
+              repairStarted.resolve()
+              return releaseRepair.promise.then(() => apply(options))
+            }
+            return apply(options)
+          },
+        }
+      },
+    },
+  })
+  const effect = createEffect<Row, number>({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .orderBy(({ row }) => row.rank)
+        .limit(limit),
+    onBatch: (events: Array<DeltaEvent<Row, number>>) => {
+      const labels: Array<string> = []
+      for (const event of events) {
+        labels.push(`${event.type}:${String(event.key)}`)
+        if (event.type === `exit`) {
+          exitedValues.set(event.key, copiedRow(event.value))
+          effectRows.delete(event.key)
+        } else {
+          effectRows.set(event.key, { ...event.value })
+        }
+      }
+      batches.push(labels)
+    },
+  })
+
+  const applySourceChange = async (
+    type: `insert` | `update` | `delete`,
+    row: Row,
+  ) => {
+    begin()
+    write({ type, value: { ...row } })
+    const receipt = commit()
+    if (receipt !== true) await receipt
+  }
+
+  return withHistoryCleanup(
+    async () => {
+      const initialIds = history === `absent-cycle` ? [1] : [1, 2]
+      await vi.waitFor(() =>
+        expect([...effectRows.keys()].sort((a, b) => a - b)).toEqual(
+          initialIds,
+        ),
+      )
+      await vi.waitFor(() => expect(loadCount).toBeGreaterThanOrEqual(2))
+      await flushPromises()
+      batches.length = 0
+
+      const first = truth.get(1)!
+      truth.delete(1)
+      delivered.delete(1)
+      await applySourceChange(`delete`, first)
+      await repairStarted.promise
+
+      if (history === `absent-cycle`) {
+        const transient: Row = {
+          id: 2,
+          rank: 2,
+          eligible: true,
+          label: `transient`,
+        }
+        delivered.add(transient.id)
+        await applySourceChange(`insert`, transient)
+        delivered.delete(transient.id)
+        await applySourceChange(`delete`, transient)
+      } else {
+        const previous = truth.get(2)!
+        const updated = { ...previous, rank: 20, label: `updated` }
+        truth.set(2, updated)
+        await applySourceChange(`update`, updated)
+        truth.delete(2)
+        delivered.delete(2)
+        await applySourceChange(`delete`, updated)
+      }
+
+      expect(batches).toEqual([])
+      releaseRepair.resolve()
+      const expectedIds = history === `absent-cycle` ? [3] : [3, 4]
+      await vi.waitFor(() =>
+        expect([...effectRows.keys()].sort((a, b) => a - b)).toEqual(
+          expectedIds,
+        ),
+      )
+
+      expect(batches).toHaveLength(1)
+      const flattened = batches.flat()
+      if (history === `absent-cycle`) {
+        expect(flattened).not.toContain(`update:2`)
+        expect(flattened).not.toContain(`enter:2`)
+        expect(flattened).not.toContain(`exit:2`)
+      } else {
+        expect(flattened).toContain(`exit:2`)
+        expect(flattened).not.toContain(`update:2`)
+        expect(exitedValues.get(2)).toEqual({
+          id: 2,
+          rank: 2,
+          eligible: true,
+          label: `second`,
+        })
+      }
+      return {
+        batches: batches.map((batch) => [...batch]),
+        rows: [...effectRows.keys()].sort((a, b) => a - b),
+        exitedValues,
+      }
+    },
+    () => [
+      () => releaseRepair.resolve(),
+      () => effect.dispose(),
+      () => source.cleanup(),
+    ],
+  )
+}
+
 describe(`ordered source work oracle`, () => {
   it(`rejects scrambled order and partial or regressed initial publications`, () => {
     const rows: Array<Row> = [
@@ -887,6 +1769,343 @@ describe(`ordered source work oracle`, () => {
       expect(effect.publications.at(-1)).toEqual(collection.publications.at(-1))
     },
   )
+
+  it(`holds the last complete Effect result across an asynchronous prefix and synchronous tie repair`, async () => {
+    await expect(observeHeldEffectRepair(`asynchronous`)).resolves.toEqual([
+      [2],
+    ])
+  })
+
+  it(`publishes one Effect replacement when ordered repair settles synchronously`, async () => {
+    await expect(observeHeldEffectRepair(`synchronous`)).resolves.toEqual([[2]])
+  })
+
+  it(`publishes the repaired ordered Effect delta when a source changes during startup`, async () => {
+    // Fixed history: the first ordered page contains row 1. Subscribing to
+    // the sibling updates row 1 before the Effect can run its initial graph.
+    // The independent final rank order is row 2, then row 1. At the first
+    // callback checkpoint, only row 2 may enter the width-one result.
+    type Sync = Parameters<SyncConfig<Row, number>[`sync`]>[0]
+    const truth = new Map<number, Row>([
+      [1, { id: 1, rank: 1, eligible: true, label: `first` }],
+      [2, { id: 2, rank: 2, eligible: true, label: `second` }],
+    ])
+    let rootSync!: Sync
+    const delivered = new Set<number>()
+    const requests: Array<LoadSubsetOptions> = []
+    const root = createCollection<Row, number>({
+      id: `ordered-effect-start-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              requests.push(options)
+              const selected = [...truth.values()]
+                .filter(
+                  (row) =>
+                    (!options.where ||
+                      evaluateReferenceExpression(options.where, row) ===
+                        true) &&
+                    (!options.cursor ||
+                      evaluateReferenceExpression(
+                        options.cursor.whereFrom,
+                        row,
+                      ) === true),
+                )
+                .sort((a, b) => a.rank - b.rank || a.id - b.id)
+                .slice(
+                  options.offset ?? 0,
+                  options.limit === undefined
+                    ? undefined
+                    : (options.offset ?? 0) + options.limit,
+                )
+              operations.begin()
+              for (const row of selected) {
+                if (!delivered.has(row.id)) {
+                  delivered.add(row.id)
+                  operations.write({ type: `insert`, value: { ...row } })
+                }
+              }
+              expect(
+                operations.commit(),
+                `ordered page applies synchronously`,
+              ).toBe(true)
+              return true
+            },
+          }
+        },
+      },
+    })
+    const marker = createCollection<Marker, number>({
+      id: `ordered-effect-start-marker-${harnessId++}`,
+      getKey: ({ id }) => id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+        },
+      },
+    })
+    const originalSubscribe = marker.subscribeChanges.bind(marker)
+    let changedDuringStart = false
+    vi.spyOn(marker, `subscribeChanges`).mockImplementation(((...args) => {
+      const subscription = originalSubscribe(...args)
+      // Only the first subscription after the ordered page can drive this
+      // history; other subscribers must not repeat or preempt the update.
+      if (changedDuringStart || requests.length === 0) return subscription
+      expect(requests[0]?.orderBy, `first request is ordered`).toBeDefined()
+      expect(requests[0]?.limit, `first request loads one row`).toBe(1)
+      expect(delivered.has(1), `first page installed row 1`).toBe(true)
+      expect(root.get(1)?.rank, `row 1 is present before its update`).toBe(1)
+      changedDuringStart = true
+      const updated = { ...truth.get(1)!, rank: 3, label: `moved` }
+      truth.set(1, updated)
+      rootSync.begin()
+      rootSync.write({ type: `update`, value: updated })
+      expect(rootSync.commit(), `startup update applies synchronously`).toBe(
+        true,
+      )
+      return subscription
+    }) as typeof marker.subscribeChanges)
+
+    const batches: Array<Array<DeltaEvent<Row, string>>> = []
+    let effect: ReturnType<typeof createEffect> | undefined
+    // Drain the scheduled callback queue at the assertion checkpoint. A single
+    // event-loop turn can miss a later duplicate batch.
+    vi.useFakeTimers()
+    try {
+      await withHistoryCleanup(
+        async () => {
+          effect = createEffect<Row, string>({
+            query: (q) =>
+              q
+                .from({ row: root })
+                .leftJoin({ marker }, ({ row, marker: child }) =>
+                  eq(row.id, child.rowId),
+                )
+                .orderBy(({ row }) => row.rank)
+                .limit(1)
+                .select(({ row }) => ({
+                  id: row.id,
+                  rank: row.rank,
+                  eligible: row.eligible,
+                  label: row.label,
+                })),
+            onBatch: (events) => {
+              batches.push(events)
+            },
+          })
+          expect(changedDuringStart).toBe(true)
+          await vi.runAllTimersAsync()
+          expect(batches).toEqual([
+            [{ type: `enter`, key: `[2,undefined]`, value: truth.get(2) }],
+          ])
+          expect(requests.some((options) => options.refetch === true)).toBe(
+            true,
+          )
+        },
+        () => [
+          () => effect?.dispose(),
+          () => root.cleanup(),
+          () => marker.cleanup(),
+        ],
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it(`keeps an Effect live when truncate replay aborts an obsolete repair participant`, async () => {
+    await expect(
+      observeEffectAfterObsoleteRepairAbort(),
+    ).resolves.toMatchObject({
+      rows: [2],
+      finalLabel: `updated after replay`,
+    })
+  })
+
+  it(`suppresses an asynchronous initial ordered window when skipInitial is set`, async () => {
+    await expect(observeSkipInitialOrderedLoad()).resolves.toEqual({
+      initialEvents: [],
+      laterEvents: expect.arrayContaining([`enter:3`, `exit:1`]),
+    })
+  })
+
+  it(`suppresses the initial joined-filter window while child demand settles`, async () => {
+    type Root = { id: number; rank: number; label: string }
+    const initial = { id: 1, rank: 1, label: `initial` }
+    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+    const root = createCollection<Root, number>({
+      id: `ordered-skip-joined-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.begin()
+          operations.write({ type: `insert`, value: initial })
+          operations.commit()
+          operations.markReady()
+        },
+      },
+    })
+    const childGate = createDeferred<void>()
+    let childLoads = 0
+    const child = createCollection<Marker, number>({
+      id: `ordered-skip-joined-child-${harnessId++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              childLoads++
+              return childGate.promise
+            },
+          }
+        },
+      },
+    })
+    const events: Array<string> = []
+    const effect = createEffect<{ id: number; label: string }>({
+      query: (q) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: child }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(1)
+          .select(({ row }) => ({ id: row.id, label: row.label })),
+      skipInitial: true,
+      onBatch: (batch) => {
+        events.push(...batch.map((event) => event.type))
+      },
+    })
+    await withHistoryCleanup(
+      async () => {
+        await vi.waitFor(() => expect(childLoads).toBeGreaterThan(0))
+        await flushPromises()
+        expect(events).toEqual([])
+        childGate.resolve()
+        await flushPromises()
+        expect(events).toEqual([])
+
+        rootSync.begin({ immediate: true })
+        rootSync.write({
+          type: `update`,
+          value: { ...initial, label: `later` },
+        })
+        const receipt = rootSync.commit()
+        if (receipt !== true) await receipt
+        await vi.waitFor(() => expect(events).toContain(`update`))
+      },
+      () => [
+        () => childGate.resolve(),
+        () => effect.dispose(),
+        () => root.cleanup(),
+        () => child.cleanup(),
+      ],
+    )
+  })
+
+  it(`avoids an extra joined-filter graph turn when the root becomes ready`, async () => {
+    type Root = { id: number; rank: number }
+    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+    let joinedSync!: Parameters<SyncConfig<Marker, number>[`sync`]>[0]
+    const root = createCollection<Root, number>({
+      id: `ordered-ready-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: { sync: (operations) => void (rootSync = operations) },
+    })
+    const joined = createCollection<Marker, number>({
+      id: `ordered-ready-joined-${harnessId++}`,
+      getKey: ({ id }) => id,
+      startSync: true,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          joinedSync = operations
+          return { loadSubset: () => true }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `ordered-ready-live-${harnessId++}`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: joined }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(0)
+          .select(({ row }) => ({ id: row.id })),
+    })
+    await withHistoryCleanup(
+      () => {
+        const builder = getCollectionBuilder(live)!
+        expect(
+          Object.values(builder.optimizableOrderByCollections).some(
+            (info) => info.joinedFilterSourceId !== undefined,
+          ),
+        ).toBe(true)
+        const scheduled = vi.spyOn(builder, `scheduleGraphRun`)
+        rootSync.markReady()
+        // Root readiness already schedules its ordinary graph turn.
+        expect(scheduled).toHaveBeenCalledTimes(1)
+        joinedSync.markReady()
+        // Joined readiness also rechecks the joined-filter demand gate.
+        expect(scheduled).toHaveBeenCalledTimes(3)
+        return Promise.resolve()
+      },
+      () => [
+        () => live.cleanup(),
+        () => root.cleanup(),
+        () => joined.cleanup(),
+      ],
+    )
+  })
+
+  it(`restarts bounded repair when another order mutation arrives during its tie request`, async () => {
+    await expect(observeMutationDuringBoundedRepair()).resolves.toMatchObject({
+      rows: [3],
+      publications: [[3]],
+    })
+  })
+
+  it(`emits no Effect delta for a row that enters and exits during held repair`, async () => {
+    await expect(observeHeldEffectDelta(`absent-cycle`)).resolves.toMatchObject(
+      {
+        rows: [3],
+      },
+    )
+  })
+
+  it(`emits the published value when an updated row exits during held repair`, async () => {
+    await expect(
+      observeHeldEffectDelta(`present-update-exit`),
+    ).resolves.toMatchObject({ rows: [3, 4] })
+  })
 
   it(`loads each source of a filtered join once`, async () => {
     type Order = {
@@ -1717,21 +2936,25 @@ describe(`ordered source work oracle`, () => {
       { includeInitialState: false },
     )
 
-    try {
-      await live.preload()
-      await live.utils.setWindow({ offset: 0, limit: 2 })
-      await flushPromises()
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        await live.utils.setWindow({ offset: 0, limit: 2 })
+        await flushPromises()
 
-      // Each page turn is followed by a tie-boundary request. The source
-      // returns one row at a time while honoring both predicates.
-      expect(loads).toBe(4)
-      expect(readIds()).toEqual([1, 2])
-      expect(batches).toEqual([[1, 2]])
-      expect(callbackReads).toEqual([[1, 2]])
-    } finally {
-      subscription.unsubscribe()
-      await Promise.all([live.cleanup(), source.cleanup()])
-    }
+        // Each page turn is followed by a tie-boundary request. The source
+        // returns one row at a time while honoring both predicates.
+        expect(loads).toBe(4)
+        expect(readIds()).toEqual([1, 2])
+        expect(batches).toEqual([[1, 2]])
+        expect(callbackReads).toEqual([[1, 2]])
+      },
+      () => [
+        () => subscription.unsubscribe(),
+        () => live.cleanup(),
+        () => source.cleanup(),
+      ],
+    )
   })
 
   it(`keeps live collections and Effects equal across the exhaustive small domain`, async () => {
@@ -1740,17 +2963,592 @@ describe(`ordered source work oracle`, () => {
     }
   })
 
-  it(`fills ordered windows filtered only through a left-joined alias`, async () => {
+  it(`keeps the collection anti-join result when the joined row exists`, async () => {
+    const observed = await observeConsumer(
+      `collection`,
+      exhaustiveScenarios[0]!,
+      `none`,
+    )
+    expect(observed.rows.map(({ id }) => id)).toEqual([2])
+  })
+
+  it(`removes a matched parent from the anti-join Effect`, async () => {
+    const observed = await observeConsumer(
+      `effect`,
+      exhaustiveScenarios[0]!,
+      `none`,
+    )
+    expect(observed.rows.map(({ id }) => id)).toEqual([2])
+  })
+
+  it(`processes a synchronous root refill before joined publication`, async () => {
+    type Root = { id: number; rank: number }
+    type Child = { id: number; rootId: number }
+    const truth: Array<Root> = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+    ]
+    const installed = new Set<number>()
+    const rootRequests: Array<LoadSubsetOptions> = []
+    const firstChildGate = createDeferred<void>()
+    let childLoads = 0
+    const rootCollection = createCollection<Root, number>({
+      id: `ordered-synchronous-refill-root`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.markReady()
+          return {
+            loadSubset: (options) => {
+              rootRequests.push(options)
+              let selected = truth
+                .filter(
+                  (row) =>
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, row) === true,
+                )
+                .filter(
+                  (row) =>
+                    !options.cursor ||
+                    evaluateReferenceExpression(
+                      options.cursor.whereFrom,
+                      row,
+                    ) === true,
+                )
+                .sort((left, right) => left.rank - right.rank)
+              if (!options.cursor && options.offset) {
+                selected = selected.slice(options.offset)
+              }
+              if (options.limit !== undefined) {
+                selected = selected.slice(0, options.limit)
+              }
+              const fresh = selected.filter(({ id }) => !installed.has(id))
+              if (fresh.length > 0) {
+                operations.begin()
+                for (const row of fresh) {
+                  installed.add(row.id)
+                  operations.write({ type: `insert`, value: row })
+                }
+                const receipt = operations.commit(options.signal)
+                if (receipt !== true) {
+                  throw new Error(`Expected synchronous root application`)
+                }
+              }
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const childCollection = createCollection<Child, number>({
+      id: `ordered-synchronous-refill-child`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          operations.begin()
+          operations.write({
+            type: `insert`,
+            value: { id: 20, rootId: 2 },
+          })
+          if (operations.commit() !== true) {
+            throw new Error(`Expected synchronous child application`)
+          }
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              childLoads++
+              return childLoads === 1 ? firstChildGate.promise : true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `ordered-synchronous-refill-live`,
+      startSync: false,
+      query: (q) =>
+        q
+          .from({ root: rootCollection })
+          .leftJoin({ child: childCollection }, ({ root, child }) =>
+            eq(root.id, child.rootId),
+          )
+          .where(({ child }) => not(isUndefined(child.rootId)))
+          .orderBy(({ root }) => root.rank)
+          .limit(1)
+          .select(({ root }) => ({ id: root.id })),
+    })
+
+    await withHistoryCleanup(
+      async () => {
+        const preload = live.preload()
+        await vi.waitFor(() => {
+          expect(childLoads).toBe(1)
+          expect(rootRequests).toHaveLength(1)
+        })
+        expect(live.toArray).toEqual([])
+
+        firstChildGate.resolve()
+        await preload
+        expect(childLoads).toBe(2)
+        expect(live.toArray.map(({ id }) => id)).toEqual([2])
+        expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
+          true,
+        )
+      },
+      () => [
+        () => firstChildGate.resolve(),
+        () => live.cleanup(),
+        () => rootCollection.cleanup(),
+        () => childCollection.cleanup(),
+      ],
+    )
+  })
+
+  it.each([`resolve`, `reject`, `retire`] as const)(
+    `keeps a widened window aligned with existing joined demand (%s)`,
+    async (outcome) => {
+      type Root = { id: number; rank: number }
+      type Child = { id: number; rootId: number }
+      const childGate = createDeferred<void>()
+      const rootContinuationGate = createDeferred<void>()
+      const rootRequests: Array<LoadSubsetOptions> = []
+      let childLoads = 0
+      let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+      const rootCollection = createCollection<Root, number>({
+        id: `ordered-held-window-root`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            rootSync = operations
+            const { begin, write, commit, markReady } = operations
+            markReady()
+            let delivered = false
+            return {
+              loadSubset: async (options) => {
+                rootRequests.push(options)
+                if (options.cursor) await rootContinuationGate.promise
+                if (!delivered && options.orderBy) {
+                  delivered = true
+                  begin()
+                  write({ type: `insert`, value: { id: 1, rank: 1 } })
+                  const receipt = commit(options.signal)
+                  if (receipt !== true) await receipt
+                }
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const childCollection = createCollection<Child, number>({
+        id: `ordered-held-window-child`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                childLoads++
+                return childGate.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const live = createLiveQueryCollection({
+        id: `ordered-held-window-live`,
+        startSync: false,
+        query: (q) =>
+          q
+            .from({ root: rootCollection })
+            .leftJoin({ child: childCollection }, ({ root, child }) =>
+              eq(root.id, child.rootId),
+            )
+            .where(({ child }) => isUndefined(child.rootId))
+            .orderBy(({ root }) => root.rank)
+            .limit(1)
+            .select(({ root }) => ({ id: root.id })),
+      })
+
+      await withHistoryCleanup(
+        async () => {
+          const preload = live.preload()
+          void preload.catch(() => {})
+          await vi.waitFor(() => {
+            expect(childLoads).toBe(1)
+            expect(rootRequests).toHaveLength(2)
+          })
+
+          let moveSettled = false
+          const move = Promise.resolve(
+            live.utils.setWindow({ offset: 0, limit: 2 }),
+          ).then(() => {
+            moveSettled = true
+          })
+          await flushPromises()
+          expect(moveSettled).toBe(false)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+          expect(live.toArray.map(({ id }) => id)).toEqual([])
+
+          if (outcome === `reject`) {
+            childGate.reject(new Error(`joined demand failed`))
+            await expect(move).rejects.toThrow(`joined demand failed`)
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+            await Promise.allSettled([preload])
+            return
+          }
+
+          if (outcome === `retire`) {
+            rootSync.begin()
+            rootSync.write({
+              type: `delete`,
+              value: { id: 1, rank: 1 },
+            })
+            const receipt = rootSync.commit()
+            if (receipt !== true) await receipt
+            rootContinuationGate.resolve()
+            await vi.waitFor(() => expect(moveSettled).toBe(true))
+            expect(rootRequests.length).toBeGreaterThan(2)
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+            expect(live.toArray).toEqual([])
+            childGate.reject(new Error(`obsolete joined demand failed`))
+            await flushPromises()
+            expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+            return
+          }
+
+          childGate.resolve()
+          await vi.waitFor(() =>
+            expect(
+              rootRequests.some(({ cursor }) => cursor !== undefined),
+            ).toBe(true),
+          )
+          await flushPromises()
+          expect(moveSettled).toBe(false)
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 1 })
+          rootContinuationGate.resolve()
+          await Promise.all([move, preload])
+          expect(live.utils.getWindow()).toEqual({ offset: 0, limit: 2 })
+          expect(live.toArray.map(({ id }) => id)).toEqual([1])
+          expect(rootRequests.some(({ cursor }) => cursor !== undefined)).toBe(
+            true,
+          )
+        },
+        () => [
+          () => childGate.resolve(),
+          () => rootContinuationGate.resolve(),
+          () => live.cleanup(),
+          () => rootCollection.cleanup(),
+          () => childCollection.cleanup(),
+        ],
+      )
+    },
+  )
+
+  it(`resumes bounded ordered repair after joined demand settles`, async () => {
+    type Root = { id: number; rank: number }
+    type Child = { id: number; rootId: number }
+    const truth: Array<Root> = [
+      { id: 1, rank: 1 },
+      { id: 2, rank: 2 },
+      { id: 3, rank: 3 },
+    ]
+    const installed = new Set<number>()
+    const rootRequests: Array<LoadSubsetOptions> = []
+    const secondChildGate = createDeferred<void>()
+    let childLoads = 0
+    let rootSync!: Parameters<SyncConfig<Root, number>[`sync`]>[0]
+    const rootCollection = createCollection<Root, number>({
+      id: `ordered-held-repair-root`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.markReady()
+          return {
+            loadSubset: async (options) => {
+              rootRequests.push(options)
+              let selected = truth
+                .filter(
+                  (row) =>
+                    !options.where ||
+                    evaluateReferenceExpression(options.where, row) === true,
+                )
+                .filter(
+                  (row) =>
+                    !options.cursor ||
+                    evaluateReferenceExpression(
+                      options.cursor.whereFrom,
+                      row,
+                    ) === true,
+                )
+                .sort((left, right) => left.rank - right.rank)
+              if (!options.cursor && options.offset) {
+                selected = selected.slice(options.offset)
+              }
+              if (options.limit !== undefined) {
+                selected = selected.slice(0, options.limit)
+              }
+              const fresh = selected.filter(({ id }) => !installed.has(id))
+              if (fresh.length > 0) {
+                operations.begin()
+                for (const row of fresh) {
+                  installed.add(row.id)
+                  operations.write({ type: `insert`, value: row })
+                }
+                const receipt = operations.commit(options.signal)
+                if (receipt !== true) await receipt
+              }
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const childCollection = createCollection<Child, number>({
+      id: `ordered-held-repair-child`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              childLoads++
+              return childLoads === 2 ? secondChildGate.promise : true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      id: `ordered-held-repair-live`,
+      startSync: false,
+      query: (q) =>
+        q
+          .from({ root: rootCollection })
+          .leftJoin({ child: childCollection }, ({ root, child }) =>
+            eq(root.id, child.rootId),
+          )
+          .where(({ child }) => isUndefined(child.rootId))
+          .orderBy(({ root }) => root.rank)
+          .limit(1)
+          .select(({ root }) => ({ id: root.id })),
+    })
+
+    const deleteRoot = async (id: number) => {
+      const row = truth.find((candidate) => candidate.id === id)!
+      truth.splice(truth.indexOf(row), 1)
+      installed.delete(id)
+      rootSync.begin()
+      rootSync.write({ type: `delete`, value: row })
+      const receipt = rootSync.commit()
+      if (receipt !== true) await receipt
+    }
+
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+        await deleteRoot(1)
+        await vi.waitFor(() => {
+          expect(childLoads).toBe(2)
+          expect(rootRequests.filter(({ refetch }) => refetch)).toHaveLength(2)
+        })
+        expect(live.toArray.map(({ id }) => id)).toEqual([1])
+
+        secondChildGate.resolve()
+        await vi.waitFor(() =>
+          expect(live.toArray.map(({ id }) => id)).toEqual([2]),
+        )
+
+        await deleteRoot(2)
+        await vi.waitFor(() =>
+          expect(live.toArray.map(({ id }) => id)).toEqual([3]),
+        )
+        expect(
+          rootRequests.filter(({ refetch }) => refetch).length,
+        ).toBeGreaterThan(2)
+      },
+      () => [
+        () => secondChildGate.resolve(),
+        () => live.cleanup(),
+        () => rootCollection.cleanup(),
+        () => childCollection.cleanup(),
+      ],
+    )
+  })
+
+  it(`bounds ordered root acquisition for a none left-join filter`, async () => {
     for (const scenario of exhaustiveScenarios) {
-      const [collection, effect] = await Promise.all([
-        observeConsumer(`collection`, scenario, true),
-        observeConsumer(`effect`, scenario, true),
-      ])
-      expect(collection.rows).toEqual(effect.rows)
-      expect(collection.errors).toEqual([])
-      expect(effect.errors).toEqual([])
+      const observed = await observeConsumer(`collection`, scenario, `none`)
+      expect(observed.requests.length).toBeGreaterThan(0)
+      expect(observed.requests[0]?.kind).toBe(`page`)
+      expect(observed.requests[0]?.limit).toBeGreaterThan(0)
     }
   })
+
+  it.each([`joined-only`, `some`, `to-one`] as const)(
+    `bounds ordered root acquisition for a %s left-join filter`,
+    async (joinFilter) => {
+      for (const scenario of exhaustiveScenarios) {
+        const [collection, effect] = await Promise.all([
+          observeConsumer(`collection`, scenario, joinFilter),
+          observeConsumer(`effect`, scenario, joinFilter),
+        ])
+        expect(collection.rows).toEqual(effect.rows)
+        expect(collection.errors).toEqual([])
+        expect(effect.errors).toEqual([])
+
+        // A direct LEFT-joined filter retains finite root acquisition.
+        for (const observation of [collection, effect]) {
+          expect(observation.requests.length).toBeGreaterThan(0)
+          expect(observation.requests[0]?.kind).toBe(`page`)
+          expect(observation.requests[0]?.limit).toBeGreaterThan(0)
+        }
+      }
+    },
+  )
+
+  it.each(
+    ([`collection`, `effect`] as const).flatMap((consumer) =>
+      ([`unindexed`, `custom`] as const).map((loadingMode) => ({
+        consumer,
+        loadingMode,
+      })),
+    ),
+  )(
+    `settles joined demand and publishes a complete $loadingMode $consumer window`,
+    async ({ consumer, loadingMode }) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 1,
+          middleEligible: false,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        `none`,
+        true,
+        false,
+        loadingMode,
+      )
+      expect(observed.rows.map(({ id }) => id)).toEqual([3])
+      expect(observed.errors).toEqual([])
+      if (loadingMode === `custom`) {
+        expect(observed.requests).toHaveLength(1)
+        expect(observed.requests[0]?.kind).toBe(`boundary`)
+        expect(observed.requests[0]?.limit).toBeUndefined()
+        expect(observed.requests[0]?.hasCursor).toBe(false)
+        expect(observed.requests[0]?.offset).toBeUndefined()
+      } else {
+        expect(observed.requests[0]?.kind).toBe(`page`)
+        expect(observed.requests.some(({ limit }) => limit === undefined)).toBe(
+          true,
+        )
+      }
+    },
+  )
+
+  it.each(
+    ([`collection`, `effect`] as const).flatMap((consumer) =>
+      ([`some`, `none`] as const).map((joinFilter) => ({
+        consumer,
+        joinFilter,
+      })),
+    ),
+  )(
+    `waits for a $joinFilter joined demand before requesting another root page in a $consumer`,
+    async ({ consumer, joinFilter }) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 1,
+          middleEligible: false,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        joinFilter,
+        true,
+      )
+      expect(observed.errors).toEqual([])
+      expect(observed.requests[0]?.kind).toBe(`page`)
+    },
+  )
+
+  it.each([`collection`, `effect`] as const)(
+    `refills a joined-filter %s window after a child leaves`,
+    async (consumer) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 1,
+          middleEligible: true,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        `some`,
+        false,
+        true,
+      )
+      expect(observed.rows.map(({ id }) => id)).toEqual([3, 2])
+      expect(observed.requests.some(({ hasCursor }) => hasCursor)).toBe(true)
+    },
+  )
+
+  it.each([`collection`, `effect`] as const)(
+    `stops a joined-filter %s after the needed root prefix`,
+    async (consumer) => {
+      const observed = await observeConsumer(
+        consumer,
+        {
+          middleCount: 40,
+          middleEligible: true,
+          lastEligible: true,
+          tied: false,
+          direction: `asc`,
+        },
+        `some`,
+      )
+      expect(observed.requests.length).toBeLessThan(10)
+      expect(
+        observed.requests.every(
+          ({ kind, key }) => kind === `page` || key !== undefined,
+        ),
+      ).toBe(true)
+    },
+  )
 
   it.each(
     [0, 1, 2, 3, 4].flatMap((middleCount) =>
@@ -2193,6 +3991,254 @@ describe(`ordered source work oracle`, () => {
       expect(
         releases.filter((release) => release === acquisition),
       ).toHaveLength(1)
+    }
+  })
+
+  it.each([`collection`, `effect`] as const)(
+    `continues an ordered anti-join %s while an unrelated include demand is pending`,
+    async (kind) => {
+      const rows = [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 2 },
+        { id: 3, rank: 3 },
+      ]
+      const delivered = new Set<number>()
+      const rootRequests: Array<{ cursor: boolean; limit?: number }> = []
+      const extraGate = createDeferred<void>()
+      let extraLoads = 0
+
+      const root = createCollection({
+        id: `ordered-unrelated-root-${harnessId++}`,
+        getKey: (row: (typeof rows)[number]) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: async (options) => {
+                rootRequests.push({
+                  cursor: !!options.cursor,
+                  limit: options.limit,
+                })
+                if (rootRequests.length > 15) throw new Error(`request loop`)
+                const matching = options.where
+                  ? rows.filter(
+                      (row) =>
+                        evaluateReferenceExpression(options.where!, row) ===
+                        true,
+                    )
+                  : rows
+                const candidates = options.cursor
+                  ? matching.filter(
+                      (row) =>
+                        evaluateReferenceExpression(
+                          options.cursor!.whereFrom,
+                          row,
+                        ) === true,
+                    )
+                  : matching.slice(options.offset ?? 0)
+                const fresh = candidates
+                  .slice(0, options.limit)
+                  .filter((row) => !delivered.has(row.id))
+                if (fresh.length === 0) return
+                begin()
+                for (const row of fresh) {
+                  delivered.add(row.id)
+                  write({ type: `insert`, value: row })
+                }
+                const receipt = commit()
+                if (receipt !== true) await receipt
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const markerSource = createCollection({
+        id: `ordered-unrelated-marker-${harnessId++}`,
+        getKey: (row: { id: number; rowId: number }) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 2, rowId: 2 } })
+            commit()
+            markReady()
+          },
+        },
+      })
+      const extraSource = createCollection({
+        id: `ordered-unrelated-extra-${harnessId++}`,
+        getKey: (row: { id: number; rowId: number }) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: async () => {
+                extraLoads++
+                await extraGate.promise
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const query = (q: InitialQueryBuilder) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: markerSource }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(2)
+          .select(({ row }) => ({
+            id: row.id,
+            extras: toArray(
+              q
+                .from({ extra: extraSource })
+                .where(({ extra }) => eq(extra.rowId, row.id)),
+            ),
+          }))
+      const live =
+        kind === `collection` ? createLiveQueryCollection(query) : undefined
+      const effectRows = new Set<number>()
+      const effect =
+        kind === `effect`
+          ? createEffect<{ id: number; extras: Array<unknown> }>({
+              query,
+              onBatch: (events) => {
+                for (const event of events) {
+                  if (event.type === `exit`) effectRows.delete(event.value.id)
+                  else effectRows.add(event.value.id)
+                }
+              },
+            })
+          : undefined
+      const preload = live?.preload()
+
+      try {
+        await vi.waitFor(() => expect(extraLoads).toBeGreaterThan(0))
+        for (let i = 0; i < 12; i++) await flushPromises()
+        expect(
+          rootRequests.some((request) => request.cursor),
+          JSON.stringify({
+            rootRequests,
+            extraLoads,
+            rows: live?.toArray ?? [...effectRows],
+          }),
+        ).toBe(true)
+        extraGate.resolve()
+        await preload
+        await vi.waitFor(() =>
+          expect(rootRequests.some((request) => request.cursor)).toBe(true),
+        )
+        expect(live?.toArray.map(({ id }) => id) ?? [...effectRows]).toEqual([
+          1, 3,
+        ])
+      } finally {
+        extraGate.resolve()
+        await Promise.all([
+          effect?.dispose(),
+          live?.cleanup(),
+          root.cleanup(),
+          markerSource.cleanup(),
+          extraSource.cleanup(),
+        ])
+      }
+    },
+  )
+
+  it(`releases held Effect changes after an empty joined replay`, async () => {
+    type ReplayRow = { id: number; rank: number; label: string }
+    const initialRow = { id: 1, rank: 1, label: `old` }
+    let rootSync!: Parameters<SyncConfig<ReplayRow, number>[`sync`]>[0]
+    const root = createCollection<ReplayRow, number>({
+      id: `ordered-replay-wakeup-root-${harnessId++}`,
+      getKey: ({ id }) => id,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          rootSync = operations
+          operations.begin()
+          operations.write({ type: `insert`, value: initialRow })
+          operations.commit()
+          operations.markReady()
+        },
+      },
+    })
+    const replayGate = createDeferred<void>()
+    let joinedLoads = 0
+    let joinedSync!: Parameters<
+      SyncConfig<{ id: number; rowId: number }, number>[`sync`]
+    >[0]
+    const joined = createCollection<{ id: number; rowId: number }, number>({
+      id: `ordered-replay-wakeup-joined-${harnessId++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      startSync: true,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      sync: {
+        sync: (operations) => {
+          joinedSync = operations
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              joinedLoads++
+              return joinedLoads === 1 ? true : replayGate.promise
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const visible = new Map<number, string>()
+    const effect = createEffect<{ id: number; label: string }>({
+      query: (q) =>
+        q
+          .from({ row: root })
+          .leftJoin({ marker: joined }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => isUndefined(marker.rowId))
+          .orderBy(({ row }) => row.rank)
+          .limit(1)
+          .select(({ row }) => ({ id: row.id, label: row.label })),
+      onBatch: (events) => {
+        for (const event of events) {
+          if (event.type === `exit`) visible.delete(event.value.id)
+          else visible.set(event.value.id, event.value.label)
+        }
+      },
+    })
+    try {
+      await vi.waitFor(() => expect(visible.get(1)).toBe(`old`))
+      joinedSync.begin()
+      joinedSync.truncate()
+      const truncateReceipt = joinedSync.commit()
+      if (truncateReceipt !== true) await truncateReceipt
+      await vi.waitFor(() => expect(joinedLoads).toBeGreaterThan(1))
+
+      rootSync.begin({ immediate: true })
+      rootSync.write({ type: `update`, value: { ...initialRow, label: `new` } })
+      const updateReceipt = rootSync.commit()
+      if (updateReceipt !== true) await updateReceipt
+      for (let i = 0; i < 5; i++) await flushPromises()
+      expect(visible.get(1)).toBe(`old`)
+
+      replayGate.resolve()
+      await vi.waitFor(() => expect(visible.get(1)).toBe(`new`))
+    } finally {
+      replayGate.resolve()
+      await Promise.all([effect.dispose(), root.cleanup(), joined.cleanup()])
     }
   })
 

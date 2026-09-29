@@ -41,8 +41,9 @@ async function setup(
   const active = new Set<LoadSubsetOptions>()
   const owned = new Map<LoadSubsetOptions, Set<number>>()
   let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
-  let failFull = 0
-  const failure = new Error(`transient full-source failure`)
+  let failRepair = 0
+  let partialRepairWrites = 0
+  const failure = new Error(`transient ordering-repair failure`)
   const source = createCollection<Row, number>({
     getKey: (row) => row.id,
     syncMode: `on-demand`,
@@ -56,13 +57,6 @@ async function setup(
         return {
           loadSubset: (options) => {
             calls.push(options)
-            if (failFull && !options.orderBy && !options.where) {
-              failFull--
-              if (syncFailure) throw failure
-              active.add(options)
-              return Promise.reject(failure)
-            }
-            active.add(options)
             const rows = truth
               .filter(
                 (row) =>
@@ -80,6 +74,35 @@ async function setup(
               offset,
               options.limit === undefined ? undefined : offset + options.limit,
             )
+            const isAuthoritativeRepair =
+              options.cursor === undefined &&
+              options.offset === undefined &&
+              ((options.orderBy !== undefined && options.limit === 2) ||
+                (options.orderBy === undefined &&
+                  options.where === undefined &&
+                  options.limit === undefined))
+            if (failRepair && isAuthoritativeRepair) {
+              failRepair--
+              const partial =
+                selected.find((row) => !installed.has(row.id)) ?? selected[0]
+              if (partial) {
+                partialRepairWrites++
+                sync.begin()
+                sync.write({
+                  type: installed.has(partial.id) ? `update` : `insert`,
+                  value: { ...partial },
+                })
+                installed.set(partial.id, partial)
+                const receipt = sync.commit()
+                if (syncFailure) throw failure
+                active.add(options)
+                owned.set(options, new Set([partial.id]))
+                return Promise.resolve(receipt).then(() => {
+                  throw failure
+                })
+              }
+            }
+            active.add(options)
             owned.set(options, new Set(selected.map((row) => row.id)))
             sync.begin()
             for (const row of selected) {
@@ -127,8 +150,11 @@ async function setup(
     calls,
     active,
     failure,
-    failNextFull: (count = 1) => {
-      failFull = count
+    get partialRepairWrites() {
+      return partialRepairWrites
+    },
+    failNextRepair: (count = 1) => {
+      failRepair = count
     },
     insert: (row: Row) => {
       truth.push(row)
@@ -211,10 +237,16 @@ describe(`Ordered source work across default and indexed plans`, () => {
       const h = await setup(true, false, false, syncFailure)
       vi.useFakeTimers({ toFake: [`setTimeout`, `clearTimeout`] })
       try {
-        h.failNextFull(outcome === `success` ? 1 : 3)
+        h.failNextRepair(outcome === `success` ? 1 : 3)
         await h.remove(1)
         await vi.advanceTimersByTimeAsync(0)
         const afterFailure = h.calls.length
+        expect(h.partialRepairWrites).toBeGreaterThan(0)
+        expect(h.calls.at(-1)?.orderBy).toEqual(expect.any(Array))
+        expect(h.calls.at(-1)?.where).toBeUndefined()
+        expect(h.calls.at(-1)?.limit).toBe(2)
+        expect(h.calls.at(-1)?.cursor).toBeUndefined()
+        expect(h.calls.at(-1)?.offset).toBeUndefined()
         expect(h.live.utils.lastSubsetError).toBe(h.failure)
         expect(h.live.status).toBe(`ready`)
         expect(h.live.toArray.map((row) => row.id)).toEqual([1, 2])
@@ -223,6 +255,13 @@ describe(`Ordered source work across default and indexed plans`, () => {
           outcome === `cleanup` ? 0 : outcome === `success` ? 1 : 2,
           (retries) => {
             expect(h.calls).toHaveLength(afterFailure + retries)
+            for (const request of h.calls.slice(afterFailure)) {
+              expect(request.orderBy).toBeUndefined()
+              expect(request.where).toBeUndefined()
+              expect(request.limit).toBeUndefined()
+              expect(request.cursor).toBeUndefined()
+              expect(request.offset).toBeUndefined()
+            }
             if (outcome === `cleanup`) return
             expect(h.live.status).toBe(`ready`)
             expect(h.live.toArray.map((row) => row.id)).toEqual(

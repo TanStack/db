@@ -19,14 +19,15 @@ export class DeduplicatedLoadSubset {
 
   loadSubset = (options: LoadSubsetOptions): true | Promise<void> => {
     const key = getLoadSubsetDemandKey(options)
-    if (this.completed.has(key)) {
+    if (!options.refetch && this.completed.has(key)) {
       this.options.onDeduplicate?.(options)
       return true
     }
 
     // Requests with independent cancellation own independent transports.
     // Unabortable requests can share without an ownership protocol.
-    const existing = options.signal ? undefined : this.inflight.get(key)
+    const existing =
+      options.signal || options.refetch ? undefined : this.inflight.get(key)
     if (existing) {
       // Observer failures must not reject a detached promise after success.
       void existing

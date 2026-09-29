@@ -1,3 +1,5 @@
+import { isRefProxy } from './builder/ref-proxy-identity.js'
+
 /*
 This is the intermediate representation of the query.
 */
@@ -140,11 +142,31 @@ export class UnionAll extends BaseExpression {
 
 export class PropRef<T = any> extends BaseExpression<T> {
   public type = `ref` as const
+  declare public readonly sourceAlias?: string
   constructor(
     public path: Array<string>, // path to the property in the collection, with the alias as the first element
+    sourceAlias?: string,
   ) {
     super()
+    if (sourceAlias !== undefined) {
+      Object.defineProperty(this, `sourceAlias`, {
+        value: sourceAlias,
+        enumerable: true,
+      })
+    }
   }
+}
+
+/** Returns an explicitly declared source alias without inferring from the path. */
+export function getPropRefSourceAlias(ref: PropRef): string | undefined {
+  return ref.sourceAlias !== undefined && ref.path[0] === ref.sourceAlias
+    ? ref.sourceAlias
+    : undefined
+}
+
+/** Returns the property path after removing only explicit source qualification. */
+export function getPropRefPropertyPath(ref: PropRef): Array<string> {
+  return getPropRefSourceAlias(ref) === undefined ? ref.path : ref.path.slice(1)
 }
 
 export class Value<T = any> extends BaseExpression<T> {
@@ -219,47 +241,24 @@ export class ConditionalSelect extends BaseExpression {
   }
 }
 
-/**
- * Runtime helper to detect IR expression-like objects.
- * Prefer this over ad-hoc local implementations to keep behavior consistent.
- */
-export function isExpressionLike(value: any): boolean {
-  if (
+/** Distinguish compiler expressions from user objects with IR-like fields. */
+export function isBasicOrAggregateExpression(
+  value: unknown,
+): value is BasicExpression | Aggregate {
+  return (
     value instanceof Aggregate ||
-    value instanceof ConditionalSelect ||
     value instanceof Func ||
     value instanceof PropRef ||
-    value instanceof Value ||
+    value instanceof Value
+  )
+}
+
+export function isExpressionLike(value: unknown): boolean {
+  return (
+    isBasicOrAggregateExpression(value) ||
+    value instanceof ConditionalSelect ||
     value instanceof IncludesSubquery
-  ) {
-    return true
-  }
-
-  if (!value || typeof value !== `object`) {
-    return false
-  }
-
-  if (value.type === `conditionalSelect`) {
-    return Array.isArray(value.branches)
-  }
-
-  if (value.type === `agg` || value.type === `func`) {
-    return typeof value.name === `string` && Array.isArray(value.args)
-  }
-
-  if (value.type === `ref`) {
-    return Array.isArray(value.path)
-  }
-
-  if (value.type === `val`) {
-    return `value` in value
-  }
-
-  if (value.type === `includesSubquery`) {
-    return `query` in value && `fieldName` in value
-  }
-
-  return false
+  )
 }
 
 /** Returns each lexical Collection source in a query tree once. */
@@ -295,7 +294,7 @@ export function collectCollectionSources(query: QueryIR): Array<CollectionRef> {
       typeof value === `object` &&
       !Array.isArray(value) &&
       !isExpressionLike(value) &&
-      value.__refProxy !== true
+      !isRefProxy(value)
     ) {
       Object.values(value).forEach(visitSelectValue)
     }
@@ -399,6 +398,24 @@ export function followRef(
   alias?: string
   sourceId?: string
 } | void {
+  const explicitAlias = getPropRefSourceAlias(ref)
+  if (explicitAlias !== undefined) {
+    const aliasRef = getRefFromAlias(query, explicitAlias)
+    if (!aliasRef) return
+
+    const propertyPath = getPropRefPropertyPath(ref)
+    if (aliasRef.type === `queryRef`) {
+      return followRef(aliasRef.query, new PropRef(propertyPath), collection)
+    }
+
+    return {
+      collection: aliasRef.collection,
+      path: propertyPath,
+      alias: explicitAlias,
+      sourceId: aliasRef.sourceId,
+    }
+  }
+
   if (ref.path.length === 0) {
     return
   }

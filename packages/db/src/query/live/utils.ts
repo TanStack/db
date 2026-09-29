@@ -3,9 +3,10 @@ import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import { collectCollectionSources, isExpressionLike } from '../ir.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
-import type { ChangeMessage } from '../../types.js'
+import type { ChangeMessage, StringCollationConfig } from '../../types.js'
 import type { InitialQueryBuilder, QueryBuilder } from '../builder/index.js'
 import type { Context } from '../builder/types.js'
 import type { OrderBy, QueryIR } from '../ir.js'
@@ -59,7 +60,7 @@ function isNestedSelectObject(obj: any): boolean {
   if (obj === null || typeof obj !== `object`) return false
   if (isExpressionLike(obj)) return false
   // Ref proxies from spread operations
-  if (obj.__refProxy) return false
+  if (isRefProxy(obj)) return false
   return true
 }
 
@@ -173,11 +174,13 @@ export function reconcileChangesForD2<
  * Compute orderBy/limit subscription hints for an alias.
  * Returns normalised orderBy and effective limit suitable for passing to
  * `subscribeChanges`, or `undefined` values when the query's orderBy cannot
- * be scoped to the given alias (e.g. cross-collection refs or aggregates).
+ * be scoped to the given alias (e.g. cross-collection refs or aggregates), or
+ * when its resolved string collation is a local custom comparator.
  */
 export function computeSubscriptionOrderByHints(
   query: { orderBy?: OrderBy; limit?: number; offset?: number },
   alias: string,
+  queryCompareOptions: StringCollationConfig,
 ): { orderBy: OrderBy | undefined; limit: number | undefined } {
   const { orderBy, limit, offset } = query
   const effectiveLimit =
@@ -187,15 +190,24 @@ export function computeSubscriptionOrderByHints(
     ? normalizeOrderByPaths(orderBy, alias)
     : undefined
 
+  const usesCustomLocalOrder =
+    normalizedOrderBy?.some(
+      (clause) =>
+        (clause.compareOptions.stringSort ?? queryCompareOptions.stringSort) ===
+        `custom`,
+    ) ?? false
+
   // Only pass orderBy when it is scoped to this alias and uses simple refs,
   // to avoid leaking cross-collection paths into backend-specific compilers.
   const canPassOrderBy =
-    normalizedOrderBy?.every((clause) => {
+    !usesCustomLocalOrder &&
+    (normalizedOrderBy?.every((clause) => {
       const exp = clause.expression
       if (exp.type !== `ref`) return false
       const path = exp.path
       return Array.isArray(path) && path.length === 1
-    }) ?? false
+    }) ??
+      false)
 
   return {
     orderBy: canPassOrderBy ? normalizedOrderBy : undefined,

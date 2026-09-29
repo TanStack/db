@@ -12,6 +12,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [`db/tests/SortedMap.test.ts`, `sorted-map`, `key ascending descending`],
   [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
   [
+    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `sqlite-persistence`,
+    `source-fifo-order abort-graph owner-isolation open-transaction-boundary`,
+  ],
+  [
     `db/tests/optimistic-transaction-oracle.property.test.ts`,
     `collection-state`,
     `mixed-transaction same-key`,
@@ -24,7 +29,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/identity-output-shape-oracle.test.ts`,
     `query-identity`,
-    `compiled-output`,
+    `compiled-output equality-partition`,
   ],
   [
     `trailbase-db-collection/tests/lifecycle-oracle.property.test.ts`,
@@ -39,7 +44,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `electric-db-collection/tests/electric-oracle.property.test.ts`,
     `electric`,
-    `match-reentry publication-epoch-convergence`,
+    `match-reentry publication-epoch-convergence persistence-interleaving`,
   ],
   [
     `electric-db-collection/tests/electric-recovery-oracle.test.ts`,
@@ -60,6 +65,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
     `retention optimistic-history`,
+  ],
+  [
+    `db/tests/change-event-history-oracle.test.ts`,
+    `collection-state`,
+    `change-event-history eager-index-history`,
   ],
   [
     `db/tests/collection-metadata-publication-oracle.property.test.ts`,
@@ -165,6 +175,11 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `db/tests/query/pagination-oracle.property.test.ts`,
     `pagination`,
     `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `persistence`,
+    `retained-demand`,
   ],
 ]
 

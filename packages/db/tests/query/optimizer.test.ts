@@ -50,6 +50,28 @@ function createAgg(name: string, ...args: Array<any>) {
 
 describe(`Query Optimizer`, () => {
   describe(`Basic Optimization`, () => {
+    test(`retains explicit ref qualification while combining predicates`, () => {
+      const department = new PropRef([`u`, `department_id`], `u`)
+      const salary = new PropRef([`u`, `salary`], `u`)
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        where: [
+          createEq(department, createValue(1)),
+          createGt(salary, createValue(50_000)),
+        ],
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+      const combined = optimizedQuery.where?.[0] as Func
+
+      expect((combined.args[0] as Func).args[0]).toMatchObject({
+        sourceAlias: `u`,
+      })
+      expect((combined.args[1] as Func).args[0]).toMatchObject({
+        sourceAlias: `u`,
+      })
+    })
+
     test(`should pass through queries without where clauses`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
@@ -171,6 +193,33 @@ describe(`Query Optimizer`, () => {
   })
 
   describe(`Join Optimization`, () => {
+    test(`preserves single-result and DISTINCT flags across join optimization`, () => {
+      const distinctSource: QueryIR = {
+        from: new CollectionRef(mockCollection, `p`),
+        select: { id: createPropRef(`p`, `id`) },
+        distinct: true,
+      }
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        join: [
+          {
+            from: new QueryRef(distinctSource, `p`),
+            type: `inner`,
+            left: createPropRef(`u`, `id`),
+            right: createPropRef(`p`, `id`),
+          },
+        ],
+        where: [createEq(createPropRef(`u`, `id`), createValue(1))],
+        singleResult: true,
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+      expect(optimizedQuery.singleResult).toBe(true)
+      expect(optimizedQuery.join?.[0]?.from.type).toBe(`queryRef`)
+      const joined = optimizedQuery.join?.[0]?.from as QueryRef
+      expect(joined.query.distinct).toBe(true)
+    })
+
     test(`should lift single-source where clauses into join subqueries`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
@@ -1145,10 +1194,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`main_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
 
@@ -1159,10 +1205,7 @@ describe(`Query Optimizer`, () => {
         expect(joinClause.from.type).toBe(`queryRef`)
         if (joinClause.from.type === `queryRef`) {
           expect(joinClause.from.query.where).toContainEqual(
-            createEq(
-              createPropRef(`other_users`, `department_id`),
-              createValue(2),
-            ),
+            createEq(createPropRef(`u`, `department_id`), createValue(2)),
           )
         }
       }
@@ -1279,10 +1322,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`filtered_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1407,10 +1447,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`sorted_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1463,7 +1500,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(createPropRef(`users`, `department_id`), createValue(1)),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })

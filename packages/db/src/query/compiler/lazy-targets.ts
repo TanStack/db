@@ -254,7 +254,7 @@ function dedupeLazyLoadTargets(
   const seen = new Set<string>()
   const deduped: Array<LazyLoadTarget> = []
   for (const target of targets) {
-    const key = `${target.sourceId}:${target.path.join(`.`)}`
+    const key = `${target.sourceId}:${JSON.stringify(target.path)}`
     if (!seen.has(key)) {
       seen.add(key)
       deduped.push(target)
@@ -274,7 +274,11 @@ function toPropRef(expr: unknown): PropRef | undefined {
     (expr as { type?: string }).type === `ref` &&
     Array.isArray((expr as { path?: unknown }).path)
   ) {
-    return new PropRef((expr as unknown as { path: Array<string> }).path)
+    const ref = expr as unknown as {
+      path: Array<string>
+      sourceAlias?: string
+    }
+    return new PropRef(ref.path, ref.sourceAlias)
   }
   return undefined
 }

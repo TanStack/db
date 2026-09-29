@@ -20,6 +20,7 @@ import type {
   ApplyLocalMutationsResponse,
   EnsureRemoteSubsetRequest,
   EnsureRemoteSubsetResponse,
+  HydrationPersistenceAdapter,
   PersistedCollectionCoordinator,
   PersistedIndexSpec,
   PersistedMutationEnvelope,
@@ -114,7 +115,7 @@ type CollectionState = {
 // belong to the persisted sync wrapper, not the elected writer transport.
 type CoordinatorAdapter = Pick<
   PersistenceAdapter,
-  `loadSubset` | `applyCommittedTx` | `ensureIndex`
+  `loadSubset` | `applyCommittedTx` | `ensureIndex` | `runInRegularScope`
 > & {
   pullSince?: (
     collectionId: string,
@@ -251,6 +252,9 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private readonly pendingRPCs = new Map<string, PendingRPC>()
   private readonly appliedEnvelopes = new Map<string, AppliedEnvelope>()
   private readonly inFlightEnvelopes = new Map<string, InFlightEnvelope>()
+  private appliedEnvelopePruneTimer: ReturnType<typeof setTimeout> | null = null
+  private rejectDisposed: ((error: Error) => void) | null = null
+  private readonly disposedPromise: Promise<never>
   private disposed = false
 
   /** Method indirection to prevent TypeScript from narrowing `disposed` across awaits */
@@ -264,8 +268,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   }
 
   private requireAdapter(collectionId: string): CoordinatorAdapter {
-    const adapter =
-      this.collectionAdapters.get(collectionId) ?? this.defaultAdapter
+    let adapter = this.collectionAdapters.get(collectionId)
+    if (!adapter && this.defaultAdapter) {
+      adapter = this.defaultAdapter
+      this.collectionAdapters.set(collectionId, adapter)
+    }
     if (!adapter) {
       throw new Error(
         `${this.coordinatorName}: adapter not set for collection "${collectionId}". Call setAdapterForCollection() before using leader-side operations.`,
@@ -282,6 +289,10 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     this.channel.onmessage = (event: MessageEvent) => {
       this.onChannelMessage(event.data)
     }
+    this.disposedPromise = new Promise<never>((_resolve, reject) => {
+      this.rejectDisposed = reject
+    })
+    void this.disposedPromise.catch(() => undefined)
   }
 
   /**
@@ -338,9 +349,9 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     state.subscribers.add(onMessage)
     return () => {
       state.subscribers.delete(onMessage)
-      if (state.subscribers.size === 0 && state.participatesInLeadership) {
+      if (state.subscribers.size === 0) {
         state.participatesInLeadership = false
-        this.releaseLeadership(collectionId, state)
+        this.releaseCollectionIfUnused(collectionId, state)
       }
     }
   }
@@ -591,9 +602,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     signature: string,
     spec: PersistedIndexSpec,
+    scopedAdapter?: HydrationPersistenceAdapter,
+    localEnsureCompleted = false,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
-      await this.requireAdapter(collectionId).ensureIndex(
+      if (localEnsureCompleted) return
+      await (scopedAdapter ?? this.requireAdapter(collectionId)).ensureIndex(
         collectionId,
         signature,
         spec,
@@ -624,6 +638,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ): Promise<ApplyLocalMutationsResponse> {
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute
     if (this.isLeader(collectionId)) {
       return this.handleApplyLocalMutations(collectionId, {
         type: `rpc:applyLocalMutations:req`,
@@ -644,7 +660,10 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   async requestApplyCommittedTx(
     collectionId: string,
     tx: PersistedTx,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<ApplyCommittedTxResponse> {
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute
     const request: Extract<RPCRequest, { type: `rpc:applyCommittedTx:req` }> = {
       type: `rpc:applyCommittedTx:req`,
       rpcId: safeRandomUUID(),
@@ -652,7 +671,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       tx,
     }
     if (this.isLeader(collectionId)) {
-      return this.handleApplyCommittedTx(collectionId, request)
+      return this.handleApplyCommittedTx(collectionId, request, scopedAdapter)
     }
 
     return this.sendRPC<ApplyCommittedTxResponse>(collectionId, request)
@@ -661,13 +680,18 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   async pullSince(
     collectionId: string,
     fromRowVersion: number,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<PullSinceResponse> {
     if (this.isLeader(collectionId)) {
-      return this.handlePullSince(collectionId, {
-        type: `rpc:pullSince:req`,
-        rpcId: safeRandomUUID(),
-        fromRowVersion,
-      })
+      return this.handlePullSince(
+        collectionId,
+        {
+          type: `rpc:pullSince:req`,
+          rpcId: safeRandomUUID(),
+          fromRowVersion,
+        },
+        scopedAdapter,
+      )
     }
 
     return this.sendRPC<PullSinceResponse>(collectionId, {
@@ -682,7 +706,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   // -----------------------------------------------------------------------
 
   dispose(): void {
+    if (this.disposed) return
     this.disposed = true
+    const disposedError = new Error(`coordinator disposed`)
+    this.rejectDisposed?.(disposedError)
+    this.rejectDisposed = null
 
     for (const acquisition of this.outboundRemoteSubsetAcquisitions.values()) {
       this.cancelRemoteSubsetReplayRetry(acquisition)
@@ -697,9 +725,13 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
 
     for (const [, pending] of this.pendingRPCs) {
       clearTimeout(pending.timer)
-      pending.reject(new Error(`coordinator disposed`))
+      pending.reject(disposedError)
     }
     this.pendingRPCs.clear()
+    if (this.appliedEnvelopePruneTimer !== null) {
+      clearTimeout(this.appliedEnvelopePruneTimer)
+      this.appliedEnvelopePruneTimer = null
+    }
 
     this.channel.close()
     this.collections.clear()
@@ -765,7 +797,13 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         lockName,
         { signal: abortController.signal },
         async () => {
-          if (this.isDisposed()) return
+          if (
+            this.isDisposed() ||
+            !this.participatesInLeadership(state) ||
+            this.collections.get(collectionId) !== state
+          ) {
+            return
+          }
 
           try {
             // Restore stream position from DB before claiming leadership
@@ -780,6 +818,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
             if (
               this.isDisposed() ||
               !this.participatesInLeadership(state) ||
+              this.collections.get(collectionId) !== state ||
               abortController.signal.aborted ||
               state.lockAbortController !== abortController
             ) {
@@ -825,7 +864,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         return
       }
       console.warn(`Failed to acquire leadership for ${collectionId}:`, error)
-      if (!this.isDisposed() && this.participatesInLeadership(state)) {
+      if (
+        !this.isDisposed() &&
+        this.participatesInLeadership(state) &&
+        this.collections.get(collectionId) === state
+      ) {
         await sleep(LEADERSHIP_RETRY_DELAY_MS)
       }
     } finally {
@@ -838,23 +881,52 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     if (
       !this.isDisposed() &&
       this.participatesInLeadership(state) &&
+      this.collections.get(collectionId) === state &&
       state.lockAbortController === null
     ) {
       void this.acquireLeadership(collectionId, state)
     }
   }
 
+  private waitForInitialRoute(collectionId: string): Promise<void> | undefined {
+    const state = this.collections.get(collectionId)
+    if (
+      state?.participatesInLeadership &&
+      !state.isLeader &&
+      state.leaderId === null
+    ) {
+      this.channel.postMessage({
+        v: 1,
+        dbName: this.dbName,
+        collectionId,
+        senderId: this.nodeId,
+        ts: Date.now(),
+        payload: { type: `leader:routeRequest` },
+      } satisfies ProtocolEnvelope<{ type: `leader:routeRequest` }>)
+      return this.waitForLeadershipRoute(
+        collectionId,
+        state,
+        undefined,
+        RPC_TIMEOUT_MS,
+      )
+    }
+    return undefined
+  }
+
   private waitForLeadershipRoute(
     collectionId: string,
     state: CollectionState,
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<void> {
     if (state.isLeader || state.leaderId !== null) return Promise.resolve()
 
     return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
       const finish = () => {
         state.routeWaiters?.delete(onRouteChange)
         signal?.removeEventListener(`abort`, onAbort)
+        if (timer !== undefined) clearTimeout(timer)
       }
       const onAbort = () => {
         finish()
@@ -879,6 +951,16 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       }
 
       ;(state.routeWaiters ??= new Set()).add(onRouteChange)
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          finish()
+          reject(
+            new Error(
+              `${this.coordinatorName}: leadership route for collection "${collectionId}" timed out after ${timeoutMs}ms`,
+            ),
+          )
+        }, timeoutMs)
+      }
       signal?.addEventListener(`abort`, onAbort, { once: true })
       if (signal?.aborted) {
         onAbort()
@@ -908,6 +990,26 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     state.isLeader = false
     state.leaderId = null
     this.notifyRouteWaiters(state)
+  }
+
+  private releaseCollectionIfUnused(
+    collectionId: string,
+    state: CollectionState,
+  ): void {
+    if (
+      state.subscribers.size > 0 ||
+      this.collections.get(collectionId) !== state
+    ) {
+      return
+    }
+    this.releaseLeadership(collectionId, state)
+    this.collections.delete(collectionId)
+    this.collectionAdapters.delete(collectionId)
+    const prefix = `${JSON.stringify([collectionId]).slice(0, -1)},`
+    for (const key of this.appliedEnvelopes.keys()) {
+      if (key.startsWith(prefix)) this.appliedEnvelopes.delete(key)
+    }
+    this.pruneAppliedEnvelopes()
   }
 
   private postRemoteSubsetRelease(
@@ -1053,6 +1155,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
 
     const type = (payload as Record<string, unknown>).type as string | undefined
 
+    if (type === `leader:routeRequest`) {
+      const state = this.collections.get(envelope.collectionId)
+      if (state?.isLeader) this.emitHeartbeat(envelope.collectionId, state)
+      return
+    }
+
     if (type === `leader:heartbeat`) {
       const heartbeat = payload as {
         leaderId?: unknown
@@ -1122,6 +1230,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     request: RPCRequest,
   ): Promise<T> {
+    if (this.isDisposed()) throw new Error(`coordinator disposed`)
     let lastError: Error | undefined
     let firstTransportCause: unknown
     const mutationRequestType = isMutatingRPCRequest(request)
@@ -1133,8 +1242,12 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
 
     for (let attempt = 0; attempt <= RPC_RETRY_ATTEMPTS; attempt++) {
       if (attempt > 0) {
-        await sleep(RPC_RETRY_DELAY_MS * attempt)
+        await Promise.race([
+          sleep(RPC_RETRY_DELAY_MS * attempt),
+          this.disposedPromise,
+        ])
       }
+      if (this.isDisposed()) throw new Error(`coordinator disposed`)
 
       if (
         mutationRoute &&
@@ -1654,12 +1767,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       spec: PersistedIndexSpec
     },
   ): Promise<RPCResponse> {
-    await this.withWriterLock(() =>
-      this.requireAdapter(collectionId).ensureIndex(
-        collectionId,
-        request.signature,
-        request.spec,
-      ),
+    await this.withScheduledWriterLock(collectionId, (adapter) =>
+      adapter.ensureIndex(collectionId, request.signature, request.spec),
     )
     return {
       type: `rpc:ensurePersistedIndex:res`,
@@ -1753,6 +1862,15 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       state,
       pendingTx,
     )
+    if (tx === null) {
+      return {
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `NOT_LEADER`,
+        error: `not the leader for ${collectionId}`,
+      }
+    }
 
     const response: ApplyLocalMutationsResponse = {
       type: `rpc:applyLocalMutations:res`,
@@ -1763,7 +1881,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       latestRowVersion: tx.rowVersion,
       acceptedMutationIds: request.mutations.map((m) => m.mutationId),
     }
-    if (this.isDisposed()) {
+    if (this.isDisposed() || this.collections.get(collectionId) !== state) {
       return response
     }
     this.appliedEnvelopes.set(
@@ -1815,6 +1933,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private async handleApplyCommittedTx(
     collectionId: string,
     request: Extract<RPCRequest, { type: `rpc:applyCommittedTx:req` }>,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<ApplyCommittedTxResponse> {
     const envelopeKey = appliedEnvelopeKey(collectionId, request.envelopeId)
     return this.runDeduplicatedEnvelope({
@@ -1835,7 +1954,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         code: `CONFLICT`,
         error: `envelope ${request.envelopeId} ${phase}`,
       }),
-      apply: () => this.applyCommittedTxOnce(collectionId, request),
+      apply: () =>
+        this.applyCommittedTxOnce(collectionId, request, scopedAdapter),
       createPending: (response) => ({
         requestType: request.type,
         response,
@@ -1887,6 +2007,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   private async applyCommittedTxOnce(
     collectionId: string,
     request: Extract<RPCRequest, { type: `rpc:applyCommittedTx:req` }>,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<ApplyCommittedTxResponse> {
     const state = this.collections.get(collectionId)
     if (!state || !state.isLeader) {
@@ -1903,7 +2024,17 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       collectionId,
       state,
       request.tx,
+      scopedAdapter,
     )
+    if (tx === null) {
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `NOT_LEADER`,
+        error: `not the leader for ${collectionId}`,
+      }
+    }
     const response: ApplyCommittedTxResponse = {
       type: `rpc:applyCommittedTx:res`,
       rpcId: request.rpcId,
@@ -1912,7 +2043,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       seq: tx.seq,
       latestRowVersion: tx.rowVersion,
     }
-    if (this.isDisposed()) {
+    if (this.isDisposed() || this.collections.get(collectionId) !== state) {
       return response
     }
     this.appliedEnvelopes.set(
@@ -1972,24 +2103,38 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     state: CollectionState,
     pendingTx: Omit<PersistedTx, `term` | `seq` | `rowVersion`>,
-  ): Promise<PersistedTx> {
-    return this.withWriterLock(async () => {
-      const tx: PersistedTx = {
-        ...pendingTx,
-        term: state.latestTerm,
-        seq: state.latestSeq + 1,
-        rowVersion: state.latestRowVersion + 1,
-      }
-      const adapter = this.requireAdapter(collectionId)
-      try {
-        await adapter.applyCommittedTx(collectionId, tx)
-      } catch (error) {
-        throw toPersistedCollectionDurabilityError(collectionId, error)
-      }
-      state.latestSeq = tx.seq
-      state.latestRowVersion = tx.rowVersion
-      return tx
-    })
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<PersistedTx | null> {
+    const expectedTerm = state.latestTerm
+    return this.withScheduledWriterLock(
+      collectionId,
+      async (adapter) => {
+        if (
+          this.isDisposed() ||
+          this.collections.get(collectionId) !== state ||
+          !state.isLeader ||
+          state.leaderId !== this.nodeId ||
+          state.latestTerm !== expectedTerm
+        ) {
+          return null
+        }
+        const tx: PersistedTx = {
+          ...pendingTx,
+          term: state.latestTerm,
+          seq: state.latestSeq + 1,
+          rowVersion: state.latestRowVersion + 1,
+        }
+        try {
+          await adapter.applyCommittedTx(collectionId, tx)
+        } catch (error) {
+          throw toPersistedCollectionDurabilityError(collectionId, error)
+        }
+        state.latestSeq = tx.seq
+        state.latestRowVersion = tx.rowVersion
+        return tx
+      },
+      scopedAdapter,
+    )
   }
 
   private async handlePullSince(
@@ -1999,10 +2144,11 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       rpcId: string
       fromRowVersion: number
     },
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<PullSinceResponse> {
     const state = this.collections.get(collectionId)
 
-    const adapter = this.requireAdapter(collectionId)
+    const adapter = scopedAdapter ?? this.requireAdapter(collectionId)
     if (!adapter.pullSince) {
       return {
         type: `rpc:pullSince:res`,
@@ -2046,6 +2192,24 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   // DB Writer Lock
   // -----------------------------------------------------------------------
 
+  private withScheduledWriterLock<T>(
+    collectionId: string,
+    task: (adapter: CoordinatorAdapter) => Promise<T>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<T> {
+    if (scopedAdapter) {
+      return this.withWriterLock(() => task(scopedAdapter))
+    }
+    // Enter the shared scheduler before taking the database-wide Web Lock.
+    // A hydrate waiting for its first commit may need that lock to finish.
+    const adapter = this.requireAdapter(collectionId)
+    return adapter.runInRegularScope
+      ? adapter.runInRegularScope((unscheduledAdapter) =>
+          this.withWriterLock(() => task(unscheduledAdapter)),
+        )
+      : this.withWriterLock(() => task(adapter))
+  }
+
   private async withWriterLock<T>(fn: () => Promise<T>): Promise<T> {
     const lockName = `tsdb:writer:${this.dbName}`
 
@@ -2082,13 +2246,30 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   // -----------------------------------------------------------------------
 
   private pruneAppliedEnvelopes(): void {
-    // Keep envelopes for 60 seconds for dedup
+    if (this.appliedEnvelopePruneTimer !== null) {
+      clearTimeout(this.appliedEnvelopePruneTimer)
+      this.appliedEnvelopePruneTimer = null
+    }
     const cutoff = Date.now() - RPC_DEDUPE_RETENTION_MS
     for (const [key, envelope] of this.appliedEnvelopes) {
-      if (envelope.appliedAt < cutoff) {
+      if (envelope.appliedAt <= cutoff) {
         this.appliedEnvelopes.delete(key)
       }
     }
+    if (this.disposed || this.appliedEnvelopes.size === 0) return
+
+    let earliestAppliedAt = Number.POSITIVE_INFINITY
+    for (const envelope of this.appliedEnvelopes.values()) {
+      earliestAppliedAt = Math.min(earliestAppliedAt, envelope.appliedAt)
+    }
+    const delay = Math.max(
+      0,
+      earliestAppliedAt + RPC_DEDUPE_RETENTION_MS - Date.now(),
+    )
+    this.appliedEnvelopePruneTimer = setTimeout(() => {
+      this.appliedEnvelopePruneTimer = null
+      this.pruneAppliedEnvelopes()
+    }, delay)
   }
 
   private setReleasedRemoteSubsetAcquisition(

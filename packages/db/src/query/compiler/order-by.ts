@@ -38,15 +38,20 @@ export type OrderByOptimizationInfo = {
     a: Record<string, unknown> | null | undefined,
     b: Record<string, unknown> | null | undefined,
   ) => number
-  /** Extracts all orderBy column values from a raw row (array for multi-column) */
+  /** Extracts the leading provider order value from a raw row. */
   valueExtractorForRawRow: (row: Record<string, unknown>) => unknown
   /** Index on the first orderBy column - used for lazy loading */
   index?: IndexReader<string | number>
   dataNeeded?: () => number
   /** Reads the source loader's synchronous request guard, when installed. */
   isRequesting?: () => boolean
-  /** Whether local operators can discard or reorder the provider's prefix. */
+  /**
+   * Whether a provider-ordered finite prefix is insufficient for the local
+   * plan, including when a custom local collation defines another order.
+   */
   requiresFullSource: boolean
+  /** Source whose lazy demand must settle before a joined-filter page. */
+  joinedFilterSourceId?: string
 }
 
 /**
@@ -135,8 +140,10 @@ export function processOrderBy(
 
   let orderByOptimizationInfo: OrderByOptimizationInfo | undefined
 
-  // When there's a limit, we create orderByOptimizationInfo to pass orderBy/limit
-  // to loadSubset so the sync layer can optimize the query.
+  // When there's a limit, create orderByOptimizationInfo for top-K source
+  // loading. Unbounded queries use subscription hints instead. A plan whose
+  // local semantics cannot be established from a provider prefix records
+  // requiresFullSource and issues one filtered full-source acquisition.
   // We try to use an index on the FIRST orderBy column for lazy loading,
   // even for multi-column orderBy (using wider bounds on first column).
   // Skip this optimization when using grouped ordering (includes with limit),
@@ -240,6 +247,19 @@ export function processOrderBy(
         a: Record<string, unknown> | null | undefined,
         b: Record<string, unknown> | null | undefined,
       ) => compareTerm(a ? extract(a) : a, b ? extract(b) : b)
+      const hasCrossAliasWhere =
+        rawQuery.where?.some((where) =>
+          [...getSourceAliasesFromExpression(getWhereExpression(where))].some(
+            (alias) => alias !== orderByAlias,
+          ),
+        ) ?? false
+      const joinedFilterSourceId =
+        hasCrossAliasWhere &&
+        rawQuery.join?.length === 1 &&
+        rawQuery.join[0]!.type === `left` &&
+        rawQuery.join[0]!.from.type === `collectionRef`
+          ? rawQuery.join[0]!.from.sourceId
+          : undefined
 
       const info: OrderByOptimizationInfo = {
         sourceId: orderBySourceId,
@@ -250,7 +270,11 @@ export function processOrderBy(
         valueExtractorForRawRow: extract,
         index,
         orderBy: sourceOrderBy,
+        joinedFilterSourceId,
         requiresFullSource:
+          sourceOrderBy.some(
+            ({ compareOptions }) => compareOptions.stringSort === `custom`,
+          ) ||
           !sourceOrderIsDirect ||
           rawQuery.from.type !== `collectionRef` ||
           rawQuery.from.sourceId !== orderBySourceId ||
@@ -258,14 +282,8 @@ export function processOrderBy(
             ({ type }) => type === `inner` || type === `right`,
           ) ??
             false) ||
-          (rawQuery.where?.some(
-            (where) =>
-              isResidualWhere(where) ||
-              [
-                ...getSourceAliasesFromExpression(getWhereExpression(where)),
-              ].some((alias) => alias !== orderByAlias),
-          ) ??
-            false) ||
+          (rawQuery.where?.some(isResidualWhere) ?? false) ||
+          (hasCrossAliasWhere && joinedFilterSourceId === undefined) ||
           (rawQuery.fnWhere?.length ?? 0) > 0 ||
           rawQuery.groupBy !== undefined ||
           rawQuery.having !== undefined ||

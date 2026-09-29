@@ -122,6 +122,7 @@
 
 import { deepEquals } from '../utils.js'
 import { CannotCombineEmptyExpressionListError } from '../errors.js'
+import { containsAggregate } from './compiler/group-by.js'
 import {
   CollectionRef as CollectionRefClass,
   Func,
@@ -489,7 +490,10 @@ function removeRedundantFromClause(from: From): From {
   const processedQuery = removeRedundantSubqueries(from.query)
 
   // Check if this subquery is redundant
-  if (isRedundantSubquery(processedQuery)) {
+  if (
+    isRedundantSubquery(processedQuery) &&
+    from.alias === getFirstFromAlias(processedQuery)
+  ) {
     // Return the inner query's FROM clause with this alias
     const innerFrom = removeRedundantFromClause(processedQuery.from)
     if (innerFrom.type === `collectionRef`) {
@@ -526,7 +530,9 @@ function isRedundantSubquery(query: QueryIR): boolean {
     query.offset === undefined &&
     !query.fnSelect &&
     (!query.fnWhere || query.fnWhere.length === 0) &&
-    (!query.fnHaving || query.fnHaving.length === 0)
+    (!query.fnHaving || query.fnHaving.length === 0) &&
+    !query.distinct &&
+    !query.singleResult
   )
 }
 
@@ -791,25 +797,16 @@ function applyOptimizations(
         ]
       : remainingWhereClauses
 
-  // Create a completely new query object to ensure immutability
+  // Preserve untouched query options while replacing the optimized clauses.
   const optimizedQuery: QueryIR = {
-    // Copy all non-optimized fields as-is
-    select: query.select,
+    ...query,
     groupBy: query.groupBy ? [...query.groupBy] : undefined,
     having: query.having ? [...query.having] : undefined,
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
-    limit: query.limit,
-    offset: query.offset,
-    distinct: query.distinct,
-    fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
-
-    // Use the optimized FROM and JOIN clauses
     from: optimizedFrom,
     join: optimizedJoins,
-
-    // Include combined WHERE clauses
     where: finalWhere.length > 0 ? finalWhere : [],
   }
 
@@ -827,11 +824,8 @@ function applyOptimizations(
  */
 function deepCopyQuery(query: QueryIR): QueryIR {
   return {
-    // Recursively copy the FROM clause
+    ...query,
     from: deepCopyFrom(query.from),
-
-    // Copy all other fields, creating new arrays where necessary
-    select: query.select,
     join: query.join
       ? query.join.map((joinClause) => ({
           type: joinClause.type,
@@ -844,9 +838,6 @@ function deepCopyQuery(query: QueryIR): QueryIR {
     groupBy: query.groupBy ? [...query.groupBy] : undefined,
     having: query.having ? [...query.having] : undefined,
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
-    limit: query.limit,
-    offset: query.offset,
-    fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
   }
@@ -976,12 +967,61 @@ function optimizeFromWithTracking(
   // Add the WHERE clause to the existing subquery
   // Create a deep copy to ensure immutability
   const existingWhere = from.query.where || []
+  const remappedWhere = remapWhereForSubquery(
+    from.query,
+    whereClause,
+    from.alias,
+  )
+  if (remappedWhere === undefined) {
+    return new QueryRefClass(deepCopyQuery(from.query), from.alias)
+  }
   const optimizedSubQuery: QueryIR = {
     ...deepCopyQuery(from.query),
-    where: [...existingWhere, whereClause],
+    where: [...existingWhere, remappedWhere],
   }
   actuallyOptimized.add(from.alias) // Mark as successfully optimized
   return new QueryRefClass(optimizedSubQuery, from.alias)
+}
+
+/**
+ * Rewrites references to an outer QueryRef alias so a pushed predicate can be
+ * evaluated inside the subquery's namespace. Pass-through SELECT fields use
+ * their projected source path; unprojected rows use the first source alias.
+ */
+function remapWhereForSubquery(
+  subquery: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string,
+): BasicExpression<boolean> | undefined {
+  const firstFromAlias = getFirstFromAlias(subquery)
+  if (firstFromAlias === undefined) return undefined
+
+  const remapExpression = (expression: BasicExpression): BasicExpression => {
+    if (expression instanceof PropRef) {
+      if (expression.path[0] !== outerAlias) return expression
+
+      const field = expression.path[1]
+      const projected = field ? subquery.select?.[field] : undefined
+      const hasNamespacedResult =
+        subquery.join !== undefined || subquery.from.type === `unionFrom`
+      const innerPath =
+        projected instanceof PropRef
+          ? [...projected.path, ...expression.path.slice(2)]
+          : hasNamespacedResult
+            ? expression.path.slice(1)
+            : [firstFromAlias, ...expression.path.slice(1)]
+
+      return new PropRef(innerPath)
+    }
+
+    if (expression instanceof Func) {
+      return new Func(expression.name, expression.args.map(remapExpression))
+    }
+
+    return expression
+  }
+
+  return remapExpression(whereClause) as BasicExpression<boolean>
 }
 
 function optimizeJoinFromWithTracking(
@@ -1004,7 +1044,7 @@ function unsafeSelect(
   if (!query.select) return false
 
   return (
-    selectHasAggregates(query.select) ||
+    containsAggregate(query.select) ||
     whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
   )
 }
@@ -1039,32 +1079,13 @@ function isSafeToPushIntoExistingSubquery(
   outerAlias: string,
 ): boolean {
   return !(
+    query.distinct ||
     unsafeSelect(query, whereClause, outerAlias) ||
     unsafeGroupBy(query) ||
     unsafeHaving(query) ||
     unsafeOrderBy(query) ||
     unsafeFnSelect(query)
   )
-}
-
-/**
- * Detects whether a SELECT projection contains any aggregate expressions.
- * Recursively traverses nested select objects.
- *
- * @param select - The SELECT object from the IR
- * @returns True if any field is an aggregate, false otherwise
- */
-function selectHasAggregates(select: Select): boolean {
-  for (const value of Object.values(select)) {
-    if (typeof value === `object`) {
-      const v: any = value
-      if (v.type === `agg`) return true
-      if (!(`type` in v)) {
-        if (selectHasAggregates(v as unknown as Select)) return true
-      }
-    }
-  }
-  return false
 }
 
 /**
@@ -1163,6 +1184,9 @@ function referencesAliasWithRemappedSelect(
   if (!select) {
     return false
   }
+  const hasSpreadProjection = Object.keys(select).some((key) =>
+    key.startsWith(`__SPREAD_SENTINEL__`),
+  )
 
   for (const ref of refs) {
     const path = ref.path
@@ -1171,8 +1195,12 @@ function referencesAliasWithRemappedSelect(
     if (path[0] !== outerAlias) continue
 
     const projected = select[path[1]!]
-    // Unselected fields can't be remapped, so skip - only care about fields in the SELECT.
-    if (!projected) continue
+    // A spread-selected field has no direct projection entry to remap.
+    // Keep its predicate outside rather than guessing its input source.
+    if (!projected) {
+      if (hasSpreadProjection) return true
+      continue
+    }
 
     // Non-PropRef projections are computed values; cannot push down.
     if (!(projected instanceof PropRef)) {

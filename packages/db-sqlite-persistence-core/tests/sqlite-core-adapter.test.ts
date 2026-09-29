@@ -6,14 +6,19 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
-import { IR } from '@tanstack/db'
-import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import { IR, createCollection } from '@tanstack/db'
+import {
+  SQLiteCorePersistenceAdapter,
+  createPersistedTableName,
+  persistedCollectionOptions,
+} from '../src'
 import { harnessScope } from './contracts/harness-scope'
 import type {
   PersistenceAdapter,
   SQLiteDriver,
   SQLitePullSinceResult,
 } from '../src'
+import type { SyncConfig } from '@tanstack/db'
 
 type Todo = {
   id: string
@@ -62,7 +67,7 @@ function interpolateSql(sql: string, params: ReadonlyArray<unknown>): string {
   return renderedSql
 }
 
-class SqliteCliDriver implements SQLiteDriver {
+export class SqliteCliDriver implements SQLiteDriver {
   private readonly transactionDbPath = new AsyncLocalStorage<string>()
   private queue: Promise<void> = Promise.resolve()
 
@@ -634,6 +639,47 @@ export type SQLiteCoreAdapterHarnessFactory = (
   >,
 ) => SQLiteCoreAdapterContractHarness
 
+function holdAndRejectFirstSubsetLoad(
+  adapter: PersistenceAdapter,
+  failure: Error,
+): { entered: Promise<void>; release: () => void } {
+  let enter!: () => void
+  let release!: () => void
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let loadCalls = 0
+  const intercept =
+    (loadSubset: PersistenceAdapter[`loadSubset`]) =>
+    async (...args: Parameters<PersistenceAdapter[`loadSubset`]>) => {
+      loadCalls++
+      if (loadCalls === 1) {
+        enter()
+        await held
+        throw failure
+      }
+      return loadSubset(...args)
+    }
+
+  const runInHydrationScope = adapter.runInHydrationScope?.bind(adapter)
+  if (runInHydrationScope) {
+    adapter.runInHydrationScope = (task) =>
+      runInHydrationScope((scopedAdapter) =>
+        task({
+          ...scopedAdapter,
+          loadSubset: intercept(scopedAdapter.loadSubset),
+        }),
+      )
+  } else {
+    adapter.loadSubset = intercept(adapter.loadSubset.bind(adapter))
+  }
+
+  return { entered, release }
+}
+
 export function runSQLiteCoreAdapterContractSuite(
   suiteName: string = `SQLiteCorePersistenceAdapter`,
   harnessFactory: SQLiteCoreAdapterHarnessFactory = createHarness,
@@ -756,6 +802,238 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(tombstoneRows).toHaveLength(1)
       expect(tombstoneRows[0]?.row_version).toBe(3)
     })
+
+    it(`reconstructs a seeded baseline before releasing a partial source update after subset failure`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `partial-source-after-subset-failure`
+      const baseline: Todo = {
+        id: `1`,
+        title: `Persisted baseline`,
+        createdAt: `2026-01-01T00:00:00.000Z`,
+        score: 10,
+      }
+      const expected: Todo = { ...baseline, title: `Source update` }
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-partial-source-baseline`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [{ type: `insert`, key: baseline.id, value: baseline }],
+      })
+
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      const subsetFailure = new Error(`controlled incremental subset failure`)
+      const subsetLoad = holdAndRejectFirstSubsetLoad(adapter, subsetFailure)
+
+      let source!: Parameters<SyncConfig<Todo, string>[`sync`]>[0]
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            rowUpdateMode: `partial`,
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const project = (row: Todo | undefined) =>
+        row && {
+          id: row.id,
+          title: row.title,
+          createdAt: row.createdAt,
+          score: row.score,
+        }
+
+      let load: Promise<void> | undefined
+      let receipt: Promise<void> | undefined
+      try {
+        await collection.stateWhenReady()
+        load = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+          () => undefined,
+        )
+        void load.catch(() => undefined)
+        await subsetLoad.entered
+
+        source.begin()
+        source.write({
+          type: `update`,
+          value: { id: baseline.id, title: expected.title } as Todo,
+        })
+        receipt = Promise.resolve(source.commit()).then(() => undefined)
+        let receiptStatus: `pending` | `fulfilled` | `rejected` = `pending`
+        void receipt.then(
+          () => {
+            receiptStatus = `fulfilled`
+          },
+          () => {
+            receiptStatus = `rejected`
+          },
+        )
+        expect(receiptStatus).toBe(`pending`)
+
+        subsetLoad.release()
+        await expect(load).rejects.toBe(subsetFailure)
+        await receipt
+        const durableBeforeRetry = await loadSubset(collectionId, {})
+        expect({
+          receiptStatus,
+          status: collection.status,
+          publicError: collection._lifecycle.getSyncError(),
+          publicBeforeRetry: project(collection.get(baseline.id)),
+          durableBeforeRetry: durableBeforeRetry.map(({ value }) => value),
+        }).toEqual({
+          receiptStatus: `fulfilled`,
+          status: `ready`,
+          publicError: undefined,
+          publicBeforeRetry: expected,
+          durableBeforeRetry: [expected],
+        })
+
+        await collection._sync.loadSubset({ limit: 1 })
+        expect({
+          publicAfterRetry: project(collection.get(baseline.id)),
+          status: collection.status,
+          publicError: collection._lifecycle.getSyncError(),
+        }).toEqual({
+          publicAfterRetry: expected,
+          status: `ready`,
+          publicError: undefined,
+        })
+      } finally {
+        subsetLoad.release()
+        await load?.catch(() => undefined)
+        await receipt?.catch(() => undefined)
+        await collection.cleanup()
+      }
+    })
+
+    it.each([`delete`, `insert`] as const)(
+      `settles a buffered complete %s across subset failure and retry`,
+      async (operation) => {
+        const { adapter } = registerContractHarness()
+        const collectionId = `complete-${operation}-after-subset-failure`
+        const row: Todo = {
+          id: `1`,
+          title: `${operation} row`,
+          createdAt: `2026-01-02T00:00:00.000Z`,
+          score: 11,
+        }
+        if (operation === `delete`) {
+          await adapter.applyCommittedTx(collectionId, {
+            txId: `seed-delete-baseline`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [{ type: `insert`, key: row.id, value: row }],
+          })
+        }
+
+        const loadSubset = adapter.loadSubset.bind(adapter)
+        const subsetFailure = new Error(
+          `controlled ${operation} subset failure`,
+        )
+        const subsetLoad = holdAndRejectFirstSubsetLoad(adapter, subsetFailure)
+
+        let source!: Parameters<SyncConfig<Todo, string>[`sync`]>[0]
+        const collection = createCollection(
+          persistedCollectionOptions<Todo, string>({
+            id: collectionId,
+            getKey: (value) => value.id,
+            syncMode: `on-demand`,
+            sync: {
+              rowUpdateMode: `partial`,
+              sync: (params) => {
+                source = params
+                params.markReady()
+                return { loadSubset: () => true }
+              },
+            },
+            persistence: { adapter },
+          }),
+        )
+
+        let load: Promise<void> | undefined
+        let receipt: Promise<void> | undefined
+        try {
+          await collection.stateWhenReady()
+          load = Promise.resolve(
+            collection._sync.loadSubset({ limit: 1 }),
+          ).then(() => undefined)
+          void load.catch(() => undefined)
+          await subsetLoad.entered
+
+          source.begin()
+          source.write(
+            operation === `delete`
+              ? { type: `delete`, key: row.id }
+              : { type: `insert`, value: row },
+          )
+          receipt = Promise.resolve(source.commit()).then(() => undefined)
+          let receiptStatus: `pending` | `fulfilled` | `rejected` = `pending`
+          void receipt.then(
+            () => {
+              receiptStatus = `fulfilled`
+            },
+            () => {
+              receiptStatus = `rejected`
+            },
+          )
+          expect(receiptStatus).toBe(`pending`)
+
+          subsetLoad.release()
+          await expect(load).rejects.toBe(subsetFailure)
+          await receipt
+          const expectedRows = operation === `delete` ? [] : [row]
+          expect({
+            receiptStatus,
+            publicRows: [...collection.values()].map((value) => ({
+              id: value.id,
+              title: value.title,
+              createdAt: value.createdAt,
+              score: value.score,
+            })),
+            durableRows: (await loadSubset(collectionId, {})).map(
+              ({ value }) => value,
+            ),
+            status: collection.status,
+            publicError: collection._lifecycle.getSyncError(),
+          }).toEqual({
+            receiptStatus: `fulfilled`,
+            publicRows: expectedRows,
+            durableRows: expectedRows,
+            status: `ready`,
+            publicError: undefined,
+          })
+
+          await collection._sync.loadSubset({ limit: 1 })
+          expect({
+            publicRows: [...collection.values()].map((value) => ({
+              id: value.id,
+              title: value.title,
+              createdAt: value.createdAt,
+              score: value.score,
+            })),
+            status: collection.status,
+            publicError: collection._lifecycle.getSyncError(),
+          }).toEqual({
+            publicRows: expectedRows,
+            status: `ready`,
+            publicError: undefined,
+          })
+        } finally {
+          subsetLoad.release()
+          await load?.catch(() => undefined)
+          await receipt?.catch(() => undefined)
+          await collection.cleanup()
+        }
+      },
+    )
 
     it(`rolls back partially applied mutations when transaction fails`, async () => {
       const { adapter, driver } = registerContractHarness()
@@ -1116,6 +1394,64 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(withInEmpty).toEqual([])
     })
 
+    // At loadSubset completion, persisted fallback ordering must use the exact
+    // custom comparator, then direction and public-key tie order. A lexical
+    // fallback fails every cell below.
+    it.each([
+      {
+        case: `ascending`,
+        direction: `asc` as const,
+        compare: (left: string, right: string) => right.localeCompare(left),
+        expected: [`zeta`, `middle`, `alpha`],
+      },
+      {
+        case: `descending`,
+        direction: `desc` as const,
+        compare: (left: string, right: string) => right.localeCompare(left),
+        expected: [`alpha`, `middle`, `zeta`],
+      },
+      {
+        case: `comparator-equal key order`,
+        direction: `asc` as const,
+        compare: () => 0,
+        expected: [`zeta`, `alpha`, `middle`],
+      },
+    ])(
+      `applies custom string collation during persisted subset ordering ($case)`,
+      async ({ case: caseName, direction, compare, expected }) => {
+        const { adapter } = registerContractHarness()
+        const collectionId = `custom-collation-order-${caseName}`
+
+        await adapter.applyCommittedTx(collectionId, {
+          txId: `seed-custom-collation`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [`zeta`, `alpha`, `middle`].map((title, index) => ({
+            type: `insert` as const,
+            key: String(index),
+            value: { id: String(index), title, createdAt: ``, score: index },
+          })),
+        })
+
+        const rows = await adapter.loadSubset(collectionId, {
+          orderBy: [
+            {
+              expression: new IR.PropRef([`title`]),
+              compareOptions: {
+                direction,
+                nulls: `last`,
+                stringSort: `custom`,
+                compare,
+              },
+            },
+          ],
+        })
+
+        expect(rows.map(({ value }) => value.title)).toEqual(expected)
+      },
+    )
+
     it(`supports datetime/strftime predicate compilation for ISO date fields`, async () => {
       const { adapter } = registerContractHarness()
       const collectionId = `date-pushdown`
@@ -1361,6 +1697,43 @@ export function runSQLiteCoreAdapterContractSuite(
         [createdIndexName],
       )
       expect(sqliteMasterAfter).toHaveLength(0)
+    })
+
+    it(`rebuilds a physical index when the normalized spec changes`, async () => {
+      const { adapter, driver } = registerContractHarness()
+      const collectionId = `todos`
+      const signature = `idx-upgraded-expression`
+
+      await adapter.ensureIndex(collectionId, signature, {
+        expressionSql: [`json_extract(value, '$.title')`],
+      })
+
+      const registryRows = await driver.query<{ index_name: string }>(
+        `SELECT index_name
+         FROM persisted_index_registry
+         WHERE collection_id = ? AND signature = ?`,
+        [collectionId, signature],
+      )
+      const indexName = registryRows[0]?.index_name
+      expect(indexName).toBeTruthy()
+
+      await adapter.ensureIndex(collectionId, signature, {
+        expressionSql: [`json_extract(value, '$.score')`],
+      })
+
+      const sqliteMasterRows = await driver.query<{ sql: string }>(
+        `SELECT sql
+         FROM sqlite_master
+         WHERE type = 'index' AND name = ?`,
+        [indexName],
+      )
+      expect(sqliteMasterRows).toHaveLength(1)
+      expect(sqliteMasterRows[0]?.sql).toContain(
+        `json_extract(value, '$.score')`,
+      )
+      expect(sqliteMasterRows[0]?.sql).not.toContain(
+        `json_extract(value, '$.title')`,
+      )
     })
 
     it(`enforces schema mismatch policies`, async () => {
@@ -2229,16 +2602,53 @@ export function runSQLiteCoreAdapterContractSuite(
       })
 
       // `meta-field` makes SQL pushdown unsupported, so filter correctness comes
-      // from the in-memory evaluator. The leading `todos` segment simulates
-      // alias-qualified refs emitted by higher-level query builders.
+      // from the in-memory evaluator. The explicit source alias is the only
+      // signal that the leading `todos` segment is qualification.
       const rows = await adapter.loadSubset(collectionId, {
         where: new IR.Func(`eq`, [
-          new IR.PropRef([`todos`, `meta-field`]),
+          new IR.PropRef([`todos`, `meta-field`], `todos`),
           new IR.Value(`alpha`),
         ]),
       })
 
       expect(rows.map((row) => row.key)).toEqual([`1`])
+    })
+
+    it(`does not guess that a legacy fallback path is an alias`, async () => {
+      const { driver } = registerContractHarness()
+      const adapter = new SQLiteCorePersistenceAdapter({ driver })
+      const collectionId = `fallback-legacy-nested-ref`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-legacy-nested-fallback`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `nested-match`,
+            value: {
+              profile: { [`meta-field`]: `alpha` },
+              [`meta-field`]: `flat-other`,
+            },
+          },
+          {
+            type: `insert`,
+            key: `flat-only`,
+            value: { [`meta-field`]: `alpha` },
+          },
+        ],
+      })
+
+      const rows = await adapter.loadSubset(collectionId, {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`profile`, `meta-field`]),
+          new IR.Value(`alpha`),
+        ]),
+      })
+
+      expect(rows.map((row) => row.key)).toEqual([`nested-match`])
     })
 
     it(`compiles serialized expression index specs used by phase-2 metadata`, async () => {

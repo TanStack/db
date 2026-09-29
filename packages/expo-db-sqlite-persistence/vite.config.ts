@@ -12,7 +12,7 @@ const config = defineConfig({
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,
-      include: [`tests/**/*.test.ts`],
+      include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
     },
   },
 })

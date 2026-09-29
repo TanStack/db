@@ -157,6 +157,9 @@ export function createBrowserWASQLitePersistence(
     `sync-absent`,
     undefined,
   )
+  if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
+    resolvedCoordinator.setAdapter(defaultPersistence.adapter)
+  }
 
   return {
     ...defaultPersistence,

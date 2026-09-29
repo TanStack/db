@@ -2,7 +2,11 @@ import { isPlainObject } from '../utils/type-guards.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
-import { getRuntimeReferenceIdentity } from './runtime-reference-identity.js'
+import {
+  getRuntimeReferenceIdentity,
+  getStringCollationIdentity,
+} from './runtime-reference-identity.js'
+import { getPropRefPropertyPath, getPropRefSourceAlias } from './ir.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -91,11 +95,12 @@ export function getQueryIdentity(query: QueryIR): QueryIdentity {
  * Returns the exact semantic identity of a loadSubset request.
  *
  * Abort signals and subscriptions are owners of a request, not part of the
- * requested data, and therefore do not affect the key. A demand generation
- * scopes one asynchronous attempt rather than the data it requests. Code that
- * rejects stale work compares this key alongside its generation; query-db uses
- * the key alone so equivalent data demands can reuse one cache entry across
- * generations.
+ * requested data, and therefore do not affect the key. `refetch` controls
+ * whether to start another acquisition attempt for that data and likewise does
+ * not affect identity. A demand generation scopes one asynchronous attempt
+ * rather than the data it requests. Code that rejects stale work compares this
+ * key alongside its generation; query-db uses the key alone so equivalent data
+ * demands can reuse one cache entry across generations.
  */
 export function getLoadSubsetDemandKey(
   options: LoadSubsetOptions,
@@ -558,12 +563,24 @@ function canonicalizeOrderBy(
       valueContext,
       scope,
     ),
-    compareOptions: canonicalizeRuntimeValue(
+    compareOptions: canonicalizeCompareOptions(
       orderBy.compareOptions,
       `${path}.compareOptions`,
       seen,
     ),
   }
+}
+
+function canonicalizeCompareOptions(
+  compareOptions: OrderByClause[`compareOptions`],
+  path: string,
+  seen: WeakSet<object>,
+): StableIdentityValue {
+  return canonicalizeRuntimeValue(
+    getStringCollationIdentity(compareOptions),
+    path,
+    seen,
+  )
 }
 
 function canonicalizeExpression(
@@ -578,6 +595,38 @@ function canonicalizeExpression(
   scope?: AliasScope,
 ): StableIdentityValue {
   if (expression.type === `ref`) {
+    const explicitAlias = getPropRefSourceAlias(expression)
+    if (explicitAlias !== undefined) {
+      const binding = resolveAliasBinding(scope, explicitAlias)
+      if (binding !== undefined) {
+        return {
+          type: `ref`,
+          path: [
+            [`binding`, ...binding],
+            ...getPropRefPropertyPath(expression).map((segment, index) =>
+              canonicalizeRuntimeValue(
+                segment,
+                `${path}.path[${index + 1}]`,
+                seen,
+              ),
+            ),
+          ],
+        }
+      }
+
+      return {
+        type: `ref`,
+        path: expression.path.map((segment, index) =>
+          canonicalizeRuntimeValue(segment, `${path}.path[${index}]`, seen),
+        ),
+        sourceAlias: canonicalizeRuntimeValue(
+          explicitAlias,
+          `${path}.sourceAlias`,
+          seen,
+        ),
+      }
+    }
+
     const binding = resolveAliasBinding(scope, expression.path[0] ?? ``)
     return {
       type: `ref`,

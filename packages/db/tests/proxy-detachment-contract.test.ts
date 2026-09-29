@@ -20,6 +20,8 @@ import type { CollectionConfig } from '../src/types.js'
  * sparse arrays and adversarial keys cover shapes that JSON equality erases.
  * Alias and back-reference tests observe both identity and stored values, so a
  * flattened or accidentally shared result cannot pass.
+ * Native Set and Map iteration order is part of the detached snapshot: a
+ * reorder with identical members or entries is still a draft change.
  */
 
 class Label {
@@ -355,6 +357,78 @@ describe(`Mutation result detachment`, () => {
         } finally {
           await collection.cleanup()
         }
+      }
+    },
+  )
+
+  // Contract: a native container's insertion order survives the draft patch
+  // and the stored-row publication, even when its members are unchanged.
+  // Model: run the same reorder on a fresh native Set or Map.
+  // Grammar: Set/Map × replacement/clear-and-readd of two entries.
+  // Driver and checkpoint: compare the change patch after the callback and
+  // the public Collection row after update() publishes and persists it.
+  it.each(
+    ([`Set`, `Map`] as const).flatMap((kind) =>
+      ([`replace`, `clear-and-readd`] as const).map((action) => ({
+        kind,
+        action,
+      })),
+    ),
+  )(
+    `records $kind $action order in draft patches and stored rows`,
+    async ({ kind, action }) => {
+      const make = (): {
+        id: number
+        value: Set<string> | Map<string, number>
+      } => ({
+        id: 1,
+        value:
+          kind === `Set`
+            ? new Set([`a`, `b`])
+            : new Map<string, number>([
+                [`a`, 1],
+                [`b`, 2],
+              ]),
+      })
+      const reorder = (row: ReturnType<typeof make>) => {
+        if (kind === `Set`) {
+          if (action === `replace`) row.value = new Set([`b`, `a`])
+          else {
+            const value = row.value as Set<string>
+            value.clear()
+            value.add(`b`).add(`a`)
+          }
+        } else if (action === `replace`)
+          row.value = new Map<string, number>([
+            [`b`, 2],
+            [`a`, 1],
+          ])
+        else {
+          const value = row.value as Map<string, number>
+          value.clear()
+          value.set(`b`, 2).set(`a`, 1)
+        }
+      }
+      const entries = (value: Set<string> | Map<string, number>) => [...value]
+      const expected = make()
+      reorder(expected)
+      const original = make()
+      const changes = withChangeTracking(original, reorder)
+      expect(Object.hasOwn(changes, `value`)).toBe(true)
+      expect(
+        entries(changes.value as Set<string> | Map<string, number>),
+      ).toEqual(entries(expected.value))
+      expect(entries(original.value)).toEqual(entries(make().value))
+
+      const collection = storedRow(make())
+      try {
+        const tx = collection.update(1, reorder)
+        await tx.isPersisted.promise
+        expect(entries(collection.get(1)!.value)).toEqual(
+          entries(expected.value),
+        )
+      } finally {
+        await collection.cleanup()
       }
     },
   )

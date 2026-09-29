@@ -11,6 +11,7 @@ import { electricCollectionOptions } from '../src/electric'
 import type { Message, Row } from '@electric-sql/client'
 import type { Collection } from '@tanstack/db'
 import type {
+  HydrationPersistenceAdapter,
   PersistenceAdapter,
   SQLiteDriver,
 } from '../../db-sqlite-persistence-core/src'
@@ -137,6 +138,7 @@ async function runRace(
     | `unknown`
     | `missing`
     | `incompatible` = `unchanged`,
+  forwardHydrationScope = false,
 ): Promise<void> {
   const database = new DatabaseSync(`:memory:`)
   const driver = createDriver(database)
@@ -219,53 +221,77 @@ async function runRace(
     const receiverFailure = new Promise<Error>((resolve) => {
       reportReceiverFailure = resolve
     })
-    const gatedAdapter = new Proxy(restartedAdapter, {
-      get(target, property) {
-        if (property === `loadResumeSnapshot`) {
-          return async function (
-            this: PersistenceAdapter,
-            ...args: Parameters<typeof target.loadResumeSnapshot>
-          ) {
-            if (this !== gatedAdapter) {
-              const error = new Error(
-                `Persistence adapter lost its receiver during resume certification`,
+    const gateSnapshotAdapter = <TAdapter extends PersistenceAdapter>(
+      adapter: TAdapter,
+    ): TAdapter => {
+      const gatedAdapter = new Proxy(adapter, {
+        get(target, property) {
+          if (property === `runInHydrationScope`) {
+            // Exercise both an adapter without optional hydration scopes and
+            // an adapter that forwards its scoped snapshot reads.
+            if (!forwardHydrationScope || !target.runInHydrationScope) {
+              return undefined
+            }
+            return <T>(
+              task: (scopedAdapter: HydrationPersistenceAdapter) => Promise<T>,
+            ): Promise<T> =>
+              target.runInHydrationScope!((scopedAdapter) =>
+                task(gateSnapshotAdapter(scopedAdapter)),
               )
-              reportReceiverFailure(error)
-              throw error
-            }
-            snapshotCalls++
-            const isLaterSnapshot = snapshotCalls > 1
-            if (isLaterSnapshot) {
-              laterSnapshotIncludedRows = args[1]?.includeRows
-              if (startupReset !== `none`) {
-                resumeStateAtLaterSnapshot = (
-                  await target.loadCollectionMetadata(collectionId)
-                ).find(({ key }) => key === `electric:resume`)?.value
-              }
-              laterSnapshotEntered.resolve()
-              await releaseLaterSnapshot.promise
-            }
-            const snapshot = await target.loadResumeSnapshot(...args)
-            if (isLaterSnapshot && laterKeySetEvidence !== `unchanged`) {
-              return {
-                ...snapshot,
-                keySet:
-                  laterKeySetEvidence === `unknown`
-                    ? { status: `unknown` as const }
-                    : laterKeySetEvidence === `incompatible`
-                      ? { status: `incompatible` as const }
-                      : undefined,
-              }
-            }
-            return missingKeySetEvidence
-              ? { ...snapshot, keySet: undefined }
-              : snapshot
           }
-        }
-        const value = Reflect.get(target, property, target) as unknown
-        return typeof value === `function` ? value.bind(target) : value
-      },
-    }) as unknown as PersistenceAdapter
+          if (property === `loadResumeSnapshot`) {
+            return async function (
+              this: PersistenceAdapter,
+              ...args: Parameters<typeof target.loadResumeSnapshot>
+            ) {
+              if (this !== gatedAdapter) {
+                const error = new Error(
+                  `Persistence adapter lost its receiver during resume certification`,
+                )
+                reportReceiverFailure(error)
+                throw error
+              }
+              snapshotCalls++
+              const isLaterSnapshot = snapshotCalls > 1
+              if (isLaterSnapshot) {
+                laterSnapshotIncludedRows = args[1]?.includeRows
+                if (startupReset !== `none`) {
+                  if (!target.loadCollectionMetadata) {
+                    throw new Error(
+                      `Expected collection metadata in snapshot scope`,
+                    )
+                  }
+                  resumeStateAtLaterSnapshot = (
+                    await target.loadCollectionMetadata(collectionId)
+                  ).find(({ key }) => key === `electric:resume`)?.value
+                }
+                laterSnapshotEntered.resolve()
+                await releaseLaterSnapshot.promise
+              }
+              const snapshot = await target.loadResumeSnapshot(...args)
+              if (isLaterSnapshot && laterKeySetEvidence !== `unchanged`) {
+                return {
+                  ...snapshot,
+                  keySet:
+                    laterKeySetEvidence === `unknown`
+                      ? { status: `unknown` as const }
+                      : laterKeySetEvidence === `incompatible`
+                        ? { status: `incompatible` as const }
+                        : undefined,
+                }
+              }
+              return missingKeySetEvidence
+                ? { ...snapshot, keySet: undefined }
+                : snapshot
+            }
+          }
+          const value = Reflect.get(target, property, target) as unknown
+          return typeof value === `function` ? value.bind(target) : value
+        },
+      })
+      return gatedAdapter
+    }
+    const gatedAdapter = gateSnapshotAdapter(restartedAdapter)
 
     const electricOptions = electricCollectionOptions<Item>({
       id: collectionId,
@@ -357,9 +383,6 @@ async function runRace(
     }
     const replacesUncertifiedBaseline =
       legacyUnknown || missingKeySetEvidence || startupReset !== `none`
-    if (startupReset !== `none`) {
-      expect(resumeStateAtLaterSnapshot).toMatchObject({ kind: `reset` })
-    }
     if (metadataWrapper === `shallow-persistence`) {
       expect(forwardedPersistenceCapability).toBe(receivedPersistenceCapability)
       expect(getExpectedCommitCallCount()).toBe(1)
@@ -535,6 +558,27 @@ async function runRace(
     expect(laterSnapshotIncludedRows).toBe(
       replacesUncertifiedBaseline || syncMode !== `on-demand`,
     )
+    if (startupReset !== `none`) {
+      // The marker write may commit before or after the held hydration read.
+      // Neither schedule may invent a new resume cursor before the fresh
+      // source snapshot. The request and final rows are checked above.
+      if (
+        typeof resumeStateAtLaterSnapshot !== `object` ||
+        resumeStateAtLaterSnapshot === null ||
+        !(`kind` in resumeStateAtLaterSnapshot)
+      ) {
+        throw new Error(`Expected the prior resume or reset marker`)
+      }
+      if (resumeStateAtLaterSnapshot.kind === `reset`) {
+        expect(resumeStateAtLaterSnapshot).not.toHaveProperty(`offset`)
+      } else {
+        expect(resumeStateAtLaterSnapshot).toMatchObject({
+          kind: `resume`,
+          offset: `10_0`,
+          handle: `shape-old`,
+        })
+      }
+    }
   } catch (error) {
     primaryFailure = error
   } finally {
@@ -819,11 +863,11 @@ describe(`Electric resume snapshot races`, () => {
     vi.clearAllMocks()
   })
 
-  it(`keeps a healthy tagged cache when a fresh reset commits before hydration`, async () => {
+  it(`keeps a healthy tagged cache when startup invalidates its resume cursor`, async () => {
     await runRace(`none`, `eager`, false, false, `tag-state`)
   })
 
-  it(`keeps a healthy cache when a changed shape commits its reset before hydration`, async () => {
+  it(`keeps a healthy cache when a changed shape invalidates its resume cursor`, async () => {
     await runRace(`none`, `eager`, false, false, `shape-identity`)
   })
 
@@ -837,6 +881,26 @@ describe(`Electric resume snapshot races`, () => {
       `shallow-persistence`,
     )
   })
+
+  it.each([
+    [`tag-state`, `none`],
+    [`shape-identity`, `none`],
+    [`shape-identity`, `shallow-persistence`],
+  ] as const)(
+    `keeps a fresh %s reset safe when the %s source wrapper forwards hydration scope`,
+    async (startupReset, metadataWrapper) => {
+      await runRace(
+        `none`,
+        `eager`,
+        false,
+        false,
+        startupReset,
+        metadataWrapper,
+        `unchanged`,
+        true,
+      )
+    },
+  )
 
   it(`rejects row loss between resume metadata and baseline hydration`, async () => {
     await runRace(`external-row-loss`)

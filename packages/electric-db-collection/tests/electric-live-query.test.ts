@@ -772,6 +772,40 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(liveQuery.size).toBeGreaterThan(2)
   })
 
+  it(`loads a prefix while publishing only the requested offset window`, async () => {
+    const electricCollection = createElectricCollectionWithSyncMode(`on-demand`)
+
+    simulateInitialSync([])
+    mockRequestSnapshot.mockResolvedValueOnce({
+      data: sampleUsers.map((user) => ({
+        headers: { operation: `insert` },
+        key: user.id,
+        value: user,
+      })),
+    })
+
+    const liveQuery = createLiveQueryCollection({
+      id: `offset-live-query`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ user: electricCollection })
+          .orderBy(({ user }) => user.id, `asc`)
+          .limit(2)
+          .offset(2),
+    })
+
+    await vi.waitFor(() => expect(liveQuery.status).toBe(`ready`))
+
+    expect(mockRequestSnapshot.mock.calls[0]?.[0]).toMatchObject({
+      limit: 4,
+      orderBy: `"id" NULLS FIRST`,
+      params: {},
+    })
+    expect(mockRequestSnapshot.mock.calls[0]?.[0]).not.toHaveProperty(`offset`)
+    expect(liveQuery.toArray.map((user) => user.id)).toEqual([3, 4])
+  })
+
   it(`should trigger fetchSnapshot in progressive mode when live query needs more data`, async () => {
     const electricCollection =
       createElectricCollectionWithSyncMode(`progressive`)

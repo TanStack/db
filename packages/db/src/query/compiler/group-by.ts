@@ -12,6 +12,7 @@ import {
   getHavingExpression,
   isExpressionLike,
 } from '../ir.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -670,7 +671,7 @@ export function replaceAggregatesByRefs(
       for (const [alias, selectExpr] of Object.entries(selectClause)) {
         if (selectExpr.type === `agg` && aggregatesEqual(aggExpr, selectExpr)) {
           // Replace with a reference to the computed aggregate
-          return new PropRef([resultAlias, alias])
+          return new PropRef([resultAlias, alias], resultAlias)
         }
       }
       // If no matching aggregate found in SELECT, throw error
@@ -801,7 +802,7 @@ function extractAndReplaceAggregates(
   if (expr.type === `agg`) {
     const alias = `${aggregatePrefix}${counter.value++}`
     return {
-      transformed: new PropRef([`$selected`, alias]),
+      transformed: new PropRef([`$selected`, alias], `$selected`),
       extracted: { [alias]: expr },
     }
   }
@@ -941,7 +942,7 @@ function replaceGroupByRefsInExpression(
     )
     return groupIndex === -1
       ? expr
-      : new PropRef([`$selected`, groupKeyRefs[groupIndex]!])
+      : new PropRef([`$selected`, groupKeyRefs[groupIndex]!], `$selected`)
   }
 
   if (expr.type === `func`) {
@@ -988,9 +989,10 @@ function compileGroupedSelectObject(
       const pathStr = splitIndex >= 0 ? rest.slice(0, splitIndex) : rest
       const isRefExpr =
         typeof value === `object` && `type` in value && value.type === `ref`
+      const path = pathStr.split(`.`)
       const expression = isRefExpr
         ? (value as BasicExpression)
-        : (new PropRef(pathStr.split(`.`)) as BasicExpression)
+        : (new PropRef(path, path[0]) as BasicExpression)
 
       return {
         key,
@@ -1050,7 +1052,7 @@ function isNestedSelectObject(value: unknown): value is Select {
     value != null &&
     typeof value === `object` &&
     !Array.isArray(value) &&
-    !(value as any).__refProxy &&
+    !isRefProxy(value) &&
     !isExpressionLike(value)
   )
 }

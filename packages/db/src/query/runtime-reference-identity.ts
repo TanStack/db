@@ -1,3 +1,5 @@
+import type { StringCollationConfig } from '../types.js'
+
 export type RuntimeReferenceIdentity = [
   `runtimeReference`,
   namespace: string,
@@ -77,6 +79,17 @@ export function getRuntimeReferenceIdentity(
   runtimeReferenceIdentityFactory ??= createRuntimeReferenceIdentityFactory()
 
   return runtimeReferenceIdentityFactory(value)
+}
+
+export function getStringCollationIdentity(
+  options: StringCollationConfig | undefined,
+): unknown {
+  return options?.stringSort === `custom`
+    ? {
+        ...options,
+        compare: getRuntimeReferenceIdentity(options.compare),
+      }
+    : options
 }
 
 function createRuntimeReferenceNamespace(): string {

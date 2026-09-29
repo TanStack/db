@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import {
   CollectionInErrorStateError,
@@ -9,27 +9,9 @@ import {
 import type { SyncConfig } from '../src/types'
 
 describe(`Collection Error Handling`, () => {
-  let originalQueueMicrotask: typeof queueMicrotask
-  let mockQueueMicrotask: ReturnType<typeof vi.fn>
-
-  beforeEach(() => {
-    // Store original queueMicrotask
-    originalQueueMicrotask = globalThis.queueMicrotask
-
-    // Create mock that doesn't actually queue microtasks
-    mockQueueMicrotask = vi.fn()
-    globalThis.queueMicrotask = mockQueueMicrotask
-  })
-
-  afterEach(() => {
-    // Restore original queueMicrotask
-    globalThis.queueMicrotask = originalQueueMicrotask
-    vi.clearAllMocks()
-  })
-
   describe(`Cleanup Error Handling`, () => {
     it.each([false, true])(
-      `finishes adapter resource cleanup after a failure, already released=%s`,
+      `rejects once after adapter cleanup fails, already released=%s`,
       async (releaseBeforeThrow) => {
         const resources = new Set<object>()
         const failure = new Error(`adapter cleanup interrupted`)
@@ -55,19 +37,17 @@ describe(`Collection Error Handling`, () => {
         collection.startSyncImmediate()
         try {
           expect(resources.size).toBe(1)
-          await collection.cleanup()
+          await expect(collection.cleanup()).rejects.toMatchObject({
+            name: `SyncCleanupError`,
+            cause: failure,
+          })
           expect(collection.status).toBe(`cleaned-up`)
           expect(resources.size).toBe(releaseBeforeThrow ? 0 : 1)
-          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
-          expect(() => mockQueueMicrotask.mock.calls[0]![0]()).toThrow(
-            SyncCleanupError,
-          )
 
-          // The Collection's public status alone does not prove resource release.
+          // The failed callback belongs to the retired run and is not retried.
           await collection.cleanup()
-          expect(resources.size).toBe(0)
-          expect(attempts).toBe(2)
-          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+          expect(resources.size).toBe(releaseBeforeThrow ? 0 : 1)
+          expect(attempts).toBe(1)
         } finally {
           await collection.cleanup()
         }
@@ -75,7 +55,7 @@ describe(`Collection Error Handling`, () => {
     )
 
     it.each([false, true])(
-      `retries failed cleanup only before replacement, restart after rejection=%s`,
+      `does not retry failed cleanup, restart after rejection=%s`,
       async (restart) => {
         const failure = new Error(`cleanup failed`)
         const cleanups: Array<number> = []
@@ -104,32 +84,26 @@ describe(`Collection Error Handling`, () => {
 
         collection.startSyncImmediate()
         try {
-          await collection.cleanup()
+          await expect(collection.cleanup()).rejects.toMatchObject({
+            name: `SyncCleanupError`,
+            cause: failure,
+          })
           expect(cleanups).toEqual([0])
-          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
-          let reportedError: unknown
-          try {
-            mockQueueMicrotask.mock.calls[0]![0]()
-          } catch (error) {
-            reportedError = error
-          }
-          expect(reportedError).toBeInstanceOf(SyncCleanupError)
-          expect((reportedError as Error).cause).toBe(failure)
 
           expect(syncRunCount).toBe(1)
           if (restart) collection.startSyncImmediate()
           await collection.cleanup()
-          expect(cleanups).toEqual(restart ? [0, 1] : [0, 0])
+          expect(cleanups).toEqual(restart ? [0, 1] : [0])
           await collection.cleanup()
-          expect(cleanups).toHaveLength(2)
-          expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
+          expect(cleanups).toHaveLength(restart ? 2 : 1)
         } finally {
           await collection.cleanup()
         }
       },
     )
 
-    it(`should complete cleanup successfully even when sync cleanup function throws an Error`, async () => {
+    it(`should reject cleanup when sync cleanup function throws an Error`, async () => {
+      const queueMicrotaskSpy = vi.spyOn(globalThis, `queueMicrotask`)
       const collection = createCollection<{ id: string; name: string }>({
         id: `error-test-collection`,
         getKey: (item) => item.id,
@@ -146,37 +120,27 @@ describe(`Collection Error Handling`, () => {
         },
       })
 
-      // Start sync to get the cleanup function
-      collection.preload()
-
-      // Cleanup should complete successfully despite the error
-      await expect(collection.cleanup()).resolves.toBeUndefined()
-
-      // Collection should be in cleaned-up state
-      expect(collection.status).toBe(`cleaned-up`)
-
-      // Verify that a microtask was queued to re-throw the error
-      expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
-
-      // Get the microtask callback and verify it throws the expected error
-      const microtaskCallback = mockQueueMicrotask.mock.calls[0]?.[0]
-      expect(microtaskCallback).toBeDefined()
-      expect(() => microtaskCallback()).toThrow(SyncCleanupError)
-
-      let caughtError: Error | undefined
       try {
-        microtaskCallback()
-      } catch (error) {
-        caughtError = error as Error
-      }
+        // Start sync to get the cleanup function
+        collection.preload()
 
-      expect(caughtError).toBeInstanceOf(SyncCleanupError)
-      expect(caughtError?.message).toBe(
-        `Collection "error-test-collection" sync cleanup function threw an error: Sync cleanup failed`,
-      )
+        await expect(collection.cleanup()).rejects.toMatchObject({
+          name: `SyncCleanupError`,
+          cause: expect.any(Error),
+          message: `Collection "error-test-collection" sync cleanup function threw an error: Sync cleanup failed`,
+        })
+
+        // Failure is observable without stranding the retired lifecycle or
+        // scheduling the legacy detached throw.
+        expect(collection.status).toBe(`cleaned-up`)
+        expect(queueMicrotaskSpy).not.toHaveBeenCalled()
+      } finally {
+        queueMicrotaskSpy.mockRestore()
+        await collection.cleanup()
+      }
     })
 
-    it(`should preserve original error stack trace when re-throwing in microtask`, async () => {
+    it(`should preserve original error stack trace when cleanup rejects`, async () => {
       const originalError = new Error(`Original sync error`)
       const originalStack = `original stack trace`
       originalError.stack = originalStack
@@ -196,31 +160,12 @@ describe(`Collection Error Handling`, () => {
         },
       })
 
-      // Start sync and cleanup
       collection.preload()
-      await collection.cleanup()
-
-      // Verify microtask was queued
-      expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
-
-      // Execute the microtask callback and catch the re-thrown error
-      const microtaskCallback = mockQueueMicrotask.mock.calls[0]?.[0]
-      expect(microtaskCallback).toBeDefined()
-
-      let caughtError: Error | undefined
-      try {
-        microtaskCallback()
-      } catch (error) {
-        caughtError = error as Error
-      }
-
-      // Verify the re-thrown error has proper context and preserved stack
-      expect(caughtError).toBeDefined()
-      expect(caughtError!.message).toBe(
-        `Collection "stack-trace-test" sync cleanup function threw an error: Original sync error`,
-      )
-      expect(caughtError!.stack).toBe(originalStack) // Original stack preserved
-      expect(caughtError!.cause).toBe(originalError) // Original error chained
+      await expect(collection.cleanup()).rejects.toMatchObject({
+        message: `Collection "stack-trace-test" sync cleanup function threw an error: Original sync error`,
+        stack: originalStack,
+        cause: originalError,
+      })
     })
 
     it(`should handle non-Error thrown values in sync cleanup`, async () => {
@@ -241,32 +186,11 @@ describe(`Collection Error Handling`, () => {
         },
       })
 
-      // Start sync and cleanup
       collection.preload()
-      await collection.cleanup()
-
-      // Verify microtask was queued
-      expect(mockQueueMicrotask).toHaveBeenCalledTimes(1)
-
-      // Execute the microtask callback and catch the re-thrown error
-      const microtaskCallback = mockQueueMicrotask.mock.calls[0]?.[0]
-      expect(microtaskCallback).toBeDefined()
-
-      let caughtError: Error | undefined
-      try {
-        microtaskCallback()
-      } catch (error) {
-        caughtError = error as Error
-      }
-
-      // Verify non-Error values are handled properly
-      expect(caughtError).toBeDefined()
-      expect(caughtError!.message).toBe(
-        `Collection "non-error-test" sync cleanup function threw an error: String error message`,
-      )
-
-      // No cause or stack preservation for non-Error values
-      expect(caughtError!.cause).toBeUndefined()
+      await expect(collection.cleanup()).rejects.toMatchObject({
+        message: `Collection "non-error-test" sync cleanup function threw an error: String error message`,
+        cause: nonErrorValue,
+      })
     })
 
     it(`should not interfere with cleanup when sync cleanup function is undefined`, async () => {
@@ -288,12 +212,9 @@ describe(`Collection Error Handling`, () => {
       // Cleanup should work normally without any cleanup function
       await expect(collection.cleanup()).resolves.toBeUndefined()
       expect(collection.status).toBe(`cleaned-up`)
-
-      // No microtask should be queued when there's no cleanup function
-      expect(mockQueueMicrotask).not.toHaveBeenCalled()
     })
 
-    it(`should handle multiple cleanup calls gracefully`, async () => {
+    it(`should not retry a failed callback on later cleanup calls`, async () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `multiple-cleanup-test`,
         getKey: (item) => item.id,
@@ -312,40 +233,16 @@ describe(`Collection Error Handling`, () => {
       // Start sync
       collection.preload()
 
-      // First cleanup should complete successfully despite error
+      await expect(collection.cleanup()).rejects.toBeInstanceOf(
+        SyncCleanupError,
+      )
+      expect(collection.status).toBe(`cleaned-up`)
+
       await expect(collection.cleanup()).resolves.toBeUndefined()
       expect(collection.status).toBe(`cleaned-up`)
 
-      // Second cleanup should also complete successfully (idempotent)
       await expect(collection.cleanup()).resolves.toBeUndefined()
       expect(collection.status).toBe(`cleaned-up`)
-
-      // Third cleanup should also work (proving idempotency)
-      await expect(collection.cleanup()).resolves.toBeUndefined()
-      expect(collection.status).toBe(`cleaned-up`)
-
-      // Verify that microtasks were queued for cleanup attempts
-      // (Each cleanup call that encounters a cleanup function will queue a microtask)
-      expect(mockQueueMicrotask).toHaveBeenCalled()
-
-      // All queued microtasks should throw the expected error when executed
-      for (const call of mockQueueMicrotask.mock.calls) {
-        const microtaskCallback = call[0]
-        expect(microtaskCallback).toBeDefined()
-        expect(() => microtaskCallback()).toThrow(SyncCleanupError)
-
-        let caughtError: Error | undefined
-        try {
-          microtaskCallback()
-        } catch (error) {
-          caughtError = error as Error
-        }
-
-        expect(caughtError).toBeInstanceOf(SyncCleanupError)
-        expect(caughtError?.message).toBe(
-          `Collection "multiple-cleanup-test" sync cleanup function threw an error: Cleanup error`,
-        )
-      }
     })
   })
 

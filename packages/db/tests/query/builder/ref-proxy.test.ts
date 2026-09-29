@@ -6,7 +6,8 @@ import {
   toExpression,
   val,
 } from '../../../src/query/builder/ref-proxy.js'
-import { PropRef, Value } from '../../../src/query/ir.js'
+import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
+import { MaterializeWrapper } from '../../../src/query/builder/functions.js'
 
 describe(`ref-proxy`, () => {
   describe(`createSingleRowRefProxy`, () => {
@@ -18,6 +19,7 @@ describe(`ref-proxy`, () => {
 
       expect(expression).toBeInstanceOf(PropRef)
       expect((expression as PropRef).path).toEqual([`timestamp`, `seconds`])
+      expect((expression as PropRef).sourceAlias).toBeUndefined()
     })
 
     it(`records built-in method paths only when the type boundary is bypassed`, () => {
@@ -195,6 +197,7 @@ describe(`ref-proxy`, () => {
       expect(expr).toBeInstanceOf(PropRef)
       expect(expr.type).toBe(`ref`)
       expect((expr as PropRef).path).toEqual([`users`, `id`])
+      expect((expr as PropRef).sourceAlias).toBe(`users`)
     })
 
     it(`converts literal values to Value expression`, () => {
@@ -212,12 +215,34 @@ describe(`ref-proxy`, () => {
       expect(toExpression(valExpr)).toBe(valExpr)
     })
 
-    it(`handles expressions with different types`, () => {
-      const funcExpr = { type: `func` as const, name: `upper`, args: [] }
-      const aggExpr = { type: `agg` as const, name: `count`, args: [] }
+    it(`preserves constructed functions and aggregates`, () => {
+      const funcExpr = new Func(`upper`, [])
+      const aggExpr = new Aggregate(`count`, [])
 
       expect(toExpression(funcExpr)).toBe(funcExpr)
       expect(toExpression(aggExpr)).toBe(aggExpr)
+    })
+
+    it(`wraps user objects with expression-like fields as values`, () => {
+      const literal = { type: `val`, value: 42 }
+      const expression = toExpression(literal)
+
+      expect(expression).toBeInstanceOf(Value)
+      expect((expression as Value).value).toBe(literal)
+    })
+
+    it(`wraps user objects with wrapper and proxy-like fields as values`, () => {
+      for (const literal of [
+        { __brand: `MaterializeWrapper` },
+        { __refProxy: true, __path: [`users`, `id`] },
+      ]) {
+        const expression = toExpression(literal)
+        expect(expression).toBeInstanceOf(Value)
+        expect((expression as Value).value).toBe(literal)
+      }
+      expect(() => toExpression(new MaterializeWrapper({} as any))).toThrow(
+        /materialize\(\) cannot be used inside expressions/,
+      )
     })
   })
 

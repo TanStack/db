@@ -25,6 +25,7 @@ import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
 import { crossJoinParentRoutes } from './parent-routes.js'
+import { queriesMatchForCaching } from './query-equivalence.js'
 import {
   INCLUDES_PUBLIC_KEY,
   attachRouteMetadata,
@@ -632,12 +633,16 @@ function processJoinSource(
       }
     }
     case `queryRef`: {
-      // Find the original query for caching purposes
-      const originalQuery = queryMapping.get(from.query) || from.query
-
-      // Recursively compile the sub-query with cache
+      // Preserve the user-defined query as the cache key when optimization
+      // only copied it. If the optimizer changed the query, compile that IR;
+      // substituting its origin would discard pushed predicates.
+      const originalQuery = queryMapping.get(from.query)
+      const queryToCompile =
+        originalQuery && queriesMatchForCaching(from.query, originalQuery)
+          ? originalQuery
+          : from.query
       const subQueryResult = onCompileSubquery(
-        originalQuery,
+        queryToCompile,
         allInputs,
         collections,
         subscriptions,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IR } from '@tanstack/db'
+import fc from 'fast-check'
+import { BasicIndex, IR, createCollection } from '@tanstack/db'
 import { RetryableRemoteSubsetAcquisitionError } from '@tanstack/db-sqlite-persistence-core'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import {
@@ -10,7 +11,9 @@ import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
 import type { LoadSubsetOptions, Subscription } from '@tanstack/db'
 import type {
   ApplyCommittedTxRequest,
+  ApplyCommittedTxResponse,
   ApplyLocalMutationsRequest,
+  ApplyLocalMutationsResponse,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   PersistedTx,
@@ -30,9 +33,17 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * request types. Remote subset request data must be clone-safe, and each
  * accepted physical acquisition creates one exact acquisition lease. A
  * passive heartbeat can update a route, but only a local participant may join
- * that collection's leadership. Durable stream positions advance after the
- * adapter accepts the write, and failed release transport retains its retry
- * route.
+ * that collection's leadership. A mutation requested before the first leader
+ * is known waits for a route up to the RPC deadline. The sole participant
+ * applies it locally if elected; an unsuccessful election cannot hold it forever.
+ * A late follower requests the leader route without sending a mutation. A
+ * current leader answers before its next periodic heartbeat is due.
+ * Election must still finish when scheduled hydration awaits that first
+ * source commit, even when a different collection has a queued write. Regular
+ * work must enter the shared scheduler before taking the database-wide writer
+ * lock. A queued write must recheck ownership before persistence if leadership
+ * changes while it waits. Durable stream positions advance after the adapter
+ * accepts the write, and failed release transport retains its retry route.
  *
  * The adapter call logs, transport controls, owner callbacks, and internal-map
  * snapshots are focused reference ledgers. Histories vary local and follower
@@ -64,6 +75,8 @@ const channels: Map<
   string,
   Set<{ onmessage: MessageHandler | null }>
 > = new Map()
+let dropNextMessageWhen: ((data: unknown) => boolean) | undefined
+let observePostedMessage: ((data: unknown) => void) | undefined
 let dropNextBroadcastMessage: ((data: unknown) => boolean) | undefined
 let duplicateNextBroadcastMessage:
   | ((data: unknown) => unknown | undefined)
@@ -83,6 +96,11 @@ class MockBroadcastChannel {
   }
 
   postMessage(data: unknown): void {
+    observePostedMessage?.(data)
+    if (dropNextMessageWhen?.(data)) {
+      dropNextMessageWhen = undefined
+      return
+    }
     observeBroadcastMessage?.(data)
     if (dropNextBroadcastMessage?.(data)) {
       dropNextBroadcastMessage = undefined
@@ -245,6 +263,8 @@ function installGlobals(): void {
 }
 
 function cleanupGlobals(): void {
+  dropNextMessageWhen = undefined
+  observePostedMessage = undefined
   dropNextBroadcastMessage = undefined
   duplicateNextBroadcastMessage = undefined
   observeBroadcastMessage = undefined
@@ -563,6 +583,31 @@ async function flush(ms: number = 10): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+type Deferred = {
+  promise: Promise<void>
+  resolve: () => void
+}
+
+function createDeferred(): Deferred {
+  let resolve!: () => void
+  const promise = new Promise<void>((settle) => {
+    resolve = settle
+  })
+  return { promise, resolve }
+}
+
+type CoordinatorInspection = {
+  collectionAdapters: Map<string, unknown>
+  collections: Map<string, unknown>
+  appliedEnvelopes: Map<string, unknown>
+}
+
+function inspectCoordinator(
+  coordinator: BrowserCollectionCoordinator,
+): CoordinatorInspection {
+  return coordinator as unknown as CoordinatorInspection
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -588,6 +633,85 @@ describe(`BrowserCollectionCoordinator`, () => {
       expect(coord.isLeader(`todos`)).toBe(true)
       coord.dispose()
     })
+
+    it.each([{ kind: `source commit` }, { kind: `local mutation` }] as const)(
+      `does not persist a queued $kind after leadership transfers`,
+      async ({ kind }) => {
+        const queued = createDeferred()
+        const releaseQueued = createDeferred()
+        const formerAdapter = createStubAdapter()
+        formerAdapter.runInRegularScope = async (task) => {
+          queued.resolve()
+          await releaseQueued.promise
+          return task(formerAdapter)
+        }
+        const newAdapter = createStubAdapter()
+        const formerLeader = createCoordinator(formerAdapter)
+        const newLeader = createCoordinator(newAdapter)
+        const unsubscribeFormer = formerLeader.subscribe(`todos`, () => {})
+        const unsubscribeNew = newLeader.subscribe(`todos`, () => {})
+        let write:
+          | Promise<ApplyCommittedTxResponse | ApplyLocalMutationsResponse>
+          | undefined
+        let publications = 0
+
+        try {
+          await vi.waitFor(() =>
+            expect(formerLeader.isLeader(`todos`)).toBe(true),
+          )
+          observeBroadcastMessage = (data) => {
+            if (
+              (data as { payload?: { type?: string } }).payload?.type ===
+              `tx:committed`
+            ) {
+              publications++
+            }
+          }
+          write =
+            kind === `source commit`
+              ? formerLeader.requestApplyCommittedTx(`todos`, {
+                  txId: `queued-source-commit`,
+                  term: 0,
+                  seq: 0,
+                  rowVersion: 0,
+                  mutations: [
+                    { type: `insert`, key: `queued`, value: { id: `queued` } },
+                  ],
+                })
+              : formerLeader.requestApplyLocalMutations(`todos`, [
+                  {
+                    mutationId: `queued-local-mutation`,
+                    type: `insert`,
+                    key: `queued`,
+                    value: { id: `queued` },
+                  },
+                ])
+          void write.catch(() => undefined)
+          await queued.promise
+          expect(formerAdapter.appliedTxs).toEqual([])
+
+          unsubscribeFormer()
+          await vi.waitFor(() => expect(newLeader.isLeader(`todos`)).toBe(true))
+          releaseQueued.resolve()
+
+          await expect(write).resolves.toMatchObject({
+            ok: false,
+            code: `NOT_LEADER`,
+          })
+          expect(formerAdapter.appliedTxs).toEqual([])
+          expect(newAdapter.appliedTxs).toEqual([])
+          expect(publications).toBe(0)
+        } finally {
+          releaseQueued.resolve()
+          await write?.catch(() => undefined)
+          observeBroadcastMessage = undefined
+          unsubscribeFormer()
+          unsubscribeNew()
+          formerLeader.dispose()
+          newLeader.dispose()
+        }
+      },
+    )
 
     it(`paces leadership retry after stream-position failure`, async () => {
       vi.useFakeTimers()
@@ -962,6 +1086,232 @@ describe(`BrowserCollectionCoordinator`, () => {
   })
 
   describe(`RPC - applyLocalMutations`, () => {
+    it.each([{ kind: `source commit` }, { kind: `local mutation` }] as const)(
+      `waits for initial leadership before routing a $kind`,
+      async ({ kind }) => {
+        const adapter = createStubAdapter()
+        const readStarted = createDeferred()
+        const releaseRead = createDeferred()
+        adapter.getStreamPosition = async () => {
+          readStarted.resolve()
+          await releaseRead.promise
+          return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+        }
+        const coordinator = createCoordinator(adapter)
+        const mutationPosts: Array<string> = []
+        observePostedMessage = (data) => {
+          const type = (data as { payload?: { type?: string } }).payload?.type
+          if (
+            type === `rpc:applyCommittedTx:req` ||
+            type === `rpc:applyLocalMutations:req`
+          ) {
+            mutationPosts.push(type)
+          }
+        }
+
+        coordinator.subscribe(`todos`, () => {})
+        await readStarted.promise
+        const request =
+          kind === `source commit`
+            ? coordinator.requestApplyCommittedTx(`todos`, {
+                txId: `first-source-commit`,
+                term: 0,
+                seq: 0,
+                rowVersion: 0,
+                mutations: [
+                  {
+                    type: `insert`,
+                    key: `first`,
+                    value: { id: `first` },
+                  },
+                ],
+              })
+            : coordinator.requestApplyLocalMutations(`todos`, [
+                {
+                  mutationId: `first-local-mutation`,
+                  type: `insert`,
+                  key: `first`,
+                  value: { id: `first` },
+                },
+              ])
+        void request.catch(() => undefined)
+
+        try {
+          // The single participating tab has not yet read its durable stream
+          // position. No owner is known, so no mutation may enter transport.
+          expect(coordinator.isLeader(`todos`)).toBe(false)
+          expect(mutationPosts).toEqual([])
+
+          releaseRead.resolve()
+          await expect(request).resolves.toMatchObject({ ok: true })
+          expect(mutationPosts).toEqual([])
+          expect(adapter.appliedTxs).toHaveLength(1)
+          expect(adapter.appliedTxs[0]?.collectionId).toBe(`todos`)
+        } finally {
+          releaseRead.resolve()
+          coordinator.dispose()
+          await request.catch(() => undefined)
+          observePostedMessage = undefined
+        }
+      },
+    )
+
+    it.each([{ kind: `source commit` }, { kind: `local mutation` }] as const)(
+      `discovers a late follower route before the next heartbeat for a $kind`,
+      async ({ kind }) => {
+        vi.useFakeTimers()
+        const leaderAdapter = createStubAdapter()
+        const leader = createCoordinator(leaderAdapter)
+        let follower: BrowserCollectionCoordinator | undefined
+        let observed: Promise<void> | undefined
+        let settled = false
+        let response:
+          | ApplyCommittedTxResponse
+          | ApplyLocalMutationsResponse
+          | undefined
+        let failure: unknown
+        const posted: Array<string> = []
+
+        try {
+          leader.subscribe(`todos`, () => {})
+          await vi.advanceTimersByTimeAsync(0)
+          expect(leader.isLeader(`todos`)).toBe(true)
+
+          // The follower joins after the initial heartbeat. Stop periodic
+          // heartbeats so only an explicit route reply can settle its write.
+          const leaderState = inspectCoordinator(leader).collections.get(
+            `todos`,
+          ) as { heartbeatTimer: ReturnType<typeof setInterval> | null }
+          if (leaderState.heartbeatTimer !== null) {
+            clearInterval(leaderState.heartbeatTimer)
+            leaderState.heartbeatTimer = null
+          }
+          observePostedMessage = (data) => {
+            const envelope = data as {
+              collectionId?: string
+              payload?: { type?: string }
+            }
+            const type = envelope.payload?.type
+            if (
+              envelope.collectionId === `todos` &&
+              (type === `leader:routeRequest` ||
+                type === `leader:heartbeat` ||
+                type === `rpc:applyCommittedTx:req` ||
+                type === `rpc:applyLocalMutations:req`)
+            ) {
+              posted.push(type)
+            }
+          }
+
+          follower = createCoordinator()
+          follower.subscribe(`todos`, () => {})
+          expect(follower.isLeader(`todos`)).toBe(false)
+
+          const write =
+            kind === `source commit`
+              ? follower.requestApplyCommittedTx(`todos`, {
+                  txId: `late-follower-source`,
+                  term: 0,
+                  seq: 0,
+                  rowVersion: 0,
+                  mutations: [
+                    { type: `insert`, key: `first`, value: { id: `first` } },
+                  ],
+                })
+              : follower.requestApplyLocalMutations(`todos`, [
+                  {
+                    mutationId: `late-follower-local`,
+                    type: `insert`,
+                    key: `first`,
+                    value: { id: `first` },
+                  },
+                ])
+          observed = write.then(
+            (result) => {
+              settled = true
+              response = result
+            },
+            (error: unknown) => {
+              settled = true
+              failure = error
+            },
+          )
+          await vi.advanceTimersByTimeAsync(0)
+
+          expect({
+            settled,
+            failure,
+            responseOk: response?.ok,
+            posted,
+          }).toEqual({
+            settled: true,
+            failure: undefined,
+            responseOk: true,
+            posted: [
+              `leader:routeRequest`,
+              `leader:heartbeat`,
+              kind === `source commit`
+                ? `rpc:applyCommittedTx:req`
+                : `rpc:applyLocalMutations:req`,
+            ],
+          })
+          expect(leaderAdapter.appliedTxs).toHaveLength(1)
+        } finally {
+          observePostedMessage = undefined
+          follower?.dispose()
+          leader.dispose()
+          await vi.advanceTimersByTimeAsync(0)
+          await observed
+          vi.useRealTimers()
+        }
+      },
+    )
+
+    it(`rejects a first source commit when election cannot establish a route`, async () => {
+      vi.useFakeTimers()
+      const adapter = createStubAdapter()
+      const readPosition = vi
+        .fn()
+        .mockRejectedValue(new Error(`stream position unavailable`))
+      adapter.getStreamPosition = readPosition
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const coordinator = createCoordinator(adapter)
+      coordinator.subscribe(`todos`, () => {})
+      const request = coordinator.requestApplyCommittedTx(`todos`, {
+        txId: `first-source-commit`,
+        term: 0,
+        seq: 0,
+        rowVersion: 0,
+        mutations: [],
+      })
+      let settled = false
+      const outcome = request.then(
+        () => {
+          settled = true
+          return undefined
+        },
+        (error: unknown) => {
+          settled = true
+          return error
+        },
+      )
+
+      try {
+        await vi.advanceTimersByTimeAsync(10_001)
+        expect(readPosition.mock.calls.length).toBeGreaterThan(1)
+        expect(settled).toBe(true)
+        expect(await outcome).toMatchObject({
+          message: expect.stringContaining(`leadership route`),
+        })
+        expect(adapter.appliedTxs).toEqual([])
+      } finally {
+        coordinator.dispose()
+        await outcome
+        warning.mockRestore()
+        vi.useRealTimers()
+      }
+    })
+
     it(`leader applies mutations and returns accepted ids`, async () => {
       const adapter = createStubAdapter()
       const coord = createCoordinator(adapter)
@@ -1600,9 +1950,605 @@ describe(`BrowserCollectionCoordinator`, () => {
         coordinator.dispose()
       }
     })
+
+    it(`scopes envelope deduplication by collection`, async () => {
+      const alphaAdapter = createStubAdapter()
+      const betaAdapter = createStubAdapter()
+      const coordinator = createCoordinator(alphaAdapter)
+      coordinator.setAdapterForCollection(`alpha`, alphaAdapter)
+      coordinator.setAdapterForCollection(`beta`, betaAdapter)
+      coordinator.subscribe(`alpha`, () => {})
+      coordinator.subscribe(`beta`, () => {})
+      await flush(50)
+
+      const internals = coordinator as unknown as {
+        handleApplyLocalMutations: (
+          collectionId: string,
+          request: {
+            type: `rpc:applyLocalMutations:req`
+            rpcId: string
+            envelopeId: string
+            mutations: Array<{
+              mutationId: string
+              type: `insert`
+              key: string
+              value: { id: string }
+            }>
+          },
+        ) => Promise<{ ok: boolean; rpcId: string }>
+      }
+
+      try {
+        const alpha = await internals.handleApplyLocalMutations(`alpha`, {
+          type: `rpc:applyLocalMutations:req`,
+          rpcId: `alpha-rpc`,
+          envelopeId: `shared-envelope`,
+          mutations: [
+            {
+              mutationId: `alpha-mutation`,
+              type: `insert`,
+              key: `alpha`,
+              value: { id: `alpha` },
+            },
+          ],
+        })
+        const beta = await internals.handleApplyLocalMutations(`beta`, {
+          type: `rpc:applyLocalMutations:req`,
+          rpcId: `beta-rpc`,
+          envelopeId: `shared-envelope`,
+          mutations: [
+            {
+              mutationId: `beta-mutation`,
+              type: `insert`,
+              key: `beta`,
+              value: { id: `beta` },
+            },
+          ],
+        })
+
+        expect({
+          alpha,
+          alphaApplies: alphaAdapter.appliedTxs,
+          beta,
+          betaApplies: betaAdapter.appliedTxs,
+        }).toMatchObject({
+          alpha: { ok: true, rpcId: `alpha-rpc` },
+          alphaApplies: [{ collectionId: `alpha` }],
+          beta: { ok: true, rpcId: `beta-rpc` },
+          betaApplies: [{ collectionId: `beta` }],
+        })
+      } finally {
+        coordinator.dispose()
+      }
+    })
+
+    it(`coalesces an envelope retry while its first write is in flight`, async () => {
+      const adapter = createStubAdapter()
+      const firstApplyEntered = createDeferred()
+      const releaseFirstApply = createDeferred()
+      let applyCalls = 0
+      adapter.applyCommittedTx = async (collectionId, tx) => {
+        applyCalls++
+        if (applyCalls === 1) {
+          firstApplyEntered.resolve()
+          await releaseFirstApply.promise
+        }
+        adapter.appliedTxs.push({ collectionId, tx })
+      }
+      const coordinator = createCoordinator(adapter)
+      coordinator.subscribe(`todos`, () => {})
+      await flush(50)
+
+      const internals = coordinator as unknown as {
+        handleApplyLocalMutations: (
+          collectionId: string,
+          request: {
+            type: `rpc:applyLocalMutations:req`
+            rpcId: string
+            envelopeId: string
+            mutations: Array<{
+              mutationId: string
+              type: `insert`
+              key: string
+              value: { id: string }
+            }>
+          },
+        ) => Promise<{
+          ok: boolean
+          rpcId: string
+          term?: number
+          seq?: number
+          latestRowVersion?: number
+        }>
+      }
+      const request = {
+        type: `rpc:applyLocalMutations:req` as const,
+        envelopeId: `in-flight-envelope`,
+        mutations: [
+          {
+            mutationId: `mutation`,
+            type: `insert` as const,
+            key: `row`,
+            value: { id: `row` },
+          },
+        ],
+      }
+
+      try {
+        const first = internals.handleApplyLocalMutations(`todos`, {
+          ...request,
+          rpcId: `first-rpc`,
+        })
+        await firstApplyEntered.promise
+        const retry = internals.handleApplyLocalMutations(`todos`, {
+          ...request,
+          rpcId: `retry-rpc`,
+        })
+        await Promise.resolve()
+        releaseFirstApply.resolve()
+
+        const [firstResponse, retryResponse] = await Promise.all([first, retry])
+        expect({
+          applyCalls,
+          first: { ...firstResponse, rpcId: undefined },
+          retry: { ...retryResponse, rpcId: undefined },
+        }).toEqual({
+          applyCalls: 1,
+          first: { ...retryResponse, rpcId: undefined },
+          retry: { ...firstResponse, rpcId: undefined },
+        })
+      } finally {
+        releaseFirstApply.resolve()
+        coordinator.dispose()
+      }
+    })
+
+    it(`replays the successful mutation result when its first response is lost`, async () => {
+      vi.useFakeTimers()
+      const adapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      let firstSuccessDropped!: () => void
+      const firstSuccessDroppedPromise = new Promise<void>((resolve) => {
+        firstSuccessDropped = resolve
+      })
+      adapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+
+      const leader = createCoordinator(adapter)
+      const follower = createCoordinator(adapter)
+
+      try {
+        leader.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+        follower.subscribe(`todos`, () => {})
+
+        dropNextMessageWhen = (data) => {
+          const payload = (
+            data as { payload?: { type?: string; ok?: boolean } }
+          ).payload
+          if (
+            payload?.type === `rpc:applyLocalMutations:res` &&
+            payload.ok === true
+          ) {
+            firstSuccessDropped()
+            return true
+          }
+          return false
+        }
+
+        const responsePromise = follower.requestApplyLocalMutations(`todos`, [
+          {
+            mutationId: `mut-lost-response`,
+            type: `insert`,
+            key: `lost-response`,
+            value: { id: `lost-response`, title: `Persisted once` },
+          },
+        ])
+
+        await firstSuccessDroppedPromise
+        expect(adapter.appliedTxs).toHaveLength(1)
+
+        await vi.advanceTimersByTimeAsync(10_200)
+        const response = await responsePromise
+        expect(response).toMatchObject({
+          ok: true,
+          acceptedMutationIds: [`mut-lost-response`],
+        })
+        expect(adapter.appliedTxs).toHaveLength(1)
+      } finally {
+        follower.dispose()
+        leader.dispose()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`preserves one durable mutation result across generated response-delivery histories`, async () => {
+      vi.useFakeTimers()
+      let run = 0
+      try {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.record({
+              mutationCount: fc.integer({ min: 1, max: 4 }),
+              dropFirstSuccess: fc.boolean(),
+            }),
+            async ({ mutationCount, dropFirstSuccess }) => {
+              run++
+              const collectionId = `delivery-history-${run}`
+              const adapter = createStubAdapter()
+              let leadershipRead!: () => void
+              const leadershipReadPromise = new Promise<void>((resolve) => {
+                leadershipRead = resolve
+              })
+              let firstSuccessDropped!: () => void
+              const firstSuccessDroppedPromise = new Promise<void>(
+                (resolve) => {
+                  firstSuccessDropped = resolve
+                },
+              )
+              adapter.getStreamPosition = async () => {
+                leadershipRead()
+                return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+              }
+
+              const leader = createCoordinator(adapter)
+              const follower = createCoordinator(adapter)
+              try {
+                leader.subscribe(collectionId, () => {})
+                await leadershipReadPromise
+                await Promise.resolve()
+                follower.subscribe(collectionId, () => {})
+
+                if (dropFirstSuccess) {
+                  dropNextMessageWhen = (data) => {
+                    const payload = (
+                      data as { payload?: { type?: string; ok?: boolean } }
+                    ).payload
+                    if (
+                      payload?.type === `rpc:applyLocalMutations:res` &&
+                      payload.ok === true
+                    ) {
+                      firstSuccessDropped()
+                      return true
+                    }
+                    return false
+                  }
+                }
+
+                const mutations = Array.from(
+                  { length: mutationCount },
+                  (_, index) => ({
+                    mutationId: `mut-${run}-${index}`,
+                    type: `insert` as const,
+                    key: `${index}`,
+                    value: { id: `${index}`, title: `row ${index}` },
+                  }),
+                )
+                const responsePromise = follower.requestApplyLocalMutations(
+                  collectionId,
+                  mutations,
+                )
+                if (dropFirstSuccess) {
+                  await firstSuccessDroppedPromise
+                  await vi.advanceTimersByTimeAsync(10_200)
+                }
+
+                const response = await responsePromise
+                expect(response).toMatchObject({
+                  ok: true,
+                  acceptedMutationIds: mutations.map(
+                    (mutation) => mutation.mutationId,
+                  ),
+                })
+                expect(adapter.appliedTxs).toHaveLength(1)
+              } finally {
+                dropNextMessageWhen = undefined
+                follower.dispose()
+                leader.dispose()
+                for (let microtask = 0; microtask < 4; microtask++) {
+                  await Promise.resolve()
+                }
+              }
+            },
+          ),
+          { seed: 1868, numRuns: 12, endOnFailure: true },
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe(`RPC - applyCommittedTx`, () => {
+    it(`schedules an ordinary source commit before requesting the writer lock`, async () => {
+      const adapter = createStubAdapter()
+      const coordinator = createCoordinator(adapter)
+      const collectionId = `ordinary-source-commit`
+      const unsubscribe = coordinator.subscribe(collectionId, () => {})
+      let applySource!: () => Promise<void>
+      const collection = createCollection(
+        persistedCollectionOptions<{ id: string }, string>({
+          id: collectionId,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              applySource = async () => {
+                begin()
+                write({ type: `insert`, value: { id: `source-row` } })
+                await commit()
+              }
+              markReady()
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        await vi.waitFor(() =>
+          expect(coordinator.isLeader(collectionId)).toBe(true),
+        )
+
+        const events: Array<string> = []
+        adapter.runInRegularScope = async (task) => {
+          events.push(`scheduler-enter`)
+          try {
+            return await task(adapter)
+          } finally {
+            events.push(`scheduler-exit`)
+          }
+        }
+        const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+        adapter.applyCommittedTx = async (...args) => {
+          events.push(`apply`)
+          await applyCommittedTx(...args)
+        }
+        const requestLock = mockNavigatorLocks.request.bind(mockNavigatorLocks)
+        const lockSpy = vi
+          .spyOn(mockNavigatorLocks, `request`)
+          .mockImplementation((name, optionsOrCallback, maybeCallback) => {
+            if (name === `tsdb:writer:test-db`) {
+              events.push(`writer-lock-request`)
+            }
+            return requestLock(name, optionsOrCallback, maybeCallback)
+          })
+
+        try {
+          await applySource()
+          expect(events).toEqual([
+            `scheduler-enter`,
+            `writer-lock-request`,
+            `apply`,
+            `scheduler-exit`,
+          ])
+          expect(adapter.appliedTxs).toHaveLength(1)
+          expect(adapter.appliedTxs[0]).toMatchObject({
+            collectionId,
+            tx: {
+              mutations: [{ key: `source-row`, value: { id: `source-row` } }],
+            },
+          })
+          expect(collection.get(`source-row`)).toMatchObject({
+            id: `source-row`,
+          })
+        } finally {
+          lockSpy.mockRestore()
+        }
+      } finally {
+        await collection.cleanup()
+        unsubscribe()
+        coordinator.dispose()
+      }
+    })
+
+    it(`completes the first source commit when leader election overlaps scheduled hydration`, async () => {
+      const database = createWASQLiteTestDatabase({ filename: `:memory:` })
+      const coordinator = createCoordinator()
+      const persistence = createBrowserWASQLitePersistence({
+        database,
+        coordinator,
+      }).resolvePersistenceForCollection?.({
+        collectionId: `first-commit`,
+        mode: `sync-present`,
+      })
+      if (!persistence?.adapter.runInHydrationScope) {
+        coordinator.dispose()
+        await database.close?.()
+        throw new Error(`scheduled hydration adapter not available`)
+      }
+
+      let unsubscribe: (() => void) | undefined
+      const hydration = persistence.adapter.runInHydrationScope(
+        async (adapter) => {
+          unsubscribe = coordinator.subscribe(`first-commit`, () => {})
+          return coordinator.requestApplyCommittedTx(
+            `first-commit`,
+            {
+              txId: `first-source-commit`,
+              term: 0,
+              seq: 0,
+              rowVersion: 0,
+              mutations: [
+                { type: `insert`, key: `first`, value: { id: `first` } },
+              ],
+            },
+            adapter,
+          )
+        },
+      )
+      void hydration.catch(() => undefined)
+      let timeout: ReturnType<typeof setTimeout> | undefined
+
+      try {
+        const response = await Promise.race([
+          hydration,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error(`first commit stalled during election`)),
+              2_000,
+            )
+          }),
+        ])
+        expect(response.ok).toBe(true)
+        expect(
+          (await persistence.adapter.loadResumeSnapshot(`first-commit`)).rows,
+        ).toEqual([{ key: `first`, value: { id: `first` } }])
+        expect(
+          await database.execute<{ count: number }>(
+            `SELECT COUNT(*) AS count FROM applied_tx`,
+          ),
+        ).toEqual([{ count: 1 }])
+      } finally {
+        if (timeout) clearTimeout(timeout)
+        coordinator.dispose()
+        await Promise.race([hydration.catch(() => undefined), flush(0)])
+        unsubscribe?.()
+        await flush(0)
+        await database.close?.()
+      }
+    })
+
+    it(`settles a cold source commit and another collection's write without a writer-lock cycle`, async () => {
+      const database = createWASQLiteTestDatabase({ filename: `:memory:` })
+      const coordinator = createCoordinator()
+      const persistence = createBrowserWASQLitePersistence({
+        database,
+        coordinator,
+      })
+      const active = persistence.resolvePersistenceForCollection?.({
+        collectionId: `active`,
+        mode: `sync-present`,
+      })
+      const cold = persistence.resolvePersistenceForCollection?.({
+        collectionId: `cold`,
+        mode: `sync-present`,
+      })
+      const adapter = cold?.adapter
+      if (
+        !active ||
+        !adapter?.runInHydrationScope ||
+        !adapter.getStreamPosition
+      ) {
+        coordinator.dispose()
+        await database.close?.()
+        throw new Error(`shared scheduled adapter not available`)
+      }
+
+      const releaseElectionRead = createDeferred()
+      const electionReadStarted = createDeferred()
+      const releaseHydration = createDeferred()
+      const sourceCommitStarted = createDeferred()
+      const getStreamPosition = adapter.getStreamPosition.bind(adapter)
+      adapter.getStreamPosition = async (collectionId) => {
+        if (collectionId === `cold`) {
+          electionReadStarted.resolve()
+          await releaseElectionRead.promise
+        }
+        return getStreamPosition(collectionId)
+      }
+
+      const unsubscribeActive = coordinator.subscribe(`active`, () => {})
+      let unsubscribeCold: (() => void) | undefined
+      let sourceCommit: Promise<ApplyCommittedTxResponse> | undefined
+      let otherWrite: Promise<ApplyLocalMutationsResponse> | undefined
+      let hydration: Promise<void> | undefined
+      let timeout: ReturnType<typeof setTimeout> | undefined
+
+      try {
+        await vi.waitFor(() =>
+          expect(coordinator.isLeader(`active`)).toBe(true),
+        )
+
+        hydration = adapter.runInHydrationScope(async (scopedAdapter) => {
+          unsubscribeCold = coordinator.subscribe(`cold`, () => {})
+          sourceCommit = coordinator.requestApplyCommittedTx(
+            `cold`,
+            {
+              txId: `first-cold-commit`,
+              term: 0,
+              seq: 0,
+              rowVersion: 0,
+              mutations: [
+                { type: `insert`, key: `cold`, value: { id: `cold` } },
+              ],
+            },
+            scopedAdapter,
+          )
+          void sourceCommit.catch(() => undefined)
+          sourceCommitStarted.resolve()
+          await Promise.race([sourceCommit, releaseHydration.promise])
+        })
+        void hydration.catch(() => undefined)
+        await Promise.all([
+          electionReadStarted.promise,
+          sourceCommitStarted.promise,
+        ])
+        expect(coordinator.isLeader(`cold`)).toBe(false)
+
+        otherWrite = coordinator.requestApplyLocalMutations(`active`, [
+          {
+            mutationId: `active-write`,
+            type: `insert`,
+            key: `active`,
+            value: { id: `active` },
+          },
+        ])
+        void otherWrite.catch(() => undefined)
+        // Let the other collection reach its writer-lock/scheduler boundary
+        // before the held election read establishes the cold route.
+        await flush(0)
+        releaseElectionRead.resolve()
+
+        const [sourceResponse, otherResponse] = await Promise.race([
+          Promise.all([sourceCommit!, otherWrite, hydration]).then(
+            ([source, other]) => [source, other] as const,
+          ),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `cross-collection writer-lock cycle; writer held=${heldLocks.has(`tsdb:writer:test-db`)}`,
+                  ),
+                ),
+              2_000,
+            )
+          }),
+        ])
+        expect(sourceResponse.ok).toBe(true)
+        expect(otherResponse.ok).toBe(true)
+        expect((await adapter.loadResumeSnapshot(`cold`)).rows).toEqual([
+          { key: `cold`, value: { id: `cold` } },
+        ])
+        expect(
+          (await active.adapter.loadResumeSnapshot(`active`)).rows,
+        ).toEqual([{ key: `active`, value: { id: `active` } }])
+      } finally {
+        if (timeout) clearTimeout(timeout)
+        releaseElectionRead.resolve()
+        releaseHydration.resolve()
+        await Promise.race([
+          Promise.allSettled([
+            hydration ?? Promise.resolve(),
+            sourceCommit ?? Promise.resolve(),
+            otherWrite ?? Promise.resolve(),
+          ]),
+          flush(500),
+        ])
+        unsubscribeCold?.()
+        unsubscribeActive()
+        coordinator.dispose()
+        await database.close?.()
+      }
+    })
+
     it(`routes a complete source transaction to the leader-owned adapter`, async () => {
       const leaderAdapter = createStubAdapter()
       const followerAdapter = createStubAdapter()
@@ -5102,6 +6048,479 @@ describe(`BrowserCollectionCoordinator`, () => {
       leader.dispose()
       follower.dispose()
     })
+
+    it(`does not repeat successful leader-local index creation`, async () => {
+      const adapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      adapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+      adapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+
+      const coord = createCoordinator(adapter)
+      try {
+        coord.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+
+        const spec = { expressionSql: [`title`] }
+        await adapter.ensureIndex(`todos`, `idx-once`, spec)
+        await coord.requestEnsurePersistedIndex(
+          `todos`,
+          `idx-once`,
+          spec,
+          adapter,
+          true,
+        )
+
+        expect(adapter.ensureIndex).toHaveBeenCalledOnce()
+      } finally {
+        coord.dispose()
+      }
+    })
+
+    it(`keeps production collection bootstrap index work exact-once on the leader`, async () => {
+      const adapter = createStubAdapter()
+      adapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      const coordinator = createCoordinator(adapter)
+      const leaderReady = createDeferred()
+      observePostedMessage = (data) => {
+        const envelope = data as {
+          collectionId?: string
+          payload?: { type?: string }
+        }
+        if (
+          envelope.collectionId === `leader-bootstrap-index` &&
+          envelope.payload?.type === `leader:heartbeat`
+        ) {
+          leaderReady.resolve()
+        }
+      }
+      const releaseLeader = coordinator.subscribe(
+        `leader-bootstrap-index`,
+        () => {},
+      )
+      await leaderReady.promise
+      observePostedMessage = undefined
+
+      const collection = createCollection(
+        persistedCollectionOptions<{ id: string; title: string }, string>({
+          id: `leader-bootstrap-index`,
+          getKey: (row) => row.id,
+          defaultIndexType: BasicIndex,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      collection.createIndex((row) => row.title, { name: `title` })
+
+      try {
+        await collection.preload()
+        expect(adapter.ensureIndex).toHaveBeenCalledOnce()
+      } finally {
+        await collection.cleanup()
+        releaseLeader()
+        coordinator.dispose()
+      }
+    })
+
+    it(`reaches crossed production RPC leadership only after both hydration scopes exit`, async () => {
+      const bothLocalIndexesEntered = createDeferred()
+      const bothLeaderRPCsEntered = createDeferred()
+      const releaseSchedulerCycle = createDeferred()
+      let localIndexEntries = 0
+      let leaderRPCEntries = 0
+
+      const createTab = () => {
+        const adapter = createStubAdapter()
+        const baseEnsureIndex = adapter.ensureIndex.bind(adapter)
+        let hydrationScopeActive = false
+        const leaderRPCScopeObservations: Array<boolean> = []
+        const scopedAdapter: PersistenceAdapter = {
+          ...adapter,
+          ensureIndex: async (...args) => {
+            localIndexEntries++
+            if (localIndexEntries === 2) bothLocalIndexesEntered.resolve()
+            await bothLocalIndexesEntered.promise
+            await baseEnsureIndex(...args)
+          },
+        }
+        adapter.runInHydrationScope = async (task) => {
+          hydrationScopeActive = true
+          try {
+            return await task(scopedAdapter)
+          } finally {
+            hydrationScopeActive = false
+          }
+        }
+        adapter.ensureIndex = async (...args) => {
+          leaderRPCScopeObservations.push(hydrationScopeActive)
+          leaderRPCEntries++
+          if (leaderRPCEntries === 2) bothLeaderRPCsEntered.resolve()
+          if (hydrationScopeActive) await releaseSchedulerCycle.promise
+          await baseEnsureIndex(...args)
+        }
+        return { adapter, leaderRPCScopeObservations }
+      }
+
+      const tab1 = createTab()
+      const tab2 = createTab()
+      const coordinator1 = createCoordinator(tab1.adapter)
+      const coordinator2 = createCoordinator(tab2.adapter)
+      const leaderCollections = new Set<string>()
+      const bothLeadersReady = createDeferred()
+      observePostedMessage = (data) => {
+        const envelope = data as {
+          collectionId?: string
+          payload?: { type?: string }
+        }
+        if (
+          envelope.payload?.type === `leader:heartbeat` &&
+          (envelope.collectionId === `crossed-a` ||
+            envelope.collectionId === `crossed-b`)
+        ) {
+          leaderCollections.add(envelope.collectionId)
+          if (leaderCollections.size === 2) bothLeadersReady.resolve()
+        }
+      }
+      coordinator1.setAdapterForCollection(`crossed-b`, tab1.adapter)
+      coordinator2.setAdapterForCollection(`crossed-a`, tab2.adapter)
+      const releaseLeaderB = coordinator1.subscribe(`crossed-b`, () => {})
+      const releaseLeaderA = coordinator2.subscribe(`crossed-a`, () => {})
+      await bothLeadersReady.promise
+      observePostedMessage = undefined
+
+      const createFollowerCollection = (
+        id: string,
+        adapter: PersistenceAdapter,
+        coordinator: BrowserCollectionCoordinator,
+      ) => {
+        const collection = createCollection(
+          persistedCollectionOptions<{ id: string; title: string }, string>({
+            id,
+            getKey: (row) => row.id,
+            defaultIndexType: BasicIndex,
+            sync: {
+              sync: ({ markReady }) => {
+                markReady()
+              },
+            },
+            persistence: { adapter, coordinator },
+          }),
+        )
+        collection.createIndex((row) => row.title, { name: `${id}-title` })
+        return collection
+      }
+      const followerA = createFollowerCollection(
+        `crossed-a`,
+        tab1.adapter,
+        coordinator1,
+      )
+      const followerB = createFollowerCollection(
+        `crossed-b`,
+        tab2.adapter,
+        coordinator2,
+      )
+      const preloadA = Promise.resolve(followerA.preload())
+      const preloadB = Promise.resolve(followerB.preload())
+      void preloadA.catch(() => undefined)
+      void preloadB.catch(() => undefined)
+
+      try {
+        await bothLeaderRPCsEntered.promise
+        expect({
+          tab1: tab1.leaderRPCScopeObservations,
+          tab2: tab2.leaderRPCScopeObservations,
+        }).toEqual({ tab1: [false], tab2: [false] })
+        await Promise.all([preloadA, preloadB])
+      } finally {
+        releaseSchedulerCycle.resolve()
+        await Promise.all([preloadA, preloadB]).catch(() => undefined)
+        await Promise.all([followerA.cleanup(), followerB.cleanup()])
+        releaseLeaderA()
+        releaseLeaderB()
+        coordinator2.dispose()
+        coordinator1.dispose()
+      }
+    })
+
+    it(`uses a supplied leader-local adapter when local work is not complete`, async () => {
+      const registeredAdapter = createStubAdapter()
+      const scopedAdapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      registeredAdapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+      registeredAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      scopedAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+
+      const coord = createCoordinator(registeredAdapter)
+      try {
+        coord.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+
+        await coord.requestEnsurePersistedIndex(
+          `todos`,
+          `idx-scoped`,
+          { expressionSql: [`title`] },
+          scopedAdapter,
+        )
+
+        expect(scopedAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(registeredAdapter.ensureIndex).not.toHaveBeenCalled()
+      } finally {
+        coord.dispose()
+      }
+    })
+
+    it(`keeps leader RPC work on the adapter registered for its collection`, async () => {
+      const todosAdapter = createStubAdapter()
+      const notesAdapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      todosAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      notesAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      todosAdapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+
+      const leader = createCoordinator(todosAdapter)
+      const follower = createCoordinator(notesAdapter)
+
+      try {
+        leader.setAdapterForCollection(`todos`, todosAdapter)
+        leader.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+        expect(leader.isLeader(`todos`)).toBe(true)
+        follower.subscribe(`todos`, () => {})
+
+        // Resolving a later collection variant must not replace the adapter
+        // already owning leader-side work for `todos`.
+        leader.setAdapter(notesAdapter)
+        await follower.requestEnsurePersistedIndex(`todos`, `idx-todos`, {
+          expressionSql: [`title`],
+        })
+
+        expect(todosAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(notesAdapter.ensureIndex).not.toHaveBeenCalled()
+      } finally {
+        follower.dispose()
+        leader.dispose()
+      }
+    })
+
+    it(`re-registers the collection adapter after cleanup and restart`, async () => {
+      const defaultAdapter = createStubAdapter()
+      const collectionAdapter = createStubAdapter()
+      const defaultEnsure = vi.fn().mockResolvedValue(undefined)
+      const collectionEnsure = vi.fn().mockResolvedValue(undefined)
+      defaultAdapter.ensureIndex = defaultEnsure
+      collectionAdapter.ensureIndex = collectionEnsure
+      const coordinator = createCoordinator(defaultAdapter)
+      const collection = createCollection(
+        persistedCollectionOptions<{ id: string; title: string }, string>({
+          id: `todos`,
+          getKey: (row) => row.id,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter: collectionAdapter, coordinator },
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        await vi.waitFor(() => expect(coordinator.isLeader(`todos`)).toBe(true))
+        await coordinator.requestEnsurePersistedIndex(`todos`, `before`, {
+          expressionSql: [`title`],
+        })
+
+        await collection.cleanup()
+        expect(
+          inspectCoordinator(coordinator).collectionAdapters.has(`todos`),
+        ).toBe(false)
+        await collection.stateWhenReady()
+        await vi.waitFor(() => expect(coordinator.isLeader(`todos`)).toBe(true))
+        await coordinator.requestEnsurePersistedIndex(`todos`, `after`, {
+          expressionSql: [`title`],
+        })
+
+        expect(collectionEnsure.mock.calls.map((call) => call[1])).toEqual([
+          `before`,
+          `after`,
+        ])
+        expect(defaultEnsure).not.toHaveBeenCalled()
+      } finally {
+        await collection.cleanup()
+        coordinator.dispose()
+      }
+    })
+
+    it(`replaces a cached default adapter with its collection registration`, async () => {
+      const defaultAdapter = createStubAdapter()
+      const replacementAdapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      defaultAdapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+      defaultAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+      replacementAdapter.ensureIndex = vi.fn().mockResolvedValue(undefined)
+
+      const coordinator = createCoordinator(defaultAdapter)
+      try {
+        coordinator.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+
+        await coordinator.requestEnsurePersistedIndex(`todos`, `idx-default`, {
+          expressionSql: [`title`],
+        })
+        coordinator.setAdapterForCollection(`todos`, replacementAdapter)
+        await coordinator.requestEnsurePersistedIndex(
+          `todos`,
+          `idx-replacement`,
+          { expressionSql: [`title`] },
+        )
+
+        expect(defaultAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(replacementAdapter.ensureIndex).toHaveBeenCalledOnce()
+        expect(replacementAdapter.ensureIndex).toHaveBeenCalledWith(
+          `todos`,
+          `idx-replacement`,
+          { expressionSql: [`title`] },
+        )
+      } finally {
+        coordinator.dispose()
+      }
+    })
+
+    it(`routes generated collection and RPC histories through their owning adapter`, async () => {
+      let run = 0
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 2, max: 4 }).chain((collectionCount) =>
+            fc.record({
+              collectionCount: fc.constant(collectionCount),
+              registrationOrder: fc.shuffledSubarray(
+                Array.from({ length: collectionCount }, (_, index) => index),
+                { minLength: collectionCount, maxLength: collectionCount },
+              ),
+              targetIndex: fc.integer({ min: 0, max: collectionCount - 1 }),
+              rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
+            }),
+          ),
+          async ({
+            collectionCount,
+            registrationOrder,
+            targetIndex,
+            rpcKind,
+          }) => {
+            run++
+            const collectionIds = Array.from(
+              { length: collectionCount },
+              (_, index) => `routing-${run}-${index}`,
+            )
+            const adapters = collectionIds.map(() => createStubAdapter())
+            const ensureCalls = adapters.map(() => vi.fn())
+            const pullCalls = adapters.map(() => vi.fn())
+            adapters.forEach((adapter, index) => {
+              adapter.ensureIndex =
+                ensureCalls[index]!.mockResolvedValue(undefined)
+              adapter.pullSince = pullCalls[index]!.mockResolvedValue({
+                latestRowVersion: index,
+                requiresFullReload: false,
+                changedKeys: [],
+                deletedKeys: [],
+              })
+            })
+
+            let leadershipRead!: () => void
+            const leadershipReadPromise = new Promise<void>((resolve) => {
+              leadershipRead = resolve
+            })
+            adapters[targetIndex]!.getStreamPosition = async () => {
+              leadershipRead()
+              return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+            }
+
+            const leader = createCoordinator(adapters[0])
+            const follower = createCoordinator(adapters.at(-1))
+            const targetCollectionId = collectionIds[targetIndex]!
+            try {
+              for (const index of registrationOrder) {
+                leader.setAdapterForCollection(
+                  collectionIds[index]!,
+                  adapters[index]!,
+                )
+              }
+              leader.subscribe(targetCollectionId, () => {})
+              await leadershipReadPromise
+              await Promise.resolve()
+              follower.subscribe(targetCollectionId, () => {})
+
+              if (rpcKind === `index`) {
+                await follower.requestEnsurePersistedIndex(
+                  targetCollectionId,
+                  `idx-${run}`,
+                  { expressionSql: [`title`] },
+                )
+              } else if (rpcKind === `pull`) {
+                await follower.pullSince(targetCollectionId, 0)
+              } else {
+                const response = await follower.requestApplyLocalMutations(
+                  targetCollectionId,
+                  [
+                    {
+                      mutationId: `mut-${run}`,
+                      type: `insert`,
+                      key: `${run}`,
+                      value: { id: `${run}`, title: `row ${run}` },
+                    },
+                  ],
+                )
+                expect(response.ok).toBe(true)
+              }
+
+              adapters.forEach((adapter, index) => {
+                const callCount =
+                  rpcKind === `index`
+                    ? ensureCalls[index]!.mock.calls.length
+                    : rpcKind === `pull`
+                      ? pullCalls[index]!.mock.calls.length
+                      : adapter.appliedTxs.length
+                expect(callCount).toBe(index === targetIndex ? 1 : 0)
+              })
+            } finally {
+              follower.dispose()
+              leader.dispose()
+              for (let microtask = 0; microtask < 4; microtask++) {
+                await Promise.resolve()
+              }
+            }
+          },
+        ),
+        { seed: 1868, numRuns: 18, endOnFailure: true },
+      )
+    })
   })
 
   describe(`dispose`, () => {
@@ -5172,6 +6591,348 @@ describe(`BrowserCollectionCoordinator`, () => {
 
       // Should not throw after disposal
       expect(coord.isLeader(`todos`)).toBe(false)
+    })
+
+    it(`settles an in-flight RPC at dispose without posting retries`, async () => {
+      vi.useFakeTimers()
+      const adapter = createStubAdapter()
+      let leadershipRead!: () => void
+      const leadershipReadPromise = new Promise<void>((resolve) => {
+        leadershipRead = resolve
+      })
+      let firstRequestPosted!: () => void
+      const firstRequestPostedPromise = new Promise<void>((resolve) => {
+        firstRequestPosted = resolve
+      })
+      adapter.getStreamPosition = async () => {
+        leadershipRead()
+        return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+      }
+
+      const leader = createCoordinator(adapter)
+      const follower = createCoordinator(adapter)
+      let requestPosts = 0
+      let settled = false
+
+      try {
+        leader.subscribe(`todos`, () => {})
+        await leadershipReadPromise
+        await Promise.resolve()
+        follower.subscribe(`todos`, () => {})
+
+        observePostedMessage = (data) => {
+          const type = (data as { payload?: { type?: string } }).payload?.type
+          if (type === `rpc:ensurePersistedIndex:req`) {
+            requestPosts++
+            if (requestPosts === 1) firstRequestPosted()
+          }
+        }
+        dropNextMessageWhen = (data) =>
+          (data as { payload?: { type?: string } }).payload?.type ===
+          `rpc:ensurePersistedIndex:req`
+
+        const request = follower
+          .requestEnsurePersistedIndex(`todos`, `idx-dispose`, {
+            expressionSql: [`title`],
+          })
+          .then(
+            () => {
+              settled = true
+            },
+            () => {
+              settled = true
+            },
+          )
+
+        await firstRequestPostedPromise
+        follower.dispose()
+        for (let microtask = 0; microtask < 8; microtask++) {
+          await Promise.resolve()
+        }
+        const settledAtDispose = settled
+
+        await vi.advanceTimersByTimeAsync(21_000)
+        await request
+
+        expect({ settledAtDispose, requestPosts }).toEqual({
+          settledAtDispose: true,
+          requestPosts: 1,
+        })
+      } finally {
+        follower.dispose()
+        leader.dispose()
+        vi.useRealTimers()
+      }
+    })
+
+    it(`makes disposal terminal across generated RPC kinds and lifecycle phases`, async () => {
+      vi.useFakeTimers()
+      let run = 0
+      try {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.record({
+              rpcKind: fc.constantFrom(`index`, `pull`, `mutation`),
+              disposePhase: fc.constantFrom(
+                `before-request`,
+                `pending`,
+                `retry-delay`,
+              ),
+            }),
+            async ({ rpcKind, disposePhase }) => {
+              run++
+              const collectionId = `dispose-history-${run}`
+              const adapter = createStubAdapter()
+              let leadershipRead!: () => void
+              const leadershipReadPromise = new Promise<void>((resolve) => {
+                leadershipRead = resolve
+              })
+              let firstRequestPosted!: () => void
+              const firstRequestPostedPromise = new Promise<void>((resolve) => {
+                firstRequestPosted = resolve
+              })
+              adapter.getStreamPosition = async () => {
+                leadershipRead()
+                return { latestTerm: 0, latestSeq: 0, latestRowVersion: 0 }
+              }
+
+              const leader = createCoordinator(adapter)
+              const follower = createCoordinator(adapter)
+              let requestPosts = 0
+              const requestType =
+                rpcKind === `index`
+                  ? `rpc:ensurePersistedIndex:req`
+                  : rpcKind === `pull`
+                    ? `rpc:pullSince:req`
+                    : `rpc:applyLocalMutations:req`
+
+              try {
+                leader.subscribe(collectionId, () => {})
+                await leadershipReadPromise
+                await Promise.resolve()
+                follower.subscribe(collectionId, () => {})
+
+                observePostedMessage = (data) => {
+                  if (
+                    (data as { payload?: { type?: string } }).payload?.type ===
+                    requestType
+                  ) {
+                    requestPosts++
+                    if (requestPosts === 1) firstRequestPosted()
+                  }
+                }
+                dropNextMessageWhen = (data) =>
+                  (data as { payload?: { type?: string } }).payload?.type ===
+                  requestType
+
+                if (disposePhase === `before-request`) {
+                  follower.dispose()
+                }
+                const request =
+                  rpcKind === `index`
+                    ? follower.requestEnsurePersistedIndex(
+                        collectionId,
+                        `idx-${run}`,
+                        { expressionSql: [`title`] },
+                      )
+                    : rpcKind === `pull`
+                      ? follower.pullSince(collectionId, 0)
+                      : follower.requestApplyLocalMutations(collectionId, [
+                          {
+                            mutationId: `mut-${run}`,
+                            type: `insert`,
+                            key: `${run}`,
+                            value: { id: `${run}`, title: `row ${run}` },
+                          },
+                        ])
+                const settled = request.then(
+                  () => `resolved` as const,
+                  () => `rejected` as const,
+                )
+
+                if (disposePhase !== `before-request`) {
+                  await firstRequestPostedPromise
+                  if (disposePhase === `retry-delay`) {
+                    await vi.advanceTimersByTimeAsync(10_000)
+                  }
+                  follower.dispose()
+                }
+
+                await expect(settled).resolves.toBe(`rejected`)
+                expect(requestPosts).toBe(
+                  disposePhase === `before-request` ? 0 : 1,
+                )
+              } finally {
+                observePostedMessage = undefined
+                dropNextMessageWhen = undefined
+                follower.dispose()
+                leader.dispose()
+                for (let microtask = 0; microtask < 4; microtask++) {
+                  await Promise.resolve()
+                }
+              }
+            },
+          ),
+          { seed: 1868, numRuns: 18, endOnFailure: true },
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  describe(`collection and retry-result retention`, () => {
+    it(`releases generated collection-owned state after the last subscriber`, async () => {
+      let run = 0
+      await fc.assert(
+        fc.asyncProperty(
+          fc.integer({ min: 1, max: 4 }).chain((collectionCount) =>
+            fc.record({
+              collectionCount: fc.constant(collectionCount),
+              releaseOrder: fc.shuffledSubarray(
+                Array.from({ length: collectionCount }, (_, index) => index),
+                { minLength: collectionCount, maxLength: collectionCount },
+              ),
+            }),
+          ),
+          async ({ collectionCount, releaseOrder }) => {
+            run++
+            const coordinator = createCoordinator()
+            const collectionIds = Array.from(
+              { length: collectionCount },
+              (_, index) => `lifecycle-${run}-${index}`,
+            )
+            const readyCollections = new Set<string>()
+            const allReady = createDeferred()
+            observePostedMessage = (data) => {
+              const envelope = data as {
+                collectionId?: string
+                payload?: { type?: string }
+              }
+              if (
+                envelope.payload?.type === `leader:heartbeat` &&
+                envelope.collectionId &&
+                collectionIds.includes(envelope.collectionId)
+              ) {
+                readyCollections.add(envelope.collectionId)
+                if (readyCollections.size === collectionCount) {
+                  allReady.resolve()
+                }
+              }
+            }
+            for (const collectionId of collectionIds) {
+              coordinator.setAdapterForCollection(
+                collectionId,
+                createStubAdapter(),
+              )
+            }
+            const releases = collectionIds.map((collectionId) =>
+              coordinator.subscribe(collectionId, () => {}),
+            )
+
+            try {
+              await allReady.promise
+              observePostedMessage = undefined
+              expect(
+                inspectCoordinator(coordinator).collectionAdapters.size,
+              ).toBe(collectionCount)
+
+              let remaining = collectionCount
+              for (const releasedIndex of releaseOrder) {
+                releases[releasedIndex]!()
+                remaining--
+                expect({
+                  adapters:
+                    inspectCoordinator(coordinator).collectionAdapters.size,
+                  collections: inspectCoordinator(coordinator).collections.size,
+                }).toEqual({
+                  adapters: remaining,
+                  collections: remaining,
+                })
+              }
+            } finally {
+              observePostedMessage = undefined
+              for (const release of releases) release()
+              coordinator.dispose()
+            }
+          },
+        ),
+        { seed: 1868, numRuns: 12, endOnFailure: true },
+      )
+    })
+
+    it(`bounds generated retry-result histories by retention and collection lifecycle`, async () => {
+      vi.useFakeTimers()
+      let run = 0
+      try {
+        await fc.assert(
+          fc.asyncProperty(
+            fc.record({
+              mutationCount: fc.integer({ min: 1, max: 4 }),
+              terminal: fc.constantFrom(`retention`, `unsubscribe`, `dispose`),
+            }),
+            async ({ mutationCount, terminal }) => {
+              run++
+              vi.setSystemTime(0)
+              const adapter = createStubAdapter()
+              const coordinator = createCoordinator(adapter)
+              const collectionId = `envelope-retention-${run}`
+              const ready = createDeferred()
+              observePostedMessage = (data) => {
+                const envelope = data as {
+                  collectionId?: string
+                  payload?: { type?: string }
+                }
+                if (
+                  envelope.collectionId === collectionId &&
+                  envelope.payload?.type === `leader:heartbeat`
+                ) {
+                  ready.resolve()
+                }
+              }
+              const release = coordinator.subscribe(collectionId, () => {})
+
+              try {
+                await ready.promise
+                observePostedMessage = undefined
+                for (let index = 0; index < mutationCount; index++) {
+                  await coordinator.requestApplyLocalMutations(collectionId, [
+                    {
+                      mutationId: `mutation-${run}-${index}`,
+                      type: `insert`,
+                      key: `${index}`,
+                      value: { id: `${index}`, title: `row ${index}` },
+                    },
+                  ])
+                }
+                expect(
+                  inspectCoordinator(coordinator).appliedEnvelopes.size,
+                ).toBe(mutationCount)
+
+                if (terminal === `retention`) {
+                  await vi.advanceTimersByTimeAsync(60_000)
+                } else if (terminal === `unsubscribe`) {
+                  release()
+                } else {
+                  coordinator.dispose()
+                }
+
+                expect(
+                  inspectCoordinator(coordinator).appliedEnvelopes.size,
+                ).toBe(0)
+              } finally {
+                observePostedMessage = undefined
+                release()
+                coordinator.dispose()
+                vi.clearAllTimers()
+              }
+            },
+          ),
+          { seed: 1868, numRuns: 12, endOnFailure: true },
+        )
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })
