@@ -13,7 +13,7 @@ import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
 import type { BaseIndex } from '../src/indexes/base-index'
-import type { ChangeMessage } from '../src/types'
+import type { ChangeMessage, SyncConfig } from '../src/types'
 
 /**
  * # Do settled change messages reconstruct the Collection's public rows?
@@ -39,9 +39,13 @@ import type { ChangeMessage } from '../src/types'
  * Every delivered batch records
  * the public rows visible during its callback and the mirror after applying
  * that batch.
+ * A maintainer decision permits either order for different keys in one
+ * callback. Changes to the same key retain their causal order. A deferred
+ * sync history checks this by comparing one ordered trace per key, including
+ * repeated changes, while leaving cross-key interleaving unconstrained.
  *
  * This partial oracle does not cover failed persistence, sync-transaction
- * cancellation, callback batch shape, callback-time index agreement, or
+ * cancellation, general callback batch shape, callback-time index agreement, or
  * publications without change messages.
  * The collection-state retention oracle owns queued source admission and
  * cancellation histories.
@@ -56,6 +60,13 @@ interface TestItem extends Record<string, unknown> {
 type OpKind = `insert` | `update` | `delete`
 type Key = 1 | 2 | 3 | 4
 type IndexType = typeof BasicIndex | typeof BTreeIndex
+type SyncActions = Parameters<SyncConfig<TestItem, number>[`sync`]>[0]
+
+type EventProjection = {
+  type: OpKind
+  value: string
+  previousValue?: string
+}
 
 const fileIdForKey = (key: number): TestItem[`fileId`] =>
   key % 2 === 1 ? `f1` : `f2`
@@ -122,6 +133,16 @@ function generateSequences(
 const describeSequence = (sequence: ReadonlyArray<Op>): string =>
   sequence.map((op) => `${op.kind}(${op.key},${op.step})`).join(` -> `)
 
+function applyModelOp(rows: Map<number, TestItem>, op: Op): void {
+  if (op.kind === `delete`) rows.delete(op.key)
+  else
+    rows.set(op.key, {
+      id: op.key,
+      name: `v${op.step}`,
+      fileId: fileIdForKey(op.key),
+    })
+}
+
 function expectedRowsAfter(
   initialKeys: ReadonlyArray<Key>,
   sequence: ReadonlyArray<Op>,
@@ -132,16 +153,60 @@ function expectedRowsAfter(
       { id: key, name: `initial-${key}`, fileId: fileIdForKey(key) },
     ]),
   )
-  for (const op of sequence) {
-    if (op.kind === `delete`) rows.delete(op.key)
-    else
-      rows.set(op.key, {
-        id: op.key,
-        name: `v${op.step}`,
-        fileId: fileIdForKey(op.key),
-      })
-  }
+  for (const op of sequence) applyModelOp(rows, op)
   return rows
+}
+
+// A batch permits any interleaving of distinct keys. Each key's trace keeps
+// message order and multiplicity, which the Collection mirror depends on.
+function perKeyEventTrace(
+  changes: ReadonlyArray<ChangeMessage<TestItem, number>>,
+): Array<readonly [number, Array<EventProjection>]> {
+  const byKey = new Map<number, Array<EventProjection>>()
+  for (const change of changes) {
+    const trace = byKey.get(change.key) ?? []
+    trace.push({
+      type: change.type,
+      value: change.value.name,
+      ...(change.previousValue === undefined
+        ? {}
+        : { previousValue: change.previousValue.name }),
+    })
+    byKey.set(change.key, trace)
+  }
+  return [...byKey].sort(([left], [right]) => left - right)
+}
+
+function expectedEventTrace(
+  sequence: ReadonlyArray<Op>,
+): Array<readonly [number, Array<EventProjection>]> {
+  const rows = new Map<number, TestItem>()
+  const byKey = new Map<number, Array<EventProjection>>()
+  for (const op of sequence) {
+    const before = rows.get(op.key)
+    applyModelOp(rows, op)
+    const after = rows.get(op.key)
+    let event: EventProjection
+    if (op.kind === `delete`) {
+      if (!before || after) throw new Error(`model delete requires a row`)
+      event = { type: `delete`, value: before.name }
+    } else if (op.kind === `insert`) {
+      if (before || !after)
+        throw new Error(`model insert requires an absent key`)
+      event = { type: `insert`, value: after.name }
+    } else {
+      if (!before || !after) throw new Error(`model update requires a row`)
+      event = {
+        type: `update`,
+        value: after.name,
+        previousValue: before.name,
+      }
+    }
+    const trace = byKey.get(op.key) ?? []
+    trace.push(event)
+    byKey.set(op.key, trace)
+  }
+  return [...byKey].sort(([left], [right]) => left - right)
 }
 
 function applyOp(
@@ -214,7 +279,7 @@ function assertIndexAgreement(
   }
 }
 
-async function runWithQueryCleanup(
+async function runWithCleanup(
   check: () => Promise<void>,
   cleanup: () => Promise<unknown>,
 ): Promise<void> {
@@ -232,7 +297,7 @@ async function runWithQueryCleanup(
     if (hasPrimaryFailure) {
       throw new AggregateError(
         [primaryFailure, error],
-        `Query check and cleanup failed`,
+        `Check and cleanup failed`,
         {
           cause: primaryFailure,
         },
@@ -255,7 +320,7 @@ async function assertIndexedQueryAgreement(
       const query = createLiveQueryCollection((q) =>
         q.from({ row: collection }).where(({ row }) => eq(row.fileId, fileId)),
       )
-      await runWithQueryCleanup(
+      await runWithCleanup(
         async () => {
           await query.preload()
           expect(
@@ -324,7 +389,7 @@ async function runHistory(
       const initialQuery = createLiveQueryCollection((q) =>
         q.from({ row: collection }).where(({ row }) => eq(row.fileId, `f1`)),
       )
-      await runWithQueryCleanup(
+      await runWithCleanup(
         async () => {
           await initialQuery.preload()
         },
@@ -439,6 +504,97 @@ async function verifyGeneratedHistory({
 }
 
 describe(`change-event history oracle`, () => {
+  it(`preserves each key's causal messages within a deferred callback`, async () => {
+    const rounds: ReadonlyArray<ReadonlyArray<Op>> = [
+      [
+        { kind: `insert`, key: 1, step: 1 },
+        { kind: `insert`, key: 2, step: 2 },
+      ],
+      [
+        { kind: `update`, key: 1, step: 3 },
+        { kind: `update`, key: 2, step: 4 },
+      ],
+      [
+        { kind: `delete`, key: 1, step: 5 },
+        { kind: `update`, key: 2, step: 6 },
+      ],
+    ]
+    const sequence = rounds.flat()
+    let sync!: SyncActions
+    const collection = createCollection<TestItem, number>({
+      id: `deferred-causal-change-history`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          sync = actions
+          actions.markReady()
+        },
+      },
+    })
+    const callbacks: Array<Array<ChangeMessage<TestItem, number>>> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => callbacks.push(changes),
+      { includeInitialState: false },
+    )
+    const publication = collection._deferPublication()
+    await runWithCleanup(
+      async () => {
+        await collection.stateWhenReady()
+        for (const round of rounds) {
+          sync.begin({ immediate: true })
+          for (const op of round) {
+            if (op.kind === `delete`) {
+              sync.write({ type: `delete`, key: op.key })
+            } else {
+              sync.write({
+                type: op.kind,
+                value: {
+                  id: op.key,
+                  name: `v${op.step}`,
+                  fileId: fileIdForKey(op.key),
+                },
+              })
+            }
+          }
+          expect(sync.commit()).toBe(true)
+        }
+        expect(callbacks).toEqual([])
+        publication.publish()
+        expect(callbacks).toHaveLength(1)
+        expect(perKeyEventTrace(callbacks[0]!)).toEqual(
+          expectedEventTrace(sequence),
+        )
+        expect(
+          [...collection.state].map(([key, row]) => [key, row.name]),
+        ).toEqual([[2, `v6`]])
+      },
+      async () => {
+        const cleanupFailures: Array<unknown> = []
+        for (const release of [
+          () => publication.discard(),
+          () => subscription.unsubscribe(),
+          () => collection.cleanup(),
+        ]) {
+          try {
+            await release()
+          } catch (error) {
+            cleanupFailures.push(error)
+          }
+        }
+        if (cleanupFailures.length > 0) {
+          throw new AggregateError(
+            cleanupFailures,
+            `Causal oracle cleanup failed`,
+            {
+              cause: cleanupFailures[0],
+            },
+          )
+        }
+      },
+    )
+  })
+
   const indexTypes: Array<readonly [string, IndexType]> = [
     [`BasicIndex`, BasicIndex],
     [`BTreeIndex`, BTreeIndex],

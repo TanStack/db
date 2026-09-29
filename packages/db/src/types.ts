@@ -1144,6 +1144,8 @@ export interface CurrentStateAsChangesOptions {
 
 /**
  * Function type for listening to collection changes
+ * Changes to the same key retain their causal order within a callback.
+ * Changes to different keys have no promised order within a callback.
  * @param changes - Array of change messages describing what happened
  * @example
  * // Basic change listener
