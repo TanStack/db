@@ -36,14 +36,18 @@ export class CollectionChangesManager<
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
-  private publicationDeferralDepth = 0
-  private discardDeferredPublications = false
-  private deferredStateRevision = 0
-  private deferredLayoutRevision = 0
-  private deferredPublications: Array<{
-    changes: Array<ChangeMessage<TOutput, TKey>>
-    layoutChanged: boolean
-  }> = []
+  private deferral:
+    | {
+        depth: number
+        discard: boolean
+        stateRevision: number
+        layoutRevision: number
+        publications: Array<{
+          changes: Array<ChangeMessage<TOutput, TKey>>
+          layoutChanged: boolean
+        }>
+      }
+    | undefined
   private layoutChangeListeners = new Set<() => void>()
 
   /**
@@ -184,8 +188,8 @@ export class CollectionChangesManager<
       this.shouldBatchEvents = false
     }
 
-    if (this.publicationDeferralDepth > 0) {
-      this.deferredPublications.push({ changes: rawEvents, layoutChanged })
+    if (this.deferral) {
+      this.deferral.publications.push({ changes: rawEvents, layoutChanged })
       return
     }
 
@@ -198,28 +202,30 @@ export class CollectionChangesManager<
    * normal transaction boundaries.
    */
   public deferPublication(): PublicationDeferral {
-    if (this.publicationDeferralDepth === 0) {
-      this.deferredStateRevision = this.stateRevision
-      this.deferredLayoutRevision = this.layoutRevision
-    }
-    this.publicationDeferralDepth++
+    const deferral = (this.deferral ??= {
+      depth: 0,
+      discard: false,
+      stateRevision: this.stateRevision,
+      layoutRevision: this.layoutRevision,
+      publications: [],
+    })
+    deferral.depth++
     let closed = false
 
     const close = (discard: boolean) => {
-      if (closed) return
+      // Cleanup can retire this handle while a later sync run owns a deferral.
+      if (closed || this.deferral !== deferral) return
       closed = true
-      if (this.publicationDeferralDepth === 0) return
-      this.discardDeferredPublications ||= discard
+      deferral.discard ||= discard
 
-      this.publicationDeferralDepth--
-      if (this.publicationDeferralDepth > 0) return
+      if (--deferral.depth > 0) return
 
-      const publications = this.deferredPublications
-      this.deferredPublications = []
-      if (this.discardDeferredPublications) {
-        this.discardDeferredPublications = false
-        this.stateRevision = this.deferredStateRevision
-        this.layoutRevision = this.deferredLayoutRevision
+      const publications = deferral.publications
+      deferral.publications = []
+      this.deferral = undefined
+      if (deferral.discard) {
+        this.stateRevision = deferral.stateRevision
+        this.layoutRevision = deferral.layoutRevision
         return
       }
       this.publishEvents(
@@ -415,7 +421,7 @@ export class CollectionChangesManager<
     this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false
-    this.deferredPublications = []
-    this.publicationDeferralDepth = 0
+    if (this.deferral) this.deferral.publications.length = 0
+    this.deferral = undefined
   }
 }

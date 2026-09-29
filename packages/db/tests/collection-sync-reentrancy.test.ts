@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
+import { CollectionChangesManager } from '../src/collection/changes.js'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
@@ -219,6 +220,28 @@ const { multiplier, ...replay } = readOracleRunConfig()
 const generatedRuns = 30 * multiplier
 
 describe(`sync publication reentrancy`, () => {
+  it.each([`cleanup`, `discard`] as const)(
+    `releases queued messages when %s retires a deferral`,
+    (ending) => {
+      const changes = new CollectionChangesManager<Row, number>()
+      const handle = changes.deferPublication()
+      changes.emitEvents([
+        { type: `insert`, key: 1, value: { id: 1, value: `queued` } },
+      ])
+
+      const retired = (
+        changes as unknown as { deferral?: { publications: Array<unknown> } }
+      ).deferral
+      if (!retired) throw new Error(`deferral did not open`)
+      expect(retired.publications).toHaveLength(1)
+
+      if (ending === `cleanup`) changes.cleanup()
+      else handle.discard()
+      expect(retired.publications).toHaveLength(0)
+      handle.publish()
+    },
+  )
+
   it(`publishes nested deferrals as one coherent batch`, async () => {
     const harness = createSyncHarness(`nested-publication-cycle`)
     const { collection } = harness
