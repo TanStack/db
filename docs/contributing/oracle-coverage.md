@@ -132,6 +132,14 @@ full replacements through the actual Cloudflare driver. A storage seam enforces
 Cloudflare's documented 100-bound-parameter query limit and checks the durable
 keys after each transaction. This Node SQLite seam does not execute in Workers.
 
+The browser OPFS lifecycle owner also checks that a silent initialization
+rejects at the default or overridden open deadline, terminates its worker,
+ignores a late response, and releases the deadline and abort listener after a
+successful open. A Chromium fixture holds the VFS database Web Lock while a
+second tab times out, checks that its queued request disappears, then reopens
+the database after releasing the lock. This controlled lock holder does not
+reproduce a frozen tab or establish behavior in other browsers.
+
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work
 counter rejects an extra joined-filter graph schedule on root readiness while
