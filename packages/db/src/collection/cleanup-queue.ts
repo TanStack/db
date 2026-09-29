@@ -13,6 +13,8 @@ export class CleanupQueue {
 
   private timeoutId: ReturnType<typeof setTimeout> | null = null
   private microtaskScheduled = false
+  private readonly clock: Performance | undefined = globalThis.performance
+  private readonly now = () => this.clock?.now() ?? Date.now()
 
   private constructor() {}
 
@@ -28,7 +30,7 @@ export class CleanupQueue {
    * multiple synchronous registrations can share one root timer.
    */
   public schedule(key: unknown, gcTime: number, callback: () => void): void {
-    const executeAt = Date.now() + gcTime
+    const executeAt = this.now() + gcTime
     this.tasks.set(key, { executeAt, callback })
 
     if (!this.microtaskScheduled) {
@@ -73,7 +75,7 @@ export class CleanupQueue {
       }
     }
 
-    const delay = Math.max(0, earliestTime - Date.now())
+    const delay = Math.max(0, earliestTime - this.now())
     this.timeoutId = setTimeout(() => this.process(), delay)
     // Background collection GC must not keep an otherwise finished Node
     // process alive. Browsers return a numeric timer handle.
@@ -86,7 +88,7 @@ export class CleanupQueue {
    */
   private process(): void {
     this.timeoutId = null
-    const now = Date.now()
+    const now = this.now()
     for (const [key, task] of this.tasks.entries()) {
       if (now >= task.executeAt) {
         this.tasks.delete(key)
