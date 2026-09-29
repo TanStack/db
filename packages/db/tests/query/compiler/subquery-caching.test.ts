@@ -22,6 +22,7 @@ function createMockCollection(id: string): CollectionImpl {
       getKey: (item: any) => item.id,
       sync: { sync: () => {} },
     },
+    indexes: new Map(),
     size: 0,
   } as any
 }
