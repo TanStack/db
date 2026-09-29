@@ -82,6 +82,7 @@ describe(`collection-size index suggestions`, () => {
           q.from({ row: source }).where(({ row }) => eq(row.url, `url-7`)),
       })
 
+      let primaryFailure: { error: unknown } | undefined
       try {
         await query.stateWhenReady()
         expect(query.toArray.map((row) => row.id)).toEqual([7])
@@ -105,9 +106,31 @@ describe(`collection-size index suggestions`, () => {
         expect(source.indexes.size).toBe(
           scenario.mode === `eager` || scenario.index !== `none` ? 1 : 0,
         )
-      } finally {
+      } catch (error) {
+        primaryFailure = { error }
+      }
+
+      const cleanupFailures: Array<unknown> = []
+      try {
         await query.cleanup()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      try {
         await source.cleanup()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      if (primaryFailure && cleanupFailures.length > 0) {
+        throw new AggregateError(
+          [primaryFailure.error, ...cleanupFailures],
+          `Index suggestion check and cleanup failed`,
+          { cause: primaryFailure.error },
+        )
+      }
+      if (primaryFailure) throw primaryFailure.error
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(cleanupFailures, `Index suggestion cleanup failed`)
       }
     })
   }
