@@ -254,7 +254,7 @@ function dedupeLazyLoadTargets(
   const seen = new Set<string>()
   const deduped: Array<LazyLoadTarget> = []
   for (const target of targets) {
-    const key = `${target.sourceId}:${target.path.join(`.`)}`
+    const key = `${target.sourceId}:${JSON.stringify(target.path)}`
     if (!seen.has(key)) {
       seen.add(key)
       deduped.push(target)
