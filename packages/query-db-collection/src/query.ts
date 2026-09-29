@@ -309,13 +309,13 @@ export interface QueryCollectionUtils<
   writeBatch: (callback: () => void) => void
 
   // Query Observer State (getters)
-  /** Get the last error encountered by the query (if any); reset on success */
+  /** Get the last error encountered by the query (if any); reset after a successful result applies */
   lastError: TError | undefined
   /** Check if the collection is in an error state */
   isError: boolean
   /**
    * Get the number of consecutive sync failures.
-   * Incremented only when query fails completely (not per retry attempt); reset on success.
+   * Incremented only when query fails completely (not per retry attempt); reset after a successful result applies.
    */
   errorCount: number
   /** Check if query is currently fetching (initial or background) */
@@ -334,7 +334,7 @@ export interface QueryCollectionUtils<
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
-   * Refetch, retaining errors until success. While a user
+   * Refetch, retaining errors until a successful result applies. While a user
    * mutation is persisting or its handler is active, this retains the Query
    * fetch boundary so it cannot wait on publication blocked by that
    * transaction.
@@ -412,8 +412,8 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
 
   public async clearError() {
     const retry = this.refetch({ throwOnError: true })
-    // Start first; reset dedupe only for a new failure with the same error/time.
-    this.state.lastErrorUpdatedAt = 0
+    // Start first; NaN forces a new failure even when the error/time repeat at zero.
+    this.state.lastErrorUpdatedAt = Number.NaN
     await retry
   }
 
@@ -2235,6 +2235,7 @@ export function queryCollectionOptions(
     const trackResultApplication = (
       hashedQueryKey: string,
       application: Promise<void>,
+      isFetching: boolean,
     ): void => {
       pendingResultApplications.set(hashedQueryKey, application)
       const finish = () => {
@@ -2246,7 +2247,14 @@ export function queryCollectionOptions(
       }
       void application.then(
         () => {
-          if (finish()) failedResultApplications.delete(hashedQueryKey)
+          if (finish()) {
+            failedResultApplications.delete(hashedQueryKey)
+            // Applying cached data during a fetch does not establish recovery.
+            if (!isFetching) {
+              state.lastError = undefined
+              state.errorCount = 0
+            }
+          }
         },
         (error) => {
           if (!finish()) return
@@ -2298,6 +2306,10 @@ export function queryCollectionOptions(
           )
           resultApplicationControllers.delete(hashedQueryKey)
           failedResultApplications.delete(hashedQueryKey)
+          if (!result.isFetching) {
+            state.lastError = undefined
+            state.errorCount = 0
+          }
         }
         return
       }
@@ -2319,7 +2331,7 @@ export function queryCollectionOptions(
       }
       void application.then(cleanupController, cleanupController)
       if (resultApplicationControllers.get(hashedQueryKey) === controller) {
-        trackResultApplication(hashedQueryKey, application)
+        trackResultApplication(hashedQueryKey, application, result.isFetching)
       }
     }
 
@@ -2353,11 +2365,6 @@ export function queryCollectionOptions(
           }
         }
         if (result.isSuccess) {
-          // Error state follows observer notification order, not the later
-          // publication time of a queued successful result.
-          state.lastError = undefined
-          state.errorCount = 0
-
           // Skip processing this result while data refreshes are deferred.
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.

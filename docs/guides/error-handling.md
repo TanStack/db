@@ -112,14 +112,14 @@ function DataList() {
 ```
 
 Error tracking methods:
-- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
+- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred since a successful result applied:
 - **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
-- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
-- **`clearError()`**: Triggers a refetch. The current error remains visible while the retry is pending. A successful result clears `lastError` and resets `errorCount`; a failed retry records another consecutive failure and rejects the returned promise:
+- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset after a successful result applies:
+- **`clearError()`**: Triggers a refetch. The current error remains visible until a successful result applies to the Collection. An applied result clears `lastError` and resets `errorCount`; a failed retry records another consecutive failure and rejects the returned promise. During a mutation handler, the promise can resolve at the fetch boundary before application clears the error:
 
   ```text
   error visible → clearError() → retry pending, error still visible
-                                   ├─ success → error cleared
+                                   ├─ applied success → error cleared
                                    └─ failure → new error visible, count increased
   ```
 

@@ -660,8 +660,8 @@ The collection provides these utility methods via `collection.utils`:
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns the tracked Queries' `QueryObserverResult` values in tracked-key order
   - Preserves an `undefined` slot if a tracked Query is removed while the refetch starts
-- `clearError()`: Refetch with errors enabled; retain the recorded error while pending and clear it after successful recovery
-  - Uses the same phase-dependent boundary as `refetch()`
+- `clearError()`: Refetch with errors enabled; retain the recorded error until a successful result applies to the Collection
+  - Uses the same phase-dependent boundary as `refetch()`. During a mutation handler, the promise can resolve at the fetch boundary before the result applies and clears the error.
 
 ## Direct Writes
 
