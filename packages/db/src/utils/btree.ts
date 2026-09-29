@@ -27,7 +27,9 @@
  * Mutable B+ tree used by BTreeIndex for sorted value buckets. Keys use the
  * supplied comparator; point operations cost O(log size). This local fork has
  * no copy-on-write sharing, cloning, optional-value storage, early-exit range
- * callbacks, or in-place range edits: only the operations BTreeIndex uses.
+ * callbacks, or in-place range edits: only the operations BTreeIndex uses,
+ * plus `has()` and the `get()` fallback that the Map oracle observes
+ * (tests/btree-map-oracle.test.ts).
  * @author David Piepgrass
  */
 export class BTree<K = any, V = any> {
@@ -286,12 +288,6 @@ class BNode<K, V> {
     this.keys.push(rhs.keys.shift()!)
   }
 
-  takeFromLeft(lhs: BNode<K, V>) {
-    // Reminder: parent node must update its copy of key for this node
-    this.values.unshift(lhs.values.pop()!)
-    this.keys.unshift(lhs.keys.pop()!)
-  }
-
   splitOffRightSide(): BNode<K, V> {
     // Reminder: parent node must update its copy of key for this node
     const half = this.keys.length >> 1
@@ -413,9 +409,10 @@ class BNodeInternal<K, V> extends BNode<K, V> {
 
     if (child.keys.length >= max) {
       // child is full; inserting anything else will cause a split.
-      // Shifting an item to the left or right sibling may avoid a split.
-      // We can do a shift if the adjacent node is not full and if the
-      // current key can still be placed in the same node after the shift.
+      // Shifting an item to the left sibling may avoid a split. We can do a
+      // shift if that sibling is not full and if the current key can still be
+      // placed in the same node after the shift. A right shift would need a
+      // key above child.maxKey(), and that only reaches the last child.
       let other: BNode<K, V> | undefined
       if (
         i > 0 &&
@@ -424,13 +421,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       ) {
         other.takeFromRight(child)
         this.keys[i - 1] = other.maxKey()!
-      } else if (
-        (other = c[i + 1]) !== undefined &&
-        other.keys.length < max &&
-        cmp(child.maxKey()!, key) < 0
-      ) {
-        other.takeFromLeft(child)
-        this.keys[i] = c[i]!.maxKey()!
       }
     }
 
@@ -471,12 +461,6 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     // Reminder: parent node must update its copy of key for this node
     this.keys.push(rhs.keys.shift()!)
     this.children.push((rhs as BNodeInternal<K, V>).children.shift()!)
-  }
-
-  takeFromLeft(lhs: BNode<K, V>) {
-    // Reminder: parent node must update its copy of key for this node
-    this.keys.unshift(lhs.keys.pop()!)
-    this.children.unshift((lhs as BNodeInternal<K, V>).children.pop()!)
   }
 
   // ///////////////////////////////////////////////////////////////////////////

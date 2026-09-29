@@ -343,6 +343,39 @@ describe(`BTree Map oracle`, () => {
     expectRefinement(tree, new Map(), 0)
   })
 
+  // Law 2 calibration. Each wrapper keeps the full scan correct, so only the
+  // partial and boundary range checks can reject it.
+  it.each([
+    {
+      design: `ignores includeHigh`,
+      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+        ((low, high, _includeHigh, onFound) =>
+          scan(low, high, true, onFound)) as typeof scan,
+    },
+    {
+      design: `ignores the low bound`,
+      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+        ((_low, high, includeHigh, onFound) =>
+          scan(-Infinity, high, includeHigh, onFound)) as typeof scan,
+    },
+  ])(`rejects a range scan that $design`, ({ wrap }) => {
+    const tree = new BTree<number, Payload>((a, b) => a - b, 4)
+    const model: ReferenceModel = new Map()
+    for (let key = 0; key < 40; key += 2)
+      applyAction(tree, model, { type: `put`, key, v: key })
+    expectRefinement(tree, model, 21)
+    const scan = tree.forRange.bind(tree)
+    const wrongScan = vi.spyOn(tree, `forRange`).mockImplementation(wrap(scan))
+    try {
+      expect(() => expectRefinement(tree, model, 21)).toThrowError(
+        /forRange\(/,
+      )
+    } finally {
+      wrongScan.mockRestore()
+    }
+    expectRefinement(tree, model, 21)
+  })
+
   it(`shrinks and replays a wrong neighbor payload without losing its pair key`, () => {
     const property = fc.property(
       fc.array(fc.integer({ min: 0, max: 20 }), { minLength: 1, maxLength: 8 }),
