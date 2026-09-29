@@ -871,7 +871,6 @@ class LiveQueryWindowControllerImpl<
       if (!this.disposed && generation === this.windowGeneration) {
         this.committedPageCount = requestedPageCount
         this.isFetchingNextPage = false
-        this.failedHasNextPage = false
         this.notify()
       }
       this.endTransition()
