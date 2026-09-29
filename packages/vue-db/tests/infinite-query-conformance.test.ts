@@ -9,6 +9,7 @@ import {
   BTreeIndex,
   createCollection,
   createLiveQueryCollection,
+  createLiveQueryWindowController,
   gt,
 } from '@tanstack/db'
 import {
@@ -213,6 +214,7 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
   makeOnDemandSource: (data, delay) =>
     makeInfiniteOnDemandSource({ createCollection, BTreeIndex }, data, delay),
   makePrecreated,
+  makeWindowController: createLiveQueryWindowController,
   mount,
   mountControllable,
   mountCollection,

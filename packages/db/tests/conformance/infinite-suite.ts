@@ -29,6 +29,36 @@ interface InfiniteRow {
   rank: number
 }
 
+/**
+ * A settled page extends the committed prefix. A failed request leaves that
+ * prefix alone and keeps its error visible until explicit recovery.
+ * Source length, not the controller's failed-window cache, decides whether the
+ * committed prefix has a continuation, including after later source writes.
+ */
+function expectedOverlappingWindow(
+  source: ReadonlyArray<InfiniteRow>,
+  pageSize: number,
+  pageSucceeded: boolean,
+  preloadFailed: boolean,
+  failure: Error,
+) {
+  const pageCount = pageSucceeded ? 2 : 1
+  const visible = source.slice(0, pageCount * pageSize)
+  return {
+    ids: visible.map((row) => row.id),
+    pages: Array.from({ length: pageCount }, (_, page) =>
+      visible
+        .slice(page * pageSize, (page + 1) * pageSize)
+        .map((row) => row.id),
+    ),
+    pageParams: Array.from({ length: pageCount }, (_, page) => page),
+    hasNextPage: source.length > pageCount * pageSize,
+    isFetchingNextPage: !pageSucceeded,
+    error: preloadFailed ? failure : undefined,
+    status: preloadFailed ? `error` : `ready`,
+  }
+}
+
 function rows(count: number, prefix = ``): Array<InfiniteRow> {
   return Array.from({ length: count }, (_, index) => ({
     id: `${prefix}${index + 1}`,
@@ -612,6 +642,167 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
+      `overlapping-window-outcomes`,
+      `retains a window failure while continuation follows committed pages and live source changes`,
+      async () => {
+        // Contract: after overlapping window requests settle, the latest
+        // committed page count determines continuation. A prior failure remains
+        // visible until explicit recovery. The bounded grammar crosses an
+        // exhausted versus remaining source with both settlement orders, then
+        // changes source extent while the earlier error remains visible.
+        // This drives the exported DB controller in each package realm. Hooks
+        // expose no preload operation, so their scheduling is outside this cell.
+        const pageSize = 2
+        let checked = 0
+        for (const rowCount of [4, 5]) {
+          for (const settleFailureFirst of [true, false]) {
+            const sourceRows = rows(rowCount)
+            let currentRows = sourceRows
+            const source = driver.makeSource(sourceRows)
+            const collection = rawDriver.makePrecreated((q) =>
+              q
+                .from({ items: source.collection })
+                .orderBy(({ items }: any) => items.rank, `desc`)
+                // Keep the peek-ahead row in the collection after the
+                // controller releases its lease for the detached read.
+                .limit(pageSize * 2 + 1)
+                .offset(0),
+            ).collection
+            lifetime!.defer(() => collection.cleanup())
+            await collection.preload()
+
+            const controller = driver.makeWindowController(collection, {
+              pageSize,
+            })
+            const utils = collection.utils as {
+              setWindow: (window: {
+                offset: number
+                limit: number
+              }) => true | Promise<void>
+            }
+            const originalSetWindow = utils.setWindow.bind(utils)
+            let rejectFirst!: (error: unknown) => void
+            let resolveSecond!: () => void
+            const firstWindow = new Promise<void>((_resolve, reject) => {
+              rejectFirst = reject
+            })
+            const secondWindow = new Promise<void>((resolve) => {
+              resolveSecond = resolve
+            })
+            const windowSpy = vi.spyOn(utils, `setWindow`)
+            windowSpy.mockImplementationOnce(() => firstWindow)
+            windowSpy.mockImplementationOnce((window) =>
+              Promise.resolve(originalSetWindow(window)).then(
+                () => secondWindow,
+              ),
+            )
+            const failure = new Error(`initial window failed`)
+            let firstReleased = false
+            let secondReleased = false
+            let preload: Promise<unknown> | undefined
+            let fetch: Promise<unknown> | undefined
+            const check = (pageSucceeded: boolean, preloadFailed: boolean) => {
+              const expected = expectedOverlappingWindow(
+                currentRows,
+                pageSize,
+                pageSucceeded,
+                preloadFailed,
+                failure,
+              )
+              const actual = controller.getSnapshot()
+              expect(actual.data.map((row) => row.id)).toEqual(expected.ids)
+              expect(
+                actual.pages.map((page) => page.map((row) => row.id)),
+              ).toEqual(expected.pages)
+              expect(actual.pageParams).toEqual(expected.pageParams)
+              expect(actual.hasNextPage).toBe(expected.hasNextPage)
+              expect(actual.isFetchingNextPage).toBe(
+                expected.isFetchingNextPage,
+              )
+              expect(actual.error).toBe(expected.error)
+              expect(actual.status).toBe(expected.status)
+              checked++
+            }
+
+            try {
+              preload = controller.preload().then(
+                () => undefined,
+                (error: unknown) => error,
+              )
+              fetch = controller.fetchNextPage().then(
+                () => undefined,
+                (error: unknown) => error,
+              )
+              expect(
+                windowSpy.mock.calls.map(([window]) => window.limit),
+              ).toEqual([3, 5])
+              if (settleFailureFirst) {
+                firstReleased = true
+                rejectFirst(failure)
+                expect(await preload).toBe(failure)
+                check(false, true)
+                secondReleased = true
+                resolveSecond()
+                expect(await fetch).toBeUndefined()
+                check(true, true)
+              } else {
+                secondReleased = true
+                resolveSecond()
+                expect(await fetch).toBeUndefined()
+                check(true, false)
+                firstReleased = true
+                rejectFirst(failure)
+                expect(await preload).toBe(failure)
+                check(true, true)
+              }
+              const fifthRow =
+                rowCount === 4
+                  ? { id: `5`, label: `row-5`, rank: -1 }
+                  : sourceRows[4]!
+              const unsubscribe = controller.subscribe(() => {})
+              try {
+                if (rowCount === 4) {
+                  source.insert(fifthRow)
+                  currentRows = [...currentRows, fifthRow]
+                } else {
+                  source.remove(fifthRow)
+                  currentRows = currentRows.slice(0, 4)
+                }
+                await waitForAsync(
+                  () => collection.toArray.length === currentRows.length,
+                )
+                check(true, true)
+              } finally {
+                unsubscribe()
+              }
+              // Detached observers refresh their rows when getSnapshot reads
+              // them; continuation must use that same current source extent.
+              if (rowCount === 4) {
+                source.remove(fifthRow)
+              } else {
+                source.insert(fifthRow)
+              }
+              currentRows = sourceRows
+              await waitForAsync(
+                () => collection.toArray.length === currentRows.length,
+              )
+              check(true, true)
+              await controller.preload()
+              check(true, false)
+            } finally {
+              if (!firstReleased) rejectFirst(failure)
+              if (!secondReleased) resolveSecond()
+              await Promise.allSettled([preload, fetch])
+              controller.dispose()
+              windowSpy.mockRestore()
+            }
+          }
+        }
+        expect(checked).toBe(20)
+      },
+    )
+
+    scenario(
       `dependency-immediate-fetch`,
       `fetches from the replacement query immediately after changing dependencies`,
       async () => {
@@ -1185,7 +1376,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(33)
+      expect(registry.size).toBe(34)
     })
   })
 }
