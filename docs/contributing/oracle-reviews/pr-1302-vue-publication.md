@@ -2,18 +2,18 @@
 
 - Raw source: [PR #1302](https://github.com/TanStack/db/pull/1302), head `de5f28d6fe9ee6f89dcf81a9d39fab90d51c4e99`. Its body contains eight proposed changes and detailed claims; GitHub returned no human issue or inline comments. The changeset bot comment is recorded below.
 - Baseline reviewed: `ae2eb3fbf3a314a7f043f0d963fd336d8c1f1ec8` (`origin/main` on 2026-09-29).
-- Repaired executable tree: `e11bedc7` on `codex/pr-1302-vue-publication`.
+- Repaired executable tree: `7a67d6a2` on `codex/pr-1302-vue-publication`.
 - Executable owner: [`useLiveQuery-publication-oracle.test.ts`](../../../packages/vue-db/tests/useLiveQuery-publication-oracle.test.ts). The shared conformance suite checks after Vue settles; this owner checks synchronous watcher observations during one source transaction.
 
 ## Contract, evidence, and decision
 
 One source sync transaction must not expose an intermediate empty Vue `data` array when the source Collection has already published nonempty final rows. A synchronous `watch(..., { flush: 'sync' })` is a public Vue observation. The oracle copies source rows into a plain array and compares each hook callback with the old or final public snapshot at that callback. It requires one callback containing the final rows. Its bounded histories cross insert, update, and nonterminal delete with a supplied Collection and an identity live query. Empty final results, multi-change transactions, query recompilation, and other framework schedulers remain outside this owner.
 
-The six oracle cells all failed on baseline main. Every cell recorded `[]` while the source already contained the final nonempty rows. The final checker fails first at the watcher count: baseline emits two callbacks, with `[]` then the final rows. An earlier checker order also failed directly on the forbidden `[]`. The same six passed after replacing `internalData.length = 0; internalData.push(...rows)` with one `ref.value = Array.from(rows)` assignment. The baseline implementation is the hostile wrong design: it reached the intended watcher checkpoint and failed by assertion, not by timeout or setup failure. The repaired cells each observed exactly one final `data` callback.
+The six oracle cells all failed on baseline main. Every cell recorded `[]` while the source already contained the final nonempty rows. The checker rejects that forbidden value before it checks the callback count. Baseline emits two callbacks, with `[]` then the final rows. The same six passed after replacing `internalData.length = 0; internalData.push(...rows)` with one `ref.value = Array.from(rows)` assignment. The baseline implementation is the hostile wrong design: it reached the intended watcher checkpoint and failed by assertion, not by timeout or setup failure. The repaired cells each observed exactly one final `data` callback.
 
 A separate focused RED found that a user query throwing `Error('__DISABLED_QUERY__')` was misclassified as disabled. Replacing the message match with a unique Symbol sentinel made that test GREEN. Null and undefined disabled queries still pass. The change also removes stack allocation for ordinary disable, while retaining a caught throw. It does not claim to fix debugger behavior for caught exceptions.
 
-The array fix uses Vue `ref`, rather than the PR's proposed `shallowRef`. A temporary compatibility probe found that baseline `reactive` and repaired `ref` both expose deep reactive arrays, rows, and nested values; an in-place nested edit triggered a synchronous watcher in both. This behavior is not asserted as a supported Collection mutation path, but preserving it avoids a separate observable change. The old array spread is gone; the new `Array.from` assignment has no function-argument limit. Production diff at `e11bedc7`: 9 additions, 12 deletions, net **−3** lines. Test and coverage text weight is separate.
+The array fix uses Vue `ref`, rather than the PR's proposed `shallowRef`. A temporary compatibility probe found that baseline `reactive` and repaired `ref` both expose deep reactive arrays, rows, and nested values; an in-place nested edit triggered a synchronous watcher in both. This behavior is not asserted as a supported Collection mutation path, but preserving it avoids a separate observable change. The old array spread is gone; the new `Array.from` assignment has no function-argument limit. Production diff at `7a67d6a2`: 9 additions, 19 deletions, net **−10** lines. Test and coverage text weight is separate.
 
 A baseline diagnostic also established that `markReady()` changed the Vue hook status to `ready` before returning and that stopping a standalone `effectScope` prevented a later source insert from changing hook data. The shared Vue `no-updates-after-unmount` conformance scenario reaches the same disposal path. These results do not prove every delayed callback schedule.
 
@@ -56,18 +56,18 @@ A baseline diagnostic also established that `markReady()` changed the Vue hook s
 | ORC-003 | The file names contract, model, grammar, production driver, and refinement check separately. |
 | ORC-004 | Not triggered: fixed bounded matrix, no generated-history coverage claim. |
 | ORC-005 | The driver invokes the real `useLiveQuery` overloads and source sync transaction; a synchronous public Vue watcher records every `data` callback and confirms source final state at each callback. |
-| ORC-006 | Baseline clear+push is the hostile mutant. All six cells failed at the synchronous watcher count assertion and captured `[]` before final rows; repaired cells passed. |
+| ORC-006 | Baseline clear+push is the hostile mutant. All six cells failed at the synchronous watcher content assertion on `[]`; repaired cells passed. |
 | ORC-007 | Not triggered: no important generated property or random campaign. |
 | ORC-008 | Not triggered: the independent model is stateless copied rows. |
 | ORC-009 | `source Collection`, `sync transaction`, and public snapshot follow the glossary; plain copied rows are a test-only projection. |
 | ORC-010 | The driver captures the primary assertion failure, attempts all cleanup steps, and aggregates separate cleanup errors without erasing the primary cause. No cleanup fault was injected. |
 | ORC-011 | No plausible shared semantic fault between copied source values and hook array notification was identified. The alternate supplied-Collection and identity-query paths exercise different hook inputs, but are not called independent semantic formulations. |
-| ORC-012 | This versioned record ties the executable evidence to `e11bedc7` and states contract × history × path × observation limits. The six-cell fix does not claim closure for untested Vue histories. |
+| ORC-012 | This versioned record ties the executable evidence to `7a67d6a2` and states contract × history × path × observation limits. The six-cell fix does not claim closure for untested Vue histories. |
 
 ## Verification and reviewer assessment
 
 - Baseline `ae2eb3fb`: publication oracle **6/6 RED**; sentinel regression **RED**; same-turn readiness and scope-disposal diagnostic **GREEN**.
-- Candidate `e11bedc7`: publication oracle **6/6 GREEN** with focused test typecheck; sentinel and existing disabled tests **GREEN**; all Vue runtime tests **106/106 GREEN**; production TypeScript check and formatting **GREEN**.
+- Candidate `7a67d6a2`: publication oracle **6/6 GREEN** with focused test typecheck; sentinel and existing disabled tests **GREEN**; all Vue runtime tests **106/106 GREEN**; production TypeScript check and formatting **GREEN**.
 - Package-wide Vitest typecheck reports 149 existing cross-package `rootDir` errors from shared conformance imports. The runtime assertions pass; the focused oracle typecheck and production TypeScript check pass.
 
 The PR author identified a real, high-signal Vue publication defect and offered a repair with the right atomic shape. Their other proposals mix API design, unmeasured performance claims, and claims already addressed on current main. A narrow `ref` assignment preserves more behavior than the proposed `shallowRef`. As a reviewer sample, this artifact alone is **insufficient to recommend hiring**: the core observation is strong, but prioritization and evidence for the broader refactor are weak.
