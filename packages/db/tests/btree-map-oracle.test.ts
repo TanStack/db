@@ -331,8 +331,7 @@ describe(`BTree Map oracle`, () => {
     const staleScan = vi
       .spyOn(tree, `forRange`)
       .mockImplementation((_low, _high, _inclusive, callback) => {
-        callback?.(1, value, 0)
-        return 1
+        callback(1, value)
       })
     try {
       expect(() => expectRefinement(tree, new Map(), 0)).toThrowError(
