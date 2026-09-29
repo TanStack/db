@@ -64,6 +64,7 @@ export type CollectionIndexSerializableValue =
 
 export interface CollectionIndexResolverMetadata {
   kind: `constructor` | `async`
+  /** Stable for built-in indexes; diagnostic and build-dependent for custom constructors. */
   name?: string
 }
 
