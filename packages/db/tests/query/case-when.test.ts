@@ -503,6 +503,10 @@ describe(`caseWhen`, () => {
       /caseWhen\(\) conditions must be expression-like values/,
     )
 
+    expect(() => caseWhen({ type: `val`, value: false } as any, `bad`)).toThrow(
+      /caseWhen\(\) conditions must be expression-like values/,
+    )
+
     expect(() =>
       createLiveQueryCollection((q) =>
         q.from({ user: users }).where(({ user }) =>

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { getLazyLoadTargets } from '../../../src/query/compiler/lazy-targets.js'
-import { CollectionRef, PropRef, QueryRef } from '../../../src/query/ir.js'
+import {
+  CollectionRef,
+  Func,
+  PropRef,
+  QueryRef,
+  UnionFrom,
+} from '../../../src/query/ir.js'
 import type { QueryIR } from '../../../src/query/ir.js'
 import type { CollectionImpl } from '../../../src/collection/index.js'
 
@@ -44,5 +50,28 @@ describe(`lazy load target identity`, () => {
 
   it(`does not route demand through a fallback with another alias`, () => {
     expect(targetsForAlias(`other`).targets).toEqual([])
+  })
+
+  it(`retains dotted and nested paths from one lazy source`, () => {
+    const source = new CollectionRef(collection, `item`)
+    const from = new UnionFrom([
+      source,
+      new CollectionRef({ id: `other` } as CollectionImpl, `other`),
+    ])
+    const query: QueryIR = { from }
+
+    const targets = getLazyLoadTargets(
+      query,
+      from,
+      `item`,
+      new Func(`coalesce`, [
+        new PropRef([`item`, `a.b`]),
+        new PropRef([`item`, `a`, `b`]),
+      ]),
+      undefined,
+      {},
+    )
+
+    expect(targets.map(({ path }) => path)).toEqual([[`a.b`], [`a`, `b`]])
   })
 })

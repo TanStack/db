@@ -1,7 +1,10 @@
 import { setImmediate as yieldToRunner } from 'node:timers/promises'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { createEffect } from '../../src/query/effect.js'
 import {
   createLiveQueryCollection,
   eq,
@@ -9,9 +12,11 @@ import {
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions } from '../oracle-config.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { SyncConfig } from '../../src/types.js'
 
 /**
  * # What makes a layered publication coherent?
@@ -753,4 +758,234 @@ describe(`layered-query publication oracle`, () => {
       value,
     })
   })
+})
+
+/**
+ * A held ordered repair can run the graph several times before one public
+ * publication. Row 1 moves behind row 2 while its payload changes A→B→A.
+ * The expected public snapshot comes from sorting source rows, not from
+ * intermediate retractions. Subscribers receive one layout notification
+ * with no value-change message. A final-value C cell checks a value update.
+ */
+describe(`held include publication`, () => {
+  it.each([
+    { intermediate: `A`, final: `A` },
+    { intermediate: `B`, final: `A` },
+    { intermediate: `B`, final: `C` },
+  ])(
+    `compares the final $intermediate to $final row with the last public snapshot`,
+    async ({ intermediate, final }) => {
+      type Row = { id: number; rank: number; value: string }
+      const sourceRows = new Map<number, Row>([
+        [1, { id: 1, rank: 1, value: `A` }],
+        [2, { id: 2, rank: 2, value: `X` }],
+      ])
+      const expectedRows = () =>
+        [...sourceRows.values()]
+          .sort((left, right) => left.rank - right.rank)
+          .map(({ id, value }) => ({
+            id,
+            value,
+            children: id === 1 ? [10] : [],
+          }))
+
+      let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+      let holdRepair = false
+      const held: Array<() => void> = []
+      let requests = 0
+      const source = createCollection<Row, number>({
+        id: `held-publication-source-${nextCollectionId++}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            sync = operations
+            operations.markReady()
+            return {
+              loadSubset: () => {
+                requests++
+                if (requests === 1) {
+                  sync.begin()
+                  for (const row of sourceRows.values()) {
+                    sync.write({ type: `insert`, value: { ...row } })
+                  }
+                  expect(sync.commit()).toBe(true)
+                }
+                return holdRepair
+                  ? new Promise<void>((resolve) => held.push(resolve))
+                  : true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const children = createControlledCollection(`held-publication-child`, [
+        { id: 10, parentId: 1 },
+      ])
+      children.collection.createIndex((child) => child.parentId, {
+        indexType: BasicIndex,
+      })
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ parent: source })
+            .orderBy(({ parent }) => parent.rank)
+            .limit(2)
+            .select(({ parent }) => ({
+              id: parent.id,
+              value: parent.value,
+              children: materialize(
+                q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.parentId, parent.id))
+                  .select(({ child }) => ({ id: child.id })),
+              ),
+            })),
+        getKey: (row) => row.id,
+      })
+      const snapshot = () =>
+        query.toArray.map(({ id, value, children: childRows }) => ({
+          id,
+          value,
+          children: childRows.map(({ id: childId }) => childId),
+        }))
+      const callbacks: Array<{
+        rows: ReturnType<typeof snapshot>
+        changes: Array<{
+          type: string
+          key: string | number
+          value?: string
+          previousValue?: string
+        }>
+      }> = []
+      const effectBatches: Array<
+        Array<{
+          type: string
+          key: string | number
+          value: string
+          previousValue: string | undefined
+        }>
+      > = []
+      let effect: ReturnType<typeof createEffect> | undefined
+      let unsubscribe: (() => void) | undefined
+
+      await withHistoryCleanup(
+        async () => {
+          await query.preload()
+          effect = createEffect<{ id: number; value: string }, number>({
+            query: (q) =>
+              q
+                .from({ parent: source })
+                .orderBy(({ parent }) => parent.rank)
+                .limit(2)
+                .select(({ parent }) => ({
+                  id: parent.id,
+                  value: parent.value,
+                })),
+            skipInitial: true,
+            onBatch: (events) => {
+              effectBatches.push(
+                events.map((event) => ({
+                  type: event.type,
+                  key: event.key,
+                  value: event.value.value,
+                  previousValue:
+                    event.type === `update`
+                      ? event.previousValue.value
+                      : undefined,
+                })),
+              )
+            },
+          })
+          await flushPromises()
+          const before = snapshot()
+          expect(before).toEqual(expectedRows())
+          const subscription = query.subscribeChanges(
+            (changes) => {
+              callbacks.push({
+                rows: snapshot(),
+                changes: changes.map((change) =>
+                  change.type === `update`
+                    ? {
+                        type: change.type,
+                        key: change.key,
+                        value: change.value.value,
+                        previousValue: change.previousValue?.value,
+                      }
+                    : { type: change.type, key: change.key },
+                ),
+              })
+            },
+            { includeInitialState: false },
+          )
+          unsubscribe = () => subscription.unsubscribe()
+
+          holdRepair = true
+          const write = (row: Row) => {
+            sourceRows.set(row.id, { ...row })
+            sync.begin()
+            sync.write({ type: `update`, value: { ...row } })
+            expect(sync.commit()).toBe(true)
+          }
+          write({ id: 1, rank: 2.5, value: `A` })
+          write({ id: 1, rank: 2.5, value: intermediate })
+          write({ id: 1, rank: 2.5, value: final })
+          expect(held.length).toBeGreaterThan(0)
+          expect(snapshot()).toEqual(before)
+          expect(callbacks).toEqual([])
+          expect(effectBatches).toEqual([])
+
+          holdRepair = false
+          for (const release of held.splice(0)) release()
+          await flushPromises()
+          const after = expectedRows()
+          expect(snapshot()).toEqual(after)
+          expect(callbacks).toEqual([
+            {
+              rows: after,
+              changes:
+                final === `A`
+                  ? []
+                  : [
+                      {
+                        type: `update`,
+                        key: 1,
+                        value: final,
+                        previousValue: `A`,
+                      },
+                    ],
+            },
+          ])
+          expect(effectBatches).toEqual(
+            final === `A`
+              ? []
+              : [
+                  [
+                    {
+                      type: `update`,
+                      key: 1,
+                      value: final,
+                      previousValue: `A`,
+                    },
+                  ],
+                ],
+          )
+        },
+        () => [
+          () => {
+            holdRepair = false
+            for (const release of held) release()
+          },
+          () => unsubscribe?.(),
+          () => effect?.dispose(),
+          () => query.cleanup(),
+          () => source.cleanup(),
+          () => children.collection.cleanup(),
+        ],
+      )
+    },
+  )
 })
