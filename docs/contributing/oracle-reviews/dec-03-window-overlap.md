@@ -124,3 +124,54 @@ This follow-up supplies ORC-012 evidence for semantic head
 ready-observer source-update cell for these finite ordered rows and public
 checkpoints. Framework hook overlap scheduling and other acquisition paths
 remain outside the claim, as recorded in the coverage map.
+
+## Follow-up: detached snapshot reads under a retained error
+
+Reviewed semantic head: `fa5a3185` (branch `codex/audit-dec-03`). The earlier
+sections retain their exact-head claims. This follow-up extends the same shared
+conformance owner to a controller with no active subscriber. The preloaded live
+query retains a five-row physical window. After a subscribed source update and
+unsubscribe, a second source write reverses the fifth row's presence. A direct
+`getSnapshot()` read must derive continuation from those current rows while
+preserving the earlier error until explicit recovery. Four or five source rows
+cross both settlement orders. The shared model still computes its answer from
+source length and committed page count, not the controller's cached value. The
+cell now checks 20 public snapshots in each receiving driver.
+
+At parent head `0b0ca99c`, React's public snapshot had the correct four rows
+and retained error after the detached removal, but `hasNextPage` remained
+`true` instead of `false`. The same oracle was green after moving continuation
+recomputation from the subscriber callback into `getSnapshot()`. It also covers
+the reverse four-to-five-row transition. The DB controller suite passed 75/75,
+and the full receiving suites passed React 36/36, Vue 38/38, and Svelte 38/38
+before the final one-line simplification. The DB package was built before the
+Svelte run, which imports its built entry point. After that simplification,
+the DB suite passed 75/75 and the focused shared cell passed in all three
+receiving drivers. Changed-file ESLint, Prettier, and `git diff --check` passed.
+
+A separate temporary control reached the synchronous page-success assignment
+with a held earlier preload failure. Replacing that assignment with a throw
+failed at the intended line; changing its value from `false` to `true` left the
+public error snapshot correct because the later failure recomputed
+continuation. Both controls were restored, then the dead synchronous write was
+removed. This supports only the stated execution order; it does not prove
+every synchronous history equivalent.
+
+ORC-001 through ORC-003 remain grounded in the maintainer's overlap decision,
+the source-length model, and the adjacent shared contract/model/driver/check.
+ORC-004 and ORC-007 remain inapplicable because the four histories form an
+explicit bounded matrix. ORC-005 reaches the exported controller in all three
+package realms and compares rows, pages, params, continuation, fetching,
+status, and error at the detached read. ORC-006 is supported by the original
+RED result and the same-path synchronous controls above. ORC-008 is
+inapplicable because the reference has no mutable state. ORC-009 maps
+`pageSucceeded` and `preloadFailed` as in the earlier section. ORC-010 retains
+the scenario's controlled gate release and cleanup. ORC-011 remains
+inapplicable within this direct-controller boundary because no new plausible
+shared semantic fault requiring a second formulation was identified. This
+section supplies ORC-012 evidence for the named semantic head.
+
+The added claim covers a detached `getSnapshot()` after the preloaded source
+publishes a change within a retained physical window. It makes no notification
+claim without a subscriber. Hook scheduling, arbitrary provider acquisition,
+and other source-state transitions remain outside this cell.
