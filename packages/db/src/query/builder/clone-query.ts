@@ -7,6 +7,7 @@ import {
   UnionFrom,
   isExpressionLike,
 } from '../ir.js'
+import { isRefProxy } from './ref-proxy-identity.js'
 import type { From, QueryIR, Select, SelectValueExpression } from '../ir.js'
 
 /**
@@ -128,8 +129,8 @@ function cloneSelectValueForPlacement(
     return value as SelectValueExpression
   }
 
-  if ((value as { __refProxy?: boolean }).__refProxy === true) {
-    return value as SelectValueExpression
+  if (isRefProxy(value)) {
+    return value as unknown as SelectValueExpression
   }
 
   return isExpressionLike(value)
