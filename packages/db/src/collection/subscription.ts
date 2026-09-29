@@ -1169,6 +1169,8 @@ export class CollectionSubscription
       orderBy: opts?.orderBy,
       limit: opts?.limit,
     }
+    // The loader can reenter releaseSnapshot before startSubsetDemand returns.
+    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     const {
       demand,
@@ -1176,7 +1178,6 @@ export class CollectionSubscription
       started,
     } = this.startSubsetDemand(loadOptions)
     if (!this.isDemandActive(demand)) return false
-    if (opts?.where) this.requestedSubsetWhere.set(loadOptions, opts.where)
 
     // Report the result synchronously, including a wait for an unavailable loader.
     opts?.onLoadSubsetResult?.(
@@ -1205,9 +1206,8 @@ export class CollectionSubscription
       })
       if (snapshot === undefined) {
         opts.onUnoptimized()
-        // The callback can unsubscribe; TypeScript retains the pre-call narrowing.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (this.unsubscribed) return false
+        // The callback can retire this demand before the fallback read.
+        if (!this.isDemandActive(demand)) return false
         snapshot = this.collection.currentStateAsChanges({
           ...stateOpts,
           optimizedOnly: false,
@@ -1216,9 +1216,8 @@ export class CollectionSubscription
     } else {
       snapshot = this.collection.currentStateAsChanges(stateOpts)
     }
-    // Snapshot evaluation may call user code that tears down the subscription.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (this.unsubscribed) return false
+    // Snapshot evaluation may call user code that retires this demand.
+    if (!this.isDemandActive(demand)) return false
 
     if (snapshot === undefined) {
       // Couldn't load from indexes
