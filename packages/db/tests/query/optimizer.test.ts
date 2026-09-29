@@ -193,6 +193,33 @@ describe(`Query Optimizer`, () => {
   })
 
   describe(`Join Optimization`, () => {
+    test(`preserves single-result and DISTINCT flags across join optimization`, () => {
+      const distinctSource: QueryIR = {
+        from: new CollectionRef(mockCollection, `p`),
+        select: { id: createPropRef(`p`, `id`) },
+        distinct: true,
+      }
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        join: [
+          {
+            from: new QueryRef(distinctSource, `p`),
+            type: `inner`,
+            left: createPropRef(`u`, `id`),
+            right: createPropRef(`p`, `id`),
+          },
+        ],
+        where: [createEq(createPropRef(`u`, `id`), createValue(1))],
+        singleResult: true,
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+      expect(optimizedQuery.singleResult).toBe(true)
+      expect(optimizedQuery.join?.[0]?.from.type).toBe(`queryRef`)
+      const joined = optimizedQuery.join?.[0]?.from as QueryRef
+      expect(joined.query.distinct).toBe(true)
+    })
+
     test(`should lift single-source where clauses into join subqueries`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),

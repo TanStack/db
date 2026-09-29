@@ -260,6 +260,15 @@ The executable oracle factors that product into valid compiler sub-grammars:
   reference identity, user symbol keys, adversarial property keys, functional
   spreads, and implicit joins.
 
+At user-value boundaries, compiler expressions are identified by their
+constructed IR classes. A plain user object remains data even when it has
+fields such as `type: 'val'` and `value`; source rows, selected objects,
+functional results, and predicate literals must not be unwrapped or rejected
+because of that shape.
+Selected arrays of references evaluate each member into an array of row values.
+User fields named `__refProxy` remain data; only constructed reference proxies
+have proxy semantics.
+
 Plain record results carry route metadata under a private symbol while the
 compiler moves them through recursive sources. Primitives and opaque objects,
 such as `Date`, use an internal envelope at those same edges. Namespacing and
