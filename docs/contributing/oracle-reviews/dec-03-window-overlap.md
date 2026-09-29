@@ -190,3 +190,8 @@ build passed; the controller suite passed 75/75; and the full React, Vue, and
 Svelte receiving suites passed 36/36, 38/38, and 38/38. Changed-file ESLint,
 Prettier, and diff checks passed. The full PR's controller source diff against
 the merge base is 9 additions and 10 deletions: net minus one production line.
+
+Main later advanced to `68f0b65c`. Merge head `3e930add` preserved the
+window-controller coverage row and main's new hash-oracle row. The controller
+and shared conformance owner did not change in this merge. The DB build and
+full DB, React, Vue, and Svelte suites passed again at the same counts.
