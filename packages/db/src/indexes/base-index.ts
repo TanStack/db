@@ -33,6 +33,8 @@ function resolveStringSort(
  */
 export const IndexOperation = comparisonFunctions
 
+export const builtInIndexResolverNames = new WeakMap<object, string>()
+
 /**
  * Type for index operation values
  */

@@ -3,6 +3,7 @@ import {
   toExpression,
 } from '../query/builder/ref-proxy'
 import { CollectionConfigurationError } from '../errors'
+import { builtInIndexResolverNames } from '../indexes/base-index'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
 import type { ChangeMessage } from '../types'
@@ -31,12 +32,7 @@ function compareStringsCodePoint(left: string, right: string): number {
 function resolveResolverMetadata<TKey extends string | number>(
   resolver: IndexConstructor<TKey>,
 ): CollectionIndexResolverMetadata {
-  // An own tag keeps subclasses' constructor names as diagnostic metadata.
-  const stableName: unknown = Object.getOwnPropertyDescriptor(
-    resolver,
-    `resolverMetadataName`,
-  )?.value
-  const name = typeof stableName === `string` ? stableName : resolver.name
+  const name = builtInIndexResolverNames.get(resolver) ?? resolver.name
   return {
     kind: `constructor`,
     ...(name ? { name } : {}),

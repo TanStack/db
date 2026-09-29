@@ -201,6 +201,28 @@ describe(`Collection Events System`, () => {
       }
     })
 
+    it(`uses custom resolver names without inspecting constructor descriptors`, () => {
+      const CustomIndex = new Proxy(BasicIndex, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === `resolverMetadataName`) {
+            throw new Error(`descriptor denied`)
+          }
+          return Reflect.getOwnPropertyDescriptor(target, key)
+        },
+      })
+      const added = vi.fn()
+      collection.on(`index:added`, added)
+
+      collection.createIndex((row) => row.id, {
+        indexType: CustomIndex,
+      })
+
+      expect(collection.indexes.size).toBe(1)
+      expect(collection.getIndexMetadata()[0]?.resolver.name).toBe(`BasicIndex`)
+      expect(added).toHaveBeenCalledOnce()
+      expect(added.mock.calls[0]?.[0].index.resolver.name).toBe(`BasicIndex`)
+    })
+
     it(`should emit index:added with stable serializable metadata`, () => {
       const indexAddedListener = vi.fn()
       collection.on(`index:added`, indexAddedListener)

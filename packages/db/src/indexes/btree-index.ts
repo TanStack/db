@@ -8,7 +8,7 @@ import {
   makeComparator,
   normalizeForBTree,
 } from '../utils/comparison.js'
-import { BaseIndex } from './base-index.js'
+import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
 import type { IndexOperation } from './base-index.js'
@@ -44,8 +44,6 @@ type OrderedBucket<TKey> = {
 export class BTreeIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
-  static readonly resolverMetadataName = `BTreeIndex`
-
   public readonly supportedOperations = new Set<IndexOperation>([
     `eq`,
     `gt`,
@@ -444,3 +442,5 @@ export class BTreeIndex<
     return result
   }
 }
+
+builtInIndexResolverNames.set(BTreeIndex, `BTreeIndex`)

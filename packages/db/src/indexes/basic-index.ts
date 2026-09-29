@@ -9,7 +9,7 @@ import {
   compareKeysReversed,
   findInsertPositionInArray,
 } from '../utils/array-utils.js'
-import { BaseIndex } from './base-index.js'
+import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
 import type { IndexOperation } from './base-index.js'
@@ -45,8 +45,6 @@ export interface BasicIndexOptions {
 export class BasicIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
-  static readonly resolverMetadataName = `BasicIndex`
-
   public readonly supportedOperations = new Set<IndexOperation>([
     `eq`,
     `gt`,
@@ -484,3 +482,5 @@ export class BasicIndex<
     return result
   }
 }
+
+builtInIndexResolverNames.set(BasicIndex, `BasicIndex`)
