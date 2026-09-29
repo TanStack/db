@@ -43,6 +43,11 @@ type AliasScope = {
 }
 
 const intrinsicTypedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype)
+const intrinsicDataViewPrototype = DataView.prototype
+const intrinsicDataViewTagGetter = Object.getOwnPropertyDescriptor(
+  intrinsicDataViewPrototype,
+  Symbol.toStringTag,
+)?.get
 const intrinsicTypedArrayToString = intrinsicTypedArrayPrototype.toString
 const intrinsicObjectToString = Object.prototype.toString
 const typedArrayTag = Object.getOwnPropertyDescriptor(
@@ -1028,11 +1033,21 @@ function canonicalizeRuntimeValue(
     let typedArrayPrototype: object | undefined
     let bufferPrototype: object | undefined
     let bufferLengthShadowed = isBuffer && Object.hasOwn(value, `length`)
+    if (
+      tag === undefined &&
+      Object.getOwnPropertyDescriptor(value, Symbol.toStringTag)?.get
+    ) {
+      throw new UnhashableQueryIRError(path, `view with custom conversion`)
+    }
     // A recognized Buffer copy has its own base prototype. Other views use
     // this module's captured built-ins because foreign prototypes can change.
     while ((prototype = Object.getPrototypeOf(prototype)) !== null) {
       rootPrototype = prototype
-      if (Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag)?.get) {
+      const tagGetter = Object.getOwnPropertyDescriptor(
+        prototype,
+        Symbol.toStringTag,
+      )?.get
+      if (tagGetter) {
         typedArrayPrototype = prototype
       }
       if (
@@ -1041,6 +1056,14 @@ function canonicalizeRuntimeValue(
         Object.hasOwn(prototype, `length`)
       ) {
         bufferLengthShadowed = true
+      }
+      if (
+        tag === undefined &&
+        tagGetter !== undefined &&
+        (prototype !== intrinsicDataViewPrototype ||
+          tagGetter !== intrinsicDataViewTagGetter)
+      ) {
+        throw new UnhashableQueryIRError(path, `view with custom conversion`)
       }
       if (
         typedArrayPrototype === undefined &&
@@ -1199,8 +1222,10 @@ function canonicalizeOrderingRuntimeValue(
     return canonicalizeRuntimeValue(Number.NaN, path, seen)
   }
 
-  const normalized = normalizeValue(value)
-  if (normalized !== value && !(value instanceof Uint8Array)) {
+  // View conversion is validated below before user-controlled tag accessors
+  // can run in normalizeValue.
+  const normalized = ArrayBuffer.isView(value) ? value : normalizeValue(value)
+  if (normalized !== value) {
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 

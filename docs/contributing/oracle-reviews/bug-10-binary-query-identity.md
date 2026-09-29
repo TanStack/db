@@ -218,3 +218,60 @@ each passed their explicit-view-key case. This records ORC-012 for the bounded
 follow-up, including the pending foreign direct-key policy. Against that main
 commit, the PR has 113 added and 9 deleted production lines, net +104 across
 five files. The Buffer follow-up itself added 9 production lines.
+
+## Current-head CI and DataView accessor follow-up
+
+The pushed head `609a15d0` failed its full `@tanstack/db` CI suite at the
+existing Buffer shadowed-`length` demand-key assertion: 6,946 tests passed and
+one failed. The same assertion also failed in a local focused run and a local
+full-suite run. Direct structural hashing already rejected the shortened
+Buffer. Ordering identity normalized its bytes before reaching that rejection
+because the host Buffer was outside the active `Uint8Array` realm. Replacing
+the realm-sensitive `instanceof` guard with `ArrayBuffer.isView` makes ordering
+identity take the reference fallback. The existing oracle's native comparison,
+direct-hash rejection, exact demand key, and query identity were RED before
+this correction and GREEN after it.
+
+CodeRabbit review 5354874124 identified a second collision on the same head.
+A local DataView with an own `Symbol.toStringTag` getter returned `DataView`
+during hashing, then `Changed` during comparison. A local inherited getter had
+the same effect. The oracle now checks both placements at the direct hash,
+exact demand-key, query-identity, and compiled `gt` checkpoints, with an
+ordinary local DataView as the hashable control. Both getter cases failed at
+the intended direct-hash assertion before the fix. The repair rejects those
+accessors without invoking them during direct hashing or identity creation,
+while exempting the captured intrinsic DataView tag getter. An ordinary typed
+array's intrinsic tag getter remains hashable. A further RED assertion caught
+two pre-scan getter calls from `normalizeValue` during demand and query identity;
+skipping value normalization for views made that assertion GREEN.
+
+These witnesses cover own and inherited local DataView accessors and Buffer
+shadowed lengths across the tested host/active-realm boundary. They do not
+claim stability after arbitrary later mutation of a view or its prototype;
+the coverage map continues to assign that history witness to this owner.
+
+An independent follow-up review found a separate classifier mismatch. The
+earlier generated view grammar varied only a non-Temporal custom tag, so it
+missed a Uint8Array subclass whose public tag impersonated
+`Temporal.PlainMonthDay`. That view and a plain same-byte Uint8Array shared a
+structural hash, query identity, and demand key, but compiled `gt` used the
+Temporal comparator for two tagged views and threw while the plain predicate
+returned true. Fixed static-tag and accessor-tag oracle cases were RED at the
+compiled predicate checkpoint. `isTemporal` now excludes ArrayBuffer views
+before reading their public tag. Both cases return the native binary ordering
+result and retain equal identities after the fix. The accessor case also proves
+the tag getter is not called during comparison or identity creation. Genuine
+Temporal values remain covered by the existing query comparison tests.
+
+The follow-up's independent quality review found no remaining correctness
+blocker. Simplification review caught the prevalidation `normalizeValue` read;
+the final source bypasses normalization for views and throws immediately when
+it encounters an untrusted DataView tag getter instead of storing another
+boolean scan state. The executable tree passed all 6,651 local `@tanstack/db`
+tests, DB TypeScript, changed-file ESLint and Prettier, the DB Vite build, and
+`git diff --check`. Against freshly fetched `origin/main`, the full PR adds
+142 and deletes 13 production lines (net +129). This follow-up alone adds 30
+and deletes 5 production lines (net +25) against the previously pushed head.
+That is above the AGENTS.md net-neutral starting budget. The added lines keep
+the witnessed realm, accessor, and classifier distinctions; no tested branch
+or guard can be removed without reopening a captured counterexample.

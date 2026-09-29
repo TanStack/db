@@ -414,6 +414,109 @@ describe('binary query value identity', () => {
     expect(foreign.calls()).toBe(0)
   })
 
+  it.each(['own', 'inherited'] as const)(
+    'does not merge local DataViews with %s tag accessors',
+    (placement) => {
+      const plain = new DataView(new Uint8Array([1]).buffer)
+      const changing = new DataView(new Uint8Array([1]).buffer)
+      let tag = 'DataView'
+      let calls = 0
+      const descriptor = {
+        get() {
+          calls++
+          return tag
+        },
+      }
+      if (placement === 'own') {
+        Object.defineProperty(changing, Symbol.toStringTag, descriptor)
+      } else {
+        Object.setPrototypeOf(
+          changing,
+          Object.create(DataView.prototype, {
+            [Symbol.toStringTag]: descriptor,
+          }),
+        )
+      }
+      const collection = createCollection<{ id: number; value: DataView }>({
+        getKey: (value) => value.id,
+        sync: { sync: () => {} },
+      })
+      const source = new CollectionRef(
+        collection as unknown as CollectionImpl,
+        'row',
+      )
+      const field = new PropRef<DataView>(['row', 'value'])
+      const predicate = (value: DataView) =>
+        new Func<boolean>('gt', [field, new Value(value)])
+      const identity = (value: DataView) =>
+        getQueryIdentity({ from: source, where: [predicate(value)] })
+      const row = { row: { value: plain } }
+
+      expect(getStableValueHash(plain)).toBe(
+        getStableValueHash(new DataView(new Uint8Array([1]).buffer)),
+      )
+      expect(() => getStableValueHash(changing)).toThrow(
+        'view with custom conversion',
+      )
+      expect(calls).toBe(0)
+      expect(getLoadSubsetDemandKey({ where: predicate(changing) })).not.toBe(
+        getLoadSubsetDemandKey({ where: predicate(plain) }),
+      )
+      expect(identity(changing)).not.toBe(identity(plain))
+      expect(calls).toBe(0)
+      tag = 'Changed'
+      expect(compileExpression(predicate(changing))(row)).toBe(true)
+      expect(compileExpression(predicate(plain))(row)).toBe(false)
+    },
+  )
+
+  it('rejects a replaced DataView prototype tag getter before conversion', () => {
+    const plain = new DataView(new Uint8Array([1]).buffer)
+    const changing = new DataView(new Uint8Array([1]).buffer)
+    const original = Object.getOwnPropertyDescriptor(
+      DataView.prototype,
+      Symbol.toStringTag,
+    )!
+    let calls = 0
+    Object.defineProperty(DataView.prototype, Symbol.toStringTag, {
+      configurable: true,
+      get() {
+        calls++
+        return this === changing ? 'Changed' : 'DataView'
+      },
+    })
+    try {
+      const collection = createCollection<{ id: number; value: DataView }>({
+        getKey: (value) => value.id,
+        sync: { sync: () => {} },
+      })
+      const source = new CollectionRef(
+        collection as unknown as CollectionImpl,
+        'row',
+      )
+      const field = new PropRef<DataView>(['row', 'value'])
+      const predicate = (value: DataView) =>
+        new Func<boolean>('gt', [field, new Value(value)])
+      const identity = (value: DataView) =>
+        getQueryIdentity({ from: source, where: [predicate(value)] })
+      const row = { row: { value: plain } }
+
+      expect(() => getStableValueHash(changing)).toThrow(
+        'view with custom conversion',
+      )
+      expect(calls).toBe(0)
+      expect(getLoadSubsetDemandKey({ where: predicate(changing) })).not.toBe(
+        getLoadSubsetDemandKey({ where: predicate(plain) }),
+      )
+      expect(identity(changing)).not.toBe(identity(plain))
+      expect(calls).toBe(0)
+      expect(compileExpression(predicate(changing))(row)).toBe(true)
+      expect(compileExpression(predicate(plain))(row)).toBe(false)
+    } finally {
+      Object.defineProperty(DataView.prototype, Symbol.toStringTag, original)
+    }
+  })
+
   it('does not trust conversion methods changed in another realm', () => {
     const foreignArray = runInNewContext(`
       Object.getPrototypeOf(Uint8Array.prototype).toString = () => '9'
@@ -558,6 +661,51 @@ describe('binary query value identity', () => {
       expect(identity(shortened)).not.toBe(identity(normal))
     }
   })
+
+  it.each(['static', 'accessor'] as const)(
+    'keeps %s Temporal tags on typed arrays in the binary ordering domain',
+    (kind) => {
+      class TaggedUint8Array extends Uint8Array {}
+      let tagCalls = 0
+      Object.defineProperty(
+        TaggedUint8Array.prototype,
+        Symbol.toStringTag,
+        kind === 'static'
+          ? { value: 'Temporal.PlainMonthDay' }
+          : {
+              get() {
+                tagCalls++
+                return 'Temporal.PlainMonthDay'
+              },
+            },
+      )
+      const plain = new Uint8Array([1])
+      const tagged = new TaggedUint8Array([1])
+      const row = { row: { value: new TaggedUint8Array([5]) } }
+      const collection = createCollection<{ id: number; value: Uint8Array }>({
+        getKey: (value) => value.id,
+        sync: { sync: () => {} },
+      })
+      const source = new CollectionRef(
+        collection as unknown as CollectionImpl,
+        'row',
+      )
+      const field = new PropRef<Uint8Array>(['row', 'value'])
+      const predicate = (value: Uint8Array) =>
+        new Func<boolean>('gt', [field, new Value(value)])
+      const identity = (value: Uint8Array) =>
+        getQueryIdentity({ from: source, where: [predicate(value)] })
+
+      expect(compileExpression(predicate(plain))(row)).toBe(true)
+      expect(compileExpression(predicate(tagged))(row)).toBe(true)
+      expect(getStableValueHash(tagged)).toBe(getStableValueHash(plain))
+      expect(getLoadSubsetDemandKey({ where: predicate(tagged) })).toBe(
+        getLoadSubsetDemandKey({ where: predicate(plain) }),
+      )
+      expect(identity(tagged)).toBe(identity(plain))
+      expect(tagCalls).toBe(0)
+    },
+  )
 
   it.each([101610, undefined])(
     'uses built-in element type and bytes for inherited typed-array behavior, seed=%s',

@@ -129,7 +129,8 @@ with nonreflexive lengths retain separate identities, matching equality's
 same-reference behavior. Recognized Buffer copies from different realms stay
 hashable; implementations with different conversion functions retain distinct
 identities. Buffer values with an own or inherited shadow of `length` reject
-direct structural hashing and use reference identity in ordering predicates.
+direct structural hashing and use reference identity in ordering predicates,
+including when the host Buffer is outside the active `Uint8Array` realm.
 Foreign realm typed arrays and DataViews fall back to reference identity in
 ordering predicates, including pristine copies. Direct structural hashing
 rejects them, so two equal-byte foreign objects lose cache reuse and a foreign
@@ -138,8 +139,12 @@ a product decision. Focused React and Svelte `useLiveQuery` tests reach this
 rethrow for a pristine foreign view and a local custom-conversion view.
 Conversion-overriding views receive runtime reference identity in ordering
 predicates; `getStableValueHash` rejects them. The owner checks custom
-`toString`, `join`, `valueOf`, `Symbol.toPrimitive`, DataView tag behavior,
-and spoofed `buffer`, `byteOffset`, and `byteLength` accessors on views.
+`toString`, `join`, `valueOf`, `Symbol.toPrimitive`, DataView tag behavior
+(including local own, inherited, and replaced intrinsic tag getters), and
+typed-array tags that impersonate Temporal values, as well as spoofed
+`buffer`, `byteOffset`, and `byteLength` accessors on views. ArrayBuffer views
+stay in the binary comparison domain even if a public tag spells a Temporal
+type.
 An explicit live-query key also rejects a custom-conversion view contained
 inside the key; that is a separate compatibility decision.
 Conversion with mutable external state and byte mutation after demand creation
