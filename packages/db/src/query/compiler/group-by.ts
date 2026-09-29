@@ -12,6 +12,7 @@ import {
   getHavingExpression,
   isExpressionLike,
 } from '../ir.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -1051,7 +1052,7 @@ function isNestedSelectObject(value: unknown): value is Select {
     value != null &&
     typeof value === `object` &&
     !Array.isArray(value) &&
-    !(value as any).__refProxy &&
+    !isRefProxy(value) &&
     !isExpressionLike(value)
   )
 }
