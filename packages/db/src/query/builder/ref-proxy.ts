@@ -75,7 +75,7 @@ export function createSingleRowRefProxy<
   const cache = new Map<string, any>()
 
   function createProxy(path: Array<string>): any {
-    const pathKey = path.join(`.`)
+    const pathKey = JSON.stringify(path)
     if (cache.has(pathKey)) {
       return cache.get(pathKey)
     }
@@ -140,7 +140,7 @@ export function createRefProxy<T extends Record<string, any>>(
   let accessId = 0 // Monotonic counter to record evaluation order
 
   function createProxy(path: Array<string>): any {
-    const pathKey = path.join(`.`)
+    const pathKey = JSON.stringify(path)
     if (cache.has(pathKey)) {
       return cache.get(pathKey)
     }
@@ -272,7 +272,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
   const cache = new Map<string, any>()
 
   function createSelectedProxy(path: Array<string>): any {
-    const pathKey = path.join(`.`)
+    const pathKey = JSON.stringify(path)
     if (cache.has(pathKey)) {
       return cache.get(pathKey)
     }

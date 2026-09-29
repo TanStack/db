@@ -1271,7 +1271,7 @@ function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
   const seen = new Set<string>()
   return refs.filter((ref) => {
     const alias = ref.path.length > 1 ? ref.path[0] : undefined
-    const path = ref.path.join(`.`)
+    const path = JSON.stringify(ref.path)
     if (
       alias == null ||
       alias === `$selected` ||
@@ -1332,7 +1332,7 @@ function collectParentRefsFromQuery(
 
   const seen = new Set<string>()
   return refs.filter((ref) => {
-    const path = ref.path.join(`.`)
+    const path = JSON.stringify(ref.path)
     if (
       ref.path[0] == null ||
       !parentAliases.includes(ref.path[0]) ||

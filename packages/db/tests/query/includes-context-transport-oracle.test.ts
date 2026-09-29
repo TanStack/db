@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import {
   add,
   and,
+  caseWhen,
   coalesce,
   count,
   createLiveQueryCollection,
@@ -50,9 +51,199 @@ import type { ControlledCollection } from './includes-oracle-helpers.js'
  * This suite owns route-context transport and public-data hygiene. The temporal
  * oracle owns demand lifetime. The publication oracle owns coherent callbacks.
  * The Collection oracle owns facade identity and retirement.
+ *
+ * The focused path witnesses below model a property path as its sequence of
+ * segments: a parent field named `a.b` and a nested field `a.b` are distinct
+ * values, as are a dotted ancestor alias and two ordinary path segments. Their
+ * public checks cover initial materialization and source updates. The include
+ * result-path witness also checks that two different child routes stay separate.
+ * These fixed fixtures do not claim arbitrary path segments or materialization
+ * forms beyond the displayed `toArray` queries.
  */
 
 type Cleanable = { cleanup: () => Promise<void> }
+
+test('carries dotted and nested parent fields through one include', async () => {
+  const parents = createGrammarCollection('path-parent', [
+    { id: 1, 'a.b': 11, a: { b: 22 } },
+  ])
+  const children = createGrammarCollection('path-child', [
+    { id: 10, parentId: 1 },
+  ])
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => ({
+      id: parent.id,
+      children: toArray(
+        q
+          .from({ child: children.collection })
+          .where(({ child }) => eq(child.parentId, parent.id))
+          .select(({ child }) => ({
+            id: child.id,
+            flat: parent['a.b'],
+            nested: parent.a.b,
+          })),
+      ),
+    })),
+  )
+  try {
+    await live.preload()
+    expect(live.get(1)?.children).toEqual([{ id: 10, flat: 11, nested: 22 }])
+
+    parents.write(`update`, { id: 1, 'a.b': 33, a: { b: 44 } })
+    expect(live.get(1)?.children).toEqual([{ id: 10, flat: 33, nested: 44 }])
+  } finally {
+    await cleanup(live, [parents, children])
+  }
+})
+
+test('carries both parent paths through nested includes', async () => {
+  const parents = createGrammarCollection('nested-path-parent', [
+    { id: 1, 'a.b': 11, a: { b: 22 } },
+  ])
+  const children = createGrammarCollection('nested-path-child', [
+    { id: 10, parentId: 1 },
+  ])
+  const grandchildren = createGrammarCollection('nested-path-grandchild', [
+    { id: 100, childId: 10 },
+  ])
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => ({
+      id: parent.id,
+      children: toArray(
+        q
+          .from({ child: children.collection })
+          .where(({ child }) => eq(child.parentId, parent.id))
+          .select(({ child }) => ({
+            id: child.id,
+            grandchildren: toArray(
+              q
+                .from({ grandchild: grandchildren.collection })
+                .where(({ grandchild }) => eq(grandchild.childId, child.id))
+                .select(({ grandchild }) => ({
+                  id: grandchild.id,
+                  flat: parent['a.b'],
+                  nested: parent.a.b,
+                })),
+            ),
+          })),
+      ),
+    })),
+  )
+  try {
+    await live.preload()
+    expect(live.toArray).toHaveLength(1)
+    expect(live.toArray[0]?.children).toEqual([
+      { id: 10, grandchildren: [{ id: 100, flat: 11, nested: 22 }] },
+    ])
+  } finally {
+    await cleanup(live, [parents, children, grandchildren])
+  }
+})
+
+test('keeps dotted ancestor aliases distinct in nested includes', async () => {
+  const dotted = createGrammarCollection('dotted-alias-parent', [
+    { id: 1, x: 11 },
+  ])
+  const nested = createGrammarCollection('nested-alias-parent', [
+    { id: 1, q: { x: 22 } },
+  ])
+  const children = createGrammarCollection('alias-path-child', [
+    { id: 10, parentId: 1 },
+  ])
+  const grandchildren = createGrammarCollection('alias-path-grandchild', [
+    { id: 100, childId: 10 },
+  ])
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ 'p.q': dotted.collection })
+      .innerJoin({ p: nested.collection }, ({ 'p.q': left, p }) =>
+        eq(left.id, p.id),
+      )
+      .select(({ 'p.q': left, p }) => ({
+        id: left.id,
+        children: toArray(
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentId, left.id))
+            .select(({ child }) => ({
+              id: child.id,
+              grandchildren: toArray(
+                q
+                  .from({ grandchild: grandchildren.collection })
+                  .where(({ grandchild }) => eq(grandchild.childId, child.id))
+                  .select(({ grandchild }) => ({
+                    id: grandchild.id,
+                    flat: left.x,
+                    nested: p.q.x,
+                  })),
+              ),
+            })),
+        ),
+      })),
+  )
+  try {
+    await live.preload()
+    expect(live.toArray).toHaveLength(1)
+    expect(live.toArray[0]?.children).toEqual([
+      { id: 10, grandchildren: [{ id: 100, flat: 11, nested: 22 }] },
+    ])
+  } finally {
+    await cleanup(live, [dotted, nested, children, grandchildren])
+  }
+})
+
+test('routes dotted and nested include result paths independently', async () => {
+  const parents = createGrammarCollection('route-path-parent', [
+    { id: 1, flatKey: 1, nestedKey: 2 },
+  ])
+  const flatChildren = createGrammarCollection('route-path-flat', [
+    { id: 10, parentId: 1 },
+  ])
+  const nestedChildren = createGrammarCollection('route-path-nested', [
+    { id: 20, parentId: 2 },
+  ])
+  const live = createLiveQueryCollection((q) =>
+    q.from({ parent: parents.collection }).select(({ parent }) => ({
+      id: parent.id,
+      'a.b': toArray(
+        q
+          .from({ child: flatChildren.collection })
+          .where(({ child }) => eq(child.parentId, parent.flatKey))
+          .select(({ child }) => ({ id: child.id })),
+      ),
+      a: caseWhen(
+        eq(parent.id, 1),
+        {
+          b: toArray(
+            q
+              .from({ child: nestedChildren.collection })
+              .where(({ child }) => eq(child.parentId, parent.nestedKey))
+              .select(({ child }) => ({ id: child.id })),
+          ),
+        },
+        { b: [] as Array<{ id: number }> },
+      ),
+    })),
+  )
+  try {
+    await live.preload()
+    expect(live.toArray).toHaveLength(1)
+    expect(live.toArray[0]?.['a.b']).toEqual([{ id: 10 }])
+    expect(live.toArray[0]?.a.b).toEqual([{ id: 20 }])
+
+    parents.write(`update`, { id: 1, flatKey: 2, nestedKey: 1 })
+    expect(live.toArray[0]?.['a.b']).toEqual([])
+    expect(live.toArray[0]?.a.b).toEqual([])
+
+    flatChildren.write(`insert`, { id: 11, parentId: 2 })
+    nestedChildren.write(`insert`, { id: 21, parentId: 1 })
+    expect(live.toArray[0]?.['a.b']).toEqual([{ id: 11 }])
+    expect(live.toArray[0]?.a.b).toEqual([{ id: 21 }])
+  } finally {
+    await cleanup(live, [parents, flatChildren, nestedChildren])
+  }
+})
+
 type MaterializationForm = (typeof materializationForms)[number]
 
 type MaterializedForms<T> = {

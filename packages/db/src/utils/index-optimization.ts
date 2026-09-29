@@ -344,7 +344,8 @@ function optimizeCompoundRangeQuery<
 
         if (fieldArg && valueArg) {
           const fieldPath = (fieldArg as any).path
-          const fieldKey = fieldPath.join(`.`)
+          // Preserve segment boundaries: [`a.b`] and [`a`, `b`] are distinct.
+          const fieldKey = JSON.stringify(fieldPath)
           const value = (valueArg as any).value
 
           if (!fieldOperations.has(fieldKey)) {
@@ -359,7 +360,7 @@ function optimizeCompoundRangeQuery<
   // Check if we have multiple operations on the same field
   for (const [fieldKey, operations] of fieldOperations) {
     if (operations.length >= 2) {
-      const fieldPath = fieldKey.split(`.`)
+      const fieldPath = JSON.parse(fieldKey) as Array<string>
       const index = findIndexForField(collection, fieldPath)
 
       // Only collapse this field into a range query when every bound's domain
