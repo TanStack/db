@@ -139,6 +139,8 @@ successful open. A Chromium fixture holds the VFS database Web Lock while a
 second tab times out, checks that its queued request disappears, then reopens
 the database after releasing the lock. This controlled lock holder does not
 reproduce a frozen tab or establish behavior in other browsers.
+The [issue #1883 review record](oracle-reviews/issue-1883-opfs-open-deadline.md)
+preserves the exact-head unit and Chromium evidence and the queued-lock mutant.
 
 The ordered-work owner also checks that an Effect with `skipInitial` waits for
 joined demand before ending initial callback suppression. A deterministic work
