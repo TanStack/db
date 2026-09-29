@@ -79,9 +79,7 @@ export function ensureIndexForField<
   }
 }
 
-/**
- * Analyzes a where expression and creates indexes for all simple operations on single fields
- */
+/** Check indexable WHERE fields for eager indexes or development advice. */
 export function ensureIndexForExpression<
   T extends Record<string, any>,
   TKey extends string | number,
@@ -91,7 +89,6 @@ export function ensureIndexForExpression<
 ): void {
   if (!shouldAutoIndex(collection) && !isDevModeEnabled()) return
 
-  // Extract all indexable expressions and create indexes for them
   const indexableExpressions = extractIndexableExpressions(expression)
 
   for (const { fieldName, fieldPath } of indexableExpressions) {
