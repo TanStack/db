@@ -367,9 +367,7 @@ describe(`BTree Map oracle`, () => {
     const scan = tree.forRange.bind(tree)
     const wrongScan = vi.spyOn(tree, `forRange`).mockImplementation(wrap(scan))
     try {
-      expect(() => expectRefinement(tree, model, 21)).toThrowError(
-        /forRange\(/,
-      )
+      expect(() => expectRefinement(tree, model, 21)).toThrowError(/forRange\(/)
     } finally {
       wrongScan.mockRestore()
     }
