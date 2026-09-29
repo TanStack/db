@@ -175,3 +175,12 @@ The added claim covers a detached `getSnapshot()` after the preloaded source
 publishes a change within a retained physical window. It makes no notification
 claim without a subscriber. Hook scheduling, arbitrary provider acquisition,
 and other source-state transitions remain outside this cell.
+
+## Post-merge validation
+
+Semantic head `5dfd32c7` merges current `origin/main` through `e16d46ce`
+without changing the controller or its oracle. On that merged head, the DB
+build passed; the controller suite passed 75/75; and the full React, Vue, and
+Svelte receiving suites passed 36/36, 38/38, and 38/38. Changed-file ESLint,
+Prettier, and diff checks passed. The full PR's controller source diff against
+the merge base is 9 additions and 10 deletions: net minus one production line.
