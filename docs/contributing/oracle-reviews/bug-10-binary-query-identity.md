@@ -135,3 +135,74 @@ changed-file ESLint, Prettier, and `git diff --check`. This record-only addition
 does not change that executable tree. The earlier ORC-012 receipt for
 `d03b6879` applies only to that older head; the witnesses and checkpoints above
 are the follow-up evidence for the current executable commit.
+
+## Second review: foreign view compatibility and Buffer length
+
+The starting pushed head for this pass was `cb451e99`, after the normal merge
+with `origin/main`. A pristine foreign Uint8Array or DataView with the same bytes
+as a local view gives the same compiled `gt` result. That head rejects direct
+`getStableValueHash(foreignView)` with `UnhashableQueryIRError`. A same-path
+Node `--import tsx` probe used two distinct pristine foreign Uint8Array([1, 2])
+objects. Repeated use of one object gave the same query identity and exact
+demand key, while the two distinct objects gave different identities and keys.
+This proves cache-reuse loss separately from the direct-hash rejection. A view
+inside an explicit query key reaches the direct-hash rejection. The product
+choice between strict rejection and object-identity acceptance is pending; this
+record does not treat equal-byte foreign cache reuse as a settled contract.
+
+A candidate repair compared foreign conversion output with local built-in output
+at hash time. A fixed oracle case for pristine foreign views passed under that
+candidate. Three hostile cases then failed at the direct-hash checkpoint:
+
+- A foreign prototype `toString`, `join`, or `valueOf` method mimicked the
+  built-in result on its first call. Hashing ran the method and accepted it.
+- An own DataView `Symbol.toStringTag` getter returned `DataView` for the first
+  three calls, then changed. Hashing ran and accepted the getter.
+- An own static DataView tag of `A` changed compiled `gt` while the candidate
+  merged its structural hash and exact demand key with a local DataView.
+
+The candidate was removed. These hostile controls now pass against the
+conservative reference fallback. A native function's source text cannot alone
+prove its semantics: replacing a foreign typed-array `toString` with native
+`RegExp.prototype.toString` preserves the usual native source text, name, and
+arity but changes conversion. Cross-realm value equivalence therefore needs a
+separate comparator contract or a more explicit trust boundary.
+
+The independent review also found a Buffer ordering collision on the pushed
+head. Node Buffer([65, 66]) normally converts to `AB`. An own or inherited
+`length = 1` makes `Buffer.prototype.toString` return `A` while intrinsic
+`byteLength` remains 2. The original structural hash and exact `gt` demand key
+merged those values, even though the compiled predicate returned false for the
+normal Buffer and true for the shortened one on the same row. The oracle was RED
+at direct hashing before the repair. The repair rejects a recognized Buffer
+whose `length` is shadowed before its intrinsic typed-array prototype, so
+ordering identity falls back to the object's reference. Both own and inherited
+variants pass the same oracle after the repair.
+
+The widened oracle keeps its independent native relational result, real compiler
+driver, structural hash and demand-key checkpoints, and fixed/random campaigns.
+The added fixed controls reject the unsound foreign-output candidate and the
+Buffer length collision. The model adds no state. It does not prove arbitrary
+later prototype mutation or getter side effects outside these fixtures. After
+rebuilding the local `@tanstack/db` package, focused receiving-path tests ran
+the real React and Svelte `useLiveQuery` hooks. Both rethrew the hash error when
+an explicit key contained a pristine foreign Uint8Array or a local view with
+custom `toString`. The Svelte test also reached the direct `getLiveQueryHash`
+assertion before each hook invocation. The coverage map names the foreign
+explicit-key decision and the static-history limit.
+
+### ORC-001 through ORC-011 for this follow-up
+
+| Requirement | Evidence or limit |
+| --- | --- |
+| ORC-001 authority and limits | Equal identity must imply equal compiled ordering behavior. The Buffer trace violates that law. The foreign direct-key policy is unsettled and is not asserted as a law. |
+| ORC-002 independent judgment | Native relational comparison predicts `gt` results without importing the identity classifier. |
+| ORC-003 responsibilities | The oracle's opening contract, finite byte and conversion fixtures, native comparison model, real compiler and identity driver, and post-call assertions remain adjacent. |
+| ORC-004 grammar controls | The existing generated local-view grammar still spans 0–8 bytes and tag ownership in fixed and random campaigns. The new foreign and Buffer cases are bounded fixed controls and make no generated-history claim. |
+| ORC-005 path and observation | Fixed controls call real `compileExpression`, `getStableValueHash`, and `getLoadSubsetDemandKey` at synchronous checkpoints. React and Svelte tests reach their public hooks. |
+| ORC-006 calibration | The Buffer guard's predecessor failed at direct hashing. The foreign-output candidate passed a pristine witness but failed the stateful-method, stateful-tag, and static-tag controls at direct hashing. |
+| ORC-007 campaign and replay | The unchanged named generated property runs fixed seed 101610 and a seedless campaign through the package oracle owner. Existing guarded seed/path replay remains wired. |
+| ORC-008 model minimality | No state was added to the native-comparison reference. |
+| ORC-009 vocabulary | Query identity and exact demand key retain production names. The foreign conversion fixtures are inputs, not a model-only subsystem state. |
+| ORC-010 failure and cleanup | The generated property keeps `withHistoryCleanup`; fixed cross-realm VM values need no asynchronous cleanup. The intentional candidate failures reached assertions. |
+| ORC-011 second formulation | Native relational comparison and compiled `gt` form separate semantic paths. The React and Svelte receiving paths independently check explicit-key error propagation. |

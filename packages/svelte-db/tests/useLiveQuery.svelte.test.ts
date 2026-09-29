@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   BaseQueryBuilder,
@@ -232,6 +233,34 @@ describe(`Query Collections`, () => {
         flushSync()
       })
     }).toThrow(/queryKey.*function value/)
+  })
+
+  it(`rethrows view hash failures from an explicit queryKey`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `unhashable-view-explicit-query-key-svelte`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+    const foreign = runInNewContext('new Uint8Array([1])') as Uint8Array
+    const custom = new Uint8Array([1])
+    Object.defineProperty(custom, 'toString', { value: () => '9' })
+
+    for (const view of [foreign, custom]) {
+      expect(() => getLiveQueryHash(undefined, [collection.id, view])).toThrow(
+        /queryKey.*view with custom conversion/,
+      )
+      expect(() => {
+        cleanup = $effect.root(() => {
+          useLiveQuery({
+            queryKey: [collection.id, view],
+            query: (q) => q.from({ people: collection }),
+          })
+          flushSync()
+        })
+      }).toThrow(/queryKey.*view with custom conversion/)
+    }
   })
 
   it(`should maintain reactivity when destructuring return values with $derived`, () => {

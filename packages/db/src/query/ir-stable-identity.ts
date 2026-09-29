@@ -1027,12 +1027,20 @@ function canonicalizeRuntimeValue(
     let rootPrototype: object | undefined
     let typedArrayPrototype: object | undefined
     let bufferPrototype: object | undefined
+    let bufferLengthShadowed = isBuffer && Object.hasOwn(value, `length`)
     // A recognized Buffer copy has its own base prototype. Other views use
     // this module's captured built-ins because foreign prototypes can change.
     while ((prototype = Object.getPrototypeOf(prototype)) !== null) {
       rootPrototype = prototype
       if (Object.getOwnPropertyDescriptor(prototype, Symbol.toStringTag)?.get) {
         typedArrayPrototype = prototype
+      }
+      if (
+        isBuffer &&
+        typedArrayPrototype === undefined &&
+        Object.hasOwn(prototype, `length`)
+      ) {
+        bufferLengthShadowed = true
       }
       if (
         typedArrayPrototype === undefined &&
@@ -1048,6 +1056,7 @@ function canonicalizeRuntimeValue(
           ? bufferPrototype?.toString
           : intrinsicTypedArrayToString
     if (
+      bufferLengthShadowed ||
       (tag === undefined && rootPrototype !== Object.prototype) ||
       (tag !== undefined &&
         !isBuffer &&

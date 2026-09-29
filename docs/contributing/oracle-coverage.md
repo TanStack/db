@@ -127,14 +127,20 @@ length distinguish predicates despite an overridden iterator. Separate views
 with nonreflexive lengths retain separate identities, matching equality's
 same-reference behavior. Recognized Buffer copies from different realms stay
 hashable; implementations with different conversion functions retain distinct
-identities. Foreign realm typed arrays and DataViews with untrusted prototype
-conversion fall back to reference identity in ordering predicates.
+identities. Buffer values with an own or inherited shadow of `length` reject
+direct structural hashing and use reference identity in ordering predicates.
+Foreign realm typed arrays and DataViews fall back to reference identity in
+ordering predicates, including pristine copies. Direct structural hashing
+rejects them, so two equal-byte foreign objects lose cache reuse and a foreign
+view inside an explicit live-query key throws. The explicit-key policy awaits
+a product decision. Focused React and Svelte `useLiveQuery` tests reach this
+rethrow for a pristine foreign view and a local custom-conversion view.
 Conversion-overriding views receive runtime reference identity in ordering
 predicates; `getStableValueHash` rejects them. The owner checks custom
 `toString`, `join`, `valueOf`, `Symbol.toPrimitive`, DataView tag behavior,
 and spoofed `buffer`, `byteOffset`, and `byteLength` accessors on views.
-An explicit live-query key can still reject a custom-conversion view contained
-inside the key; that hook compatibility boundary needs a product decision.
+An explicit live-query key also rejects a custom-conversion view contained
+inside the key; that is a separate compatibility decision.
 Conversion with mutable external state and byte mutation after demand creation
 still need a history witness in this owner. The Collection index-events test
 checks stable built-in resolver names through `index:added` and

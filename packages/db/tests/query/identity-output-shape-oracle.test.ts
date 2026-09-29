@@ -337,10 +337,12 @@ describe('query identity agrees with compiled lexical output shape', () => {
 })
 
 /**
- * Views with the same element type, bytes, and inherited conversion denote the
- * same ordering operand. A changed conversion can change `gt` and must keep
- * the demand and query identities distinct. The model uses native relational
- * comparison on finite row values. The grammar varies bytes and tag ownership,
+ * Views with the same element type, bytes, and trusted local built-in conversion
+ * denote the same ordering operand. A changed conversion can change `gt` and
+ * must keep the demand and query identities distinct. Foreign views use
+ * reference identity when their conversion provenance is uncertain. The model
+ * uses native relational comparison on finite row values. The grammar varies
+ * bytes and tag ownership,
  * then checks explicit conversion overrides and spoofed byte accessors. The
  * driver compiles the predicate and computes identities. Equality has a
  * separate law: equal keys must not combine candidates with different indexed
@@ -349,6 +351,69 @@ describe('query identity agrees with compiled lexical output shape', () => {
  * Constructor names do not belong to the denotation.
  */
 describe('binary query value identity', () => {
+  it('rejects changed foreign prototype methods before calling them', () => {
+    const witnesses = [
+      runInNewContext(`
+        let calls = 0
+        Object.getPrototypeOf(Uint8Array.prototype).toString = function () {
+          calls++
+          return calls === 1 ? '1' : '9'
+        }
+        ;({ value: new Uint8Array([1]), calls: () => calls })
+      `),
+      runInNewContext(`
+        let calls = 0
+        Object.getPrototypeOf(Uint8Array.prototype).join = function () {
+          calls++
+          return calls === 1 ? '1' : '9'
+        }
+        ;({ value: new Uint8Array([1]), calls: () => calls })
+      `),
+      runInNewContext(`
+        let calls = 0
+        Object.prototype.valueOf = function () {
+          calls++
+          return this
+        }
+        ;({ value: new Uint8Array([1]), calls: () => calls })
+      `),
+      runInNewContext(`
+        let calls = 0
+        Object.prototype.toString = function () {
+          calls++
+          return calls === 1 ? '[object DataView]' : '9'
+        }
+        ;({ value: new DataView(new Uint8Array([1]).buffer), calls: () => calls })
+      `),
+    ] as Array<{ value: ArrayBufferView; calls: () => number }>
+
+    for (const { value, calls } of witnesses) {
+      expect(() => getStableValueHash(value)).toThrow(
+        'view with custom conversion',
+      )
+      expect(calls()).toBe(0)
+    }
+  })
+
+  it('rejects an own DataView tag getter before it can change conversion', () => {
+    const foreign = runInNewContext(`
+      let calls = 0
+      const value = new DataView(new Uint8Array([1]).buffer)
+      Object.defineProperty(value, Symbol.toStringTag, {
+        get() {
+          calls++
+          return calls <= 3 ? 'DataView' : 'Changed'
+        },
+      })
+      ;({ value, calls: () => calls })
+    `) as { value: DataView; calls: () => number }
+
+    expect(() => getStableValueHash(foreign.value)).toThrow(
+      'view with custom conversion',
+    )
+    expect(foreign.calls()).toBe(0)
+  })
+
   it('does not trust conversion methods changed in another realm', () => {
     const foreignArray = runInNewContext(`
       Object.getPrototypeOf(Uint8Array.prototype).toString = () => '9'
@@ -358,6 +423,15 @@ describe('binary query value identity', () => {
       Object.prototype.toString = () => '9'
       new DataView(new Uint8Array([1]).buffer)
     `) as DataView
+    const foreignJoinedArray = runInNewContext(`
+      Object.getPrototypeOf(Uint8Array.prototype).join = () => '9'
+      new Uint8Array([1])
+    `) as Uint8Array
+    const foreignTaggedDataView = runInNewContext(`
+      const value = new DataView(new Uint8Array([1]).buffer)
+      Object.defineProperty(value, Symbol.toStringTag, { value: 'A' })
+      value
+    `) as DataView
     const field = new PropRef<ArrayBufferView>(['row', 'value'])
     const predicate = (value: ArrayBufferView) =>
       new Func<boolean>('gt', [field, new Value(value)])
@@ -365,8 +439,22 @@ describe('binary query value identity', () => {
     for (const [host, foreign, row, hostResult, foreignResult] of [
       [new Uint8Array([1]), foreignArray, new Uint8Array([5]), true, false],
       [
+        new Uint8Array([1]),
+        foreignJoinedArray,
+        new Uint8Array([5]),
+        true,
+        false,
+      ],
+      [
         new DataView(new Uint8Array([1]).buffer),
         foreignDataView,
+        new DataView(new Uint8Array([1]).buffer),
+        false,
+        true,
+      ],
+      [
+        new DataView(new Uint8Array([1]).buffer),
+        foreignTaggedDataView,
         new DataView(new Uint8Array([1]).buffer),
         false,
         true,
@@ -431,6 +519,43 @@ describe('binary query value identity', () => {
       )
     } finally {
       vi.unstubAllGlobals()
+    }
+  })
+
+  it('does not merge Buffers whose shadowed length changes ordering', () => {
+    const normal = Buffer.from([65, 66])
+    const ownLength = Buffer.from([65, 66])
+    Object.defineProperty(ownLength, 'length', { value: 1 })
+    const inheritedLength = Buffer.from([65, 66])
+    Object.setPrototypeOf(
+      inheritedLength,
+      Object.create(Buffer.prototype, { length: { value: 1 } }),
+    )
+    const row = { row: { value: Buffer.from([65, 66]) } }
+    const collection = createCollection<{ id: number; value: Buffer }>({
+      getKey: (value) => value.id,
+      sync: { sync: () => {} },
+    })
+    const source = new CollectionRef(
+      collection as unknown as CollectionImpl,
+      'row',
+    )
+    const field = new PropRef<Buffer>(['row', 'value'])
+    const predicate = (value: Buffer) =>
+      new Func<boolean>('gt', [field, new Value(value)])
+    const identity = (value: Buffer) =>
+      getQueryIdentity({ from: source, where: [predicate(value)] })
+
+    expect(compileExpression(predicate(normal))(row)).toBe(false)
+    for (const shortened of [ownLength, inheritedLength]) {
+      expect(compileExpression(predicate(shortened))(row)).toBe(true)
+      expect(() => getStableValueHash(shortened)).toThrow(
+        'view with custom conversion',
+      )
+      expect(getLoadSubsetDemandKey({ where: predicate(shortened) })).not.toBe(
+        getLoadSubsetDemandKey({ where: predicate(normal) }),
+      )
+      expect(identity(shortened)).not.toBe(identity(normal))
     }
   })
 
