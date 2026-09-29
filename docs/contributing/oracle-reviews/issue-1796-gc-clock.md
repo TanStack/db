@@ -13,12 +13,12 @@ documents the live-query variant. Where `performance.now()` is available and
 monotonic, moving the wall clock must not move an already scheduled GC deadline.
 The Collection's normal idle callback still follows the queue deadline.
 
-The queue now captures the Performance clock at construction and uses it for
-schedule, timer selection, and processing. The previous `Date.now()` path
-remains the fallback where Performance is unavailable. That fallback still
-inherits backward wall-clock adjustments. Some browsers pause Performance time
-through OS sleep despite the intended monotonic-clock contract; this review did
-not test suspend/resume and does not claim sleep-inclusive GC timing.
+The queue reads the current Performance clock for scheduling, timer selection,
+and processing. The previous `Date.now()` path remains the fallback where
+Performance is unavailable. That fallback still inherits backward wall-clock
+adjustments. Some browsers pause Performance time through OS sleep despite the
+intended monotonic-clock contract; this review did not test suspend/resume and
+does not claim sleep-inclusive GC timing.
 
 ## RED and GREEN
 
@@ -62,3 +62,22 @@ Suspend/resume behavior and runtimes without `performance.now()` also remain
 with that owner. The focused live-query test covers one eager source, one live
 query, and source subscription release after GC; it does not prove React render
 or unmount scheduling.
+
+## Follow-up: timer clock replacement
+
+Reviewed PR head: `1c2d53a0`. Verified repair: `d0f3ca00`. The original queue
+captured a Vitest fake `Performance` object in its singleton. After the test
+restored real timers and installed fresh fake timers, a later GC appointment
+read the stale object's time while the current fake timer advanced. The focused
+two-installation test failed on `1c2d53a0`: its second callback was called zero
+times after its one-millisecond delay. The full reproduction was 12 failures in
+three existing test files, including two 10,000-timer loops and ten collections
+that remained ready or in error past their GC deadline.
+
+`d0f3ca00` reads the currently installed Performance object at each queue clock
+read. The same focused test, all 12 previously failing tests, and the adjacent
+GC/live-query tests passed: 262 tests across ten files. The production diff
+against `ae2eb3fb` is now net **+1** line. The replacement witness only swaps
+the global clock after the previous appointment has drained. Replacing the
+global clock while an appointment remains pending is outside this tested
+contract; normal runtimes keep one Performance clock for that interval.
