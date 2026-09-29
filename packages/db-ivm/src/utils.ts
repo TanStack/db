@@ -1,3 +1,5 @@
+import { isTemporal } from './hashing/temporal.js'
+
 /**
  * Simple assertion function for runtime checks.
  * Throws an error if the condition is false.
@@ -209,6 +211,7 @@ type CanonicalValue =
   | readonly [`bigint`, string]
   | readonly [`string`, string]
   | readonly [`date`, number | `Invalid`]
+  | readonly [`temporal`, string, string]
   | readonly [`regexp`, string, string]
   | readonly [`bytes`, Array<number>]
   | readonly [`array`, Array<CanonicalValue>]
@@ -265,6 +268,7 @@ function isJsonSafeStructuralValue(
       value instanceof Date ||
       value instanceof RegExp ||
       value instanceof Uint8Array ||
+      isTemporal(value) ||
       value instanceof Map ||
       value instanceof Set
     ) {
@@ -346,6 +350,10 @@ function toCanonicalValue(
 
     if (value instanceof Uint8Array) {
       return [`bytes`, Array.from(value)]
+    }
+
+    if (isTemporal(value)) {
+      return [`temporal`, value[Symbol.toStringTag], value.toString()]
     }
 
     if (Array.isArray(value)) {

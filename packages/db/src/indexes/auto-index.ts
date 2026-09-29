@@ -67,7 +67,7 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
+        options: { compareFn, compareOptions: compareOpts },
       },
     )
   } catch (error) {
