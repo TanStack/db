@@ -19,9 +19,10 @@ import {
  * grammar crosses all Temporal kinds recognized by structural hashing with a
  * different value and a matching fresh value. One initial batch reaches the
  * public groupBy operator; its output is checked after graph.run(). This owner
- * does not decide whether alias-equivalent ZonedDateTimes that satisfy native
- * .equals() should coalesce. Symbols, cycles, and mutable RegExp state are out
- * of scope.
+ * keeps alternate string representations in separate groups. Values with
+ * altered Temporal prototypes or methods and separately loaded polyfill copies
+ * are outside this contract. Symbols, cycles, and mutable RegExp state are also
+ * out of scope.
  */
 const temporalCases = [
   {
@@ -128,6 +129,15 @@ describe('Temporal group keys', () => {
       )
     },
   )
+
+  it('keeps equal-comparing Duration representations in separate groups', () => {
+    const hour = Temporal.Duration.from('PT1H')
+    const minutes = Temporal.Duration.from('PT60M')
+    expect(Temporal.Duration.compare(hour, minutes)).toBe(0)
+    expect(observedGroupCounts([{ date: hour }, { date: minutes }])).toEqual(
+      expectedGroupCounts(['hour', 'minutes']),
+    )
+  })
 
   it('keeps a Temporal value distinct from an empty object', () => {
     const date = Temporal.PlainDate.from('2024-01-15')

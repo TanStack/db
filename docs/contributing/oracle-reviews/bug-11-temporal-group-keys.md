@@ -102,3 +102,120 @@ from this change. Also, `Temporal.Duration.compare(PT1H, PT60M)` returns zero,
 but `groupBy` emits two count-1 groups under the established string-key domain.
 The coverage map retains that equality-policy decision with the ZonedDateTime
 alias example.
+
+## Second review on `b9b59c089dd574b5eed7672a66b6768808837919`
+
+The second review challenged the remaining custom-prototype case named in the
+coverage map. A plain object can inherit a `Temporal.PlainDate` tag and a
+matching `toString()` from a custom prototype. With an own `extra: 1` field,
+this object is a supported structural value distinct from a genuine PlainDate.
+The current public `groupBy` merged those two rows. A new primary-oracle case
+failed at `graph.run()`: expected group counts `[1, 1]`, observed `[2]`.
+This is an in-scope counterexample to the plain-object versus Temporal group-key
+identity law. It keeps the broader tag-spoofing class open. The RED case remains
+local and uncommitted while the compatibility policy is undecided; the PR must
+not gain an active failing test without its repair.
+
+A trusted brand method can distinguish this counterfeit. The local
+`temporal-polyfill` `PlainDate.prototype.toString.call(value)` rejects it.
+Node 24's native Temporal method also rejects it. Under `--harmony-temporal`,
+the native method accepts genuine values from a separate VM realm for all eight
+recognized Temporal kinds. The local polyfill method rejects a genuine
+PlainDate from a separately loaded polyfill copy with `TypeError: Invalid
+calling context`. Current `groupBy` accepts that cross-copy value and merges
+it with a same-value local polyfill PlainDate into one count-2 group. Thus a
+local-polyfill-only brand gate would break an observed public behavior.
+
+The smallest policy-dependent options are:
+
+1. Trust the runtime's native Temporal constructors and one imported
+   `temporal-polyfill` copy. Call each trusted prototype method on the input.
+   This preserves native cross-realm and local-polyfill values. It cannot
+   authenticate a separately loaded foreign polyfill copy. Treating that copy
+   as an ordinary object could merge distinct foreign dates with no enumerable
+   fields, so this option needs a declared unsupported boundary or an error.
+   It also needs a runtime polyfill dependency and roughly 15–25 additional
+   production lines before simplification. The final count needs the diff.
+2. Add a trusted registration path for other polyfill copies. A registered
+   constructor supplies its brand-checking prototype method. This can preserve
+   cross-copy grouping after registration, but requires a new public capability
+   and an explicit decision about unregistered values. The extra registry,
+   lifecycle, and API need more production code than option 1.
+3. Fail immediately for untrusted Temporal-like inputs. This prevents a silent
+   collision, but it rejects valid plain objects that advertise a Temporal tag
+   and does not preserve existing cross-copy grouping.
+
+Reading a constructor or method from the candidate object is not a sound brand
+check: a counterfeit can supply both. JavaScript exposes no generic Temporal
+internal-slot check that accepts arbitrary independent polyfill copies without
+a trusted intrinsic or registration. The user is deciding whether separately
+loaded polyfill copies must remain supported. Until that decision, this review
+item is `confirmed-open`; no production change, changeset, PR-body update, or
+push follows from this review. Production-code weight for this second review is
+zero. The Duration alias-equivalence decision remains separate and unchanged.
+
+Reviewer assessment for this second finding: technically accurate and high
+signal. It reached the public boundary and named a residual case that the
+coverage map already owned. The request for a sound cross-realm brand check
+exposes a real compatibility choice, so the proposed fix is incomplete until
+that choice is made. This review sample supports a positive reviewer
+recommendation, with the policy dependency stated explicitly.
+
+## Full rereview: own-only Temporal tag on `b9b59c089dd574b5eed7672a66b6768808837919`
+
+R19-4 proposed that a genuine Temporal value with only an own
+`Symbol.toStringTag` would fail the current prototype-tag gate. This state does
+not arise from ordinary native or `temporal-polyfill` construction. It is still
+reachable through legal JavaScript operations. For both implementations, the
+probe created two equal `PlainDate` values, added an own matching tag to one,
+then moved that value to `Object.prototype`. It installed the implementation's
+intrinsic `toString` method as a non-enumerable own property. The intrinsic
+still returned `2024-01-15` for the changed value, proving that its Temporal
+brand survived the prototype change.
+
+An own matching tag with the original prototype remained recognized by
+`isTemporal`. With the changed prototype, `isTemporal` returned false and
+`serializeValue` produced `{}` instead of the genuine date's Temporal key.
+Public `groupBy` emitted two count-1 groups for the equal dates, while the
+fixture-defined Temporal identity law expects one count-2 group. The same
+result occurred with the local polyfill and Node 24 native Temporal under
+`--harmony-temporal`. The claim is technically true for a valid, uncommon
+operation. The current contract says Temporal values are valid group keys and
+does not exclude prototype changes. The broader trusted-brand decision from
+the second review also owns this case. No stricter gate or RED test is pushed
+while the user decides the supported cross-copy polyfill domain.
+
+The rereview also called `PT1H` versus `PT60M` separation "by-design." That
+phrase describes the existing kind-and-string key rule, but it overstates the
+alias policy. The coverage map explicitly says whether equal-comparing
+Durations should coalesce needs a separate contract decision. The first review
+record makes the same distinction. Therefore the current behavior is documented,
+but the alias-equivalence policy is open. This review does not change it.
+
+Full-rereview ledger: two source claims. R19-4 is `confirmed-open` with the
+public groupBy probe above. The Duration wording is a `design-decision` with
+its destination in the Temporal group-key coverage map. Neither item caused a
+production edit, test commit, PR-body change, or push. Production-code weight
+for this rereview is zero. Reviewer assessment: R19-4 identified a real but
+uncommon legal state, while the "by-design" summary was too strong. The
+technical signal is good; the review should keep documented behavior separate
+from an approved product decision.
+
+## Product scope decision
+
+The maintainer chose ordinary native Temporal values or one polyfill copy as
+the supported group-key inputs. Code that replaces a Temporal prototype or
+creates a custom prototype that impersonates Temporal is outside this contract.
+Separately loaded polyfill copies are also outside it. The RED probes above
+remain evidence of those behaviors; they do not establish an in-scope product
+bug under the chosen domain. The active oracle keeps its ordinary own-tag
+plain-object control and does not include a failing altered-prototype case.
+
+The maintainer also chose to keep alternate representations separate.
+`PT1H` and `PT60M` therefore remain separate groups even though
+`Temporal.Duration.compare()` returns zero. This follows the established
+kind-and-string key rule. The coverage map and oracle opening now state both
+decisions. No production code or new runtime dependency is needed.
+
+The updated oracle checks a `PT1H`/`PT60M` pair at the public `groupBy`
+checkpoint. The 20 Temporal oracle tests and db-ivm TypeScript check pass.

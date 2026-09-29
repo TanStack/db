@@ -136,13 +136,14 @@ values and a plain object with its own spoofed Temporal tag. Nested
 serialization controls cover records, arrays, Maps, and Sets. Incremental
 retractions and unsupported symbols, cycles, and mutable RegExp state are outside
 this owner's bounded domain. The owner uses db-ivm's established kind-and-string
-Temporal key domain. Whether native `.equals()` aliases, such as ZonedDateTime
-`[UTC]` and `[Etc/UTC]`, or Durations such as `PT1H` and `PT60M` that compare
-equal, should coalesce needs a separate contract decision.
-The structural Temporal detector still trusts a custom prototype that advertises
-a Temporal tag. Closing that separate spoofing class requires a brand policy
-that works for native Temporal and supported polyfills, plus a `groupBy` witness
-with a counterfeit prototype at this oracle owner.
+Temporal key domain. Alternate representations remain separate: Durations such
+as `PT1H` and `PT60M` form different groups even when they compare equal. The
+supported inputs are ordinary native Temporal values or values from one
+polyfill copy. A custom prototype that impersonates Temporal can still merge a
+plain object with a genuine value. A genuine value with a replaced prototype
+can split from an equal value. Both altered-prototype cases and separately
+loaded polyfill copies are outside this contract. The oracle still protects a
+plain object's own spoofed tag without a custom prototype.
 
 The [includes publication oracle](../../packages/db/tests/query/includes-publication-oracle.test.ts)
 now checks one held ordered repair with two public parent rows and one inline
