@@ -135,9 +135,11 @@ keys after each transaction. This Node SQLite seam does not execute in Workers.
 The browser OPFS lifecycle owner also checks that a silent initialization
 rejects at the default or overridden open deadline, terminates its worker,
 ignores a late response, and releases the deadline and abort listener after a
-successful open. A Chromium fixture holds the VFS database Web Lock while a
-second tab times out, checks that its queued request disappears, then reopens
-the database after releasing the lock. This controlled lock holder does not
+successful open. It also checks an abort during synchronous option evaluation,
+after the initial signal check but before listener registration. A Chromium
+fixture holds the VFS database Web Lock while a second tab times out. It checks
+that the queued request disappears, then reopens the database after releasing
+the lock. This controlled lock holder does not
 reproduce a frozen tab or establish behavior in other browsers.
 The [issue #1883 review record](oracle-reviews/issue-1883-opfs-open-deadline.md)
 preserves the exact-head unit and Chromium evidence and the queued-lock mutant.

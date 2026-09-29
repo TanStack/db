@@ -877,7 +877,8 @@ pagehide before response production, after production, or after delivery; mixed
 completed/pending siblings; both persisted values; Worker error/messageerror;
 late delivery; repeated disposal; and every response code at init and close.
 Fixed open cases cover default/overridden/disabled deadlines, pending and
-pre-aborted signals, a late response, and no cancellation after successful open.
+pre-aborted signals, an abort during synchronous option evaluation, a late
+response, and no cancellation after successful open.
 Reference: an independent settlement ledger and terminal-state model. The model
 uses a declarative public error table and derives outcomes from history, without
 consulting the production request map, disposal flag, or completion order.
@@ -988,6 +989,48 @@ describe(`OPFS page lifecycle oracle`, () => {
     ).rejects.toBe(reason)
     expect(ControlledWorker.instances).toEqual([])
     expect(page.listenerCount).toBe(0)
+  })
+
+  it(`observes an abort during synchronous option evaluation`, async () => {
+    vi.useFakeTimers()
+    const page = installEnvironment({ heldResponseType: `init` })
+    const controller = new AbortController()
+    const reason = new DOMException(`App stopped opening`, `AbortError`)
+    const settlements: Array<Settlement> = []
+    let vfsNameReads = 0
+    const opened = track(
+      `init`,
+      openBrowserWASQLiteOPFSDatabase({
+        databaseName: `oracle.sqlite`,
+        timeoutMs: 0,
+        signal: controller.signal,
+        get vfsName() {
+          vfsNameReads++
+          controller.abort(reason)
+          return `opfs`
+        },
+      }),
+      () => `database`,
+      settlements,
+    )
+    const worker = ControlledWorker.instances[0]!
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vfsNameReads).toBe(1)
+    expect(worker.requests.map((request) => request.type)).toEqual([`init`])
+    expect(settlements).toEqual([
+      {
+        label: `init`,
+        status: `rejected`,
+        observation: { name: `AbortError`, message: `App stopped opening` },
+      },
+    ])
+    expect((await opened).settlement).toEqual(settlements[0])
+    expectDisposed(page, worker)
+
+    worker.releaseHeldResponses()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settlements).toHaveLength(1)
   })
 
   it(`allows an explicit zero deadline while the worker remains silent`, async () => {

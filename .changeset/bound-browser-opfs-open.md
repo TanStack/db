@@ -2,4 +2,4 @@
 '@tanstack/browser-db-sqlite-persistence': patch
 ---
 
-Limit browser OPFS database opening to 30 seconds by default. Callers can override or disable the deadline and can cancel a pending open with an AbortSignal. A timed-out or aborted open terminates its worker instead of acquiring the database later.
+Browser OPFS database opening previously waited without a deadline. It now rejects after 30 seconds by default and terminates the pending worker instead of acquiring the database later. Set `timeoutMs: 0` to keep the previous unbounded wait, override the deadline with another value, or pass an `AbortSignal` to cancel a pending open.

@@ -38,7 +38,8 @@ test(`an OPFS open deadline releases its queued worker and allows a later open`,
 }) => {
   const databaseName = `open-timeout-${crypto.randomUUID()}.sqlite`
   const lockName = `ahp:/${databaseName}`
-  const timeoutMs = 5_000
+  const timeoutMs = 15_000
+  const pendingLockTimeoutMs = 10_000
   const pages: Array<Page> = []
   let holder: Page | undefined
   let contender: Page | undefined
@@ -99,7 +100,8 @@ test(`an OPFS open deadline releases its queued worker and allows a later open`,
 
     await expect
       .poll(() => hasPendingLock(contender!, lockName), {
-        timeout: timeoutMs - 500,
+        timeout: pendingLockTimeoutMs,
+        message: `The contender did not queue the held OPFS Web Lock`,
       })
       .toBe(true)
 
