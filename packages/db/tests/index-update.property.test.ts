@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, test, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { compareKeys } from '@tanstack/db-ivm'
+import { createCollection } from '../src/collection/index.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
@@ -654,4 +655,171 @@ test(`retired-identity calibration shrinks and replays the same semantic failure
   expect(replay.failed).toBe(true)
   expect(replay.error).toMatch(/expected/)
   expect(replay.counterexample).toEqual(failed.counterexample)
+})
+
+/**
+ * Auto-indexes refine the Collection's declared collation: an ordered public
+ * read must return the independent label order through the index path, and
+ * repeated reads must reuse the one index for that field. These fixed cells
+ * differ from the direct-index model above because index creation is driven
+ * by the public Collection API rather than by the test.
+ */
+const collationCases = [
+  {
+    name: `lexical`,
+    collation: { stringSort: `lexical` as const },
+    clause: { direction: `asc`, nulls: `first` },
+    expected: [`item10`, `item2`],
+  },
+  {
+    name: `numeric locale`,
+    collation: {
+      stringSort: `locale` as const,
+      locale: `en-US`,
+      localeOptions: { numeric: true },
+    },
+    clause: { direction: `asc`, nulls: `first` },
+    expected: [`item2`, `item10`],
+  },
+  {
+    name: `explicit ordinary locale override`,
+    collation: {
+      stringSort: `locale` as const,
+      locale: `en-US`,
+      localeOptions: { numeric: true },
+    },
+    clause: {
+      direction: `asc`,
+      nulls: `first`,
+      stringSort: `locale`,
+      locale: `en-US`,
+    },
+    expected: [`item10`, `item2`],
+  },
+] as const
+
+function createCollationCollection(
+  collation: (typeof collationCases)[number][`collation`],
+  autoIndex: `off` | `eager`,
+  defaultIndexType?: typeof BasicIndex | typeof BTreeIndex,
+  labels: ReadonlyArray<string> = [`item10`, `item2`],
+) {
+  return createCollection<{ id: string; label: string }>({
+    getKey: (row) => row.id,
+    autoIndex,
+    defaultIndexType,
+    defaultStringCollation: collation,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const label of labels) {
+          write({ type: `insert`, value: { id: label, label } })
+        }
+        commit()
+        markReady()
+      },
+    },
+  })
+}
+
+describe.each([
+  [`BasicIndex`, BasicIndex],
+  [`BTreeIndex`, BTreeIndex],
+] as const)(`%s Collection auto-index collation`, (_name, IndexType) => {
+  test.each(collationCases)(
+    `$name ordered public reads reuse one compatible index`,
+    async ({ collation, clause, expected }) => {
+      const collection = createCollationCollection(
+        collation,
+        `eager`,
+        IndexType,
+      )
+      const createIndex = vi.spyOn(collection, `createIndex`)
+
+      try {
+        await collection.stateWhenReady()
+        expect(collection.indexes.size).toBe(0)
+        const read = () =>
+          collection
+            .currentStateAsChanges({
+              orderBy: [
+                {
+                  expression: new PropRef([`label`]),
+                  compareOptions: clause,
+                },
+              ],
+              optimizedOnly: true,
+            })
+            ?.map(({ value }) => value.label)
+
+        expect.soft(read(), `first indexed read`).toEqual(expected)
+        expect.soft(read(), `second indexed read`).toEqual(expected)
+        expect(createIndex, `one index construction`).toHaveBeenCalledTimes(1)
+        expect(collection.indexes.size, `one index per field`).toBe(1)
+      } finally {
+        createIndex.mockRestore()
+        await collection.cleanup()
+      }
+    },
+  )
+})
+
+test.each(collationCases)(
+  `$name ordered public reads honor Collection collation without an index`,
+  async ({ collation, clause, expected }) => {
+    const collection = createCollationCollection(collation, `off`)
+
+    try {
+      await collection.stateWhenReady()
+      const rows = collection.currentStateAsChanges({
+        orderBy: [
+          {
+            expression: new PropRef([`label`]),
+            compareOptions: clause,
+          },
+        ],
+      })
+      expect(rows?.map(({ value }) => value.label)).toEqual(expected)
+      expect(collection.indexes.size, `scan path reached`).toBe(0)
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)
+
+test(`ordered scan resolves inherited collation outside each comparison`, async () => {
+  const collection = createCollationCollection(
+    { stringSort: `lexical` },
+    `off`,
+    undefined,
+    [`f`, `e`, `d`, `c`, `b`, `a`],
+  )
+
+  try {
+    await collection.stateWhenReady()
+    const optionReads = vi.spyOn(collection, `compareOptions`, `get`)
+    const rows = collection.currentStateAsChanges({
+      orderBy: [
+        {
+          expression: new PropRef([`label`]),
+          compareOptions: { direction: `asc`, nulls: `first` },
+        },
+      ],
+    })
+
+    expect(rows?.map(({ value }) => value.label)).toEqual([
+      `a`,
+      `b`,
+      `c`,
+      `d`,
+      `e`,
+      `f`,
+    ])
+    // One resolution can check the index path; the scan needs only one more.
+    expect(optionReads.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(collection.indexes.size).toBe(0)
+  } finally {
+    await collection.cleanup()
+  }
 })
