@@ -486,7 +486,7 @@ export interface LiveQueryWindowSnapshot<
   pageParams: ReadonlyArray<number>
   hasNextPage: boolean
   isFetchingNextPage: boolean
-  /** The last pagination failure, cleared when a retry begins. */
+  /** Last pagination failure, retained through an earlier-started success until recovery begins. */
   error: unknown
   /** Keyed results for the physical window, or `undefined` when disabled. */
   state: ReadonlyMap<TKey, T> | undefined
@@ -617,6 +617,9 @@ class LiveQueryWindowControllerImpl<
 
   getSnapshot(): LiveQueryWindowSnapshot<T, TKey> {
     const observerSnapshot = this.observer.getSnapshot()
+    if (this.hasPaginationError && observerSnapshot.status === `ready`) {
+      this.failedHasNextPage = this.getComputedHasNextPage(observerSnapshot)
+    }
     const cached = this.cachedSnapshot
     if (
       cached &&
@@ -696,7 +699,7 @@ class LiveQueryWindowControllerImpl<
         // compile or restart the live-query pipeline.
         const windowResult = this.ensureLeaseActive(this.committedPageCount)
         const leaseGeneration = this.leaseGeneration
-        observerUnsub = this.observer.subscribe(() => this.onObserverNotify())
+        observerUnsub = this.observer.subscribe(() => this.notify())
         this.observerUnsub = observerUnsub
         if (windowResult !== true) {
           this.trackAttachmentFailure(windowResult, leaseGeneration)
@@ -868,7 +871,6 @@ class LiveQueryWindowControllerImpl<
       if (!this.disposed && generation === this.windowGeneration) {
         this.committedPageCount = requestedPageCount
         this.isFetchingNextPage = false
-        this.failedHasNextPage = false
         this.notify()
       }
       this.endTransition()
@@ -887,7 +889,7 @@ class LiveQueryWindowControllerImpl<
           this.pendingWindowGeneration = undefined
           this.committedPageCount = requestedPageCount
           this.isFetchingNextPage = false
-          this.failedHasNextPage = false
+          this.failedHasNextPage = this.getComputedHasNextPage()
           this.notify()
           this.endTransition()
         },
@@ -966,17 +968,14 @@ class LiveQueryWindowControllerImpl<
     })
   }
 
-  private getComputedHasNextPage(): boolean {
-    const snapshot: LiveQuerySnapshot<T, TKey> = this.observer.getSnapshot()
+  private getComputedHasNextPage(
+    snapshot: LiveQuerySnapshot<T, TKey> = this.observer.getSnapshot(),
+  ): boolean {
     return (
       snapshot.isEnabled &&
       Array.isArray(snapshot.data) &&
       snapshot.data.length > this.committedPageCount * this.pageSize
     )
-  }
-
-  private onObserverNotify(): void {
-    this.notify()
   }
 
   private beginTransition(): void {

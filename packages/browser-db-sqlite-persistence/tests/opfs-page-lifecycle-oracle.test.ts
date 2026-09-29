@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterEach, describe, expect, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { openBrowserWASQLiteOPFSDatabase } from '../src/opfs-database'
 import type {
   BrowserOPFSWorkerErrorCode,
@@ -10,8 +10,9 @@ import type {
 /**
  * # Who owns an OPFS worker when the browser page leaves?
  *
- * A database request, pagehide, worker response, terminal worker event, close,
- * and bfcache admission can race. Every accepted request must settle once.
+ * A database request, open deadline, caller abort, pagehide, worker response,
+ * terminal worker event, close, and bfcache admission can race. Every accepted
+ * request must settle once.
  * Non-persisted pagehide closes and terminates the worker after pending work;
  * persisted pagehide keeps the database eligible for restoration. Listener and
  * worker resources release exactly once even when init or close fails.
@@ -20,7 +21,8 @@ import type {
  * message grammar. Generated products vary pending request kind, delivery
  * stage, persisted flag, execute count, release direction, and terminal event.
  * The driver observes exact requests, settlements, errors, listener counts,
- * held responses, close, and termination against this state machine.
+ * held responses, close, and termination against this state machine. Fixed
+ * open histories check the default/overridden deadline and caller abort.
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
  * locking, real bfcache admission, or browser process teardown.
@@ -731,6 +733,7 @@ async function runFailureHistory(history: FailureHistory): Promise<void> {
 
 afterEach(async () => {
   await cleanupEnvironment()
+  vi.useRealTimers()
 })
 
 const lifecycleSeed = Number(
@@ -864,13 +867,18 @@ const terminalEventExamples: Array<[TerminalEventHistory]> = (
 
 /*
 Law/source: the README Notes section requires pagehide to synchronously dispose
-the dedicated worker and reject pending work with AbortError; its capability
-bullet and the public sqlite-persistence-core errors define terminal failures.
+the dedicated worker and reject pending work with AbortError. It gives opening
+a default deadline and permits caller abort; either must dispose a pending
+worker. Its capability bullet and the public sqlite-persistence-core errors
+define terminal failures.
 The worker protocol defines the three response-error classifications.
 Domain/histories: pending init/execute/close; one to three sibling queries;
 pagehide before response production, after production, or after delivery; mixed
 completed/pending siblings; both persisted values; Worker error/messageerror;
 late delivery; repeated disposal; and every response code at init and close.
+Fixed open cases cover default/overridden/disabled deadlines, pending and
+pre-aborted signals, an abort during synchronous option evaluation, a late
+response, and no cancellation after successful open.
 Reference: an independent settlement ledger and terminal-state model. The model
 uses a declarative public error table and derives outcomes from history, without
 consulting the production request map, disposal flag, or completion order.
@@ -880,13 +888,215 @@ after late delivery, and after post-disposal next use.
 Observed: raw settlement multiplicity plus order-independent sibling outcomes,
 exact values/errors, positive and negative request reach, listener ownership,
 and termination count. Synthetic events and a fake worker do not prove real
-bfcache admission, durability, native handle release, or wa-sqlite #88.
+bfcache admission, durability, native handle release, or wa-sqlite #88. The
+Chromium Web Lock fixture checks native queued-lock release separately.
 Challenge/replay: fixed examples exhaust the cheap structural products;
 generated lanes use verbose FastCheck output to retain original/reduced traces.
 Replay each property with its TANSTACK_DB_OPFS_*_ORACLE_{SEED,RUNS,PATH}
 controls and this file's package-local Vitest command.
 */
 describe(`OPFS page lifecycle oracle`, () => {
+  it.each([
+    { label: `default`, timeoutMs: undefined, deadline: 30_000 },
+    { label: `overridden`, timeoutMs: 40, deadline: 40 },
+  ])(
+    `terminates a silent worker at the $label open deadline`,
+    async ({ timeoutMs, deadline }) => {
+      vi.useFakeTimers()
+      const page = installEnvironment({ heldResponseType: `init` })
+      const settlements: Array<Settlement> = []
+      const opened = track(
+        `init`,
+        openBrowserWASQLiteOPFSDatabase({
+          databaseName: `oracle.sqlite`,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        }),
+        () => `database`,
+        settlements,
+      )
+      const worker = ControlledWorker.instances[0]!
+
+      await Promise.resolve()
+      expect(worker.heldResponseCount).toBe(1)
+      await vi.advanceTimersByTimeAsync(deadline - 1)
+      expect(settlements).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settlements).toEqual([
+        {
+          label: `init`,
+          status: `rejected`,
+          observation: {
+            name: `TimeoutError`,
+            message: `Opening browser OPFS database timed out after ${deadline} ms`,
+          },
+        },
+      ])
+      expect((await opened).settlement).toEqual(settlements[0])
+      expectDisposed(page, worker)
+
+      const terminalLedger = [...settlements]
+      worker.releaseHeldResponses()
+      await Promise.resolve()
+      expect(settlements).toEqual(terminalLedger)
+      expect(worker.terminationCalls).toBe(1)
+    },
+  )
+
+  it(`aborts a pending open and ignores its late worker response`, async () => {
+    vi.useFakeTimers()
+    const page = installEnvironment({ heldResponseType: `init` })
+    const controller = new AbortController()
+    const reason = new DOMException(`App stopped opening`, `AbortError`)
+    const settlements: Array<Settlement> = []
+    const opened = track(
+      `init`,
+      openBrowserWASQLiteOPFSDatabase({
+        databaseName: `oracle.sqlite`,
+        timeoutMs: 40,
+        signal: controller.signal,
+      }),
+      () => `database`,
+      settlements,
+    )
+    const worker = ControlledWorker.instances[0]!
+    await Promise.resolve()
+    expect(worker.heldResponseCount).toBe(1)
+
+    controller.abort(reason)
+    expect((await opened).settlement).toEqual({
+      label: `init`,
+      status: `rejected`,
+      observation: { name: `AbortError`, message: `App stopped opening` },
+    })
+    expectDisposed(page, worker)
+    worker.releaseHeldResponses()
+    await vi.advanceTimersByTimeAsync(40)
+    expect(settlements).toHaveLength(1)
+    expect(worker.terminationCalls).toBe(1)
+  })
+
+  it(`does not create a worker for an already-aborted open`, async () => {
+    const page = installEnvironment({})
+    const controller = new AbortController()
+    const reason = new DOMException(`App stopped opening`, `AbortError`)
+    controller.abort(reason)
+
+    await expect(
+      openBrowserWASQLiteOPFSDatabase({
+        databaseName: `oracle.sqlite`,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(reason)
+    expect(ControlledWorker.instances).toEqual([])
+    expect(page.listenerCount).toBe(0)
+  })
+
+  it(`observes an abort during synchronous option evaluation`, async () => {
+    vi.useFakeTimers()
+    const page = installEnvironment({ heldResponseType: `init` })
+    const controller = new AbortController()
+    const reason = new DOMException(`App stopped opening`, `AbortError`)
+    const settlements: Array<Settlement> = []
+    let vfsNameReads = 0
+    const opened = track(
+      `init`,
+      openBrowserWASQLiteOPFSDatabase({
+        databaseName: `oracle.sqlite`,
+        timeoutMs: 0,
+        signal: controller.signal,
+        get vfsName() {
+          vfsNameReads++
+          controller.abort(reason)
+          return `opfs`
+        },
+      }),
+      () => `database`,
+      settlements,
+    )
+    const worker = ControlledWorker.instances[0]!
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vfsNameReads).toBe(1)
+    expect(worker.requests.map((request) => request.type)).toEqual([`init`])
+    expect(settlements).toEqual([
+      {
+        label: `init`,
+        status: `rejected`,
+        observation: { name: `AbortError`, message: `App stopped opening` },
+      },
+    ])
+    expect((await opened).settlement).toEqual(settlements[0])
+    expectDisposed(page, worker)
+
+    worker.releaseHeldResponses()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settlements).toHaveLength(1)
+  })
+
+  it(`allows an explicit zero deadline while the worker remains silent`, async () => {
+    vi.useFakeTimers()
+    const page = installEnvironment({ heldResponseType: `init` })
+    const settlements: Array<Settlement> = []
+    const opened = track(
+      `init`,
+      openBrowserWASQLiteOPFSDatabase({
+        databaseName: `oracle.sqlite`,
+        timeoutMs: 0,
+      }),
+      () => `database`,
+      settlements,
+    )
+    const worker = ControlledWorker.instances[0]!
+    await Promise.resolve()
+    expect(worker.heldResponseCount).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(settlements).toEqual([])
+    expect(worker.terminationCalls).toBe(0)
+    worker.releaseHeldResponses()
+    const database = (await opened).value!
+    await database.close?.()
+    expectDisposed(page, worker)
+  })
+
+  it.each([-1, 0.5, Number.POSITIVE_INFINITY, 2_147_483_648])(
+    `rejects invalid open deadline %s before creating a worker`,
+    async (timeoutMs) => {
+      const page = installEnvironment({})
+      await expect(
+        openBrowserWASQLiteOPFSDatabase({
+          databaseName: `oracle.sqlite`,
+          timeoutMs,
+        }),
+      ).rejects.toMatchObject({
+        name: `InvalidPersistedCollectionConfigError`,
+      })
+      expect(ControlledWorker.instances).toEqual([])
+      expect(page.listenerCount).toBe(0)
+    },
+  )
+
+  it(`stops observing the deadline and signal after open succeeds`, async () => {
+    vi.useFakeTimers()
+    const page = installEnvironment({})
+    const controller = new AbortController()
+    const database = await openBrowserWASQLiteOPFSDatabase({
+      databaseName: `oracle.sqlite`,
+      timeoutMs: 40,
+      signal: controller.signal,
+    })
+    const worker = ControlledWorker.instances[0]!
+
+    await vi.advanceTimersByTimeAsync(40)
+    controller.abort()
+    expect(worker.terminationCalls).toBe(0)
+    await expect(database.execute(`SELECT 1`)).resolves.toEqual([
+      { sql: `SELECT 1` },
+    ])
+    await database.close?.()
+    expectDisposed(page, worker)
+  })
+
   fcTest.prop([pagehideHistory], {
     seed: lifecycleSeed,
     numRuns: lifecycleRuns,
