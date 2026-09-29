@@ -334,7 +334,7 @@ export interface QueryCollectionUtils<
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
-   * Clear the error state and trigger a refetch of the query. While a user
+   * Refetch, retaining errors until success. While a user
    * mutation is persisting or its handler is active, this retains the Query
    * fetch boundary so it cannot wait on publication blocked by that
    * transaction.
@@ -411,10 +411,10 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
   }
 
   public async clearError() {
-    this.state.lastError = undefined
-    this.state.errorCount = 0
+    const retry = this.refetch({ throwOnError: true })
+    // Start first; reset dedupe only for a new failure with the same error/time.
     this.state.lastErrorUpdatedAt = 0
-    await this.refetch({ throwOnError: true })
+    await retry
   }
 
   // Getters for error state

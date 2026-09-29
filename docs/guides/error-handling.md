@@ -115,7 +115,13 @@ Error tracking methods:
 - **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
 - **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
 - **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
-- **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
+- **`clearError()`**: Triggers a refetch. The current error remains visible while the retry is pending. A successful result clears `lastError` and resets `errorCount`; a failed retry records another consecutive failure and rejects the returned promise:
+
+  ```text
+  error visible → clearError() → retry pending, error still visible
+                                   ├─ success → error cleared
+                                   └─ failure → new error visible, count increased
+  ```
 
 ## Incremental Subset Load Errors
 

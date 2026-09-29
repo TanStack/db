@@ -4353,6 +4353,122 @@ describe(`query collection ownership lifecycle`, () => {
     expect(collection.get(shared.id)?.name).toBe(recovered.name)
   })
 
+  /**
+   * Error recovery law: a previous Query failure remains public while an
+   * explicit retry is pending. A failed retry is another consecutive failure;
+   * a successful retry clears the error. This follows the documented
+   * `lastError`/`errorCount` reset-on-success contract. The model represents
+   * only these three public error fields, not Collection status or row changes.
+   *
+   * The bounded history crosses a failed initial load or a failed background
+   * refetch with a held retry that succeeds or fails. A repeated error at the
+   * same clock tick distinguishes consecutive failures from duplicate observer
+   * notifications. The real QueryClient and `clearError()` are the driver.
+   * The refinement check reads the public utils
+   * when the retry starts but before its result settles, then after settlement.
+   *
+   * ORC-001: `query.ts` getter comments and the error-handling guide promise
+   * reset on success. ORC-002/003/005: the three-state public model below is
+   * separate from Query's timestamp and is checked at both named boundaries.
+   * ORC-004/007: this is a bounded fixed matrix, not a generated property.
+   * ORC-006: the original `clearError()` fails both initial pending cases;
+   * removing its timestamp reset fails the repeated-error case. ORC-008:
+   * no model state is combined or removed. ORC-009: `retry pending` maps to
+   * a held Query result; no new production concept is named. ORC-010: cleanup
+   * settles the held result and retains primary assertion failures. ORC-011:
+   * no plausible shared semantic helper needs a second formulation here.
+   * The matrix does not cover concurrent retries for multiple tracked Queries
+   * or errors during deferred result application.
+   */
+  it.each([
+    { priorFailure: `initial`, retryResult: `failure`, sameError: false },
+    { priorFailure: `initial`, retryResult: `success`, sameError: false },
+    { priorFailure: `background`, retryResult: `failure`, sameError: false },
+    { priorFailure: `background`, retryResult: `success`, sameError: false },
+    { priorFailure: `initial`, retryResult: `failure`, sameError: true },
+  ] as const)(
+    `keeps a $priorFailure error visible until a held retry $retryResult, same error $sameError`,
+    async ({ priorFailure, retryResult, sameError }) => {
+      const id = `held-error-retry-${priorFailure}-${retryResult}-${sameError}`
+      const previousError = new Error(`previous failure`)
+      const retryError = sameError ? previousError : new Error(`retry failure`)
+      const heldResult = createDeferred<Array<Item>>()
+      const queryClient = createQueryClient()
+      const now = sameError ? vi.spyOn(Date, `now`).mockReturnValue(1000) : null
+      const queryFn = vi.fn<() => Promise<Array<Item>>>()
+      if (priorFailure === `background`) {
+        queryFn.mockResolvedValueOnce([shared])
+      }
+      queryFn.mockRejectedValueOnce(previousError)
+      queryFn.mockImplementationOnce(() => heldResult.promise)
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const collection = createCollection(
+        queryCollectionOptions<Item>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `eager`,
+          startSync: true,
+          retry: false,
+        }),
+      )
+      cleanups.push(async () => {
+        consoleError.mockRestore()
+        now?.mockRestore()
+        heldResult.resolve([])
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      if (priorFailure === `initial`) {
+        await expect(collection.stateWhenReady()).rejects.toBe(previousError)
+      } else {
+        await collection.stateWhenReady()
+        await expect(
+          collection.utils.refetch({ throwOnError: true }),
+        ).rejects.toBe(previousError)
+      }
+
+      const observeError = () => ({
+        lastError: collection.utils.lastError,
+        isError: collection.utils.isError,
+        errorCount: collection.utils.errorCount,
+      })
+      // An independent three-state model: pending retains the previous
+      // failure; a failed retry advances the consecutive count; success resets.
+      const expected = {
+        pending: { lastError: previousError, isError: true, errorCount: 1 },
+        failure: { lastError: retryError, isError: true, errorCount: 2 },
+        success: { lastError: undefined, isError: false, errorCount: 0 },
+      }
+      expect(observeError()).toEqual(expected.pending)
+
+      const retry = collection.utils.clearError().then(
+        () => ({ outcome: `fulfilled` as const }),
+        (error: unknown) => ({ outcome: `rejected` as const, error }),
+      )
+      await vi.waitFor(() =>
+        expect(queryFn).toHaveBeenCalledTimes(
+          priorFailure === `initial` ? 2 : 3,
+        ),
+      )
+      expect(observeError()).toEqual(expected.pending)
+
+      if (retryResult === `failure`) {
+        heldResult.reject(retryError)
+        expect(await retry).toEqual({ outcome: `rejected`, error: retryError })
+      } else {
+        heldResult.resolve([shared])
+        expect(await retry).toEqual({ outcome: `fulfilled` })
+      }
+      expect(observeError()).toEqual(expected[retryResult])
+    },
+  )
+
   it(`rejects an invalid retained revalidation before its persisted baseline loads`, async () => {
     const id = `retained-invalid-result-settlement`
     const queryHash = hashKey([id])
