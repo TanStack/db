@@ -3,6 +3,7 @@ import { UnsupportedRootScalarSelectError } from '../../errors.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import { collectCollectionSources, isExpressionLike } from '../ir.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage, StringCollationConfig } from '../../types.js'
@@ -59,7 +60,7 @@ function isNestedSelectObject(obj: any): boolean {
   if (obj === null || typeof obj !== `object`) return false
   if (isExpressionLike(obj)) return false
   // Ref proxies from spread operations
-  if (obj.__refProxy) return false
+  if (isRefProxy(obj)) return false
   return true
 }
 

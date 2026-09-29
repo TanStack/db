@@ -104,6 +104,10 @@ could not resolve `@tanstack/db` in two existing conformance contracts in this
 isolated worktree; it named no changed file. The PR's CI is the remaining type
 validation gate.
 
+After merging current `main`, the same three suites plus the newly merged
+subquery user-value oracle passed together: 134 tests. The oracle campaign
+keeps both this PR's indexed-path owner and `main`'s new subquery owner.
+
 The second reviewer found two real public bugs beyond the original local fix
 and identified the correct class of collision. The compiler routing claim and
 shared-helper prescription overreached: they did not account for the allocator

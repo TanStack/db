@@ -1,5 +1,6 @@
 import { CollectionImpl } from '../../collection/index.js'
 import { hasCollectionOptionsBrand } from '../../collection-options.js'
+import { isPlainObject as isRecord } from '../../utils/type-guards.js'
 import {
   Aggregate as AggregateExpr,
   CollectionRef,
@@ -11,7 +12,6 @@ import {
   QueryRef,
   UnionAll,
   UnionFrom,
-  Value as ValueExpr,
   isExpressionLike,
 } from '../ir.js'
 import {
@@ -1046,24 +1046,15 @@ function getValueTypeName(value: unknown): string {
 
 // Helper to ensure we have a BasicExpression/Aggregate for a value
 function toExpr(value: any): BasicExpression | Aggregate {
-  if (value === undefined) return toExpression(null)
-  if (
-    value instanceof AggregateExpr ||
-    value instanceof FuncExpr ||
-    value instanceof PropRef ||
-    value instanceof ValueExpr
-  ) {
-    return value as BasicExpression | Aggregate
-  }
-  return toExpression(value)
+  return toExpression(value ?? null)
 }
 
-function isPlainObject(value: any): value is Record<string, any> {
+function isNestedSelectRecord(value: any): value is Record<string, any> {
   return (
-    value !== null &&
-    typeof value === `object` &&
+    isRecord(value) &&
+    !Array.isArray(value) &&
     !isExpressionLike(value) &&
-    !value.__refProxy
+    !isRefProxy(value)
   )
 }
 
@@ -1072,6 +1063,14 @@ function buildNestedSelect(
   parentAliases: Array<string> = [],
   fieldName?: string,
 ): any {
+  if (Array.isArray(obj)) {
+    return obj.some((value) => isRefProxy(value) || isExpressionLike(value))
+      ? new FuncExpr(
+          `array`,
+          obj.map((value) => toExpression(value ?? null)),
+        )
+      : toExpr(obj)
+  }
   if (obj instanceof BaseQueryBuilder) {
     if (!fieldName) {
       throw new Error(`Conditional include branch is missing a field name`)
@@ -1101,7 +1100,7 @@ function buildNestedSelect(
   if (obj instanceof CaseWhenWrapper) {
     return buildConditionalSelect(obj, parentAliases, fieldName)
   }
-  if (!isPlainObject(obj)) return toExpr(obj)
+  if (!isNestedSelectRecord(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
   for (const [k, v] of Object.entries(obj)) {
     if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
@@ -1224,7 +1223,7 @@ function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
       ...collectExternalRefsFromQuery(value.query),
     ]
   }
-  if (!isPlainObject(value)) return []
+  if (!isNestedSelectRecord(value)) return []
   return Object.values(value).flatMap(collectRefsFromSelectValue)
 }
 
@@ -1523,7 +1522,7 @@ function buildIncludesSubquery(
 
   const rawChildSelect = modifiedQuery.select as any
   const hasObjectSelect =
-    rawChildSelect === undefined || isPlainObject(rawChildSelect)
+    rawChildSelect === undefined || isNestedSelectRecord(rawChildSelect)
   let includesQuery = modifiedQuery
   let scalarField: string | undefined
 
