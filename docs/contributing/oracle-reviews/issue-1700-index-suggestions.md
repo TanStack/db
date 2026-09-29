@@ -22,10 +22,12 @@ actual suggestion metadata, exact public result row, and index count. The
 unrelated-index control rejects a classifier that suppresses advice merely
 because some index exists.
 
-On unchanged `ae2eb3fb`, the oracle was **RED** in two cells: manual mode
-recorded zero suggestions where one was expected, and eager mode recorded one
-where zero was expected. The other two original controls passed. On
-`64c79bd8`, all seven cells passed; the 17 existing auto-index tests passed,
+On unchanged `ae2eb3fb`, the final oracle was **RED** in four of seven cells:
+explicit manual mode, default manual mode, and manual mode with an unrelated
+index each recorded zero suggestions where one was expected; eager mode
+recorded one where zero was expected. The threshold, matching-index, and
+disabled-advice controls passed. On `64c79bd8`, all seven cells passed; the 17
+existing auto-index tests passed,
 and package Vitest reported zero type errors. The change keeps the production
 file at 5 added versus 6 removed lines. The report's proposed single-guard
 inversion was insufficient because `ensureIndexForExpression` had its own
