@@ -1181,6 +1181,45 @@ describe(`Operators`, () => {
 })
 
 describe(`Operators`, () => {
+  describe(`TopKWithFractionalIndex operator window moves without rows`, () => {
+    // A lazy source loads rows only after a window move reports a change, so
+    // the ungrouped window must report it even after every row has left.
+    it(`reports a changed window after all rows were retracted`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { value: string }]>()
+      const messages: Array<Array<unknown>> = []
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | undefined
+
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          limit: 2,
+          offset: 0,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          messages.push(message.getInner())
+        }),
+      )
+      graph.finalize()
+
+      const row = { value: `a` }
+      input.sendData(new MultiSet([[[1, row], 1]]))
+      graph.run()
+      input.sendData(new MultiSet([[[1, row], -1]]))
+      graph.run()
+      const beforeMove = messages.length
+
+      windowFn!({ offset: 2, limit: 2 })
+      graph.run()
+
+      expect(messages.slice(beforeMove)).toEqual([[]])
+    })
+  })
+
   describe(`TopKWithFractionalIndex operator with array`, () => {
     it(`should support moving topK window past current window using setWindowFn callback`, () => {
       const graph = new D2()

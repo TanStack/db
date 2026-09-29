@@ -30,6 +30,7 @@ import {
 } from '../../errors.js'
 import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { BaseQueryBuilder } from '../builder/index.js'
+import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
@@ -1860,17 +1861,10 @@ function processFrom(
   }
 }
 
-// Helper to check if a value is a Value expression
-function isValue(raw: any): boolean {
-  return (
-    raw instanceof ValClass ||
-    (raw && typeof raw === `object` && `type` in raw && raw.type === `val`)
-  )
-}
-
-// Helper to unwrap a Value expression or return the value itself
+// Only compiler-created Value instances are wrappers; user rows may have
+// ordinary `type` and `value` fields with the same shape.
 function unwrapValue(value: any): any {
-  return isValue(value) ? value.value : value
+  return value instanceof ValClass ? value.value : value
 }
 
 function attachVirtualPropsToSelected(
@@ -2268,7 +2262,7 @@ function isNestedSelectObject(value: any): value is Record<string, any> {
     typeof value === `object` &&
     !Array.isArray(value) &&
     !isExpressionLike(value) &&
-    value.__refProxy !== true
+    !isRefProxy(value)
   )
 }
 
