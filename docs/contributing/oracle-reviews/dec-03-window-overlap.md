@@ -157,6 +157,12 @@ continuation. Both controls were restored, then the dead synchronous write was
 removed. This supports only the stated execution order; it does not prove
 every synchronous history equivalent.
 
+The rereview's broader explanation that every error-entry path recomputes
+continuation is too strong. The `requestPageCount` synchronous throw and
+asynchronous rejection paths preserve a captured `previousHasNextPage` value.
+Those paths do not read the dead synchronous assignment. Their distinct
+overlap histories are not established by the diagnostic probe above.
+
 ORC-001 through ORC-003 remain grounded in the maintainer's overlap decision,
 the source-length model, and the adjacent shared contract/model/driver/check.
 ORC-004 and ORC-007 remain inapplicable because the four histories form an
