@@ -206,3 +206,15 @@ explicit-key decision and the static-history limit.
 | ORC-009 vocabulary | Query identity and exact demand key retain production names. The foreign conversion fixtures are inputs, not a model-only subsystem state. |
 | ORC-010 failure and cleanup | The generated property keeps `withHistoryCleanup`; fixed cross-realm VM values need no asynchronous cleanup. The intentional candidate failures reached assertions. |
 | ORC-011 second formulation | Native relational comparison and compiled `gt` form separate semantic paths. The React and Svelte receiving paths independently check explicit-key error propagation. |
+
+The executable head for this follow-up is
+`739093fe42503bfa812ff19cd9179dad9f6d7ed6`, which merged current main
+`e16d46ce5d10c7f895c8abff86da4925f0eda2d1` after the Buffer repair.
+The merge kept both the query-identity and subquery-user-value oracle campaign
+entries. This exact tree passed 112 focused DB tests, the DB package's Vite
+build, DB/React/Svelte TypeScript checks, changed-file ESLint, Prettier, and
+`git diff --check`. After the build, the focused React and Svelte hook tests
+each passed their explicit-view-key case. This records ORC-012 for the bounded
+follow-up, including the pending foreign direct-key policy. Against that main
+commit, the PR has 113 added and 9 deleted production lines, net +104 across
+five files. The Buffer follow-up itself added 9 production lines.
