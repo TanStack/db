@@ -1,7 +1,8 @@
 import { runInNewContext } from 'node:vm'
 import { Temporal } from 'temporal-polyfill'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { fc } from '@fast-check/vitest'
+import { MultiSet } from '../src/multiset.js'
 import {
   equalHashValues,
   hash,
@@ -912,6 +913,52 @@ describe(`hash identity oracle`, () => {
     expect(
       equalHashValues(runInNewContext(`[1, 2]`), runInNewContext(`[1, 2]`)),
     ).toBe(true)
+  })
+
+  it(`keeps distinct carriers unequal when hash markers collide`, async () => {
+    const loadWithCollision = async (target: number, replacement: number) => {
+      vi.resetModules()
+      let draws = 0
+      const random = vi.spyOn(Math, `random`).mockImplementation(() => {
+        draws++
+        return (draws === target ? replacement : draws) / 100
+      })
+      try {
+        const { equalHashValues: compare } = await import(
+          `../src/hashing/hash.js`
+        )
+        expect(draws).toBe(19)
+        return compare
+      } finally {
+        random.mockRestore()
+      }
+    }
+
+    // The module's 16th and 17th draws allocate the Map and Set markers.
+    const mapSetEqual = await loadWithCollision(17, 16)
+    expect(mapSetEqual(new Map(), new Set())).toBe(false)
+    expect(mapSetEqual(new Set(), new Map())).toBe(false)
+    const { topKBatch } = await import(`../src/operators/topKState.js`)
+    const messages = [
+      new MultiSet<[number, unknown]>([
+        [[1, new Map()], -1],
+        [[1, new Set()], 1],
+      ]),
+    ]
+    expect(
+      [...topKBatch(messages)].map(([[, value], weight]) => [
+        value instanceof Map ? `map` : value instanceof Set ? `set` : `other`,
+        weight,
+      ]),
+    ).toEqual([
+      [`map`, -1],
+      [`set`, 1],
+    ])
+
+    // A Map/Array collision also used to make comparison order matter.
+    const mapArrayEqual = await loadWithCollision(16, 15)
+    expect(mapArrayEqual(new Map(), [])).toBe(false)
+    expect(mapArrayEqual([], new Map())).toBe(false)
   })
 
   it(`treats shared and copied subtrees, prototypes, and hidden properties as equal`, () => {

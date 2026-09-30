@@ -13,14 +13,15 @@ const NULL = randomHash()
 const UNDEFINED = randomHash()
 const KEY = randomHash()
 const FUNCTIONS = randomHash()
-const DATE_MARKER = randomHash()
-const REGEXP_MARKER = randomHash()
-const OBJECT_MARKER = randomHash()
-const ARRAY_MARKER = randomHash()
-const MAP_MARKER = randomHash()
-const SET_MARKER = randomHash()
-const UINT8ARRAY_MARKER = randomHash()
-const TEMPORAL_MARKER = randomHash()
+// Identity is distinct even if two random hash values happen to collide.
+const DATE_MARKER = { hash: randomHash() }
+const REGEXP_MARKER = { hash: randomHash() }
+const OBJECT_MARKER = { hash: randomHash() }
+const ARRAY_MARKER = { hash: randomHash() }
+const MAP_MARKER = { hash: randomHash() }
+const SET_MARKER = { hash: randomHash() }
+const UINT8ARRAY_MARKER = { hash: randomHash() }
+const TEMPORAL_MARKER = { hash: randomHash() }
 // Bound structural recursion and value visits. Shared acyclic subtrees are
 // cached; cycles are rejected rather than given context-dependent hashes.
 const MAX_STRUCTURAL_HASH_WORK = 1_000_000
@@ -64,7 +65,7 @@ function hashObject(input: object, context: HashContext): number {
   try {
     const [marker, header, body] = objectParts(input)
     const hasher = new MurmurHashStream()
-    hasher.update(marker)
+    hasher.update(marker.hash)
     // Header values of a type with a body (array length, RegExp fields)
     // count toward the work cap; Date, binary, and Temporal headers do not.
     for (const value of header)
@@ -103,7 +104,7 @@ function hashObject(input: object, context: HashContext): number {
  * own properties are compared structurally.
  */
 type ObjectParts = [
-  marker: number,
+  marker: Readonly<{ hash: number }>,
   // A RegExp `lastIndex` can hold any value; the other headers are strings
   // or numbers.
   header: ReadonlyArray<unknown>,
