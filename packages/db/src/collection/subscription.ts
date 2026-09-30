@@ -10,10 +10,11 @@ import { runAllCallbacks } from '../utils/callbacks.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
 import {
-  compileEqualityPrefilter,
   createFilterFunctionFromExpression,
   createFilteredCallback,
+  findEqualityRoute,
 } from './change-events.js'
+import type { EqualityRoute } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
 import type {
@@ -173,8 +174,8 @@ export class CollectionSubscription
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
-  /** Necessary condition for a row to satisfy the where clause, if cheap. */
-  private equalityPrefilter: ((row: object) => boolean) | undefined
+  /** Field and literal the where clause requires, if it has a cheap one. */
+  private readonly equalityRoute: EqualityRoute | undefined
 
   private orderByIndex: IndexReader<string | number> | undefined
 
@@ -238,8 +239,8 @@ export class CollectionSubscription
 
     this.callback = callbackWithSentKeysTracking
 
-    this.equalityPrefilter = options.whereExpression
-      ? compileEqualityPrefilter(options.whereExpression)
+    this.equalityRoute = options.whereExpression
+      ? findEqualityRoute(options.whereExpression)
       : undefined
 
     // Create a filtered callback if where clause is provided
@@ -1120,7 +1121,6 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
-    if (this.cannotMatchAny(changes)) return false
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
@@ -1134,28 +1134,20 @@ export class CollectionSubscription
   }
 
   /**
-   * A change reaches the where filter only as its value or previous value, so
-   * a batch in which neither can pass the prefilter publishes nothing and
-   * changes no sent-key record: those record published rows only. Stale
-   * published rows and truncate replay consume unfiltered changes, and an
-   * empty batch signals Collection readiness, so those take the full path.
+   * The route through which this subscription may receive only the changes
+   * whose value or previous value holds the route's literal. A change reaches
+   * the where filter only through those values, so the others cannot publish,
+   * and sent-key records cover published rows only. Stale published rows and
+   * truncate replay consume unfiltered changes, so no route applies then.
    */
-  private cannotMatchAny(changes: Array<ChangeMessage<any, any>>): boolean {
-    const prefilter = this.equalityPrefilter
+  get changeRoute(): EqualityRoute | undefined {
     if (
-      !prefilter ||
-      changes.length === 0 ||
       this.stalePublishedRows.size > 0 ||
       this.truncateReplayState !== undefined
     ) {
-      return false
+      return undefined
     }
-    return changes.every(
-      (change) =>
-        !prefilter(change.value) &&
-        (change.previousValue === undefined ||
-          !prefilter(change.previousValue)),
-    )
+    return this.equalityRoute
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */

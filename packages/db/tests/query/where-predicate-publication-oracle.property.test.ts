@@ -51,8 +51,10 @@
  * Production driver: a `mockSyncCollectionOptions` Collection; a live query
  * built with the public `eq`/`not`/`and`/`or` builder functions; direct
  * `subscribeChanges` subscribers with and without `includeInitialState` using
- * the equivalent IR; and the public `Collection.currentStateAsChanges`
- * snapshot.
+ * the equivalent IR; peer subscribers whose `eq` predicates share one field
+ * with different literals, plus one on a virtual field, so published changes
+ * must be routed to exactly the subscribers they can satisfy; and the public
+ * `Collection.currentStateAsChanges` snapshot.
  *
  * Refinement check: each consumer's exact key set equals the model after the
  * subscribers attach and after each sync transaction commits. Direct
@@ -595,6 +597,18 @@ type Consumer =
   | `subscriber with initial state`
   | `subscriber without initial state`
   | `direct snapshot`
+  | `peer ${string}`
+
+// Peers share one field with different literals, plus one on a second field,
+// so each change must reach exactly the peers whose predicate it can satisfy.
+const peerPredicates: ReadonlyArray<Predicate> = [
+  ...[`a`, `b`, PREFIXED, true, false].map(fieldEq),
+  {
+    kind: `eq`,
+    left: { kind: `virtual`, name: `$synced` },
+    right: { kind: `literal`, value: true },
+  },
+]
 
 type Observation = {
   checkpoint: string
@@ -661,6 +675,7 @@ async function observeHistory(
     checkpoint: string,
     consumer: Consumer,
     keys: Iterable<string | number>,
+    predicate: Predicate = history.predicate,
   ) => {
     observations.push({
       checkpoint,
@@ -671,16 +686,28 @@ async function observeHistory(
       checkpoint,
       consumer,
       keys: expectedVisible(
-        history.predicate,
+        predicate,
         modelRows,
         consumer === `subscriber without initial state` ? touched : undefined,
       ),
     })
   }
+  const peers = peerPredicates.map((predicate) => ({
+    predicate,
+    visible: new Set<string | number>(),
+  }))
   const recordSubscribers = (checkpoint: string) => {
     record(checkpoint, `live query`, live.keys())
     record(checkpoint, `subscriber with initial state`, withInitial)
     record(checkpoint, `subscriber without initial state`, withoutInitial)
+    for (const peer of peers) {
+      record(
+        checkpoint,
+        `peer ${describePredicate(peer.predicate)}`,
+        peer.visible,
+        peer.predicate,
+      )
+    }
   }
 
   const subscriptions: Array<{ unsubscribe: () => void }> = []
@@ -703,6 +730,12 @@ async function observeHistory(
       collection.subscribeChanges(recordVisibleKeys(withoutInitial), {
         whereExpression: irPredicate(history.predicate),
       }),
+      ...peers.map((peer) =>
+        collection.subscribeChanges(recordVisibleKeys(peer.visible), {
+          includeInitialState: true,
+          whereExpression: irPredicate(peer.predicate),
+        }),
+      ),
     )
     recordSubscribers(`after subscribe`)
     const snapshot = collection.currentStateAsChanges({
@@ -982,6 +1015,52 @@ describe(`WHERE predicate publication oracle`, () => {
       } finally {
         subscription?.unsubscribe()
         await collection.cleanup()
+      }
+    })
+
+    it(`a layout-only publication reaches a filtered subscriber as one empty batch`, async () => {
+      // An ordered live query whose rows move without changing their selected
+      // values publishes no rows, only a layout change. Every subscriber still
+      // learns that the layout changed, whatever its predicate.
+      type RankedRow = { id: string; rank: number }
+      const source = createCollection(
+        mockSyncCollectionOptions<RankedRow>({
+          id: `where-publication-layout-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `r0`, rank: 1 },
+            { id: `r1`, rank: 2 },
+          ],
+        }),
+      )
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .orderBy(({ row }) => row.rank)
+          .select(({ row }) => ({ id: row.id })),
+      )
+      const batches: Array<number> = []
+      let subscription: { unsubscribe: () => void } | undefined
+      try {
+        await live.preload()
+        subscription = live.subscribeChanges(
+          (changes) => batches.push(changes.length),
+          {
+            whereExpression: new Func(`eq`, [
+              new PropRef([`id`]),
+              new Value(`missing`),
+            ]),
+          },
+        )
+        source.utils.begin()
+        source.utils.write({ type: `update`, value: { id: `r0`, rank: 3 } })
+        source.utils.commit()
+        expect([...live.keys()]).toEqual([`r1`, `r0`])
+        expect(batches).toEqual([0])
+      } finally {
+        subscription?.unsubscribe()
+        await live.cleanup()
+        await source.cleanup()
       }
     })
 

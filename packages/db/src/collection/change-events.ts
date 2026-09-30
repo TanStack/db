@@ -221,24 +221,34 @@ export function createFilterFunctionFromExpression<T extends object>(
   }
 }
 
+/** A field and the string or boolean literal a top-level `eq` requires. */
+export type EqualityRoute = {
+  path: Array<string>
+  expected: string | boolean
+}
+
+/** Read result for a route path whose property access threw. */
+export const UNREADABLE_ROUTE_VALUE: unique symbol = Symbol(
+  `unreadable route value`,
+)
+
 /**
- * Compiles a cheap necessary condition for `expression` to be TRUE, or returns
+ * Finds a cheap necessary condition for `expression` to be TRUE, or returns
  * undefined when the expression has none.
  *
  * A top-level conjunct `eq(field, literal)` with a string or boolean literal is
  * TRUE only when the field holds the identical string or boolean: equality
  * normalization never maps another type onto a plain string or boolean. A
- * row that fails the returned test therefore fails the whole expression.
+ * row whose field holds anything else therefore fails the whole expression.
  *
- * With `storedRows`, the test reads a stored row instead of its enriched copy.
- * The copy reads a non-virtual field either from the stored row or as
- * `undefined`, so the test remains a necessary condition. Conjuncts on virtual
- * fields are skipped because stored rows need not carry them.
+ * With `storedRows`, the condition is read from a stored row instead of its
+ * enriched copy, so conjuncts on virtual fields are skipped: stored rows need
+ * not carry them.
  */
-export function compileEqualityPrefilter(
+export function findEqualityRoute(
   expression: BasicExpression<boolean>,
   { storedRows = false }: { storedRows?: boolean } = {},
-): ((row: object) => boolean) | undefined {
+): EqualityRoute | undefined {
   const conjuncts: Array<BasicExpression> = []
   const collect = (node: BasicExpression) => {
     if (node.type === `func` && node.name === `and`) node.args.forEach(collect)
@@ -247,7 +257,7 @@ export function compileEqualityPrefilter(
   collect(expression)
 
   // A string literal usually rejects more rows than a boolean one.
-  let best: { path: Array<string>; expected: string | boolean } | undefined
+  let best: EqualityRoute | undefined
   for (const conjunct of conjuncts) {
     if (conjunct.type !== `func` || conjunct.name !== `eq`) continue
     const [left, right] = conjunct.args
@@ -268,28 +278,61 @@ export function compileEqualityPrefilter(
     }
     if (typeof expected === `string`) break
   }
-  if (best === undefined) return undefined
+  return best
+}
 
-  const { path, expected } = best
-  const root = path[0]!
-  return (row) => {
-    // Enrichment copies only enumerable own root properties, so a stored row
-    // can reject only through a field its enriched copy also reads.
-    if (storedRows && !Object.prototype.propertyIsEnumerable.call(row, root)) {
-      return true
+/**
+ * Reads a route field the way the single-row evaluator does. A throwing read
+ * returns UNREADABLE_ROUTE_VALUE so callers leave the decision to the full
+ * predicate.
+ */
+export function readRouteValue(
+  row: unknown,
+  path: ReadonlyArray<string>,
+): unknown {
+  try {
+    let value: unknown = row
+    for (const segment of path) {
+      if (value === null || value === undefined) return undefined
+      value = (value as Record<string, unknown>)[segment]
     }
-    try {
-      let value: unknown = row
-      for (const segment of path) {
-        // Walk exactly as the single-row evaluator does.
-        if (value === null || value === undefined) return false
-        value = (value as Record<string, unknown>)[segment]
+    return value
+  } catch {
+    return UNREADABLE_ROUTE_VALUE
+  }
+}
+
+/**
+ * Compiles the route of `expression` as a row test that is false only when
+ * the full predicate must be false.
+ *
+ * With `storedRows`, the test reads a stored row instead of its enriched copy.
+ * The copy holds each enumerable own root property of the stored row and
+ * lacks the others, so its field is either the stored value or `undefined`,
+ * which never equals the literal. A read that throws passes the row to the
+ * full predicate.
+ */
+export function compileEqualityPrefilter(
+  expression: BasicExpression<boolean>,
+  { storedRows = false }: { storedRows?: boolean } = {},
+): ((row: object) => boolean) | undefined {
+  const route = findEqualityRoute(expression, { storedRows })
+  if (route === undefined) return undefined
+  const { path, expected } = route
+  // Most routes name one top-level field; read it without walking a path.
+  if (path.length === 1) {
+    const field = path[0]!
+    return (row) => {
+      try {
+        return (row as Record<string, unknown>)[field] === expected
+      } catch {
+        return true
       }
-      return value === expected
-    } catch {
-      // A throwing read leaves the decision to the full predicate.
-      return true
     }
+  }
+  return (row) => {
+    const value = readRouteValue(row, path)
+    return value === UNREADABLE_ROUTE_VALUE || value === expected
   }
 }
 
