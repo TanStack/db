@@ -740,6 +740,14 @@ function processJoinSource(
   }
 }
 
+// JSON prints non-finite numbers as null, the missing-side marker. An object
+// never collides with a source key, which is a string or a number.
+function encodeNonFiniteKey(_: string, value: unknown): unknown {
+  return typeof value === `number` && !Number.isFinite(value)
+    ? { number: String(value) }
+    : value
+}
+
 function getFirstFromAlias(query: QueryIR): string | undefined {
   return getFromSources(query.from)[0]?.alias
 }
@@ -773,7 +781,10 @@ function processJoinResults(
       // Combine the main and joined keys without ambiguity: keys may contain
       // delimiters, numbers and strings may print alike, and a missing outer
       // side encodes as null, which no source key can be.
-      const resultKey = JSON.stringify([mainKey ?? null, joinedKey ?? null])
+      const resultKey = JSON.stringify(
+        [mainKey ?? null, joinedKey ?? null],
+        encodeNonFiniteKey,
+      )
 
       return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
     }),

@@ -1,19 +1,22 @@
 /**
  * # Does every joined pair keep its own result row?
  *
- * Law and source: a joined live query publishes one row for each matching
- * pair of source rows, plus one row for each unmatched row a left or full join
- * keeps. Its result key must identify that pair: two distinct pairs never share
- * a key. The compiler used to join the two source keys with a comma, so keys
- * that contain delimiters, or a number and a string that print alike, could
- * collide and drop or reject a valid row.
+ * Law and source: the live-query guide defines joins like SQL joins that
+ * combine matching rows into single result rows, and gives a join result a
+ * composite key of the parent keys (`docs/guides/live-queries.md`, "Joins" and
+ * the `getKey` option). A joined live-query Collection therefore publishes one
+ * row for each matching pair of source rows, plus one row for each unmatched
+ * row a left or full join keeps, and two distinct pairs never share a key. The
+ * guide does not fix the key's format. The compiler used to join the two source
+ * keys with a comma, so keys that contain delimiters, or a number and a string
+ * that print alike, could collide and drop or reject a valid row.
  *
  * Model: `expectedPairs` recomputes the pair set with nested loops over plain
  * arrays. It does not import the compiler or its key encoding.
  *
  * History grammar: left and right rows draw keys from a domain of plain,
- * comma-bearing, bracket-bearing, and quoted strings, plus numbers alongside
- * the strings that print the same. Rows join on a small group value. Each
+ * comma-bearing, bracket-bearing, and quoted strings, numbers alongside the
+ * strings that print the same, and both infinities. Rows join on a small group value. Each
  * history uses an inner, left, or full join, then applies up to three synced
  * group changes to either side.
  *
@@ -24,11 +27,16 @@
  * rows equal the model's pair multiset, and the result key count equals the
  * row count.
  *
- * Calibration: the fixed pair (`a,b`, `c`) versus (`a`, `b,c`) collided under
- * the comma encoding; restoring it fails the pinned history.
+ * Calibration: the fixed pair (`a,b`, `c`) versus (`a`, `b,c`) and the pair
+ * (1, `c`) versus (`1`, `c`) collided under the comma encoding; restoring it
+ * fails both pinned histories and both campaigns. Plain `JSON.stringify`
+ * printed `Infinity` and `-Infinity` as `null`; restoring it fails the pinned
+ * infinity history and both campaigns.
  *
- * Known omissions: joins over subqueries, more than two sources, custom
- * `getKey`, and optimistic mutations are outside this owner.
+ * Known omissions: `NaN` source keys, joins over subqueries, more than two
+ * sources, custom `getKey`, and optimistic mutations are outside this owner.
+ * The mock sync source is a controlled provider; this oracle claims only the
+ * compiler's keying of the rows it supplies, not any real adapter's behavior.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
@@ -39,7 +47,7 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, withOracleCleanup } from '../utils.js'
 
 const property = `join-result-key.pairs`
 const requestedReplayProperty = readOracleRunConfig().replayProperty
@@ -55,7 +63,9 @@ type History = {
   changes: Array<Change>
 }
 
-// Keys that a delimiter-joined encoding cannot tell apart.
+// Keys that a delimiter-joined encoding cannot tell apart, plus infinite
+// numbers, which JSON prints as `null`, the missing-side marker. `NaN` keys
+// fail before key encoding matters and are outside this owner.
 const keyDomain: ReadonlyArray<Key> = [
   `a`,
   `b`,
@@ -69,6 +79,8 @@ const keyDomain: ReadonlyArray<Key> = [
   `1`,
   2,
   `2`,
+  Number.POSITIVE_INFINITY,
+  Number.NEGATIVE_INFINITY,
 ]
 
 // ---------------------------------------------------------------------------
@@ -136,7 +148,9 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
 })
 
 // Under the comma encoding, (`a,b`, `c`) and (`a`, `b,c`) share `[a,b,c]`,
-// and (1, x) and (`1`, x) share `[1,x]`.
+// and (1, `c`) and (`1`, `c`) share `[1,c]`. Under plain JSON, (`a`, Infinity)
+// and (`a`, -Infinity) share `["a",null]`, and so do the unmatched right rows
+// once `a` moves away.
 const pinnedHistories: ReadonlyArray<History> = [
   {
     join: `inner`,
@@ -156,8 +170,17 @@ const pinnedHistories: ReadonlyArray<History> = [
       { id: 1, g: 1 },
       { id: `1`, g: 1 },
     ],
-    right: [{ id: `x`, g: 1 }],
+    right: [{ id: `c`, g: 1 }],
     changes: [{ side: `right`, index: 0, g: 0 }],
+  },
+  {
+    join: `full`,
+    left: [{ id: `a`, g: 1 }],
+    right: [
+      { id: Number.POSITIVE_INFINITY, g: 1 },
+      { id: Number.NEGATIVE_INFINITY, g: 1 },
+    ],
+    changes: [{ side: `left`, index: 0, g: 0 }],
   },
 ]
 
@@ -200,7 +223,7 @@ async function runHistory(history: History): Promise<void> {
     )
     expect(live.size, `${checkpoint} key count`).toBe(published.length)
   }
-  try {
+  await withOracleCleanup(async () => {
     await live.preload()
     check(`after preload`)
     for (const [step, change] of history.changes.entries()) {
@@ -217,10 +240,10 @@ async function runHistory(history: History): Promise<void> {
       target.g = change.g
       check(`after change ${step}`)
     }
-  } finally {
-    await live.cleanup()
-    await Promise.all([left.cleanup(), right.cleanup()])
-  }
+  }, [
+    () => live.cleanup(),
+    () => Promise.all([left.cleanup(), right.cleanup()]),
+  ])
 }
 
 describe(`joined result key oracle`, () => {
