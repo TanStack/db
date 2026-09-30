@@ -932,7 +932,15 @@ export class CollectionSubscription
   /** Create the record for a fresh, abortable acquisition attempt. */
   private createSubsetAcquisitionRecord(
     demand: SubsetDemand,
-  ): SubsetAcquisitionRecord & { abortController: AbortController } {
+  ): SubsetAcquisitionRecord {
+    // Eager sync never passes subset options to an adapter, so an abortable
+    // acquisition would only allocate a controller and an AbortError.
+    if (this.collection.config.syncMode !== `on-demand`) {
+      return {
+        options: demand.requestOptions,
+        syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
+      }
+    }
     const abortController = new AbortController()
     const requestSignal = demand.requestOptions.signal
     let removeRequestAbortListener: (() => void) | undefined
@@ -1020,12 +1028,7 @@ export class CollectionSubscription
       void initialResult.promise.then(finish, finish)
       return { demand, result: initialResult.promise, started: false }
     }
-    // Eager sync never passes subset options to an adapter, so an abortable
-    // acquisition would only allocate a controller and an AbortError.
-    const acquisition =
-      this.collection.config.syncMode === `on-demand`
-        ? this.createSubsetAcquisitionRecord(demand)
-        : demand.acquisition
+    const acquisition = this.createSubsetAcquisitionRecord(demand)
     demand.acquisition = acquisition
     const replayState = this.truncateReplayState
     const replayAttempt = replayState?.currentAttempt
@@ -1132,9 +1135,8 @@ export class CollectionSubscription
 
   /**
    * A change reaches the where filter only as its value or previous value, so
-   * a batch in which neither can pass the prefilter publishes nothing. Its
-   * only other effect is sent-key bookkeeping, and only a delete of a tracked
-   * key changes a record that later batches read. Stale
+   * a batch in which neither can pass the prefilter publishes nothing and
+   * changes no sent-key record: those record published rows only. Stale
    * published rows and truncate replay consume unfiltered changes, and an
    * empty batch signals Collection readiness, so those take the full path.
    */
@@ -1148,11 +1150,8 @@ export class CollectionSubscription
     ) {
       return false
     }
-    // Deleting a tracked key clears its sent-key record, even when the row
-    // was never published, so a later reinsertion is not a duplicate.
     return changes.every(
       (change) =>
-        !(change.type === `delete` && this.sentKeys.has(change.key)) &&
         !prefilter(change.value) &&
         (change.previousValue === undefined ||
           !prefilter(change.previousValue)),
@@ -1634,15 +1633,21 @@ export class CollectionSubscription
     // 3. We're collecting all changes atomically, so filtering doesn't make sense
     const skipDeleteFilter = this.isBufferingForTruncate
 
+    // sentKeys records only published rows; trackSentKeys adds them after
+    // delivery. Keys inserted earlier in this batch are tracked locally, so a
+    // row the where clause drops cannot advance pagination or later look like
+    // a duplicate insert.
+    const insertedInBatch = new Set<string | number>()
     const newChanges = []
     for (const change of changes) {
       let newChange = change
-      const keyInSentKeys = this.sentKeys.has(change.key)
+      const keyInSentKeys =
+        this.sentKeys.has(change.key) || insertedInBatch.has(change.key)
 
       if (!keyInSentKeys) {
         if (change.type === `update`) {
           newChange = { ...change, type: `insert`, previousValue: undefined }
-          this.sentKeys.add(change.key)
+          insertedInBatch.add(change.key)
         } else if (change.type === `delete`) {
           // Filter out deletes for keys that have not been sent,
           // UNLESS we're buffering for truncate (where all deletes should pass through)
@@ -1650,7 +1655,7 @@ export class CollectionSubscription
             continue
           }
         } else {
-          this.sentKeys.add(change.key)
+          insertedInBatch.add(change.key)
         }
       } else {
         // Key was already sent - handle based on change type
@@ -1664,6 +1669,7 @@ export class CollectionSubscription
           // Remove from sentKeys so future inserts for this key are allowed
           // (e.g., after truncate + reinsert)
           this.sentKeys.delete(change.key)
+          insertedInBatch.delete(change.key)
         }
       }
       newChanges.push(newChange)

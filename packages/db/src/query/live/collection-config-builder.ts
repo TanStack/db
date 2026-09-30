@@ -848,9 +848,7 @@ export class CollectionConfigBuilder<
     )
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
-    this.bucketFacadesCache = materialized.resolvesPublicValues
-      ? materialized.facades
-      : undefined
+    this.bucketFacadesCache = materialized.facades
 
     const missingSources = this.collectionSources
       .map((source) => source.sourceId)

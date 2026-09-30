@@ -949,6 +949,42 @@ describe(`WHERE predicate publication oracle`, () => {
       }
     })
 
+    it(`a pending optimistic delete hides a row from a prefiltered unindexed scan`, async () => {
+      // The scan may read synced rows directly only when no optimistic state
+      // changes visibility. A pending delete removes a synced row.
+      const collection = createCollection(
+        mockSyncCollectionOptions<Row>({
+          id: `where-publication-optimistic-delete-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `r0`, v: `a` },
+            { id: `r1`, v: `a` },
+            { id: `r2`, v: `b` },
+          ],
+        }),
+      )
+      const visible = new Set<string | number>()
+      let subscription: { unsubscribe: () => void } | undefined
+      try {
+        await collection.stateWhenReady()
+        // The adapter's onDelete awaits a sync acknowledgement that this test
+        // never sends, so the delete stays pending.
+        collection.delete(`r1`)
+        subscription = collection.subscribeChanges(recordVisibleKeys(visible), {
+          includeInitialState: true,
+          whereExpression: irPredicate(fieldEq(`a`)),
+        })
+        const snapshot = collection.currentStateAsChanges({
+          where: irPredicate(fieldEq(`a`)),
+        })
+        expect(snapshot?.map((change) => change.key)).toEqual([`r0`])
+        expect([...visible]).toEqual([`r0`])
+      } finally {
+        subscription?.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
     it(`a restarted source retracts a vanished row even when its first batch cannot match`, async () => {
       // Cleanup keeps the subscriber's published rows. The restarted eager
       // source's first publication must retract rows it no longer holds,

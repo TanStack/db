@@ -68,12 +68,13 @@ export type MaterializedCompilation = {
   facades: Array<BucketFacadeCompilation>
 }
 
-export type MaterializedRootCompilation = MaterializedCompilation & {
+export type MaterializedRootCompilation = {
+  pipeline: ResultStream
   /**
-   * False when the compiled pipeline passes through unchanged. Its rows then
-   * carry no facade references or private route state to resolve.
+   * Undefined when the compiled pipeline passes through unchanged. Its rows
+   * then carry no facade references or private route state to resolve.
    */
-  resolvesPublicValues: boolean
+  facades: Array<BucketFacadeCompilation> | undefined
 }
 
 type RelationScope = `root` | `child`
@@ -99,11 +100,7 @@ export function materializeCompilation(
     !compilation.includes?.length &&
     !(getRootKey && reduceJoinedPublicKeys)
   ) {
-    return {
-      pipeline: compilation.pipeline,
-      facades: [],
-      resolvesPublicValues: false,
-    }
+    return { pipeline: compilation.pipeline, facades: undefined }
   }
 
   const built: BuiltRelations = new WeakMap()
@@ -116,7 +113,6 @@ export function materializeCompilation(
   return {
     ...materialized,
     facades: dedupeFacades(materialized.facades),
-    resolvesPublicValues: true,
   }
 }
 

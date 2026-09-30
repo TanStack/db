@@ -246,6 +246,8 @@ export function compileEqualityPrefilter(
   }
   collect(expression)
 
+  // A string literal usually rejects more rows than a boolean one.
+  let best: { path: Array<string>; expected: string | boolean } | undefined
   for (const conjunct of conjuncts) {
     if (conjunct.type !== `func` || conjunct.name !== `eq`) continue
     const [left, right] = conjunct.args
@@ -261,29 +263,34 @@ export function compileEqualityPrefilter(
     if (storedRows && (path.length === 0 || isVirtualPropName(path[0]!))) {
       continue
     }
-    const read = (row: object) => {
-      let value: any = row
+    if (best === undefined || typeof best.expected === `boolean`) {
+      best = { path, expected }
+    }
+    if (typeof expected === `string`) break
+  }
+  if (best === undefined) return undefined
+
+  const { path, expected } = best
+  const root = path[0]!
+  return (row) => {
+    // Enrichment copies only enumerable own root properties, so a stored row
+    // can reject only through a field its enriched copy also reads.
+    if (storedRows && !Object.prototype.propertyIsEnumerable.call(row, root)) {
+      return true
+    }
+    try {
+      let value: unknown = row
       for (const segment of path) {
-        if (value == null) return false
-        value = value[segment]
+        // Walk exactly as the single-row evaluator does.
+        if (value === null || value === undefined) return false
+        value = (value as Record<string, unknown>)[segment]
       }
       return value === expected
-    }
-    if (!storedRows) return read
-    return (row) => {
-      try {
-        // Enrichment copies only enumerable own properties from the root.
-        return (
-          !Object.prototype.propertyIsEnumerable.call(row, path[0]!) ||
-          read(row)
-        )
-      } catch {
-        // Let the full predicate decide when a stored-row read is uncertain.
-        return true
-      }
+    } catch {
+      // A throwing read leaves the decision to the full predicate.
+      return true
     }
   }
-  return undefined
 }
 
 /**
