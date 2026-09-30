@@ -350,24 +350,31 @@ export class CollectionIndexesManager<
    * Updates all indexes when the collection changes
    */
   public updateIndexes(changes: Array<ChangeMessage<TOutput, TKey>>): void {
-    for (const index of this.indexes.values()) {
-      for (const change of changes) {
-        switch (change.type) {
-          case `insert`:
-            index.add(change.key, change.value)
-            break
-          case `update`:
-            if (change.previousValue) {
-              index.update(change.key, change.previousValue, change.value)
-            } else {
+    try {
+      for (const index of this.indexes.values()) {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
               index.add(change.key, change.value)
-            }
-            break
-          case `delete`:
-            index.remove(change.key, change.value)
-            break
+              break
+            case `update`:
+              if (change.previousValue) {
+                index.update(change.key, change.previousValue, change.value)
+              } else {
+                index.add(change.key, change.value)
+              }
+              break
+            case `delete`:
+              index.remove(change.key, change.value)
+              break
+          }
         }
       }
+    } catch (error) {
+      // Callers have written rows that are not yet published. Crash the
+      // collection instead of leaving it usable with unpublished rows.
+      this.lifecycle.markError(error)
+      throw error
     }
   }
 

@@ -130,41 +130,40 @@ it.each(cases)(
       expect(observed.at(-1)?.publicData).toEqual(expectedAfter)
     } catch (error) {
       primaryFailure = error
-      throw error
-    } finally {
-      const cleanupErrors: Array<unknown> = []
-      let liveQueryCollection: typeof source | null = null
+    }
+    const cleanupErrors: Array<unknown> = []
+    let liveQueryCollection: typeof source | null = null
+    try {
+      liveQueryCollection = result.collection.value as typeof source | null
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    try {
+      scope.stop()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    if (liveQueryCollection && liveQueryCollection !== source) {
       try {
-        liveQueryCollection = result.collection.value as typeof source | null
+        await liveQueryCollection.cleanup()
       } catch (error) {
         cleanupErrors.push(error)
-      }
-      try {
-        scope.stop()
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-      if (liveQueryCollection && liveQueryCollection !== source) {
-        try {
-          await liveQueryCollection.cleanup()
-        } catch (error) {
-          cleanupErrors.push(error)
-        }
-      }
-      try {
-        await source.cleanup()
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-      if (cleanupErrors.length > 0) {
-        throw new AggregateError(
-          primaryFailure === undefined
-            ? cleanupErrors
-            : [primaryFailure, ...cleanupErrors],
-          `Vue publication oracle cleanup failed`,
-          { cause: primaryFailure },
-        )
       }
     }
+    try {
+      await source.cleanup()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        primaryFailure === undefined
+          ? cleanupErrors
+          : [primaryFailure, ...cleanupErrors],
+        `Vue publication oracle cleanup failed`,
+        { cause: primaryFailure },
+      )
+    }
+    if (primaryFailure !== undefined) throw primaryFailure
   },
 )

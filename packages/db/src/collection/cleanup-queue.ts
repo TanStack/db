@@ -13,6 +13,8 @@ export class CleanupQueue {
 
   private timeoutId: ReturnType<typeof setTimeout> | null = null
   private microtaskScheduled = false
+  // Some runtimes lack `performance` although the DOM types declare it.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   private readonly now = () => globalThis.performance?.now() ?? Date.now()
 
   private constructor() {}

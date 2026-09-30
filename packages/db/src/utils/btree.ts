@@ -25,7 +25,8 @@
 
 /**
  * Mutable B+ tree used by BTreeIndex for sorted value buckets. Keys use the
- * supplied comparator; point operations cost O(log size). This local fork has
+ * supplied comparator, which must return a number that is not NaN; BTreeIndex
+ * checks every comparator result. Point operations cost O(log size). This fork has
  * no copy-on-write sharing, cloning, optional-value storage, early-exit range
  * callbacks, or in-place range edits: only the operations BTreeIndex uses,
  * plus `has()` and the `get()` fallback that the Map oracle observes
@@ -197,14 +198,7 @@ class BNode<K, V> {
       else if (c > 0)
         // key < keys[mid]
         hi = mid
-      else if (c === 0) return mid
-      else {
-        // c is NaN or otherwise invalid
-        if (key === key)
-          // at least the search key is not NaN
-          return keys.length
-        else throw new Error(`BTree: NaN was used as a key`)
-      }
+      else return mid
       mid = (lo + hi) >> 1
     }
     return mid ^ failXor
@@ -435,7 +429,8 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     if (this.keys.length >= max) {
       // no, we must split also
       newRightSibling = this.splitOffRightSide()
-      if (cmp(result.maxKey()!, this.maxKey()!) > 0) {
+      // The new child follows i; no comparison is needed after mutation.
+      if (i + 1 >= this.keys.length) {
         target = newRightSibling
         i -= this.keys.length
       }
