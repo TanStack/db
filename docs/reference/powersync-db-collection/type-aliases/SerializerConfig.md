@@ -7,7 +7,7 @@ title: SerializerConfig
 type SerializerConfig<TOutput, TSQLite> = object;
 ```
 
-Defined in: [definitions.ts:63](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L63)
+Defined in: [definitions.ts:65](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L65)
 
 ## Type Parameters
 
@@ -27,7 +27,7 @@ Defined in: [definitions.ts:63](https://github.com/TanStack/db/blob/main/package
 onDeserializationError: (error) => void;
 ```
 
-Defined in: [definitions.ts:96](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L96)
+Defined in: [definitions.ts:98](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L98)
 
 Application logic should ensure that incoming synced data is always valid.
 Failing to deserialize and apply incoming changes results in data inconsistency - which is a fatal error.
@@ -51,7 +51,7 @@ Use this callback to react to deserialization errors.
 optional serializer: CustomSQLiteSerializer<TOutput, TSQLite>;
 ```
 
-Defined in: [definitions.ts:89](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L89)
+Defined in: [definitions.ts:91](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L91)
 
 Optional partial serializer object for customizing how individual columns are serialized for SQLite.
 

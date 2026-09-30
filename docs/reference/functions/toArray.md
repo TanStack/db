@@ -4,10 +4,10 @@ title: toArray
 ---
 
 ```ts
-function toArray<TContext>(query): ToArrayWrapper<GetRawResult<TContext>>;
+function toArray<TContext>(query): ToArrayWrapper<GetInlineResult<TContext>>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:752](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L752)
+Defined in: [packages/db/src/query/builder/functions.ts:807](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L807)
 
 ## Type Parameters
 
@@ -23,4 +23,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:752](https://github.com/
 
 ## Returns
 
-`ToArrayWrapper`\<`GetRawResult`\<`TContext`\>\>
+`ToArrayWrapper`\<`GetInlineResult`\<`TContext`\>\>

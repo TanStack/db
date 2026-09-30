@@ -3,7 +3,7 @@ id: LiveQueryWindowController
 title: LiveQueryWindowController
 ---
 
-Defined in: [packages/db/src/live-query-window-controller.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L514)
+Defined in: [packages/db/src/live-query-window-controller.ts:517](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L517)
 
 **`Internal`**
 
@@ -27,7 +27,7 @@ This contract is unstable while RFC #1623 is being implemented.
 dispose: () => void;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:525](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L525)
+Defined in: [packages/db/src/live-query-window-controller.ts:528](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L528)
 
 #### Returns
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:525](https://github
 fetchNextPage: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:521](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L521)
+Defined in: [packages/db/src/live-query-window-controller.ts:524](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L524)
 
 Load one more page, resolving only after that page is committed.
 
@@ -57,7 +57,7 @@ Load one more page, resolving only after that page is committed.
 getSnapshot: () => LiveQueryWindowSnapshot<T, TKey>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:518](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L518)
+Defined in: [packages/db/src/live-query-window-controller.ts:521](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L521)
 
 #### Returns
 
@@ -71,7 +71,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:518](https://github
 preload: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:524](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L524)
+Defined in: [packages/db/src/live-query-window-controller.ts:527](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L527)
 
 #### Returns
 
@@ -85,7 +85,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:524](https://github
 reset: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:523](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L523)
+Defined in: [packages/db/src/live-query-window-controller.ts:526](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L526)
 
 Reset to the first page, resolving after the smaller window is accepted.
 
@@ -101,7 +101,7 @@ Reset to the first page, resolving after the smaller window is accepted.
 subscribe: (listener) => () => void;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:519](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L519)
+Defined in: [packages/db/src/live-query-window-controller.ts:522](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L522)
 
 #### Parameters
 

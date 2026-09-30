@@ -3,7 +3,7 @@ id: SyncConfig
 title: SyncConfig
 ---
 
-Defined in: [packages/db/src/types.ts:387](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L387)
+Defined in: [packages/db/src/types.ts:422](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L422)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:387](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L431)
+Defined in: [packages/db/src/types.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L470)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -40,7 +40,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L425)
+Defined in: [packages/db/src/types.ts:464](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L464)
 
 Get the sync metadata for insert operations
 
@@ -58,7 +58,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:436](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L436)
+Defined in: [packages/db/src/types.ts:475](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L475)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -80,7 +80,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:441](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L441)
+Defined in: [packages/db/src/types.ts:480](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L480)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -106,7 +106,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:450](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L450)
+Defined in: [packages/db/src/types.ts:489](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L489)
 
 The row update mode used to sync to the collection.
 
@@ -130,7 +130,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:391](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L391)
+Defined in: [packages/db/src/types.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L426)
 
 #### Parameters
 
@@ -154,7 +154,11 @@ Commit the active sync transaction in FIFO order.
 Returns `true` when the writes and events are already visible. Otherwise
 returns a receipt that resolves after they become visible. If collection
 cleanup or an optional request abort abandons the transaction first, the
-receipt rejects with an error named `AbortError`.
+receipt rejects with an error named `AbortError`. If cancellation of an
+earlier transaction invalidates this transaction's insert admission, the
+receipt rejects with `DuplicateKeySyncError`.
+If cancellation removes a row required by this transaction's partial
+update, its receipt rejects with an error named `AbortError`.
 Pass a signal only for request-scoped work that must not publish after
 cancellation. Aborting after application has no effect.
 

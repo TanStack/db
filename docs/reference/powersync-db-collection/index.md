@@ -23,6 +23,7 @@ title: "@tanstack/powersync-db-collection"
 - [EnhancedPowerSyncCollectionConfig](type-aliases/EnhancedPowerSyncCollectionConfig.md)
 - [InferPowerSyncOutputType](type-aliases/InferPowerSyncOutputType.md)
 - [OnDemandSyncHooks](type-aliases/OnDemandSyncHooks.md)
+- [OptionalExtractedTable](type-aliases/OptionalExtractedTable.md)
 - [PowerSyncCollectionConfig](type-aliases/PowerSyncCollectionConfig.md)
 - [PowerSyncCollectionMeta](type-aliases/PowerSyncCollectionMeta.md)
 - [PowerSyncCollectionUtils](type-aliases/PowerSyncCollectionUtils.md)

@@ -10,6 +10,7 @@ title: "@tanstack/query-db-collection"
 - [GetKeyRequiredError](classes/GetKeyRequiredError.md)
 - [InitialDataInOnDemandModeError](classes/InitialDataInOnDemandModeError.md)
 - [InvalidItemStructureError](classes/InvalidItemStructureError.md)
+- [InvalidQueryResultError](classes/InvalidQueryResultError.md)
 - [InvalidSyncOperationError](classes/InvalidSyncOperationError.md)
 - [ItemNotFoundError](classes/ItemNotFoundError.md)
 - [MissingKeyFieldError](classes/MissingKeyFieldError.md)
@@ -23,6 +24,9 @@ title: "@tanstack/query-db-collection"
 
 ## Interfaces
 
+- [CursorPage](interfaces/CursorPage.md)
+- [CursorPager](interfaces/CursorPager.md)
+- [CursorPagerOptions](interfaces/CursorPagerOptions.md)
 - [QueryCollectionConfig](interfaces/QueryCollectionConfig.md)
 - [QueryCollectionMeta](interfaces/QueryCollectionMeta.md)
 - [QueryCollectionUtils](interfaces/QueryCollectionUtils.md)
@@ -33,4 +37,5 @@ title: "@tanstack/query-db-collection"
 
 ## Functions
 
+- [createCursorPager](functions/createCursorPager.md)
 - [queryCollectionOptions](functions/queryCollectionOptions.md)

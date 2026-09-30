@@ -7,7 +7,7 @@ title: LoadSubsetFn
 type LoadSubsetFn = (options) => true | Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:360](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L360)
+Defined in: [packages/db/src/types.ts:382](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L382)
 
 Loads one subset and transfers its ongoing resource ownership only after
 returning `true` or a promise. An implementation that throws synchronously

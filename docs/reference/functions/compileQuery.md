@@ -19,7 +19,7 @@ function compileQuery(
    childCorrelationField?): CompilationResult;
 ```
 
-Defined in: [packages/db/src/query/compiler/index.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L364)
+Defined in: [packages/db/src/query/compiler/index.ts:366](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/index.ts#L366)
 
 Compiles a query IR into a D2 pipeline
 
@@ -81,7 +81,7 @@ Optional cache for compiled subqueries (used internally for recursion)
 
 `QueryMapping` = `...`
 
-Optional mapping from optimized queries to original queries
+Optional lineage from optimized queries to user-defined queries
 
 ### parentKeyStream?
 

@@ -7,7 +7,7 @@ title: InsertMutationFnParams
 type InsertMutationFnParams<T, TKey, TUtils> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:545](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L545)
+Defined in: [packages/db/src/types.ts:633](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L633)
 
 ## Type Parameters
 
@@ -31,14 +31,14 @@ Defined in: [packages/db/src/types.ts:545](https://github.com/TanStack/db/blob/m
 collection: Collection<T, TKey, TUtils>;
 ```
 
-Defined in: [packages/db/src/types.ts:551](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L551)
+Defined in: [packages/db/src/types.ts:643](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L643)
 
 ***
 
 ### transaction
 
 ```ts
-transaction: TransactionWithMutations<T, "insert">;
+transaction: TransactionWithMutations<T, "insert", Collection<T, TKey, TUtils>>;
 ```
 
-Defined in: [packages/db/src/types.ts:550](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L550)
+Defined in: [packages/db/src/types.ts:638](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L638)

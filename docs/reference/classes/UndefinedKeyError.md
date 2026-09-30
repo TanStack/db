@@ -3,7 +3,7 @@ id: UndefinedKeyError
 title: UndefinedKeyError
 ---
 
-Defined in: [packages/db/src/errors.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L158)
+Defined in: [packages/db/src/errors.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L168)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:158](https://github.com/TanStack/db/blob/
 new UndefinedKeyError(item): UndefinedKeyError;
 ```
 
-Defined in: [packages/db/src/errors.ts:159](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L159)
+Defined in: [packages/db/src/errors.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L169)
 
 #### Parameters
 

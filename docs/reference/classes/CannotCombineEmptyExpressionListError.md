@@ -3,7 +3,7 @@ id: CannotCombineEmptyExpressionListError
 title: CannotCombineEmptyExpressionListError
 ---
 
-Defined in: [packages/db/src/errors.ts:764](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L764)
+Defined in: [packages/db/src/errors.ts:802](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L802)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:764](https://github.com/TanStack/db/blob/
 new CannotCombineEmptyExpressionListError(): CannotCombineEmptyExpressionListError;
 ```
 
-Defined in: [packages/db/src/errors.ts:765](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L765)
+Defined in: [packages/db/src/errors.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L803)
 
 #### Returns
 

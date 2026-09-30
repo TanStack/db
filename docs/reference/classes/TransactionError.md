@@ -3,7 +3,7 @@ id: TransactionError
 title: TransactionError
 ---
 
-Defined in: [packages/db/src/errors.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L298)
+Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L308)
 
 ## Extends
 
@@ -11,6 +11,10 @@ Defined in: [packages/db/src/errors.ts:298](https://github.com/TanStack/db/blob/
 
 ## Extended by
 
+- [`QueueCapacityExceededError`](QueueCapacityExceededError.md)
+- [`QueueDisposedError`](QueueDisposedError.md)
+- [`ThrottleCallDroppedError`](ThrottleCallDroppedError.md)
+- [`DebounceCallDroppedError`](DebounceCallDroppedError.md)
 - [`MissingMutationFunctionError`](MissingMutationFunctionError.md)
 - [`OnMutateMustBeSynchronousError`](OnMutateMustBeSynchronousError.md)
 - [`TransactionNotPendingMutateError`](TransactionNotPendingMutateError.md)
@@ -29,7 +33,7 @@ Defined in: [packages/db/src/errors.ts:298](https://github.com/TanStack/db/blob/
 new TransactionError(message): TransactionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L299)
+Defined in: [packages/db/src/errors.ts:309](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L309)
 
 #### Parameters
 

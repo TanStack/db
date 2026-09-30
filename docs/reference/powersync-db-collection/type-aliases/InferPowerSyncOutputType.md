@@ -4,7 +4,7 @@ title: InferPowerSyncOutputType
 ---
 
 ```ts
-type InferPowerSyncOutputType<TTable, TSchema> = TSchema extends never ? ExtractedTable<TTable> : InferSchemaOutput<TSchema>;
+type InferPowerSyncOutputType<TTable, TSchema> = [TSchema] extends [never] ? ExtractedTable<TTable> : InferSchemaOutput<TSchema>;
 ```
 
 Defined in: [definitions.ts:22](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L22)

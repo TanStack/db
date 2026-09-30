@@ -66,7 +66,7 @@ Defined in: [PowerSyncTransactor.ts:59](https://github.com/TanStack/db/blob/main
 ### database
 
 ```ts
-database: AbstractPowerSyncDatabase;
+database: CommonPowerSyncDatabase;
 ```
 
 Defined in: [PowerSyncTransactor.ts:56](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L56)
@@ -111,7 +111,7 @@ Persists a Transaction to the PowerSync SQLite database.
 protected getMutationCollectionMeta(mutation): PowerSyncCollectionMeta<any>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:320](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L320)
+Defined in: [PowerSyncTransactor.ts:340](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L340)
 
 #### Parameters
 
@@ -134,7 +134,7 @@ protected handleDelete(
 waitForCompletion): Promise<PendingOperation | null>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:246](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L246)
+Defined in: [PowerSyncTransactor.ts:258](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L258)
 
 #### Parameters
 
@@ -165,7 +165,7 @@ protected handleInsert(
 waitForCompletion): Promise<PendingOperation | null>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:175](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L175)
+Defined in: [PowerSyncTransactor.ts:180](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L180)
 
 #### Parameters
 
@@ -197,7 +197,7 @@ protected handleOperationWithCompletion(
 handler): Promise<PendingOperation | null>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:289](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L289)
+Defined in: [PowerSyncTransactor.ts:301](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L301)
 
 Helper function which wraps a persistence operation by:
 - Fetching the mutation's collection's SQLite table details
@@ -220,7 +220,7 @@ Helper function which wraps a persistence operation by:
 
 ##### handler
 
-(`tableName`, `mutation`, `serializeValue`) => `Promise`\<`void`\>
+(`tableName`, `mutation`, `serializeValue`) => `Promise`\<`false` \| `void`\>
 
 #### Returns
 
@@ -237,7 +237,7 @@ protected handleUpdate(
 waitForCompletion): Promise<PendingOperation | null>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:211](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L211)
+Defined in: [PowerSyncTransactor.ts:216](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L216)
 
 #### Parameters
 
@@ -265,7 +265,7 @@ Defined in: [PowerSyncTransactor.ts:211](https://github.com/TanStack/db/blob/mai
 protected processMutationMetadata(mutation): string | null;
 ```
 
-Defined in: [PowerSyncTransactor.ts:339](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L339)
+Defined in: [PowerSyncTransactor.ts:359](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L359)
 
 Processes collection mutation metadata for persistence to the database.
 We only support storing string metadata.

@@ -3,7 +3,7 @@ id: CollectionPreloadAbortedError
 title: CollectionPreloadAbortedError
 ---
 
-Defined in: [packages/db/src/errors.ts:741](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L741)
+Defined in: [packages/db/src/errors.ts:779](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L779)
 
 A collection was cleaned up before its initial preload became ready.
 
@@ -19,7 +19,7 @@ A collection was cleaned up before its initial preload became ready.
 new CollectionPreloadAbortedError(): CollectionPreloadAbortedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:742](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L742)
+Defined in: [packages/db/src/errors.ts:780](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L780)
 
 #### Returns
 
