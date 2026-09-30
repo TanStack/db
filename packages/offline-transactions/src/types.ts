@@ -49,6 +49,8 @@ export interface OfflineTransaction {
   createdAt: Date
   retryCount: number
   nextAttemptAt: number
+  /** Present only after mutationFn fulfills and durable outbox deletion remains. */
+  outboxPhase?: `deletion-pending`
   lastError?: SerializedError
   metadata?: Record<string, any>
   spanContext?: SerializedSpanContext
@@ -67,6 +69,8 @@ export interface SerializedOfflineTransaction {
   createdAt: string
   retryCount: number
   nextAttemptAt: number
+  /** Absent in older records and while mutationFn may still need to run. */
+  outboxPhase?: `deletion-pending`
   lastError?: SerializedError
   metadata?: Record<string, any>
   spanContext?: SerializedSpanContext

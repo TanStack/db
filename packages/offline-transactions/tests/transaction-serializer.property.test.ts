@@ -1057,6 +1057,85 @@ it(`preserves prior wire meanings when reading native scalar markers`, async () 
   }
 })
 
+it(`keeps legacy pending-work records phase-free across serialization`, () => {
+  const serializer = new TransactionSerializer({})
+  const legacyWire = {
+    id: `legacy-pending`,
+    mutationFnName: `persist`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `legacy-key`,
+    createdAt: new Date(0).toISOString(),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    version: 1,
+  }
+
+  const decoded = serializer.deserialize(JSON.stringify(legacyWire))
+  expect(decoded.outboxPhase).toBeUndefined()
+  const rewritten = JSON.parse(serializer.serialize(decoded)) as Record<
+    string,
+    unknown
+  >
+  expect(rewritten).not.toHaveProperty(`outboxPhase`)
+  expect(rewritten).toMatchObject(legacyWire)
+  expect(rewritten).toHaveProperty(`valueEncoding`, 3)
+})
+
+it(`round-trips a mutationFn-fulfilled deletion-pending record`, () => {
+  const serializer = new TransactionSerializer({})
+  const transaction: OfflineTransaction = {
+    id: `deletion-pending`,
+    mutationFnName: `persist`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `stable-key`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    outboxPhase: `deletion-pending`,
+    version: 1,
+  }
+
+  const encoded = serializer.serialize(transaction)
+  expect(JSON.parse(encoded)).toMatchObject({
+    id: transaction.id,
+    idempotencyKey: `stable-key`,
+    outboxPhase: `deletion-pending`,
+    valueEncoding: 3,
+    version: 1,
+  })
+  expect(serializer.deserialize(encoded)).toEqual(transaction)
+})
+
+it.each([null, false, 0, {}, `provider-pending`, `unknown`])(
+  `rejects malformed or unknown outbox phase %j`,
+  (outboxPhase) => {
+    const serializer = new TransactionSerializer({})
+    const wire = {
+      id: `invalid-phase`,
+      mutationFnName: `persist`,
+      mutations: [],
+      keys: [],
+      idempotencyKey: `stable-key`,
+      createdAt: new Date(0).toISOString(),
+      retryCount: 0,
+      nextAttemptAt: 0,
+      outboxPhase,
+      version: 1,
+    }
+    expect(() => serializer.deserialize(JSON.stringify(wire))).toThrow(
+      /Unsupported transaction outbox phase/,
+    )
+    expect(() =>
+      serializer.serialize({
+        ...wire,
+        createdAt: new Date(0),
+      } as unknown as OfflineTransaction),
+    ).toThrow(/Unsupported transaction outbox phase/)
+  },
+)
+
 it(`fails visibly with the retained native scalar transaction id`, async () => {
   const collection = createCollection<{ id: string; due: unknown }>({
     id: `native-scalar-missing-runtime`,

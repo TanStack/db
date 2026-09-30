@@ -167,14 +167,20 @@ observe the executor's awaited outbox update between `updateTransaction` and
 The transaction serializer owner uses controlled Temporal constructors and fake
 storage; a claim about native Temporal or browser storage needs a receiving
 witness in those runtimes.
-The offline settlement owner has an unresolved authority conflict:
-`packages/offline-transactions/README.md` says successful settlement follows
-durable outbox removal, while
-`packages/offline-transactions/tests/transaction-settlement.property.test.ts`
-expects fulfillment after the configured `mutationFn` fulfills even when
-acknowledgement deletion throws and the fake-storage outbox row remains. The
-offline settlement contract owner must
-decide which law is promised before this cell can support a closure claim.
+The offline settlement owner follows the README's success boundary: the
+configured `mutationFn` has returned and the storage adapter has acknowledged
+outbox deletion. Its controlled storage histories hold and fail deletion,
+retain a queued peer at the FIFO head, retry deletion in-process, and restart
+after a persisted `deletion-pending` phase. A marked row skips provider replay
+even when `beforeRetry` filters all ordinary pending work; an old unmarked row
+still replays. Adapter tests prove that IndexedDB transaction failure and
+localStorage `removeItem` failure reject rather than masquerade as deletion.
+These witnesses do not establish physical power-loss durability, a real
+provider's idempotency, or the crash window between provider completion and
+the phase write. The provider must honor the supplied idempotency key in that
+window. Older application versions that do not understand the phase can also
+replay a marked row. Native browser restart and multi-owner handoff of the
+marked phase remain receiving witnesses for this owner.
 
 ### Recent fix-wave authority inventory
 
@@ -646,9 +652,13 @@ The maintainer assigned offline policy work to
 [RFC #1659](https://github.com/TanStack/db/issues/1659). It is not a merge blocker
 for this oracle repair. Keep these scenarios and decisions with that owner:
 
-- **A10 R7/R13:** provider succeeds, outbox deletion fails, then restart can replay
-  the retained work. IndexedDB transaction-completion settlement is fixed here;
-  LocalStorage's failure/read policy and post-success acknowledgment remain open.
+- **A10 R7/R13:** the executor now holds caller success until deletion is
+  acknowledged, and a persisted `deletion-pending` phase prevents provider
+  replay after a known deletion failure. Controlled restart and adapter-failure
+  witnesses cover that boundary. A crash before the phase write, old readers of
+  marked rows, physical power loss after adapter acknowledgement, and native
+  browser restart or multi-owner handoff remain open. Provider idempotency is
+  required to avoid a repeated effect in the first two cases.
 - **A10 R4/R5/R9:** loss before durable admission, terminal waiter/removal/clear
   and restored optimistic lifetimes, and retry-hook failures.
 - **A10 R11/R12 and earlier R8:** metadata/native-value domain, old readers of

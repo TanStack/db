@@ -214,6 +214,17 @@ outbox. It means the server confirmed or exposed the write only when that
 `mutationFn` explicitly waits for the provider's acknowledgement, read-back, or
 sync observation before returning.
 
+After `mutationFn` returns, the executor records a `deletion-pending` outbox
+phase before removing the row. If recording that phase or removing the row
+fails, `commit()`, `isPersisted.promise`, and the per-ID completion waiter remain
+pending while the executor retries. A restarted executor retries removal of a
+marked row without calling `mutationFn` again; `beforeRetry` only filters rows
+whose provider work is still pending. An unmarked row can replay after a crash
+between provider completion and the phase write. Providers must honor the
+supplied `idempotencyKey` to prevent a repeated effect in that window. Outbox
+removal means the storage adapter acknowledged deletion; it does not establish
+physical power-loss durability or exactly-once provider execution.
+
 ```typescript
 const offlineTx = offline.createOfflineTransaction({
   mutationFnName: 'syncTodos',

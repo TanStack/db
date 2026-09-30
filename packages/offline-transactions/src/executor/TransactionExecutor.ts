@@ -95,33 +95,48 @@ export class TransactionExecutor {
             span.setAttribute(`retry.attempt`, transaction.retryCount)
           }
 
-          let result: void
-          try {
-            result = await this.runMutationFn(transaction)
-          } catch (error) {
-            const err =
-              error instanceof Error ? error : new Error(String(error))
+          if (transaction.outboxPhase !== `deletion-pending`) {
+            try {
+              await this.runMutationFn(transaction)
+            } catch (error) {
+              const err =
+                error instanceof Error ? error : new Error(String(error))
 
-            span.setAttribute(`result`, `error`)
+              span.setAttribute(`result`, `error`)
 
-            await this.handleError(transaction, err)
-            ;(err as any)[HANDLED_EXECUTION_ERROR] = true
-            throw err
+              await this.handleError(transaction, err)
+              ;(err as any)[HANDLED_EXECUTION_ERROR] = true
+              throw err
+            }
           }
 
-          let removalError: unknown
+          // A successful provider call can outlive this executor. Persist that
+          // fact before removal so a restarted executor only retries deletion.
+          const deletionPending: OfflineTransaction = {
+            ...transaction,
+            outboxPhase: `deletion-pending`,
+          }
           try {
-            // Replay can still see this ID until durable deletion settles.
+            await this.outbox.update(transaction.id, deletionPending)
             await this.outbox.remove(transaction.id)
           } catch (error) {
-            removalError = error
-          } finally {
-            this.scheduler.markCompleted(transaction)
+            span.recordException(
+              error instanceof Error ? error : new Error(String(error)),
+            )
+            span.setAttribute(`result`, `deletion_retry`)
+            this.scheduler.updateTransaction({
+              ...deletionPending,
+              nextAttemptAt:
+                Date.now() +
+                this.retryPolicy.calculateDelay(transaction.retryCount),
+            })
+            this.scheduler.markFailed(transaction)
+            return
           }
 
+          this.scheduler.markCompleted(transaction)
           span.setAttribute(`result`, `success`)
-          this.offlineExecutor.resolveTransaction(transaction.id, result)
-          if (removalError !== undefined) throw removalError
+          this.offlineExecutor.resolveTransaction(transaction.id, undefined)
         },
       )
     } catch (error) {
@@ -242,11 +257,17 @@ export class TransactionExecutor {
     await this.outbox.withAll((transactions) => {
       const { isOfflineEnabled } = this.offlineExecutor
       if (!isOfflineEnabled) return
-      let filteredTransactions = transactions
-
-      if (this.config.beforeRetry) {
-        filteredTransactions = this.config.beforeRetry(transactions)
-      }
+      const providerPending = transactions.filter(
+        (transaction) => transaction.outboxPhase !== `deletion-pending`,
+      )
+      const filteredTransactions = [
+        ...(this.config.beforeRetry
+          ? this.config.beforeRetry(providerPending)
+          : providerPending),
+        ...transactions.filter(
+          (transaction) => transaction.outboxPhase === `deletion-pending`,
+        ),
+      ]
 
       // The retry hook is user code and may synchronously revoke replay rights.
       if (!this.offlineExecutor.isOfflineEnabled) return
