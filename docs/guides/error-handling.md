@@ -367,12 +367,16 @@ try {
   if (error instanceof CollectionInErrorStateError) {
     // Collection needs to be cleaned up and restarted
     await todoCollection.cleanup()
+    await todoCollection.preload()
     
     // Now retry the operation
     todoCollection.insert(newTodo)
   }
 }
 ```
+
+If a live query depends on this Collection, restart both Collections as shown
+in [Collection Cleanup and Restart](#collection-cleanup-and-restart).
 
 ### Missing Mutation Handlers
 
@@ -583,18 +587,44 @@ await collection.cleanup() // Resolves successfully
 ### Collection Cleanup and Restart
 
 Cleanup ends the current sync run and releases the resources installed by its
-`sync()` call. A later access can start a new sync run. Clean up collections in
-error states like this:
+`sync()` call. A later access can start a new sync run. If no live query or
+Effect depends on the source Collection, restart it like this:
 
 ```ts
 if (todoCollection.status === "error") {
   // Cleanup ends the current sync run and resets the collection
   await todoCollection.cleanup()
   
-  // The next access starts a new sync run
-  todoCollection.preload() // Or any other operation
+  // Start a new sync run and wait for readiness
+  await todoCollection.preload()
 }
 ```
+
+Cleaning up a source Collection while a live-query Collection depends on it
+puts that live query in a terminal error state. Restarting the source alone
+does not revive the live query. If you own both Collections, clean up the
+dependent live query first. Preloading it after source cleanup starts fresh
+sync runs for both Collections and waits for the query's required data:
+
+```ts
+const todosQuery = createLiveQueryCollection((q) =>
+  q.from({ todos: todoCollection }),
+)
+await todosQuery.preload()
+
+// Later, if todoCollection enters an error state:
+await todosQuery.cleanup()
+await todoCollection.cleanup()
+await todosQuery.preload()
+```
+
+The same `todosQuery` object and its subscribers can receive later source
+updates after this sequence. A framework hook that creates its own live-query
+Collection may retain it across renders or remounts. Use a pre-created
+live-query Collection when you need to control this cleanup and restart
+sequence. A successful preload establishes Collection readiness; whether the
+source has caught up with a remote service depends on its sync adapter.
+Cleanup also disposes dependent Effects; recreate them after the source restarts.
 
 ### Graceful Degradation
 
@@ -851,22 +881,10 @@ const TodoApp = () => {
     }
   }
 
-  const handleCleanup = async () => {
-    try {
-      await todoCollection.cleanup()
-      // Collection will restart on next access
-    } catch (error) {
-      console.error("Cleanup failed:", error)
-    }
-  }
-
   if (isError) {
     return (
       <div>
-        <div>Collection error - data may be stale</div>
-        <button onClick={handleCleanup}>
-          Restart Collection
-        </button>
+        Collection error - data may be stale
       </div>
     )
   }
