@@ -123,7 +123,10 @@ export abstract class BaseIndex<
   public readonly expression: BasicExpression
   public abstract readonly supportedOperations: Set<IndexOperation>
   protected readonly compareOptions: CompareOptions
-  /** Orders indexed values. A user-supplied comparator is checked on every call. */
+  /**
+   * Orders indexed values. Every result is checked, because a custom
+   * comparator or custom collation may be supplied by the user.
+   */
   protected readonly compareFn: (a: any, b: any) => number
   private compiledIndexEvaluator: CompiledSingleRowExpression | undefined
   /**
@@ -143,9 +146,9 @@ export abstract class BaseIndex<
     this.expression = expression
     this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
     this.hasCustomComparator = options?.compareFn != null
-    this.compareFn = options?.compareFn
-      ? makeCheckedComparator(options.compareFn)
-      : makeComparator(this.compareOptions)
+    this.compareFn = makeCheckedComparator(
+      options?.compareFn ?? makeComparator(this.compareOptions),
+    )
     this.name = name
     this.initialize(options)
   }

@@ -26,7 +26,7 @@
 /**
  * Mutable B+ tree used by BTreeIndex for sorted value buckets. Keys use the
  * supplied comparator, which must return a number that is not NaN; BTreeIndex
- * checks custom comparators. Point operations cost O(log size). This fork has
+ * checks every comparator result. Point operations cost O(log size). This fork has
  * no copy-on-write sharing, cloning, optional-value storage, early-exit range
  * callbacks, or in-place range edits: only the operations BTreeIndex uses,
  * plus `has()` and the `get()` fallback that the Map oracle observes

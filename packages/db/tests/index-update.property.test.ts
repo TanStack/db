@@ -10,6 +10,7 @@ import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { makeComparator } from '../src/utils/comparison.js'
 import { indexedKeysSet, orderedEntriesArray, valueMapData } from './utils'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
+import type { CompareOptions } from '../src/query/builder/types.js'
 
 /**
  * An index is a derived multimap from indexed value to source keys.
@@ -29,7 +30,7 @@ type IndexConstructor = new (
   name?: string,
   options?: {
     compareFn?: (left: unknown, right: unknown) => number
-    compareOptions?: typeof DEFAULT_COMPARE_OPTIONS
+    compareOptions?: CompareOptions
   },
 ) => BaseIndex<string>
 
@@ -453,6 +454,19 @@ describe.each(indexTypes)(
       const { index, step } = createRecordedIndex((left, right) => left - right)
       expect(step(() => index.add(`1`, { value: `ann` }))).toBe(false)
       expect(step(() => index.add(`2`, { value: `bob` }))).toBe(true)
+    })
+
+    test(`checks a custom collation compare from compareOptions`, () => {
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareOptions: {
+          ...DEFAULT_COMPARE_OPTIONS,
+          stringSort: `custom`,
+          compare: () => NaN,
+        },
+      })
+      index.add(`ann`, { value: `ann` })
+      expect(() => index.add(`bob`, { value: `bob` })).toThrow(TypeError)
+      expect(index.keyCount).toBe(1)
     })
 
     test(`a rejected remove leaves its row indexed`, () => {
