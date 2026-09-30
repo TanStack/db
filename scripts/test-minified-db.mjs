@@ -34,8 +34,9 @@ assert.ok(
   'Install workspace dependencies before running test:minified-db',
 )
 
-// The built entry must be at least as new as every source file and the
-// mangle cache, or this check would judge stale output.
+// The built entry must be at least as new as every source file, the mangle
+// cache, and the package's build configuration, or this check would judge
+// output from an older build pipeline.
 const builtEntry = path.join(root, 'packages/db/dist/esm/index.js')
 const builtInfo = await stat(builtEntry).catch((error) => {
   if (error.code !== 'ENOENT') throw error
@@ -43,7 +44,12 @@ const builtInfo = await stat(builtEntry).catch((error) => {
 })
 assert.ok(builtInfo, 'Build @tanstack/db before running test:minified-db')
 const inputs = [
-  path.join(root, 'packages/db/mangle-cache.json'),
+  ...[
+    'mangle-cache.json',
+    'vite.config.ts',
+    'package.json',
+    'tsconfig.json',
+  ].map((file) => path.join(root, 'packages/db', file)),
   ...(await readdir(path.join(root, 'packages/db/src'), { recursive: true }))
     .filter((file) => file.endsWith('.ts'))
     .map((file) => path.join(root, 'packages/db/src', file)),

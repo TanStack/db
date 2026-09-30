@@ -21,7 +21,8 @@ runs esbuild `mangleProps` on each emitted ESM and CJS module.
   and updates it (`--write`). `--write` keeps existing assignments, drops names
   that are no longer safe, and gives new safe names the next free short names.
 - `scripts/test-minified-db.mjs` now bundles the built `dist`, not `src`, and
-  rejects a `dist` that is older than `src` or the cache. CI builds db-ivm and
+  rejects a `dist` that is older than `src`, the cache, or the package's build
+  configuration (`vite.config.ts`, `package.json`, `tsconfig.json`). CI builds db-ivm and
   db before this lane and runs `check:mangle` first.
 
 The published declarations, the public API, and the source maps do not
@@ -118,7 +119,14 @@ assertions:
 | `--calibrate-error-name` | assertion failure: `CollectionConfigurationError.name` |
 | `--calibrate-public-member` | assertion failure: `public index metadata method` |
 | `--calibrate-output-shape` | assertion failure: query rows differ |
-| a source file newer than `dist` | assertion failure: `packages/db/dist is older than ...` |
+| a source file newer than `dist` | assertion failure: `packages/db/dist is older than packages/db/src/SortedMap.ts` |
+| `vite.config.ts`, `package.json`, `tsconfig.json`, or the cache newer than `dist` | assertion failure naming that file |
+
+An external review of `a1d2b85b` found that the freshness check did not
+include the build configuration. With only `vite.config.ts` touched after a
+build, the lane passed against output from the older pipeline. The check now
+includes the configuration files. Each input was touched alone after a fresh
+build, and each one fails the check with its own path.
 
 ## Behavior evidence
 
