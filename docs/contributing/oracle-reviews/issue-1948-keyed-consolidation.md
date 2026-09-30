@@ -70,3 +70,54 @@ is made for the repaired hot path.
 | ORC-010 | No external resources are acquired. Shrinking and direct replay preserve the missing-identity failure at the result checkpoint. |
 | ORC-011 | No separate shared semantic fault was named. The reference's structured key differs from production's length-prefixed composition, and the positive controls challenge adjacent identity equivalences. |
 | ORC-012 | This versioned record identifies the exact executable revision, RED/GREEN receipts, limits, and the outcomes above. |
+
+## PR #1967 external-review follow-up
+
+Reviewed executable revision: `b39e162f82bfc8b228841970b0c31bd5624b508f`.
+The review targeted `bd0a95eaa39c5b99ae420752de3b5f100b4cd183`.
+The production encoder did not change in this follow-up.
+
+A new pinned witness uses `NaN`, `Infinity`, and `-Infinity` as numeric keys.
+Before the model repair, the witness failed at the multiplicity assertion.
+`JSON.stringify` converted all three raw numeric keys to `null`, so the model
+expected one group with weight 6. Production returned three distinct groups.
+The repaired model compares keys and leaves directly with SameValueZero, then
+compares the two elements of join tuples. It does not serialize keyed identity.
+The keyed generator now includes all three non-finite keys. The unkeyed
+structural fallback retains its former key and value domains.
+
+The same focused witness is GREEN after the model repair. All 23 consolidation
+oracle tests, all 650 `@tanstack/db-ivm` tests, package typechecking, Prettier,
+and `git diff --check` pass. The full package run disabled coverage output.
+The old production files from `c879ba6d` were run with the new oracle in an
+isolated directory. The numeric/string-key witness failed at the public
+multiplicity comparison: production returned weight 2 where the model required
+weight 1. A bigint/number value witness failed at the missing-identity
+comparison. An initial isolated run stopped during TypeScript configuration
+setup; that run is not counted as a mutant kill. The reruns reached the
+assertions.
+
+The external review also questioned the baseline label. `c879ba6d` was the
+recorded unchanged production baseline. `c0d123b8` was its child and supplied
+the isolated object probe. Both commits have identical `multiset.ts` and
+`utils.ts` blobs. The coverage map's RED baseline is accurate.
+
+| Requirement | Follow-up outcome at reviewed revision |
+| --- | --- |
+| ORC-001 | The keyed law and direct-API limit remain in the opening contract. It now names non-finite keys in the grammar. |
+| ORC-002 | Direct SameValueZero/reference equality supplies expected keyed groups. It does not use production's string encoding or `getStringId`. |
+| ORC-003 | Contract, model, grammar, production call, and result comparison remain visible in one file. |
+| ORC-004 | The pinned non-finite-key case reconstructs the false RED. The keyed generator adds those keys; the fallback generator keeps its prior domains. The earlier collision reconstruction and exclusions remain. |
+| ORC-005 | The driver still calls `MultiSet.consolidate()` and compares every output group, weight, and retained first record after return. |
+| ORC-006 | The unchanged pre-fix encoder fails the revised model at the intended public-result assertion. Setup failure was not credited. |
+| ORC-007 | Fixed and seedless 300-run campaigns retain the same grammar and comparison within each revision. Seed-plus-path replay support remains. |
+| ORC-008 | Not applicable: the model is stateless recomputation. |
+| ORC-009 | The `keyedCollision` grammar branch and replay label retain their declared mapping. |
+| ORC-010 | No external resources are acquired. The isolated baseline rerun reached the same result checkpoint. |
+| ORC-011 | A shared type/text encoding concern now has a second formulation: direct SameValueZero/reference equality. The old encoder fails it. |
+| ORC-012 | This append-only entry records the revised executable commit, false-RED repair, hostile baseline, GREEN checks, and limits. |
+
+Direct replay also used fixed seed `2026929` and shrink path `1:0` with the
+revised model. The old encoder failed after one replay case at `missing
+identities`, with numeric and string keys carrying opposite weights. The same
+seed and path passed on `b39e162f`.
