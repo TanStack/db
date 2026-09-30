@@ -20,6 +20,7 @@ import {
   stripVirtualProps,
   withIndexTracking,
 } from '../utils'
+import type { IndexUsageStats } from '../utils'
 
 interface TestItem {
   id: string
