@@ -8,6 +8,7 @@ import {
 } from '../utils/index-optimization.js'
 import { ensureIndexForField } from '../indexes/auto-index.js'
 import { getPropRefPropertyPath } from '../query/ir.js'
+import { isVirtualPropName } from '../virtual-props.js'
 import { makeComparator } from '../utils/comparison.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
 import type {
@@ -19,6 +20,14 @@ import type {
 import type { CollectionImpl } from './index.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { WithVirtualProps } from '../virtual-props.js'
+
+/**
+ * Yields visible entries, enriched with virtual properties, whose stored row
+ * passes `prefilter`.
+ */
+export type StoredRowScan<T extends object, TKey extends string | number> = (
+  prefilter: (row: object) => boolean,
+) => Iterable<[TKey, WithVirtualProps<T, TKey>]>
 
 /**
  * Returns the current state of the collection as an array of changes
@@ -57,12 +66,25 @@ export function currentStateAsChanges<
 >(
   collection: CollectionLike<WithVirtualProps<T, TKey>, TKey>,
   options: CurrentStateAsChangesOptions = {},
+  scanStoredRows?: StoredRowScan<T, TKey>,
 ): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> | void {
   // Helper function to collect filtered results
   const collectFilteredResults = (
     filterFn?: (value: WithVirtualProps<T, TKey>) => boolean,
   ): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> => {
     const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
+    // Reject rows by one stored field before copying them to add virtual
+    // properties. Survivors still pass through the full predicate.
+    const prefilter =
+      filterFn && options.where && scanStoredRows
+        ? compileEqualityPrefilter(options.where, { storedRows: true })
+        : undefined
+    if (filterFn && scanStoredRows && prefilter) {
+      for (const [key, value] of scanStoredRows(prefilter)) {
+        if (filterFn(value)) result.push({ type: `insert`, key, value })
+      }
+      return result
+    }
     for (const [key, value] of collection.entries()) {
       // If no filter function is provided, include all items
       if (filterFn?.(value) ?? true) {
@@ -207,9 +229,15 @@ export function createFilterFunctionFromExpression<T extends object>(
  * TRUE only when the field holds the identical string or boolean: equality
  * normalization never maps another type onto a plain string or boolean. A
  * row that fails the returned test therefore fails the whole expression.
+ *
+ * With `storedRows`, the test reads a stored row instead of its enriched copy.
+ * The copy reads a non-virtual field either from the stored row or as
+ * `undefined`, so the test remains a necessary condition. Conjuncts on virtual
+ * fields are skipped because stored rows need not carry them.
  */
 export function compileEqualityPrefilter(
   expression: BasicExpression<boolean>,
+  { storedRows = false }: { storedRows?: boolean } = {},
 ): ((row: object) => boolean) | undefined {
   const conjuncts: Array<BasicExpression> = []
   const collect = (node: BasicExpression) => {
@@ -230,6 +258,9 @@ export function compileEqualityPrefilter(
     if (typeof expected !== `string` && typeof expected !== `boolean`) continue
 
     const path = getPropRefPropertyPath(ref)
+    if (storedRows && (path.length === 0 || isVirtualPropName(path[0]!))) {
+      continue
+    }
     return (row) => {
       let value: any = row
       for (const segment of path) {

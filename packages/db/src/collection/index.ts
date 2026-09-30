@@ -1051,7 +1051,9 @@ export class CollectionImpl<
   public currentStateAsChanges(
     options: CurrentStateAsChangesOptions = {},
   ): Array<ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>> | void {
-    return currentStateAsChanges(this, options)
+    return currentStateAsChanges(this, options, (prefilter) =>
+      this._state.entriesPassing(prefilter),
+    )
   }
 
   /**

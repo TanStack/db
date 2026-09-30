@@ -292,8 +292,9 @@ const predicateArbitrary: fc.Arbitrary<Predicate> = fc.letrec<{
 })).predicate
 
 // A top-level `eq(v, string | boolean)` conjunct lets a subscription skip
-// batches that cannot match. Change histories favor that shape so generated
-// histories exercise the skip, not only the full filter.
+// batches that cannot match and lets an unindexed snapshot reject stored rows
+// before copying them. Histories favor that shape so generated histories
+// exercise both shortcuts, not only the full filter.
 const prefilterablePredicateArbitrary: fc.Arbitrary<Predicate> = fc
   .tuple(
     fc.constantFrom<FieldValue>(`a`, PREFIXED, true),
@@ -310,8 +311,8 @@ const prefilterablePredicateArbitrary: fc.Arbitrary<Predicate> = fc
       : { kind: `and`, args: [conjunct, rest] }
   })
 
-// Change histories favor one matching and one non-matching string so rows
-// cross the predicate boundary often; the full domain stays reachable.
+// Histories favor one matching and one non-matching string so rows cross the
+// predicate boundary often; the full domain stays reachable.
 const changeValueArbitrary = fc.oneof(
   { weight: 2, arbitrary: fc.constantFrom<FieldValue>(`a`, `b`) },
   fieldValueArbitrary,
@@ -342,10 +343,10 @@ const historyArbitrary: fc.Arbitrary<History> = fc.oneof(
   fc.record({
     kind: fc.constant(`snapshot` as const),
     rows: fc.array(
-      fc.record({ v: fieldValueArbitrary, optimistic: fc.boolean() }),
+      fc.record({ v: changeValueArbitrary, optimistic: fc.boolean() }),
       { minLength: 1, maxLength: 6 },
     ),
-    predicate: predicateArbitrary,
+    predicate: fc.oneof(predicateArbitrary, prefilterablePredicateArbitrary),
   }),
   {
     weight: 2,
@@ -428,6 +429,18 @@ const pinnedHistories: ReadonlyArray<History> = [
     },
   },
 ]
+
+// An unindexed snapshot may reject stored rows by one field before copying
+// them. A pending optimistic row is visible although it is not yet synced.
+const pinnedPrefilteredSnapshot: History = {
+  kind: `snapshot`,
+  rows: [
+    { v: `a`, optimistic: true },
+    { v: `a`, optimistic: false },
+    { v: `b`, optimistic: true },
+  ],
+  predicate: fieldEq(`a`),
+}
 
 // Each change history moves rows across a predicate whose equality operand a
 // skip-if-no-match shortcut can misread.
@@ -923,7 +936,11 @@ describe(`WHERE predicate publication oracle`, () => {
       }
     })
 
-    for (const history of [...pinnedHistories, ...pinnedChangeHistories]) {
+    for (const history of [
+      ...pinnedHistories,
+      pinnedPrefilteredSnapshot,
+      ...pinnedChangeHistories,
+    ]) {
       it(`publishes TRUE rows for ${history.kind} history ${describePredicate(history.predicate)}`, () =>
         runHistory(history))
     }

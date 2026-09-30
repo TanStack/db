@@ -134,9 +134,9 @@ export function createIndexUsageTracker(collection: any): {
     })
   }
 
-  // Track full scan calls (entries() iteration)
-  const originalEntries = collection.entries
-  collection.entries = function* () {
+  // Track full scan calls: filtered iteration through either the public
+  // entries() or the stored-row scan used by a prefiltered snapshot.
+  const recordFullScan = () => {
     // Only count as full scan if we're in a filtering context
     // Check the call stack to see if we're inside createFilterFunction
     const stack = new Error().stack || ``
@@ -149,7 +149,17 @@ export function createIndexUsageTracker(collection: any): {
         type: `fullScan`,
       })
     }
+  }
+  const originalEntries = collection.entries
+  collection.entries = function* () {
+    recordFullScan()
     yield* originalEntries.call(this)
+  }
+  const state = collection._state
+  const originalEntriesPassing = state.entriesPassing
+  state.entriesPassing = function* (prefilter: (row: object) => boolean) {
+    recordFullScan()
+    yield* originalEntriesPassing.call(this, prefilter)
   }
 
   const restore = () => {
@@ -164,6 +174,7 @@ export function createIndexUsageTracker(collection: any): {
       }
     }
     collection.entries = originalEntries
+    state.entriesPassing = originalEntriesPassing
   }
 
   return { stats, restore }
