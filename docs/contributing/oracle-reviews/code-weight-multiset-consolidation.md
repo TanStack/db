@@ -1,9 +1,14 @@
 # Code weight: one MultiSet consolidation loop
 
-Reviewed executable revision: `cca2c1c1` (base `b5d92ceb`, the fetched
+Reviewed executable revision: `a27600fd` (base `bef12e24`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
-commit. The oracle lands in `025f0866` on unchanged production code. The
-refactor lands in `f46dd42e`. Review fixes land in `cca2c1c1`.
+commit. The oracle lands in `35720388` on unchanged production code. The
+refactor lands in `b1599995`. Review fixes land in `a27600fd`.
+
+The work started on `b5d92ceb` and was rebased onto `bef12e24`. The
+`packages/db-ivm` sources are identical at those two revisions. The base
+mutants and the timings below ran against the `b5d92ceb` sources, and they
+apply to `bef12e24` without change.
 
 ## Change
 
@@ -23,19 +28,19 @@ The change is intended to preserve behavior, including the keyed identity
 collisions in [#1948](https://github.com/TanStack/db/issues/1948). A fix for
 that bug is a separate behavior change.
 
-`f46dd42e` changed one behavior. On the single-primitive path, the base code
-returned the `Map` key, so a `-0` record came back as `0`. `f46dd42e` returned
+`b1599995` changed one behavior. On the single-primitive path, the base code
+returned the `Map` key, so a `-0` record came back as `0`. `b1599995` returned
 the input record, so `-0` stayed `-0`. The oracle did not generate `-0`, and
-no other db-ivm test failed. Review found the change. `cca2c1c1` returns the
+no other db-ivm test failed. Review found the change. `a27600fd` returns the
 `Map` key again, and the oracle grammar now contains `-0` and `NaN`.
 
 | Entry | Revision | min | gzip | brotli |
 | --- | --- | ---: | ---: | ---: |
-| full `@tanstack/db` (db-ivm inlined) | `b5d92ceb` | 375,072 | 105,834 | 89,692 |
-| | `cca2c1c1` | 374,092 | 105,501 | 89,317 |
-| | Δ | −980 | −333 | −375 |
-| standalone `@tanstack/db-ivm` | `b5d92ceb` | 35,345 | 10,894 | 9,855 |
-| | `cca2c1c1` | 34,374 | 10,570 | 9,513 |
+| full `@tanstack/db` (db-ivm inlined) | `bef12e24` | 375,166 | 105,868 | 89,634 |
+| | `a27600fd` | 374,186 | 105,541 | 89,418 |
+| | Δ | −980 | −327 | −216 |
+| standalone `@tanstack/db-ivm` | `bef12e24` | 35,345 | 10,894 | 9,855 |
+| | `a27600fd` | 34,374 | 10,570 | 9,513 |
 | | Δ | −971 | −324 | −342 |
 
 All numbers come from an esbuild bundle of the public entry, minified.
@@ -132,7 +137,7 @@ total tests.
 | W5: the last record replaces the first | assertion failure (3/7) | assertion failure (3/591) |
 | W6: mixed unkeyed data uses raw values as keys | assertion failure (3/7) | assertion failure (4/591) |
 
-### Source mutants on the refactor (`f46dd42e`)
+### Source mutants on the refactor (`b1599995`)
 
 | Mutant | New oracle | Suite |
 | --- | --- | --- |
@@ -144,15 +149,15 @@ total tests.
 | N6: mixed unkeyed data uses raw values as keys | assertion failure (3/8) | assertion failure (4/588) |
 | W7: an input pair becomes the output entry | assertion failure (6/8) | assertion failure (14/588) |
 
-### Source mutants on the reviewed head (`cca2c1c1`)
+### Source mutants on the reviewed head (`a27600fd`)
 
 | Mutant | New oracle | Suite |
 | --- | --- | --- |
-| N7: the single-primitive path returns the input record (`f46dd42e`) | assertion failure (3/9) | assertion failure (3/589, oracle only) |
+| N7: the single-primitive path returns the input record (`b1599995`) | assertion failure (3/9) | assertion failure (3/589, oracle only) |
 | N8: the keyed path writes a `-0` value as `0` in the input pair | assertion failure (2/9) | assertion failure (2/589, oracle only) |
 
-The N1–N6 and W7 counts come from `f46dd42e`, which had 8 oracle cases.
-`cca2c1c1` changes only the single-primitive result and the loop that builds
+The N1–N6 and W7 counts come from `b1599995`, which had 8 oracle cases.
+`a27600fd` changes only the single-primitive result and the loop that builds
 the result, so those mutants apply unchanged. N7 and N8 survive the rest of
 the db-ivm suite. N8 changes no output record, so only the input contents check
 rejects it.
@@ -185,7 +190,7 @@ process-per-implementation harness removed that bias. Its A/A control measured
 | unkeyed numbers | 0.991 | 1.008 | 0.763 |
 | unkeyed objects | 0.821 | 0.802 | 0.824 |
 
-Each ratio is `cca2c1c1` time over base time. Lower is faster. Unkeyed numbers
+Each ratio is `a27600fd` time over base time. Lower is faster. Unkeyed numbers
 at sizes 10 and 1,000 are inside the A/A noise band. Batches of size 10
 ran 20,000 times, size 1,000 ran 200 times, and size 100,000 ran twice. Output
 sizes matched in every workload. The refactor keeps one `Map` of
@@ -211,12 +216,12 @@ harness is not checked in.
 
 ## Verification
 
-On `cca2c1c1`, the following passed:
+On `a27600fd`, the following passed:
 
 - `packages/db-ivm` Vitest: 41 files, 589 tests, no type errors.
 - `packages/db-ivm` `tsc --noEmit`: no errors.
-- `packages/db` Vitest, typecheck off: 191 files, 6,821 tests.
-- `pnpm test:oracles`: 48 files, 2,831 tests.
+- `packages/db` Vitest, typecheck off: 193 files, 6,830 tests.
+- `pnpm test:oracles`: 49 files, 2,838 tests.
 - `pnpm test:minified-db`: error names, index metadata, query rows, and live
   updates.
 
