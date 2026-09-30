@@ -15,22 +15,30 @@ import type { MultiSetArray } from '../src/multiset.js'
  *    is a join tuple: each element compares by the same primitive/reference
  *    rule, so fresh tuples with the same elements merge.
  * 2. **Unkeyed, one primitive type.** Every record is a string, or every
- *    record is a number. Records compare by value.
+ *    record is a number. Records compare by value, as `Map` keys do: `-0`
+ *    equals `0`, and `NaN` equals `NaN`. The retained record is that value
+ *    with `-0` written as `0`.
  * 3. **Unkeyed, structural.** Any other multiset. Records compare by
  *    structure, so fresh objects or arrays with equal contents merge.
  *
  * For each identity, the result holds exactly one record: the first record in
- * input order, with the summed multiplicity. An identity whose sum is zero is
+ * input order (normalized as in rule 2), with the summed multiplicity. An identity whose sum is zero is
  * absent. Consolidation does not change the input multiset.
  *
- * Authority: the identity rules are the documented behavior in
- * `src/multiset.ts` (method comments on keyed and unkeyed consolidation).
+ * Authority: the contract comment on `MultiSet.consolidate()` in
+ * `src/multiset.ts`. It restates the behavior and the keyed and unkeyed method
+ * comments of the implementation before the shared consolidation loop
+ * (`b5d92ceb`).
  *
  * Limits:
  * - The output order is not part of this law. No contract states it.
- * - Keyed values never mix a number and a string with the same text (or a
- *   boolean and its text). Keyed consolidation merges those today, which is
- *   the open bug #1948. Remove this exclusion when that bug is fixed.
+ * - Keyed identity is a text encoding that is not injective today (open bug
+ *   #1948). The grammar excludes each known collision:
+ *   - keys or values of different types with the same text (`1` and `'1'`,
+ *     `true` and `'true'`, `1n` and `1`);
+ *   - keys or values that contain the `|` delimiter;
+ *   - symbol and function values, which compare by text, not by reference.
+ *   Remove these exclusions when that bug is fixed.
  * - Structural identity uses a 32-bit hash in production. The small value
  *   domain here makes a collision unlikely, but this is not an injectivity
  *   claim.
@@ -46,7 +54,7 @@ type Spec =
 type Leaf = { kind: `prim` | `obj`; i: number }
 
 // Primitive texts are distinct across types: no `'1'`, `'true'`, `'null'`, or
-// `'undefined'` strings. See the #1948 limit above.
+// `'undefined'` strings, and no `|`. See the #1948 limit above.
 const KEYED_PRIMITIVES: ReadonlyArray<Data> = [
   0,
   1,
@@ -56,6 +64,8 @@ const KEYED_PRIMITIVES: ReadonlyArray<Data> = [
   null,
   undefined,
   true,
+  -0,
+  NaN,
 ]
 const KEYS: ReadonlyArray<string | number> = [0, 1, 2, `a`, `b`]
 
@@ -110,18 +120,21 @@ function expectedConsolidation(records: MultiSetArray<Data>): Expected {
   const onePrimitiveType = [`string`, `number`].some((type) =>
     records.every(([data]) => typeof data === type),
   )
+  // `String` writes `-0` as `0`, so the identity follows `Map` key equality.
   const identity = isKeyed
     ? keyedIdentity
     : onePrimitiveType
-      ? (data: Data) => JSON.stringify([typeof data, data])
+      ? (data: Data) => JSON.stringify([typeof data, String(data)])
       : (data: Data) => JSON.stringify(structure(data))
+  const retained = (data: Data) =>
+    onePrimitiveType && Object.is(data, -0) ? 0 : data
 
   const groups = new Map<string, { first: Data; sum: number }>()
   for (const [data, multiplicity] of records) {
     const id = identity(data)
     const group = groups.get(id)
     if (group) group.sum += multiplicity
-    else groups.set(id, { first: data, sum: multiplicity })
+    else groups.set(id, { first: retained(data), sum: multiplicity })
   }
   for (const [id, group] of groups) if (group.sum === 0) groups.delete(id)
   return { groups, identity }
@@ -166,7 +179,10 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
   }),
   fc.record({
     mode: fc.constant(`numbers` as const),
-    steps: fc.array(fc.tuple(fc.nat(3), multiplicityArb), { maxLength: 24 }),
+    steps: fc.array(
+      fc.tuple(fc.constantFrom(0, -0, 1, 2, 3, NaN), multiplicityArb),
+      { maxLength: 24 },
+    ),
   }),
   fc.record({
     mode: fc.constant(`strings` as const),
@@ -230,9 +246,27 @@ function buildRecords(history: History): MultiSetArray<Data> {
 // ---------------------------------------------------------------------------
 // Production driver and refinement check.
 
+// A tagged encoding of every record's contents. Objects become ids in
+// first-seen order, so a changed shared reference also shows. The tags keep
+// `-0`, `NaN`, and `undefined` distinct.
+function contentsOf(records: MultiSetArray<Data>): string {
+  const ids = new Map<object, number>()
+  const encode = (value: Data): Data => {
+    if (value === null || typeof value !== `object`)
+      return [typeof value, Object.is(value, -0) ? `-0` : String(value)]
+    if (!ids.has(value)) ids.set(value, ids.size)
+    return [
+      ids.get(value),
+      Object.entries(value).map(([key, item]) => [key, encode(item)]),
+    ]
+  }
+  return JSON.stringify(records.map(([data, m]) => [encode(data), m]))
+}
+
 function expectConsolidation(history: History): void {
   const records = buildRecords(history)
   const inputSnapshot = records.map(([data, m]) => [data, m] as const)
+  const inputContents = contentsOf(records)
   const { groups: expected, identity } = expectedConsolidation(records)
 
   const actual = new MultiSet(records).consolidate().getInner()
@@ -243,6 +277,7 @@ function expectConsolidation(history: History): void {
     expect(data).toBe(inputSnapshot[index]![0])
     expect(m).toBe(inputSnapshot[index]![1])
   })
+  expect(contentsOf(records), `input record contents`).toBe(inputContents)
 
   // Record every output entry. A duplicate identity or a zero multiplicity
   // stays visible.
@@ -396,6 +431,18 @@ describe(`MultiSet consolidation oracle`, () => {
         steps: [
           [[0, { kind: `obj`, i: 0 }], 1],
           [[0, { kind: `obj`, i: 1 }], 1],
+        ],
+      },
+    ],
+    [
+      `single-number data merges -0 with 0 and returns 0`,
+      {
+        mode: `numbers`,
+        steps: [
+          [-0, 1],
+          [0, 1],
+          [NaN, 1],
+          [NaN, 1],
         ],
       },
     ],
