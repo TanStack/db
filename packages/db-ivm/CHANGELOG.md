@@ -1,5 +1,17 @@
 # @tanstack/db-ivm
 
+## 0.1.23
+
+### Patch Changes
+
+- Add regression coverage for structural hash type markers and empty top-K window moves. ([#1918](https://github.com/TanStack/db/pull/1918))
+
+- Preserve only captured accepted local inserts across a truncate. Preserve sparse-array length and RegExp state through ordered-query hashing, including hosts without a global File constructor. Prevent delayed replay reads from rerunning any transaction removed while the read was in flight, without rescanning the outbox. ([#1822](https://github.com/TanStack/db/pull/1822))
+
+- Keep distinct Temporal values in separate `groupBy` groups and prevent plain objects with Temporal tags from sharing those groups. ([#1919](https://github.com/TanStack/db/pull/1919))
+
+- Compare min and max aggregates against `undefined` instead of truthiness so `0`, `0n`, and `""` can be the extreme of a group. ([#1809](https://github.com/TanStack/db/pull/1809))
+
 ## 0.1.22
 
 ### Patch Changes

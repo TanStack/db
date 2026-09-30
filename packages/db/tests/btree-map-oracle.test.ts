@@ -12,7 +12,11 @@ import { BTree } from '../src/utils/btree.js'
  * After each action, this oracle checks four laws:
  *
  * 1. Point operations return the same result as the Map model.
- * 2. A full range scan returns each modeled key once in sorted order.
+ * 2. A range scan returns each modeled key in `[low, high]` once in sorted
+ *    order. When `includeHigh` is false, the range is `[low, high)`. A range
+ *    with `low > high` is empty. `BTreeIndex.rangeQuery` uses arbitrary
+ *    bounds in both modes, so the oracle checks partial and boundary ranges
+ *    as well as the full scan.
  * 3. Neighbor operations return the closest strict key and its exact payload.
  * 4. A missing lookup returns the fallback object supplied by the caller.
  *
@@ -110,6 +114,27 @@ function expectPair(
   if (key !== undefined) expectValue(actual?.[1], model.get(key))
 }
 
+// Law 2 for one range. The expected keys come from the sorted model keys, not
+// from the tree's search or traversal code.
+function expectRange(
+  tree: BTree<number, Payload>,
+  model: ReferenceModel,
+  sorted: ReadonlyArray<number>,
+  low: number,
+  high: number,
+  includeHigh: boolean,
+): void {
+  const expected = sorted.filter(
+    (key) => key >= low && (includeHigh ? key <= high : key < high),
+  )
+  const seen: Array<number> = []
+  tree.forRange(low, high, includeHigh, (key, value) => {
+    seen.push(key)
+    expectValue(value, model.get(key))
+  })
+  expect(seen, `forRange(${low}, ${high}, ${includeHigh})`).toEqual(expected)
+}
+
 // This is the refinement check. It compares all public observations used by
 // the index code with the independent Map model at the current history cut.
 function expectRefinement(
@@ -141,6 +166,21 @@ function expectRefinement(
     },
   )
   expect(seen).toEqual(sorted)
+  // Bounds on existing keys test the inclusive and exclusive edges. Bounds
+  // around the probe test ranges that start or end between keys, and the
+  // reversed pair tests an empty range.
+  const rangeBounds: Array<[number, number]> = [
+    [probe - 23, probe + 37],
+    [probe, probe],
+    [probe + 5, probe - 5],
+    [sorted[1] ?? probe, sorted.at(-2) ?? probe],
+    [sorted[0] ?? probe, sorted[0] ?? probe],
+  ]
+  for (const [low, high] of rangeBounds) {
+    for (const includeHigh of [true, false]) {
+      expectRange(tree, model, sorted, low, high, includeHigh)
+    }
+  }
   expectPair(
     tree.nextHigherPair(probe),
     sorted.find((key) => key > probe),
@@ -291,8 +331,7 @@ describe(`BTree Map oracle`, () => {
     const staleScan = vi
       .spyOn(tree, `forRange`)
       .mockImplementation((_low, _high, _inclusive, callback) => {
-        callback?.(1, value, 0)
-        return 1
+        callback(1, value)
       })
     try {
       expect(() => expectRefinement(tree, new Map(), 0)).toThrowError(
@@ -302,6 +341,37 @@ describe(`BTree Map oracle`, () => {
       staleScan.mockRestore()
     }
     expectRefinement(tree, new Map(), 0)
+  })
+
+  // Law 2 calibration. Each wrapper keeps the full scan correct, so only the
+  // partial and boundary range checks can reject it.
+  it.each([
+    {
+      design: `ignores includeHigh`,
+      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+        ((low, high, _includeHigh, onFound) =>
+          scan(low, high, true, onFound)) as typeof scan,
+    },
+    {
+      design: `ignores the low bound`,
+      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+        ((_low, high, includeHigh, onFound) =>
+          scan(-Infinity, high, includeHigh, onFound)) as typeof scan,
+    },
+  ])(`rejects a range scan that $design`, ({ wrap }) => {
+    const tree = new BTree<number, Payload>((a, b) => a - b, 4)
+    const model: ReferenceModel = new Map()
+    for (let key = 0; key < 40; key += 2)
+      applyAction(tree, model, { type: `put`, key, v: key })
+    expectRefinement(tree, model, 21)
+    const scan = tree.forRange.bind(tree)
+    const wrongScan = vi.spyOn(tree, `forRange`).mockImplementation(wrap(scan))
+    try {
+      expect(() => expectRefinement(tree, model, 21)).toThrowError(/forRange\(/)
+    } finally {
+      wrongScan.mockRestore()
+    }
+    expectRefinement(tree, model, 21)
   })
 
   it(`shrinks and replays a wrong neighbor payload without losing its pair key`, () => {
