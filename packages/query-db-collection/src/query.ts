@@ -469,17 +469,6 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
   }
 }
 
-function getLoadSubsetOptionsForMeta(
-  opts: LoadSubsetOptions,
-): Omit<LoadSubsetOptions, `subscription` | `refetch`> {
-  const {
-    subscription: _subscription,
-    refetch: _refetch,
-    ...serializableOptions
-  } = opts
-  return serializableOptions
-}
-
 /**
  * Creates query collection options for use with a standard Collection.
  * This integrates TanStack Query with TanStack DB for automatic synchronization.
@@ -1793,10 +1782,19 @@ export function queryCollectionOptions(
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
-      const extendedMeta = {
-        ...meta,
-        loadSubsetOptions: getLoadSubsetOptionsForMeta(opts),
-      }
+      const {
+        subscription: _subscription,
+        refetch: _refetch,
+        ...requestOptions
+      } = opts
+      const extendedMeta = { ...meta }
+      // Query functions need request options, but SSR must not serialize them.
+      Object.defineProperty(extendedMeta, `loadSubsetOptions`, {
+        value: requestOptions,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      })
       const retainedEntry = metadata?.collection.get(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
