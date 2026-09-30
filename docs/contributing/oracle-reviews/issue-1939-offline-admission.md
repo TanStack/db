@@ -81,3 +81,48 @@ loss and regain, with settlement checked after the write. The IndexedDB
 write-settlement owner needs a browser-host composition of that timing with
 the adapter's transaction-completion boundary. The coverage map names both
 owners.
+
+## PR #1966 follow-up: admission and provider checkpoints
+
+- External review: two test-assertion findings supplied for PR #1966.
+- Starting head: `bf742b1b7`.
+- Reviewed executable head after repair: `2579ac0acf70465a3902a8317ff241129b9b550e`.
+- Owner: `packages/offline-transactions/tests/leadership-replay.property.test.ts`.
+
+| ID | Review claim | Verdict and action | Durable value |
+| --- | --- | --- | --- |
+| F0 | The production rejection and rollback path is sound. | Confirmed; already fixed before this review. The original-guard mutant and five admission cases are recorded above. | Keep the public settlement, outbox, provider-call, and optimistic-row checks in the leadership oracle. |
+| F1 | The retained-leader provider-call count can run after storage becomes visible but before `executor.execute()` starts. | Confirmed; fixed in the reviewed executable head. | The oracle now separates the stored-record checkpoint from transaction settlement. |
+| F2 | Comparing the manual `commit()` and `isPersisted.promise` errors by identity overconstrains the contract; check only their class. | Refuted as a test flaw; retain the identity assertion. | `packages/db/tests/transactions.test.ts` explicitly owns the same-instance error law for the underlying transaction. The offline manual path checks that its wrapper preserves it. |
+
+A controlled storage wrapper wrote the retained-leader record, signaled that it
+was visible, and held its `set()` completion. On the starting code, the old
+provider-count assertion failed at its original checkpoint: expected one call,
+observed zero. This was an assertion failure, not a timeout or setup failure.
+After the repair, the same held-write case observed a pending caller, one stored
+record, and zero provider calls. It then released the write, awaited public
+settlement, and observed one provider call and fulfillment. Clearing the
+provider-call recorder after settlement made the moved assertion fail, proving
+that the later check still rejects a missing call. The recorder corruption
+was removed; the controlled hold remains in the oracle.
+
+The `commit()`/`isPersisted.promise` identity law is explicit in
+`packages/db/tests/transactions.test.ts` and in the core transaction's original
+error rethrow. The offline wrapper rethrows the same error. A temporary wrapper
+that threw a fresh `NonRetriableError` with the same message made the manual
+oracle's identity assertion fail at the intended checkpoint. Replacing that
+assertion with the proposed class-only check let the mutant pass. Both temporary
+changes were removed; the core identity test passed on this branch. The review
+correctly spotted a dependence on identity, but that dependence protects an
+established behavior.
+
+The changed executable owner passed its focused held-write case and the full
+offline package suite: 207 tests in 17 files. Package typecheck, changed-file
+Prettier, `git diff --check`, and the commit hook's ESLint task passed. The
+addition retains the admission law and bounded leadership-loss scope. In particular,
+ORC-005 now names the stored-record and settled-call checkpoints separately;
+ORC-006 has the controlled old-order failure and missing-call control;
+ORC-010 releases the held write during cleanup; ORC-012 records the exact
+executable head. The new hold keeps leadership throughout the write. Leadership
+loss or regain across a held write and the IndexedDB browser composition remain
+with the owners in the coverage map; this review does not close those cells.
