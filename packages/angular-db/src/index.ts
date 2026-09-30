@@ -21,6 +21,8 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryObserver,
+  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -50,6 +52,9 @@ export interface InjectLiveQueryResult<TContext extends Context> {
   isLoading: Signal<boolean>
   /** A signal indicating whether the collection is ready */
   isReady: Signal<boolean>
+  persistedStatus: Signal<LiveQueryPersistedStatus>
+  isPersistedReady: Signal<boolean>
+  persistedError: Signal<unknown | undefined>
   /** A signal indicating whether the collection is idle */
   isIdle: Signal<boolean>
   /** A signal indicating whether the collection has an error */
@@ -81,6 +86,9 @@ export interface InjectLiveQueryResultWithCollection<
   status: Signal<CollectionStatus | `disabled`>
   isLoading: Signal<boolean>
   isReady: Signal<boolean>
+  persistedStatus: Signal<LiveQueryPersistedStatus>
+  isPersistedReady: Signal<boolean>
+  persistedError: Signal<unknown | undefined>
   isIdle: Signal<boolean>
   isError: Signal<boolean>
   isCleanedUp: Signal<boolean>
@@ -97,6 +105,9 @@ export interface InjectLiveQueryResultWithSingleResultCollection<
   status: Signal<CollectionStatus | `disabled`>
   isLoading: Signal<boolean>
   isReady: Signal<boolean>
+  persistedStatus: Signal<LiveQueryPersistedStatus>
+  isPersistedReady: Signal<boolean>
+  persistedError: Signal<unknown | undefined>
   isIdle: Signal<boolean>
   isError: Signal<boolean>
   isCleanedUp: Signal<boolean>
@@ -220,6 +231,8 @@ export function injectLiveQuery(opts: any) {
     const value = statusValue()
     return value === `idle` && !collection() ? `disabled` : value
   })
+  const persistedStatus = signal<LiveQueryPersistedStatus>(`unavailable`)
+  const persistedError = signal<unknown>(undefined)
 
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
@@ -234,13 +247,17 @@ export function injectLiveQuery(opts: any) {
 
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>,
+    observer: LiveQueryObserver<any, any>,
   ) => {
     const newState = new Map(currentCollection.entries())
     const newData = Array.from(currentCollection.values())
 
     state.set(newState)
     internalData.set(newData)
-    statusValue.set(currentCollection.status)
+    const snapshot = observer.getSnapshot()
+    statusValue.set(snapshot.status)
+    persistedStatus.set(snapshot.persistedStatus)
+    persistedError.set(snapshot.persistedError)
   }
 
   let unsub: (() => void) | null = null
@@ -255,6 +272,8 @@ export function injectLiveQuery(opts: any) {
     // Handle null collection (disabled query)
     if (!currentCollection) {
       statusValue.set(`disabled` as const)
+      persistedStatus.set(`unavailable`)
+      persistedError.set(undefined)
       state.set(new Map())
       internalData.set([])
       cleanup()
@@ -273,11 +292,11 @@ export function injectLiveQuery(opts: any) {
     })
 
     const unsubscribe = observer.subscribe(() => {
-      syncDataFromCollection(currentCollection)
+      syncDataFromCollection(currentCollection, observer)
     })
     // Wholesale attach suppresses listener calls raised by synchronous sync
     // startup. Read once after subscribe returns to capture that final state.
-    syncDataFromCollection(currentCollection)
+    syncDataFromCollection(currentCollection, observer)
     unsub = () => {
       unsubscribe()
       observer.dispose()
@@ -297,6 +316,9 @@ export function injectLiveQuery(opts: any) {
     status,
     isLoading: computed(() => status() === `loading`),
     isReady: computed(() => status() === `ready` || status() === `disabled`),
+    persistedStatus,
+    isPersistedReady: computed(() => persistedStatus() === `ready`),
+    persistedError,
     isIdle: computed(() => status() === `idle`),
     isError: computed(() => status() === `error`),
     isCleanedUp: computed(() => status() === `cleaned-up`),

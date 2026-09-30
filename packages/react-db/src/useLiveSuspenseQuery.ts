@@ -201,7 +201,7 @@ export function useLiveSuspenseQuery(
   const collectionStatus = result.collection.status
 
   // Track when we reach ready state
-  if (result.isReady) {
+  if (result.isReady || queryInfo.observer.isInitialRenderReady()) {
     hasBeenReadyRef.current = true
     promiseRef.current = null
   }
@@ -214,14 +214,25 @@ export function useLiveSuspenseQuery(
 
   // Only throw errors during initial load (before first ready)
   // After success, errors surface as stale data (matches TanStack Query behavior)
-  if (collectionStatus === `error` && !hasBeenReadyRef.current) {
+  if (
+    collectionStatus === `error` &&
+    !hasBeenReadyRef.current &&
+    (result.persistedStatus === `unavailable` ||
+      result.persistedStatus === `error`)
+  ) {
     promiseRef.current = null
     // TODO: Once collections hold a reference to their last error object (#671),
     // we should rethrow that actual error instead of creating a generic message
     throw new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
-  if (!hasBeenReadyRef.current && (result.isLoading || result.isIdle)) {
+  if (
+    !hasBeenReadyRef.current &&
+    (result.isLoading ||
+      result.isIdle ||
+      (collectionStatus === `error` &&
+        result.persistedStatus !== `unavailable`))
+  ) {
     if (queryInfo.client?._isSsrStreamingEnabled() && !queryInfo.queryHash) {
       const reason = queryInfo.identityError
         ? `${queryInfo.identityError.reason} at ${queryInfo.identityError.path}`
@@ -232,7 +243,7 @@ export function useLiveSuspenseQuery(
     }
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
-      promiseRef.current = queryInfo.observer.preload()
+      promiseRef.current = queryInfo.observer.preloadForInitialRender()
     }
     // React Suspense catches this promise and retries after preload settles.
     throw promiseRef.current

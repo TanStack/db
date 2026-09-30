@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, test, vi } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { compareKeys } from '@tanstack/db-ivm'
 import { createCollection } from '../src/collection/index.js'
+import { CollectionInErrorStateError } from '../src/errors.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
@@ -9,6 +10,7 @@ import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 import { makeComparator } from '../src/utils/comparison.js'
 import { indexedKeysSet, orderedEntriesArray, valueMapData } from './utils'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
+import type { CompareOptions } from '../src/query/builder/types.js'
 
 /**
  * An index is a derived multimap from indexed value to source keys.
@@ -28,7 +30,7 @@ type IndexConstructor = new (
   name?: string,
   options?: {
     compareFn?: (left: unknown, right: unknown) => number
-    compareOptions?: typeof DEFAULT_COMPARE_OPTIONS
+    compareOptions?: CompareOptions
   },
 ) => BaseIndex<string>
 
@@ -317,6 +319,296 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
     expect(index.rangeQuery({ to: 1 })).toEqual(new Set([`one`]))
   })
 })
+
+/**
+ * A custom index comparator must return a number that is not NaN.
+ *
+ * A broken comparator is a programming error, so the index crashes: the
+ * operation that receives an invalid result must throw. It must never report
+ * success from an operation that consumed an invalid result, and it must never
+ * reject an operation whose comparisons were all valid. A rejected add or
+ * remove throws before it changes the index, so the index still refines the
+ * accepted rows. Update and build are not atomic; the Collection boundary
+ * below crashes the whole collection instead.
+ *
+ * Model: a recording comparator counts invalid results during one operation.
+ * The operation throws exactly when that count is nonzero. The model does not
+ * use the production check.
+ *
+ * Grammar: index type x comparator x accepted numeric prefix x one probe
+ * operation. The probe inserts or reads the non-numeric value `ann`. An
+ * empty prefix is included: its first write compares nothing, so it must
+ * succeed, and the next comparing operation must throw. Comparator
+ * transitivity is outside this owner.
+ */
+describe.each(indexTypes)(
+  `%s invalid comparator results`,
+  (_name, IndexType) => {
+    const comparators: Array<{
+      name: string
+      compare: (left: any, right: any) => unknown
+      // Whether the comparator orders numbers, so the numeric model can
+      // observe the index after a rejected write.
+      ordersNumbers: boolean
+    }> = [
+      {
+        name: `subtraction`,
+        compare: (left, right) => left - right,
+        ordersNumbers: true,
+      },
+      {
+        name: `boolean`,
+        compare: (left, right) => left > right,
+        ordersNumbers: false,
+      },
+      {
+        name: `signed infinity`,
+        compare: (left, right) =>
+          left === right ? 0 : left < right ? -Infinity : Infinity,
+        ordersNumbers: true,
+      },
+    ]
+    const probes: Array<{
+      name: string
+      run: (index: BaseIndex<string>, size: number) => unknown
+      atomic?: true
+    }> = [
+      {
+        name: `add`,
+        run: (index) => index.add(`ann`, { value: `ann` }),
+        atomic: true,
+      },
+      {
+        name: `update`,
+        run: (index) => index.update(`0`, { value: 0 }, { value: `ann` }),
+      },
+      { name: `gt`, run: (index) => index.lookup(`gt`, `ann`) },
+      { name: `lte`, run: (index) => index.lookup(`lte`, `ann`) },
+      { name: `take`, run: (index) => index.take(3, `ann`) },
+      { name: `takeReversed`, run: (index) => index.takeReversed(3, `ann`) },
+      {
+        name: `build`,
+        run: (index, size) =>
+          index.build([
+            ...Array.from({ length: size }, (_, value): [string, object] => [
+              String(value),
+              { value },
+            ]),
+            [`ann`, { value: `ann` }],
+          ]),
+      },
+    ]
+
+    function createRecordedIndex(compare: (left: any, right: any) => unknown) {
+      const recorder = { invalidResults: 0 }
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareFn: (left, right) => {
+          const result = compare(left, right)
+          if (typeof result !== `number` || Number.isNaN(result))
+            recorder.invalidResults++
+          return result as number
+        },
+      })
+      // Refinement check for one operation. Returns whether the index crashed.
+      const step = (run: () => unknown): boolean => {
+        recorder.invalidResults = 0
+        let error: unknown
+        try {
+          run()
+        } catch (caught) {
+          error = caught
+        }
+        if (recorder.invalidResults === 0) {
+          expect(error).toBeUndefined()
+          return false
+        }
+        expect(error).toBeInstanceOf(TypeError)
+        expect((error as Error).message).toMatch(/comparator/)
+        return true
+      }
+      return { index, step }
+    }
+
+    describe.each(comparators)(
+      `$name comparator`,
+      ({ compare, ordersNumbers }) => {
+        describe.each(probes)(`$name`, ({ run, atomic }) => {
+          test.each([0, 1, 4, 5, 32, 33, 65])(
+            `throws exactly when it receives an invalid result after %s rows`,
+            (size) => {
+              const { index, step } = createRecordedIndex(compare)
+              const rows = new Map<string, IndexValue>()
+              for (let value = 0; value < size; value++) {
+                if (step(() => index.add(String(value), { value }))) return
+                rows.set(String(value), value)
+              }
+              if (step(() => run(index, size)) && atomic && ordersNumbers)
+                expectIndexMatchesModel(index, rows)
+            },
+          )
+        })
+      },
+    )
+
+    test(`crashes at the second write of the reported string rows`, () => {
+      const { index, step } = createRecordedIndex((left, right) => left - right)
+      expect(step(() => index.add(`1`, { value: `ann` }))).toBe(false)
+      expect(step(() => index.add(`2`, { value: `bob` }))).toBe(true)
+    })
+
+    test(`checks a custom collation compare from compareOptions`, () => {
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareOptions: {
+          ...DEFAULT_COMPARE_OPTIONS,
+          stringSort: `custom`,
+          compare: () => NaN,
+        },
+      })
+      index.add(`ann`, { value: `ann` })
+      expect(() => index.add(`bob`, { value: `bob` })).toThrow(TypeError)
+      expect(index.keyCount).toBe(1)
+    })
+
+    test(`a rejected remove leaves its row indexed`, () => {
+      const { index, step } = createRecordedIndex((left, right) => left - right)
+      expect(step(() => index.add(`x`, { value: `x` }))).toBe(false)
+      expect(step(() => index.remove(`x`, { value: `x` }))).toBe(true)
+      expect(index.keyCount).toBe(1)
+      expect(index.lookup(`eq`, `x`)).toEqual(new Set([`x`]))
+    })
+
+    // `A` and `a` share one comparator position. Removing the representative
+    // `A` promotes `a`, whose comparison with `z` is the only invalid pair.
+    test(`a rejected representative replacement leaves the index unchanged`, () => {
+      const { index, step } = createRecordedIndex((left, right) => {
+        if ([left, right].includes(`a`) && [left, right].includes(`z`))
+          return NaN
+        const l = String(left).toLowerCase()
+        const r = String(right).toLowerCase()
+        return l === r ? 0 : l < r ? -1 : 1
+      })
+      expect(step(() => index.add(`upper`, { value: `A` }))).toBe(false)
+      expect(step(() => index.add(`lower`, { value: `a` }))).toBe(false)
+      expect(step(() => index.add(`zed`, { value: `z` }))).toBe(false)
+      // Equality lookups and key count read the index without comparing.
+      if (step(() => index.remove(`upper`, { value: `A` }))) {
+        expect(index.keyCount).toBe(3)
+        expect(index.lookup(`eq`, `A`)).toEqual(new Set([`upper`]))
+        expect(index.lookup(`eq`, `a`)).toEqual(new Set([`lower`]))
+        expect(index.lookup(`eq`, `z`)).toEqual(new Set([`zed`]))
+      }
+    })
+
+    test(`keeps NaN keys after other values with the default comparator`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      index.add(`nan`, { value: NaN })
+      index.add(`one`, { value: 1 })
+      expect(index.lookup(`eq`, NaN)).toEqual(new Set([`nan`]))
+      expect(index.keyCount).toBe(2)
+      expect(index.takeFromStart(3)).toEqual([`one`, `nan`])
+    })
+  },
+)
+
+/**
+ * Collection boundary for the invalid-comparator law.
+ *
+ * The Collection writes its rows before it updates indexes and publishes
+ * change events. An index throw in between would leave rows that subscribers
+ * were never told about while the collection stays usable. That is partial
+ * success, which `AGENTS.md` forbids. The collection crashes instead: after
+ * the throwing write, its status is `error` and the next mutation throws
+ * `CollectionInErrorStateError`.
+ *
+ * Model: until a write throws, the subscriber's accumulated keys equal the
+ * collection's keys and the collection is ready.
+ *
+ * Grammar: index type x write path (optimistic insert, sync commit). Rows use
+ * string names with a subtracting comparator. The first row compares nothing;
+ * the second is the first invalid comparison.
+ */
+describe.each([
+  [`BasicIndex`, BasicIndex],
+  [`BTreeIndex`, BTreeIndex],
+] as const)(
+  `%s invalid comparator at the Collection boundary`,
+  (_name, IndexType) => {
+    type Row = { id: number; name: string }
+    const writePaths: Array<{
+      name: string
+      write: (
+        collection: ReturnType<typeof createNamedCollection>[`collection`],
+        sync: () => SyncApi,
+        row: Row,
+      ) => void
+    }> = [
+      {
+        name: `optimistic insert`,
+        write: (collection, _sync, row) => collection.insert(row),
+      },
+      {
+        name: `sync commit`,
+        write: (_collection, sync, row) => {
+          const api = sync()
+          api.begin()
+          api.write({ type: `insert`, value: row })
+          api.commit()
+        },
+      },
+    ]
+    type SyncApi = {
+      begin: () => void
+      write: (message: { type: `insert`; value: Row }) => void
+      commit: () => void
+    }
+
+    function createNamedCollection() {
+      let syncApi: SyncApi | undefined
+      const collection = createCollection<Row, number>({
+        id: `invalid-comparator-boundary-${IndexType.name}`,
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: (api) => {
+            syncApi = api as unknown as SyncApi
+            api.markReady()
+          },
+        },
+        onInsert: async () => {},
+      })
+      collection.createIndex((row) => row.name, {
+        indexType: IndexType,
+        options: { compareFn: (left: any, right: any) => left - right },
+      })
+      return { collection, sync: () => syncApi! }
+    }
+
+    test.each(writePaths)(
+      `$name crashes the collection instead of publishing partial success`,
+      ({ write }) => {
+        const { collection, sync } = createNamedCollection()
+        const published = new Set<number>()
+        collection.subscribeChanges((changes) => {
+          for (const change of changes)
+            if (change.type === `delete`) published.delete(change.key)
+            else published.add(change.key)
+        })
+
+        write(collection, sync, { id: 1, name: `ann` })
+        expect(collection.status).toBe(`ready`)
+        expect(published).toEqual(new Set(collection.keys()))
+
+        expect(() => write(collection, sync, { id: 2, name: `bob` })).toThrow(
+          TypeError,
+        )
+        expect(collection.status).toBe(`error`)
+        expect(() => collection.insert({ id: 3, name: `cy` })).toThrow(
+          CollectionInErrorStateError,
+        )
+      },
+    )
+  },
+)
 
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test(`rejects stale retired identity outputs without rejecting live reuse`, () => {

@@ -20,7 +20,7 @@ import { deepEquals } from '../src/utils'
 const arbitraryPrimitive = fc.oneof(
   fc.string(),
   fc.integer(),
-  fc.double({ noNaN: true }), // NaN !== NaN, which would break reflexivity
+  fc.double(),
   fc.boolean(),
   fc.constant(null),
   fc.constant(undefined),
@@ -69,7 +69,7 @@ const arbitraryTemporalDuration = fc
 const arbitrarySameTypePrimitive = fc.oneof(
   fc.tuple(fc.string(), fc.string()),
   fc.tuple(fc.integer(), fc.integer()),
-  fc.tuple(fc.double({ noNaN: true }), fc.double({ noNaN: true })),
+  fc.tuple(fc.double(), fc.double()),
   fc.tuple(fc.boolean(), fc.boolean()),
 )
 
@@ -542,6 +542,12 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`structural equality`, () => {
+    it(`treats copied NaN values and invalid Dates as equal`, () => {
+      expect(deepEquals({ rank: NaN }, { rank: NaN })).toBe(true)
+      expect(deepEquals(new Date(NaN), new Date(NaN))).toBe(true)
+      expect(deepEquals({ rank: NaN }, { rank: 10 })).toBe(false)
+    })
+
     fcTest.prop([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
       `arrays with same elements are equal`,
       (arr) => {
