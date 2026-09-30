@@ -6,7 +6,7 @@ Prior review: [Oracle guide portfolio follow-up](2026-09-30-guide-portfolio-foll
 
 This append-only record resolves the prior offline settlement authority conflict.
 The maintainer chose outbox deletion as the success boundary. The
-[README](../../../packages/offline-transactions/README.md) promises that the
+[README](https://github.com/TanStack/db/blob/9b6b8316fcad08be37c8ddca51dd66096b3a80b1/packages/offline-transactions/README.md) promises that the
 configured `mutationFn` returns and the storage adapter acknowledges deletion
 before `commit()`, `isPersisted.promise`, or the per-ID waiter fulfills. A
 provider effect is confirmed only to the extent that `mutationFn` waits for it.

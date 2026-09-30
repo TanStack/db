@@ -100,7 +100,7 @@ passing type assertions do not prove runtime parsing, I/O, or publication.
 
 The shared-driver fairness owner now distinguishes K=1 from K=2 at the second
 hydrate and checks full logical persist FIFO order in its Node seam. The
-[Chromium OPFS receiving spec](../../packages/browser-db-sqlite-persistence/e2e/shared-driver-fairness.opfs.spec.ts)
+[Chromium OPFS receiving spec](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/shared-driver-fairness.opfs.spec.ts)
 checks a cold SQL read, the K=1 hydrate bound, public rows, the pending persist
 backlog at the second hydrate, and all five logical persist completion IDs in
 FIFO order during one held-BEGIN storm through the real worker. This closes the
