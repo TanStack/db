@@ -80,32 +80,38 @@ export function createIndexUsageTracker(collection: any): {
     queriesExecuted: [],
   }
 
-  // Track index method calls by patching all existing indexes
+  // Track index method calls. Indexes are patched when first read through the
+  // collection, so indexes created after tracking starts (such as auto-indexes
+  // added by a live query) are tracked too.
   const originalMethods = new Map()
-
-  for (const [indexId, index] of collection.indexes) {
+  // A range lookup delegates to rangeQuery; record it once, as the lookup.
+  let lookupDepth = 0
+  const patchIndex = (indexId: unknown, index: any) => {
+    if (originalMethods.has(indexId)) return
     // Track lookup calls (new unified method)
     const originalLookup = index.lookup.bind(index)
     index.lookup = function (operation: any, value: any) {
-      // Only track non-range operations to avoid double counting
-      // Range operations (gt, gte, lt, lte) are handled by rangeQuery tracking
-      if (![`gt`, `gte`, `lt`, `lte`].includes(operation)) {
-        stats.rangeQueryCalls++
-        stats.indexesUsed.push(String(indexId))
-        stats.queriesExecuted.push({
-          type: `index`,
-          operation,
-          field: index.expression?.path?.join(`.`),
-          value,
-        })
+      stats.rangeQueryCalls++
+      stats.indexesUsed.push(String(indexId))
+      stats.queriesExecuted.push({
+        type: `index`,
+        operation,
+        field: index.expression?.path?.join(`.`),
+        value,
+      })
+      lookupDepth++
+      try {
+        return originalLookup(operation, value)
+      } finally {
+        lookupDepth--
       }
-      return originalLookup(operation, value)
     }
 
     // Track rangeQuery calls (for compound range queries)
-    if (index.rangeQuery) {
-      const originalRangeQuery = index.rangeQuery.bind(index)
+    const originalRangeQuery = index.rangeQuery?.bind(index)
+    if (originalRangeQuery) {
       index.rangeQuery = function (options: any) {
+        if (lookupDepth > 0) return originalRangeQuery(options)
         stats.rangeQueryCalls++
         stats.indexesUsed.push(String(indexId))
 
@@ -129,10 +135,26 @@ export function createIndexUsageTracker(collection: any): {
     }
 
     originalMethods.set(indexId, {
+      index,
       lookup: originalLookup,
-      rangeQuery: index.rangeQuery ? index.rangeQuery.bind(index) : undefined,
+      rangeQuery: originalRangeQuery,
     })
   }
+  const originalIndexesGetter = Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(collection),
+    `indexes`,
+  )?.get
+  const readIndexes = (): Map<unknown, any> =>
+    originalIndexesGetter?.call(collection) ?? new Map()
+  for (const [indexId, index] of readIndexes()) patchIndex(indexId, index)
+  Object.defineProperty(collection, `indexes`, {
+    get: () => {
+      const indexes = readIndexes()
+      for (const [indexId, index] of indexes) patchIndex(indexId, index)
+      return indexes
+    },
+    configurable: true,
+  })
 
   // Track full scan calls: filtered iteration through either the public
   // entries() or the stored-row scan used by a prefiltered snapshot.
@@ -163,15 +185,11 @@ export function createIndexUsageTracker(collection: any): {
   }
 
   const restore = () => {
-    // Restore original index methods
-    for (const [indexId, index] of collection.indexes) {
-      const original = originalMethods.get(indexId)
-      if (original) {
-        index.lookup = original.lookup
-        if (original.rangeQuery) {
-          index.rangeQuery = original.rangeQuery
-        }
-      }
+    // Remove the instance getter so the prototype getter applies again
+    delete collection.indexes
+    for (const { index, lookup, rangeQuery } of originalMethods.values()) {
+      index.lookup = lookup
+      if (rangeQuery) index.rangeQuery = rangeQuery
     }
     collection.entries = originalEntries
     state.entriesPassing = originalEntriesPassing
