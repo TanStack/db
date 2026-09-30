@@ -150,11 +150,16 @@ it.each([
 ] as const)(
   `never fulfills an unadmitted action when it $history`,
   async ({ loss, providerCalls }) => {
-    const admitted = gate()
+    const stored = gate()
+    const releaseWrite = gate()
     class Storage extends FakeStorageAdapter {
       override async set(key: string, value: string) {
         await super.set(key, value)
-        if (key.startsWith(`tx:`)) admitted.resolve()
+        if (key.startsWith(`tx:`)) {
+          stored.resolve()
+          // Keep the stored record visible before admission starts provider work.
+          if (loss === `never`) await releaseWrite.promise
+        }
       }
     }
     const env = createTestOfflineEnvironment({ storage: new Storage() })
@@ -198,15 +203,13 @@ it.each([
       )
       observed = settled
 
-      // Both exits from this admission attempt are observable: public
-      // settlement or a completed durable write. A silent pending action with
-      // no outbox record times out here.
+      // Public settlement or a stored record lets us inspect this attempt.
+      // The provider call may follow the stored record.
       await atOracleCheckpoint(
-        Promise.race([settled, admitted.promise]),
-        `action settled or durably admitted`,
+        Promise.race([settled, stored.promise]),
+        `action settled or stored`,
       )
       const durable = await env.executor.peekOutbox()
-      expect(env.mutationCalls).toHaveLength(providerCalls)
       // Fulfillment without either effect violates the admission law.
       expect([
         outcome.status,
@@ -220,14 +223,22 @@ it.each([
         expect(durable).toEqual([])
         expect(env.collection.get(row.id)).toBeUndefined()
       } else {
+        if (loss === `never`) {
+          expect(outcome.status).toBe(`pending`)
+          expect(durable).toHaveLength(1)
+          expect(env.mutationCalls).toHaveLength(0)
+          releaseWrite.resolve()
+        }
         await atOracleCheckpoint(observed, `admitted action settled`)
         expect(outcome.status).toBe(`fulfilled`)
         expect(env.collection.get(row.id)).toMatchObject(row)
       }
+      expect(env.mutationCalls).toHaveLength(providerCalls)
     } catch (error) {
       hasPrimaryFailure = true
       throw error
     } finally {
+      releaseWrite.resolve()
       if (outcome.status === `pending` && transactionId) {
         env.executor.rejectTransaction(
           transactionId,
