@@ -182,6 +182,11 @@ window. Older application versions that do not understand the phase can also
 replay a marked row. Native browser restart and multi-owner handoff of the
 marked phase remain receiving witnesses for this owner.
 
+The same owner also needs a captured failing seed-and-shrink-path replay for
+its generated settlement property. The
+[deletion-settlement review record](oracle-reviews/2026-09-30-offline-deletion-settlement.md)
+preserves the exact executable revision, RED/GREEN witnesses, and limits.
+
 ### Recent fix-wave authority inventory
 
 This inventory records the permanent authority for the September 17 fix wave. It
