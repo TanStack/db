@@ -548,7 +548,7 @@ async function observeHistory(
   history: History,
   indexed: boolean,
 ): Promise<{ observations: Array<Observation>; model: Array<Observation> }> {
-  const seeds =
+  const seeds: Array<SeedRow & { id: string }> =
     history.kind === `snapshot`
       ? history.rows.map((seed, index) => ({ ...seed, id: `r${index}` }))
       : history.rows.map((v, index) => ({
