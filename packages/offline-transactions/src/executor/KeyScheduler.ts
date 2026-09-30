@@ -85,16 +85,7 @@ export class KeyScheduler {
   }
 
   updateTransaction(transaction: OfflineTransaction): void {
-    const index = this.pendingTransactions.findIndex(
-      (tx) => tx.id === transaction.id,
-    )
-    if (index >= 0) {
-      this.pendingTransactions[index] = transaction
-      // Re-sort to maintain FIFO order after update
-      this.pendingTransactions.sort(
-        (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-      )
-    }
+    this.updateTransactions([transaction])
   }
 
   getPendingCount(): number {

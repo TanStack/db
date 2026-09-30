@@ -69,20 +69,29 @@ it(`retains replay records with membership work proportional to the snapshot`, a
       registerRestorationTransaction: () => {},
     },
   )
+  const isRetainedIdArray = (values: Array<unknown>) =>
+    values.length === n / 2 && values[0] === `tx-0`
   const nativeIncludes = Array.prototype.includes
   const includes = vi
     .spyOn(Array.prototype, `includes`)
     .mockImplementation(function (this: Array<unknown>, value, fromIndex) {
-      // A copied array of filtered IDs plus repeated includes() must count as
-      // repeated membership work even though string equality is not observable.
-      if (this.length === n / 2 && this[0] === `tx-0`) {
-        arrayScanWork += this.length
-      }
+      // Repeated scans of copied IDs are work even when equality reads no getter.
+      if (isRetainedIdArray(this)) arrayScanWork += this.length
       return nativeIncludes.call(this, value, fromIndex)
     })
+  const nativeSome = Array.prototype.some
+  const some = vi.spyOn(Array.prototype, `some`).mockImplementation(function (
+    this: Array<unknown>,
+    predicate,
+    thisArg,
+  ) {
+    if (isRetainedIdArray(this)) arrayScanWork += this.length
+    return nativeSome.call(this, predicate, thisArg)
+  })
   try {
     await executor.loadPendingTransactions()
   } finally {
+    some.mockRestore()
     includes.mockRestore()
   }
   const ids = (await outbox.getAll()).map(({ id }) => id)
