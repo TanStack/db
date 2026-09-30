@@ -3,7 +3,7 @@
 - Raw source: [PR #1302](https://github.com/TanStack/db/pull/1302), head `de5f28d6fe9ee6f89dcf81a9d39fab90d51c4e99`. Its body contains eight proposed changes and detailed claims; GitHub returned no human issue or inline comments. The changeset bot comment is recorded below.
 - Baseline reviewed: `ae2eb3fbf3a314a7f043f0d963fd336d8c1f1ec8` (`origin/main` on 2026-09-29).
 - Repaired executable tree: `7a67d6a2` on `codex/pr-1302-vue-publication`.
-- Executable owner: [`useLiveQuery-publication-oracle.test.ts`](../../../packages/vue-db/tests/useLiveQuery-publication-oracle.test.ts). The shared conformance suite checks after Vue settles; this owner checks synchronous watcher observations during one source transaction.
+- Executable owner: [`useLiveQuery-publication-oracle.test.ts`](https://github.com/TanStack/db/blob/main/packages/vue-db/tests/useLiveQuery-publication-oracle.test.ts). The shared conformance suite checks after Vue settles; this owner checks synchronous watcher observations during one source transaction.
 
 ## Contract, evidence, and decision
 
