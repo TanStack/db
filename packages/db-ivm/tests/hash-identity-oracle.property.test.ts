@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
@@ -47,7 +48,8 @@ import {
  * `8283f2e8`, which this file pins before the hash dispatch refactor.
  *
  * Limits:
- * - Arrays from another realm (`node:vm`) are outside the grammar.
+ * - Arrays from another realm (`node:vm`) are outside the grammar. One pinned
+ *   case keeps equality's length check for them.
  * - Work and depth caps belong to `hash-work.test.ts`.
  * - Map and Set order sensitivity and ignored Map/Set properties are current
  *   behavior. No contract promises them.
@@ -74,7 +76,7 @@ type Spec =
   | { k: `array`; items: Array<Spec | null>; p?: Spec }
   | { k: `twice`; child: Spec }
   | { k: `map`; entries: Array<[string, Spec]> }
-  | { k: `set`; items: Array<string | number> }
+  | { k: `set`; items: Array<Spec> }
   | { k: `obj`; entries: Array<[string, Spec]>; syms: Array<[number, Spec]> }
   | { k: `back`; up: number }
 
@@ -160,7 +162,7 @@ function canon(spec: Spec, path: Array<Spec>): unknown {
     case `map`:
       return [`map`, spec.entries.map(([key, value]) => [key, inner(value)])]
     case `set`:
-      return [`set`, spec.items.map((item) => [typeof item, item])]
+      return [`set`, spec.items.map(inner)]
     case `obj`:
       return [
         `obj`,
@@ -233,9 +235,8 @@ const specArb = fc.letrec<{ spec: Spec }>((tie) => ({
     }),
     fc.record({
       k: fc.constant(`set` as const),
-      items: fc.uniqueArray(fc.constantFrom<string | number>(`a`, `b`, 1, 2), {
-        maxLength: 3,
-      }),
+      // Unique identities, so a Set never merges two generated values.
+      items: fc.uniqueArray(tie(`spec`), { maxLength: 3, selector: identity }),
     }),
     fc.record({
       k: fc.constant(`obj` as const),
@@ -267,6 +268,13 @@ function nodes(
           items: spec.items.map((old, i) => (i === index ? next : old)),
         }))
     })
+  else if (spec.k === `set`)
+    spec.items.forEach((item, index) =>
+      child(item, (next) => ({
+        ...spec,
+        items: spec.items.map((old, i) => (i === index ? next : old)),
+      })),
+    )
   else if (spec.k === `twice`)
     child(spec.child, (next) => ({ ...spec, child: next }))
   else if (spec.k === `map` || spec.k === `obj`)
@@ -356,31 +364,33 @@ function nearMiss(spec: Spec, choice: number): [Mutation, Spec] {
               ]
     case `twice`:
       return [`replace`, { k: `array`, items: [spec.child] }]
-    case `map`:
-      return choice % 2 && spec.entries.length > 1
+    case `map`: {
+      const pairs = spec.entries.map(
+        ([key, value]): Spec => ({
+          k: `array`,
+          items: [{ k: `str`, v: key }, value],
+        }),
+      )
+      return choice % 4 === 0 && spec.entries.length > 1
         ? [`order`, { ...spec, entries: [...spec.entries].reverse() }]
-        : [
-            `retype`,
-            {
-              k: `array`,
-              items: spec.entries.map(([key, value]) => ({
-                k: `array`,
-                items: [{ k: `str`, v: key }, value],
-              })),
-            },
-          ]
+        : choice % 4 === 1 && spec.entries.length > 0
+          ? [
+              `property`,
+              {
+                ...spec,
+                entries: spec.entries.map(([key, value], i) =>
+                  i === 0 ? ([`z`, value] as [string, Spec]) : [key, value],
+                ),
+              },
+            ]
+          : choice % 4 === 2
+            ? [`retype`, { k: `array`, items: pairs }]
+            : [`retype`, { k: `set`, items: pairs }]
+    }
     case `set`:
       return choice % 2 && spec.items.length > 1
         ? [`order`, { ...spec, items: [...spec.items].reverse() }]
-        : [
-            `retype`,
-            {
-              k: `array`,
-              items: spec.items.map((item) =>
-                typeof item === `string` ? { k: `str`, v: item } : num(item),
-              ),
-            },
-          ]
+        : [`retype`, { k: `array`, items: spec.items }]
     case `obj`:
       return choice % 3 === 0 && spec.entries.length > 0
         ? [
@@ -494,9 +504,11 @@ function realize(spec: Spec, seed: number): unknown {
         })
       }
       case `set`: {
-        const value = new Set(node.items)
-        if (coin()) Object.assign(value, { extra: 1 })
-        return value
+        const value = new Set<unknown>()
+        return container(value, () => {
+          for (const item of node.items) value.add(build(item))
+          if (coin()) Object.assign(value, { extra: 1 })
+        })
       }
       case `obj`: {
         const value: Record<PropertyKey, unknown> = coin()
@@ -753,8 +765,21 @@ describe(`hash identity oracle`, () => {
     ],
     [
       `a Set differs from an array of its values`,
-      { k: `set`, items: [1, 2] },
+      { k: `set`, items: [num(1), num(2)] },
       { k: `array`, items: [num(1), num(2)] },
+    ],
+    [
+      `a Set differs from a Map with the same entry pairs`,
+      {
+        k: `set`,
+        items: [{ k: `array`, items: [{ k: `str`, v: `a` }, num(1)] }],
+      },
+      { k: `map`, entries: [[`a`, num(1)]] },
+    ],
+    [
+      `a Map key counts`,
+      { k: `map`, entries: [[`a`, num(1)]] },
+      { k: `map`, entries: [[`b`, num(1)]] },
     ],
     [
       `binary values differ from arrays of their bytes`,
@@ -796,6 +821,37 @@ describe(`hash identity oracle`, () => {
       [3, 4],
     ] as Array<[number, number]>)
       expectPair({ left, right, mutation: `replace` }, seeds)
+  })
+
+  // Real Temporal types print distinct formats, so only a polyfill-shaped
+  // value can share text across types. The contract still names the tag.
+  it(`Temporal-shaped values with the same text and different types differ`, () => {
+    const temporalLike = (tag: string) =>
+      new (class {
+        get [Symbol.toStringTag]() {
+          return tag
+        }
+        toString() {
+          return `2024-01`
+        }
+      })()
+    const date = temporalLike(`Temporal.PlainDate`)
+    const month = temporalLike(`Temporal.PlainYearMonth`)
+    expect(equalHashValues(date, temporalLike(`Temporal.PlainDate`))).toBe(true)
+    expect(hash(date)).toBe(hash(temporalLike(`Temporal.PlainDate`)))
+    expect(equalHashValues(date, month)).toBe(false)
+    expect(hash(date)).not.toBe(hash(month))
+  })
+
+  // Current behavior outside the grammar: an array from another realm takes
+  // the object marker, but equality still compares array lengths.
+  it(`keeps the equality length check for arrays from another realm`, () => {
+    const withHole = runInNewContext(`const a = [1]; a.length = 2; a`)
+    const short = runInNewContext(`[1]`)
+    expect(equalHashValues(withHole, short)).toBe(false)
+    expect(
+      equalHashValues(runInNewContext(`[1, 2]`), runInNewContext(`[1, 2]`)),
+    ).toBe(true)
   })
 
   it(`treats shared and copied subtrees, prototypes, and hidden properties as equal`, () => {
