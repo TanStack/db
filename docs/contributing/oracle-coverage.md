@@ -519,10 +519,13 @@ joined-source deadline composition, and a query-only error that must not be
 mistaken for network failure. It checks a
 separate initial-render wait that leaves network `preload()` unchanged. The
 framework conformance suite checks the projected signals in React, Vue,
-Svelte, Solid, and Angular; the window-controller test checks infinite-query
+Svelte, Solid, and Angular, including exact identity for a plain-object restore
+error after notification. The window-controller test checks infinite-query
 projection, and focused React and Solid tests check Suspense gating.
 This owner uses a controlled persistence adapter, not native SQLite or a real
 network provider; it does not prove browser scheduling or arbitrary histories.
+The framework identity scenario does not cover every possible rejection value
+or an error already present before a hook mounts.
 
 ## Deferred contracts and evidence
 

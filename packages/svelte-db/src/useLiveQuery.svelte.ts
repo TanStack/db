@@ -458,7 +458,7 @@ export function useLiveQuery(
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
   let persistedStatus = $state(initialSnapshot.persistedStatus)
-  let persistedError = $state<unknown>(initialSnapshot.persistedError)
+  let persistedError = $state.raw<unknown>(initialSnapshot.persistedError)
 
   const syncFromObserver = (
     observer: LiveQueryObserver<any, any>,

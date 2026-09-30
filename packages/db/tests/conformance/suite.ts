@@ -95,8 +95,16 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     mountDisabled: () => track(rawDriver.mountDisabled()),
   }
 
-  const installPersistedReadiness = (source: DeferredSourceHandle) => {
-    let snapshot = { status: `loading` as `loading` | `ready` }
+  const installPersistedReadiness = (
+    source: DeferredSourceHandle,
+    settledSnapshot:
+      | { status: `ready` }
+      | { status: `error`; error: unknown } = { status: `ready` },
+  ) => {
+    let snapshot:
+      | { status: `loading` }
+      | { status: `ready` }
+      | { status: `error`; error: unknown } = { status: `loading` }
     const listeners = new Set<() => void>()
     Object.defineProperty(
       source.collection.config,
@@ -114,7 +122,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       },
     )
     return () => {
-      snapshot = { status: `ready` }
+      snapshot = settledSnapshot
       for (const listener of listeners) listener()
     }
   }
@@ -212,6 +220,26 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           persistedStatus: `unavailable`,
           isPersistedReady: false,
         })
+      },
+    )
+    scenario(
+      `persisted-error-identity`,
+      `a persisted restore failure keeps its original object identity`,
+      async () => {
+        const source = driver.makeDeferredSource<Row>()
+        const failure = { code: `restore-failed`, detail: { retryable: false } }
+        const failRestore = installPersistedReadiness(source, {
+          status: `error`,
+          error: failure,
+        })
+        const h = driver.mount((q) => q.from({ items: source.collection }))
+        await h.flush()
+        expect(h.current().persistedStatus).toBe(`loading`)
+
+        await h.apply(failRestore)
+        expect(h.current().persistedStatus).toBe(`error`)
+        expect(h.current().persistedError).toBe(failure)
+        expect(h.current().isPersistedReady).toBe(false)
       },
     )
     // ---- spine: query + liveness ----------------------------------------
@@ -913,7 +941,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(27)
+      expect(registry.size).toBe(28)
     })
   })
 }

@@ -4,6 +4,7 @@ import {
   onUnmounted,
   reactive,
   ref,
+  shallowRef,
   toValue,
   watchEffect,
 } from 'vue'
@@ -382,7 +383,7 @@ export function useLiveQuery(
     collection.value ? collection.value.status : (`disabled` as const),
   )
   const persistedStatus = ref<LiveQueryPersistedStatus>(`unavailable`)
-  const persistedError = ref<unknown>(undefined)
+  const persistedError = shallowRef<unknown>(undefined)
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.

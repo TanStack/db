@@ -133,6 +133,13 @@ come from a source is still an error, not a network fallback. Ordinary
 `useLiveQuery` row updates and Collection `status`, `isReady`, and `preload()` are unchanged;
 `status` is a Collection lifecycle signal, not a pure network-health signal.
 
+Persisted readiness does not prove current authorization. A source error can
+permit restored rows to render even when that error reports an authorization
+failure. Applications with user- or tenant-specific data must isolate persisted
+storage by identity and clear or replace it when the identity changes. If a
+policy denial must hide cached rows, gate the view separately; `initialRender`
+does not classify source errors.
+
 `initialRender` is rejected with `syncMode: 'on-demand'`, since an on-demand
 Collection has no complete startup snapshot to certify.
 
