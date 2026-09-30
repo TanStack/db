@@ -9,20 +9,25 @@ import { resetCleanupQueue } from './utils'
  *
  * A cleanup appointment binds one key to one callback and one deadline.
  * Scheduling the same key replaces its appointment. Cancellation removes its
- * appointment. Advancing the clock runs each due callback exactly once.
+ * appointment. Advancing elapsed time runs each due callback exactly once.
+ * A wall-clock correction does not move an appointment's elapsed deadline.
  *
  * A callback error must not stop another due callback. The contract does not
  * set callback order when one clock advance makes several callbacks due. The
  * queue must use at most one root timer.
  *
- * `stepModel` stores only appointments and public deliveries. It does not copy
- * the production timer, microtask, or wake-up logic.
+ * `stepModel` stores only elapsed appointments and public deliveries. It does
+ * not copy the production timer, microtask, or wake-up logic. The grammar
+ * crosses registration, cancellation, replacement, elapsed advance, and
+ * positive or negative wall-clock correction. Callback reentry is out of
+ * scope.
  */
 
 type Action =
   | { kind: `schedule`; key: number; delay: number; throws: boolean }
   | { kind: `cancel`; key: number }
   | { kind: `advance`; elapsed: number }
+  | { kind: `stepWallClock`; offset: number }
 type Delivery = { id: number; at: number }
 type Appointment = {
   id: number
@@ -44,7 +49,7 @@ type Fault =
   | `late`
 
 // Each key has at most one appointment. A schedule replaces the old
-// appointment. An advance moves the clock and delivers all due appointments.
+// appointment. Only elapsed advance moves its deadline toward delivery.
 function stepModel(model: Model, id: number, action: Action): Model {
   if (action.kind === `schedule`) {
     return {
@@ -69,6 +74,8 @@ function stepModel(model: Model, id: number, action: Action): Model {
       ),
     }
   }
+
+  if (action.kind === `stepWallClock`) return model
 
   const now = model.now + action.elapsed
   const due = model.appointments.filter((entry) => entry.at <= now)
@@ -101,6 +108,7 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
   const keys = [0, `0`, {}, {}]
   const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
   const actual: Array<Delivery> = []
+  let wallClockOffset = 0
   let model: Model = {
     now: 0,
     appointments: [],
@@ -134,6 +142,9 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
     for (const [id, action] of actions.entries()) {
       if (action.kind === `advance`) {
         await advance(action.elapsed)
+      } else if (action.kind === `stepWallClock`) {
+        wallClockOffset += action.offset
+        vi.setSystemTime(Date.now() + action.offset)
       } else if (action.kind === `cancel`) {
         model = stepModel(model, id, action)
         if (fault !== `ignore-cancel`) queue.cancel(keys[action.key])
@@ -143,8 +154,9 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
           fault === `lose-replacement` ? { key: action.key } : keys[action.key],
           action.delay + (fault === `late` ? 1 : 0),
           () => {
-            actual.push({ id, at: Date.now() })
-            if (fault === `duplicate`) actual.push({ id, at: Date.now() })
+            actual.push({ id, at: Date.now() - wallClockOffset })
+            if (fault === `duplicate`)
+              actual.push({ id, at: Date.now() - wallClockOffset })
             if (action.throws) throw new Error(`callback:${id}`)
           },
         )
@@ -176,10 +188,15 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
     kind: fc.constant(`advance` as const),
     elapsed: fc.integer({ min: 0, max: 20 }),
   }),
+  fc.record({
+    kind: fc.constant(`stepWallClock` as const),
+    offset: fc.integer({ min: -1000, max: 1000 }),
+  }),
 )
 
-// Run one stable campaign and one random campaign. The shared oracle config
-// accepts a seed and shrink path for replay of the random lane.
+// Run one stable campaign and one random campaign. Fixed witnesses retain
+// backward-step delay and forward-step early-delivery boundaries. The shared
+// oracle config accepts a seed and shrink path for replay of the random lane.
 it.each([20260913, undefined])(
   `obeys appointment histories (seed %s)`,
   async (seed) => {
@@ -193,6 +210,22 @@ it.each([20260913, undefined])(
           ? oraclePropertyOptions(100, `cleanup-queue.history`)
           : { seed, numRuns: oracleRuns(100) }),
         examples: [
+          [
+            [
+              { kind: `schedule`, key: 0, delay: 10, throws: false },
+              { kind: `stepWallClock`, offset: -1000 },
+              { kind: `advance`, elapsed: 10 },
+            ],
+          ],
+          [
+            [
+              { kind: `schedule`, key: 0, delay: 10, throws: false },
+              { kind: `stepWallClock`, offset: 1000 },
+              { kind: `schedule`, key: 1, delay: 20, throws: false },
+              { kind: `advance`, elapsed: 0 },
+              { kind: `advance`, elapsed: 10 },
+            ],
+          ],
           [
             [
               { kind: `schedule`, key: 0, delay: 1, throws: false },
