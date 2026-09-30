@@ -1702,14 +1702,30 @@ describe(`CollectionSubscription status tracking`, () => {
 
   // The next limited page starts after the rows this subscription published.
   // A change its where clause drops is not published and cannot advance the
-  // offset, whether it arrives alone or beside a matching change.
-  it.each([
-    `alone`,
-    `beside a matching change`,
-    `as an update beside a matching change`,
-  ] as const)(
-    `does not advance the page offset for a dropped change that arrives %s`,
-    async (grouping) => {
+  // offset, whether it arrives alone or beside a matching change. Change
+  // routing withholds dropped rows from an `eq` subscription before sent keys
+  // are recorded, so an `or` predicate, which is not routed, is also needed to
+  // reach that record.
+  const statusA = new Func(`eq`, [new PropRef([`status`]), new Value(`a`)])
+  it.each(
+    [
+      `alone`,
+      `beside a matching change`,
+      `as an update beside a matching change`,
+    ].flatMap((grouping) => [
+      { grouping, predicate: `routed eq`, where: statusA },
+      {
+        grouping,
+        predicate: `unrouted or`,
+        where: new Func(`or`, [
+          statusA,
+          new Func(`eq`, [new PropRef([`status`]), new Value(`z`)]),
+        ]),
+      },
+    ]),
+  )(
+    `does not advance the page offset for a dropped change that arrives $grouping ($predicate)`,
+    async ({ grouping, where }) => {
       type Row = { id: string; rank: number; status: string }
       const loads: Array<LoadSubsetOptions> = []
       let sync!: {
@@ -1718,7 +1734,7 @@ describe(`CollectionSubscription status tracking`, () => {
         commit: () => void
       }
       const collection = createCollection<Row>({
-        id: `limited-offset-dropped-change-${grouping}`,
+        id: `limited-offset-dropped-change-${grouping}-${String(where.name)}`,
         getKey: ({ id }) => id,
         syncMode: `on-demand`,
         sync: {
@@ -1749,12 +1765,7 @@ describe(`CollectionSubscription status tracking`, () => {
             else published.add(change.key)
           }
         },
-        {
-          whereExpression: new Func(`eq`, [
-            new PropRef([`status`]),
-            new Value(`a`),
-          ]),
-        },
+        { whereExpression: where },
       )
       subscription.setOrderByIndex(index)
       const requestPage = () =>

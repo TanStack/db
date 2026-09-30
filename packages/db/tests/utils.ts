@@ -17,6 +17,39 @@ export type OutputWithVirtual<
   T extends object,
   TKey extends string | number = string | number,
 > = WithVirtualProps<T, TKey>
+/**
+ * Runs an oracle check, then every cleanup step in order. A cleanup failure
+ * never replaces the check's own failure: the check failure is thrown alone or
+ * as the `cause` of an `AggregateError` that also holds each cleanup failure.
+ */
+export async function withOracleCleanup(
+  check: () => Promise<void> | void,
+  cleanups: ReadonlyArray<() => unknown>,
+): Promise<void> {
+  const failures: Array<unknown> = []
+  let checkFailed = false
+  try {
+    await check()
+  } catch (error) {
+    checkFailed = true
+    failures.push(error)
+  }
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(
+      failures,
+      checkFailed ? `Oracle check and cleanup failed` : `Oracle cleanup failed`,
+      { cause: failures[0] },
+    )
+  }
+}
 
 // Keep sync startup, writes, readiness, and load outcomes in the test itself.
 export function createOnDemandCollection<T extends { id: string | number }>(

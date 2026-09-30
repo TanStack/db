@@ -17,7 +17,7 @@
  * update into an insert when the row starts matching and into a delete when it
  * stops. A subscriber that requested the initial state sees every TRUE row.
  * A subscriber that did not sees a TRUE row once a later insert or update
- * touches it. A live query publishes every TRUE row.
+ * touches it. A live-query Collection publishes every TRUE row.
  *
  * Why an example can miss the failure: a direct `eq` filter treats FALSE and
  * UNKNOWN alike, because both drop the row; the difference appears only under
@@ -36,7 +36,7 @@
  * prefix, booleans, numbers, `NaN`, a valid Date, `null`, and a missing field.
  * Predicates are `eq` leaves over `v`, a literal, or a virtual field, composed
  * with `not`, `and`, and `or` up to depth three. A snapshot history may hold
- * pending optimistic inserts and applies no source transactions: the
+ * pending optimistic inserts and applies no sync transactions: the
  * Collection holds synced commits while a user transaction persists, and the
  * optimistic-history oracle owns that law. A change history starts from synced
  * rows and applies up to six synced transactions of one to three operations.
@@ -48,10 +48,10 @@
  * change detection, which the change-event history oracle owns. Each history
  * runs with and without a `BasicIndex` on `v`.
  *
- * Production driver: a `mockSyncCollectionOptions` Collection; a live query
- * built with the public `eq`/`not`/`and`/`or` builder functions; direct
- * `subscribeChanges` subscribers with and without `includeInitialState` using
- * the equivalent IR; peer subscribers whose `eq` predicates share one field
+ * Production driver: a `mockSyncCollectionOptions` Collection; a live-query
+ * Collection built with the public `eq`/`not`/`and`/`or` builder functions;
+ * direct `subscribeChanges` subscribers with and without `includeInitialState`
+ * using the equivalent IR (a subscriber is the callback of one subscription); peer subscribers whose `eq` predicates share one field
  * with different literals, plus one on a virtual field, so published changes
  * must be routed to exactly the subscribers they can satisfy; and the public
  * `Collection.currentStateAsChanges` snapshot.
@@ -80,7 +80,8 @@
  * comparison, cold-join, and subscription replay oracles own those boundaries.
  * Generated cleanup and restart histories for filtered subscribers remain
  * open; the lifecycle publication owner needs a predicate dimension to reach
- * them.
+ * them. The mock sync source is a controlled provider; this oracle claims only
+ * how the Collection filters and routes the sync transactions it supplies.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
@@ -97,6 +98,7 @@ import {
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
+  withOracleCleanup,
 } from '../utils.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type { ChangeMessage } from '../../src/types.js'
@@ -132,6 +134,7 @@ const literalValues: ReadonlyArray<FieldValue> = [
   `a`,
   PREFIXED,
   true,
+  false,
   1,
   Number.NaN,
   null,
@@ -483,9 +486,9 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
     transactions: [[{ type: `update`, target: 0, v: Number.NaN }]],
   },
   {
-    // A subscriber without initial state records every unsent inserted key.
-    // Deleting a key it never published must still clear that record, or a
-    // later matching reinsertion looks like a duplicate insert.
+    // A subscriber without initial state never saw the dropped `b` row.
+    // Deleting it and reinserting its key with a matching value must publish
+    // the new row, not treat it as a duplicate insert.
     kind: `changes`,
     rows: [],
     predicate: fieldEq(`a`),
@@ -711,7 +714,7 @@ async function observeHistory(
   }
 
   const subscriptions: Array<{ unsubscribe: () => void }> = []
-  try {
+  await withOracleCleanup(async () => {
     await collection.stateWhenReady()
     if (indexed) {
       collection.createIndex((row) => row.v, { indexType: BasicIndex })
@@ -809,11 +812,13 @@ async function observeHistory(
         recordSubscribers(`after transaction ${step}`)
       }
     }
-  } finally {
-    for (const subscription of subscriptions) subscription.unsubscribe()
-    await live.cleanup()
-    await collection.cleanup()
-  }
+  }, [
+    () => {
+      for (const subscription of subscriptions) subscription.unsubscribe()
+    },
+    () => live.cleanup(),
+    () => collection.cleanup(),
+  ])
   return { observations, model }
 }
 
@@ -915,15 +920,12 @@ describe(`WHERE predicate publication oracle`, () => {
         (changes) => batches.push(changes.length),
         { whereExpression: irPredicate(fieldEq(`a`)) },
       )
-      try {
+      await withOracleCleanup(() => {
         collection.utils.begin()
         collection.utils.commit()
         collection.utils.markReady()
         expect(batches).toEqual([0])
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
+      }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     })
 
     it(`publishes the new payload for a same-key update that stays TRUE`, async () => {
@@ -962,7 +964,7 @@ describe(`WHERE predicate publication oracle`, () => {
           whereExpression: irPredicate(fieldEq(`a`)),
         },
       )
-      try {
+      await withOracleCleanup(() => {
         events.length = 0
         expect(live.get(`r0`)?.n).toBe(1)
         collection.utils.begin()
@@ -975,11 +977,11 @@ describe(`WHERE predicate publication oracle`, () => {
         expect(events).toEqual([
           { type: `update`, key: `r0`, n: 2, previousN: 1 },
         ])
-      } finally {
-        subscription.unsubscribe()
-        await live.cleanup()
-        await collection.cleanup()
-      }
+      }, [
+        () => subscription.unsubscribe(),
+        () => live.cleanup(),
+        () => collection.cleanup(),
+      ])
     })
 
     it(`a pending optimistic delete hides a row from a prefiltered unindexed scan`, async () => {
@@ -998,7 +1000,7 @@ describe(`WHERE predicate publication oracle`, () => {
       )
       const visible = new Set<string | number>()
       let subscription: { unsubscribe: () => void } | undefined
-      try {
+      await withOracleCleanup(async () => {
         await collection.stateWhenReady()
         // The adapter's onDelete awaits a sync acknowledgement that this test
         // never sends, so the delete stays pending.
@@ -1012,10 +1014,7 @@ describe(`WHERE predicate publication oracle`, () => {
         })
         expect(snapshot?.map((change) => change.key)).toEqual([`r0`])
         expect([...visible]).toEqual([`r0`])
-      } finally {
-        subscription?.unsubscribe()
-        await collection.cleanup()
-      }
+      }, [() => subscription?.unsubscribe(), () => collection.cleanup()])
     })
 
     it(`a layout-only publication reaches a filtered subscriber as one empty batch`, async () => {
@@ -1041,7 +1040,7 @@ describe(`WHERE predicate publication oracle`, () => {
       )
       const batches: Array<number> = []
       let subscription: { unsubscribe: () => void } | undefined
-      try {
+      await withOracleCleanup(async () => {
         await live.preload()
         subscription = live.subscribeChanges(
           (changes) => batches.push(changes.length),
@@ -1057,11 +1056,11 @@ describe(`WHERE predicate publication oracle`, () => {
         source.utils.commit()
         expect([...live.keys()]).toEqual([`r1`, `r0`])
         expect(batches).toEqual([0])
-      } finally {
-        subscription?.unsubscribe()
-        await live.cleanup()
-        await source.cleanup()
-      }
+      }, [
+        () => subscription?.unsubscribe(),
+        () => live.cleanup(),
+        () => source.cleanup(),
+      ])
     })
 
     it(`a restarted source retracts a vanished row even when its first batch cannot match`, async () => {
@@ -1094,7 +1093,7 @@ describe(`WHERE predicate publication oracle`, () => {
           whereExpression: irPredicate(fieldEq(`a`)),
         },
       )
-      try {
+      await withOracleCleanup(async () => {
         expect([...visible]).toEqual([`r0`])
         sourceRows = [{ id: `r1`, v: `b` }]
         await collection.cleanup()
@@ -1102,10 +1101,7 @@ describe(`WHERE predicate publication oracle`, () => {
         expect([...visible]).toEqual([])
         markSourceReady()
         expect([...visible]).toEqual([])
-      } finally {
-        subscription.unsubscribe()
-        await collection.cleanup()
-      }
+      }, [() => subscription.unsubscribe(), () => collection.cleanup()])
     })
 
     for (const history of [
