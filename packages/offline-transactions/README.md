@@ -347,7 +347,7 @@ const tx = offline.createOfflineTransaction({
   autoCommit: false,
 })
 tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
-await tx.commit() // Remains pending until the mutation function succeeds.
+await tx.commit() // Waits for the mutation function and outbox deletion.
 ```
 
 ## Platform Support

@@ -176,6 +176,14 @@ after a persisted `deletion-pending` phase. A marked row skips provider replay
 even when `beforeRetry` filters all ordinary pending work; an old unmarked row
 still replays. Adapter tests prove that IndexedDB transaction failure and
 localStorage `removeItem` failure reject rather than masquerade as deletion.
+When a caller removes an active row with `removeFromOutbox` or `clearOutbox`
+while its provider is held, the caller remains pending until that provider
+returns. The controlled witness then checks provider calls, public settlement,
+and the empty outbox. The leadership owner checks that an earlier
+`deletion-pending` row with the same persisted timestamp is deleted before its
+later peer reaches the provider. This restart witness uses storage insertion
+order to distinguish creation order; independent storage writers and native
+browser hosts remain outside its claim.
 These witnesses do not establish physical power-loss durability, a real
 provider's idempotency, or the crash window between provider completion and
 the phase write. The provider must honor the supplied idempotency key in that
@@ -187,6 +195,11 @@ The same owner also needs a captured failing seed-and-shrink-path replay for
 its generated settlement property. The
 [deletion-settlement review record](oracle-reviews/2026-09-30-offline-deletion-settlement.md)
 preserves the exact executable revision, RED/GREEN witnesses, and limits.
+The guarded replay owner (`packages/db/tests/oracle-replay.test.ts`) now checks
+that named pagination and index campaigns execute only the requested replay
+lane. An unrelated failing fixed campaign no longer runs first. The
+[prep-PR review record](oracle-reviews/2026-09-30-prep-pr-followup.md) records
+these four review repairs at their exact executable revision.
 
 ### Recent fix-wave authority inventory
 
@@ -325,6 +338,9 @@ child. Its bounded history crosses a single-step row move, a private value
 change that returns to the prior value, and a final value change. It compares
 root Collection reads and subscriber callbacks with an independent sorted
 source Map, and checks Effect callbacks against the last callback-visible row.
+Its optimistic rollback histories also require the callback to be reached and
+compare the restored public rows and callback trace after rejection. This
+rejects a final-row-only check that misses a torn callback publication.
 The [DEC-02 review record](oracle-reviews/2026-09-28-retracted-value-retention.md)
 retains the RED and mutant evidence. The receiving Collection-valued owner
 (`packages/db/tests/query/includes-collection-oracle.property.test.ts`) now
