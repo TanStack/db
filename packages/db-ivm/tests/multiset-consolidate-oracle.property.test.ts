@@ -32,13 +32,9 @@ import type { MultiSetArray } from '../src/multiset.js'
  *
  * Limits:
  * - The output order is not part of this law. No contract states it.
- * - Keyed identity is a text encoding that is not injective today (open bug
- *   #1948). The grammar excludes each known collision:
- *   - keys or values of different types with the same text (`1` and `'1'`,
- *     `true` and `'true'`, `1n` and `1`);
- *   - keys or values that contain the `|` delimiter;
- *   - symbol and function values, which compare by text, not by reference.
- *   Remove these exclusions when that bug is fixed.
+ * - The keyed grammar includes the reported type, reference, and delimiter
+ *   collisions in #1948. This checks `MultiSet` directly. It does not prove
+ *   which `@tanstack/db` query shapes produce these records.
  * - Structural identity uses a 32-bit hash in production. The small value
  *   domain here makes a collision unlikely, but this is not an injectivity
  *   claim.
@@ -53,8 +49,11 @@ type Spec =
   | { kind: `triple`; i: number }
 type Leaf = { kind: `prim` | `obj`; i: number }
 
-// Primitive texts are distinct across types: no `'1'`, `'true'`, `'null'`, or
-// `'undefined'` strings, and no `|`. See the #1948 limit above.
+const firstSymbol = Symbol(`s`)
+const secondSymbol = Symbol(`s`)
+const firstFunction = () => 1
+const secondFunction = () => 1
+
 const KEYED_PRIMITIVES: ReadonlyArray<Data> = [
   0,
   1,
@@ -66,8 +65,18 @@ const KEYED_PRIMITIVES: ReadonlyArray<Data> = [
   true,
   -0,
   NaN,
+  `1`,
+  `true`,
+  `null`,
+  `undefined`,
+  1n,
+  `x|str_y`,
+  firstSymbol,
+  secondSymbol,
+  firstFunction,
+  secondFunction,
 ]
-const KEYS: ReadonlyArray<string | number> = [0, 1, 2, `a`, `b`]
+const KEYS: ReadonlyArray<string | number> = [0, 1, 2, `a`, `b`, `1`, `a|str_x`]
 
 // ---------------------------------------------------------------------------
 // Model. It does not use production identity helpers or `hash`.
@@ -80,15 +89,18 @@ type Expected = {
 }
 
 function expectedConsolidation(records: MultiSetArray<Data>): Expected {
-  const refIds = new Map<object, number>()
-  const refId = (value: object) => {
+  const refIds = new Map<object | symbol, number>()
+  const refId = (value: object | symbol) => {
     if (!refIds.has(value)) refIds.set(value, refIds.size)
     return refIds.get(value)!
   }
   const leaf = (value: Data) =>
-    value !== null && typeof value === `object`
+    value !== null &&
+    (typeof value === `object` ||
+      typeof value === `function` ||
+      typeof value === `symbol`)
       ? [`ref`, refId(value)]
-      : [`value`, typeof value, value === undefined ? null : value]
+      : [`value`, typeof value, String(value)]
   const keyedIdentity = (data: Data) => {
     const [key, value] = data as [string | number, Data]
     const valueIdentity =
@@ -144,18 +156,24 @@ function expectedConsolidation(records: MultiSetArray<Data>): Expected {
 // History grammar. Each run builds fresh objects, so equal contents never
 // imply equal references.
 
-const leafArb: fc.Arbitrary<Leaf> = fc.oneof(
-  fc.record({
-    kind: fc.constant(`prim` as const),
-    i: fc.nat(KEYED_PRIMITIVES.length - 1),
-  }),
-  fc.record({ kind: fc.constant(`obj` as const), i: fc.nat(2) }),
-)
-const specArb: fc.Arbitrary<Spec> = fc.oneof(
-  leafArb,
-  fc.record({ kind: fc.constant(`tuple` as const), a: leafArb, b: leafArb }),
-  fc.record({ kind: fc.constant(`triple` as const), i: fc.nat(2) }),
-)
+function specArbFor(maxPrimitiveIndex: number): fc.Arbitrary<Spec> {
+  const leafArb: fc.Arbitrary<Leaf> = fc.oneof(
+    fc.record({
+      kind: fc.constant(`prim` as const),
+      i: fc.nat(maxPrimitiveIndex),
+    }),
+    fc.record({ kind: fc.constant(`obj` as const), i: fc.nat(2) }),
+  )
+  return fc.oneof(
+    leafArb,
+    fc.record({ kind: fc.constant(`tuple` as const), a: leafArb, b: leafArb }),
+    fc.record({ kind: fc.constant(`triple` as const), i: fc.nat(2) }),
+  )
+}
+
+const keyedSpecArb = specArbFor(KEYED_PRIMITIVES.length - 1)
+// The unkeyed fallback checks structural hashing on its original value domain.
+const fallbackSpecArb = specArbFor(9)
 const multiplicityArb = fc.integer({ min: -2, max: 2 })
 
 type StructuralStep =
@@ -166,14 +184,101 @@ type StructuralStep =
   | { fresh: `object`; v: number }
   | { fresh: `array`; pair: [number, number] }
 
-type Mode = `keyed` | `numbers` | `strings` | `structural` | `fallback`
-type History = { mode: Mode; steps: Array<[unknown, number]> }
+type Mode =
+  | `keyed`
+  | `keyedCollision`
+  | `numbers`
+  | `strings`
+  | `structural`
+  | `fallback`
+// `keyedCollision` selects grammar witnesses; it exercises the same keyed
+// production path as `keyed`. `caseName` labels a replay, not product state.
+type History = {
+  mode: Mode
+  steps: Array<[unknown, number]>
+  caseName?: string
+}
+
+// Each pair has distinct keyed identities under the documented rule. They
+// were RED on the pre-fix text encoding in #1948.
+const collisionCases: Array<{ name: string; records: MultiSetArray<Data> }> = [
+  {
+    name: `numeric and string keys stay separate`,
+    records: [
+      [[1, `v`], 1],
+      [[`1`, `v`], 1],
+    ],
+  },
+  {
+    name: `numeric and string values do not cancel`,
+    records: [
+      [[`k`, 1], 1],
+      [[`k`, `1`], -1],
+    ],
+  },
+  {
+    name: `join tuple elements keep their primitive type`,
+    records: [
+      [[`k`, [1, null]], 1],
+      [[`k`, [`1`, null]], -1],
+    ],
+  },
+  {
+    name: `the key and value boundary stays distinct when text contains a pipe`,
+    records: [
+      [[`a|str_x`, `y`], 1],
+      [[`a`, `x|str_y`], -1],
+    ],
+  },
+  {
+    name: `boolean and string values do not cancel`,
+    records: [
+      [[`k`, true], 1],
+      [[`k`, `true`], -1],
+    ],
+  },
+  {
+    name: `bigint and number values do not cancel`,
+    records: [
+      [[`k`, 1n], 1],
+      [[`k`, 1], -1],
+    ],
+  },
+  {
+    name: `symbols with the same description keep reference identity`,
+    records: [
+      [[`k`, firstSymbol], 1],
+      [[`k`, secondSymbol], -1],
+    ],
+  },
+  {
+    name: `functions with the same source text keep reference identity`,
+    records: [
+      [[`k`, firstFunction], 1],
+      [[`k`, secondFunction], -1],
+    ],
+  },
+]
+const collisionHistoryArb: fc.Arbitrary<History> = fc
+  .tuple(fc.constantFrom(...collisionCases), fc.constantFrom(-2, -1, 1, 2))
+  .map(([collision, multiplicity]) => ({
+    mode: `keyedCollision`,
+    caseName: collision.name,
+    steps: collision.records.map(([data], index) => [
+      data,
+      index === 0 ? multiplicity : -multiplicity,
+    ]),
+  }))
 
 const historyArb: fc.Arbitrary<History> = fc.oneof(
+  collisionHistoryArb,
   fc.record({
     mode: fc.constant(`keyed` as const),
     steps: fc.array(
-      fc.tuple(fc.tuple(fc.nat(KEYS.length - 1), specArb), multiplicityArb),
+      fc.tuple(
+        fc.tuple(fc.nat(KEYS.length - 1), keyedSpecArb),
+        multiplicityArb,
+      ),
       { maxLength: 24 },
     ),
   }),
@@ -209,7 +314,10 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
   fc.record({
     mode: fc.constant(`fallback` as const),
     steps: fc.array(
-      fc.tuple(fc.tuple(fc.nat(KEYS.length - 1), specArb), multiplicityArb),
+      fc.tuple(
+        fc.tuple(fc.nat(KEYS.length - 1), fallbackSpecArb),
+        multiplicityArb,
+      ),
       { minLength: 1, maxLength: 23 },
     ),
   }),
@@ -227,6 +335,10 @@ function buildRecords(history: History): MultiSetArray<Data> {
         ? [spec.i, spec.i, spec.i]
         : fromLeaf(spec)
   const records: MultiSetArray<Data> = history.steps.map(([step, m]) => {
+    if (history.mode === `keyedCollision`) {
+      const [key, value] = step as [string | number, Data]
+      return [[key, Array.isArray(value) ? [...value] : value], m]
+    }
     if (history.mode === `keyed` || history.mode === `fallback`) {
       const [keyIndex, spec] = step as [number, Spec]
       return [[KEYS[keyIndex], fromSpec(spec)], m]
@@ -249,9 +361,15 @@ function buildRecords(history: History): MultiSetArray<Data> {
 // A tagged encoding of every record's contents. Objects become ids in
 // first-seen order, so a changed shared reference also shows. The tags keep
 // `-0`, `NaN`, and `undefined` distinct.
-function contentsOf(records: MultiSetArray<Data>): string {
-  const ids = new Map<object, number>()
+function contentsOf(
+  records: MultiSetArray<Data>,
+  ids: Map<object | symbol, number>,
+): string {
   const encode = (value: Data): Data => {
+    if (typeof value === `symbol` || typeof value === `function`) {
+      if (!ids.has(value)) ids.set(value, ids.size)
+      return [typeof value, ids.get(value)]
+    }
     if (value === null || typeof value !== `object`)
       return [typeof value, Object.is(value, -0) ? `-0` : String(value)]
     if (!ids.has(value)) ids.set(value, ids.size)
@@ -263,10 +381,10 @@ function contentsOf(records: MultiSetArray<Data>): string {
   return JSON.stringify(records.map(([data, m]) => [encode(data), m]))
 }
 
-function expectConsolidation(history: History): void {
-  const records = buildRecords(history)
+function expectRecordsConsolidated(records: MultiSetArray<Data>): void {
   const inputSnapshot = records.map(([data, m]) => [data, m] as const)
-  const inputContents = contentsOf(records)
+  const contentIds = new Map<object | symbol, number>()
+  const inputContents = contentsOf(records, contentIds)
   const { groups: expected, identity } = expectedConsolidation(records)
 
   const actual = new MultiSet(records).consolidate().getInner()
@@ -277,7 +395,9 @@ function expectConsolidation(history: History): void {
     expect(data).toBe(inputSnapshot[index]![0])
     expect(m).toBe(inputSnapshot[index]![1])
   })
-  expect(contentsOf(records), `input record contents`).toBe(inputContents)
+  expect(contentsOf(records, contentIds), `input record contents`).toBe(
+    inputContents,
+  )
 
   // Record every output entry. A duplicate identity or a zero multiplicity
   // stays visible.
@@ -295,6 +415,10 @@ function expectConsolidation(history: History): void {
     [...expected.keys()].filter((id) => !seen.has(id)),
     `missing identities`,
   ).toEqual([])
+}
+
+function expectConsolidation(history: History): void {
+  expectRecordsConsolidated(buildRecords(history))
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +442,50 @@ const campaigns =
       ]
 
 describe(`MultiSet consolidation oracle`, () => {
+  it.each(collisionCases)(`$name`, ({ records }) =>
+    expectRecordsConsolidated(records),
+  )
+
+  it(`keeps a direct object and an object tuple apart across a delimiter key`, () => {
+    const first = { v: 1 }
+    const second = { v: 2 }
+    expectRecordsConsolidated([
+      [[`a|ref_1`, second], 1],
+      [[`a`, [first, second]], -1],
+    ])
+  })
+
+  it.each<[string, MultiSetArray<Data>]>([
+    [
+      `the same symbol value still merges`,
+      [
+        [[`k`, firstSymbol], 1],
+        [[`k`, firstSymbol], 2],
+      ],
+    ],
+    [
+      `the same function value still merges`,
+      [
+        [[`k`, firstFunction], 1],
+        [[`k`, firstFunction], 2],
+      ],
+    ],
+    [
+      `signed zero keys still merge`,
+      [
+        [[-0, `v`], 1],
+        [[0, `v`], 2],
+      ],
+    ],
+    [
+      `NaN values still merge`,
+      [
+        [[`k`, NaN], 1],
+        [[`k`, NaN], 2],
+      ],
+    ],
+  ])(`%s`, (_name, records) => expectRecordsConsolidated(records))
+
   for (const { name, seed } of campaigns) {
     it(`matches the identity model across generated multisets (${name})`, () => {
       if (replayPath !== undefined && replaySeed === undefined)
@@ -347,7 +515,14 @@ describe(`MultiSet consolidation oracle`, () => {
     const sample = fc.sample(historyArb, { seed: 2026929, numRuns: 300 })
     const modes = new Set(sample.map((history) => history.mode))
     expect([...modes].sort()).toEqual(
-      [`fallback`, `keyed`, `numbers`, `strings`, `structural`].sort(),
+      [
+        `fallback`,
+        `keyed`,
+        `keyedCollision`,
+        `numbers`,
+        `strings`,
+        `structural`,
+      ].sort(),
     )
     const withMerges = sample.filter((history) => {
       const records = buildRecords(history)
