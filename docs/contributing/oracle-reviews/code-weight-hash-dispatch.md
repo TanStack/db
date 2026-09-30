@@ -336,3 +336,46 @@ On `6073cb13`, the following passed:
   updates.
 
 The environment was Node `v24.19.0` and Vitest `3.2.4` on Darwin arm64.
+
+## External review follow-up at `33603a2f`
+
+The executable fix at `33603a2f` follows reviewed PR head `f4c390a6` and
+base `0122da80`. An external review found that the refactor used independent
+31-bit random hash numbers as equality type discriminators. Those numbers can
+collide even though the value types differ. With a fresh module and controlled
+`Math.random` draws, making only the Map and Set marker numbers equal made
+`equalHashValues(new Map(), new Set())` and its reverse return `true` on
+`f4c390a6`; both returned `false` on the base. Making the Map and array numbers
+equal made Map-to-array return `true` and array-to-Map return `false` on the PR;
+both directions returned `false` on the base. Each probe observed 19 draws.
+
+The new pinned oracle first failed on the unmodified PR at the Map/Set
+assertion (`expected true to be false`). Each type marker now carries its
+original random hash number in a distinct private object. Hashing writes that
+number; equality compares the marker objects by identity. This keeps the
+shared type dispatch and its random hash values while separating equality
+from numeric marker collisions. The same controlled probes then returned
+`false` for both pairs in both argument orders. The oracle also checks that
+`topKBatch` retains one Map retraction and one Set addition for the same key.
+The full db-ivm suite passed 625 tests in 42 files; `tsc --noEmit -p
+packages/db-ivm/tsconfig.json`, Prettier, and `git diff --check` passed.
+
+The test checks equality type separation for empty Map/Set and Map/array pairs
+under forced collisions, plus the corresponding `topKBatch` output. Distinct
+marker objects cover the other supported carrier types by the same invariant;
+the test does not prove hash collision freedom or all live-query histories.
+The generated Map grammar still uses only the string keys `a`, `b`, and `c`.
+Numeric, symbol, object, and reference keys need another grammar axis or a
+pinned witness before the oracle claims those legal cases.
+
+Three other external suggestions remain optional. The `if (body)` test in the
+header loop is invariant, but runs at most three times for a RegExp and once
+for an array. Distinct object comparisons allocate two parts tuples; a
+Map/Set mismatch copied one entries iterator on both the PR and base, while a
+binary/Date mismatch newly calls `String.fromCharCode` once. A direct type
+short-circuit would duplicate the shared dispatch without an established hot
+path need. For a fresh 16-byte binary value, a deterministic counter observed
+56 `writeByte` calls on the PR and 40 on the base. The earlier review's 10%
+binary timing and 1.3–1.4× small-pair equality timing were not rerun for this
+fix. Reintroducing specialized binary hashing remains a conditional
+performance follow-up, not part of this correctness repair.
