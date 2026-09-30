@@ -2,14 +2,6 @@
 // We removed methods that we don't need.
 
 // B+ tree by David Piepgrass. License: MIT
-type EditRangeResult<V, R = number> = {
-  value?: V
-  break?: R
-  delete?: boolean
-}
-
-type index = number
-
 // Informative microbenchmarks & stuff:
 // http://www.jayconrod.com/posts/52/a-tour-of-v8-object-representation (very educational)
 // https://blog.mozilla.org/luke/2012/10/02/optimizing-javascript-variable-access/ (local vars are faster than properties)
@@ -34,8 +26,10 @@ type index = number
 /**
  * Mutable B+ tree used by BTreeIndex for sorted value buckets. Keys use the
  * supplied comparator; point operations cost O(log size). This local fork has
- * no copy-on-write sharing, cloning, or optional-value storage.
- * Range callbacks may return { break: result } to stop traversal early.
+ * no copy-on-write sharing, cloning, optional-value storage, early-exit range
+ * callbacks, or in-place range edits: only the operations BTreeIndex uses,
+ * plus `has()` and the `get()` fallback that the Map oracle observes
+ * (tests/btree-map-oracle.test.ts).
  * @author David Piepgrass
  */
 export class BTree<K = any, V = any> {
@@ -60,9 +54,6 @@ export class BTree<K = any, V = any> {
     this._compare = compare
   }
 
-  // ///////////////////////////////////////////////////////////////////////////
-  // ES6 Map<K,V> methods /////////////////////////////////////////////////////
-
   /** Gets the number of key-value pairs in the tree. */
   get size() {
     return this._size
@@ -84,22 +75,20 @@ export class BTree<K = any, V = any> {
     return this._root.get(key, defaultValue, this)
   }
 
+  /** Returns true if the key exists in the B+ tree. */
+  has(key: K): boolean {
+    const missing = {} as V
+    return this.get(key, missing) !== missing
+  }
+
   /**
-   * Adds or overwrites a key-value pair in the B+ tree.
-   * @param key the key is used to determine the sort order of
-   *        data in the tree.
-   * @param value data to associate with the key
-   * @param overwrite Whether to overwrite an existing key-value pair
-   *        (default: true). If this is false and there is an existing
-   *        key-value pair then this method has no effect.
+   * Adds or overwrites a key-value pair in the B+ tree. Overwriting also
+   * replaces the stored key.
    * @returns true if a new key-value pair was added.
    * @description Computational complexity: O(log size)
-   * Note: when overwriting a previous entry, the key is updated
-   * as well as the value. This has no effect unless the new key
-   * has data that does not affect its sort order.
    */
-  set(key: K, value: V, overwrite?: boolean): boolean {
-    const result = this._root.set(key, value, overwrite, this)
+  set(key: K, value: V): boolean {
+    const result = this._root.set(key, value, this)
     if (result === true || result === false) return result
     // Root node has split, so create a new root node.
     this._root = new BNodeInternal<K, V>([this._root, result])
@@ -107,28 +96,23 @@ export class BTree<K = any, V = any> {
   }
 
   /**
-   * Returns true if the key exists in the B+ tree, false if not.
-   * Use get() for best performance; use has() if you need to
-   * distinguish between "undefined value" and "key not present".
-   * @param key Key to detect
-   * @description Computational complexity: O(log size)
-   */
-  has(key: K): boolean {
-    return this.forRange(key, key, true, undefined) !== 0
-  }
-
-  /**
    * Removes a single key-value pair from the B+ tree.
-   * @param key Key to find
    * @returns true if a pair was found and removed, false otherwise.
    * @description Computational complexity: O(log size)
    */
   delete(key: K): boolean {
-    return this.editRange(key, key, true, DeleteRange) !== 0
+    const size = this._size
+    let root = this._root
+    root.forRange(key, key, true, true, this)
+    // Collapse roots left with at most one child by the deletion.
+    while (root.keys.length <= 1 && !root.isLeaf) {
+      this._root = root =
+        root.keys.length === 0
+          ? new BNode<K, V>()
+          : (root as any as BNodeInternal<K, V>).children[0]!
+    }
+    return this._size !== size
   }
-
-  // ///////////////////////////////////////////////////////////////////////////
-  // Additional methods ///////////////////////////////////////////////////////
 
   /** Gets the lowest key in the tree. Complexity: O(log size) */
   minKey(): K | undefined {
@@ -142,44 +126,21 @@ export class BTree<K = any, V = any> {
 
   /** Returns the next pair whose key is larger than the specified key (or undefined if there is none).
    * If key === undefined, this function returns the lowest pair.
-   * @param key The key to search for.
-   * @param reusedArray Optional array used repeatedly to store key-value pairs, to
-   * avoid creating a new array on every iteration.
    */
-  nextHigherPair(key: K | undefined, reusedArray?: [K, V]): [K, V] | undefined {
-    reusedArray = reusedArray || ([] as unknown as [K, V])
-    if (key === undefined) {
-      return this._root.minPair(reusedArray)
-    }
-    return this._root.getPairOrNextHigher(
-      key,
-      this._compare,
-      false,
-      reusedArray,
-    )
+  nextHigherPair(key: K | undefined): [K, V] | undefined {
+    return key === undefined
+      ? this._root.minPair()
+      : this._root.getPairOrNextHigher(key, this._compare)
   }
 
   /** Returns the next pair whose key is smaller than the specified key (or undefined if there is none).
    *  If key === undefined, this function returns the highest pair.
-   * @param key The key to search for.
-   * @param reusedArray Optional array used repeatedly to store key-value pairs, to
-   *        avoid creating a new array each time you call this method.
    */
-  nextLowerPair(key: K | undefined, reusedArray?: [K, V]): [K, V] | undefined {
-    reusedArray = reusedArray || ([] as unknown as [K, V])
-    if (key === undefined) {
-      return this._root.maxPair(reusedArray)
-    }
-    return this._root.getPairOrNextLower(key, this._compare, false, reusedArray)
+  nextLowerPair(key: K | undefined): [K, V] | undefined {
+    return key === undefined
+      ? this._root.maxPair()
+      : this._root.getPairOrNextLower(key, this._compare)
   }
-
-  forRange(
-    low: K,
-    high: K,
-    includeHigh: boolean,
-    onFound?: (k: K, v: V, counter: number) => void,
-    initialCounter?: number,
-  ): number
 
   /**
    * Scans the specified range of keys, in ascending order by key.
@@ -190,84 +151,15 @@ export class BTree<K = any, V = any> {
    * @param high Scanning stops when a key larger than this is reached.
    * @param includeHigh If the `high` key is present, `onFound` is called for
    *        that final pair if and only if this parameter is true.
-   * @param onFound A function that is called for each key-value pair. This
-   *        function can return {break:R} to stop early with result R.
-   * @param initialCounter Initial third argument of onFound. This value
-   *        increases by one each time `onFound` is called. Default: 0
-   * @returns The number of values found, or R if the callback returned
-   *        `{break:R}` to stop early.
    * @description Computational complexity: O(number of items scanned + log size)
    */
-  forRange<R = number>(
+  forRange(
     low: K,
     high: K,
     includeHigh: boolean,
-    onFound?: (k: K, v: V, counter: number) => { break?: R } | void,
-    initialCounter?: number,
-  ): R | number {
-    const r = this._root.forRange(
-      low,
-      high,
-      includeHigh,
-      false,
-      this,
-      initialCounter || 0,
-      onFound,
-    )
-    return typeof r === `number` ? r : r.break!
-  }
-
-  /**
-   * Scans and potentially modifies values for a subsequence of keys.
-   * Note: the callback `onFound` should ideally be a pure function.
-   *   Specfically, it must not insert items or change the collection
-   *   except via return value; out-of-band editing may cause an
-   *   exception or may cause incorrect data to be sent to the callback
-   *   (duplicate or missed items).
-   * @param low The first key scanned will be greater than or equal to `low`.
-   * @param high Scanning stops when a key larger than this is reached.
-   * @param includeHigh If the `high` key is present, `onFound` is called for
-   *        that final pair if and only if this parameter is true.
-   * @param onFound A function that is called for each key-value pair. This
-   *        function can return `{value:v}` to change the value associated
-   *        with the current key, `{delete:true}` to delete the current pair,
-   *        `{break:R}` to stop early with result R, or it can return nothing
-   *        (undefined or {}) to cause no effect and continue iterating.
-   *        `{break:R}` can be combined with one of the other two commands.
-   *        The third argument `counter` is the number of items iterated
-   *        previously; it equals 0 when `onFound` is called the first time.
-   * @returns The number of values scanned, or R if the callback returned
-   *        `{break:R}` to stop early.
-   * @description
-   *   Computational complexity: O(number of items scanned + log size)
-   */
-  editRange<R = V>(
-    low: K,
-    high: K,
-    includeHigh: boolean,
-    onFound: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void,
-    initialCounter?: number,
-  ): R | number {
-    let root = this._root
-    try {
-      const r = root.forRange(
-        low,
-        high,
-        includeHigh,
-        true,
-        this,
-        initialCounter || 0,
-        onFound,
-      )
-      return typeof r === `number` ? r : r.break!
-    } finally {
-      while (root.keys.length <= 1 && !root.isLeaf) {
-        this._root = root =
-          root.keys.length === 0
-            ? new BNode<K, V>()
-            : (root as any as BNodeInternal<K, V>).children[0]!
-      }
-    }
+    onFound: (k: K, v: V) => void,
+  ): void {
+    this._root.forRange(low, high, includeHigh, false, this, onFound)
   }
 }
 
@@ -294,7 +186,7 @@ class BNode<K, V> {
 
   // If key not found, returns i^failXor where i is the insertion index.
   // Callers that don't care whether there was a match will set failXor=0.
-  indexOf(key: K, failXor: number, cmp: (a: K, b: K) => number): index {
+  indexOf(key: K, failXor: number, cmp: (a: K, b: K) => number): number {
     const keys = this.keys
     let lo = 0,
       hi = keys.length,
@@ -325,19 +217,19 @@ class BNode<K, V> {
     return this.keys[0]
   }
 
-  minPair(reusedArray: [K, V]): [K, V] | undefined {
-    if (this.keys.length === 0) return undefined
-    reusedArray[0] = this.keys[0]!
-    reusedArray[1] = this.values[0]!
-    return reusedArray
+  /** Returns the pair at index `i`, or undefined when `i` is out of range. */
+  pairAt(i: number): [K, V] | undefined {
+    return i >= 0 && i < this.keys.length
+      ? [this.keys[i]!, this.values[i]!]
+      : undefined
   }
 
-  maxPair(reusedArray: [K, V]): [K, V] | undefined {
-    if (this.keys.length === 0) return undefined
-    const lastIndex = this.keys.length - 1
-    reusedArray[0] = this.keys[lastIndex]!
-    reusedArray[1] = this.values[lastIndex]!
-    return reusedArray
+  minPair(): [K, V] | undefined {
+    return this.pairAt(0)
+  }
+
+  maxPair(): [K, V] | undefined {
+    return this.pairAt(this.keys.length - 1)
   }
 
   get(key: K, defaultValue: V | undefined, tree: BTree<K, V>): V | undefined {
@@ -345,96 +237,55 @@ class BNode<K, V> {
     return i < 0 ? defaultValue : this.values[i]
   }
 
+  // Strictly lower / higher neighbours of `key` within this leaf.
   getPairOrNextLower(
     key: K,
     compare: (a: K, b: K) => number,
-    inclusive: boolean,
-    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, -1, compare)
-    const indexOrLower = i < 0 ? ~i - 1 : inclusive ? i : i - 1
-    if (indexOrLower >= 0) {
-      reusedArray[0] = this.keys[indexOrLower]!
-      reusedArray[1] = this.values[indexOrLower]!
-      return reusedArray
-    }
-    return undefined
+    return this.pairAt(i < 0 ? ~i - 1 : i - 1)
   }
 
   getPairOrNextHigher(
     key: K,
     compare: (a: K, b: K) => number,
-    inclusive: boolean,
-    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, -1, compare)
-    const indexOrLower = i < 0 ? ~i : inclusive ? i : i + 1
-    const keys = this.keys
-    if (indexOrLower < keys.length) {
-      reusedArray[0] = keys[indexOrLower]!
-      reusedArray[1] = this.values[indexOrLower]!
-      return reusedArray
-    }
-    return undefined
+    return this.pairAt(i < 0 ? ~i : i + 1)
   }
 
   // ///////////////////////////////////////////////////////////////////////////
   // Leaf Node: set & node splitting //////////////////////////////////////////
 
-  set(
-    key: K,
-    value: V,
-    overwrite: boolean | undefined,
-    tree: BTree<K, V>,
-  ): boolean | BNode<K, V> {
+  set(key: K, value: V, tree: BTree<K, V>): boolean | BNode<K, V> {
     let i = this.indexOf(key, -1, tree._compare)
-    if (i < 0) {
-      // key does not exist yet
-      i = ~i
-      tree._size++
-
-      if (this.keys.length < tree._maxNodeSize) {
-        return this.insertInLeaf(i, key, value)
-      } else {
-        // This leaf node is full and must split
-        const newRightSibling = this.splitOffRightSide()
-        let target: BNode<K, V> = this
-        if (i > this.keys.length) {
-          i -= this.keys.length
-          target = newRightSibling
-        }
-        target.insertInLeaf(i, key, value)
-        return newRightSibling
-      }
-    } else {
-      // Key already exists
-      if (overwrite !== false) {
-        // usually this is a no-op, but some users may wish to edit the key
-        this.keys[i] = key
-        this.values[i] = value
-      }
+    if (i >= 0) {
+      // Key already exists. Overwrite both key and value.
+      this.keys[i] = key
+      this.values[i] = value
       return false
     }
-  }
-
-  insertInLeaf(i: index, key: K, value: V) {
-    this.keys.splice(i, 0, key)
-    this.values.splice(i, 0, value)
-    return true
+    i = ~i
+    tree._size++
+    let target: BNode<K, V> = this
+    let newRightSibling: BNode<K, V> | undefined
+    if (this.keys.length >= tree._maxNodeSize) {
+      // This leaf node is full and must split
+      newRightSibling = this.splitOffRightSide()
+      if (i > this.keys.length) {
+        i -= this.keys.length
+        target = newRightSibling
+      }
+    }
+    target.keys.splice(i, 0, key)
+    target.values.splice(i, 0, value)
+    return newRightSibling ?? true
   }
 
   takeFromRight(rhs: BNode<K, V>) {
     // Reminder: parent node must update its copy of key for this node
-    // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
     this.values.push(rhs.values.shift()!)
     this.keys.push(rhs.keys.shift()!)
-  }
-
-  takeFromLeft(lhs: BNode<K, V>) {
-    // Reminder: parent node must update its copy of key for this node
-    // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
-    this.values.unshift(lhs.values.pop()!)
-    this.keys.unshift(lhs.keys.pop()!)
   }
 
   splitOffRightSide(): BNode<K, V> {
@@ -446,52 +297,39 @@ class BNode<K, V> {
   // ///////////////////////////////////////////////////////////////////////////
   // Leaf Node: scanning & deletions //////////////////////////////////////////
 
-  forRange<R>(
+  // Visits [low, high] (or [low, high)) with `onFound`, or deletes that range
+  // when `deleteMode` is set.
+  forRange(
     low: K,
     high: K,
-    includeHigh: boolean | undefined,
-    editMode: boolean,
+    includeHigh: boolean,
+    deleteMode: boolean,
     tree: BTree<K, V>,
-    count: number,
-    onFound?: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void,
-  ): EditRangeResult<V, R> | number {
+    onFound?: (k: K, v: V) => void,
+  ): void {
     const cmp = tree._compare
     let iLow, iHigh
     if (high === low) {
-      if (!includeHigh) return count
+      // A point range (as used by delete) needs only one search.
+      if (!includeHigh) return
       iHigh = (iLow = this.indexOf(low, -1, cmp)) + 1
-      if (iLow < 0) return count
+      if (iLow < 0) return
     } else {
       iLow = this.indexOf(low, 0, cmp)
       iHigh = this.indexOf(high, -1, cmp)
       if (iHigh < 0) iHigh = ~iHigh
-      else if (includeHigh === true) iHigh++
+      else if (includeHigh) iHigh++
     }
-    const keys = this.keys,
-      values = this.values
-    if (onFound !== undefined) {
-      for (let i = iLow; i < iHigh; i++) {
-        const key = keys[i]!
-        const result = onFound(key, values[i]!, count++)
-        if (result !== undefined) {
-          if (editMode === true) {
-            if (key !== keys[i])
-              throw new Error(`BTree illegally changed in editRange`)
-            if (result.delete) {
-              this.keys.splice(i, 1)
-              this.values.splice(i, 1)
-              tree._size--
-              i--
-              iHigh--
-            } else if (result.hasOwnProperty(`value`)) {
-              values[i] = result.value!
-            }
-          }
-          if (result.break !== undefined) return result
-        }
+    if (deleteMode) {
+      if (iHigh > iLow) {
+        this.keys.splice(iLow, iHigh - iLow)
+        this.values.splice(iLow, iHigh - iLow)
+        tree._size -= iHigh - iLow
       }
-    } else count += iHigh - iLow
-    return count
+    } else {
+      for (let i = iLow; i < iHigh; i++)
+        onFound!(this.keys[i]!, this.values[i]!)
+    }
   }
 
   /** Adds entire contents of right-hand sibling (rhs is left unchanged) */
@@ -509,11 +347,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
   children: Array<BNode<K, V>>
 
   constructor(children: Array<BNode<K, V>>, keys?: Array<K>) {
-    if (!keys) {
-      keys = []
-      for (let i = 0; i < children.length; i++) keys[i] = children[i]!.maxKey()!
-    }
-    super(keys)
+    super(keys ?? children.map((child) => child.maxKey()!))
     this.children = children
   }
 
@@ -521,12 +355,12 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     return this.children[0]!.minKey()
   }
 
-  minPair(reusedArray: [K, V]): [K, V] | undefined {
-    return this.children[0]!.minPair(reusedArray)
+  minPair(): [K, V] | undefined {
+    return this.children[0]!.minPair()
   }
 
-  maxPair(reusedArray: [K, V]): [K, V] | undefined {
-    return this.children[this.children.length - 1]!.maxPair(reusedArray)
+  maxPair(): [K, V] | undefined {
+    return this.children[this.children.length - 1]!.maxPair()
   }
 
   get(key: K, defaultValue: V | undefined, tree: BTree<K, V>): V | undefined {
@@ -540,55 +374,33 @@ class BNodeInternal<K, V> extends BNode<K, V> {
   getPairOrNextLower(
     key: K,
     compare: (a: K, b: K) => number,
-    inclusive: boolean,
-    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, 0, compare),
       children = this.children
-    if (i >= children.length) return this.maxPair(reusedArray)
-    const result = children[i]!.getPairOrNextLower(
-      key,
-      compare,
-      inclusive,
-      reusedArray,
+    if (i >= children.length) return this.maxPair()
+    return (
+      children[i]!.getPairOrNextLower(key, compare) ??
+      (i > 0 ? children[i - 1]!.maxPair() : undefined)
     )
-    if (result === undefined && i > 0) {
-      return children[i - 1]!.maxPair(reusedArray)
-    }
-    return result
   }
 
   getPairOrNextHigher(
     key: K,
     compare: (a: K, b: K) => number,
-    inclusive: boolean,
-    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, 0, compare),
-      children = this.children,
-      length = children.length
-    if (i >= length) return undefined
-    const result = children[i]!.getPairOrNextHigher(
-      key,
-      compare,
-      inclusive,
-      reusedArray,
+      children = this.children
+    if (i >= children.length) return undefined
+    return (
+      children[i]!.getPairOrNextHigher(key, compare) ??
+      children[i + 1]?.minPair()
     )
-    if (result === undefined && i < length - 1) {
-      return children[i + 1]!.minPair(reusedArray)
-    }
-    return result
   }
 
   // ///////////////////////////////////////////////////////////////////////////
   // Internal Node: set & node splitting //////////////////////////////////////
 
-  set(
-    key: K,
-    value: V,
-    overwrite: boolean | undefined,
-    tree: BTree<K, V>,
-  ): boolean | BNodeInternal<K, V> {
+  set(key: K, value: V, tree: BTree<K, V>): boolean | BNodeInternal<K, V> {
     const c = this.children,
       max = tree._maxNodeSize,
       cmp = tree._compare
@@ -597,9 +409,10 @@ class BNodeInternal<K, V> extends BNode<K, V> {
 
     if (child.keys.length >= max) {
       // child is full; inserting anything else will cause a split.
-      // Shifting an item to the left or right sibling may avoid a split.
-      // We can do a shift if the adjacent node is not full and if the
-      // current key can still be placed in the same node after the shift.
+      // Shifting an item to the left sibling may avoid a split. We can do a
+      // shift if that sibling is not full and if the current key can still be
+      // placed in the same node after the shift. A right shift would need a
+      // key above child.maxKey(), and that only reaches the last child.
       let other: BNode<K, V> | undefined
       if (
         i > 0 &&
@@ -608,43 +421,28 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       ) {
         other.takeFromRight(child)
         this.keys[i - 1] = other.maxKey()!
-      } else if (
-        (other = c[i + 1]) !== undefined &&
-        other.keys.length < max &&
-        cmp(child.maxKey()!, key) < 0
-      ) {
-        other.takeFromLeft(child)
-        this.keys[i] = c[i]!.maxKey()!
       }
     }
 
-    const result = child.set(key, value, overwrite, tree)
+    const result = child.set(key, value, tree)
     if (result === false) return false
     this.keys[i] = child.maxKey()!
     if (result === true) return true
 
     // The child has split and `result` is a new right child... does it fit?
-    if (this.keys.length < max) {
-      // yes
-      this.insert(i + 1, result)
-      return true
-    } else {
+    let target: BNodeInternal<K, V> = this
+    let newRightSibling: BNodeInternal<K, V> | undefined
+    if (this.keys.length >= max) {
       // no, we must split also
-      const newRightSibling = this.splitOffRightSide()
-      let target: BNodeInternal<K, V> = this
+      newRightSibling = this.splitOffRightSide()
       if (cmp(result.maxKey()!, this.maxKey()!) > 0) {
         target = newRightSibling
         i -= this.keys.length
       }
-      target.insert(i + 1, result)
-      return newRightSibling
     }
-  }
-
-  /** Inserts `child` at index `i`. */
-  insert(i: index, child: BNode<K, V>) {
-    this.children.splice(i, 0, child)
-    this.keys.splice(i, 0, child.maxKey()!)
+    target.children.splice(i + 1, 0, result)
+    target.keys.splice(i + 1, 0, result.maxKey()!)
+    return newRightSibling ?? true
   }
 
   /**
@@ -661,110 +459,68 @@ class BNodeInternal<K, V> extends BNode<K, V> {
 
   takeFromRight(rhs: BNode<K, V>) {
     // Reminder: parent node must update its copy of key for this node
-    // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
     this.keys.push(rhs.keys.shift()!)
     this.children.push((rhs as BNodeInternal<K, V>).children.shift()!)
-  }
-
-  takeFromLeft(lhs: BNode<K, V>) {
-    // Reminder: parent node must update its copy of key for this node
-    // assert rhs.keys.length > (maxNodeSize/2 && this.keys.length<maxNodeSize)
-    this.keys.unshift(lhs.keys.pop()!)
-    this.children.unshift((lhs as BNodeInternal<K, V>).children.pop()!)
   }
 
   // ///////////////////////////////////////////////////////////////////////////
   // Internal Node: scanning & deletions //////////////////////////////////////
 
-  // Note: `count` is the next value of the third argument to `onFound`.
-  //       A leaf node's `forRange` function returns a new value for this counter,
-  //       unless the operation is to stop early.
-  forRange<R>(
+  forRange(
     low: K,
     high: K,
-    includeHigh: boolean | undefined,
-    editMode: boolean,
+    includeHigh: boolean,
+    deleteMode: boolean,
     tree: BTree<K, V>,
-    count: number,
-    onFound?: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void,
-  ): EditRangeResult<V, R> | number {
+    onFound?: (k: K, v: V) => void,
+  ): void {
     const cmp = tree._compare
     const keys = this.keys,
       children = this.children
     let iLow = this.indexOf(low, 0, cmp),
       i = iLow
+    // A point range (as used by delete) needs only one search.
     const iHigh = Math.min(
       high === low ? iLow : this.indexOf(high, 0, cmp),
       keys.length - 1,
     )
-    if (!editMode) {
-      // Simple case
-      for (; i <= iHigh; i++) {
-        const result = children[i]!.forRange(
-          low,
-          high,
-          includeHigh,
-          editMode,
-          tree,
-          count,
-          onFound,
-        )
-        if (typeof result !== `number`) return result
-        count = result
-      }
-    } else if (i <= iHigh) {
-      try {
-        for (; i <= iHigh; i++) {
-          const result = children[i]!.forRange(
-            low,
-            high,
-            includeHigh,
-            editMode,
-            tree,
-            count,
-            onFound,
-          )
-          // Note: if children[i] is empty then keys[i]=undefined.
-          //       This is an invalid state, but it is fixed below.
-          keys[i] = children[i]!.maxKey()!
-          if (typeof result !== `number`) return result
-          count = result
-        }
-      } finally {
-        // Deletions may have occurred, so look for opportunities to merge nodes.
-        const half = tree._maxNodeSize >> 1
-        if (iLow > 0) iLow--
-        for (i = iHigh; i >= iLow; i--) {
-          if (children[i]!.keys.length <= half) {
-            if (children[i]!.keys.length !== 0) {
-              this.tryMerge(i, tree._maxNodeSize)
-            } else {
-              // child is empty! delete it!
-              keys.splice(i, 1)
-              children.splice(i, 1)
-            }
+    for (; i <= iHigh; i++) {
+      children[i]!.forRange(low, high, includeHigh, deleteMode, tree, onFound)
+      // Note: if children[i] is empty then keys[i]=undefined.
+      //       This is an invalid state, but it is fixed below.
+      if (deleteMode) keys[i] = children[i]!.maxKey()!
+    }
+    if (deleteMode) {
+      // Deletions may have occurred, so look for opportunities to merge nodes.
+      const half = tree._maxNodeSize >> 1
+      if (iLow > 0) iLow--
+      for (i = iHigh; i >= iLow; i--) {
+        if (children[i]!.keys.length <= half) {
+          if (children[i]!.keys.length !== 0) {
+            this.tryMerge(i, tree._maxNodeSize)
+          } else {
+            // child is empty! delete it!
+            keys.splice(i, 1)
+            children.splice(i, 1)
           }
         }
-        if (children.length !== 0 && children[0]!.keys.length === 0)
-          check(false, `emptiness bug`)
       }
     }
-    return count
   }
 
   /** Merges child i with child i+1 if their combined size is not too large */
-  tryMerge(i: index, maxSize: number): boolean {
+  tryMerge(i: number, maxSize: number): void {
     const children = this.children
-    if (i >= 0 && i + 1 < children.length) {
-      if (children[i]!.keys.length + children[i + 1]!.keys.length <= maxSize) {
-        children[i]!.mergeSibling(children[i + 1]!, maxSize)
-        children.splice(i + 1, 1)
-        this.keys.splice(i + 1, 1)
-        this.keys[i] = children[i]!.maxKey()!
-        return true
-      }
+    if (
+      i >= 0 &&
+      i + 1 < children.length &&
+      children[i]!.keys.length + children[i + 1]!.keys.length <= maxSize
+    ) {
+      children[i]!.mergeSibling(children[i + 1]!, maxSize)
+      children.splice(i + 1, 1)
+      this.keys.splice(i + 1, 1)
+      this.keys[i] = children[i]!.maxKey()!
     }
-    return false
   }
 
   /**
@@ -781,15 +537,5 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     // they may need to be merged too (but only the oldLength-1 and its
     // right sibling should need this).
     this.tryMerge(oldLength - 1, maxNodeSize)
-  }
-}
-
-const Delete = { delete: true },
-  DeleteRange = () => Delete
-
-function check(fact: boolean, ...args: Array<any>) {
-  if (!fact) {
-    args.unshift(`B+ tree`) // at beginning of message
-    throw new Error(args.join(` `))
   }
 }
