@@ -29,7 +29,7 @@
  * Model: `expectedTruth` is an independent Kleene evaluator over plain row
  * objects, and `expectedVisible` adds the touched-row rule for a subscriber
  * without initial state. Neither imports production comparison,
- * normalization, routing, or virtual-field helpers.
+ * normalization, prefilter, or virtual-field helpers.
  *
  * History grammar: rows carry field `v` from a value domain of equal and
  * unequal strings, a string that begins with the internal normalization
@@ -53,19 +53,20 @@
  * the equivalent IR; and the public `Collection.currentStateAsChanges`
  * snapshot.
  *
- * Refinement check: each route's exact key set equals the model after the
- * subscribers attach and after each source transaction commits. Direct
+ * Refinement check: each consumer's exact key set equals the model after the
+ * subscribers attach and after each sync transaction commits. Direct
  * subscribers are reconstructed from their callback batches. Two fixed
- * witnesses check boundaries outside the generated grammar: a ready
- * publication reaches a filtered subscriber as one empty batch, and an eager
+ * witnesses check boundaries outside the generated grammar: Collection
+ * readiness reaches a filtered subscriber as one empty batch, and an eager
  * source restarted after cleanup retracts a vanished row even when its first
  * batch cannot satisfy the predicate.
  *
  * Calibration: pinned histories separate Kleene from two-valued logic, and a
  * checker test requires the two-valued answer to fail. Hostile production
- * mutants that returned FALSE for `eq(string, null)`, routed `or` operands as
- * conjuncts, routed number literals past Date or NaN rows, skipped an empty
- * ready batch, or skipped a batch while stale published rows awaited
+ * mutants that returned FALSE for `eq(string, null)`, prefiltered on `or`
+ * operands as if they were conjuncts, prefiltered number literals past Date or
+ * NaN rows, skipped an empty
+ * Collection-readiness batch, or skipped a batch while stale published rows awaited
  * reconciliation each passed the pre-existing `@tanstack/db` suite and fail
  * here.
  *
@@ -405,8 +406,8 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
     ],
   },
   {
-    // A valid Date equals its timestamp, so a number literal cannot route by
-    // identity.
+    // A valid Date equals its timestamp, so a number literal cannot prefilter
+    // by identity.
     kind: `changes`,
     rows: [2, 2],
     predicate: fieldEq(1),
@@ -519,13 +520,17 @@ function sourceRow(id: string, v: FieldValue): Row {
   return v === MISSING ? { id } : { id, v }
 }
 
-type Route =
+type Consumer =
   | `live query`
   | `subscriber with initial state`
   | `subscriber without initial state`
   | `direct snapshot`
 
-type Observation = { checkpoint: string; route: Route; keys: Array<string> }
+type Observation = {
+  checkpoint: string
+  consumer: Consumer
+  keys: Array<string>
+}
 
 // Rebuild a subscriber's visible key set from its callback batches.
 function recordVisibleKeys(visible: Set<string | number>) {
@@ -584,21 +589,21 @@ async function observeHistory(
   const model: Array<Observation> = []
   const record = (
     checkpoint: string,
-    route: Route,
+    consumer: Consumer,
     keys: Iterable<string | number>,
   ) => {
     observations.push({
       checkpoint,
-      route,
+      consumer,
       keys: [...keys].map(String).sort(),
     })
     model.push({
       checkpoint,
-      route,
+      consumer,
       keys: expectedVisible(
         history.predicate,
         modelRows,
-        route === `subscriber without initial state` ? touched : undefined,
+        consumer === `subscriber without initial state` ? touched : undefined,
       ),
     })
   }
@@ -697,10 +702,10 @@ async function observeHistory(
 async function runHistory(history: History): Promise<void> {
   for (const indexed of [false, true]) {
     const { observations, model } = await observeHistory(history, indexed)
-    const route = `${indexed ? `indexed` : `scan`} route for ${describePredicate(history.predicate)}`
+    const path = `${indexed ? `index` : `scan`} path for ${describePredicate(history.predicate)}`
     const listObservations = (list: Array<Observation>) =>
-      list.map((o) => `${o.checkpoint} ${o.route}: [${o.keys.join(`,`)}]`)
-    expect(listObservations(observations), route).toEqual(
+      list.map((o) => `${o.checkpoint} ${o.consumer}: [${o.keys.join(`,`)}]`)
+    expect(listObservations(observations), path).toEqual(
       listObservations(model),
     )
   }
@@ -777,8 +782,9 @@ describe(`WHERE predicate publication oracle`, () => {
       }
     })
 
-    it(`a ready publication reaches a filtered subscriber as one empty batch`, async () => {
-      // `markReady` notifies dependents with an empty batch. A subscriber
+    it(`Collection readiness reaches a filtered subscriber as one empty batch`, async () => {
+      // `markReady` notifies subscribers of Collection readiness with an
+      // empty batch. A subscriber
       // whose predicate no row can satisfy must still receive it.
       const collection = createCollection(
         mockSyncCollectionOptionsNoInitialState<Row>({

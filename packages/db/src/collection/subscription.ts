@@ -1134,7 +1134,7 @@ export class CollectionSubscription
    * A change reaches the where filter only as its value or previous value, so
    * a batch in which neither can pass the prefilter publishes nothing. Stale
    * published rows and truncate replay consume unfiltered changes, and an
-   * empty batch is a ready signal, so those always take the full path.
+   * empty batch signals Collection readiness, so those take the full path.
    */
   private cannotMatchAny(changes: Array<ChangeMessage<any, any>>): boolean {
     const prefilter = this.equalityPrefilter
