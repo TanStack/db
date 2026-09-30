@@ -26,6 +26,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
+  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -449,6 +450,9 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -468,6 +472,9 @@ export function useLiveQuery<TContext extends Context>(
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -487,6 +494,9 @@ export function useLiveQuery<TContext extends Context>(
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -510,6 +520,9 @@ export function useLiveQuery<
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -545,6 +558,9 @@ export function useLiveQuery<
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -596,6 +612,9 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus // Can't be disabled when query always returns a builder
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -612,6 +631,9 @@ export function useLiveQuery<TContext extends Context>(
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -629,6 +651,9 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus // Can't be disabled when query always returns a builder
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -646,6 +671,9 @@ export function useLiveQuery<TContext extends Context>(
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -695,6 +723,9 @@ export function useLiveQuery<
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -715,6 +746,9 @@ export function useLiveQuery<
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean

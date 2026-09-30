@@ -510,6 +510,30 @@ a hostile wrong-answer control, and an explicit statement of remaining limits.
   the current fixed DISTINCT and nested aggregate witnesses do not establish
   those neighboring paths.
 
+## Persisted readiness and network-first initial rendering
+
+The persisted-readiness oracle in
+`packages/db-sqlite-persistence-core/tests/persisted-readiness-oracle.test.ts`
+owns the opted-in eager restore boundary through the persisted wrapper,
+Collection, live query, and observer. A finite two-source model checks all 36
+opt-in/outcome combinations independently of the observer classifier. Its
+controlled persistence histories check nonempty
+and empty restore while upstream remains pending, all-source conjunction,
+mixed opt-out, nested live-query sources, exact failure, SSR seed handoff,
+stale cleanup/restart work, an already-restored source, a network-first deadline,
+early network success and failure, network failure before nonempty restore,
+joined-source deadline composition, and a query-only error that must not be
+mistaken for network failure. It checks a
+separate initial-render wait that leaves network `preload()` unchanged. The
+framework conformance suite checks the projected signals in React, Vue,
+Svelte, Solid, and Angular, including exact identity for a plain-object restore
+error after notification. The window-controller test checks infinite-query
+projection, and focused React and Solid tests check Suspense gating.
+This owner uses a controlled persistence adapter, not native SQLite or a real
+network provider; it does not prove browser scheduling or arbitrary histories.
+The framework identity scenario does not cover every possible rejection value
+or an error already present before a hook mounts.
+
 ## Deferred contracts and evidence
 
 The maintainer assigned offline policy work to

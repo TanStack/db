@@ -174,6 +174,9 @@ function makeHandle(hook: RenderHookResult<any, any>) {
         state: r?.state,
         status: r?.status,
         isReady: r?.isReady,
+        persistedStatus: r?.persistedStatus,
+        isPersistedReady: r?.isPersistedReady,
+        persistedError: r?.persistedError,
         isError: r?.isError,
         // Read react-db's real `isEnabled` field so the suite catches a broken
         // one (deriving from status would mask it).

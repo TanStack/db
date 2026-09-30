@@ -87,6 +87,62 @@ and resolves persistence using:
 This lets runtime wrappers expose one shared persistence instance per database
 while still handling per-collection schema versions correctly.
 
+### Network-first initial rendering
+
+Set `initialRender` on every eager persisted source Collection in a query to
+let React or Solid Suspense render restored SQLite rows when the network is
+slow or unavailable:
+
+```ts
+const todos = createCollection(
+  persistedCollectionOptions({
+    id: 'todos',
+    getKey: (todo) => todo.id,
+    persistence,
+    sync,
+    initialRender: {
+      strategy: 'network-first',
+      networkTimeoutMs: 3_000,
+    },
+  }),
+)
+
+const result = useLiveQuery((q) => q.from({ todos }))
+if (result.isPersistedReady) {
+  // The eager persisted restore completed, even if the network is pending.
+}
+```
+
+The live-query observer and framework hooks expose `persistedStatus`
+(`unavailable`, `loading`, `ready`, or `error`), `isPersistedReady`, and
+`persistedError`. `ready` means every source Collection in the query opted in
+and completed its current eager persisted restore; an empty database also
+counts as ready. One unconfigured source makes the query's persisted status
+`unavailable`. A failed restore reports its original error through
+`persistedError`. An SSR seed does not count as persisted restore.
+
+The initial render prefers Collection readiness. If the network has not made
+the query ready after `networkTimeoutMs`, Suspense may use a completed
+persisted restore. A network failure allows that fallback sooner. If the
+restore is still loading, the query waits for it or for the network. The
+deadline never cancels network sync. The default deadline is 3 seconds;
+`networkTimeoutMs: 0` allows fallback as soon as restore finishes. For a query
+with multiple opted-in sources, the longest deadline applies. An unconfigured
+source keeps the existing network-readiness gate. A query failure that did not
+come from a source is still an error, not a network fallback. Ordinary
+`useLiveQuery` row updates and Collection `status`, `isReady`, and `preload()` are unchanged;
+`status` is a Collection lifecycle signal, not a pure network-health signal.
+
+Persisted readiness does not prove current authorization. A source error can
+permit restored rows to render even when that error reports an authorization
+failure. Applications with user- or tenant-specific data must isolate persisted
+storage by identity and clear or replace it when the identity changes. If a
+policy denial must hide cached rows, gate the view separately; `initialRender`
+does not classify source errors.
+
+`initialRender` is rejected with `syncMode: 'on-demand'`, since an on-demand
+Collection has no complete startup snapshot to certify.
+
 ### Coordinator contract
 
 Every `PersistedCollectionCoordinator` must implement

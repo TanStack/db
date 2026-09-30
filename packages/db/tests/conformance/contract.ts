@@ -88,6 +88,9 @@ export interface ConformanceResult {
   state: ReadonlyMap<any, any> | undefined
   status: string
   isReady: boolean
+  persistedStatus?: string
+  isPersistedReady?: boolean
+  persistedError?: unknown
   isError: boolean
   isEnabled: boolean
 }
