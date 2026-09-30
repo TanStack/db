@@ -76,6 +76,44 @@ describe(`guarded oracle replay`, () => {
   // replays instead of starving Vitest's RPC channel across the whole suite.
   afterEach(() => setImmediate())
 
+  it(`runs a named replay directly without the owner's fixed campaign`, () => {
+    const result = runReplay([fixture])
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).toContain(`"executions":1`)
+    expect(result.output).not.toContain(`unrelated fixed campaign ran`)
+  }, 40_000)
+
+  it.each([
+    [`index-update.reference-model`, `tests/index-update.property.test.ts`, 2],
+    [`index-update.exact-identity`, `tests/index-update.property.test.ts`, 2],
+    [
+      `index-update.custom-comparator`,
+      `tests/index-update.property.test.ts`,
+      2,
+    ],
+    [
+      `pagination.matrix.window-0`,
+      `tests/query/pagination-oracle.property.test.ts`,
+      1,
+    ],
+    [
+      `pagination.matrix.state-7`,
+      `tests/query/pagination-oracle.property.test.ts`,
+      1,
+    ],
+  ] as const)(
+    `selects only the requested %s replay lane`,
+    (property, file, expectedTests) => {
+      const result = runReplay([file], undefined, property)
+      expect(result.status, result.output).toBe(0)
+      expect(result.output).toContain(`"executions":${expectedTests}`)
+      expect(result.output).toMatch(
+        new RegExp(`Tests\\s+${expectedTests} passed \\| \\d+ skipped`),
+      )
+    },
+    40_000,
+  )
+
   it.each([
     [
       `sorted-map.key`,
@@ -171,7 +209,6 @@ describe(`guarded oracle replay`, () => {
   it.each([
     [`property`, `replay property sentinel`],
     [`setup`, `replay setup sentinel`],
-    [`unrelated`, `replay unrelated sentinel`],
     [`precondition`, `too many pre-condition failures`],
   ])(
     `preserves a %s failure`,
@@ -179,7 +216,7 @@ describe(`guarded oracle replay`, () => {
       const result = runReplay([fixture], fault)
       expect(result.status, result.output).toBe(1)
       expect(result.output).toContain(message)
-      if (fault === `property` || fault === `unrelated`) {
+      if (fault === `property`) {
         expect(result.output).toContain(`"executions":1`)
       } else {
         expect(result.output).toContain(`"executions":0`)
@@ -187,6 +224,13 @@ describe(`guarded oracle replay`, () => {
     },
     40_000,
   )
+
+  it(`does not run an unrelated failing assertion during direct replay`, () => {
+    const result = runReplay([fixture], `unrelated`)
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).not.toContain(`replay unrelated sentinel`)
+    expect(result.output).toContain(`"executions":1`)
+  }, 40_000)
 
   it(`reports the original failed replay and a later cleanup failure separately`, () => {
     const result = runReplay([fixture], `property`, undefined, true)
@@ -358,6 +402,17 @@ describe(`named oracle replay manifest`, () => {
       } else {
         expect(source).toContain(`\`${entry.property}\``)
       }
+    }
+  })
+
+  it(`gives every index and pagination matrix property a direct test selector`, () => {
+    const direct = oracleReplayManifest.filter(({ property }) =>
+      /^(index-update|pagination\.matrix)\./.test(property),
+    )
+    expect(direct).toHaveLength(19)
+    for (const entry of direct) {
+      expect(entry.status).toBe(`assertion`)
+      expect(entry.testNamePattern).toBeDefined()
     }
   })
 })

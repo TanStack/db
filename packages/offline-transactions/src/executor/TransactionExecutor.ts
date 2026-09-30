@@ -1,4 +1,5 @@
 import { createTransaction } from '@tanstack/db'
+import { OutboxTransactionNotFoundError } from '../outbox/OutboxManager'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
@@ -117,7 +118,14 @@ export class TransactionExecutor {
             outboxPhase: `deletion-pending`,
           }
           try {
-            await this.outbox.update(transaction.id, deletionPending)
+            try {
+              await this.outbox.update(transaction.id, deletionPending)
+            } catch (error) {
+              // A public removal can finish while the provider is still running.
+              // Its acknowledged deletion already satisfies this boundary.
+              if (!(error instanceof OutboxTransactionNotFoundError))
+                throw error
+            }
             await this.outbox.remove(transaction.id)
           } catch (error) {
             span.recordException(
@@ -260,14 +268,15 @@ export class TransactionExecutor {
       const providerPending = transactions.filter(
         (transaction) => transaction.outboxPhase !== `deletion-pending`,
       )
-      const filteredTransactions = [
-        ...(this.config.beforeRetry
-          ? this.config.beforeRetry(providerPending)
-          : providerPending),
-        ...transactions.filter(
-          (transaction) => transaction.outboxPhase === `deletion-pending`,
-        ),
-      ]
+      const selectedProvider = this.config.beforeRetry
+        ? this.config.beforeRetry(providerPending)
+        : providerPending
+      const selectedById = new Map(selectedProvider.map((tx) => [tx.id, tx]))
+      const filteredTransactions = transactions.flatMap((transaction) => {
+        if (transaction.outboxPhase === `deletion-pending`) return [transaction]
+        const selected = selectedById.get(transaction.id)
+        return selected ? [selected] : []
+      })
 
       // The retry hook is user code and may synchronously revoke replay rights.
       if (!this.offlineExecutor.isOfflineEnabled) return
@@ -276,11 +285,9 @@ export class TransactionExecutor {
         this.scheduler.schedule(transaction),
       )
 
+      const retainedIds = new Set(filteredTransactions.map(({ id }) => id))
       removedIds = transactions
-        .filter(
-          (tx) =>
-            !filteredTransactions.some((filtered) => filtered.id === tx.id),
-        )
+        .filter(({ id }) => !retainedIds.has(id))
         .map(({ id }) => id)
       removedIds = this.scheduler.removePendingTransactions(removedIds)
 

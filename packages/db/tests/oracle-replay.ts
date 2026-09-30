@@ -30,6 +30,30 @@ if (entry?.status !== `assertion`) {
   )
 }
 
+function selectReplayTest(args: Array<string>, pattern: string): Array<string> {
+  const filters: Array<string> = [pattern]
+  const forwarded: Array<string> = []
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index]!
+    if (argument === `-t` || argument === `--testNamePattern`) {
+      const filter = args[++index]
+      if (filter === undefined)
+        throw new Error(`${argument} requires a test name pattern`)
+      filters.push(filter)
+    } else if (argument.startsWith(`--testNamePattern=`)) {
+      filters.push(argument.slice(`--testNamePattern=`.length))
+    } else {
+      forwarded.push(argument)
+    }
+  }
+  // The manifest selects the named random/replay lane. Caller filters can
+  // narrow that lane, but cannot replace it with a fixed or unrelated test.
+  const intersection = `^${filters
+    .map((filter) => `(?=[\\s\\S]*${filter})`)
+    .join(``)}`
+  return [...forwarded, `-t`, intersection]
+}
+
 const directory = mkdtempSync(join(tmpdir(), `tanstack-oracle-replay-`))
 const channel = join(directory, `witness.jsonl`)
 let primaryFailure: unknown
@@ -44,7 +68,11 @@ try {
     dirname(require.resolve(`vitest/package.json`)),
     `vitest.mjs`,
   )
-  const args = process.argv.slice(2)
+  const requestedArgs = process.argv.slice(2)
+  const args =
+    entry.testNamePattern === undefined
+      ? requestedArgs
+      : selectReplayTest(requestedArgs, entry.testNamePattern)
   const result = spawnSync(process.execPath, [vitest, `run`, ...args], {
     cwd: process.cwd(),
     env: { ...process.env, TANSTACK_DB_ORACLE_REPLAY_WITNESS: channel },

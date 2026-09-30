@@ -5511,7 +5511,7 @@ describe(`pagination recomputation oracle`, () => {
         `pagination.matrix.window-${index}`,
       ),
     )(
-      `covers ${name} window paths for a random or replayed seed`,
+      `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
       runWindowCell,
     )
 
@@ -5526,7 +5526,10 @@ describe(`pagination recomputation oracle`, () => {
         replay,
         `pagination.matrix.state-${index}`,
       ),
-    )(`covers ${name} state paths for a random or replayed seed`, runStateCell)
+    )(
+      `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
+      runStateCell,
+    )
   }
 
   fcTest.prop([scenarioArbitrary], {

@@ -52,6 +52,9 @@ import type { TestItem } from './harness'
  * storage establish this executor boundary, not real server acknowledgement
  * timing, native storage completion, or multiple-owner leadership. A normal
  * run pairs fixed and seedless campaigns.
+ * Public manual removal may acknowledge deletion while a provider call is
+ * held. Once that call fulfills, both success conditions have occurred, so
+ * the caller and local persistence promise must settle without another row.
  * To replay one shrink directly, set OFFLINE_ORACLE_SEED and
  * OFFLINE_ORACLE_PATH, then select this file and the failing test name.
  */
@@ -820,6 +823,104 @@ it(`keeps commit pending until successful outbox deletion`, async () => {
     )
   }
 })
+
+it.each([`removeFromOutbox`, `clearOutbox`] as const)(
+  `settles active provider work after %s acknowledges outbox deletion`,
+  async (removal) => {
+    const providerEntered = gate()
+    const releaseProvider = gate()
+    const env = createTestOfflineEnvironment({
+      mutationFn: async (params) => {
+        providerEntered.resolve()
+        await releaseProvider.promise
+        env.applyMutations(params.transaction.mutations)
+      },
+    })
+    let transactionId = ``
+    let commitStatus: unknown = `pending`
+    let persistedStatus: unknown = `pending`
+    let observed: Promise<void> | undefined
+    let observedPersistence: Promise<void> | undefined
+    let hasPrimaryFailure = false
+    try {
+      await env.waitForLeader()
+      const transaction = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      transactionId = transaction.id
+      const localTransaction = transaction.mutate(() =>
+        env.collection.insert({
+          id: `manually-removed-active`,
+          value: `provider-applied`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      observedPersistence = localTransaction.isPersisted.promise.then(
+        () => {
+          persistedStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          persistedStatus = error
+        },
+      )
+      observed = transaction.commit().then(
+        () => {
+          commitStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          commitStatus = error
+        },
+      )
+
+      await atOracleCheckpoint(providerEntered.promise, `provider held`)
+      expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+        transactionId,
+      ])
+      if (removal === `removeFromOutbox`)
+        await env.executor.removeFromOutbox(transactionId)
+      else await env.executor.clearOutbox()
+      expect(await env.executor.peekOutbox()).toEqual([])
+      expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
+        `pending`,
+        `pending`,
+        `persisting`,
+      ])
+
+      releaseProvider.resolve()
+      await atOracleCheckpoint(
+        Promise.all([observed, observedPersistence]),
+        `provider fulfillment after ${removal} deletion settled caller`,
+      )
+      expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
+        `fulfilled`,
+        `fulfilled`,
+        `completed`,
+      ])
+      expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+        transactionId,
+      ])
+      expect(env.serverState.has(`manually-removed-active`)).toBe(true)
+      expect(await env.executor.peekOutbox()).toEqual([])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseProvider.resolve()
+      if (commitStatus === `pending` && transactionId)
+        env.executor.resolveTransaction(transactionId, undefined)
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all([observed, observedPersistence]),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
 
 it(`settles successful provider work only after failed deletion is retried`, async () => {
   const firstProviderEntered = gate()

@@ -180,6 +180,85 @@ function oracleOptions(
   }
 }
 
+it(`removes an earlier deletion-pending row before replaying an equal-time peer`, async () => {
+  // The README promises creation-order FIFO and deletion before success. This
+  // fixed restart history uses storage insertion order to distinguish creation
+  // when both persisted timestamps are equal. The independent expected trace
+  // is removal of the earlier completed-provider row, then provider execution
+  // and removal of its later peer. It covers this controlled storage boundary,
+  // not ordering across independent storage writers or a native browser host.
+  const earlier: OfflineTransaction = {
+    ...storedTransaction(`earlier`),
+    outboxPhase: `deletion-pending`,
+  }
+  const later = storedTransaction(`later`)
+  const events: Array<string> = []
+  const hookInputs: Array<Array<string>> = []
+  class Storage extends FakeStorageAdapter {
+    override async delete(key: string): Promise<void> {
+      events.push(`delete:${key.slice(3)}`)
+      await super.delete(key)
+    }
+  }
+  const outbox = new OutboxManager(new Storage(), {})
+  await outbox.add(earlier)
+  await outbox.add(later)
+  const executor = new TransactionExecutor(
+    new KeyScheduler(),
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: async ({ transaction }) => {
+          events.push(`provider:${transaction.id}`)
+        },
+      },
+      beforeRetry: (transactions) => {
+        hookInputs.push(transactions.map(({ id }) => id))
+        return transactions
+      },
+    },
+    {
+      isOfflineEnabled: true,
+      isOnline: () => true,
+      resolveTransaction: () => {},
+      rejectTransaction: () => {},
+      registerRestorationTransaction: () => {},
+    },
+  )
+
+  let hasPrimaryFailure = false
+  try {
+    expect((await outbox.getAll()).map(({ id }) => id)).toEqual([
+      earlier.id,
+      later.id,
+    ])
+    await atOracleCheckpoint(
+      executor.loadPendingTransactions(),
+      `equal-time outbox replay loaded`,
+    )
+    await atOracleCheckpoint(
+      executor.executeAll(),
+      `equal-time outbox replay drained`,
+    )
+
+    expect({ hookInputs, events, remaining: await outbox.count() }).toEqual({
+      hookInputs: [[later.id]],
+      events: [
+        `delete:${earlier.id}`,
+        `provider:${later.id}`,
+        `delete:${later.id}`,
+      ],
+      remaining: 0,
+    })
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupOfflineOracle([() => executor.clear()], hasPrimaryFailure)
+  }
+})
+
 it(`revokes only replay work excluded by the retry hook`, async () => {
   // The hook classifies one captured replay snapshot. Reconciliation may
   // revoke IDs from that snapshot, but must preserve work admitted later.

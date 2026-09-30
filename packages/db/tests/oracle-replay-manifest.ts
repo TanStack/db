@@ -246,7 +246,34 @@ export type OracleReplayManifestEntry = {
   file?: string
   cwd?: string
   command?: string
+  testNamePattern?: string
   environment: ReadonlyArray<string>
+}
+
+// These patterns name the random/replay lane, never its fixed-seed sibling.
+// Pagination cells carry their property name in the test title so the guard
+// can select one cell without running the rest of the matrix.
+const indexReplayTestNames = new Map([
+  [
+    `index-update.reference-model`,
+    `matches a reference model across valid operation sequences \\(seed undefined\\)`,
+  ],
+  [
+    `index-update.exact-identity`,
+    `preserves exact equality while ordered traversal retains every row \\(seed undefined\\)`,
+  ],
+  [
+    `index-update.custom-comparator`,
+    `matches an independent custom-comparator model \\(seed undefined\\)`,
+  ],
+])
+
+function directReplayTestName(property: string): string | undefined {
+  if (property === `oracle-replay.calibration`)
+    return `executes the replay calibration property`
+  if (property.startsWith(`pagination.matrix.`))
+    return `\\[${property.replaceAll(`.`, `\\.`)}\\]`
+  return indexReplayTestNames.get(property)
 }
 
 export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
@@ -266,6 +293,7 @@ export const oracleReplayManifest: ReadonlyArray<OracleReplayManifestEntry> = [
     status,
     file,
     cwd,
+    testNamePattern: directReplayTestName(property),
     command:
       file === undefined
         ? undefined

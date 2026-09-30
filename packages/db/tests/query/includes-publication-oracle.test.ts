@@ -57,10 +57,13 @@ import type { SyncConfig } from '../../src/types.js'
  * joined metadata. Each action updates an existing key; missing-key updates
  * are excluded. The fixed plain-action list reaches the two-write path;
  * a fixed cell and generated properties reach optimistic confirmation, while
- * a generated property reaches rollback. Removing an action kind loses its
- * publication path; removing a Q1/Q2 shape loses that graph path. Rollback
- * runs in the direct pass-through shape. The other plain actions cross all
- * shapes in the fixed list. Generated scalar values exclude initial values.
+ * a generated property reaches both the optimistic and rollback publication
+ * cuts. Each cut requires a callback from Q1 and Q2, so an empty callback
+ * ledger cannot pass the callback-coherence comparison. Removing an action
+ * kind loses its publication path; removing a Q1/Q2 shape loses that graph
+ * path. Rollback runs in the direct pass-through shape. The other plain
+ * actions cross all shapes in the fixed list. Generated scalar values exclude
+ * initial values.
  * Their domain spans -100..100, with -100, -1, 1, and 100 as margins; child
  * values add 0 and 2.
  * Route targets cover occupied group 20 and empty group 30. Atomic
@@ -222,6 +225,7 @@ type PublicationObservation = {
   q1: Array<PublishedRow>
   q2: Array<PublishedRow>
   callbacks: Array<CallbackObservation>
+  callbackReachStart: number | undefined
 }
 
 type CallbackObservation = {
@@ -246,6 +250,9 @@ type PublicationContext = {
   }
   queries: ReturnType<typeof createLayeredQuery>
   callbacks: Array<CallbackObservation>
+  // Driver-only reach marker: callbacks since this index must include both
+  // public query layers at an optimistic or rollback publication cut.
+  callbackReachStart: number | undefined
   unsubscribe: Array<() => void>
   // Model-only subscriber ledger: equal current Collection rows can produce
   // insert or update on the next delivery depending on prior callback reach.
@@ -281,10 +288,11 @@ const publicationProjection: TraceProjection<
 > = {
   // Observe both final reads and rows captured inside each listener. A later
   // repair cannot hide a callback-time tear.
-  observe: ({ queries, callbacks }) => ({
+  observe: ({ queries, callbacks, callbackReachStart }) => ({
     q1: stripVirtualProperties(queries.q1.toArray) as Array<PublishedRow>,
     q2: stripVirtualProperties(queries.q2.toArray) as Array<PublishedRow>,
     callbacks,
+    callbackReachStart,
   }),
   recompute: (context) => {
     const expected = recomputeRows(context)
@@ -292,11 +300,21 @@ const publicationProjection: TraceProjection<
       q1: expected.map((row) => structuredClone(row)),
       q2: expected.map((row) => structuredClone(row)),
       callbacks: [],
+      callbackReachStart: undefined,
     }
   },
   assertEqual: (observed, expected) => {
     expect(observed.q1).toEqual(expected.q1)
     expect(observed.q2).toEqual(expected.q2)
+    if (observed.callbackReachStart !== undefined) {
+      for (const layer of [`q1`, `q2`] as const) {
+        expect(
+          observed.callbacks
+            .slice(observed.callbackReachStart)
+            .some((callback) => callback.layer === layer),
+        ).toBe(true)
+      }
+    }
     // Each layer's own callback must be coherent. This makes no claim that
     // Q2 has already advanced while Q1's earlier callback is running.
     for (const callback of observed.callbacks) {
@@ -341,7 +359,6 @@ async function settleRollback(
 function createPublicationDriver(
   q1Shape: Q1Shape,
   q2Shape: Q2Shape,
-  checkpointOptimistic = false,
 ): TraceDriver<PublicationAction, PublicationContext> {
   // The driver sends each action through real source, optimistic, graph, and
   // Collection publication boundaries. The checkpoint marks each synchronous
@@ -378,6 +395,7 @@ function createPublicationDriver(
           q2Shape,
         ),
         callbacks: [],
+        callbackReachStart: undefined,
         unsubscribe: [],
         lastDeliveredRows: { q1: [], q2: [] },
         model: {
@@ -469,8 +487,17 @@ function createPublicationDriver(
         action.type === `optimisticConfirm` ||
         action.type === `optimisticRollback`
       ) {
+        const checkpointWithCallbackReach = (since: number) => {
+          context.callbackReachStart = since
+          try {
+            checkpoint()
+          } finally {
+            context.callbackReachStart = undefined
+          }
+        }
         const previous = { ...current }
         context.model.parents.set(next.id, { ...next })
+        const beforeOptimisticCallbacks = context.callbacks.length
         const transaction = context.sources.parents.collection.update(
           next.id,
           (draft) => {
@@ -479,12 +506,10 @@ function createPublicationDriver(
         )
 
         let optimisticFailure: unknown
-        if (checkpointOptimistic) {
-          try {
-            checkpoint()
-          } catch (error) {
-            optimisticFailure = error
-          }
+        try {
+          checkpointWithCallbackReach(beforeOptimisticCallbacks)
+        } catch (error) {
+          optimisticFailure = error
         }
 
         if (action.type === `optimisticConfirm`) {
@@ -492,11 +517,13 @@ function createPublicationDriver(
           context.sources.parents.resolveSync()
           await transaction.isPersisted.promise
         } else {
+          const beforeRollbackCallbacks = context.callbacks.length
           context.model.parents.set(previous.id, previous)
           await settleRollback(
             context.sources.parents.rejectSync,
             transaction.isPersisted.promise,
           )
+          checkpointWithCallbackReach(beforeRollbackCallbacks)
         }
 
         if (optimisticFailure) throw optimisticFailure
@@ -526,13 +553,12 @@ function createPublicationDriver(
 
 async function expectPublicationMatches(
   action: PublicationAction,
-  checkpointOptimistic = false,
   q1Shape: Q1Shape = `direct`,
   q2Shape: Q2Shape = `passThrough`,
 ): Promise<void> {
   await runTrace({
     steps: [action],
-    driver: createPublicationDriver(q1Shape, q2Shape, checkpointOptimistic),
+    driver: createPublicationDriver(q1Shape, q2Shape),
     projection: publicationProjection,
   })
 }
@@ -693,7 +719,7 @@ describe(`layered-query publication oracle`, () => {
 
       it(`checks both sides of confirmation through ${q1Shape}/${q2Shape}`, async () => {
         for (const fault of [`none`, `optimistic`, `confirmed`] as const) {
-          const driver = createPublicationDriver(q1Shape, q2Shape, true)
+          const driver = createPublicationDriver(q1Shape, q2Shape)
           let phase: `initial` | `optimistic` | `confirmed` = `initial`
           const seen: Array<string> = []
           let hits = 0
@@ -742,7 +768,6 @@ describe(`layered-query publication oracle`, () => {
           async (value) => {
             await expectPublicationMatches(
               { type: `parentScalar`, value },
-              false,
               q1Shape,
               q2Shape,
             )
@@ -762,7 +787,6 @@ describe(`layered-query publication oracle`, () => {
           async (parentValue, childValue) => {
             await expectPublicationMatches(
               { type: `parentThenChild`, parentValue, childValue },
-              false,
               q1Shape,
               q2Shape,
             )
@@ -779,7 +803,6 @@ describe(`layered-query publication oracle`, () => {
           async (value) => {
             await expectPublicationMatches(
               { type: `optimisticConfirm`, value },
-              true,
               q1Shape,
               q2Shape,
             )
@@ -788,6 +811,41 @@ describe(`layered-query publication oracle`, () => {
       }
     }
   }
+
+  it.each([
+    { phase: `optimistic`, cut: 0, checkpoint: 1 },
+    { phase: `rollback`, cut: 1, checkpoint: 2 },
+  ])(
+    `rejects missing $phase callbacks at the public checkpoint`,
+    async ({ cut, checkpoint: expectedCheckpoint }) => {
+      const driver = createPublicationDriver(`direct`, `passThrough`)
+      let reachedCuts = 0
+      let previousCallbackCount = 0
+      const run = runTrace({
+        steps: [{ type: `optimisticRollback` as const, value: 7 }],
+        driver: {
+          ...driver,
+          apply: (action, context, checkpoint) =>
+            driver.apply(action, context, () => {
+              // Remove one phase's recorded public callbacks while preserving
+              // the final reads. The callback-reach check must reject it.
+              if (reachedCuts === cut) {
+                context.callbacks.splice(previousCallbackCount)
+              }
+              reachedCuts++
+              previousCallbackCount = context.callbacks.length
+              return checkpoint()
+            }),
+        },
+        projection: publicationProjection,
+      })
+      await expect(run).rejects.toMatchObject({
+        name: `TraceAssertionError`,
+        checkpoint: expectedCheckpoint,
+      })
+      expect(reachedCuts).toBe(2)
+    },
+  )
 
   for (const campaign of publicationCampaigns(
     100,
