@@ -16,7 +16,8 @@
       "@tanstack/db": ["../db/src"],
       "@tanstack/db-ivm": ["../db-ivm/src"],
       "@tanstack/offline-transactions": ["../offline-transactions/src"],
-      "@tanstack/db-collection-e2e": ["../db-collection-e2e/src"]
+      "@tanstack/db-collection-e2e": ["../db-collection-e2e/src"],
+      "@tanstack/electric-db-collection": ["../electric-db-collection/src"]
     }
   },
   "include": [
