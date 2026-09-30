@@ -1,5 +1,16 @@
 # offline-first-electron
 
+## 1.0.7
+
+### Patch Changes
+
+- Updated dependencies [[`9c62ac3`](https://github.com/TanStack/db/commit/9c62ac3782779dc2a91335dd834ad8eb907db109), [`c0d123b`](https://github.com/TanStack/db/commit/c0d123b86aeb2942d0a2a70a050bf10a3b3dda48), [`f7c0afe`](https://github.com/TanStack/db/commit/f7c0afe1d28b2a8805695e84a383c3bc5496b63e), [`c879ba6`](https://github.com/TanStack/db/commit/c879ba6d855914e5c0cac49af7a007eb5cabe7e4), [`bef12e2`](https://github.com/TanStack/db/commit/bef12e24227aa993cea03c7b1cdeeda233cce739), [`eecbf4f`](https://github.com/TanStack/db/commit/eecbf4f24ff52886a79fa548b9265f1a5ec611a3)]:
+  - @tanstack/react-db@0.5.0
+  - @tanstack/offline-transactions@1.0.58
+  - @tanstack/query-db-collection@1.3.1
+  - @tanstack/electron-db-sqlite-persistence@0.2.1
+  - @tanstack/node-db-sqlite-persistence@0.2.25
+
 ## 1.0.6
 
 ### Patch Changes

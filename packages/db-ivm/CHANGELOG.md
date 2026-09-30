@@ -1,5 +1,15 @@
 # @tanstack/db-ivm
 
+## 0.1.24
+
+### Patch Changes
+
+- Share one type dispatch between structural hashing and `equalHashValues`. Value identity, cycle rejection, and the structural work cap do not change. The standalone `@tanstack/db-ivm` entry is about 1 KB smaller when minified (about 225 B with gzip). ([#1961](https://github.com/TanStack/db/pull/1961))
+
+- Share one loop for keyed and unkeyed `MultiSet` consolidation. Identity rules do not change, and a `-0` record in single-number data still consolidates to `0`. The standalone `@tanstack/db-ivm` entry is about 970 B smaller when minified (about 325 B with gzip). Consolidation is faster or equal in the measured workloads. ([#1951](https://github.com/TanStack/db/pull/1951))
+
+- Run only D2 operators with queued input so unrelated branches do no operator work during an update. ([#1959](https://github.com/TanStack/db/pull/1959))
+
 ## 0.1.23
 
 ### Patch Changes
