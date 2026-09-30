@@ -48,7 +48,7 @@ export function deepEqualsInternal(
   visited: Map<object, object>,
 ): boolean {
   // Handle strict equality (primitives, same reference)
-  if (a === b) return true
+  if (a === b || Object.is(a, b)) return true
 
   // Handle null/undefined
   if (a == null || b == null) return false
@@ -59,7 +59,7 @@ export function deepEqualsInternal(
   // Handle Date objects
   if (a instanceof Date) {
     if (!(b instanceof Date)) return false
-    return a.getTime() === b.getTime()
+    return Object.is(a.getTime(), b.getTime())
   }
   // Symmetric check: if b is Date but a is not, they're not equal
   if (b instanceof Date) return false
