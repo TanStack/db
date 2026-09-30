@@ -126,14 +126,12 @@ export class KeyScheduler {
   }
 
   updateTransactions(updatedTransactions: Array<OfflineTransaction>): void {
-    for (const updatedTx of updatedTransactions) {
-      const index = this.pendingTransactions.findIndex(
-        (tx) => tx.id === updatedTx.id,
-      )
-      if (index >= 0) {
-        this.pendingTransactions[index] = updatedTx
-      }
-    }
+    const updatedById = new Map(
+      updatedTransactions.map((transaction) => [transaction.id, transaction]),
+    )
+    this.pendingTransactions = this.pendingTransactions.map(
+      (transaction) => updatedById.get(transaction.id) ?? transaction,
+    )
     // Re-sort to maintain FIFO order after updates
     this.pendingTransactions.sort(
       (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
