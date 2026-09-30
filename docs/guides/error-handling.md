@@ -243,7 +243,7 @@ const App = () => (
 
 With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
 
-When every eager SQLite persisted source opts in, a failed client query stream can produce a different initial result. React waits for every persisted restore, then renders the query result. A derived-query failure still reaches the Error Boundary. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for the option and its limits.
+When every eager SQLite persisted source opts in, a failed client query stream can produce a different initial result. React waits for every persisted restore. If each restore succeeds, React renders the query result. A derived-query failure still reaches the Error Boundary. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for the option and its limits.
 
 ## Transaction Error Handling
 

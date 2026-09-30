@@ -248,7 +248,9 @@ Place `TodosScreen` inside an [Error Boundary](./error-handling.md#using-suspens
 
 Suspense prefers Collection readiness. If it remains pending after `networkTimeoutMs`, a completed SQLite restore can release the first render. The default is 3 seconds. Set `networkTimeoutMs: 0` to allow fallback as soon as restore completes. For a query with multiple sources, the longest configured deadline applies. The deadline does not stop network sync.
 
-A source failure can allow fallback before the deadline. React also waits for restore if its client query stream fails before the first render, including when that failure occurs before the component mounts. Once restore completes, React renders the derived query result, even if it is empty. A derived-query failure still reaches the React Error Boundary. If restore fails or a source did not opt in, React sends the initial error to the Error Boundary.
+A source failure can allow fallback before the deadline. React also waits for restore if its client query stream fails before the first render, including before the component mounts. Once every restore succeeds, React renders the derived query result, even if it is empty.
+
+A derived-query failure still reaches the surrounding React Error Boundary. If the network-first wait rejects, its error reaches that boundary. A successful network load can render even if restore failed or a source did not opt in.
 
 Persisted readiness does not prove current authorization. Isolate SQLite data by user or tenant. If an authorization failure must hide cached rows, block the view separately. The fallback does not classify source errors.
 
