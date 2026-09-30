@@ -1,6 +1,6 @@
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it, vi } from 'vitest'
-import { hash, registerOpaqueHash } from '../src/hashing/hash'
+import { equalHashValues, hash, registerOpaqueHash } from '../src/hashing/hash'
 
 function countTraversalAllocations(run: () => void): number {
   let allocations = 0
@@ -123,6 +123,21 @@ describe(`hash traversal work`, () => {
       expect(reads).toBe(attempt)
     }
     expect(hash({ value: 1 })).toBe(hash({ value: 1 }))
+  })
+
+  it(`copies a shared Map's entries once per compared pair, not per revisit`, () => {
+    const shared = new Map(Array.from({ length: 50 }, (_, i) => [i, i]))
+    const copy = new Map(shared)
+    const entries = vi.spyOn(Map.prototype, `entries`)
+    try {
+      expect(
+        equalHashValues(Array(100).fill(shared), Array(100).fill(copy)),
+      ).toBe(true)
+      // One copy for each side of the single distinct pair.
+      expect(entries).toHaveBeenCalledTimes(2)
+    } finally {
+      entries.mockRestore()
+    }
   })
 
   // Each visited value costs one unit of work. Each header value of an array

@@ -117,11 +117,11 @@ function refObject(kind: RefKind, id: number): object {
 // Model: a canonical encoding of a spec's identity.
 
 function identity(spec: Spec): string {
-  return JSON.stringify(canon(spec, []))
+  return JSON.stringify(canon(spec))
 }
 
-function canon(spec: Spec, path: Array<Spec>): unknown {
-  const inner = (child: Spec) => canon(child, [...path, spec])
+function canon(spec: Spec): unknown {
+  const inner = canon
   const props = (p: Spec | undefined) => (p ? [[`p`, inner(p)]] : [])
   switch (spec.k) {
     case `num`:
@@ -286,12 +286,22 @@ function nodes(
         ),
       })),
     )
+  if (spec.k === `obj`)
+    spec.syms.forEach(([id, value], index) =>
+      child(value, (next) => ({
+        ...spec,
+        syms: spec.syms.map((old, i) =>
+          i === index ? ([id, next] as [number, Spec]) : old,
+        ),
+      })),
+    )
   return out
 }
 
 type Mutation =
   | `none`
   | `replace`
+  | `split`
   | `header`
   | `order`
   | `hole`
@@ -363,7 +373,17 @@ function nearMiss(spec: Spec, choice: number): [Mutation, Spec] {
                 },
               ]
     case `twice`:
-      return [`replace`, { k: `array`, items: [spec.child] }]
+      // A shared child on one side against two different copies on the other
+      // tests that equality's revisit check keys on both objects.
+      return choice % 2
+        ? [`replace`, { k: `array`, items: [spec.child] }]
+        : [
+            `split`,
+            {
+              k: `array`,
+              items: [spec.child, nearMiss(spec.child, choice >> 1)[1]],
+            },
+          ]
     case `map`: {
       const pairs = spec.entries.map(
         ([key, value]): Spec => ({
@@ -545,7 +565,7 @@ type CyclicPair = { spec: Spec; changed: Spec; seeds: [number, number] }
 
 const cyclicArb: fc.Arbitrary<CyclicPair> = fc
   .tuple(
-    fc.constantFrom(`array`, `map`, `obj`),
+    fc.constantFrom(`array`, `map`, `set`, `obj`),
     fc.array(fc.oneof(primitiveArb, fc.constant(null)), {
       minLength: 1,
       maxLength: 3,
@@ -566,11 +586,13 @@ const cyclicArb: fc.Arbitrary<CyclicPair> = fc
               k: `map`,
               entries: inner.map((child, i) => [`k${i}`, child]),
             }
-          : {
-              k: `obj`,
-              entries: inner.map((child, i) => [`k${i}`, child]),
-              syms: [],
-            }
+          : kind === `set`
+            ? { k: `set`, items: inner }
+            : {
+                k: `obj`,
+                entries: inner.map((child, i) => [`k${i}`, child]),
+                syms: [],
+              }
     const leafSpecs = leaves.map((leaf) => leaf ?? num(1))
     let spec = children([...leafSpecs, { k: `back`, up }])
     for (let level = 0; level < depth; level++) spec = children([spec])
@@ -578,6 +600,7 @@ const cyclicArb: fc.Arbitrary<CyclicPair> = fc
       ([node]) =>
         node.k !== `back` &&
         node.k !== `array` &&
+        node.k !== `set` &&
         node.k !== `map` &&
         node.k !== `obj`,
     )!
@@ -714,9 +737,10 @@ describe(`hash identity oracle`, () => {
         `property`,
         `replace`,
         `retype`,
+        `split`,
       ].sort(),
     )
-    for (const mutation of [`header`, `hole`, `retype`, `replace`])
+    for (const mutation of [`header`, `hole`, `retype`, `replace`, `split`])
       expect(verdicts.get(mutation), mutation).toContain(false)
     expect(verdicts.get(`none`)).toEqual(new Set([true]))
   })
@@ -845,6 +869,33 @@ describe(`hash identity oracle`, () => {
 
   // Current behavior outside the grammar: an array from another realm takes
   // the object marker, but equality still compares array lengths.
+  // Current behavior outside the grammar: equality compares RegExp fields
+  // with `===`, so a NaN `lastIndex` never equals itself, and `-0` equals `0`.
+  // Hashing normalizes both, so the NaN pair hashes equal.
+  it(`compares RegExp lastIndex with strict equality`, () => {
+    const withLastIndex = (lastIndex: number) =>
+      Object.assign(/a/g, { lastIndex })
+    expect(equalHashValues(withLastIndex(NaN), withLastIndex(NaN))).toBe(false)
+    expect(equalHashValues(withLastIndex(-0), withLastIndex(0))).toBe(true)
+  })
+
+  it(`does not accept a second copy because the first copy matched`, () => {
+    const spec: Spec = {
+      k: `twice`,
+      child: { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
+    }
+    const split: Spec = {
+      k: `array`,
+      items: [
+        { k: `obj`, entries: [[`a`, num(1)]], syms: [] },
+        { k: `obj`, entries: [[`a`, num(2)]], syms: [] },
+      ],
+    }
+    // Some seeds share the child on the left side.
+    for (let seed = 1; seed < 20; seed++)
+      expectPair({ left: spec, right: split, mutation: `split` }, [seed, seed])
+  })
+
   it(`keeps the equality length check for arrays from another realm`, () => {
     const withHole = runInNewContext(`const a = [1]; a.length = 2; a`)
     const short = runInNewContext(`[1]`)

@@ -69,7 +69,7 @@ function hashObject(input: object, context: HashContext): number {
     // count toward the work cap; Date, binary, and Temporal headers do not.
     for (const value of header)
       if (body) updateHasher(hasher, value, context)
-      else hasher.update(value)
+      else hasher.update(value as string | number)
     if (body) {
       // Sorted string keys, then enumerable symbol keys by identity.
       const keys: Array<string | symbol> = Object.keys(body).sort(keySort)
@@ -104,12 +104,18 @@ function hashObject(input: object, context: HashContext): number {
  */
 type ObjectParts = [
   marker: number,
-  header: ReadonlyArray<string | number>,
+  // A RegExp `lastIndex` can hold any value; the other headers are strings
+  // or numbers.
+  header: ReadonlyArray<unknown>,
   body?: object,
 ]
 
 function objectParts(input: object): ObjectParts {
-  if (input instanceof Date) return [DATE_MARKER, [input.getTime()]]
+  if (input instanceof Date) {
+    const time = input.getTime()
+    // Invalid dates are equal to each other; headers compare with `===`.
+    return [DATE_MARKER, [Number.isNaN(time) ? `invalid` : time]]
+  }
   if (isBinaryValue(input))
     return [
       UINT8ARRAY_MARKER,
@@ -237,18 +243,19 @@ export function equalHashValues(left: unknown, right: unknown): boolean {
     if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length)
       return false
 
+    // Revisited pairs close cycles and avoid expanding shared subtrees. Check
+    // before objectParts copies Map or Set entries; record only pairs with a
+    // body, after their markers and headers match.
+    const peers = compared.get(a)
+    if (peers?.has(b)) return true
     const [aMarker, aHeader, aBody] = objectParts(a)
     const [bMarker, bHeader, bBody] = objectParts(b)
     if (
       aMarker !== bMarker ||
-      !aHeader.every((value, index) => equal(value, bHeader[index]))
+      !aHeader.every((value, index) => value === bHeader[index])
     )
       return false
     if (!aBody || !bBody) return true
-
-    // Revisited pairs close cycles and avoid expanding shared subtrees.
-    const peers = compared.get(a)
-    if (peers?.has(b)) return true
     if (peers) peers.add(b)
     else compared.set(a, new Set([b]))
     const aKeys = keys(aBody)
