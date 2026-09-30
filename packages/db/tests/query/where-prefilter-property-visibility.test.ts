@@ -93,3 +93,44 @@ it('lets the full predicate handle a throwing nested getter', async () => {
     await collection.cleanup()
   }
 })
+
+it('lets the full filter handle a throwing nested getter in a change', async () => {
+  const nested = () =>
+    Object.create(
+      Object.defineProperty({}, 'v', {
+        get() {
+          throw new Error('nested getter read')
+        },
+      }),
+    ) as { v?: string }
+  const collection = createCollection(
+    mockSyncCollectionOptions<Row>({
+      id: 'prefilter-getter-nested-change',
+      getKey: (item) => item.id,
+      initialData: [],
+    }),
+  )
+  const batches: Array<Array<string | number>> = []
+  let subscription: { unsubscribe: () => void } | undefined
+  try {
+    await collection.stateWhenReady()
+    subscription = collection.subscribeChanges(
+      (changes) => batches.push(changes.map((change) => change.key)),
+      { whereExpression: nestedWhere },
+    )
+    collection.utils.begin()
+    collection.utils.write({
+      type: 'insert',
+      value: { id: 'thrower', nested: nested() },
+    })
+    collection.utils.write({
+      type: 'insert',
+      value: { id: 'match', nested: { v: 'a' } },
+    })
+    collection.utils.commit()
+    expect(batches).toEqual([['match']])
+  } finally {
+    subscription?.unsubscribe()
+    await collection.cleanup()
+  }
+})
