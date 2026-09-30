@@ -10,6 +10,7 @@ import { runAllCallbacks } from '../utils/callbacks.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
 import {
+  compileEqualityPrefilter,
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from './change-events.js'
@@ -172,6 +173,9 @@ export class CollectionSubscription
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
+  /** Necessary condition for a row to satisfy the where clause, if cheap. */
+  private equalityPrefilter: ((row: object) => boolean) | undefined
+
   private orderByIndex: IndexReader<string | number> | undefined
 
   // Status tracking
@@ -233,6 +237,10 @@ export class CollectionSubscription
     }
 
     this.callback = callbackWithSentKeysTracking
+
+    this.equalityPrefilter = options.whereExpression
+      ? compileEqualityPrefilter(options.whereExpression)
+      : undefined
 
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
@@ -1109,6 +1117,7 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
+    if (this.cannotMatchAny(changes)) return false
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
@@ -1119,6 +1128,30 @@ export class CollectionSubscription
     // missing content. Delegated publication keeps its private D2 contributions.
     if (this.bufferPrivately(newChanges)) return false
     return this.filteredCallback(newChanges)
+  }
+
+  /**
+   * A change reaches the where filter only as its value or previous value, so
+   * a batch in which neither can pass the prefilter publishes nothing. Stale
+   * published rows and truncate replay consume unfiltered changes, and an
+   * empty batch is a ready signal, so those always take the full path.
+   */
+  private cannotMatchAny(changes: Array<ChangeMessage<any, any>>): boolean {
+    const prefilter = this.equalityPrefilter
+    if (
+      !prefilter ||
+      changes.length === 0 ||
+      this.stalePublishedRows.size > 0 ||
+      this.truncateReplayState !== undefined
+    ) {
+      return false
+    }
+    return changes.every(
+      (change) =>
+        !prefilter(change.value) &&
+        (change.previousValue === undefined ||
+          !prefilter(change.previousValue)),
+    )
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */

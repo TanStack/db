@@ -7,6 +7,7 @@ import {
   optimizeExpressionWithIndexes,
 } from '../utils/index-optimization.js'
 import { ensureIndexForField } from '../indexes/auto-index.js'
+import { getPropRefPropertyPath } from '../query/ir.js'
 import { makeComparator } from '../utils/comparison.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
 import type {
@@ -196,6 +197,49 @@ export function createFilterFunctionFromExpression<T extends object>(
       return false
     }
   }
+}
+
+/**
+ * Compiles a cheap necessary condition for `expression` to be TRUE, or returns
+ * undefined when the expression has none.
+ *
+ * A top-level conjunct `eq(field, literal)` with a string or boolean literal is
+ * TRUE only when the field holds the identical string or boolean: equality
+ * normalization never maps another type onto a plain string or boolean. A
+ * row that fails the returned test therefore fails the whole expression.
+ */
+export function compileEqualityPrefilter(
+  expression: BasicExpression<boolean>,
+): ((row: object) => boolean) | undefined {
+  const conjuncts: Array<BasicExpression> = []
+  const collect = (node: BasicExpression) => {
+    if (node.type === `func` && node.name === `and`) node.args.forEach(collect)
+    else conjuncts.push(node)
+  }
+  collect(expression)
+
+  for (const conjunct of conjuncts) {
+    if (conjunct.type !== `func` || conjunct.name !== `eq`) continue
+    const [left, right] = conjunct.args
+    const ref =
+      left?.type === `ref` ? left : right?.type === `ref` ? right : undefined
+    const literal =
+      left?.type === `val` ? left : right?.type === `val` ? right : undefined
+    if (!ref || !literal) continue
+    const expected: unknown = literal.value
+    if (typeof expected !== `string` && typeof expected !== `boolean`) continue
+
+    const path = getPropRefPropertyPath(ref)
+    return (row) => {
+      let value: any = row
+      for (const segment of path) {
+        if (value == null) return false
+        value = value[segment]
+      }
+      return value === expected
+    }
+  }
+  return undefined
 }
 
 /**
