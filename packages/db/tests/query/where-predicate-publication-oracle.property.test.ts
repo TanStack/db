@@ -39,9 +39,10 @@
  * pending optimistic inserts and applies no source transactions: the
  * Collection holds synced commits while a user transaction persists, and the
  * optimistic-history oracle owns that law. A change history starts from synced
- * rows and applies up to four synced transactions of one to three operations.
- * Operations insert a new key or update or delete an existing key, so one
- * transaction can move several rows across the predicate boundary. An update
+ * rows and applies up to six synced transactions of one to three operations.
+ * Operations insert a new or previously deleted key, or update or delete an
+ * existing key, so one transaction can move several rows across the predicate
+ * boundary. An update
  * to an equivalent value, or a second update to one key in the same
  * transaction, is dropped from the history: whether a net no-op publishes is
  * change detection, which the change-event history oracle owns. Each history
@@ -145,7 +146,7 @@ type Predicate =
 
 type SeedRow = { v: FieldValue; optimistic: boolean }
 type Operation =
-  | { type: `insert`; v: FieldValue }
+  | { type: `insert`; v: FieldValue; reuse?: number }
   | { type: `update`; target: number; v: FieldValue }
   | { type: `delete`; target: number }
 type History =
@@ -290,12 +291,48 @@ const predicateArbitrary: fc.Arbitrary<Predicate> = fc.letrec<{
   ),
 })).predicate
 
+// A top-level `eq(v, string | boolean)` conjunct lets a subscription skip
+// batches that cannot match. Change histories favor that shape so generated
+// histories exercise the skip, not only the full filter.
+const prefilterablePredicateArbitrary: fc.Arbitrary<Predicate> = fc
+  .tuple(
+    fc.constantFrom<FieldValue>(`a`, PREFIXED, true),
+    fc.option(predicateArbitrary, { nil: undefined }),
+  )
+  .map(([value, rest]): Predicate => {
+    const conjunct: Predicate = {
+      kind: `eq`,
+      left: { kind: `field` },
+      right: { kind: `literal`, value },
+    }
+    return rest === undefined
+      ? conjunct
+      : { kind: `and`, args: [conjunct, rest] }
+  })
+
+// Change histories favor one matching and one non-matching string so rows
+// cross the predicate boundary often; the full domain stays reachable.
+const changeValueArbitrary = fc.oneof(
+  { weight: 2, arbitrary: fc.constantFrom<FieldValue>(`a`, `b`) },
+  fieldValueArbitrary,
+)
+
 const operationArbitrary: fc.Arbitrary<Operation> = fc.oneof(
-  fieldValueArbitrary.map((v): Operation => ({ type: `insert`, v })),
+  fc
+    .tuple(
+      changeValueArbitrary,
+      fc.option(fc.nat({ max: 7 }), { nil: undefined }),
+    )
+    .map(
+      ([v, reuse]): Operation =>
+        reuse === undefined
+          ? { type: `insert`, v }
+          : { type: `insert`, v, reuse },
+    ),
   {
     weight: 2,
     arbitrary: fc
-      .tuple(fc.nat({ max: 7 }), fieldValueArbitrary)
+      .tuple(fc.nat({ max: 7 }), changeValueArbitrary)
       .map(([target, v]): Operation => ({ type: `update`, target, v })),
   },
   fc.nat({ max: 7 }).map((target): Operation => ({ type: `delete`, target })),
@@ -314,11 +351,14 @@ const historyArbitrary: fc.Arbitrary<History> = fc.oneof(
     weight: 2,
     arbitrary: fc.record({
       kind: fc.constant(`changes` as const),
-      rows: fc.array(fieldValueArbitrary, { maxLength: 5 }),
-      predicate: predicateArbitrary,
+      rows: fc.array(changeValueArbitrary, { maxLength: 5 }),
+      predicate: fc.oneof(predicateArbitrary, {
+        weight: 2,
+        arbitrary: prefilterablePredicateArbitrary,
+      }),
       transactions: fc.array(
         fc.array(operationArbitrary, { minLength: 1, maxLength: 3 }),
-        { minLength: 1, maxLength: 4 },
+        { minLength: 1, maxLength: 6 },
       ),
     }),
   },
@@ -425,6 +465,22 @@ const pinnedChangeHistories: ReadonlyArray<History> = [
     rows: [2],
     predicate: fieldEq(Number.NaN),
     transactions: [[{ type: `update`, target: 0, v: Number.NaN }]],
+  },
+  {
+    // A subscriber without initial state records every unsent inserted key.
+    // Deleting a key it never published must still clear that record, or a
+    // later matching reinsertion looks like a duplicate insert.
+    kind: `changes`,
+    rows: [],
+    predicate: fieldEq(`a`),
+    transactions: [
+      [
+        { type: `insert`, v: `a` },
+        { type: `insert`, v: `b` },
+      ],
+      [{ type: `delete`, target: 1 }],
+      [{ type: `insert`, v: `a`, reuse: 0 }],
+    ],
   },
   {
     // A row that moves out must be retracted, including inside one batch.
@@ -647,13 +703,27 @@ async function observeHistory(
 
     if (history.kind === `changes`) {
       let nextKey = 0
+      // Keys deleted by an earlier transaction may be reinserted. Reinsertion
+      // in the deleting transaction is a net change outside this grammar.
+      const deletedKeys: Array<string> = []
       for (const [step, operations] of history.transactions.entries()) {
         collection.utils.begin()
         const updatedKeys = new Set<string>()
+        const reusableKeys = [...deletedKeys]
         for (const operation of operations) {
           const keys = [...modelRows.keys()]
           if (operation.type === `insert`) {
-            const id = `n${nextKey++}`
+            const reused =
+              operation.reuse !== undefined && reusableKeys.length > 0
+                ? reusableKeys.splice(
+                    operation.reuse % reusableKeys.length,
+                    1,
+                  )[0]!
+                : undefined
+            if (reused !== undefined) {
+              deletedKeys.splice(deletedKeys.indexOf(reused), 1)
+            }
+            const id = reused ?? `n${nextKey++}`
             collection.utils.write({
               type: `insert`,
               value: sourceRow(id, operation.v),
@@ -669,6 +739,7 @@ async function observeHistory(
             collection.utils.write({ type: `delete`, value: { id } })
             modelRows.delete(id)
             touched.delete(id)
+            deletedKeys.push(id)
             continue
           }
           if (

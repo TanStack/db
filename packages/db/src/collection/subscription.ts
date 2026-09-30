@@ -1132,7 +1132,9 @@ export class CollectionSubscription
 
   /**
    * A change reaches the where filter only as its value or previous value, so
-   * a batch in which neither can pass the prefilter publishes nothing. Stale
+   * a batch in which neither can pass the prefilter publishes nothing. Its
+   * only other effect is sent-key bookkeeping, and only a delete of a tracked
+   * key changes a record that later batches read. Stale
    * published rows and truncate replay consume unfiltered changes, and an
    * empty batch signals Collection readiness, so those take the full path.
    */
@@ -1146,8 +1148,11 @@ export class CollectionSubscription
     ) {
       return false
     }
+    // Deleting a tracked key clears its sent-key record, even when the row
+    // was never published, so a later reinsertion is not a duplicate.
     return changes.every(
       (change) =>
+        !(change.type === `delete` && this.sentKeys.has(change.key)) &&
         !prefilter(change.value) &&
         (change.previousValue === undefined ||
           !prefilter(change.previousValue)),
