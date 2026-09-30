@@ -3,7 +3,7 @@ id: QueryBuilderError
 title: QueryBuilderError
 ---
 
-Defined in: [packages/db/src/errors.ts:373](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L373)
+Defined in: [packages/db/src/errors.ts:411](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L411)
 
 ## Extends
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:373](https://github.com/TanStack/db/blob/
 new QueryBuilderError(message): QueryBuilderError;
 ```
 
-Defined in: [packages/db/src/errors.ts:374](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L374)
+Defined in: [packages/db/src/errors.ts:412](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L412)
 
 #### Parameters
 

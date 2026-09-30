@@ -7,7 +7,7 @@ title: createLiveQueryWindowController
 function createLiveQueryWindowController<T, TKey>(collection, options): LiveQueryWindowController<T, TKey>;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:1035](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L1035)
+Defined in: [packages/db/src/live-query-window-controller.ts:1040](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L1040)
 
 **`Internal`**
 

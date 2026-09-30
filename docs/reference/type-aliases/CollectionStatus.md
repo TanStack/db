@@ -7,7 +7,7 @@ title: CollectionStatus
 type CollectionStatus = "idle" | "loading" | "ready" | "error" | "cleaned-up";
 ```
 
-Defined in: [packages/db/src/types.ts:599](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L599)
+Defined in: [packages/db/src/types.ts:704](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L704)
 
 Collection status values for lifecycle management
 

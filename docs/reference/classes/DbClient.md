@@ -52,7 +52,7 @@ Defined in: [packages/db/src/client.ts:342](https://github.com/TanStack/db/blob/
 _consumeLiveQueryResult(queryHash, dehydratedAt): void;
 ```
 
-Defined in: [packages/db/src/client.ts:635](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L635)
+Defined in: [packages/db/src/client.ts:636](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L636)
 
 **`Internal`**
 
@@ -78,7 +78,7 @@ Defined in: [packages/db/src/client.ts:635](https://github.com/TanStack/db/blob/
 _failPendingLiveQueries(error): void;
 ```
 
-Defined in: [packages/db/src/client.ts:678](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L678)
+Defined in: [packages/db/src/client.ts:679](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L679)
 
 **`Internal`**
 
@@ -100,7 +100,7 @@ Defined in: [packages/db/src/client.ts:678](https://github.com/TanStack/db/blob/
 _getLiveQuery(queryHash): DbClientLiveQuery | undefined;
 ```
 
-Defined in: [packages/db/src/client.ts:630](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L630)
+Defined in: [packages/db/src/client.ts:631](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L631)
 
 **`Internal`**
 
@@ -122,7 +122,7 @@ Defined in: [packages/db/src/client.ts:630](https://github.com/TanStack/db/blob/
 _isSsrServerCleanupEnabled(): boolean;
 ```
 
-Defined in: [packages/db/src/client.ts:625](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L625)
+Defined in: [packages/db/src/client.ts:626](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L626)
 
 **`Internal`**
 
@@ -138,7 +138,7 @@ Defined in: [packages/db/src/client.ts:625](https://github.com/TanStack/db/blob/
 _isSsrStreamingEnabled(): boolean;
 ```
 
-Defined in: [packages/db/src/client.ts:615](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L615)
+Defined in: [packages/db/src/client.ts:616](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L616)
 
 **`Internal`**
 
@@ -194,7 +194,7 @@ Defined in: [packages/db/src/client.ts:432](https://github.com/TanStack/db/blob/
 _registerLiveQuery(queryHash, promise): Promise<void>;
 ```
 
-Defined in: [packages/db/src/client.ts:643](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L643)
+Defined in: [packages/db/src/client.ts:644](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L644)
 
 **`Internal`**
 
@@ -220,7 +220,7 @@ Defined in: [packages/db/src/client.ts:643](https://github.com/TanStack/db/blob/
 _registerLiveQueryResource(owner, cleanup): () => void;
 ```
 
-Defined in: [packages/db/src/client.ts:665](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L665)
+Defined in: [packages/db/src/client.ts:666](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L666)
 
 **`Internal`**
 
@@ -252,7 +252,7 @@ Defined in: [packages/db/src/client.ts:665](https://github.com/TanStack/db/blob/
 _setSsrServerCleanupEnabled(enabled): void;
 ```
 
-Defined in: [packages/db/src/client.ts:620](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L620)
+Defined in: [packages/db/src/client.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L621)
 
 **`Internal`**
 
@@ -274,7 +274,7 @@ Defined in: [packages/db/src/client.ts:620](https://github.com/TanStack/db/blob/
 _setSsrStreamingEnabled(enabled): void;
 ```
 
-Defined in: [packages/db/src/client.ts:610](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L610)
+Defined in: [packages/db/src/client.ts:611](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L611)
 
 **`Internal`**
 
@@ -296,7 +296,7 @@ Defined in: [packages/db/src/client.ts:610](https://github.com/TanStack/db/blob/
 applyCollectionChunk(chunk): void;
 ```
 
-Defined in: [packages/db/src/client.ts:600](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L600)
+Defined in: [packages/db/src/client.ts:601](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L601)
 
 #### Parameters
 
@@ -316,7 +316,7 @@ Defined in: [packages/db/src/client.ts:600](https://github.com/TanStack/db/blob/
 cleanup(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/client.ts:685](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L685)
+Defined in: [packages/db/src/client.ts:686](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L686)
 
 #### Returns
 
@@ -504,7 +504,7 @@ Defined in: [packages/db/src/client.ts:346](https://github.com/TanStack/db/blob/
 dehydrate(options): DehydratedDbState;
 ```
 
-Defined in: [packages/db/src/client.ts:521](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L521)
+Defined in: [packages/db/src/client.ts:522](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L522)
 
 #### Parameters
 
@@ -550,7 +550,7 @@ Defined in: [packages/db/src/client.ts:328](https://github.com/TanStack/db/blob/
 hydrate(state): void;
 ```
 
-Defined in: [packages/db/src/client.ts:582](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L582)
+Defined in: [packages/db/src/client.ts:583](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L583)
 
 #### Parameters
 
@@ -616,7 +616,7 @@ Defined in: [packages/db/src/client.ts:332](https://github.com/TanStack/db/blob/
 subscribe(listener): () => void;
 ```
 
-Defined in: [packages/db/src/client.ts:604](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L604)
+Defined in: [packages/db/src/client.ts:605](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L605)
 
 #### Parameters
 

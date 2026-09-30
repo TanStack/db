@@ -7,7 +7,7 @@ title: UseLiveInfiniteQueryConfig
 type UseLiveInfiniteQueryConfig<_TContext> = object;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:45](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L45)
+Defined in: [useLiveInfiniteQuery.ts:47](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L47)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [useLiveInfiniteQuery.ts:45](https://github.com/TanStack/db/blob/mai
 optional client: DbClient;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:53](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L53)
+Defined in: [useLiveInfiniteQuery.ts:55](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L55)
 
 Override the nearest DbProvider for this query.
 
@@ -35,7 +35,7 @@ Override the nearest DbProvider for this query.
 optional initialPageParam: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:56](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L56)
+Defined in: [useLiveInfiniteQuery.ts:58](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L58)
 
 First result-page label, not a server cursor or remote offset.
 
@@ -47,7 +47,7 @@ First result-page label, not a server cursor or remote offset.
 optional pageSize: number;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:54](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L54)
+Defined in: [useLiveInfiniteQuery.ts:56](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L56)
 
 ***
 
@@ -57,7 +57,7 @@ Defined in: [useLiveInfiniteQuery.ts:54](https://github.com/TanStack/db/blob/mai
 optional queryKey: LiveQueryKey;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:51](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L51)
+Defined in: [useLiveInfiniteQuery.ts:53](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L53)
 
 Explicit identity for queries that contain opaque functional variants or
 are hot enough that deriving identity from structured IR is too expensive.

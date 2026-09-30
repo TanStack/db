@@ -9,7 +9,7 @@ title: gt
 function gt<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L150)
+Defined in: [packages/db/src/query/builder/functions.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L173)
 
 ### Type Parameters
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:150](https://github.com/
 function gt<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L154)
+Defined in: [packages/db/src/query/builder/functions.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L177)
 
 ### Type Parameters
 
@@ -65,7 +65,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:154](https://github.com/
 function gt<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L158)
+Defined in: [packages/db/src/query/builder/functions.ts:181](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L181)
 
 ### Type Parameters
 

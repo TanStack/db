@@ -4,10 +4,10 @@ title: MergeContextForJoinCallback
 ---
 
 ```ts
-type MergeContextForJoinCallback<TContext, TNewSchema> = object & PreserveHasResultFlag<TContext["hasResult"]> & PreserveUnionFromFlag<TContext["hasUnionFrom"]> & PreserveFromSourceNames<TContext["fromSourceNames"]>;
+type MergeContextForJoinCallback<TContext, TNewSchema> = Omit<TContext, "schema" | "refsSchema" | "hasJoins" | "joinTypes"> & object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1267](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1267)
+Defined in: [packages/db/src/query/builder/types.ts:1331](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1331)
 
 MergeContextForJoinCallback - Special context for join condition callbacks
 
@@ -58,19 +58,13 @@ hasJoins: true;
 ### joinTypes
 
 ```ts
-joinTypes: TContext["joinTypes"] extends Record<string, any> ? TContext["joinTypes"] : object;
+joinTypes: TContext["joinTypes"] extends Record<string, any> ? TContext["joinTypes"] : object & { [K in keyof TNewSchema & string]: "inner" };
 ```
 
 ### refsSchema
 
 ```ts
 refsSchema: RefsSchemaForContext<TContext> & TNewSchema;
-```
-
-### result
-
-```ts
-result: TContext["result"];
 ```
 
 ### schema

@@ -10,7 +10,7 @@ type PowerSyncCollectionConfig<TTable, TSchema> = BasePowerSyncCollectionConfig<
 | ConfigWithArbitraryCollectionTypes<TTable, TSchema>;
 ```
 
-Defined in: [definitions.ts:260](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L260)
+Defined in: [definitions.ts:266](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L266)
 
 Configuration options for creating a PowerSync collection.
 

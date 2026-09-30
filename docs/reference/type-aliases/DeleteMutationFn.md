@@ -7,7 +7,7 @@ title: DeleteMutationFn
 type DeleteMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:576](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L576)
+Defined in: [packages/db/src/types.ts:681](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L681)
 
 ## Type Parameters
 
@@ -26,6 +26,8 @@ Defined in: [packages/db/src/types.ts:576](https://github.com/TanStack/db/blob/m
 ### TReturn
 
 `TReturn` = `any`
+
+DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
 
 ## Parameters
 

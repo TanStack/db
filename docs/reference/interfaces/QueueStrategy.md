@@ -55,12 +55,12 @@ Should be called when the strategy is no longer needed
 ### execute()
 
 ```ts
-execute: <T>(fn) => void | Promise<void>;
+execute: <T>(fn) => boolean | void | Promise<void>;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L15)
+Defined in: [packages/db/src/strategies/types.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L69)
 
-Execute a function according to the strategy's timing rules
+Explicit false rejects the transaction; void preserves custom strategies.
 
 #### Type Parameters
 
@@ -74,15 +74,11 @@ Execute a function according to the strategy's timing rules
 
 () => [`Transaction`](Transaction.md)\<`T`\>
 
-The function to execute
-
 #### Returns
 
-`void` \| `Promise`\<`void`\>
+`boolean` \| `void` \| `Promise`\<`void`\>
 
-The result of the function execution (if applicable)
-
-#### Inherited from
+#### Overrides
 
 [`BaseStrategy`](BaseStrategy.md).[`execute`](BaseStrategy.md#execute)
 

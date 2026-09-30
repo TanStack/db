@@ -42,7 +42,7 @@ optional maxSize: number;
 
 Defined in: [packages/db/src/strategies/types.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L54)
 
-Maximum number of waiting items; overflow rejects its transaction. A value of `0` rejects every mutation, including the first.
+Maximum waiting items. Overflow rejects its transaction; 0 rejects every mutation.
 
 ***
 

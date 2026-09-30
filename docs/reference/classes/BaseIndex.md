@@ -3,7 +3,7 @@ id: BaseIndex
 title: BaseIndex
 ---
 
-Defined in: [packages/db/src/indexes/base-index.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L115)
+Defined in: [packages/db/src/indexes/base-index.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L118)
 
 Base abstract class that all index types extend
 
@@ -34,7 +34,7 @@ new BaseIndex<TKey>(
 options?): BaseIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L131)
+Defined in: [packages/db/src/indexes/base-index.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L139)
 
 #### Parameters
 
@@ -60,13 +60,40 @@ Defined in: [packages/db/src/indexes/base-index.ts:131](https://github.com/TanSt
 
 ## Properties
 
+### compareFn()
+
+```ts
+protected readonly compareFn: (a, b) => number;
+```
+
+Defined in: [packages/db/src/indexes/base-index.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L130)
+
+Orders indexed values. Every result is checked, because a custom
+comparator or custom collation may be supplied by the user.
+
+#### Parameters
+
+##### a
+
+`any`
+
+##### b
+
+`any`
+
+#### Returns
+
+`number`
+
+***
+
 ### compareOptions
 
 ```ts
-protected compareOptions: CompareOptions;
+protected readonly compareOptions: CompareOptions;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L122)
+Defined in: [packages/db/src/indexes/base-index.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L125)
 
 ***
 
@@ -76,20 +103,20 @@ Defined in: [packages/db/src/indexes/base-index.ts:122](https://github.com/TanSt
 readonly expression: BasicExpression;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L120)
+Defined in: [packages/db/src/indexes/base-index.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L123)
 
 ***
 
 ### hasCustomComparator
 
 ```ts
-protected hasCustomComparator: boolean = false;
+protected readonly hasCustomComparator: boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L128)
+Defined in: [packages/db/src/indexes/base-index.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L136)
 
-Set by subclasses when constructed with a user-supplied comparator, whose
-ordering may not match the WHERE evaluator's relational operators.
+A user-supplied comparator's ordering may not match the WHERE evaluator's
+relational operators.
 
 ***
 
@@ -99,7 +126,7 @@ ordering may not match the WHERE evaluator's relational operators.
 readonly id: number;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L118)
+Defined in: [packages/db/src/indexes/base-index.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L121)
 
 ***
 
@@ -109,7 +136,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:118](https://github.com/TanSt
 readonly optional name: string;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L119)
+Defined in: [packages/db/src/indexes/base-index.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L122)
 
 ***
 
@@ -119,7 +146,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:119](https://github.com/TanSt
 abstract readonly supportedOperations: Set<"eq" | "gt" | "gte" | "lt" | "lte" | "in" | "like" | "ilike">;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L121)
+Defined in: [packages/db/src/indexes/base-index.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L124)
 
 ## Accessors
 
@@ -131,7 +158,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:121](https://github.com/TanSt
 get abstract keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L169)
+Defined in: [packages/db/src/indexes/base-index.ts:181](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L181)
 
 ##### Returns
 
@@ -151,7 +178,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:169](https://github.com/TanSt
 get supportsRangeOptimization(): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L193)
+Defined in: [packages/db/src/indexes/base-index.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L205)
 
 Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
 return every matching key. Range traversal relies on the index ordering, so
@@ -175,7 +202,7 @@ a full scan when this is `false`.
 abstract add(key, item): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:145](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L145)
+Defined in: [packages/db/src/indexes/base-index.ts:157](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L157)
 
 #### Parameters
 
@@ -203,7 +230,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:145](https://github.com/TanSt
 protected addRangeValue(value): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:197](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L197)
+Defined in: [packages/db/src/indexes/base-index.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L209)
 
 #### Parameters
 
@@ -223,7 +250,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:197](https://github.com/TanSt
 abstract build(entries): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:148](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L148)
+Defined in: [packages/db/src/indexes/base-index.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L160)
 
 #### Parameters
 
@@ -247,7 +274,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:148](https://github.com/TanSt
 canOptimizeRangeFor(value): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:219](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L219)
+Defined in: [packages/db/src/indexes/base-index.ts:231](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L231)
 
 Whether the live values in this index share the predicate operand's
 relational domain. Mixed domains can sort differently in the index and
@@ -275,7 +302,7 @@ WHERE evaluator, which can make a range lookup omit matching rows.
 abstract clear(): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L149)
+Defined in: [packages/db/src/indexes/base-index.ts:161](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L161)
 
 #### Returns
 
@@ -293,7 +320,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:149](https://github.com/TanSt
 protected clearRangeValues(): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:215](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L215)
+Defined in: [packages/db/src/indexes/base-index.ts:227](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L227)
 
 #### Returns
 
@@ -307,7 +334,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:215](https://github.com/TanSt
 abstract equalityLookup(value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L170)
+Defined in: [packages/db/src/indexes/base-index.ts:182](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L182)
 
 #### Parameters
 
@@ -331,7 +358,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:170](https://github.com/TanSt
 protected evaluateIndexExpression(item): any;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:276](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L276)
+Defined in: [packages/db/src/indexes/base-index.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L299)
 
 #### Parameters
 
@@ -351,7 +378,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:276](https://github.com/TanSt
 abstract inArrayLookup(values): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:171](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L171)
+Defined in: [packages/db/src/indexes/base-index.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L183)
 
 #### Parameters
 
@@ -375,7 +402,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:171](https://github.com/TanSt
 abstract protected initialize(options?): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:274](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L274)
+Defined in: [packages/db/src/indexes/base-index.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L297)
 
 #### Parameters
 
@@ -395,7 +422,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:274](https://github.com/TanSt
 abstract lookup(operation, value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L150)
+Defined in: [packages/db/src/indexes/base-index.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L162)
 
 #### Parameters
 
@@ -423,7 +450,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:150](https://github.com/TanSt
 matchesCompareOptions(compareOptions): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L241)
+Defined in: [packages/db/src/indexes/base-index.ts:253](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L253)
 
 Checks if the compare options match the index's compare options.
 The direction is ignored because the index can be reversed if the direction is different.
@@ -450,7 +477,7 @@ The direction is ignored because the index can be reversed if the direction is d
 matchesDirection(direction): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:270](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L270)
+Defined in: [packages/db/src/indexes/base-index.ts:293](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L293)
 
 Checks if the index matches the provided direction.
 
@@ -476,7 +503,7 @@ Checks if the index matches the provided direction.
 matchesField(fieldPath): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L229)
+Defined in: [packages/db/src/indexes/base-index.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L241)
 
 #### Parameters
 
@@ -500,7 +527,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:229](https://github.com/TanSt
 abstract rangeQuery(options): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L172)
+Defined in: [packages/db/src/indexes/base-index.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L184)
 
 #### Parameters
 
@@ -524,7 +551,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:172](https://github.com/TanSt
 rangeQueryReversed(options): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:175](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L175)
+Defined in: [packages/db/src/indexes/base-index.ts:187](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L187)
 
 #### Parameters
 
@@ -548,7 +575,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:175](https://github.com/TanSt
 abstract remove(key, item): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:146](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L146)
+Defined in: [packages/db/src/indexes/base-index.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L158)
 
 #### Parameters
 
@@ -576,7 +603,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:146](https://github.com/TanSt
 protected removeRangeValue(value): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:206](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L206)
+Defined in: [packages/db/src/indexes/base-index.ts:218](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L218)
 
 #### Parameters
 
@@ -596,7 +623,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:206](https://github.com/TanSt
 supports(operation): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:189](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L189)
+Defined in: [packages/db/src/indexes/base-index.ts:201](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L201)
 
 #### Parameters
 
@@ -623,7 +650,7 @@ abstract take(
    filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L151)
+Defined in: [packages/db/src/indexes/base-index.ts:163](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L163)
 
 #### Parameters
 
@@ -655,7 +682,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:151](https://github.com/TanSt
 abstract takeFromStart(n, filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L156)
+Defined in: [packages/db/src/indexes/base-index.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L168)
 
 #### Parameters
 
@@ -686,7 +713,7 @@ abstract takeReversed(
    filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L160)
+Defined in: [packages/db/src/indexes/base-index.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L172)
 
 #### Parameters
 
@@ -718,7 +745,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:160](https://github.com/TanSt
 abstract takeReversedFromEnd(n, filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:165](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L165)
+Defined in: [packages/db/src/indexes/base-index.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L177)
 
 #### Parameters
 
@@ -749,7 +776,7 @@ abstract update(
    newItem): void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:147](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L147)
+Defined in: [packages/db/src/indexes/base-index.ts:159](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L159)
 
 #### Parameters
 

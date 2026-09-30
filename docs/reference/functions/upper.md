@@ -7,7 +7,7 @@ title: upper
 function upper<T>(arg): StringFunctionReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:283](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L283)
+Defined in: [packages/db/src/query/builder/functions.ts:306](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L306)
 
 ## Type Parameters
 

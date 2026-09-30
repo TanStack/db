@@ -3,7 +3,7 @@ id: InvalidKeyError
 title: InvalidKeyError
 ---
 
-Defined in: [packages/db/src/errors.ts:166](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L166)
+Defined in: [packages/db/src/errors.ts:176](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L176)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:166](https://github.com/TanStack/db/blob/
 new InvalidKeyError(key, item): InvalidKeyError;
 ```
 
-Defined in: [packages/db/src/errors.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L167)
+Defined in: [packages/db/src/errors.ts:177](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L177)
 
 #### Parameters
 

@@ -3,7 +3,7 @@ id: InvalidCollectionStatusTransitionError
 title: InvalidCollectionStatusTransitionError
 ---
 
-Defined in: [packages/db/src/errors.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L118)
+Defined in: [packages/db/src/errors.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L128)
 
 ## Extends
 
@@ -20,7 +20,7 @@ new InvalidCollectionStatusTransitionError(
    collectionId): InvalidCollectionStatusTransitionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L119)
+Defined in: [packages/db/src/errors.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L129)
 
 #### Parameters
 

@@ -3,15 +3,11 @@ id: QueryCollectionUtils
 title: QueryCollectionUtils
 ---
 
-Defined in: [packages/query-db-collection/src/query.ts:262](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L262)
+Defined in: [packages/query-db-collection/src/query.ts:290](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L290)
 
 Utility methods available on Query Collections for direct writes and manual operations.
 Direct writes bypass optimistic mutations and write to the synced data store.
 Eager collections patch Query cache; on-demand collections revalidate scoped entries.
-
-## Extends
-
-- `UtilsRecord`
 
 ## Type Parameters
 
@@ -39,12 +35,6 @@ The type accepted for insert operations
 
 The type of errors that can occur during queries
 
-## Indexable
-
-```ts
-[key: string]: any
-```
-
 ## Properties
 
 ### clearError()
@@ -53,15 +43,18 @@ The type of errors that can occur during queries
 clearError: () => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:306](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L306)
+Defined in: [packages/query-db-collection/src/query.ts:344](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L344)
 
-Clear the error state and trigger a refetch of the query
+Refetch, retaining errors until a successful result applies. While a user
+mutation is persisting or its handler is active, this retains the Query
+fetch boundary so it cannot wait on publication blocked by that
+transaction.
 
 #### Returns
 
 `Promise`\<`void`\>
 
-Promise that resolves when the refetch completes successfully
+Promise that resolves when the applicable refetch boundary completes
 
 #### Throws
 
@@ -75,7 +68,7 @@ Error if the refetch fails
 dataUpdatedAt: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:297](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L297)
+Defined in: [packages/query-db-collection/src/query.ts:328](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L328)
 
 Get timestamp of last successful data update (in milliseconds)
 
@@ -87,10 +80,10 @@ Get timestamp of last successful data update (in milliseconds)
 errorCount: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:289](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L289)
+Defined in: [packages/query-db-collection/src/query.ts:320](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L320)
 
 Get the number of consecutive sync failures.
-Incremented only when query fails completely (not per retry attempt); reset on success.
+Incremented only when query fails completely (not per retry attempt); reset after a successful result applies.
 
 ***
 
@@ -100,9 +93,11 @@ Incremented only when query fails completely (not per retry attempt); reset on s
 fetchStatus: "idle" | "fetching" | "paused";
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:299](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L299)
+Defined in: [packages/query-db-collection/src/query.ts:334](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L334)
 
-Get current fetch status
+Get the aggregate observer fetch status. Returns `fetching` if any
+observer is fetching, otherwise `paused` if any observer is paused, and
+`idle` when every observer is idle or no observers exist.
 
 ***
 
@@ -112,7 +107,7 @@ Get current fetch status
 isError: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:284](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L284)
+Defined in: [packages/query-db-collection/src/query.ts:315](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L315)
 
 Check if the collection is in an error state
 
@@ -124,7 +119,7 @@ Check if the collection is in an error state
 isFetching: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:291](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L291)
+Defined in: [packages/query-db-collection/src/query.ts:322](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L322)
 
 Check if query is currently fetching (initial or background)
 
@@ -136,7 +131,7 @@ Check if query is currently fetching (initial or background)
 isLoading: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:295](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L295)
+Defined in: [packages/query-db-collection/src/query.ts:326](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L326)
 
 Check if query is loading for the first time (no data yet)
 
@@ -148,7 +143,7 @@ Check if query is loading for the first time (no data yet)
 isRefetching: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:293](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L293)
+Defined in: [packages/query-db-collection/src/query.ts:324](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L324)
 
 Check if query is refetching in background (not initial fetch)
 
@@ -160,9 +155,9 @@ Check if query is refetching in background (not initial fetch)
 lastError: TError | undefined;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:282](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L282)
+Defined in: [packages/query-db-collection/src/query.ts:313](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L313)
 
-Get the last error encountered by the query (if any); reset on success
+Get the last error encountered by the query (if any); reset after a successful result applies
 
 ***
 
@@ -172,9 +167,9 @@ Get the last error encountered by the query (if any); reset on success
 refetch: RefetchFn;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:268](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L268)
+Defined in: [packages/query-db-collection/src/query.ts:299](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L299)
 
-Manually trigger a refetch of the query
+Manually refetch and await the applicable fetch or application boundary.
 
 ***
 
@@ -184,7 +179,7 @@ Manually trigger a refetch of the query
 writeBatch: (callback) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:278](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L278)
+Defined in: [packages/query-db-collection/src/query.ts:309](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L309)
 
 Execute direct writes as one atomic batch, then update or revalidate the Query cache
 
@@ -206,7 +201,7 @@ Execute direct writes as one atomic batch, then update or revalidate the Query c
 writeDelete: (keys) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:274](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L274)
+Defined in: [packages/query-db-collection/src/query.ts:305](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L305)
 
 Delete items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
@@ -228,7 +223,7 @@ Delete items without an optimistic update. On-demand queries revalidate their sc
 writeInsert: (data) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:270](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L270)
+Defined in: [packages/query-db-collection/src/query.ts:301](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L301)
 
 Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
@@ -250,7 +245,7 @@ Insert items without an optimistic update. On-demand queries revalidate their sc
 writeUpdate: (updates) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:272](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L272)
+Defined in: [packages/query-db-collection/src/query.ts:303](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L303)
 
 Update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 
@@ -272,7 +267,7 @@ Update items without an optimistic update. On-demand queries revalidate their sc
 writeUpsert: (data) => void;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:276](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L276)
+Defined in: [packages/query-db-collection/src/query.ts:307](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L307)
 
 Insert or update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
 

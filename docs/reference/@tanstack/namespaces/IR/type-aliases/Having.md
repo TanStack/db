@@ -7,4 +7,4 @@ title: Having
 type Having = Where;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L62)
+Defined in: [packages/db/src/query/ir.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L64)

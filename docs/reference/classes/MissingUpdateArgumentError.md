@@ -3,7 +3,7 @@ id: MissingUpdateArgumentError
 title: MissingUpdateArgumentError
 ---
 
-Defined in: [packages/db/src/errors.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L223)
+Defined in: [packages/db/src/errors.ts:233](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L233)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:223](https://github.com/TanStack/db/blob/
 new MissingUpdateArgumentError(): MissingUpdateArgumentError;
 ```
 
-Defined in: [packages/db/src/errors.ts:224](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L224)
+Defined in: [packages/db/src/errors.ts:234](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L234)
 
 #### Returns
 

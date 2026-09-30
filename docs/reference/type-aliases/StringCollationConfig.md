@@ -14,12 +14,12 @@ type StringCollationConfig =
   stringSort?: "locale";
 }
   | {
-  compare: (a: string, b: string) => number;
+  compare: (a, b) => number;
   stringSort: "custom";
 };
 ```
 
-Defined in: [packages/db/src/types.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L32)
+Defined in: [packages/db/src/types.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L34)
 
 StringCollationConfig - Options for string sorting behavior
 

@@ -7,7 +7,7 @@ title: multiply
 function multiply<T1, T2>(left, right): BinaryNumericReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L621)
+Defined in: [packages/db/src/query/builder/functions.ts:644](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L644)
 
 ## Type Parameters
 

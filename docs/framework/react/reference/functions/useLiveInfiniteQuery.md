@@ -6,10 +6,10 @@ title: useLiveInfiniteQuery
 ## Call Signature
 
 ```ts
-function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturn<any>;
+function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:107](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L107)
+Defined in: [useLiveInfiniteQuery.ts:135](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L135)
 
 Create an infinite query using a query function with live updates.
 
@@ -44,7 +44,7 @@ Configuration including pageSize and an optional initial page label
 
 ### Returns
 
-[`UseLiveInfiniteQueryReturn`](../type-aliases/UseLiveInfiniteQueryReturn.md)\<`any`\>
+[`UseLiveInfiniteQueryReturnWithCollection`](../type-aliases/UseLiveInfiniteQueryReturnWithCollection.md)\<`TResult`, `TKey`, `TUtils`\>
 
 Object with pages, data, and pagination controls
 
@@ -57,7 +57,7 @@ function useLiveInfiniteQuery<TContext>(
 deps?): UseLiveInfiniteQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:117](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L117)
+Defined in: [useLiveInfiniteQuery.ts:145](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L145)
 
 Create an infinite query using a query function with live updates.
 

@@ -3,7 +3,7 @@ id: InvalidSyncOperationError
 title: InvalidSyncOperationError
 ---
 
-Defined in: [packages/query-db-collection/src/errors.ts:92](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L92)
+Defined in: [packages/query-db-collection/src/errors.ts:99](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L99)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:92](https://github.com/T
 new InvalidSyncOperationError(message): InvalidSyncOperationError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:93](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L93)
+Defined in: [packages/query-db-collection/src/errors.ts:100](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L100)
 
 #### Parameters
 
