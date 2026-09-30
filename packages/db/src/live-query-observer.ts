@@ -974,6 +974,11 @@ class LiveQueryObserverImpl<
       (source) => source.collection.status === `error`,
     )
     if (collection.status === `error`) return sourceFailed
+    const clientQuery =
+      this.client && this.queryHash
+        ? this.client._getLiveQuery(this.queryHash)
+        : undefined
+    if (clientQuery?.status === `error`) return true
     return sources.every(
       (source) => Date.now() >= source.readiness.getOrStartNetworkDeadline(),
     )
@@ -988,6 +993,12 @@ class LiveQueryObserverImpl<
     if (this.initialRenderPromise) return this.initialRenderPromise
 
     const network = this.preload()
+    const clientQuery =
+      this.client && this.queryHash
+        ? this.client._getLiveQuery(this.queryHash)
+        : undefined
+    const clientStream =
+      clientQuery?.promise === network ? clientQuery : undefined
     if (this.collection) INITIAL_RENDER_PRELOADS.add(this.collection)
 
     const unsubscribers: Array<() => void> = []
@@ -995,8 +1006,11 @@ class LiveQueryObserverImpl<
     let timer: ReturnType<typeof setTimeout> | undefined
     const initialRender = new Promise<void>((resolve, reject) => {
       let networkReady = false
-      let networkFailed = false
-      let networkError: unknown
+      // React can start a new observer after the client stream has failed.
+      let failedClientStream =
+        clientQuery?.status === `error` ? clientQuery : undefined
+      let networkFailed = failedClientStream !== undefined
+      let networkError: unknown = failedClientStream?.error
       let settled = false
       const finish = (failure?: { error: unknown }) => {
         if (settled) return
@@ -1030,7 +1044,16 @@ class LiveQueryObserverImpl<
         const sourceFailed = sources.some(
           (source) => source.collection.status === `error`,
         )
-        if (networkFailed && !sourceFailed) {
+        const clientStreamFailed =
+          failedClientStream !== undefined &&
+          this.client !== undefined &&
+          this.queryHash !== undefined &&
+          this.client._getLiveQuery(this.queryHash) === failedClientStream
+        if (
+          networkFailed &&
+          !sourceFailed &&
+          (this.collection?.status === `error` || !clientStreamFailed)
+        ) {
           finish({ error: networkError })
         } else if (
           (deadlinePassed || networkFailed) &&
@@ -1054,6 +1077,8 @@ class LiveQueryObserverImpl<
         (error) => {
           networkFailed = true
           networkError = error
+          failedClientStream =
+            clientStream?.status === `error` ? clientStream : undefined
           check()
         },
       )

@@ -7,6 +7,8 @@ TanStack DB provides a powerful mutation system that enables optimistic updates 
 
 Local changes are applied immediately as optimistic state. When the mutation handler returns successfully while the transaction is still `persisting`, the transaction completes and the optimistic state is recomputed. Completion proves backend confirmation only when the handler explicitly waited for that confirmation or read-back.
 
+Use [offline transactions](./offline-transactions.md) when a mutation must remain pending across an app restart. Use [SQLite persistence](./sqlite-persistence.md) to retain Collection rows. It can also save sync metadata for supported adapters.
+
 ```tsx
 // Define a collection with a mutation handler
 const todoCollection = createCollection({

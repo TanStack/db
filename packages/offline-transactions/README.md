@@ -1,12 +1,12 @@
 # @tanstack/offline-transactions
 
-Offline-first transaction capabilities for TanStack DB that provides durable persistence of mutations with automatic retry when connectivity is restored.
+This package gives the leader a durable outbox for pending TanStack DB mutations. It retries stored mutations when the server is available. Read the [Offline Transactions guide](../../docs/guides/offline-transactions.md) for setup and lifecycle behavior.
 
 ## Features
 
-- **Outbox Pattern**: Persist mutations before dispatch for zero data loss
+- **Outbox**: The leader stores mutations before sending them when `isOfflineEnabled` is true
 - **Automatic Retry**: Configurable retry behavior with exponential backoff + jitter by default
-- **Multi-tab Coordination**: Leader election ensures safe storage access
+- **Multi-tab Coordination**: Leader election chooses one tab to process the outbox
 - **FIFO Sequential Processing**: Transactions execute one at a time in creation order
 - **Flexible Storage**: IndexedDB with localStorage fallback
 - **Type Safe**: Full TypeScript support with TanStack DB integration
@@ -25,7 +25,7 @@ npm install @tanstack/offline-transactions
 npm install @tanstack/offline-transactions @react-native-community/netinfo
 ```
 
-The React Native implementation requires the `@react-native-community/netinfo` peer dependency for network connectivity detection.
+The React Native entry point uses `@react-native-community/netinfo` for connectivity detection. Supply a `StorageAdapter` for the outbox. The package does not include an AsyncStorage adapter.
 
 ## Platform Support
 
@@ -36,7 +36,7 @@ This package provides platform-specific implementations for web and React Native
 
 ## Quick Start
 
-Using offline transactions on web and React Native/Expo is identical except for the import. Choose the appropriate import based on your target platform:
+Use the entry point for your platform. React Native also needs a storage adapter, as shown in the [guide](../../docs/guides/offline-transactions.md#react-native-and-expo).
 
 **Web:**
 
@@ -50,7 +50,7 @@ import { startOfflineExecutor } from '@tanstack/offline-transactions'
 import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
 ```
 
-**Usage (same for both platforms):**
+**Web usage:**
 
 ```typescript
 // Setup offline executor
@@ -68,13 +68,15 @@ const offline = startOfflineExecutor({
   },
 })
 
+await offline.waitForInit()
+
 // Create offline transactions
 const offlineTx = offline.createOfflineTransaction({
   mutationFnName: 'syncTodos',
   autoCommit: false,
 })
 
-offlineTx.mutate(() => {
+const transaction = offlineTx.mutate(() => {
   todoCollection.insert({
     id: crypto.randomUUID(),
     text: 'Buy milk',
@@ -82,20 +84,25 @@ offlineTx.mutate(() => {
   })
 })
 
-// Execute with automatic offline support
-await offlineTx.commit()
+// Commit can remain pending while offline. Observe final failure.
+void offlineTx.commit().catch((error) => console.error(error))
+void transaction.isPersisted.promise.catch((error) => console.error(error))
 ```
+
+On React Native, pass a custom `storage` adapter to `startOfflineExecutor`.
 
 ## Core Concepts
 
-### Outbox-First Persistence
+### Durable Outbox
 
-Mutations are persisted to a durable outbox before being applied, ensuring zero data loss during offline periods:
+When `isOfflineEnabled` is true, the executor records a mutation before it sends the mutation to the server. The optimistic change appears before the outbox write settles:
 
-1. Mutation is persisted to IndexedDB/localStorage
-2. Optimistic update is applied locally
-3. When online, mutation is sent to server
-4. On success, mutation is removed from outbox
+1. The Collection applies an optimistic mutation.
+2. The leader writes the transaction to the outbox.
+3. When online, the executor calls the named mutation function.
+4. After a successful call, the executor attempts to remove the outbox entry.
+
+An optimistic change does not prove that the outbox write succeeded. Handle transaction failures, and use an idempotency key on the server because an attempt can run more than once.
 
 ### Multi-tab Coordination
 
@@ -107,11 +114,11 @@ Only one tab acts as the "leader" to safely manage the outbox:
 
 ### FIFO Sequential Processing
 
-Transactions are processed one at a time in the order they were created:
+The executor processes one transaction at a time, in creation order:
 
 - **Sequential execution**: All transactions execute in FIFO order
 - **Dependency safety**: Avoids conflicts between transactions that may reference each other
-- **Predictable behavior**: Transactions complete in the exact order they were created
+- **Predictable behavior**: Transactions complete in creation order
 
 ## API Reference
 
@@ -209,8 +216,8 @@ persistence. `isPersisted.promise` settles at the same success or failure
 boundary.
 
 On the offline-execution path, successful settlement means the configured
-`mutationFn` returned and the executor removed the transaction from its durable
-outbox. It means the server confirmed or exposed the write only when that
+`mutationFn` returned. The executor also attempts to remove the durable outbox
+entry. It means the server confirmed or exposed the write only when that
 `mutationFn` explicitly waits for the provider's acknowledgement, read-back, or
 sync observation before returning.
 
@@ -268,8 +275,8 @@ function isPending(itemId: string): boolean {
 ```
 
 Using only `pendingItems.delete(itemId)` in an older transaction's completion
-handler is unsafe because it can erase a newer transaction's status. A map that
-represents only "the latest submission" must identity-check its cleanup:
+handler is unsafe because it can remove a newer transaction's status. A map that
+represents only "the latest submission" must compare the current entry with the finishing transaction before cleanup:
 
 ```typescript
 if (latestByItem.get(itemId) === tx) {
@@ -320,9 +327,14 @@ const offline = startOfflineExecutor({
   },
 })
 
-const tx = offline.createOfflineTransaction({ mutationFnName: 'syncTodos' })
+await offline.waitForInit()
+
+const tx = offline.createOfflineTransaction({
+  mutationFnName: 'syncTodos',
+  autoCommit: false,
+})
 tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
-await tx.commit() // Works offline!
+await tx.commit() // Remains pending until the mutation function succeeds.
 ```
 
 ## Platform Support
@@ -336,10 +348,10 @@ await tx.commit() // Works offline!
 
 ### React Native
 
-- **React Native**: 0.60+ (tested with latest versions)
-- **Expo**: SDK 40+ (tested with latest versions)
+- **React Native**: 0.70+ (package peer dependency)
+- **Expo**: Use the React Native entry point
 - **Required peer dependency**: `@react-native-community/netinfo` for network connectivity detection
-- **Storage**: Uses AsyncStorage or custom storage adapters
+- **Storage**: Supply a custom `StorageAdapter`, such as the [example AsyncStorage adapter](../../examples/react-native/offline-transactions/src/db/AsyncStorageAdapter.ts)
 
 ## License
 
