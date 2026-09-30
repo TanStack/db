@@ -50,7 +50,7 @@ per-consolidation reference map, distinguishes a leaf from a tuple, and
 length-prefixes components. Positive controls keep same-symbol,
 same-function, signed-zero-key, and NaN-value merging intact.
 
-Production code changes by +9 net lines. Test code grows to make the new
+Production code changes by +10 net lines. Test code grows to make the new
 grammar, named cases, and controls visible. No elapsed-time performance claim
 is made for the repaired hot path.
 
