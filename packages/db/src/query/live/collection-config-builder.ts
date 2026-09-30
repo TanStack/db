@@ -205,6 +205,11 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
+  /** Direct lexical source Collections, including joins, unions, and includes. */
+  getSourceCollections(): ReadonlyArray<Collection<any, any, any>> {
+    return this.collectionSources.map(({ collection }) => collection)
+  }
+
   /**
    * Recursively checks if a query or any of its subqueries contains joins
    */

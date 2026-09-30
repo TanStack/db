@@ -25,6 +25,8 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryObserver,
+  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -118,6 +120,9 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -139,6 +144,9 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -198,6 +206,9 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -258,6 +269,9 @@ export function useLiveQuery<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -283,6 +297,9 @@ export function useLiveQuery<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -353,6 +370,9 @@ export function useLiveQuery(
       name: `TanstackDBStatus`,
     },
   )
+  const [persistedStatus, setLocalStatus] =
+    createSignal<LiveQueryPersistedStatus>(`unavailable`)
+  const [persistedError, setLocalError] = createSignal<unknown>(undefined)
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -390,19 +410,31 @@ export function useLiveQuery(
   // into hook-scoped state and would still run — resurrecting rows/status from
   // a collection that has already been replaced.
   let resourceGeneration = 0
+  let localWaitObserver: LiveQueryObserver<any, any> | undefined
+  onCleanup(() => localWaitObserver?.dispose())
 
   const [getDataResource] = createResource(
     () => ({ currentCollection: collection() }),
     async ({ currentCollection }) => {
       const generation = ++resourceGeneration
+      localWaitObserver?.dispose()
+      localWaitObserver = undefined
       if (!currentCollection) {
         return []
       }
       setStatus(currentCollection.status)
       try {
-        await currentCollection.toArrayWhenReady()
+        const observer = createLiveQueryObserver(currentCollection)
+        localWaitObserver = observer
+        try {
+          await observer.preloadForInitialRender()
+        } finally {
+          observer.dispose()
+          if (localWaitObserver === observer) localWaitObserver = undefined
+        }
       } catch (error) {
-        if (generation === resourceGeneration) setStatus(`error`)
+        if (generation !== resourceGeneration) return data
+        setStatus(`error`)
         throw error
       }
       if (generation !== resourceGeneration) {
@@ -430,6 +462,8 @@ export function useLiveQuery(
     const currentCollection = collection()
     if (!currentCollection) {
       setStatus(`disabled` as const)
+      setLocalStatus(`unavailable`)
+      setLocalError(undefined)
       state.clear()
       rowsByKey.clear()
       rowsCollection = undefined
@@ -474,7 +508,10 @@ export function useLiveQuery(
             }
           }
           syncDataFromCollection(currentCollection)
-          setStatus(observer.getSnapshot().status)
+          const snapshot = observer.getSnapshot()
+          setStatus(snapshot.status)
+          setLocalStatus(snapshot.persistedStatus)
+          setLocalError(snapshot.persistedError)
         })
       },
     )
@@ -483,7 +520,10 @@ export function useLiveQuery(
     // resource continuation to correct the previous collection's rows.
     batch(() => {
       syncDataFromCollection(currentCollection)
-      setStatus(observer.getSnapshot().status)
+      const snapshot = observer.getSnapshot()
+      setStatus(snapshot.status)
+      setLocalStatus(snapshot.persistedStatus)
+      setLocalError(snapshot.persistedError)
     })
 
     onCleanup(() => {
@@ -534,6 +574,21 @@ export function useLiveQuery(
     isReady: {
       get() {
         return status() === `ready` || status() === `disabled`
+      },
+    },
+    persistedStatus: {
+      get() {
+        return persistedStatus()
+      },
+    },
+    isPersistedReady: {
+      get() {
+        return persistedStatus() === `ready`
+      },
+    },
+    persistedError: {
+      get() {
+        return persistedError()
       },
     },
     isIdle: {

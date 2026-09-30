@@ -140,6 +140,9 @@ function makeHandle(
         state: result?.state,
         status: result?.status,
         isReady: result?.isReady,
+        persistedStatus: result?.persistedStatus,
+        isPersistedReady: result?.isPersistedReady,
+        persistedError: result?.persistedError,
         isError: result?.isError,
         // solid-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result?.status !== `disabled`,

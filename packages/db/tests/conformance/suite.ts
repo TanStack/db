@@ -37,7 +37,12 @@ import {
   expectUnorderedRows,
   selectedRow,
 } from './result-laws'
-import type { LiveQueryDriver, LiveQueryHandle, Row } from './contract'
+import type {
+  DeferredSourceHandle,
+  LiveQueryDriver,
+  LiveQueryHandle,
+  Row,
+} from './contract'
 
 const SEED: Array<Row> = [
   { id: `1`, name: `John Doe`, age: 30, team: `a` },
@@ -90,6 +95,38 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     mountDisabled: () => track(rawDriver.mountDisabled()),
   }
 
+  const installPersistedReadiness = (
+    source: DeferredSourceHandle,
+    settledSnapshot:
+      | { status: `ready` }
+      | { status: `error`; error: unknown } = { status: `ready` },
+  ) => {
+    let snapshot:
+      | { status: `loading` }
+      | { status: `ready` }
+      | { status: `error`; error: unknown } = { status: `loading` }
+    const listeners = new Set<() => void>()
+    Object.defineProperty(
+      source.collection.config,
+      Symbol.for(`@tanstack/db.persistedReadiness`),
+      {
+        value: {
+          networkTimeoutMs: 0,
+          getOrStartNetworkDeadline: () => Date.now(),
+          getSnapshot: () => snapshot,
+          subscribe: (listener: () => void) => {
+            listeners.add(listener)
+            return () => listeners.delete(listener)
+          },
+        },
+      },
+    )
+    return () => {
+      snapshot = settledSnapshot
+      for (const listener of listeners) listener()
+    }
+  }
+
   /** Register one unique law. */
   const scenario = (
     key: string,
@@ -120,6 +157,91 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
+    scenario(
+      `persisted-readiness`,
+      `every opted-in source restores before a joined query reports persisted readiness`,
+      async () => {
+        const left = driver.makeDeferredSource<Row>()
+        const right = driver.makeDeferredSource<Row>()
+        const settleLeft = installPersistedReadiness(left)
+        const settleRight = installPersistedReadiness(right)
+        const h = driver.mount((q) =>
+          q
+            .from({ left: left.collection })
+            .join({ right: right.collection }, ({ left: a, right: b }: any) =>
+              ops.eq(a.id, b.id),
+            ),
+        )
+        await h.flush()
+        expect(h.current()).toMatchObject({
+          status: `loading`,
+          persistedStatus: `loading`,
+          isPersistedReady: false,
+        })
+
+        await h.apply(() => {
+          left.emit([SEED[0]!])
+          right.emit([SEED[0]!])
+        })
+        await h.flush()
+        expect(h.current().data).toHaveLength(1)
+
+        await h.apply(settleLeft)
+        await h.flush()
+        expect(h.current().persistedStatus).toBe(`loading`)
+        await h.apply(settleRight)
+        await h.flush()
+        expect(h.current()).toMatchObject({
+          status: `loading`,
+          persistedStatus: `ready`,
+          isPersistedReady: true,
+        })
+      },
+    )
+
+    scenario(
+      `persisted-readiness-opt-out`,
+      `one unconfigured source keeps the persisted signal unavailable`,
+      async () => {
+        const opted = driver.makeDeferredSource<Row>()
+        const ordinary = driver.makeDeferredSource<Row>()
+        const settle = installPersistedReadiness(opted)
+        const h = driver.mount((q) =>
+          q
+            .from({ opted: opted.collection })
+            .join(
+              { ordinary: ordinary.collection },
+              ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id),
+            ),
+        )
+        await h.apply(settle)
+        await h.flush()
+        expect(h.current()).toMatchObject({
+          persistedStatus: `unavailable`,
+          isPersistedReady: false,
+        })
+      },
+    )
+    scenario(
+      `persisted-error-identity`,
+      `a persisted restore failure keeps its original object identity`,
+      async () => {
+        const source = driver.makeDeferredSource<Row>()
+        const failure = { code: `restore-failed`, detail: { retryable: false } }
+        const failRestore = installPersistedReadiness(source, {
+          status: `error`,
+          error: failure,
+        })
+        const h = driver.mount((q) => q.from({ items: source.collection }))
+        await h.flush()
+        expect(h.current().persistedStatus).toBe(`loading`)
+
+        await h.apply(failRestore)
+        expect(h.current().persistedStatus).toBe(`error`)
+        expect(h.current().persistedError).toBe(failure)
+        expect(h.current().isPersistedReady).toBe(false)
+      },
+    )
     // ---- spine: query + liveness ----------------------------------------
 
     scenario(
@@ -819,7 +941,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(25)
+      expect(registry.size).toBe(28)
     })
   })
 }

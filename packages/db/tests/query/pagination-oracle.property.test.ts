@@ -28,12 +28,14 @@ import type {
  * A page is not whatever rows the loader happened to retain. It is the result
  * of filtering the authoritative finite source, sorting with the declared
  * terms and public-key tie-breaker, then slicing by offset and limit. Window
- * changes, source inserts, updates, deletes, ties, nulls, locale order, and
+ * changes, source inserts, updates, deletes, ties, nulls, NaN, locale order, and
  * failed requests must all preserve that definition.
  *
  * Authority: `query/live/ARCHITECTURE.md`, especially Ordered loading and
  * Atomic window publication, defines the value, acquisition, repair, and
- * publication laws. This oracle establishes those laws only for the bounded
+ * publication laws. `docs/guides/live-queries.md` gives NaN the PostgreSQL
+ * float order: NaN equals itself and follows finite values in ascending order.
+ * This oracle establishes those laws only for the bounded
  * row/history grammar below and the in-memory on-demand adapter seam. It does
  * not establish a backend's physical query plan, latency, complete SQL
  * predicate semantics, or behavior outside the generated and named domains.
@@ -623,13 +625,31 @@ function referenceWindowRows(
   window: PaginationWindow,
 ): Array<PageRow> {
   return [...rows]
-    .sort(
-      (left, right) =>
-        (left.rank - right.rank) * (direction === `asc` ? 1 : -1) ||
-        left.id - right.id,
-    )
+    .sort((left, right) => {
+      // The public NaN contract places NaN after finite ranks in ascending
+      // order. The key breaks ties between equal ranks, including two NaNs.
+      const rankOrder = Number.isNaN(left.rank)
+        ? Number.isNaN(right.rank)
+          ? 0
+          : 1
+        : Number.isNaN(right.rank)
+          ? -1
+          : left.rank < right.rank
+            ? -1
+            : left.rank > right.rank
+              ? 1
+              : 0
+      return rankOrder * (direction === `asc` ? 1 : -1) || left.id - right.id
+    })
     .slice(window.offset, window.offset + window.limit)
     .map(({ id, rank }) => ({ id, rank }))
+}
+
+function expectWindowRows(
+  actual: ReadonlyArray<PublicPageRow>,
+  expected: ReadonlyArray<PublicPageRow>,
+): void {
+  expect(actual).toEqual(expected)
 }
 
 function projectPageRow(row: PageRow): PublicPageRow {
@@ -663,7 +683,10 @@ function expectedPageChanges(
     const next = afterById.get(row.id)
     if (!next) {
       changes.push({ type: `delete`, key: row.id, value: row })
-    } else if (next.rank !== row.rank) {
+    } else if (
+      next.rank !== row.rank &&
+      !(Number.isNaN(next.rank) && Number.isNaN(row.rank))
+    ) {
       changes.push({
         type: `update`,
         key: row.id,
@@ -777,39 +800,46 @@ async function runPaginationScenario(
       autoIndex: `eager`,
     }),
   )
-  const live = createLiveQueryCollection((query) => {
-    const from = query.from({ row: source })
-    const filtered = scenario.includeFilter
-      ? from.where(({ row }) => eq(row.keep, true))
-      : from
-    const ordered = filtered.orderBy(({ row }) => row.rank, scenario.direction)
-    return (
-      scenario.explicitPublicKeyOrder === false
-        ? ordered
-        : ordered.orderBy(({ row }) => row.id, `asc`)
-    )
-      .offset(initialWindow.offset)
-      .limit(initialWindow.limit)
-      .select(({ row }) => ({ id: row.id, rank: row.rank }))
-  })
-
-  try {
-    await live.preload()
-    expect(Array.from(live.values(), ({ id, rank }) => ({ id, rank }))).toEqual(
-      referenceWindowRows(expectedRows, scenario.direction, initialWindow),
-    )
-
-    for (const window of scenario.windows.slice(1)) {
-      const result = live.utils.setWindow(window)
-      if (result instanceof Promise) await result
-
-      expect(
+  const cleanups: Array<() => unknown> = [() => source.cleanup()]
+  await withHistoryCleanup(
+    async () => {
+      const live = createLiveQueryCollection((query) => {
+        const from = query.from({ row: source })
+        const filtered = scenario.includeFilter
+          ? from.where(({ row }) => eq(row.keep, true))
+          : from
+        const ordered = filtered.orderBy(
+          ({ row }) => row.rank,
+          scenario.direction,
+        )
+        return (
+          scenario.explicitPublicKeyOrder === false
+            ? ordered
+            : ordered.orderBy(({ row }) => row.id, `asc`)
+        )
+          .offset(initialWindow.offset)
+          .limit(initialWindow.limit)
+          .select(({ row }) => ({ id: row.id, rank: row.rank }))
+      })
+      cleanups.unshift(() => live.cleanup())
+      await live.preload()
+      expectWindowRows(
         Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
-      ).toEqual(referenceWindowRows(expectedRows, scenario.direction, window))
-    }
-  } finally {
-    await cleanupAll(live, source)
-  }
+        referenceWindowRows(expectedRows, scenario.direction, initialWindow),
+      )
+
+      for (const window of scenario.windows.slice(1)) {
+        const result = live.utils.setWindow(window)
+        if (result instanceof Promise) await result
+
+        expectWindowRows(
+          Array.from(live.values(), ({ id, rank }) => ({ id, rank })),
+          referenceWindowRows(expectedRows, scenario.direction, window),
+        )
+      }
+    },
+    () => cleanups,
+  )
 }
 
 async function expectMultiOrderBoundaryMatches(): Promise<void> {
@@ -1005,104 +1035,113 @@ async function runPaginationStateScenario(
     autoIndex: `eager` as const,
   })
   const source = createCollection(sourceOptions)
-  const live = createLiveQueryCollection((query) => {
-    const from = query.from({ row: source })
-    const filtered = scenario.includeFilter
-      ? from.where(({ row }) => eq(row.keep, true))
-      : from
-    const ordered = filtered.orderBy(({ row }) => row.rank, scenario.direction)
-    return (
-      scenario.explicitPublicKeyOrder === false
-        ? ordered
-        : ordered.orderBy(({ row }) => row.id, `asc`)
-    )
-      .offset(currentWindow.offset)
-      .limit(currentWindow.limit)
-      .select(({ row }) => ({ id: row.id, rank: row.rank }))
-  })
-  const publications: Array<{
-    changes: Array<PublicPageChange>
-    rows: Array<PublicPageRow>
-  }> = []
-  let publicationSubscription:
-    | ReturnType<typeof live.subscribeChanges>
-    | undefined
-
-  const readCurrentWindow = () =>
-    Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
-
-  const expectCurrentWindow = (checkpoint: number) => {
-    try {
-      expect(readCurrentWindow()).toEqual(
-        referenceWindowRows(
-          visibleRows([...rows.values()], scenario.includeFilter),
+  const cleanups: Array<() => unknown> = [() => source.cleanup()]
+  await withHistoryCleanup(
+    async () => {
+      const live = createLiveQueryCollection((query) => {
+        const from = query.from({ row: source })
+        const filtered = scenario.includeFilter
+          ? from.where(({ row }) => eq(row.keep, true))
+          : from
+        const ordered = filtered.orderBy(
+          ({ row }) => row.rank,
           scenario.direction,
-          currentWindow,
-        ),
-      )
-    } catch (error) {
-      throw new TraceAssertionError(checkpoint, error)
-    }
-  }
+        )
+        return (
+          scenario.explicitPublicKeyOrder === false
+            ? ordered
+            : ordered.orderBy(({ row }) => row.id, `asc`)
+        )
+          .offset(currentWindow.offset)
+          .limit(currentWindow.limit)
+          .select(({ row }) => ({ id: row.id, rank: row.rank }))
+      })
+      cleanups.unshift(() => live.cleanup())
+      const publications: Array<{
+        changes: Array<PublicPageChange>
+        rows: Array<PublicPageRow>
+      }> = []
+      let publicationSubscription:
+        | ReturnType<typeof live.subscribeChanges>
+        | undefined
 
-  try {
-    await live.preload()
-    expectCurrentWindow(0)
-    expect(live.status).toBe(`ready`)
-    expect(live.utils.lastSubsetError).toBeUndefined()
-    publicationSubscription = live.subscribeChanges(
-      (changes) =>
-        publications.push({
-          changes: normalizePageChanges(
-            changes as Array<ChangeMessage<PageRow, number>>,
-          ),
-          rows: readCurrentWindow(),
-        }),
-      { includeInitialState: false },
-    )
+      const readCurrentWindow = () =>
+        Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
 
-    for (const [index, action] of scenario.actions.entries()) {
-      const beforeRows = readCurrentWindow()
-      const publicationCount = publications.length
-      if (action.type === `window`) {
-        currentWindow = { offset: action.offset, limit: action.limit }
-        const result = live.utils.setWindow(currentWindow)
-        if (result instanceof Promise) await result
-      } else if (action.type === `put`) {
-        const row = {
-          id: action.id,
-          rank: action.rank,
-          keep: action.keep ?? isKeptRow(action.id),
-        }
-        const type = rows.has(action.id) ? `update` : `insert`
-        rows.set(action.id, row)
-        sourceOptions.utils.begin()
-        sourceOptions.utils.write({ type, value: { ...row } })
-        sourceOptions.utils.commit()
-      } else {
-        const row = rows.get(action.id)
-        if (row) {
-          rows.delete(action.id)
-          sourceOptions.utils.begin()
-          sourceOptions.utils.write({ type: `delete`, value: { ...row } })
-          sourceOptions.utils.commit()
+      const expectCurrentWindow = (checkpoint: number) => {
+        try {
+          expect(readCurrentWindow()).toEqual(
+            referenceWindowRows(
+              visibleRows([...rows.values()], scenario.includeFilter),
+              scenario.direction,
+              currentWindow,
+            ),
+          )
+        } catch (error) {
+          throw new TraceAssertionError(checkpoint, error)
         }
       }
-      expectCurrentWindow(index + 1)
-      expect(live.status).toBe(`ready`)
-      expect(live.utils.lastSubsetError).toBeUndefined()
-      const afterRows = readCurrentWindow()
-      const expectedChanges = expectedPageChanges(beforeRows, afterRows)
-      expect(publications.slice(publicationCount)).toEqual(
-        expectedChanges.length > 0
-          ? [{ changes: expectedChanges, rows: afterRows }]
-          : [],
-      )
-    }
-  } finally {
-    publicationSubscription?.unsubscribe()
-    await cleanupAll(live, source)
-  }
+
+      try {
+        await live.preload()
+        expectCurrentWindow(0)
+        expect(live.status).toBe(`ready`)
+        expect(live.utils.lastSubsetError).toBeUndefined()
+        publicationSubscription = live.subscribeChanges(
+          (changes) =>
+            publications.push({
+              changes: normalizePageChanges(
+                changes as Array<ChangeMessage<PageRow, number>>,
+              ),
+              rows: readCurrentWindow(),
+            }),
+          { includeInitialState: false },
+        )
+
+        for (const [index, action] of scenario.actions.entries()) {
+          const beforeRows = readCurrentWindow()
+          const publicationCount = publications.length
+          if (action.type === `window`) {
+            currentWindow = { offset: action.offset, limit: action.limit }
+            const result = live.utils.setWindow(currentWindow)
+            if (result instanceof Promise) await result
+          } else if (action.type === `put`) {
+            const row = {
+              id: action.id,
+              rank: action.rank,
+              keep: action.keep ?? isKeptRow(action.id),
+            }
+            const type = rows.has(action.id) ? `update` : `insert`
+            rows.set(action.id, row)
+            sourceOptions.utils.begin()
+            sourceOptions.utils.write({ type, value: { ...row } })
+            sourceOptions.utils.commit()
+          } else {
+            const row = rows.get(action.id)
+            if (row) {
+              rows.delete(action.id)
+              sourceOptions.utils.begin()
+              sourceOptions.utils.write({ type: `delete`, value: { ...row } })
+              sourceOptions.utils.commit()
+            }
+          }
+          expectCurrentWindow(index + 1)
+          expect(live.status).toBe(`ready`)
+          expect(live.utils.lastSubsetError).toBeUndefined()
+          const afterRows = readCurrentWindow()
+          const expectedChanges = expectedPageChanges(beforeRows, afterRows)
+          expect(publications.slice(publicationCount)).toEqual(
+            expectedChanges.length > 0
+              ? [{ changes: expectedChanges, rows: afterRows }]
+              : [],
+          )
+        }
+      } finally {
+        publicationSubscription?.unsubscribe()
+      }
+    },
+    () => cleanups,
+  )
 }
 
 async function runOnDemandPaginationScenario(
@@ -3157,6 +3196,85 @@ describe(`pagination recomputation oracle`, () => {
       ranks: [0, 1, 2],
       direction: `asc`,
       windows: [{ offset: 0, limit: 0 }],
+    })
+  })
+
+  it(`rejects the right NaN window members in the wrong order`, () => {
+    const rows = [
+      { id: 1, rank: 10 },
+      { id: 2, rank: 20 },
+      { id: 3, rank: NaN },
+      { id: 4, rank: 30 },
+      { id: 5, rank: 40 },
+    ]
+    const expected = referenceWindowRows(rows, `desc`, { offset: 0, limit: 3 })
+    expect(expected.map(({ id }) => id)).toEqual([3, 5, 4])
+    expect(() =>
+      expectWindowRows([expected[1]!, expected[2]!, expected[0]!], expected),
+    ).toThrow()
+  })
+
+  it.each([
+    {
+      direction: `asc` as const,
+      ranks: [10, 20, NaN, 30, 40],
+      expectedIds: [1, 2, 4],
+      limit: 3,
+    },
+    {
+      direction: `desc` as const,
+      ranks: [10, 20, NaN, 30, 40],
+      expectedIds: [3, 5, 4],
+      limit: 3,
+    },
+    {
+      direction: `desc` as const,
+      ranks: [10, NaN, 20],
+      expectedIds: [2, 3],
+      limit: 2,
+    },
+    {
+      direction: `desc` as const,
+      ranks: [NaN, 20, NaN, 30],
+      expectedIds: [1, 3, 4],
+      limit: 3,
+    },
+    {
+      direction: `desc` as const,
+      ranks: [10, 20, 25, 30, 40],
+      expectedIds: [5, 4, 3],
+      limit: 3,
+    },
+  ])(
+    `orders a $direction eager window with a NaN or finite middle rank`,
+    async ({ direction, ranks, expectedIds, limit }) => {
+      const rows = ranks.map((rank, index) => ({ id: index + 1, rank }))
+      const modeled = referenceWindow(rows, direction, { offset: 0, limit })
+      expect(modeled).toEqual(expectedIds)
+      await runPaginationScenario({
+        ranks,
+        direction,
+        explicitPublicKeyOrder: false,
+        windows: [
+          { offset: 0, limit },
+          { offset: 1, limit },
+        ],
+      })
+    },
+  )
+
+  it(`keeps a NaN window coherent through equal and changed source ranks`, async () => {
+    await runPaginationStateScenario({
+      ranks: [10, 20, NaN, 30, 40],
+      direction: `desc`,
+      explicitPublicKeyOrder: false,
+      initialWindow: { offset: 0, limit: 3 },
+      actions: [
+        { type: `put`, id: 3, rank: NaN },
+        { type: `put`, id: 3, rank: 35 },
+        { type: `put`, id: 3, rank: NaN },
+        { type: `delete`, id: 3 },
+      ],
     })
   })
 

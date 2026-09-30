@@ -147,6 +147,9 @@ function makeHandle(result: any, destroy: () => void): LiveQueryHandle {
         state: result.state(),
         status: result.status(),
         isReady: result.isReady(),
+        persistedStatus: result.persistedStatus(),
+        isPersistedReady: result.isPersistedReady(),
+        persistedError: result.persistedError(),
         isError: result.isError(),
         // angular-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status() !== `disabled`,
@@ -367,6 +370,9 @@ it(`preserves raw result types through the actual driver reader`, () => {
     state: new Map(),
     status: `disabled`,
     isReady: false,
+    persistedStatus: `unavailable`,
+    isPersistedReady: false,
+    persistedError: undefined,
     isError: false,
     isEnabled: false,
   }

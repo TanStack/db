@@ -29,6 +29,51 @@ import { BTree } from '../src/utils/btree.js'
  * depth, while the fast-check lane supplies new and shrinkable histories.
  */
 
+// The tree trusts its comparator to return a valid order; BTreeIndex rejects
+// invalid custom-comparator results before they reach the tree, so that law
+// lives in index-update.property.test.ts.
+
+// Splitting already determines the new child's position from the insertion
+// index. A redundant comparison after mutation must not misplace it. Each
+// fixture returns NaN only for the pair such a comparison would use, so the
+// split must succeed without consulting it. Observe inserted-key reads and
+// whole ranges; the invalid pair is not a lookup order.
+it.each([
+  [16, 14],
+  [32, 46],
+])(
+  `preserves the Map across a split after %s accepted entries`,
+  (size, rightKey) => {
+    const insertedKey = size * 2
+    const tree = new BTree<number, Payload>(
+      (left, right) =>
+        left === insertedKey && right === rightKey ? NaN : left - right,
+      4,
+    )
+    const model: ReferenceModel = new Map()
+    for (let key = 0; key < insertedKey; key += 2)
+      applyAction(tree, model, { type: `put`, key, v: key })
+    for (const key of [insertedKey, insertedKey + 2]) {
+      applyAction(tree, model, { type: `put`, key, v: key })
+      const sorted = [...model.keys()].sort((left, right) => left - right)
+      expectRange(tree, model, sorted, -Infinity, Infinity, true)
+      expect(tree.minKey()).toBe(sorted[0])
+      expect(tree.maxKey()).toBe(sorted.at(-1))
+    }
+  },
+)
+
+it(`accepts infinite comparison results that still provide an order`, () => {
+  const tree = new BTree<number, Payload>((left, right) =>
+    left === right ? 0 : left < right ? -Infinity : Infinity,
+  )
+  const model: ReferenceModel = new Map()
+  for (const key of [2, 0, 1]) {
+    applyAction(tree, model, { type: `put`, key, v: key })
+    expectRefinement(tree, model, key)
+  }
+})
+
 type Payload = { v: number }
 type Stored = Readonly<{ reference: Payload; v: number }>
 type ReferenceModel = Map<number, Stored>
