@@ -332,19 +332,19 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(state.value.size).toBe(3)
 
-    expect(state.value.get(`[1,1]`)).toMatchObject({
+    expect(state.value.get(`["1","1"]`)).toMatchObject({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state.value.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(state.value.get(`[3,1]`)).toMatchObject({
+    expect(state.value.get(`["3","1"]`)).toMatchObject({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -366,7 +366,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[4,2]`)).toMatchObject({
+    expect(state.value.get(`["4","2"]`)).toMatchObject({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -388,7 +388,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // The updated title should be reflected in the joined results
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state.value.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
@@ -410,7 +410,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // After deletion, issue 3 should no longer have a joined result
-    expect(state.value.get(`[3,1]`)).toBeUndefined()
+    expect(state.value.get(`["3","1"]`)).toBeUndefined()
     expect(state.value.size).toBe(3)
   })
 
@@ -621,8 +621,8 @@ describe(`Query Collections`, () => {
     watchEffect(() => {
       renderStates.push({
         stateSize: state.value.size,
-        hasTempKey: state.value.has(`[temp-key,1]`),
-        hasPermKey: state.value.has(`[4,1]`),
+        hasTempKey: state.value.has(`["temp-key","1"]`),
+        hasPermKey: state.value.has(`["4","1"]`),
         timestamp: Date.now(),
       })
     })
@@ -694,12 +694,12 @@ describe(`Query Collections`, () => {
 
     // Verify optimistic state is immediately reflected (should be synchronous)
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toMatchObject({
+    expect(state.value.get(`["temp-key","1"]`)).toMatchObject({
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
     })
-    expect(state.value.get(`[4,1]`)).toBeUndefined()
+    expect(state.value.get(`["4","1"]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await transaction.isPersisted.promise
@@ -708,8 +708,8 @@ describe(`Query Collections`, () => {
 
     // Verify the temporary key is replaced by the permanent one
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toBeUndefined()
-    expect(state.value.get(`[4,1]`)).toMatchObject({
+    expect(state.value.get(`["temp-key","1"]`)).toBeUndefined()
+    expect(state.value.get(`["4","1"]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,

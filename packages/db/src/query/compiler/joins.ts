@@ -770,8 +770,10 @@ function processJoinResults(
         Object.assign(mergedNamespacedRow, joinedNamespacedRow)
       }
 
-      // We create a composite key that combines the main and joined keys
-      const resultKey = `[${mainKey},${joinedKey}]`
+      // Combine the main and joined keys without ambiguity: keys may contain
+      // delimiters, numbers and strings may print alike, and a missing outer
+      // side encodes as null, which no source key can be.
+      const resultKey = JSON.stringify([mainKey ?? null, joinedKey ?? null])
 
       return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
     }),
