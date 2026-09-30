@@ -16,9 +16,9 @@
  *
  * History grammar: left and right rows draw keys from a domain of plain,
  * comma-bearing, bracket-bearing, and quoted strings, numbers alongside the
- * strings that print the same, and both infinities. Rows join on a small group value. Each
- * history uses an inner, left, or full join, then applies up to three synced
- * group changes to either side.
+ * strings that print the same, both infinities, and `NaN`. Rows join on a small
+ * group value. Each history uses an inner, left, or full join, then applies up
+ * to three synced group changes to either side.
  *
  * Production driver: two `mockSyncCollectionOptions` Collections and a public
  * `createLiveQueryCollection` join that selects both keys.
@@ -31,10 +31,12 @@
  * (1, `c`) versus (`1`, `c`) collided under the comma encoding; restoring it
  * fails both pinned histories and both campaigns. Plain `JSON.stringify`
  * printed `Infinity` and `-Infinity` as `null`; restoring it fails the pinned
- * infinity history and both campaigns.
+ * infinity history and both campaigns. Comparing the join index's source-key
+ * prefixes with `===` let a retracted `NaN`-keyed row survive; restoring it
+ * fails the pinned `NaN` history.
  *
- * Known omissions: `NaN` source keys, joins over subqueries, more than two
- * sources, custom `getKey`, and optimistic mutations are outside this owner.
+ * Known omissions: joins over subqueries, more than two sources, custom
+ * `getKey`, and optimistic mutations are outside this owner.
  * The mock sync source is a controlled provider; this oracle claims only the
  * compiler's keying of the rows it supplies, not any real adapter's behavior.
  */
@@ -63,9 +65,9 @@ type History = {
   changes: Array<Change>
 }
 
-// Keys that a delimiter-joined encoding cannot tell apart, plus infinite
-// numbers, which JSON prints as `null`, the missing-side marker. `NaN` keys
-// fail before key encoding matters and are outside this owner.
+// Keys that a delimiter-joined encoding cannot tell apart, plus non-finite
+// numbers, which JSON prints as `null`, the missing-side marker. A `NaN` key
+// also checks that the join's source-key index treats `NaN` as one key.
 const keyDomain: ReadonlyArray<Key> = [
   `a`,
   `b`,
@@ -81,6 +83,7 @@ const keyDomain: ReadonlyArray<Key> = [
   `2`,
   Number.POSITIVE_INFINITY,
   Number.NEGATIVE_INFINITY,
+  Number.NaN,
 ]
 
 // ---------------------------------------------------------------------------
@@ -182,6 +185,16 @@ const pinnedHistories: ReadonlyArray<History> = [
     ],
     changes: [{ side: `left`, index: 0, g: 0 }],
   },
+  {
+    // The pair leaves and re-forms; the NaN-keyed left row must cancel.
+    join: `inner`,
+    left: [{ id: Number.NaN, g: 0 }],
+    right: [{ id: `a`, g: 0 }],
+    changes: [
+      { side: `left`, index: 0, g: 1 },
+      { side: `right`, index: 0, g: 1 },
+    ],
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -250,7 +263,9 @@ describe(`joined result key oracle`, () => {
   if (requestedReplayProperty === undefined) {
     for (const history of pinnedHistories) {
       it(`keeps every ${history.join} join pair for ${history.left
-        .map((row) => JSON.stringify(row.id))
+        .map((row) =>
+          typeof row.id === `number` ? String(row.id) : JSON.stringify(row.id),
+        )
         .join(` `)}`, () => runHistory(history))
     }
 

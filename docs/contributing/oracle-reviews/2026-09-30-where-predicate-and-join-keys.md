@@ -17,9 +17,9 @@ deletes, truncate, failed replay, or generated cleanup and restart histories.
 
 The joined result key oracle claims that an inner, left, or full two-source
 join publishes one row per joined pair and that distinct pairs never share a
-result key, for string keys, numeric keys, and both infinities. It does not
-cover `NaN` source keys, joins over subqueries, more than two sources, custom
-`getKey`, or optimistic mutations.
+result key, for string keys, numeric keys, both infinities, and `NaN`. It does
+not cover joins over subqueries, more than two sources, custom `getKey`, or
+optimistic mutations.
 
 Both oracles use `mockSyncCollectionOptions` as a controlled provider. Their
 claims are limited to how the Collection and compiler handle the sync
@@ -40,14 +40,20 @@ restored after each run.
 | The same sent-key mutant | `collection-subscription.test.ts` page-offset witness | Survived the pre-review `eq` witness. After the review added an unrouted `or` predicate, the two cases beside a matching change fail by assertion (offset 3, expected 2). The unrouted `alone` case survives. |
 | Result key joins the source keys with a comma | Join | Key-count invariant error or wrong-row assertion in both pinned delimiter and number histories and both campaigns (4 tests). |
 | Result key uses plain `JSON.stringify` | Join | Wrong-row assertion in the pinned infinity history and both campaigns (3 tests). |
+| Index compares source-key prefixes with `===` | Join | Key-count invariant error in the pinned `NaN` history and the fixed campaign (2 tests). |
+| The same prefix comparison | Index refinement oracle | Assertion failure in three pinned `NaN` histories and both campaigns; the `-0` control passes. |
 
 The plain-JSON mutant is the pre-review implementation. The review found that
 `JSON.stringify` prints `Infinity` and `-Infinity` as `null`, the marker for a
 missing outer side. Adding both infinities to the key domain failed the fixed
 and random campaigns with a full join over `-Infinity` on both sides. The repair
 encodes a non-finite number as an object, which no source key can be. `NaN`
-source keys fail before key encoding matters, with the comma encoding as well,
-and remain open.
+source keys failed before key encoding mattered, with the comma encoding as
+well, because the join index compared source-key prefixes with `===`, so a
+retracted `NaN`-keyed row never cancelled. The review fixed that comparison in
+`@tanstack/db-ivm` and added an Index refinement oracle for it; the join oracle
+now includes `NaN` keys and a pinned history in which a `NaN`-keyed pair leaves
+and re-forms.
 
 After the repairs, `test:oracles` at `TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10`
 passed 2,869 tests and the `@tanstack/db` suite passed 7,499 tests. Final
@@ -88,13 +94,11 @@ verification receipts belong in the pull request.
 | ORC-010 Failure fidelity and cleanup | Pass after repair, through `withOracleCleanup`. |
 | ORC-011 Independent second formulation | Not triggered. No shared-fault hypothesis has been named. |
 | ORC-012 Review evidence | This record. The coverage map links it. |
-| ORC-013 Reusable boundary law | Pass. The law is that distinct pairs have distinct keys. The comma encoding is rejected by the delimiter and number pinned histories, and plain JSON by the infinity pinned history. |
+| ORC-013 Reusable boundary law | Pass. The law is that distinct pairs have distinct keys and a retracted pair cancels. The comma encoding is rejected by the delimiter and number pinned histories, plain JSON by the infinity pinned history, and `===` prefixes by the `NaN` pinned history. |
 | ORC-014 Controlled-premise handoff | Not triggered. The claim is limited to how the compiler keys rows from the controlled provider. |
 
 ## Open work
 
-- `NaN` source keys in joins fail on main as well as on this branch. The join
-  compiler owns this.
 - The sent-key mutant survives the unrouted `alone` page-offset case.
 - Generated cleanup and restart histories for filtered subscriptions remain
   with the lifecycle publication owner, as the coverage map records.
