@@ -27,6 +27,10 @@ jobs:
           persist-credentials: false
       - name: Setup Tools
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Check private-member mangle cache
+        run: pnpm run check:mangle
+      - name: Build DB packages
+        run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
       - name: Check minified public API
         run: pnpm run test:minified-db
   test:

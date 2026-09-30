@@ -1,5 +1,7 @@
 // Consumer-build contract: public Collection/query behavior, error names, and
 // index metadata have the same observations after identifier minification.
+// The driver bundles the built packages/db/dist, which is what consumers
+// install, so it also covers the private-member renaming in the db build.
 // Authority: the corresponding source-facing tests in packages/db/tests for
 // queryOnce, live queries, collection events/indexes, and errors. The model is
 // a plain array filter/sort/projection over one initial and one updated source
@@ -7,7 +9,7 @@
 // does not replace the generated oracles or framework adapter conformance.
 // The --calibrate modes are hostile controls for this check, not CI jobs.
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
@@ -31,6 +33,28 @@ assert.ok(
   dbNodeModulesInfo?.isDirectory(),
   'Install workspace dependencies before running test:minified-db',
 )
+
+// The built entry must be at least as new as every source file and the
+// mangle cache, or this check would judge stale output.
+const builtEntry = path.join(root, 'packages/db/dist/esm/index.js')
+const builtInfo = await stat(builtEntry).catch((error) => {
+  if (error.code !== 'ENOENT') throw error
+  return null
+})
+assert.ok(builtInfo, 'Build @tanstack/db before running test:minified-db')
+const inputs = [
+  path.join(root, 'packages/db/mangle-cache.json'),
+  ...(await readdir(path.join(root, 'packages/db/src'), { recursive: true }))
+    .filter((file) => file.endsWith('.ts'))
+    .map((file) => path.join(root, 'packages/db/src', file)),
+]
+for (const input of inputs) {
+  const { mtimeMs } = await stat(input)
+  assert.ok(
+    mtimeMs <= builtInfo.mtimeMs,
+    `packages/db/dist is older than ${path.relative(root, input)}; rebuild @tanstack/db`,
+  )
+}
 const bundleDirectory = await mkdtemp(path.join(dbNodeModules, '.minified-db-'))
 const bundlePath = path.join(bundleDirectory, 'index.mjs')
 
@@ -47,7 +71,7 @@ const errorNameMutant = {
   name: 'error-name-mutant',
   setup(builder) {
     builder.onLoad(
-      { filter: /packages\/db\/src\/errors\.ts$/ },
+      { filter: /packages\/db\/dist\/esm\/errors\.js$/ },
       async ({ path: file }) => {
         const source = await readFile(file, 'utf8')
         const original = 'this.name = `CollectionConfigurationError`'
@@ -58,7 +82,7 @@ const errorNameMutant = {
         )
         return {
           contents: source.replace(original, 'this.name = new.target.name'),
-          loader: 'ts',
+          loader: 'js',
         }
       },
     )
@@ -230,7 +254,7 @@ async function checkCollectionsAndQueries(db) {
 try {
   const bundle = await build({
     absWorkingDir: root,
-    entryPoints: [path.join(root, 'packages/db/src/index.ts')],
+    entryPoints: [builtEntry],
     outfile: bundlePath,
     bundle: true,
     minify: true,

@@ -20,6 +20,7 @@
     "test": "pnpm --filter \"./packages/**\" test",
     "test:oracles": "pnpm --filter @tanstack/db test:oracles && pnpm --filter @tanstack/query-db-collection test:oracles",
     "test:minified-db": "node scripts/test-minified-db.mjs",
+    "check:mangle": "node scripts/mangle-private-members.mjs",
     "typecheck:tests": "pnpm --filter @tanstack/db-ivm --filter @tanstack/offline-transactions typecheck",
     "test:docs": "node scripts/verify-links.ts",
     "test:sherif": "sherif -i zod -p offline-transactions-react-native -p shopping-list-react-native",
