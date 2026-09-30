@@ -249,6 +249,15 @@ describe(`useLiveSuspenseQuery`, () => {
         expect(viewA.getByText(`Query failed: Client A failed`)).toBeTruthy(),
       )
 
+      let resolveClientB!: (result: {
+        rows: Array<{ key: string; value: Person }>
+      }) => void
+      const clientBLoad = new Promise<{
+        rows: Array<{ key: string; value: Person }>
+      }>((resolve) => {
+        resolveClientB = resolve
+      })
+      void clientB._registerLiveQuery(queryHash, clientBLoad)
       viewB = renderComponent(
         <DbProvider client={clientB}>
           <TestErrorBoundary>
@@ -260,6 +269,9 @@ describe(`useLiveSuspenseQuery`, () => {
       )
       expect(viewB.getByText(`Client B loading`)).toBeTruthy()
       expect(viewB.container.textContent).not.toContain(`Client A failed`)
+      await act(() => resolveClientB({ rows: [] }))
+      await waitFor(() => expect(viewB!.getByText(`Query ready`)).toBeTruthy())
+      expect(viewA.getByText(`Query failed: Client A failed`)).toBeTruthy()
     } finally {
       viewA.unmount()
       viewB?.unmount()
