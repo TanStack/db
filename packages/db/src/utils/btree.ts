@@ -409,13 +409,14 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       // placed in the same node after the shift. A right shift would need a
       // key above child.maxKey(), and that only reaches the last child.
       let other: BNode<K, V> | undefined
-      if (
-        i > 0 &&
-        (other = c[i - 1]!).keys.length < max &&
-        cmp(child.keys[0]!, key) < 0
-      ) {
-        other.takeFromRight(child)
-        this.keys[i - 1] = other.maxKey()!
+      if (i > 0 && (other = c[i - 1]!).keys.length < max) {
+        const comparison = cmp(child.keys[0]!, key)
+        if (!(comparison < 0 || comparison === 0 || comparison > 0))
+          throw new Error(`BTree: comparator returned NaN or an invalid result`)
+        if (comparison < 0) {
+          other.takeFromRight(child)
+          this.keys[i - 1] = other.maxKey()!
+        }
       }
     }
 
@@ -430,7 +431,8 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     if (this.keys.length >= max) {
       // no, we must split also
       newRightSibling = this.splitOffRightSide()
-      if (cmp(result.maxKey()!, this.maxKey()!) > 0) {
+      // The new child follows i; no comparison is needed after mutation.
+      if (i + 1 >= this.keys.length) {
         target = newRightSibling
         i -= this.keys.length
       }

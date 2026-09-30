@@ -69,6 +69,68 @@ describe.each(invalidComparisonOperations)(
   },
 )
 
+// These comparisons are reached by insertion maintenance rather than the
+// root search. Rejection must precede sibling redistribution.
+it.each([
+  [6, 4],
+  [7, 6],
+  [10, 12],
+  [11, 14],
+  [18, 28],
+  [21, 22],
+])(
+  `invalid comparator before redistribution after %s accepted entries`,
+  (size, leftKey) => {
+    const rejectedKey = size * 2
+    const tree = new BTree<number, Payload>(
+      (left, right) =>
+        left === leftKey && right === rejectedKey ? NaN : left - right,
+      4,
+    )
+    const model: ReferenceModel = new Map()
+    for (let key = 0; key < rejectedKey; key += 2)
+      applyAction(tree, model, { type: `put`, key, v: key })
+    expect(() => tree.set(rejectedKey, { v: rejectedKey })).toThrow(
+      /comparator returned NaN/,
+    )
+    expectRefinement(tree, model, 0)
+    applyAction(tree, model, {
+      type: `put`,
+      key: rejectedKey + 1,
+      v: rejectedKey + 1,
+    })
+    expectRefinement(tree, model, 0)
+  },
+)
+
+// Splitting already determines the new child's position. A redundant
+// comparison after mutation must not misplace it. Observe inserted-key reads
+// and whole ranges; the deliberately invalid pair is not a lookup order.
+it.each([
+  [16, 14],
+  [32, 46],
+])(
+  `preserves the Map across a split after %s accepted entries`,
+  (size, rightKey) => {
+    const insertedKey = size * 2
+    const tree = new BTree<number, Payload>(
+      (left, right) =>
+        left === insertedKey && right === rightKey ? NaN : left - right,
+      4,
+    )
+    const model: ReferenceModel = new Map()
+    for (let key = 0; key < insertedKey; key += 2)
+      applyAction(tree, model, { type: `put`, key, v: key })
+    for (const key of [insertedKey, insertedKey + 2]) {
+      applyAction(tree, model, { type: `put`, key, v: key })
+      const sorted = [...model.keys()].sort((left, right) => left - right)
+      expectRange(tree, model, sorted, -Infinity, Infinity, true)
+      expect(tree.minKey()).toBe(sorted[0])
+      expect(tree.maxKey()).toBe(sorted.at(-1))
+    }
+  },
+)
+
 it(`accepts infinite comparison results that still provide an order`, () => {
   const tree = new BTree<number, Payload>((left, right) =>
     left === right ? 0 : left < right ? -Infinity : Infinity,
