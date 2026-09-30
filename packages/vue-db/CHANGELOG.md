@@ -1,5 +1,18 @@
 # @tanstack/vue-db
 
+## 0.3.0
+
+### Minor Changes
+
+- Add opt-in network-first initial rendering for eagerly persisted SQLite Collections. `initialRender: { strategy: 'network-first', networkTimeoutMs }` lets React and Solid Suspense render restored rows after the configured deadline (three seconds by default) or a network failure while sync continues. Live-query observers and the Angular, React, Solid, Svelte, and Vue integrations expose `persistedStatus`, `isPersistedReady`, and `persistedError` separately from Collection readiness. ([#1955](https://github.com/TanStack/db/pull/1955))
+
+### Patch Changes
+
+- Publish one coherent live-query data snapshot to synchronous Vue watchers. Propagate query errors even when their text matches the disabled-query marker. A saved `data.value` array no longer receives later row-list changes; read `data.value` again for the latest rows. ([#1943](https://github.com/TanStack/db/pull/1943))
+
+- Updated dependencies [[`9c62ac3`](https://github.com/TanStack/db/commit/9c62ac3782779dc2a91335dd834ad8eb907db109), [`d5e4732`](https://github.com/TanStack/db/commit/d5e47325a7db907fb2c5f9bb6d1273754bfc4a69), [`0122da8`](https://github.com/TanStack/db/commit/0122da80ae58d8e8e624b460506370a910037c8e), [`f7d96f7`](https://github.com/TanStack/db/commit/f7d96f7e22c8997bca0815521e8e944457c8888a), [`fb509ef`](https://github.com/TanStack/db/commit/fb509efb985f830736389d7ec2b53504c0611395), [`dc4b4e0`](https://github.com/TanStack/db/commit/dc4b4e089a5c5b4b9462fd833ff3c6e0c2f17988), [`f158258`](https://github.com/TanStack/db/commit/f15825858e09914b6b94c4150f77c5137efecdbf), [`c879ba6`](https://github.com/TanStack/db/commit/c879ba6d855914e5c0cac49af7a007eb5cabe7e4), [`b5d92ce`](https://github.com/TanStack/db/commit/b5d92cebd0d951d8a3399618aea4f399915b6ea9)]:
+  - @tanstack/db@0.11.0
+
 ## 0.2.2
 
 ### Patch Changes
