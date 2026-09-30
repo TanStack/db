@@ -1,34 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { DefaultMap, compareKeys, serializeValue } from '../src/utils.js'
+import { compareKeys, serializeValue } from '../src/utils.js'
 import { hash } from '../src/hashing/index.js'
-
-describe(`DefaultMap`, () => {
-  it(`should return default value for missing keys`, () => {
-    const map = new DefaultMap(() => 0)
-    expect(map.get(`missing`)).toBe(0)
-  })
-
-  it(`should store and retrieve values`, () => {
-    const map = new DefaultMap(() => 0)
-    map.set(`key`, 42)
-    expect(map.get(`key`)).toBe(42)
-  })
-
-  it(`should accept initial entries`, () => {
-    const map = new DefaultMap(() => 0, [[`key`, 1]])
-    expect(map.get(`key`)).toBe(1)
-  })
-
-  it(`should update values using the update method`, () => {
-    const map = new DefaultMap(() => 0)
-    map.update(`key`, (value) => value + 1)
-    expect(map.get(`key`)).toBe(1)
-
-    map.update(`key`, (value) => value * 2)
-    expect(map.get(`key`)).toBe(2)
-  })
-})
 
 describe(`compareKeys`, () => {
   it(`orders finite numeric keys before NaN`, () => {

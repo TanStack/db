@@ -13,36 +13,6 @@ export function assert(
   }
 }
 
-/**
- * A map that returns a default value for keys that are not present.
- */
-export class DefaultMap<K, V> extends Map<K, V> {
-  constructor(
-    private defaultValue: () => V,
-    entries?: Iterable<[K, V]>,
-  ) {
-    super(entries)
-  }
-
-  get(key: K): V {
-    if (!this.has(key)) {
-      // this.set(key, this.defaultValue())
-      return this.defaultValue()
-    }
-    return super.get(key)!
-  }
-
-  /**
-   * Update the value for a key using a function.
-   */
-  update(key: K, updater: (value: V) => V): V {
-    const value = this.get(key)
-    const newValue = updater(value)
-    this.set(key, newValue)
-    return newValue
-  }
-}
-
 // JS engines have various limits on how many args can be passed to a function
 // with a spread operator, so we need to split the operation into chunks
 // 32767 is the max for Chrome 14, all others are higher
@@ -80,55 +50,21 @@ export function binarySearch<T>(
   return low
 }
 
+const objectIds = new WeakMap<object, number>()
+let nextObjectId = 0
+
 /**
- * Utility for generating unique IDs for objects and values.
- * Uses WeakMap for object reference tracking and consistent hashing for primitives.
+ * A string identity for composite keys: primitives by value, objects by
+ * reference.
  */
-export class ObjectIdGenerator {
-  private objectIds = new WeakMap<object, number>()
-  private nextId = 0
-
-  /**
-   * Get a unique identifier for any value.
-   * - Objects: Uses WeakMap for reference-based identity
-   * - Primitives: Uses consistent string-based hashing
-   */
-  getId(value: any): number {
-    // For primitives, use a simple hash of their string representation
-    if (typeof value !== `object` || value === null) {
-      const str = String(value)
-      let hashValue = 0
-      for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i)
-        hashValue = (hashValue << 5) - hashValue + char
-        hashValue = hashValue & hashValue // Convert to 32-bit integer
-      }
-      return hashValue
-    }
-
-    // For objects, use WeakMap to assign unique IDs
-    if (!this.objectIds.has(value)) {
-      this.objectIds.set(value, this.nextId++)
-    }
-    return this.objectIds.get(value)!
-  }
-
-  /**
-   * Get a string representation of the ID for use in composite keys.
-   */
-  getStringId(value: any): string {
-    if (value === null) return `null`
-    if (value === undefined) return `undefined`
-    if (typeof value !== `object`) return `str_${String(value)}`
-
-    return `obj_${this.getId(value)}`
-  }
+export function getStringId(value: unknown): string {
+  if (value === null) return `null`
+  if (value === undefined) return `undefined`
+  if (typeof value !== `object`) return `str_${String(value)}`
+  let id = objectIds.get(value)
+  if (id === undefined) objectIds.set(value, (id = nextObjectId++))
+  return `obj_${id}`
 }
-
-/**
- * Global instance for cases where a shared object ID space is needed.
- */
-export const globalObjectIdGenerator = new ObjectIdGenerator()
 
 export function* concatIterable<T>(
   ...iterables: Array<Iterable<T>>

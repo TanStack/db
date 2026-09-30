@@ -320,12 +320,11 @@ export function useLiveQuery(
     if (typeof unwrappedParam === `function`) {
       // To avoid calling the query function twice, we wrap it to handle null/undefined returns
       // The wrapper will be called once by createLiveQueryCollection
+      const disabledQuery = Symbol()
       const wrappedQuery = (q: InitialQueryBuilder) => {
         const result = unwrappedParam(q)
-        // If the query function returns null/undefined, throw a special error
-        // that we'll catch to return null collection
         if (result === undefined || result === null) {
-          throw new Error(`__DISABLED_QUERY__`)
+          throw disabledQuery
         }
         return result
       }
@@ -336,8 +335,7 @@ export function useLiveQuery(
           startSync: true,
         })
       } catch (error) {
-        // Check if this is our special disabled query marker
-        if (error instanceof Error && error.message === `__DISABLED_QUERY__`) {
+        if (error === disabledQuery) {
           return null
         }
         // Re-throw other errors
@@ -355,32 +353,24 @@ export function useLiveQuery(
   const state = reactive(new Map<string | number, any>())
 
   // Reactive data array that maintains sorted order
-  const internalData = reactive<Array<any>>([])
+  const internalData = ref<Array<any>>([])
 
   // Computed wrapper for the data to match expected return type
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
     const currentCollection = collection.value
     if (!currentCollection) {
-      return internalData
+      return internalData.value
     }
     return isSingleResultCollection(currentCollection)
-      ? internalData[0]
-      : internalData
+      ? internalData.value[0]
+      : internalData.value
   })
 
   // Track collection status reactively
   const status = ref(
     collection.value ? collection.value.status : (`disabled` as const),
   )
-
-  // Helper to sync data array from collection in correct order
-  const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
-  ) => {
-    internalData.length = 0
-    internalData.push(...Array.from(currentCollection.values()))
-  }
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
@@ -391,7 +381,7 @@ export function useLiveQuery(
     currentCollection: Collection<any, any, any>,
   ) => {
     status.value = observer.getSnapshot().status as CollectionStatus
-    syncDataFromCollection(currentCollection)
+    internalData.value = Array.from(currentCollection.values())
   }
 
   // Watch for collection changes and subscribe to updates
@@ -406,7 +396,7 @@ export function useLiveQuery(
     if (!currentCollection) {
       status.value = `disabled` as const
       state.clear()
-      internalData.length = 0
+      internalData.value = []
       return
     }
 
