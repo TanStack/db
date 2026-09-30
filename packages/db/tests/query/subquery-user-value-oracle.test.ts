@@ -32,9 +32,9 @@ import { createControlledCollection } from './includes-oracle-helpers.js'
  * A second driver removes duplicate support one row at a time, restores it,
  * then flips the outer predicate. The nested aggregate history compares the
  * complete public snapshot when each synchronous source write returns. The
- * joined findOne() history checks later singleton and empty cuts, but its
- * two-candidate initial QueryRef cut fails; a materialized control localizes the
- * defect. These bounded histories do not establish every join or schedule.
+ * joined findOne() histories check the initial, singleton, empty, restored,
+ * and default-key candidate cuts. A materialized control checks the receiving
+ * boundary. These bounded histories do not establish every join or schedule.
  */
 
 type Person = { id: number; groupId: number; enabled: boolean }
@@ -538,10 +538,9 @@ describe('subquery boundaries preserve operators and user rows', () => {
   })
 
   // A flat aggregate is legal by the query builder and has the same one-row
-  // count as the nested aggregate above. The current join path loses it.
-  // Pin the observed empty result, then demonstrate that the desired public
-  // comparison rejects it. When this path is repaired, convert it to a green law.
-  it('records the flat aggregate QueryRef join gap', async () => {
+  // count as the nested aggregate above. Check the exact public row when
+  // source counts and matching people change.
+  it('publishes a flat aggregate QueryRef join through source writes', async () => {
     const source = createControlledCollection('flat-aggregate-items', [
       { id: 1 },
       { id: 2 },
@@ -568,11 +567,34 @@ describe('subquery boundaries preserve operators and user rows', () => {
       getKey: (row) => row.personId,
     })
 
-    let publicSnapshot: Array<{ personId: number; total: number }> = []
+    const modelItems = new Map([
+      [1, { id: 1 }],
+      [2, { id: 2 }],
+    ])
+    const modelPeople = new Map([[2, { id: 2 }]])
+    const checkPublicSnapshot = (checkpoint: string) => {
+      const total = modelItems.size
+      const expected = Array.from(modelPeople.values())
+        .filter((person) => person.id === total)
+        .map((person) => ({ personId: person.id, total }))
+      expect(live.toArray.map(stripVirtualProps), checkpoint).toEqual(expected)
+    }
     await withHistoryCleanup(
       async () => {
         await live.preload()
-        publicSnapshot = live.toArray.map(stripVirtualProps)
+        checkPublicSnapshot('after initial preload')
+
+        source.write('insert', { id: 3 })
+        modelItems.set(3, { id: 3 })
+        checkPublicSnapshot('after the aggregate grows')
+
+        persons.write('insert', { id: 3 })
+        modelPeople.set(3, { id: 3 })
+        checkPublicSnapshot('after the new aggregate joins')
+
+        source.write('delete', { id: 1 })
+        modelItems.delete(1)
+        checkPublicSnapshot('after the aggregate returns to two')
       },
       () => [
         () => live.cleanup(),
@@ -580,18 +602,79 @@ describe('subquery boundaries preserve operators and user rows', () => {
         () => persons.collection.cleanup(),
       ],
     )
-    expect(publicSnapshot).toEqual([])
-    expect(() =>
-      expect(publicSnapshot, 'after initial preload').toEqual([
-        { personId: 2, total: 2 },
-      ]),
-    ).toThrowError(/after initial preload/)
+  })
+
+  it('keeps one default-key findOne QueryRef row through candidate changes', async () => {
+    const first = { id: 1 }
+    const second = { id: 2 }
+    const source = createControlledCollection('find-one-default-source', [
+      first,
+      second,
+    ])
+    const anchors = createControlledCollection('find-one-default-anchors', [
+      first,
+      second,
+    ])
+    const joined = createLiveQueryCollection({
+      query: (q) => {
+        const firstQuery = q
+          .from({ item: source.collection })
+          .select(({ item }) => ({ id: item.id }))
+          .findOne()
+        return q
+          .from({ anchor: anchors.collection })
+          .innerJoin({ first: firstQuery }, ({ anchor, first: row }) =>
+            eq(anchor.id, row.id),
+          )
+          .select(({ first: row }) => ({ id: row.id }))
+      },
+      getKey: (row) => row.id,
+    })
+    const leading = createLiveQueryCollection({
+      query: (q) => {
+        const firstQuery = q
+          .from({ item: source.collection })
+          .select(({ item }) => ({ id: item.id }))
+          .findOne()
+        return q
+          .from({ first: firstQuery })
+          .innerJoin({ anchor: anchors.collection }, ({ first: row, anchor }) =>
+            eq(row.id, anchor.id),
+          )
+          .select(({ first: row }) => ({ id: row.id }))
+      },
+      getKey: (row) => row.id,
+    })
+
+    await withHistoryCleanup(
+      async () => {
+        await Promise.all([joined.preload(), leading.preload()])
+        for (const live of [joined, leading]) {
+          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
+        }
+
+        source.write('delete', first)
+        for (const live of [joined, leading]) {
+          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 2 }])
+        }
+
+        source.write('insert', first)
+        for (const live of [joined, leading]) {
+          expect(live.toArray.map(stripVirtualProps)).toEqual([{ id: 1 }])
+        }
+      },
+      () => [
+        () => joined.cleanup(),
+        () => leading.cleanup(),
+        () => source.collection.cleanup(),
+        () => anchors.collection.cleanup(),
+      ],
+    )
   })
 
   // The public builder documents findOne() as returning the first result.
-  // Today the nested QueryRef drops singleResult before the outer join when
-  // two candidates exist. Later one-candidate and empty cuts are green.
-  it('records the joined findOne QueryRef singleton gap', async () => {
+  // The nested QueryRef must reduce the candidates before the outer join.
+  it('publishes one ordered joined findOne QueryRef row through source writes', async () => {
     const initialPeople = [
       { id: 1, groupId: 1 },
       { id: 2, groupId: 2 },
@@ -698,21 +781,9 @@ describe('subquery boundaries preserve operators and user rows', () => {
       ],
     )
     expect(snapshots).toHaveLength(5)
-    const [initial, ...later] = snapshots
-    expect(initial).toEqual({
-      checkpoint: 'after initial preload',
-      actual: [
-        { anchorId: 1, tagId: 10 },
-        { anchorId: 2, tagId: 20 },
-      ],
-      expected: [{ anchorId: 1, tagId: 10 }],
-    })
-    for (const { checkpoint, actual, expected } of later) {
+    for (const { checkpoint, actual, expected } of snapshots) {
       expect(actual, checkpoint).toEqual(expected)
     }
-    expect(() =>
-      expect(initial!.actual, initial!.checkpoint).toEqual(initial!.expected),
-    ).toThrowError(/after initial preload/)
   })
 
   it('materializes one joined findOne value after source writes', async () => {

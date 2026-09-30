@@ -16,11 +16,9 @@
  * rejecting predicate distinguishes filtering after aggregation from dropping
  * the predicate altogether.
  * An inner join has a separate boundary: the global aggregate joins when its
- * computed total matches an anchor. The nested matching cases currently fail;
- * exact expected-failure guards preserve that open defect. A materialized
- * aggregate Collection supplies positive matching and nonmatching controls.
- * The nested rejecting case checks the outer filter, but this oracle does not
- * yet reject an all-empty nested QueryRef implementation.
+ * computed total matches an anchor. A materialized aggregate Collection
+ * supplies a second formulation for matching and nonmatching controls.
+ * The nested matching cases also reject an all-empty QueryRef implementation.
  */
 import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
@@ -110,23 +108,7 @@ describe('optimizer aggregate semantics', () => {
       // The first synchronous public snapshot must follow aggregate, join,
       // then outer-filter semantics. This compares complete rows, not counts.
       const actual = result.toArray.map(stripVirtualProps)
-      if (scenario.target === 30 && scenario.filter !== `reject`) {
-        // Known inner-join defect: these legal matching cases currently vanish.
-        // Keep the exact law as an expected failure until production is fixed.
-        let mismatch: unknown
-        try {
-          expect(actual).toEqual(scenario.expected)
-        } catch (error) {
-          mismatch = error
-        }
-        expect(mismatch).toMatchObject({
-          name: `AssertionError`,
-          actual: [],
-          expected: [{ total: 30 }],
-        })
-      } else {
-        expect(actual).toEqual(scenario.expected)
-      }
+      expect(actual).toEqual(scenario.expected)
 
       if (scenario.filter === `none`) {
         const aggregate = createLiveQueryCollection({
