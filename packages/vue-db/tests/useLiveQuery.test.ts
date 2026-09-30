@@ -1835,6 +1835,15 @@ describe(`Query Collections`, () => {
   })
 
   describe(`Disabled queries`, () => {
+    it(`propagates a query error whose text matches the disabled marker`, () => {
+      const failure = new Error(`__DISABLED_QUERY__`)
+      expect(() =>
+        useLiveQuery(() => {
+          throw failure
+        }),
+      ).toThrow(failure)
+    })
+
     it(`should handle callback returning undefined with proper state`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
