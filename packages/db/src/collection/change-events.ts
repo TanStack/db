@@ -261,13 +261,26 @@ export function compileEqualityPrefilter(
     if (storedRows && (path.length === 0 || isVirtualPropName(path[0]!))) {
       continue
     }
-    return (row) => {
+    const read = (row: object) => {
       let value: any = row
       for (const segment of path) {
         if (value == null) return false
         value = value[segment]
       }
       return value === expected
+    }
+    if (!storedRows) return read
+    return (row) => {
+      try {
+        // Enrichment copies only enumerable own properties from the root.
+        return (
+          !Object.prototype.propertyIsEnumerable.call(row, path[0]!) ||
+          read(row)
+        )
+      } catch {
+        // Let the full predicate decide when a stored-row read is uncertain.
+        return true
+      }
     }
   }
   return undefined

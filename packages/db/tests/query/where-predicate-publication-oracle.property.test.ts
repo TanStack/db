@@ -60,7 +60,8 @@
  * witnesses check boundaries outside the generated grammar: Collection
  * readiness reaches a filtered subscriber as one empty batch, and an eager
  * source restarted after cleanup retracts a vanished row even when its first
- * batch cannot satisfy the predicate.
+ * batch cannot satisfy the predicate. A third witness checks that a same-key
+ * update which stays TRUE publishes its new row and exact subscriber payload.
  *
  * Calibration: pinned histories separate Kleene from two-valued logic, and a
  * checker test requires the two-valued answer to fail. Hostile production
@@ -888,6 +889,62 @@ describe(`WHERE predicate publication oracle`, () => {
         expect(batches).toEqual([0])
       } finally {
         subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`publishes the new payload for a same-key update that stays TRUE`, async () => {
+      type PayloadRow = { id: string; v: string; n: number }
+      const collection = createCollection(
+        mockSyncCollectionOptions<PayloadRow>({
+          id: `where-publication-payload-${collectionSerial++}`,
+          getKey: (row) => row.id,
+          initialData: [{ id: `r0`, v: `a`, n: 1 }],
+        }),
+      )
+      const live = createLiveQueryCollection((q) =>
+        q.from({ row: collection }).where(({ row }) => eq(row.v, `a`)),
+      )
+      const events: Array<{
+        type: string
+        key: string | number
+        n: number
+        previousN: number | undefined
+      }> = []
+      await collection.stateWhenReady()
+      await live.preload()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            events.push({
+              type: change.type,
+              key: change.key,
+              n: change.value.n,
+              previousN: change.previousValue?.n,
+            })
+          }
+        },
+        {
+          includeInitialState: true,
+          whereExpression: irPredicate(fieldEq(`a`)),
+        },
+      )
+      try {
+        events.length = 0
+        expect(live.get(`r0`)?.n).toBe(1)
+        collection.utils.begin()
+        collection.utils.write({
+          type: `update`,
+          value: { id: `r0`, v: `a`, n: 2 },
+        })
+        collection.utils.commit()
+        expect(live.get(`r0`)?.n).toBe(2)
+        expect(events).toEqual([
+          { type: `update`, key: `r0`, n: 2, previousN: 1 },
+        ])
+      } finally {
+        subscription.unsubscribe()
+        await live.cleanup()
         await collection.cleanup()
       }
     })
