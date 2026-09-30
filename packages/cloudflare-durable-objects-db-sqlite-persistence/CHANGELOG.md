@@ -1,5 +1,14 @@
 # @tanstack/cloudflare-durable-objects-db-sqlite-persistence
 
+## 0.2.24
+
+### Patch Changes
+
+- Batch cold full-replacement SQLite writes to reduce worker round trips while preserving one atomic persisted transaction. Keep Cloudflare Durable Object batches within its 100-bound-parameter limit. ([#1916](https://github.com/TanStack/db/pull/1916))
+
+- Updated dependencies [[`6e151b0`](https://github.com/TanStack/db/commit/6e151b0e57d63e2535cdf8e02518690d453214bc), [`5108acf`](https://github.com/TanStack/db/commit/5108acf47a0724691a06af8a660014776f9cf716), [`fef53f8`](https://github.com/TanStack/db/commit/fef53f8be7f1cb68f00639a4c3206a6598663de4), [`4b9617c`](https://github.com/TanStack/db/commit/4b9617cfd36c4f0ec14ad55dd6eaa92a2e8c9a8d), [`f09868f`](https://github.com/TanStack/db/commit/f09868ffba3ea401a9b182cc90282435bf832e3c), [`d3c38c8`](https://github.com/TanStack/db/commit/d3c38c8f4e83cef4545e8011dc3419be1fcf527a), [`5218f0c`](https://github.com/TanStack/db/commit/5218f0c385f61ccfa08ff366fb6f487528702017), [`98639f0`](https://github.com/TanStack/db/commit/98639f03a0071ab712d2277ee7e59e33ec6c760d), [`2781581`](https://github.com/TanStack/db/commit/27815817c56b3bca1823703dbd9893a0ef86f6d2), [`3d96614`](https://github.com/TanStack/db/commit/3d96614547cca8b085e89d628c7aa585ac7ddc88), [`f473a36`](https://github.com/TanStack/db/commit/f473a36201abe9af43d36a83492a2649668756d8), [`510cb53`](https://github.com/TanStack/db/commit/510cb538c4706e21a4d70046bf2ab2753f47bfa8)]:
+  - @tanstack/db-sqlite-persistence-core@0.3.0
+
 ## 0.2.23
 
 ### Patch Changes

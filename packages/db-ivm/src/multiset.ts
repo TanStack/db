@@ -1,8 +1,4 @@
-import {
-  DefaultMap,
-  chunkedArrayPush,
-  globalObjectIdGenerator,
-} from './utils.js'
+import { chunkedArrayPush, getStringId } from './utils.js'
 import { hash } from './hashing/index.js'
 
 export type MultiSetArray<T> = Array<[T, number]>
@@ -69,139 +65,59 @@ export class MultiSet<T> {
    * Produce as output a collection that is logically equivalent to the input
    * but which combines identical instances of the same record into one
    * (record, multiplicity) pair.
+   *
+   * Record identity depends on the shape of the whole multiset:
+   *
+   * - Keyed: every record is a `[key, value]` pair with a string or number
+   *   key. Keys and primitive values compare by value, and object values by
+   *   reference. A value that is an array of length 2 is a join tuple, and
+   *   its two elements compare by the same rule. The keyed identity text
+   *   has known collisions: https://github.com/TanStack/db/issues/1948
+   * - Unkeyed, one primitive type: every record is a string, or every record
+   *   is a number. Records compare as `Map` keys do, and a `-0` record is
+   *   returned as `0`.
+   * - Otherwise, records compare by structure (`hash`).
+   *
+   * Each identity keeps its first record in input order with the summed
+   * multiplicity. Identities whose sum is zero are dropped. The input is not
+   * changed.
    */
   consolidate(): MultiSet<T> {
-    // Check if this looks like a keyed multiset (first item is a tuple of length 2)
-    if (this.#inner.length > 0) {
-      const firstItem = this.#inner[0]?.[0]
-      if (Array.isArray(firstItem) && firstItem.length === 2) {
-        return this.#consolidateKeyed()
-      }
-    }
-
-    // Fall back to original method for unkeyed data
-    return this.#consolidateUnkeyed()
-  }
-
-  /**
-   * Private method for consolidating keyed multisets where keys are strings/numbers
-   * and values are compared by reference equality.
-   *
-   * This method provides significant performance improvements over the hash-based approach
-   * by using WeakMap for object reference tracking and avoiding expensive serialization.
-   *
-   * Special handling for join operations: When values are tuples of length 2 (common in joins),
-   * we unpack them and compare each element individually to maintain proper equality semantics.
-   */
-  #consolidateKeyed(): MultiSet<T> {
-    const consolidated = new Map<string, number>()
-    const values = new Map<string, T>()
-
-    // Use global object ID generator for consistent reference equality
-
-    /**
-     * Special handler for tuples (arrays of length 2) commonly produced by join operations.
-     * Unpacks the tuple and generates an ID based on both elements to ensure proper
-     * consolidation of join results like ['A', null] and [null, 'X'].
-     */
-    const getTupleId = (tuple: Array<any>): string => {
-      if (tuple.length !== 2) {
-        throw new Error(`Expected tuple of length 2`)
-      }
-      const [first, second] = tuple
-      return `${globalObjectIdGenerator.getStringId(first)}|${globalObjectIdGenerator.getStringId(second)}`
-    }
-
-    // Process each item in the multiset
-    for (const [data, multiplicity] of this.#inner) {
-      // Verify this is still a keyed item (should be [key, value] pair)
-      if (!Array.isArray(data) || data.length !== 2) {
-        // Found non-keyed item, fall back to unkeyed consolidation
-        return this.#consolidateUnkeyed()
-      }
-
-      const [key, value] = data
-
-      // Verify key is string or number as expected for keyed multisets
-      if (typeof key !== `string` && typeof key !== `number`) {
-        // Found non-string/number key, fall back to unkeyed consolidation
-        return this.#consolidateUnkeyed()
-      }
-
-      // Generate value ID with special handling for join tuples
-      let valueId: string
-      if (Array.isArray(value) && value.length === 2) {
-        // Special case: value is a tuple from join operations
-        valueId = getTupleId(value)
-      } else {
-        // Regular case: use reference/value equality
-        valueId = globalObjectIdGenerator.getStringId(value)
-      }
-
-      // Create composite key and consolidate
-      const compositeKey = key + `|` + valueId
-      consolidated.set(
-        compositeKey,
-        (consolidated.get(compositeKey) || 0) + multiplicity,
+    const inner = this.#inner
+    // Keyed multisets hold [string | number key, value] pairs. Their values are
+    // compared by reference, which avoids hashing. Join tuples (values of
+    // length 2) are unpacked so ['A', null] and [null, 'X'] stay distinct.
+    if (
+      inner.every(
+        ([data]) =>
+          Array.isArray(data) &&
+          data.length === 2 &&
+          (typeof data[0] === `string` || typeof data[0] === `number`),
       )
-
-      // Store the original data for the first occurrence
-      if (!values.has(compositeKey)) {
-        values.set(compositeKey, data as T)
-      }
+    ) {
+      return consolidateBy(inner, (data) => {
+        const [key, value] = data as [string | number, unknown]
+        const valueId =
+          Array.isArray(value) && value.length === 2
+            ? `${getStringId(value[0])}|${getStringId(value[1])}`
+            : getStringId(value)
+        return key + `|` + valueId
+      })
     }
 
-    // Build result array, filtering out zero multiplicities
-    const result: MultiSetArray<T> = []
-    for (const [compositeKey, multiplicity] of consolidated) {
-      if (multiplicity !== 0) {
-        result.push([values.get(compositeKey)!, multiplicity])
-      }
-    }
-
-    return new MultiSet(result)
-  }
-
-  /**
-   * Private method for consolidating unkeyed multisets using the original approach.
-   */
-  #consolidateUnkeyed(): MultiSet<T> {
-    const consolidated = new DefaultMap<string | number, number>(() => 0)
-    const values = new Map<string, any>()
-
-    let hasString = false
-    let hasNumber = false
-    let hasOther = false
-    for (const [data, _] of this.#inner) {
-      if (typeof data === `string`) {
-        hasString = true
-      } else if (typeof data === `number`) {
-        hasNumber = true
-      } else {
-        hasOther = true
-        break
-      }
-    }
-
-    const requireJson = hasOther || (hasString && hasNumber)
-
-    for (const [data, multiplicity] of this.#inner) {
-      const key = requireJson ? hash(data) : (data as string | number)
-      if (requireJson && !values.has(key as string)) {
-        values.set(key as string, data)
-      }
-      consolidated.update(key, (count) => count + multiplicity)
-    }
-
-    const result: MultiSetArray<T> = []
-    for (const [key, multiplicity] of consolidated.entries()) {
-      if (multiplicity !== 0) {
-        const parsedKey = requireJson ? values.get(key as string) : key
-        result.push([parsedKey as T, multiplicity])
-      }
-    }
-
-    return new MultiSet(result)
+    // Unkeyed data of a single primitive type is its own identity, and the
+    // result holds the Map key, so -0 becomes 0. Anything else is compared
+    // structurally by hash.
+    let primitiveType: string | undefined
+    const requireHash = inner.some(([data]) => {
+      const type = typeof data
+      if (type !== `string` && type !== `number`) return true
+      primitiveType ??= type
+      return type !== primitiveType
+    })
+    return requireHash
+      ? consolidateBy(inner, hash)
+      : consolidateBy(inner, (data) => data, true)
   }
 
   extend(other: MultiSet<T> | MultiSetArray<T>): void {
@@ -218,4 +134,29 @@ export class MultiSet<T> {
   getInner(): MultiSetArray<T> {
     return this.#inner
   }
+}
+
+/**
+ * Sums multiplicities of records with the same identity, keeping the first
+ * record seen for each identity (or its Map key, which writes -0 as 0, when
+ * `keepIdentity` is set) and dropping records whose sum is zero.
+ */
+function consolidateBy<T>(
+  inner: MultiSetArray<T>,
+  identityOf: (data: T) => unknown,
+  keepIdentity = false,
+): MultiSet<T> {
+  const consolidated = new Map<unknown, [T, number]>()
+  for (const [data, multiplicity] of inner) {
+    const identity = identityOf(data)
+    const entry = consolidated.get(identity)
+    if (entry) entry[1] += multiplicity
+    else consolidated.set(identity, [data, multiplicity])
+  }
+  const result: MultiSetArray<T> = []
+  for (const [identity, [data, multiplicity]] of consolidated) {
+    if (multiplicity !== 0)
+      result.push([keepIdentity ? (identity as T) : data, multiplicity])
+  }
+  return new MultiSet(result)
 }

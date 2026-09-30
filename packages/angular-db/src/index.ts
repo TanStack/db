@@ -226,9 +226,11 @@ export function injectLiveQuery(opts: any) {
 
   const state = signal(new Map<string | number, any>())
   const internalData = signal<Array<any>>([])
-  const status = signal<CollectionStatus | `disabled`>(
-    collection() ? `idle` : `disabled`,
-  )
+  const statusValue = signal<CollectionStatus | `disabled`>(`idle`)
+  const status = computed(() => {
+    const value = statusValue()
+    return value === `idle` && !collection() ? `disabled` : value
+  })
   const persistedStatus = signal<LiveQueryPersistedStatus>(`unavailable`)
   const persistedError = signal<unknown>(undefined)
 
@@ -253,7 +255,7 @@ export function injectLiveQuery(opts: any) {
     state.set(newState)
     internalData.set(newData)
     const snapshot = observer.getSnapshot()
-    status.set(snapshot.status)
+    statusValue.set(snapshot.status)
     persistedStatus.set(snapshot.persistedStatus)
     persistedError.set(snapshot.persistedError)
   }
@@ -269,7 +271,7 @@ export function injectLiveQuery(opts: any) {
 
     // Handle null collection (disabled query)
     if (!currentCollection) {
-      status.set(`disabled` as const)
+      statusValue.set(`disabled` as const)
       persistedStatus.set(`unavailable`)
       persistedError.set(undefined)
       state.set(new Map())

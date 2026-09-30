@@ -193,10 +193,14 @@ describe(`Query2 Compiler`, () => {
       const usersCollection = {
         id: `users`,
         config: { autoIndex: `off` },
+        indexes: new Map(),
+        size: 0,
       } as CollectionImpl
       const postsCollection = {
         id: `posts`,
         config: { autoIndex: `off` },
+        indexes: new Map(),
+        size: 0,
       } as CollectionImpl
 
       const resultKeys = (userAlias: string, postAlias: string) => {

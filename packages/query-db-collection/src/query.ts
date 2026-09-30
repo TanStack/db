@@ -309,13 +309,13 @@ export interface QueryCollectionUtils<
   writeBatch: (callback: () => void) => void
 
   // Query Observer State (getters)
-  /** Get the last error encountered by the query (if any); reset on success */
+  /** Get the last error encountered by the query (if any); reset after a successful result applies */
   lastError: TError | undefined
   /** Check if the collection is in an error state */
   isError: boolean
   /**
    * Get the number of consecutive sync failures.
-   * Incremented only when query fails completely (not per retry attempt); reset on success.
+   * Incremented only when query fails completely (not per retry attempt); reset after a successful result applies.
    */
   errorCount: number
   /** Check if query is currently fetching (initial or background) */
@@ -334,7 +334,7 @@ export interface QueryCollectionUtils<
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
-   * Clear the error state and trigger a refetch of the query. While a user
+   * Refetch, retaining errors until a successful result applies. While a user
    * mutation is persisting or its handler is active, this retains the Query
    * fetch boundary so it cannot wait on publication blocked by that
    * transaction.
@@ -350,7 +350,6 @@ export interface QueryCollectionUtils<
 interface QueryCollectionState {
   lastError: any
   errorCount: number
-  lastErrorUpdatedAt: number
   observers: Map<
     string,
     QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -411,9 +410,6 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
   }
 
   public async clearError() {
-    this.state.lastError = undefined
-    this.state.errorCount = 0
-    this.state.lastErrorUpdatedAt = 0
     await this.refetch({ throwOnError: true })
   }
 
@@ -825,7 +821,6 @@ export function queryCollectionOptions(
   const state: QueryCollectionState = {
     lastError: undefined as any,
     errorCount: 0,
-    lastErrorUpdatedAt: 0,
     observers: new Map<
       string,
       QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -1140,6 +1135,8 @@ export function queryCollectionOptions(
     const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
     const retainedQueriesPendingRevalidation = new Set<string>()
     const pendingResultApplications = new Map<string, Promise<void>>()
+    const observedErrorUpdates = new WeakMap<AnyQuery, number>()
+    let errorRevision = 0
     const failedResultApplications = new Map<string, unknown>()
     const exceptionalResultSettlements = new WeakMap<
       QueryObserverResult<unknown, unknown>,
@@ -2235,6 +2232,8 @@ export function queryCollectionOptions(
     const trackResultApplication = (
       hashedQueryKey: string,
       application: Promise<void>,
+      isFetching: boolean,
+      applicationErrorRevision: number,
     ): void => {
       pendingResultApplications.set(hashedQueryKey, application)
       const finish = () => {
@@ -2246,14 +2245,21 @@ export function queryCollectionOptions(
       }
       void application.then(
         () => {
-          if (finish()) failedResultApplications.delete(hashedQueryKey)
+          if (finish()) {
+            failedResultApplications.delete(hashedQueryKey)
+            // Applying cached data during a fetch does not establish recovery.
+            if (!isFetching && applicationErrorRevision === errorRevision) {
+              state.lastError = undefined
+              state.errorCount = 0
+            }
+          }
         },
         (error) => {
           if (!finish()) return
           failedResultApplications.set(hashedQueryKey, error)
           state.lastError = error
           state.errorCount++
-          state.lastErrorUpdatedAt = Date.now()
+          errorRevision++
           console.error(
             `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
             error,
@@ -2274,6 +2280,7 @@ export function queryCollectionOptions(
       ) => true | Promise<void>,
     ): void => {
       invalidatePendingResultApplication(hashedQueryKey)
+      const currentErrorRevision = errorRevision
       const controller: ResultApplicationController = new AbortController()
       let settleRefetchAtFetchBoundary = () => {}
       const fetchBoundary = new Promise<void>((resolve) => {
@@ -2298,6 +2305,10 @@ export function queryCollectionOptions(
           )
           resultApplicationControllers.delete(hashedQueryKey)
           failedResultApplications.delete(hashedQueryKey)
+          if (!result.isFetching && currentErrorRevision === errorRevision) {
+            state.lastError = undefined
+            state.errorCount = 0
+          }
         }
         return
       }
@@ -2319,7 +2330,12 @@ export function queryCollectionOptions(
       }
       void application.then(cleanupController, cleanupController)
       if (resultApplicationControllers.get(hashedQueryKey) === controller) {
-        trackResultApplication(hashedQueryKey, application)
+        trackResultApplication(
+          hashedQueryKey,
+          application,
+          result.isFetching,
+          currentErrorRevision,
+        )
       }
     }
 
@@ -2328,11 +2344,11 @@ export function queryCollectionOptions(
       const hashedQueryKey = hashKey(queryKey)
       const handleQueryResult: UpdateHandler = (result) => {
         const observer = state.observers.get(hashedQueryKey)
-        if (observer) {
-          const query = observer.getCurrentQuery()
-          trackOwnedCacheQuery(query, hashedQueryKey)
+        const observedQuery = observer?.getCurrentQuery()
+        if (observer && observedQuery) {
+          trackOwnedCacheQuery(observedQuery, hashedQueryKey)
           if (result.isSuccess) {
-            if (!hasPostWriteAuthority(hashedQueryKey, query)) {
+            if (!hasPostWriteAuthority(hashedQueryKey, observedQuery)) {
               // Query observers are notified before Query Cache subscribers.
               // Recheck after the cache success action records fetch authority.
               queueMicrotask(() => {
@@ -2353,11 +2369,6 @@ export function queryCollectionOptions(
           }
         }
         if (result.isSuccess) {
-          // Error state follows observer notification order, not the later
-          // publication time of a queued successful result.
-          state.lastError = undefined
-          state.errorCount = 0
-
           // Skip processing this result while data refreshes are deferred.
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
@@ -2427,14 +2438,25 @@ export function queryCollectionOptions(
           manualWriteSnapshots.delete(hashedQueryKey)
         }
 
-        if (result.isError) {
+        if (
+          observedQuery &&
+          result.errorUpdateCount <
+            (observedErrorUpdates.get(observedQuery) ?? 0)
+        ) {
+          observedErrorUpdates.delete(observedQuery)
+        }
+        // Retry attempts can re-notify the previous error before the fetch settles.
+        if (result.isError && result.fetchStatus === `idle`) {
           const isNewError =
-            result.errorUpdatedAt !== state.lastErrorUpdatedAt ||
-            result.error !== state.lastError
+            !observedQuery ||
+            result.errorUpdateCount !== observedErrorUpdates.get(observedQuery)
           if (isNewError) {
+            if (observedQuery) {
+              observedErrorUpdates.set(observedQuery, result.errorUpdateCount)
+            }
             state.lastError = result.error
             state.errorCount++
-            state.lastErrorUpdatedAt = result.errorUpdatedAt
+            errorRevision++
           }
 
           console.error(

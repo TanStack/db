@@ -11,10 +11,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  Component,
   DestroyRef,
   EnvironmentInjector,
   createEnvironmentInjector,
   inject,
+  input,
   runInInjectionContext,
   signal,
 } from '@angular/core'
@@ -279,6 +281,89 @@ describe(`owned native scope setup`, () => {
 })
 
 runSuite(angularDriver)
+
+it(`reports a disabled query as ready before effects run`, () => {
+  const mounted = inCtx(() => injectLiveQuery(() => null))
+  try {
+    expect(mounted.result.status()).toBe(`disabled`)
+    expect(mounted.result.isReady()).toBe(true)
+  } finally {
+    mounted.destroy()
+  }
+})
+
+/**
+ * Angular component boundary: required inputs are assigned after field
+ * initialization. A reactive live-query option may read an input when Angular
+ * first runs effects, but construction must not read it before `setInput`.
+ * The model is a full filter of two fixed source rows at each input value.
+ * This checks rendered public data after change detection, not every possible
+ * framework scheduling cut or the shared query model's other laws.
+ */
+it(`waits for required inputs before evaluating a reactive live query`, async () => {
+  const source = createCollection(
+    mockSyncCollectionOptions<{ id: string; age: number }>({
+      id: `angular-required-input-query`,
+      getKey: (row) => row.id,
+      initialData: [
+        { id: `a`, age: 20 },
+        { id: `b`, age: 40 },
+      ],
+    }),
+  )
+
+  @Component({
+    inputs: [{ name: `minAge`, required: true }],
+    template: `{{ live.data().length }}`,
+  })
+  class RequiredInputQuery {
+    minAge = input.required<number>()
+    live = injectLiveQuery({
+      params: () => ({ minAge: this.minAge() }),
+      query: ({ params, q }) =>
+        q
+          .from({ person: source })
+          .where(({ person }) => gt(person.age, params.minAge))
+          .select(({ person }) => ({ id: person.id, age: person.age })),
+    })
+  }
+
+  // This suite uses Angular's JIT test environment, which does not infer the
+  // signal-input flag from `input.required()`. Supply the same input metadata
+  // that Angular's AOT compiler emits; TestBed still constructs the component,
+  // assigns the input, runs its effects, and renders the public result.
+  const definition = (
+    RequiredInputQuery as unknown as {
+      ɵcmp: { inputs: { minAge: [string, number, null] } }
+    }
+  ).ɵcmp
+  definition.inputs.minAge = [`minAge`, 1, null]
+
+  const fixture = TestBed.createComponent(RequiredInputQuery)
+  try {
+    fixture.componentRef.setInput(`minAge`, 30)
+    fixture.detectChanges()
+    await settle()
+    fixture.detectChanges()
+    expect(fixture.nativeElement.textContent.trim()).toBe(`1`)
+    expect(fixture.componentInstance.live.data().map((row) => row.id)).toEqual([
+      `b`,
+    ])
+
+    fixture.componentRef.setInput(`minAge`, 10)
+    fixture.detectChanges()
+    await settle()
+    fixture.detectChanges()
+    expect(fixture.nativeElement.textContent.trim()).toBe(`2`)
+    expect(fixture.componentInstance.live.data().map((row) => row.id)).toEqual([
+      `a`,
+      `b`,
+    ])
+  } finally {
+    fixture.destroy()
+  }
+})
+
 it(`preserves raw result types through the actual driver reader`, () => {
   const raw: Record<string, unknown> = {
     data: [{ id: `a`, value: undefined }],
