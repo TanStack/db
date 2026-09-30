@@ -33,7 +33,8 @@ import type { MultiSetArray } from '../src/multiset.js'
  * Limits:
  * - The output order is not part of this law. No contract states it.
  * - The keyed grammar includes the reported type, reference, and delimiter
- *   collisions in #1948. This checks `MultiSet` directly. It does not prove
+ *   collisions in #1948, plus non-finite numeric keys. This checks `MultiSet`
+ *   directly. It does not prove
  *   which `@tanstack/db` query shapes produce these records.
  * - Structural identity uses a 32-bit hash in production. The small value
  *   domain here makes a collision unlikely, but this is not an injectivity
@@ -76,38 +77,56 @@ const KEYED_PRIMITIVES: ReadonlyArray<Data> = [
   firstFunction,
   secondFunction,
 ]
-const KEYS: ReadonlyArray<string | number> = [0, 1, 2, `a`, `b`, `1`, `a|str_x`]
+// The structural fallback retains its original key domain. Non-finite keys
+// challenge only the keyed path, whose contract defines their identity.
+const FALLBACK_KEYS: ReadonlyArray<string | number> = [
+  0,
+  1,
+  2,
+  `a`,
+  `b`,
+  `1`,
+  `a|str_x`,
+]
+const KEYED_KEYS: ReadonlyArray<string | number> = [
+  ...FALLBACK_KEYS,
+  NaN,
+  Infinity,
+  -Infinity,
+]
 
 // ---------------------------------------------------------------------------
 // Model. It does not use production identity helpers or `hash`.
 
 type Expected = {
-  groups: Map<string, { first: Data; sum: number }>
-  // The refinement check classifies production output with this same
-  // independent rule.
-  identity: (data: Data) => string
+  groups: Array<{ first: Data; sum: number }>
+  sameIdentity: (left: Data, right: Data) => boolean
 }
 
 function expectedConsolidation(records: MultiSetArray<Data>): Expected {
-  const refIds = new Map<object | symbol, number>()
-  const refId = (value: object | symbol) => {
-    if (!refIds.has(value)) refIds.set(value, refIds.size)
-    return refIds.get(value)!
-  }
-  const leaf = (value: Data) =>
-    value !== null &&
-    (typeof value === `object` ||
-      typeof value === `function` ||
-      typeof value === `symbol`)
-      ? [`ref`, refId(value)]
-      : [`value`, typeof value, String(value)]
-  const keyedIdentity = (data: Data) => {
-    const [key, value] = data as [string | number, Data]
-    const valueIdentity =
-      Array.isArray(value) && value.length === 2
-        ? [`tuple`, leaf(value[0]), leaf(value[1])]
-        : leaf(value)
-    return JSON.stringify([typeof key, key, valueIdentity])
+  // SameValueZero compares primitive values; strict equality also preserves
+  // reference identity for objects, functions, and symbols.
+  const sameLeaf = (left: Data, right: Data): boolean =>
+    left === right ||
+    (typeof left === `number` &&
+      typeof right === `number` &&
+      Number.isNaN(left) &&
+      Number.isNaN(right))
+  const sameKeyed = (left: Data, right: Data): boolean => {
+    const [leftKey, leftValue] = left as [string | number, Data]
+    const [rightKey, rightValue] = right as [string | number, Data]
+    if (!sameLeaf(leftKey, rightKey)) return false
+    if (Array.isArray(leftValue) && leftValue.length === 2)
+      return (
+        Array.isArray(rightValue) &&
+        rightValue.length === 2 &&
+        sameLeaf(leftValue[0], rightValue[0]) &&
+        sameLeaf(leftValue[1], rightValue[1])
+      )
+    return (
+      !(Array.isArray(rightValue) && rightValue.length === 2) &&
+      sameLeaf(leftValue, rightValue)
+    )
   }
   const structure = (value: Data): Data => {
     if (Array.isArray(value)) return [`array`, value.map(structure)]
@@ -132,24 +151,22 @@ function expectedConsolidation(records: MultiSetArray<Data>): Expected {
   const onePrimitiveType = [`string`, `number`].some((type) =>
     records.every(([data]) => typeof data === type),
   )
-  // `String` writes `-0` as `0`, so the identity follows `Map` key equality.
-  const identity = isKeyed
-    ? keyedIdentity
+  const sameIdentity: Expected['sameIdentity'] = isKeyed
+    ? sameKeyed
     : onePrimitiveType
-      ? (data: Data) => JSON.stringify([typeof data, String(data)])
-      : (data: Data) => JSON.stringify(structure(data))
+      ? sameLeaf
+      : (left, right) =>
+          JSON.stringify(structure(left)) === JSON.stringify(structure(right))
   const retained = (data: Data) =>
     onePrimitiveType && Object.is(data, -0) ? 0 : data
 
-  const groups = new Map<string, { first: Data; sum: number }>()
+  const groups: Expected['groups'] = []
   for (const [data, multiplicity] of records) {
-    const id = identity(data)
-    const group = groups.get(id)
+    const group = groups.find(({ first }) => sameIdentity(first, data))
     if (group) group.sum += multiplicity
-    else groups.set(id, { first: retained(data), sum: multiplicity })
+    else groups.push({ first: retained(data), sum: multiplicity })
   }
-  for (const [id, group] of groups) if (group.sum === 0) groups.delete(id)
-  return { groups, identity }
+  return { groups: groups.filter(({ sum }) => sum !== 0), sameIdentity }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +293,7 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
     mode: fc.constant(`keyed` as const),
     steps: fc.array(
       fc.tuple(
-        fc.tuple(fc.nat(KEYS.length - 1), keyedSpecArb),
+        fc.tuple(fc.nat(KEYED_KEYS.length - 1), keyedSpecArb),
         multiplicityArb,
       ),
       { maxLength: 24 },
@@ -315,7 +332,7 @@ const historyArb: fc.Arbitrary<History> = fc.oneof(
     mode: fc.constant(`fallback` as const),
     steps: fc.array(
       fc.tuple(
-        fc.tuple(fc.nat(KEYS.length - 1), fallbackSpecArb),
+        fc.tuple(fc.nat(FALLBACK_KEYS.length - 1), fallbackSpecArb),
         multiplicityArb,
       ),
       { minLength: 1, maxLength: 23 },
@@ -341,7 +358,13 @@ function buildRecords(history: History): MultiSetArray<Data> {
     }
     if (history.mode === `keyed` || history.mode === `fallback`) {
       const [keyIndex, spec] = step as [number, Spec]
-      return [[KEYS[keyIndex], fromSpec(spec)], m]
+      return [
+        [
+          (history.mode === `fallback` ? FALLBACK_KEYS : KEYED_KEYS)[keyIndex],
+          fromSpec(spec),
+        ],
+        m,
+      ]
     }
     if (history.mode === `numbers` || history.mode === `strings`)
       return [step, m]
@@ -385,7 +408,7 @@ function expectRecordsConsolidated(records: MultiSetArray<Data>): void {
   const inputSnapshot = records.map(([data, m]) => [data, m] as const)
   const contentIds = new Map<object | symbol, number>()
   const inputContents = contentsOf(records, contentIds)
-  const { groups: expected, identity } = expectedConsolidation(records)
+  const { groups: expected, sameIdentity } = expectedConsolidation(records)
 
   const actual = new MultiSet(records).consolidate().getInner()
 
@@ -401,18 +424,21 @@ function expectRecordsConsolidated(records: MultiSetArray<Data>): void {
 
   // Record every output entry. A duplicate identity or a zero multiplicity
   // stays visible.
-  const seen = new Map<string, number>()
+  const seen = new Set<number>()
   for (const [data, multiplicity] of actual) {
-    const id = identity(data)
-    seen.set(id, (seen.get(id) ?? 0) + 1)
-    const group = expected.get(id)
-    expect(group, `unexpected identity ${id} x${multiplicity}`).toBeDefined()
-    expect(multiplicity, `multiplicity of ${id}`).toBe(group!.sum)
-    expect(data, `retained record of ${id}`).toBe(group!.first)
+    const index = expected.findIndex(({ first }) => sameIdentity(first, data))
+    expect(
+      index,
+      `unexpected output entry ${seen.size}`,
+    ).toBeGreaterThanOrEqual(0)
+    expect(seen.has(index), `duplicate identity ${index}`).toBe(false)
+    seen.add(index)
+    const group = expected[index]!
+    expect(multiplicity, `multiplicity of group ${index}`).toBe(group.sum)
+    expect(data, `retained record of group ${index}`).toBe(group.first)
   }
-  for (const [id, count] of seen) expect(count, `copies of ${id}`).toBe(1)
   expect(
-    [...expected.keys()].filter((id) => !seen.has(id)),
+    expected.flatMap((_, index) => (seen.has(index) ? [] : [index])),
     `missing identities`,
   ).toEqual([])
 }
@@ -478,6 +504,14 @@ describe(`MultiSet consolidation oracle`, () => {
       ],
     ],
     [
+      `non-finite numeric keys stay separate`,
+      [
+        [[NaN, `v`], 1],
+        [[Infinity, `v`], 2],
+        [[-Infinity, `v`], 3],
+      ],
+    ],
+    [
       `NaN values still merge`,
       [
         [[`k`, NaN], 1],
@@ -527,7 +561,7 @@ describe(`MultiSet consolidation oracle`, () => {
     const withMerges = sample.filter((history) => {
       const records = buildRecords(history)
       return (
-        expectedConsolidation(records).groups.size <
+        expectedConsolidation(records).groups.length <
         new Set(records.map(([data]) => data)).size
       )
     })
