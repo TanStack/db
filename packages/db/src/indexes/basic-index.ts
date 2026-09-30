@@ -1,17 +1,11 @@
 import { compareKeys } from '@tanstack/db-ivm'
-import {
-  areSameValueZeroEqual,
-  defaultComparator,
-  makeComparator,
-  normalizeValue,
-} from '../utils/comparison.js'
+import { areSameValueZeroEqual, normalizeValue } from '../utils/comparison.js'
 import {
   compareKeysReversed,
   findInsertPositionInArray,
 } from '../utils/array-utils.js'
 import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
-import type { BasicExpression } from '../query/ir.js'
 import type { IndexOperation } from './base-index.js'
 
 /**
@@ -60,22 +54,6 @@ export class BasicIndex<
   private sortedValues: Array<any> = []
   // Set of all indexed PKs
   private indexedKeys = new Set<TKey>()
-  // Comparator function
-  private compareFn: (a: any, b: any) => number = defaultComparator
-
-  constructor(
-    id: number,
-    expression: BasicExpression,
-    name?: string,
-    options?: any,
-  ) {
-    super(id, expression, name, options)
-    if (options?.compareOptions) {
-      this.compareOptions = options!.compareOptions
-    }
-    this.compareFn = options?.compareFn ?? makeComparator(this.compareOptions)
-    this.hasCustomComparator = options?.compareFn != null
-  }
 
   protected initialize(_options?: BasicIndexOptions): void {}
 

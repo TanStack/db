@@ -1,6 +1,7 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
+import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
 import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
@@ -121,13 +122,15 @@ export abstract class BaseIndex<
   public readonly name?: string
   public readonly expression: BasicExpression
   public abstract readonly supportedOperations: Set<IndexOperation>
-  protected compareOptions: CompareOptions
+  protected readonly compareOptions: CompareOptions
+  /** Orders indexed values. A user-supplied comparator is checked on every call. */
+  protected readonly compareFn: (a: any, b: any) => number
   private compiledIndexEvaluator: CompiledSingleRowExpression | undefined
   /**
-   * Set by subclasses when constructed with a user-supplied comparator, whose
-   * ordering may not match the WHERE evaluator's relational operators.
+   * A user-supplied comparator's ordering may not match the WHERE evaluator's
+   * relational operators.
    */
-  protected hasCustomComparator = false
+  protected readonly hasCustomComparator: boolean
   private rangeValueDomains = new Map<string, number>()
 
   constructor(
@@ -138,7 +141,11 @@ export abstract class BaseIndex<
   ) {
     this.id = id
     this.expression = expression
-    this.compareOptions = DEFAULT_COMPARE_OPTIONS
+    this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
+    this.hasCustomComparator = options?.compareFn != null
+    this.compareFn = options?.compareFn
+      ? makeCheckedComparator(options.compareFn)
+      : makeComparator(this.compareOptions)
     this.name = name
     this.initialize(options)
   }

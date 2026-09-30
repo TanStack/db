@@ -3,14 +3,11 @@ import { compareKeysReversed } from '../utils/array-utils.js'
 import { BTree } from '../utils/btree.js'
 import {
   areSameValueZeroEqual,
-  defaultComparator,
   denormalizeUndefined,
-  makeComparator,
   normalizeForBTree,
 } from '../utils/comparison.js'
 import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
-import type { BasicExpression } from '../query/ir.js'
 import type { IndexOperation } from './base-index.js'
 
 /**
@@ -56,38 +53,19 @@ export class BTreeIndex<
   // Internal data structures - private to hide implementation details
   // The `orderedEntries` B+ tree groups values that occupy the same comparator
   // position. The `valueMap` keeps exact values separate for equality lookups.
-  private orderedEntries: BTree<any, OrderedBucket<TKey>>
+  private orderedEntries = new BTree<any, OrderedBucket<TKey>>((a, b) =>
+    this.compareStored(a, b),
+  )
   private valueMap = new Map<
     unknown,
     { keys: Set<TKey>; ordered: OrderedBucket<TKey> }
   >()
   private indexedKeys = new Set<TKey>()
-  private compareFn: (a: any, b: any) => number = defaultComparator
 
-  constructor(
-    id: number,
-    expression: BasicExpression,
-    name?: string,
-    options?: any,
-  ) {
-    super(id, expression, name, options)
-
-    if (options?.compareOptions) {
-      this.compareOptions = options!.compareOptions
-    }
-
-    // Get the base compare function
-    const baseCompareFn =
-      options?.compareFn ?? makeComparator(this.compareOptions)
-    this.hasCustomComparator = options?.compareFn != null
-
-    // Wrap it to denormalize sentinels before comparison
-    // This ensures UNDEFINED_SENTINEL is converted back to undefined
-    // before being passed to the baseCompareFn (which can be user-provided and is unaware of the UNDEFINED_SENTINEL)
-    this.compareFn = (a: any, b: any) =>
-      baseCompareFn(denormalizeUndefined(a), denormalizeUndefined(b))
-
-    this.orderedEntries = new BTree(this.compareFn)
+  // Stored keys use UNDEFINED_SENTINEL; the comparator, which may be
+  // user-supplied, expects undefined.
+  private compareStored(a: any, b: any): number {
+    return this.compareFn(denormalizeUndefined(a), denormalizeUndefined(b))
   }
 
   protected initialize(_options?: BTreeIndexOptions): void {}
@@ -319,7 +297,7 @@ export class BTreeIndex<
         if (
           hasFrom &&
           !fromInclusive &&
-          this.compareFn(indexedValue, fromKey) === 0
+          this.compareStored(indexedValue, fromKey) === 0
         ) {
           // the B+ tree `forRange` method does not support exclusive lower bounds
           // so we need to exclude it manually

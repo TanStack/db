@@ -29,83 +29,15 @@ import { BTree } from '../src/utils/btree.js'
  * depth, while the fast-check lane supplies new and shrinkable histories.
  */
 
-// Invalid comparisons are contract contradictions, not missing keys. The
-// rejected operation must leave the accepted Map unchanged. These finite
-// cases cover leaf/internal searches and point/range/neighbor entry points;
-// they do not check numeric comparators that violate transitivity.
-const invalidComparisonOperations: Array<{
-  name: string
-  run: (tree: BTree<number, Payload>) => unknown
-}> = [
-  { name: `set`, run: (tree) => tree.set(-999, { v: -999 }) },
-  { name: `get`, run: (tree) => tree.get(-999) },
-  { name: `has`, run: (tree) => tree.has(-999) },
-  { name: `delete`, run: (tree) => tree.delete(-999) },
-  { name: `nextHigherPair`, run: (tree) => tree.nextHigherPair(-999) },
-  { name: `nextLowerPair`, run: (tree) => tree.nextLowerPair(-999) },
-  { name: `forRange`, run: (tree) => tree.forRange(-999, 99, true, () => {}) },
-]
+// The tree trusts its comparator to return a valid order; BTreeIndex rejects
+// invalid custom-comparator results before they reach the tree, so that law
+// lives in index-update.property.test.ts.
 
-describe.each(invalidComparisonOperations)(
-  `invalid comparator in $name`,
-  ({ run }) => {
-    it.each([1, 4, 5, 16, 32, 65])(
-      `rejects without changing a Map with %s entries`,
-      (size) => {
-        const tree = new BTree<number, Payload>(
-          (left, right) =>
-            left === -999 || right === -999 ? NaN : left - right,
-          4,
-        )
-        const model: ReferenceModel = new Map()
-        for (let key = 0; key < size; key++)
-          applyAction(tree, model, { type: `put`, key, v: key })
-        expect(() => run(tree)).toThrow(/comparator returned NaN/)
-        expectRefinement(tree, model, 0)
-        applyAction(tree, model, { type: `put`, key: size, v: size })
-        expectRefinement(tree, model, size)
-      },
-    )
-  },
-)
-
-// These comparisons are reached by insertion maintenance rather than the
-// root search. Rejection must precede sibling redistribution.
-it.each([
-  [6, 4],
-  [7, 6],
-  [10, 12],
-  [11, 14],
-  [18, 28],
-  [21, 22],
-])(
-  `invalid comparator before redistribution after %s accepted entries`,
-  (size, leftKey) => {
-    const rejectedKey = size * 2
-    const tree = new BTree<number, Payload>(
-      (left, right) =>
-        left === leftKey && right === rejectedKey ? NaN : left - right,
-      4,
-    )
-    const model: ReferenceModel = new Map()
-    for (let key = 0; key < rejectedKey; key += 2)
-      applyAction(tree, model, { type: `put`, key, v: key })
-    expect(() => tree.set(rejectedKey, { v: rejectedKey })).toThrow(
-      /comparator returned NaN/,
-    )
-    expectRefinement(tree, model, 0)
-    applyAction(tree, model, {
-      type: `put`,
-      key: rejectedKey + 1,
-      v: rejectedKey + 1,
-    })
-    expectRefinement(tree, model, 0)
-  },
-)
-
-// Splitting already determines the new child's position. A redundant
-// comparison after mutation must not misplace it. Observe inserted-key reads
-// and whole ranges; the deliberately invalid pair is not a lookup order.
+// Splitting already determines the new child's position from the insertion
+// index. A redundant comparison after mutation must not misplace it. Each
+// fixture returns NaN only for the pair such a comparison would use, so the
+// split must succeed without consulting it. Observe inserted-key reads and
+// whole ranges; the invalid pair is not a lookup order.
 it.each([
   [16, 14],
   [32, 46],

@@ -318,57 +318,127 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
   })
 })
 
-describe(`BTreeIndex invalid comparator results`, () => {
-  // A comparator must provide an order. AGENTS.md requires contradictory
-  // collaborator signals to throw before publishing a successful mutation.
-  // The model keeps only accepted rows; a rejected add leaves that Map intact.
-  // Enumerated prefixes cross leaf growth and root splits. This checks add,
-  // equality, ordered reads, and valid continuation, not atomic update/build.
-  test.each([1, 4, 5, 32, 33, 65])(
-    `rejects an unordered add without changing %s accepted rows`,
-    (size) => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        undefined,
-        {
-          compareFn: (left: unknown, right: unknown) =>
-            typeof left === `number` && typeof right === `number`
-              ? left - right
-              : NaN,
+/**
+ * A custom index comparator must return a number that is not NaN.
+ *
+ * A broken comparator is a programming error, so the index crashes: the
+ * operation that receives an invalid result must throw. The index makes no
+ * promise about its state after that throw. It must never report success
+ * from an operation that consumed an invalid result, and it must never reject
+ * an operation whose comparisons were all valid.
+ *
+ * Model: a recording comparator counts invalid results during one operation.
+ * The operation throws exactly when that count is nonzero. The model does not
+ * use the production check.
+ *
+ * Grammar: index type x comparator x accepted numeric prefix x one probe
+ * operation. The probe inserts or reads the non-numeric value `ann`. An
+ * empty prefix is included: its first write compares nothing, so it must
+ * succeed, and the next comparing operation must throw. Comparator
+ * transitivity is outside this owner.
+ */
+describe.each(indexTypes)(
+  `%s invalid comparator results`,
+  (_name, IndexType) => {
+    const comparators: Array<{
+      name: string
+      compare: (left: any, right: any) => unknown
+    }> = [
+      { name: `subtraction`, compare: (left, right) => left - right },
+      { name: `boolean`, compare: (left, right) => left > right },
+      {
+        name: `signed infinity`,
+        compare: (left, right) =>
+          left === right ? 0 : left < right ? -Infinity : Infinity,
+      },
+    ]
+    const probes: Array<{
+      name: string
+      run: (index: BaseIndex<string>, size: number) => unknown
+    }> = [
+      { name: `add`, run: (index) => index.add(`ann`, { value: `ann` }) },
+      {
+        name: `update`,
+        run: (index) => index.update(`0`, { value: 0 }, { value: `ann` }),
+      },
+      { name: `gt`, run: (index) => index.lookup(`gt`, `ann`) },
+      { name: `lte`, run: (index) => index.lookup(`lte`, `ann`) },
+      { name: `take`, run: (index) => index.take(3, `ann`) },
+      { name: `takeReversed`, run: (index) => index.takeReversed(3, `ann`) },
+      {
+        name: `build`,
+        run: (index, size) =>
+          index.build([
+            ...Array.from({ length: size }, (_, value): [string, object] => [
+              String(value),
+              { value },
+            ]),
+            [`ann`, { value: `ann` }],
+          ]),
+      },
+    ]
+
+    function createRecordedIndex(compare: (left: any, right: any) => unknown) {
+      const recorder = { invalidResults: 0 }
+      const index = new IndexType(1, new PropRef([`value`]), undefined, {
+        compareFn: (left, right) => {
+          const result = compare(left, right)
+          if (typeof result !== `number` || Number.isNaN(result))
+            recorder.invalidResults++
+          return result as number
         },
-      )
-      const rows = new Map<string, number>()
-      for (let value = 0; value < size; value++) {
-        const key = String(value)
-        index.add(key, { value })
-        rows.set(key, value)
+      })
+      // Refinement check for one operation. Returns whether the index crashed.
+      const step = (run: () => unknown): boolean => {
+        recorder.invalidResults = 0
+        let error: unknown
+        try {
+          run()
+        } catch (caught) {
+          error = caught
+        }
+        if (recorder.invalidResults === 0) {
+          expect(error).toBeUndefined()
+          return false
+        }
+        expect(error).toBeInstanceOf(TypeError)
+        expect((error as Error).message).toMatch(/comparator/)
+        return true
       }
+      return { index, step }
+    }
 
-      expect(() => index.add(`invalid`, { value: `ann` })).toThrow(
-        /comparator returned NaN/,
-      )
-      expect(index.lookup(`eq`, `ann`)).toEqual(new Set())
-      expectIndexMatchesModel(index, rows)
+    describe.each(comparators)(`$name comparator`, ({ compare }) => {
+      describe.each(probes)(`$name`, ({ run }) => {
+        test.each([0, 1, 4, 5, 32, 33, 65])(
+          `throws exactly when it receives an invalid result after %s rows`,
+          (size) => {
+            const { index, step } = createRecordedIndex(compare)
+            for (let value = 0; value < size; value++) {
+              if (step(() => index.add(String(value), { value }))) return
+            }
+            step(() => run(index, size))
+          },
+        )
+      })
+    })
 
-      index.add(`next`, { value: size })
-      rows.set(`next`, size)
-      expectIndexMatchesModel(index, rows)
-      index.remove(`next`, { value: size })
-      rows.delete(`next`)
-      expectIndexMatchesModel(index, rows)
-    },
-  )
+    test(`crashes at the second write of the reported string rows`, () => {
+      const { index, step } = createRecordedIndex((left, right) => left - right)
+      expect(step(() => index.add(`1`, { value: `ann` }))).toBe(false)
+      expect(step(() => index.add(`2`, { value: `bob` }))).toBe(true)
+    })
 
-  test(`keeps valid NaN keys with the default comparator`, () => {
-    const index = new BTreeIndex<string>(1, new PropRef([`value`]))
-    index.add(`one`, { value: 1 })
-    index.add(`nan`, { value: NaN })
-    expect(index.lookup(`eq`, NaN)).toEqual(new Set([`nan`]))
-    expect(index.keyCount).toBe(2)
-    expect(new Set(index.takeFromStart(3))).toEqual(new Set([`one`, `nan`]))
-  })
-})
+    test(`keeps NaN keys after other values with the default comparator`, () => {
+      const index = new IndexType(1, new PropRef([`value`]))
+      index.add(`nan`, { value: NaN })
+      index.add(`one`, { value: 1 })
+      expect(index.lookup(`eq`, NaN)).toEqual(new Set([`nan`]))
+      expect(index.keyCount).toBe(2)
+      expect(index.takeFromStart(3)).toEqual([`one`, `nan`])
+    })
+  },
+)
 
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test(`rejects stale retired identity outputs without rejecting live reuse`, () => {

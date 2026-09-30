@@ -25,7 +25,8 @@
 
 /**
  * Mutable B+ tree used by BTreeIndex for sorted value buckets. Keys use the
- * supplied comparator; point operations cost O(log size). This local fork has
+ * supplied comparator, which must return a number that is not NaN; BTreeIndex
+ * checks custom comparators. Point operations cost O(log size). This fork has
  * no copy-on-write sharing, cloning, optional-value storage, early-exit range
  * callbacks, or in-place range edits: only the operations BTreeIndex uses,
  * plus `has()` and the `get()` fallback that the Map oracle observes
@@ -197,9 +198,7 @@ class BNode<K, V> {
       else if (c > 0)
         // key < keys[mid]
         hi = mid
-      else if (c === 0) return mid
-      else
-        throw new Error(`BTree: comparator returned NaN or an invalid result`)
+      else return mid
       mid = (lo + hi) >> 1
     }
     return mid ^ failXor
@@ -409,14 +408,13 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       // placed in the same node after the shift. A right shift would need a
       // key above child.maxKey(), and that only reaches the last child.
       let other: BNode<K, V> | undefined
-      if (i > 0 && (other = c[i - 1]!).keys.length < max) {
-        const comparison = cmp(child.keys[0]!, key)
-        if (!(comparison < 0 || comparison === 0 || comparison > 0))
-          throw new Error(`BTree: comparator returned NaN or an invalid result`)
-        if (comparison < 0) {
-          other.takeFromRight(child)
-          this.keys[i - 1] = other.maxKey()!
-        }
+      if (
+        i > 0 &&
+        (other = c[i - 1]!).keys.length < max &&
+        cmp(child.keys[0]!, key) < 0
+      ) {
+        other.takeFromRight(child)
+        this.keys[i - 1] = other.maxKey()!
       }
     }
 
