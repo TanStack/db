@@ -31,11 +31,36 @@ next comparing operation must throw. The BTree Map owner
 (`packages/db/tests/btree-map-oracle.test.ts`) keeps two split histories that
 prove split placement does not consult a post-mutation comparison.
 
-This evidence covers comparators whose invalid result is encountered by an
-index operation. It does not validate comparator transitivity, nor does it
-establish atomic recovery of collection or index state after such a throw: a
-comparator break is a programming error, and the index makes no promise about
-its internal state afterward.
+A rejected index `add` or `remove` throws before it changes the index, so the
+index still refines its accepted rows. Index `update` and `build` are not
+atomic. `createIndex` builds before it registers the index, so a failed build
+never reaches a collection.
+
+### Collection boundary
+
+An external review showed that the first version of this change was worse than
+`main` at the Collection boundary. The Collection writes rows before it
+updates indexes and publishes change events. An index throw between those
+steps left rows that subscribers were never told about, while the collection
+stayed usable and reported the write as failed. That is the partial success
+`AGENTS.md` forbids. `main` stored and published those rows; only its index
+order was wrong.
+
+The repair crashes the collection. `CollectionIndexesManager.updateIndexes`
+calls the existing `lifecycle.markError` and rethrows. The collection status
+becomes `error`, and the next mutation throws `CollectionInErrorStateError`.
+No recovery path, generation, or rollback is added. The index owner states
+this law for both index types and both write paths (optimistic insert and sync
+commit).
+
+Remaining limits:
+
+- A sync source can still begin and commit writes on a collection in `error`
+  state. Those rows are stored but not published. This is existing
+  `markError` behavior for any crashed collection, not specific to comparators.
+- A user who relied on `main`'s silently misordered index now gets a crashed
+  collection at the first invalid comparison. The changeset states this.
+- Comparator transitivity is not validated.
 
 ## Conformance evidence
 
@@ -45,14 +70,14 @@ its internal state afterward.
 | ORC-002 | The refinement model counts invalid comparator results with its own recording wrapper. It does not call `makeCheckedComparator` or any production classifier. |
 | ORC-003 | The opening comment states the law and limits; the probe/comparator/prefix tables supply inputs; public `add`/`update`/`lookup`/`take`/`build` drive production; the recording step judges throw-vs-success. |
 | ORC-004 | Bounded enumeration crosses two index types, three comparators, seven probe operations, and seven prefixes including the empty prefix. The empty prefix reconstructs the first-write-never-compares case. The `signed infinity` comparator is the marginal valid case; it must never throw. |
-| ORC-005 | Public index entry points execute. The refinement check compares the promised observation (throw vs. success) for each operation. |
+| ORC-005 | Public index entry points execute, and the Collection cells drive `collection.insert` and a sync `commit`. Observations: throw vs. success, accepted-row refinement after a rejected add/remove, and collection status plus the next mutation after a rejected write. |
 | ORC-006 | On unmodified `origin/main`, the BasicIndex law and the reported-string case fail (85 cases). Mutants that leave either index's comparator unchecked, that reject only `NaN` (accepting booleans), or that also reject infinite results each fail at the intended checkpoint. All were classified as assertion failures. |
 | ORC-007 | These are bounded enumerations, not an important generated property; no fixed/random campaign parity is required. The package's existing generated index campaign is unchanged. |
 | ORC-008 | No stateful reference model is introduced; the check recomputes throw-vs-success per operation. |
 | ORC-009 | Accepted rows and index operations retain existing vocabulary. |
 | ORC-010 | Checks are synchronous and retain no resources. |
 | ORC-011 | Both index types run through the same law, distinguishing an index-type-specific fault from a shared one. |
-| ORC-012 | This record names the reviewed head and each applicable outcome. It makes no universal bug-class closure claim; collection/index-state atomicity after a comparator break is out of scope. |
+| ORC-012 | This record names the reviewed head and each applicable outcome. It makes no universal bug-class closure claim; the sync-writes-after-crash limit above stays open. |
 
 ## Mutant kills (recorded at review time)
 
@@ -67,6 +92,16 @@ Run: `vitest run tests/index-update.property.test.ts -t "invalid comparator resu
 | Check also rejects `±Infinity` | 82 assertion failures (the `signed infinity` valid control now throws). |
 | Shipped fix | 0 failures. |
 
-The full `@tanstack/db` suite passes: 223 files, 7,423 tests, no type errors.
+Collection and atomicity cells, run with `-t "invalid comparator|rejected remove"`:
+
+| Mutant | Result |
+| --- | --- |
+| PR head before this repair | 12 assertion failures: 4 Collection cells (status stayed `ready`), 6 BasicIndex add cells, 2 remove cells. |
+| `updateIndexes` rethrows without `markError` | 4 assertion failures (Collection cells). |
+| BasicIndex add writes `valueMap` before its sorted search | 6 assertion failures. |
+| BTreeIndex remove changes maps before the tree delete | 1 assertion failure. |
+| Shipped fix | 0 failures. |
+
+The full `@tanstack/db` suite passes: 223 files, 7,429 tests, no type errors.
 Production code is net negative against the merge base. Tests and this record
 grow separately.

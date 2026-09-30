@@ -144,20 +144,25 @@ export class BTreeIndex<
 
   private removeFromBucket(key: TKey, normalizedValue: unknown): void {
     const exact = this.valueMap.get(normalizedValue)
-    if (!exact || !exact.keys.delete(key)) return
-    const removedExactValue = exact.keys.size === 0
-    if (removedExactValue) this.valueMap.delete(normalizedValue)
+    if (!exact?.keys.has(key)) return
     const orderedBucket = exact.ordered
-    orderedBucket.keys.delete(key)
-    if (removedExactValue) orderedBucket.exactValues.delete(normalizedValue)
-
-    if (orderedBucket.keys.size === 0) {
-      this.orderedEntries.delete(normalizedValue)
-    } else if (
+    const removedExactValue = exact.keys.size === 1
+    const replacesRepresentative =
       removedExactValue &&
+      orderedBucket.keys.size > 1 &&
       areSameValueZeroEqual(orderedBucket.representative, normalizedValue)
-    ) {
+
+    // Tree deletion compares first, so a comparator failure throws before
+    // the index changes.
+    if (orderedBucket.keys.size === 1 || replacesRepresentative)
       this.orderedEntries.delete(normalizedValue)
+    exact.keys.delete(key)
+    orderedBucket.keys.delete(key)
+    if (removedExactValue) {
+      this.valueMap.delete(normalizedValue)
+      orderedBucket.exactValues.delete(normalizedValue)
+    }
+    if (replacesRepresentative) {
       const representative = orderedBucket.exactValues.values().next().value
       orderedBucket.representative = representative
       this.orderedEntries.set(representative, orderedBucket)

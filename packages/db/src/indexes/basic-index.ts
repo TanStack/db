@@ -85,15 +85,14 @@ export class BasicIndex<
       // Value already exists, just add the key to the set
       keySet.add(key)
     } else {
-      // New value - add to map and insert into sorted array
-      this.valueMap.set(normalizedValue, new Set([key]))
-
-      // Insert into sorted position
+      // New value. Find its sorted position first: a comparator failure must
+      // throw before the index changes.
       const insertIdx = findInsertPositionInArray(
         this.sortedValues,
         normalizedValue,
         this.compareFn,
       )
+      this.valueMap.set(normalizedValue, new Set([key]))
       this.sortedValues.splice(insertIdx, 0, normalizedValue)
     }
   }
@@ -124,12 +123,10 @@ export class BasicIndex<
 
   private removeFromBucket(key: TKey, normalizedValue: unknown): void {
     const keySet = this.valueMap.get(normalizedValue)
-    if (keySet) {
-      keySet.delete(key)
-
-      if (keySet.size === 0) {
-        // No more keys for this value, remove from map and sorted array
-        this.valueMap.delete(normalizedValue)
+    if (keySet?.has(key)) {
+      // The last key for this value leaves the sorted array too. Locate it
+      // before any change, so a comparator failure leaves the index unchanged.
+      if (keySet.size === 1) {
         let sortedIndex = findInsertPositionInArray(
           this.sortedValues,
           normalizedValue,
@@ -151,7 +148,9 @@ export class BasicIndex<
           }
           sortedIndex++
         }
+        this.valueMap.delete(normalizedValue)
       }
+      keySet.delete(key)
     }
   }
 
