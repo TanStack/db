@@ -36,18 +36,8 @@ function setup(id: string) {
     getKey: (row) => row.id,
     sync: { sync: () => ({}) },
   })
-  Object.defineProperty(
-    source.config,
-    Symbol.for(`@tanstack/db.persistedReadiness`),
-    {
-      value: {
-        networkTimeoutMs: 60_000,
-        getOrStartNetworkDeadline: () => Date.now() + 60_000,
-        getSnapshot: () => ({ status: `ready` }),
-        subscribe: () => () => {},
-      },
-    },
-  )
+  // This source has no persisted restore. A client request failure must reach
+  // the boundary; the tests below check retry and client isolation for it.
   const query = createLiveQueryCollection((q) => q.from({ person: source }))
   const client = new DbClient()
   const hash = getStableValueHash([`collection`, query.id], `queryKey`)
@@ -79,6 +69,164 @@ function setup(id: string) {
 }
 
 describe(`useLiveSuspenseQuery preload recovery`, () => {
+  it.each([
+    {
+      name: `restored row, stream fails afterward`,
+      rows: [{ id: `cached` }],
+      failureBeforeRestore: false,
+      failureBeforeMount: false,
+    },
+    {
+      name: `restored row, stream fails first`,
+      rows: [{ id: `cached` }],
+      failureBeforeRestore: true,
+      failureBeforeMount: false,
+    },
+    {
+      name: `empty restore, stream fails afterward`,
+      rows: [],
+      failureBeforeRestore: false,
+      failureBeforeMount: false,
+    },
+    {
+      name: `empty restore, stream fails first`,
+      rows: [],
+      failureBeforeRestore: true,
+      failureBeforeMount: false,
+    },
+    {
+      name: `restored row, stream failed before mount`,
+      rows: [{ id: `cached` }],
+      failureBeforeRestore: true,
+      failureBeforeMount: true,
+    },
+  ])(
+    `renders a completed persisted query after a client stream fails: $name`,
+    async ({ name, rows, failureBeforeRestore, failureBeforeMount }) => {
+      let sync!: {
+        begin: () => void
+        write: (row: Person) => void
+        commit: () => void
+      }
+      const source = createCollection<Person>({
+        id: `fallback-${name}-source`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: ({ begin, write, commit }) => {
+            sync = {
+              begin,
+              write: (row) => write({ type: `insert`, value: row }),
+              commit,
+            }
+            return {}
+          },
+        },
+      })
+      let persistedStatus: `loading` | `ready` = `loading`
+      const readinessListeners = new Set<() => void>()
+      Object.defineProperty(
+        source.config,
+        Symbol.for(`@tanstack/db.persistedReadiness`),
+        {
+          value: {
+            networkTimeoutMs: 60_000,
+            getOrStartNetworkDeadline: () => Date.now() + 60_000,
+            getSnapshot: () => ({ status: persistedStatus }),
+            subscribe: (listener: () => void) => {
+              readinessListeners.add(listener)
+              return () => readinessListeners.delete(listener)
+            },
+          },
+        },
+      )
+      const query = createLiveQueryCollection((q) => q.from({ person: source }))
+      const client = new DbClient()
+      const hash = getStableValueHash([`collection`, query.id], `queryKey`)
+      let rejectStream!: (error: Error) => void
+      const stream = new Promise<{ rows: Array<never> }>((_, reject) => {
+        rejectStream = reject
+      })
+      void client._registerLiveQuery(hash, stream).catch(() => {})
+      if (failureBeforeMount) {
+        rejectStream(new Error(`stream failed`))
+        await stream.catch(() => {})
+        expect(client._getLiveQuery(hash)?.status).toBe(`error`)
+      }
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      function View() {
+        const result = useLiveSuspenseQuery(query)
+        const ids = result.data.map((row) => row.id)
+        return (
+          <div>{ids.length ? `Rows: ${ids.join(`,`)}` : `Rows: (empty)`}</div>
+        )
+      }
+      const view = render(
+        <DbProvider client={client}>
+          <Boundary>
+            <Suspense fallback={<div>Waiting for network</div>}>
+              <View />
+            </Suspense>
+          </Boundary>
+        </DbProvider>,
+      )
+      try {
+        if (failureBeforeMount) expect(query.status).toBe(`loading`)
+        expect(view.getByText(`Waiting for network`)).toBeTruthy()
+        const restore = async () => {
+          await act(() => {
+            if (rows.length > 0) {
+              sync.begin()
+              rows.forEach(sync.write)
+              sync.commit()
+            }
+            persistedStatus = `ready`
+            readinessListeners.forEach((listener) => listener())
+          })
+          await waitFor(() =>
+            expect(query.toArray.map((row) => row.id)).toEqual(
+              rows.map((row) => row.id),
+            ),
+          )
+          expect(source.status).toBe(`loading`)
+          expect(query.status).toBe(`loading`)
+        }
+        const failStream = async () => {
+          await act(async () => {
+            rejectStream(new Error(`stream failed`))
+            await stream.catch(() => {})
+          })
+        }
+        if (failureBeforeMount) {
+          await restore()
+        } else if (failureBeforeRestore) {
+          await failStream()
+          expect(view.getByText(`Waiting for network`)).toBeTruthy()
+          await restore()
+        } else {
+          await restore()
+          expect(view.getByText(`Waiting for network`)).toBeTruthy()
+          await failStream()
+        }
+        await waitFor(() =>
+          expect(
+            view.getByText(
+              rows.length
+                ? `Rows: ${rows.map((row) => row.id).join(`,`)}`
+                : `Rows: (empty)`,
+            ),
+          ).toBeTruthy(),
+        )
+      } finally {
+        view.unmount()
+        consoleError.mockRestore()
+        await query.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
+
   it.each([
     { name: `Error`, failure: new Error(`first stream failed`) },
     { name: `undefined`, failure: undefined },

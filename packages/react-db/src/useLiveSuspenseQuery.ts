@@ -23,8 +23,8 @@ import type {
 const initialRenderErrors = new WeakMap<
   Collection<any, any, any>,
   {
-    byClient: WeakMap<DbClient, { error: unknown }>
-    unscoped?: { error: unknown }
+    byClient: WeakMap<DbClient, { error: unknown; clientQuery?: object }>
+    unscoped?: { error: unknown; clientQuery?: object }
   }
 >()
 
@@ -42,6 +42,7 @@ function rememberInitialRenderError(
   collection: Collection<any, any, any>,
   client: DbClient | undefined,
   error: unknown,
+  clientQuery?: object,
 ) {
   if (collection.status === `cleaned-up`) return
   let entry = initialRenderErrors.get(collection)
@@ -52,7 +53,7 @@ function rememberInitialRenderError(
     })
     initialRenderErrors.set(collection, entry)
   }
-  if (client) entry.byClient.set(client, { error })
+  if (client) entry.byClient.set(client, { error, clientQuery })
   else entry.unscoped = { error }
 }
 
@@ -254,8 +255,12 @@ export function useLiveSuspenseQuery(
     queryInfo.client && queryInfo.queryHash
       ? queryInfo.client._getLiveQuery(queryInfo.queryHash)
       : undefined
+  // A configured persisted restore may still satisfy this render after the
+  // client query fails. Let the observer classify that failure below.
   if (
     !hasBeenReadyRef.current &&
+    (result.persistedStatus === `unavailable` ||
+      result.persistedStatus === `error`) &&
     (observerError !== undefined || clientQuery?.status === `error`)
   ) {
     promiseRef.current = null
@@ -266,7 +271,13 @@ export function useLiveSuspenseQuery(
   const initialRenderError = queryInfo.client
     ? errorEntry?.byClient.get(queryInfo.client)
     : errorEntry?.unscoped
-  if (initialRenderError && !hasBeenReadyRef.current) {
+  // A replacement client query must not inherit the prior request's error.
+  if (
+    initialRenderError?.clientQuery !== undefined &&
+    initialRenderError.clientQuery !== clientQuery
+  ) {
+    clearInitialRenderError(result.collection, queryInfo.client)
+  } else if (initialRenderError && !hasBeenReadyRef.current) {
     promiseRef.current = null
     throw initialRenderError.error
   }
@@ -289,6 +300,7 @@ export function useLiveSuspenseQuery(
     !hasBeenReadyRef.current &&
     (result.isLoading ||
       result.isIdle ||
+      result.isError ||
       (collectionStatus === `error` &&
         result.persistedStatus !== `unavailable`))
   ) {
@@ -322,12 +334,13 @@ export function useLiveSuspenseQuery(
         .catch((error: unknown) => {
           const latestClientQuery =
             client && queryHash ? client._getLiveQuery(queryHash) : undefined
-          if (
-            active &&
-            latestClientQuery === preloadClientQuery &&
-            preloadClientQuery?.status !== `error`
-          )
-            rememberInitialRenderError(collection, client, error)
+          if (active && latestClientQuery === preloadClientQuery)
+            rememberInitialRenderError(
+              collection,
+              client,
+              error,
+              preloadClientQuery,
+            )
           throw error
         })
         .finally(stopWatchingCleanup)

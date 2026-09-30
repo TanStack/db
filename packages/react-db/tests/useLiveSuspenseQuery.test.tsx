@@ -131,65 +131,92 @@ describe(`useLiveSuspenseQuery`, () => {
     }
   })
 
-  it(`sends a derived query load error to the boundary while its source is ready`, async () => {
-    const failure = new Error(`derived query load failed`)
-    const source = createCollection<Person>({
-      id: `suspense-derived-query-error-source`,
-      getKey: (row) => row.id,
-      syncMode: `on-demand`,
-      sync: {
-        sync: ({ markReady }) => {
-          markReady()
-          return {
-            loadSubset: () => {
-              throw failure
-            },
-          }
+  it.each([
+    { name: `without a client stream`, failedClientStream: false },
+    { name: `with an already failed client stream`, failedClientStream: true },
+  ])(
+    `sends a derived query load error to the boundary $name`,
+    async ({ failedClientStream }) => {
+      const failure = new Error(`derived query load failed`)
+      const source = createCollection<Person>({
+        id: `suspense-derived-query-error-source`,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                throw failure
+              },
+            }
+          },
         },
-      },
-    })
-    Object.defineProperty(
-      source.config,
-      Symbol.for(`@tanstack/db.persistedReadiness`),
-      {
-        value: {
-          networkTimeoutMs: 60_000,
-          getOrStartNetworkDeadline: () => Date.now() + 60_000,
-          getSnapshot: () => ({ status: `ready` }),
-          subscribe: () => () => {},
+      })
+      Object.defineProperty(
+        source.config,
+        Symbol.for(`@tanstack/db.persistedReadiness`),
+        {
+          value: {
+            networkTimeoutMs: 60_000,
+            getOrStartNetworkDeadline: () => Date.now() + 60_000,
+            getSnapshot: () => ({ status: `ready` }),
+            subscribe: () => () => {},
+          },
         },
-      },
-    )
-    const query = createLiveQueryCollection((q) =>
-      q.from({ person: source }).where(({ person }) => gt(person.age, 20)),
-    )
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-    function View() {
-      useLiveSuspenseQuery(query)
-      return <div>Query ready</div>
-    }
-
-    const view = renderComponent(
-      <TestErrorBoundary>
-        <Suspense fallback={<div>Loading query</div>}>
-          <View />
-        </Suspense>
-      </TestErrorBoundary>,
-    )
-    try {
-      await waitFor(() =>
-        expect(view.getByText(`Query failed: ${failure.message}`)).toBeTruthy(),
       )
-      expect(source.status).toBe(`ready`)
-      expect(query.status).toBe(`error`)
-    } finally {
-      view.unmount()
-      consoleError.mockRestore()
-      await query.cleanup()
-      await source.cleanup()
-    }
-  })
+      const query = createLiveQueryCollection((q) =>
+        q.from({ person: source }).where(({ person }) => gt(person.age, 20)),
+      )
+      const client = failedClientStream ? new DbClient() : undefined
+      if (client) {
+        await expect(query.preload()).rejects.toBe(failure)
+        const queryHash = getStableValueHash(
+          [`collection`, query.id],
+          `queryKey`,
+        )
+        const streamFailure = new Error(`client stream failed`)
+        await expect(
+          client._registerLiveQuery(queryHash, Promise.reject(streamFailure)),
+        ).rejects.toBe(streamFailure)
+      }
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      function View() {
+        useLiveSuspenseQuery(query)
+        return <div>Query ready</div>
+      }
+
+      const content = (
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading query</div>}>
+            <View />
+          </Suspense>
+        </TestErrorBoundary>
+      )
+      const view = renderComponent(
+        client ? <DbProvider client={client}>{content}</DbProvider> : content,
+      )
+      try {
+        await waitFor(() =>
+          expect(
+            view.getByText(
+              `Query failed: ${failedClientStream ? `client stream failed` : failure.message}`,
+            ),
+          ).toBeTruthy(),
+        )
+        expect(source.status).toBe(`ready`)
+        expect(query.status).toBe(`error`)
+      } finally {
+        view.unmount()
+        consoleError.mockRestore()
+        await query.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it(`does not share an initial-render failure between DbClients`, async () => {
     const source = createCollection<Person>({
@@ -197,18 +224,8 @@ describe(`useLiveSuspenseQuery`, () => {
       getKey: (row) => row.id,
       sync: { sync: () => ({}) },
     })
-    Object.defineProperty(
-      source.config,
-      Symbol.for(`@tanstack/db.persistedReadiness`),
-      {
-        value: {
-          networkTimeoutMs: 60_000,
-          getOrStartNetworkDeadline: () => Date.now() + 60_000,
-          getSnapshot: () => ({ status: `ready` }),
-          subscribe: () => () => {},
-        },
-      },
-    )
+    // Neither client has a configured persisted fallback, so A's failure
+    // must reach its boundary while B remains suspended on its own request.
     const query = createLiveQueryCollection((q) => q.from({ person: source }))
     const clientA = new DbClient()
     const clientB = new DbClient()
