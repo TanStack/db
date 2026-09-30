@@ -993,6 +993,55 @@ describe(`Query Collections`, () => {
     expect(result.current.collection).toBe(liveQueryCollection)
   })
 
+  it(`shows recovery of a pre-created live query after dependent-first cleanup`, async () => {
+    let starts = 0
+    let failSource!: () => void
+    const source = createCollection({
+      getKey: (todo: { id: string; text: string }) => todo.id,
+      sync: {
+        sync: (methods) => {
+          starts++
+          methods.begin()
+          methods.write({
+            type: `insert`,
+            value: { id: `1`, text: `Todo ${starts}` },
+          })
+          methods.commit()
+          methods.markReady()
+          failSource = () => methods.markError(new Error(`source sync failed`))
+        },
+      },
+    })
+    const todosQuery = createLiveQueryCollection((q) =>
+      q.from({ todos: source }),
+    )
+    const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const { result, unmount } = renderHook(() => useLiveQuery(todosQuery))
+
+    try {
+      await waitFor(() => expect(result.current.status).toBe(`ready`))
+      expect(result.current.data[0]?.text).toBe(`Todo 1`)
+
+      act(() => failSource())
+      await waitFor(() => expect(result.current.isError).toBe(true))
+
+      await act(async () => {
+        await todosQuery.cleanup()
+        await source.cleanup()
+        await todosQuery.preload()
+      })
+
+      await waitFor(() => expect(result.current.status).toBe(`ready`))
+      expect(result.current.collection).toBe(todosQuery)
+      expect(result.current.data[0]?.text).toBe(`Todo 2`)
+    } finally {
+      unmount()
+      reports.mockRestore()
+      await todosQuery.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`should switch to a different pre-created live query collection when changed`, async () => {
     const collection1 = createCollection(
       mockSyncCollectionOptions<Person>({

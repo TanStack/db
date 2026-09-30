@@ -147,8 +147,10 @@ async function checkWithCleanup(
  * failure. Neither an empty persisted database nor a pending network source
  * changes the rule. Initial rendering prefers network readiness until the
  * longest opted-in source deadline, then permits only completed restoration.
- * Network failure permits earlier fallback without stopping sync. If that
- * failure precedes restore, the fallback must include the restored query rows.
+ * Network failure permits earlier fallback without stopping sync. A failed
+ * client query stream is a network failure; a derived-query failure is not.
+ * If the stream failure precedes restore, the fallback must include the
+ * restored query rows. An empty restore is complete data, not missing data.
  * The production driver holds each adapter's persisted read and
  * observes the real persisted wrapper, Collection, live query, and observer.
  *
@@ -156,8 +158,8 @@ async function checkWithCleanup(
  * settlement. The row assertion prevents a status-only false green; the empty
  * case prevents inferring readiness from row count. The SSR handoff and
  * framework scheduling paths have separate focused witnesses below and in
- * their packages. This owner does not claim native SQLite or arbitrary
- * provider/network histories.
+ * their packages. This owner does not claim native SQLite, replacement client
+ * records during the wait, or arbitrary provider/network histories.
  *
  * Audit: ORC-001/002 use the approved all-source rule and the independent
  * expectedPersistedSnapshot model. ORC-003/005 are the finite outcome grammar,
@@ -167,13 +169,19 @@ async function checkWithCleanup(
  * preloadForInitialRender; the deadline test also failed against the immediate
  * persisted-ready race. Before the early-error repair, the held-read witness
  * resolved initial rendering with an empty live query despite a durable row.
- * An any-one-ready answer fails the joined half-ready checkpoint, and a
- * nonempty-rows answer fails the empty-restore checkpoint. ORC-009 maps model
+ * Before the client-stream repair, the four stream-failure cases rejected the
+ * initial-render wait instead of exposing the completed persisted result.
+ * A preexisting failed stream also left a fresh observer waiting for the
+ * deadline after restore. The observer-start witness rejects that design.
+ * An any-one-ready answer fails the joined half-ready checkpoint. A
+ * nonempty-rows answer fails the empty-restore checkpoint. The combined
+ * derived-query/client-stream failure rejects false local fallback. ORC-009 maps model
  * outcome `ready` to completed persisted restore; it is not Collection status.
  * ORC-010 preserves a primary mismatch and distinct cleanup failures through
- * checkWithCleanup. ORC-011 has no named
- * shared-fault hypothesis requiring another model formulation.
- * ORC-012: these witnesses and the coverage-map limits are the review evidence.
+ * checkWithCleanup. ORC-011 has no named shared-fault hypothesis requiring
+ * another model formulation. ORC-012 records the bounded contract, driver,
+ * wrong-answer checks, and uncovered histories here and in the coverage map.
+ * It does not claim all network histories.
  * ORC-013: the joined half-ready snapshot rejects any-one-ready; the empty
  * restore rejects row-count readiness; the 99/100-ms deadline and 50/100-ms
  * joined deadlines reject early fallback; the restart witness rejects stale
@@ -787,6 +795,122 @@ describe(`persisted-readiness oracle`, () => {
     }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
   })
 
+  for (const rows of [[], [{ id: `one`, value: `persisted` }]]) {
+    for (const failureBeforeRestore of [false, true]) {
+      it(`uses a ${rows.length ? `nonempty` : `empty`} restore after a client stream fails ${failureBeforeRestore ? `before` : `after`} restore`, async () => {
+        const fixture = recordingAdapter(rows)
+        const persisted = source(
+          `stream-failure-${rows.length}-${failureBeforeRestore}`,
+          fixture.adapter,
+          true,
+          60_000,
+        )
+        const query = createLiveQueryCollection({
+          query: (q) => q.from({ row: persisted }),
+        })
+        const client = new DbClient()
+        const queryHash = `stream-failure-${rows.length}-${failureBeforeRestore}`
+        const stream = deferred<{ rows: Array<never> }>()
+        void client
+          ._registerLiveQuery(queryHash, stream.promise)
+          .catch(() => {})
+        const observer = createLiveQueryObserver(query, {
+          client,
+          queryHash,
+          mode: `wholesale`,
+        })
+        const unsubscribe = observer.subscribe(() => {})
+        await checkWithCleanup(async () => {
+          let settlement: `pending` | `resolved` | `rejected` = `pending`
+          const initialRender = observer.preloadForInitialRender()
+          void initialRender.then(
+            () => (settlement = `resolved`),
+            () => (settlement = `rejected`),
+          )
+          const rejectStream = async () => {
+            stream.reject(new Error(`client stream failed`))
+            await stream.promise.catch(() => {})
+          }
+
+          if (failureBeforeRestore) {
+            await rejectStream()
+            expect(settlement).toBe(`pending`)
+            fixture.load.resolve()
+          } else {
+            fixture.load.resolve()
+            await vi.waitFor(() =>
+              expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
+            )
+            expect(settlement).toBe(`pending`)
+            await rejectStream()
+          }
+
+          await initialRender
+          expect(settlement).toBe(`resolved`)
+          expect(observer.isInitialRenderReady()).toBe(true)
+          expect(observer.getSnapshot().data).toMatchObject(rows)
+        }, [
+          () => fixture.load.resolve(),
+          unsubscribe,
+          () => observer.dispose(),
+          () => query.cleanup(),
+          () => persisted.cleanup(),
+        ])
+      })
+    }
+  }
+
+  it(`uses a completed restore when the client stream failed before the observer started`, async () => {
+    const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
+    const persisted = source(
+      `preexisting-stream-failure`,
+      fixture.adapter,
+      true,
+      60_000,
+    )
+    const query = createLiveQueryCollection({
+      query: (q) => q.from({ row: persisted }),
+    })
+    const client = new DbClient()
+    const queryHash = `preexisting-stream-failure`
+    const stream = deferred<{ rows: Array<never> }>()
+    const registered = client._registerLiveQuery(queryHash, stream.promise)
+    stream.reject(new Error(`client stream failed`))
+    await expect(registered).rejects.toThrow(`client stream failed`)
+
+    const observer = createLiveQueryObserver(query, {
+      client,
+      queryHash,
+      mode: `wholesale`,
+    })
+    const unsubscribe = observer.subscribe(() => {})
+    await checkWithCleanup(async () => {
+      let settled = false
+      const initialRender = observer.preloadForInitialRender()
+      void initialRender.then(
+        () => {
+          settled = true
+        },
+        () => {},
+      )
+      fixture.load.resolve()
+      await vi.waitFor(() =>
+        expect(observer.getSnapshot().persistedStatus).toBe(`ready`),
+      )
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 1_000 })
+      await initialRender
+      expect(observer.getSnapshot().data).toMatchObject([
+        { id: `one`, value: `persisted` },
+      ])
+    }, [
+      () => fixture.load.resolve(),
+      unsubscribe,
+      () => observer.dispose(),
+      () => query.cleanup(),
+      () => persisted.cleanup(),
+    ])
+  })
+
   for (const failureMode of [`markError`, `throw`] as const) {
     it(`publishes restored query rows when ${failureMode} precedes the persisted read`, async () => {
       const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
@@ -868,6 +992,64 @@ describe(`persisted-readiness oracle`, () => {
       () => observer.dispose(),
       () => preload.mockRestore(),
       () => persisted.cleanup(),
+    ])
+  })
+
+  it(`does not use persisted fallback when a derived query and client stream both fail`, async () => {
+    const queryFailure = new Error(`derived query failed`)
+    const streamFailure = new Error(`client stream failed`)
+    const sourceCollection = createCollection<Row>({
+      id: `query-and-stream-failure-source`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              throw queryFailure
+            },
+          }
+        },
+      },
+    })
+    Object.defineProperty(sourceCollection.config, PERSISTED_READINESS, {
+      value: {
+        networkTimeoutMs: 60_000,
+        getOrStartNetworkDeadline: () => Date.now() + 60_000,
+        getSnapshot: () => ({ status: `ready` }),
+        subscribe: () => () => {},
+      },
+    })
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ row: sourceCollection })
+          .where(({ row }) => eq(row.value, `persisted`)),
+    })
+    const client = new DbClient()
+    const queryHash = `query-and-stream-failure`
+    const stream = deferred<{ rows: Array<never> }>()
+    const observer = createLiveQueryObserver(query, {
+      client,
+      queryHash,
+      mode: `wholesale`,
+    })
+    await checkWithCleanup(async () => {
+      await expect(query.preload()).rejects.toBe(queryFailure)
+      expect(sourceCollection.status).toBe(`ready`)
+      expect(query.status).toBe(`error`)
+
+      void client._registerLiveQuery(queryHash, stream.promise).catch(() => {})
+      const initialRender = observer.preloadForInitialRender()
+      stream.reject(streamFailure)
+      await expect(initialRender).rejects.toBe(streamFailure)
+      expect(observer.isInitialRenderReady()).toBe(false)
+    }, [
+      () => stream.reject(streamFailure),
+      () => observer.dispose(),
+      () => query.cleanup(),
+      () => sourceCollection.cleanup(),
     ])
   })
 

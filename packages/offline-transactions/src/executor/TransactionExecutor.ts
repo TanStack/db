@@ -285,9 +285,8 @@ export class TransactionExecutor {
         this.scheduler.schedule(transaction),
       )
 
-      const retainedIds = new Set(filteredTransactions.map(({ id }) => id))
-      removedIds = transactions
-        .filter(({ id }) => !retainedIds.has(id))
+      removedIds = providerPending
+        .filter(({ id }) => !selectedById.has(id))
         .map(({ id }) => id)
       removedIds = this.scheduler.removePendingTransactions(removedIds)
 

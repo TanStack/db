@@ -2,6 +2,8 @@
 
 Thin SQLite persistence for Expo apps using the official `expo-sqlite` adapter.
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+
 ## Public API
 
 - `createExpoSQLitePersistence(...)`

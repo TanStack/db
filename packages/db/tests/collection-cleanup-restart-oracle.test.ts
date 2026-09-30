@@ -34,6 +34,11 @@ import type { SyncConfig } from '../src/types'
  * healthy source. Terminal setup must retain no partial source ownership.
  * A repeated-source history also proves one live query enters terminal error
  * once when two lexical aliases depend on the same Collection.
+ * Errored eager and on-demand source histories clean up the dependent first,
+ * then restart both Collections through live-query preload. They check the
+ * same live-query object and subscriber after a later source update. These
+ * pinned paths sit outside the three-cut model; they do not establish
+ * automatic recovery after source-only restart.
  * If adapter cleanup and local teardown both fail, the aggregate keeps the
  * adapter error primary and every local error as an ordered secondary
  * diagnostic. A lone error keeps its identity.
@@ -1026,6 +1031,77 @@ describe(`Collection cleanup admission oracle`, () => {
       await source.cleanup()
     }
   })
+
+  it.each([`eager`, `on-demand`] as const)(
+    `recovers an errored %s source and dependent live query through their own restarts`,
+    async (syncMode) => {
+      let sourceSync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
+      let starts = 0
+      const source = createCollection<Row, number>({
+        getKey: (row) => row.id,
+        syncMode,
+        sync: {
+          sync: (methods) => {
+            sourceSync = methods
+            starts++
+            const writeRow = () => {
+              methods.begin()
+              methods.write({ type: `insert`, value: { id: 1, rank: starts } })
+              methods.commit()
+            }
+            if (syncMode === `eager`) writeRow()
+            methods.markReady()
+            if (syncMode === `on-demand`) {
+              return {
+                loadSubset: () => {
+                  writeRow()
+                  return true
+                },
+                unloadSubset: () => {},
+              }
+            }
+            return undefined
+          },
+        },
+      })
+      const live = createLiveQueryCollection((q) => q.from({ row: source }))
+      const observedRanks: Array<number | undefined> = []
+      const subscription = live.subscribeChanges(() => {
+        observedRanks.push(live.get(1)?.rank)
+      })
+      const reports = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+      try {
+        await live.preload()
+        expect(live.get(1)?.rank).toBe(1)
+
+        sourceSync.markError(new Error(`source sync failed`))
+        expect(source.status).toBe(`error`)
+        expect(live.status).toBe(`error`)
+
+        await live.cleanup()
+        await source.cleanup()
+        await live.preload()
+
+        expect(starts).toBe(2)
+        expect(source.status).toBe(`ready`)
+        expect(live.status).toBe(`ready`)
+        expect(live.get(1)?.rank).toBe(2)
+
+        observedRanks.length = 0
+        sourceSync.begin()
+        sourceSync.write({ type: `update`, value: { id: 1, rank: 3 } })
+        sourceSync.commit()
+        expect(live.get(1)?.rank).toBe(3)
+        expect(observedRanks).toEqual([3])
+      } finally {
+        subscription.unsubscribe()
+        reports.mockRestore()
+        await live.cleanup()
+        await source.cleanup()
+      }
+    },
+  )
 
   it(`treats an incidental contextual-void return as synchronous cleanup`, async () => {
     let starts = 0

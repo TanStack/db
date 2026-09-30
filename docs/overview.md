@@ -34,6 +34,8 @@ It extends TanStack Query with collections, live queries and optimistic mutation
 
 - [How it works](#how-it-works) — understand the TanStack DB development model and how the pieces fit together
 - [SSR and hydration](./guides/ssr.md) — use `DbClient` to transport explicit collection rows or live-query result snapshots
+- [SQLite persistence](./guides/sqlite-persistence.md) — retain Collection rows across restarts and save sync metadata for supported adapters
+- [Offline transactions](./guides/offline-transactions.md) — retain pending mutations and retry them later
 - [API reference](#api-reference) — for the primitives and function interfaces
 - [Usage examples](#usage-examples) — examples of common usage patterns
 - [More info](#more-info) — where to find support and more information
