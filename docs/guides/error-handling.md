@@ -112,10 +112,16 @@ function DataList() {
 ```
 
 Error tracking methods:
-- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
+- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred since a successful result applied:
 - **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
-- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
-- **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
+- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset after a successful result applies:
+- **`clearError()`**: Triggers a refetch. The current error remains visible until a successful result applies to the Collection. An applied result clears `lastError` and resets `errorCount`; a failed retry records another consecutive failure and rejects the returned promise. During a mutation handler, the promise can resolve at the fetch boundary before application clears the error:
+
+  ```text
+  error visible → clearError() → retry pending, error still visible
+                                   ├─ applied success → error cleared
+                                   └─ failure → new error visible, count increased
+  ```
 
 ## Incremental Subset Load Errors
 
@@ -361,12 +367,16 @@ try {
   if (error instanceof CollectionInErrorStateError) {
     // Collection needs to be cleaned up and restarted
     await todoCollection.cleanup()
+    await todoCollection.preload()
     
     // Now retry the operation
     todoCollection.insert(newTodo)
   }
 }
 ```
+
+If a live query depends on this Collection, restart both Collections as shown
+in [Collection Cleanup and Restart](#collection-cleanup-and-restart).
 
 ### Missing Mutation Handlers
 
@@ -577,18 +587,44 @@ await collection.cleanup() // Resolves successfully
 ### Collection Cleanup and Restart
 
 Cleanup ends the current sync run and releases the resources installed by its
-`sync()` call. A later access can start a new sync run. Clean up collections in
-error states like this:
+`sync()` call. A later access can start a new sync run. If no live query or
+Effect depends on the source Collection, restart it like this:
 
 ```ts
 if (todoCollection.status === "error") {
   // Cleanup ends the current sync run and resets the collection
   await todoCollection.cleanup()
   
-  // The next access starts a new sync run
-  todoCollection.preload() // Or any other operation
+  // Start a new sync run and wait for readiness
+  await todoCollection.preload()
 }
 ```
+
+Cleaning up a source Collection while a live-query Collection depends on it
+puts that live query in a terminal error state. Restarting the source alone
+does not revive the live query. If you own both Collections, clean up the
+dependent live query first. Preloading it after source cleanup starts fresh
+sync runs for both Collections and waits for the query's required data:
+
+```ts
+const todosQuery = createLiveQueryCollection((q) =>
+  q.from({ todos: todoCollection }),
+)
+await todosQuery.preload()
+
+// Later, if todoCollection enters an error state:
+await todosQuery.cleanup()
+await todoCollection.cleanup()
+await todosQuery.preload()
+```
+
+The same `todosQuery` object and its subscribers can receive later source
+updates after this sequence. A framework hook that creates its own live-query
+Collection may retain it across renders or remounts. Use a pre-created
+live-query Collection when you need to control this cleanup and restart
+sequence. A successful preload establishes Collection readiness; whether the
+source has caught up with a remote service depends on its sync adapter.
+Cleanup also disposes dependent Effects; recreate them after the source restarts.
 
 ### Graceful Degradation
 
@@ -784,6 +820,7 @@ Thrown when calling `commit()` on a sync transaction that's already committed.
 ```tsx
 import {
   createCollection,
+  createLiveQueryCollection,
   SchemaValidationError,
   DuplicateKeyError,
   UpdateKeyNotFoundError,
@@ -810,19 +847,22 @@ const todoCollection = createCollection({
     return response.json()
   },
   sync: {
-    sync: ({ begin, write, commit }) => {
+    sync: ({ begin, write, commit, markReady }) => {
       // Your sync implementation
       begin()
       // ... sync logic
       commit()
+      markReady()
     }
   }
 })
 
+const todosQuery = createLiveQueryCollection((query) =>
+  query.from({ todos: todoCollection })
+)
+
 const TodoApp = () => {
-  const { data, status, isError, isLoading } = useLiveQuery(
-    (query) => query.from({ todos: todoCollection })
-  )
+  const { data, isError, isLoading } = useLiveQuery(todosQuery)
 
   const handleAddTodo = async (text: string) => {
     try {
@@ -845,12 +885,13 @@ const TodoApp = () => {
     }
   }
 
-  const handleCleanup = async () => {
+  const handleRestart = async () => {
     try {
+      await todosQuery.cleanup()
       await todoCollection.cleanup()
-      // Collection will restart on next access
+      await todosQuery.preload()
     } catch (error) {
-      console.error("Cleanup failed:", error)
+      alert(`Failed to restart todos: ${String(error)}`)
     }
   }
 
@@ -858,9 +899,7 @@ const TodoApp = () => {
     return (
       <div>
         <div>Collection error - data may be stale</div>
-        <button onClick={handleCleanup}>
-          Restart Collection
-        </button>
+        <button onClick={handleRestart}>Restart Collections</button>
       </div>
     )
   }

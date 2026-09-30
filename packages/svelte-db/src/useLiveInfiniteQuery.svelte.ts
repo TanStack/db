@@ -238,6 +238,15 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     get isReady() {
       return snapshot.isReady
     },
+    get persistedStatus() {
+      return snapshot.persistedStatus
+    },
+    get isPersistedReady() {
+      return snapshot.isPersistedReady
+    },
+    get persistedError() {
+      return snapshot.persistedError
+    },
     get isIdle() {
       return snapshot.isIdle
     },

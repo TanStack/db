@@ -32,6 +32,77 @@ describe(`KeyScheduler`, () => {
     vi.useRealTimers()
   })
 
+  it(`reconciles bulk updates with work proportional to the pending records`, () => {
+    const scheduler = new KeyScheduler()
+    const count = 64
+    let pendingIdReads = 0
+    for (let index = 0; index < count; index++) {
+      const transaction = createTransaction({
+        id: `tx-${index}`,
+        createdAt: new Date(index),
+        nextAttemptAt: 0,
+      })
+      Object.defineProperty(transaction, `id`, {
+        get: () => {
+          pendingIdReads++
+          return `tx-${index}`
+        },
+      })
+      scheduler.schedule(transaction)
+    }
+    pendingIdReads = 0
+
+    let updateIdReads = 0
+    const updates = Array.from({ length: count }, (_, index) => {
+      const transaction = createTransaction({
+        id: `tx-${index}`,
+        createdAt: new Date(count - index),
+        nextAttemptAt: index + 1,
+      })
+      Object.defineProperty(transaction, `id`, {
+        get: () => {
+          updateIdReads++
+          return `tx-${index}`
+        },
+      })
+      return transaction
+    })
+
+    scheduler.updateTransactions(updates)
+
+    expect(pendingIdReads + updateIdReads).toBeLessThanOrEqual(count * 4)
+    expect(
+      scheduler
+        .getAllPendingTransactions()
+        .map(({ nextAttemptAt }) => nextAttemptAt),
+    ).toEqual(Array.from({ length: count }, (_, index) => count - index))
+  })
+
+  it(`keeps the last update for a pending ID and ignores unknown IDs`, () => {
+    const scheduler = new KeyScheduler()
+    const first = createTransaction({
+      id: `first`,
+      createdAt: new Date(0),
+      nextAttemptAt: 0,
+    })
+    const second = createTransaction({
+      id: `second`,
+      createdAt: new Date(1),
+      nextAttemptAt: 0,
+    })
+    scheduler.schedule(first)
+    scheduler.schedule(second)
+
+    const lastFirst = { ...first, createdAt: new Date(2), nextAttemptAt: 2 }
+    scheduler.updateTransactions([
+      { ...first, createdAt: new Date(-1), nextAttemptAt: 1 },
+      { ...first, id: `unknown` },
+      lastFirst,
+    ])
+
+    expect(scheduler.getAllPendingTransactions()).toEqual([second, lastFirst])
+  })
+
   it(`does not execute a later ready transaction while an earlier retry is pending`, () => {
     vi.useFakeTimers()
 

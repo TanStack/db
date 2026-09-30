@@ -41,6 +41,9 @@ production queues, caches, or semantic helpers merely to share their names.
 | publication | The boundary that makes one coherent result observable to reads, events, and downstream queries. | Provider return, request settlement, or sync commit by itself. |
 | atomic publication | One publication boundary at which state, events, and consumers observe the same result without an intermediate public state. | Any individual `commit()` call or source snapshot. |
 | readiness | Evidence that a named consumer may proceed. Always qualify Collection readiness, subscription readiness, or initial-query readiness; they settle at different boundaries. | Provider completion or publication in general. |
+| persisted restore | The eager persisted source Collection's startup read and publication of its durable rows, including an empty snapshot, in the current sync run. | Upstream/provider readiness or an SSR seed. |
+| persisted readiness | An opt-in live-query signal that every source Collection completed persisted restore in the current sync run; it is unavailable if any source did not opt in. | Collection readiness, network availability, or row nonemptiness. |
+| network-first initial render | An opt-in Suspense gate that prefers Collection readiness until a configured deadline or network failure, then permits a completed persisted restore. A failed client query stream counts as network failure; a failed derived query does not. The gate does not stop network sync. | The persisted-readiness status itself or a change to ordinary live-query row publication. |
 
 `source` names a role in a data flow; it does not own a lifecycle. Do not coin a
 `source session`. Use `sync run` for the local Collection sync invocation

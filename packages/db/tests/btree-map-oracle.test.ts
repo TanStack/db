@@ -12,7 +12,11 @@ import { BTree } from '../src/utils/btree.js'
  * After each action, this oracle checks four laws:
  *
  * 1. Point operations return the same result as the Map model.
- * 2. A full range scan returns each modeled key once in sorted order.
+ * 2. A range scan returns each modeled key in `[low, high]` once in sorted
+ *    order. When `includeHigh` is false, the range is `[low, high)`. A range
+ *    with `low > high` is empty. `BTreeIndex.rangeQuery` uses arbitrary
+ *    bounds in both modes, so the oracle checks partial and boundary ranges
+ *    as well as the full scan.
  * 3. Neighbor operations return the closest strict key and its exact payload.
  * 4. A missing lookup returns the fallback object supplied by the caller.
  *
@@ -24,6 +28,51 @@ import { BTree } from '../src/utils/btree.js'
  * node sizes force structural changes. A fixed long campaign gives stable
  * depth, while the fast-check lane supplies new and shrinkable histories.
  */
+
+// The tree trusts its comparator to return a valid order; BTreeIndex rejects
+// invalid custom-comparator results before they reach the tree, so that law
+// lives in index-update.property.test.ts.
+
+// Splitting already determines the new child's position from the insertion
+// index. A redundant comparison after mutation must not misplace it. Each
+// fixture returns NaN only for the pair such a comparison would use, so the
+// split must succeed without consulting it. Observe inserted-key reads and
+// whole ranges; the invalid pair is not a lookup order.
+it.each([
+  [16, 14],
+  [32, 46],
+])(
+  `preserves the Map across a split after %s accepted entries`,
+  (size, rightKey) => {
+    const insertedKey = size * 2
+    const tree = new BTree<number, Payload>(
+      (left, right) =>
+        left === insertedKey && right === rightKey ? NaN : left - right,
+      4,
+    )
+    const model: ReferenceModel = new Map()
+    for (let key = 0; key < insertedKey; key += 2)
+      applyAction(tree, model, { type: `put`, key, v: key })
+    for (const key of [insertedKey, insertedKey + 2]) {
+      applyAction(tree, model, { type: `put`, key, v: key })
+      const sorted = [...model.keys()].sort((left, right) => left - right)
+      expectRange(tree, model, sorted, -Infinity, Infinity, true)
+      expect(tree.minKey()).toBe(sorted[0])
+      expect(tree.maxKey()).toBe(sorted.at(-1))
+    }
+  },
+)
+
+it(`accepts infinite comparison results that still provide an order`, () => {
+  const tree = new BTree<number, Payload>((left, right) =>
+    left === right ? 0 : left < right ? -Infinity : Infinity,
+  )
+  const model: ReferenceModel = new Map()
+  for (const key of [2, 0, 1]) {
+    applyAction(tree, model, { type: `put`, key, v: key })
+    expectRefinement(tree, model, key)
+  }
+})
 
 type Payload = { v: number }
 type Stored = Readonly<{ reference: Payload; v: number }>
@@ -110,6 +159,27 @@ function expectPair(
   if (key !== undefined) expectValue(actual?.[1], model.get(key))
 }
 
+// Law 2 for one range. The expected keys come from the sorted model keys, not
+// from the tree's search or traversal code.
+function expectRange(
+  tree: BTree<number, Payload>,
+  model: ReferenceModel,
+  sorted: ReadonlyArray<number>,
+  low: number,
+  high: number,
+  includeHigh: boolean,
+): void {
+  const expected = sorted.filter(
+    (key) => key >= low && (includeHigh ? key <= high : key < high),
+  )
+  const seen: Array<number> = []
+  tree.forRange(low, high, includeHigh, (key, value) => {
+    seen.push(key)
+    expectValue(value, model.get(key))
+  })
+  expect(seen, `forRange(${low}, ${high}, ${includeHigh})`).toEqual(expected)
+}
+
 // This is the refinement check. It compares all public observations used by
 // the index code with the independent Map model at the current history cut.
 function expectRefinement(
@@ -141,6 +211,21 @@ function expectRefinement(
     },
   )
   expect(seen).toEqual(sorted)
+  // Bounds on existing keys test the inclusive and exclusive edges. Bounds
+  // around the probe test ranges that start or end between keys, and the
+  // reversed pair tests an empty range.
+  const rangeBounds: Array<[number, number]> = [
+    [probe - 23, probe + 37],
+    [probe, probe],
+    [probe + 5, probe - 5],
+    [sorted[1] ?? probe, sorted.at(-2) ?? probe],
+    [sorted[0] ?? probe, sorted[0] ?? probe],
+  ]
+  for (const [low, high] of rangeBounds) {
+    for (const includeHigh of [true, false]) {
+      expectRange(tree, model, sorted, low, high, includeHigh)
+    }
+  }
   expectPair(
     tree.nextHigherPair(probe),
     sorted.find((key) => key > probe),
@@ -291,8 +376,7 @@ describe(`BTree Map oracle`, () => {
     const staleScan = vi
       .spyOn(tree, `forRange`)
       .mockImplementation((_low, _high, _inclusive, callback) => {
-        callback?.(1, value, 0)
-        return 1
+        callback(1, value)
       })
     try {
       expect(() => expectRefinement(tree, new Map(), 0)).toThrowError(
@@ -302,6 +386,37 @@ describe(`BTree Map oracle`, () => {
       staleScan.mockRestore()
     }
     expectRefinement(tree, new Map(), 0)
+  })
+
+  // Law 2 calibration. Each wrapper keeps the full scan correct, so only the
+  // partial and boundary range checks can reject it.
+  it.each([
+    {
+      design: `ignores includeHigh`,
+      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+        ((low, high, _includeHigh, onFound) =>
+          scan(low, high, true, onFound)) as typeof scan,
+    },
+    {
+      design: `ignores the low bound`,
+      wrap: (scan: BTree<number, Payload>[`forRange`]) =>
+        ((_low, high, includeHigh, onFound) =>
+          scan(-Infinity, high, includeHigh, onFound)) as typeof scan,
+    },
+  ])(`rejects a range scan that $design`, ({ wrap }) => {
+    const tree = new BTree<number, Payload>((a, b) => a - b, 4)
+    const model: ReferenceModel = new Map()
+    for (let key = 0; key < 40; key += 2)
+      applyAction(tree, model, { type: `put`, key, v: key })
+    expectRefinement(tree, model, 21)
+    const scan = tree.forRange.bind(tree)
+    const wrongScan = vi.spyOn(tree, `forRange`).mockImplementation(wrap(scan))
+    try {
+      expect(() => expectRefinement(tree, model, 21)).toThrowError(/forRange\(/)
+    } finally {
+      wrongScan.mockRestore()
+    }
+    expectRefinement(tree, model, 21)
   })
 
   it(`shrinks and replays a wrong neighbor payload without losing its pair key`, () => {

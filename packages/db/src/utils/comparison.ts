@@ -151,6 +151,23 @@ export function makeComparator(
   }
 }
 
+/**
+ * Wraps a user comparator so an index crashes on a result that cannot order
+ * its storage, instead of silently misplacing rows.
+ */
+export function makeCheckedComparator(
+  compareFn: (a: any, b: any) => number,
+): (a: any, b: any) => number {
+  return (a, b) => {
+    const result: unknown = compareFn(a, b)
+    if (typeof result !== `number` || Number.isNaN(result))
+      throw new TypeError(
+        `Index comparator must return a number, but returned ${String(result)}`,
+      )
+    return result
+  }
+}
+
 /** Default comparator orders values in ascending order with nulls first and locale string comparison. */
 export const defaultComparator = makeComparator({
   direction: `asc`,

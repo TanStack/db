@@ -494,6 +494,9 @@ export interface LiveQueryWindowSnapshot<
   status: CollectionStatus | `disabled`
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQuerySnapshot<T, TKey>[`persistedStatus`]
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -669,6 +672,9 @@ class LiveQueryWindowControllerImpl<
       status,
       isLoading: statusFlags.isLoading,
       isReady: statusFlags.isReady,
+      persistedStatus: observerSnapshot.persistedStatus,
+      isPersistedReady: observerSnapshot.isPersistedReady,
+      persistedError: observerSnapshot.persistedError,
       isIdle: statusFlags.isIdle,
       isError: statusFlags.isError,
       isCleanedUp: observerSnapshot.isCleanedUp,

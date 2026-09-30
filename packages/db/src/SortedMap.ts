@@ -9,6 +9,8 @@ export class SortedMap<TKey extends string | number, TValue> {
   private map: Map<TKey, TValue>
   private sortedKeys: Array<TKey>
   private comparator: ((a: TValue, b: TValue) => number) | undefined
+  private orderDirty = false
+  private runtimeKeyCount = 0
 
   /**
    * Creates a new SortedMap instance
@@ -82,15 +84,39 @@ export class SortedMap<TKey extends string | number, TValue> {
     return left
   }
 
+  /** Restore the ordered view after a synchronous batch of deferred writes. */
+  restoreOrder(): void {
+    if (!this.orderDirty) return
+    this.sortedKeys.length = 0
+    for (const key of this.map.keys()) this.sortedKeys.push(key)
+    this.sortedKeys.sort((left, right) => {
+      const byValue =
+        this.comparator?.(this.map.get(left)!, this.map.get(right)!) ?? 0
+      return byValue || compareKeys(left, right)
+    })
+    this.orderDirty = false
+  }
+
   /**
    * Sets a key-value pair in the map and maintains sort order
    *
    * @param key - The key to set
    * @param value - The value to associate with the key
+   * @param deferOrder - Defer ordering until restoreOrder or the next ordered read
    * @returns This SortedMap instance for chaining
    */
-  set(key: TKey, value: TValue): this {
-    if (this.map.has(key)) {
+  set(key: TKey, value: TValue, deferOrder = false): this {
+    // Grouped Collections can produce nullish keys at runtime. compareKeys
+    // is not a total order there, so retain the existing binary-insert path.
+    const runtimeKey = typeof key !== `string` && typeof key !== `number`
+    if (deferOrder && this.runtimeKeyCount === 0 && !runtimeKey) {
+      this.map.set(key, value)
+      this.orderDirty = true
+      return this
+    }
+    this.restoreOrder()
+    const exists = this.map.has(key)
+    if (exists) {
       // Need to remove the old key from the sorted keys array
       const oldValue = this.map.get(key)!
       const oldIndex = this.indexOf(key, oldValue)
@@ -102,6 +128,7 @@ export class SortedMap<TKey extends string | number, TValue> {
     this.sortedKeys.splice(index, 0, key)
 
     this.map.set(key, value)
+    if (runtimeKey && !exists) this.runtimeKeyCount++
 
     return this
   }
@@ -120,14 +147,24 @@ export class SortedMap<TKey extends string | number, TValue> {
    * Removes a key-value pair from the map
    *
    * @param key - The key to remove
+   * @param deferOrder - Defer ordering until restoreOrder or the next ordered read
    * @returns True if the key was found and removed, false otherwise
    */
-  delete(key: TKey): boolean {
+  delete(key: TKey, deferOrder = false): boolean {
+    if (deferOrder && this.runtimeKeyCount === 0) {
+      const deleted = this.map.delete(key)
+      this.orderDirty ||= deleted
+      return deleted
+    }
+    this.restoreOrder()
     if (this.map.has(key)) {
       const oldValue = this.map.get(key)
       const index = this.indexOf(key, oldValue!)
       this.sortedKeys.splice(index, 1)
-      return this.map.delete(key)
+      const deleted = this.map.delete(key)
+      if (deleted && typeof key !== `string` && typeof key !== `number`)
+        this.runtimeKeyCount--
+      return deleted
     }
 
     return false
@@ -149,6 +186,8 @@ export class SortedMap<TKey extends string | number, TValue> {
   clear(): void {
     this.map.clear()
     this.sortedKeys = []
+    this.orderDirty = false
+    this.runtimeKeyCount = 0
   }
 
   /**
@@ -164,6 +203,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns An iterator for the map's entries
    */
   *[Symbol.iterator](): IterableIterator<[TKey, TValue]> {
+    this.restoreOrder()
     for (const key of this.sortedKeys) {
       yield [key, this.map.get(key)!] as [TKey, TValue]
     }
@@ -184,6 +224,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns An iterator for the map's keys
    */
   keys(): IterableIterator<TKey> {
+    this.restoreOrder()
     return this.sortedKeys[Symbol.iterator]()
   }
 
@@ -194,6 +235,7 @@ export class SortedMap<TKey extends string | number, TValue> {
    */
   values(): IterableIterator<TValue> {
     return function* (this: SortedMap<TKey, TValue>) {
+      this.restoreOrder()
       for (const key of this.sortedKeys) {
         yield this.map.get(key)!
       }
@@ -208,6 +250,7 @@ export class SortedMap<TKey extends string | number, TValue> {
   forEach(
     callbackfn: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void,
   ): void {
+    this.restoreOrder()
     for (const key of this.sortedKeys) {
       callbackfn(this.map.get(key)!, key, this.map)
     }

@@ -4,6 +4,7 @@ import {
   onUnmounted,
   reactive,
   ref,
+  shallowRef,
   toValue,
   watchEffect,
 } from 'vue'
@@ -23,6 +24,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
+  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -48,6 +50,9 @@ export interface UseLiveQueryReturn<TContext extends Context> {
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
@@ -82,6 +87,9 @@ export interface UseLiveQueryReturnWithCollection<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
@@ -98,6 +106,9 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
@@ -320,12 +331,11 @@ export function useLiveQuery(
     if (typeof unwrappedParam === `function`) {
       // To avoid calling the query function twice, we wrap it to handle null/undefined returns
       // The wrapper will be called once by createLiveQueryCollection
+      const disabledQuery = Symbol()
       const wrappedQuery = (q: InitialQueryBuilder) => {
         const result = unwrappedParam(q)
-        // If the query function returns null/undefined, throw a special error
-        // that we'll catch to return null collection
         if (result === undefined || result === null) {
-          throw new Error(`__DISABLED_QUERY__`)
+          throw disabledQuery
         }
         return result
       }
@@ -336,8 +346,7 @@ export function useLiveQuery(
           startSync: true,
         })
       } catch (error) {
-        // Check if this is our special disabled query marker
-        if (error instanceof Error && error.message === `__DISABLED_QUERY__`) {
+        if (error === disabledQuery) {
           return null
         }
         // Re-throw other errors
@@ -355,32 +364,26 @@ export function useLiveQuery(
   const state = reactive(new Map<string | number, any>())
 
   // Reactive data array that maintains sorted order
-  const internalData = reactive<Array<any>>([])
+  const internalData = ref<Array<any>>([])
 
   // Computed wrapper for the data to match expected return type
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
     const currentCollection = collection.value
     if (!currentCollection) {
-      return internalData
+      return internalData.value
     }
     return isSingleResultCollection(currentCollection)
-      ? internalData[0]
-      : internalData
+      ? internalData.value[0]
+      : internalData.value
   })
 
   // Track collection status reactively
   const status = ref(
     collection.value ? collection.value.status : (`disabled` as const),
   )
-
-  // Helper to sync data array from collection in correct order
-  const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
-  ) => {
-    internalData.length = 0
-    internalData.push(...Array.from(currentCollection.values()))
-  }
+  const persistedStatus = ref<LiveQueryPersistedStatus>(`unavailable`)
+  const persistedError = shallowRef<unknown>(undefined)
 
   // The shared observer owns subscription, the ready-race, and status; Vue
   // materializes into its own reactive map (granular) + ordered array.
@@ -390,8 +393,11 @@ export function useLiveQuery(
     observer: LiveQueryObserver<any, any>,
     currentCollection: Collection<any, any, any>,
   ) => {
-    status.value = observer.getSnapshot().status as CollectionStatus
-    syncDataFromCollection(currentCollection)
+    const snapshot = observer.getSnapshot()
+    status.value = snapshot.status as CollectionStatus
+    persistedStatus.value = snapshot.persistedStatus
+    persistedError.value = snapshot.persistedError
+    internalData.value = Array.from(currentCollection.values())
   }
 
   // Watch for collection changes and subscribe to updates
@@ -405,8 +411,10 @@ export function useLiveQuery(
     // Handle null collection (disabled query)
     if (!currentCollection) {
       status.value = `disabled` as const
+      persistedStatus.value = `unavailable`
+      persistedError.value = undefined
       state.clear()
-      internalData.length = 0
+      internalData.value = []
       return
     }
 
@@ -467,6 +475,9 @@ export function useLiveQuery(
     isReady: computed(
       () => status.value === `ready` || status.value === `disabled`,
     ),
+    persistedStatus: computed(() => persistedStatus.value),
+    isPersistedReady: computed(() => persistedStatus.value === `ready`),
+    persistedError: computed(() => persistedError.value),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
