@@ -14,7 +14,7 @@ import {
   getStableValueHash,
   gt,
 } from '@tanstack/db'
-import { StrictMode, Suspense } from 'react'
+import { Component, StrictMode, Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { DbProvider } from '../src/DbProvider'
@@ -62,7 +62,278 @@ function SuspenseWrapper({ children }: { children: ReactNode }) {
   return <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
 }
 
+class TestErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  render() {
+    return this.state.error ? (
+      <div>Query failed: {this.state.error.message}</div>
+    ) : (
+      this.props.children
+    )
+  }
+}
+
 describe(`useLiveSuspenseQuery`, () => {
+  it(`sends a persisted query-only preload failure to the error boundary`, async () => {
+    const source = createCollection<Person>({
+      id: `suspense-query-only-error-source`,
+      getKey: (row) => row.id,
+      sync: { sync: () => ({}) },
+    })
+    Object.defineProperty(
+      source.config,
+      Symbol.for(`@tanstack/db.persistedReadiness`),
+      {
+        value: {
+          networkTimeoutMs: 60_000,
+          getOrStartNetworkDeadline: () => Date.now() + 60_000,
+          getSnapshot: () => ({ status: `ready` }),
+          subscribe: () => () => {},
+        },
+      },
+    )
+    const query = createLiveQueryCollection((q) => q.from({ person: source }))
+    const failure = new Error(`query failed independently of its source`)
+    const preload = vi.spyOn(query, `preload`).mockRejectedValue(failure)
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    function View() {
+      useLiveSuspenseQuery(query)
+      return <div>Query ready</div>
+    }
+
+    const view = renderComponent(
+      <TestErrorBoundary>
+        <Suspense fallback={<div>Loading query</div>}>
+          <View />
+        </Suspense>
+      </TestErrorBoundary>,
+    )
+    try {
+      await waitFor(() =>
+        expect(view.getByText(`Query failed: ${failure.message}`)).toBeTruthy(),
+      )
+      expect(view.queryByText(`Query ready`)).toBeNull()
+    } finally {
+      view.unmount()
+      consoleError.mockRestore()
+      preload.mockRestore()
+      await query.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it(`sends a derived query load error to the boundary while its source is ready`, async () => {
+    const failure = new Error(`derived query load failed`)
+    const source = createCollection<Person>({
+      id: `suspense-derived-query-error-source`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              throw failure
+            },
+          }
+        },
+      },
+    })
+    Object.defineProperty(
+      source.config,
+      Symbol.for(`@tanstack/db.persistedReadiness`),
+      {
+        value: {
+          networkTimeoutMs: 60_000,
+          getOrStartNetworkDeadline: () => Date.now() + 60_000,
+          getSnapshot: () => ({ status: `ready` }),
+          subscribe: () => () => {},
+        },
+      },
+    )
+    const query = createLiveQueryCollection((q) =>
+      q.from({ person: source }).where(({ person }) => gt(person.age, 20)),
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    function View() {
+      useLiveSuspenseQuery(query)
+      return <div>Query ready</div>
+    }
+
+    const view = renderComponent(
+      <TestErrorBoundary>
+        <Suspense fallback={<div>Loading query</div>}>
+          <View />
+        </Suspense>
+      </TestErrorBoundary>,
+    )
+    try {
+      await waitFor(() =>
+        expect(view.getByText(`Query failed: ${failure.message}`)).toBeTruthy(),
+      )
+      expect(source.status).toBe(`ready`)
+      expect(query.status).toBe(`error`)
+    } finally {
+      view.unmount()
+      consoleError.mockRestore()
+      await query.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it(`does not share an initial-render failure between DbClients`, async () => {
+    const source = createCollection<Person>({
+      id: `suspense-client-error-source`,
+      getKey: (row) => row.id,
+      sync: { sync: () => ({}) },
+    })
+    Object.defineProperty(
+      source.config,
+      Symbol.for(`@tanstack/db.persistedReadiness`),
+      {
+        value: {
+          networkTimeoutMs: 60_000,
+          getOrStartNetworkDeadline: () => Date.now() + 60_000,
+          getSnapshot: () => ({ status: `ready` }),
+          subscribe: () => () => {},
+        },
+      },
+    )
+    const query = createLiveQueryCollection((q) => q.from({ person: source }))
+    const clientA = new DbClient()
+    const clientB = new DbClient()
+    const queryHash = getStableValueHash([`collection`, query.id], `queryKey`)
+    let rejectClientA!: (error: Error) => void
+    const clientALoad = new Promise<{
+      rows: Array<{ key: string; value: Person }>
+    }>((_, reject) => {
+      rejectClientA = reject
+    })
+    void clientA._registerLiveQuery(queryHash, clientALoad).catch(() => {})
+    const pendingQueryLoad = new Promise<void>(() => {})
+    const preload = vi.spyOn(query, `preload`).mockReturnValue(pendingQueryLoad)
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    function View() {
+      useLiveSuspenseQuery(query)
+      return <div>Query ready</div>
+    }
+
+    const viewA = renderComponent(
+      <DbProvider client={clientA}>
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Client A loading</div>}>
+            <View />
+          </Suspense>
+        </TestErrorBoundary>
+      </DbProvider>,
+    )
+    let viewB: ReturnType<typeof renderComponent> | undefined
+    try {
+      expect(viewA.getByText(`Client A loading`)).toBeTruthy()
+      await act(async () => {
+        rejectClientA(new Error(`Client A failed`))
+        await clientALoad.catch(() => {})
+      })
+      await waitFor(() =>
+        expect(viewA.getByText(`Query failed: Client A failed`)).toBeTruthy(),
+      )
+
+      viewB = renderComponent(
+        <DbProvider client={clientB}>
+          <TestErrorBoundary>
+            <Suspense fallback={<div>Client B loading</div>}>
+              <View />
+            </Suspense>
+          </TestErrorBoundary>
+        </DbProvider>,
+      )
+      expect(viewB.getByText(`Client B loading`)).toBeTruthy()
+      expect(viewB.container.textContent).not.toContain(`Client A failed`)
+    } finally {
+      viewA.unmount()
+      viewB?.unmount()
+      consoleError.mockRestore()
+      preload.mockRestore()
+      await query.cleanup()
+      await source.cleanup()
+    }
+  })
+
+  it(`does not retain an initial-render failure after collection cleanup`, async () => {
+    const source = createCollection<Person>({
+      id: `suspense-restart-error-source`,
+      getKey: (row) => row.id,
+      sync: { sync: () => ({}) },
+    })
+    Object.defineProperty(
+      source.config,
+      Symbol.for(`@tanstack/db.persistedReadiness`),
+      {
+        value: {
+          networkTimeoutMs: 60_000,
+          getOrStartNetworkDeadline: () => Date.now() + 60_000,
+          getSnapshot: () => ({ status: `ready` }),
+          subscribe: () => () => {},
+        },
+      },
+    )
+    const query = createLiveQueryCollection((q) => q.from({ person: source }))
+    const failure = new Error(`first query run failed`)
+    const pendingRetry = new Promise<void>(() => {})
+    const preload = vi
+      .spyOn(query, `preload`)
+      .mockRejectedValueOnce(failure)
+      .mockReturnValue(pendingRetry)
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    function View() {
+      useLiveSuspenseQuery(query)
+      return <div>Query ready</div>
+    }
+
+    const renderView = () =>
+      renderComponent(
+        <TestErrorBoundary>
+          <Suspense fallback={<div>Loading query</div>}>
+            <View />
+          </Suspense>
+        </TestErrorBoundary>,
+      )
+    const first = renderView()
+    let second: ReturnType<typeof renderView> | undefined
+    try {
+      await waitFor(() =>
+        expect(
+          first.getByText(`Query failed: ${failure.message}`),
+        ).toBeTruthy(),
+      )
+      first.unmount()
+      await query.cleanup()
+
+      second = renderView()
+      expect(second.getByText(`Loading query`)).toBeTruthy()
+      expect(second.container.textContent).not.toContain(failure.message)
+    } finally {
+      first.unmount()
+      second?.unmount()
+      consoleError.mockRestore()
+      preload.mockRestore()
+      await query.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it.each([
     {
       name: `immediate persisted fallback`,

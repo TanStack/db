@@ -7,6 +7,7 @@ import type { UseLiveQueryConfig } from './useLiveQuery'
 import type {
   Collection,
   Context,
+  DbClient,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
@@ -15,6 +16,45 @@ import type {
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+// React can discard a render that suspends, including its refs. Keep the
+// initial-render failure across retries, scoped by client because streamed
+// preloads of the same collection can fail independently.
+const initialRenderErrors = new WeakMap<
+  Collection<any, any, any>,
+  {
+    byClient: WeakMap<DbClient, { error: unknown }>
+    unscoped?: { error: unknown }
+  }
+>()
+
+function clearInitialRenderError(
+  collection: Collection<any, any, any>,
+  client: DbClient | undefined,
+) {
+  const entry = initialRenderErrors.get(collection)
+  if (!entry) return
+  if (client) entry.byClient.delete(client)
+  else delete entry.unscoped
+}
+
+function rememberInitialRenderError(
+  collection: Collection<any, any, any>,
+  client: DbClient | undefined,
+  error: unknown,
+) {
+  if (collection.status === `cleaned-up`) return
+  let entry = initialRenderErrors.get(collection)
+  if (!entry) {
+    entry = { byClient: new WeakMap() }
+    collection.once(`status:cleaned-up`, () => {
+      initialRenderErrors.delete(collection)
+    })
+    initialRenderErrors.set(collection, entry)
+  }
+  if (client) entry.byClient.set(client, { error })
+  else entry.unscoped = { error }
+}
 
 /**
  * Create a live query with React Suspense support
@@ -204,12 +244,22 @@ export function useLiveSuspenseQuery(
   if (result.isReady || queryInfo.observer.isInitialRenderReady()) {
     hasBeenReadyRef.current = true
     promiseRef.current = null
+    clearInitialRenderError(result.collection, queryInfo.client)
   }
 
   const observerError = queryInfo.observer.getError()
   if (observerError !== undefined && !hasBeenReadyRef.current) {
     promiseRef.current = null
     throw observerError
+  }
+
+  const errorEntry = initialRenderErrors.get(result.collection)
+  const initialRenderError = queryInfo.client
+    ? errorEntry?.byClient.get(queryInfo.client)
+    : errorEntry?.unscoped
+  if (initialRenderError && !hasBeenReadyRef.current) {
+    promiseRef.current = null
+    throw initialRenderError.error
   }
 
   // Only throw errors during initial load (before first ready)
@@ -243,7 +293,14 @@ export function useLiveSuspenseQuery(
     }
     // Create or reuse promise for current collection
     if (!promiseRef.current) {
-      promiseRef.current = queryInfo.observer.preloadForInitialRender()
+      const collection = result.collection
+      const client = queryInfo.client
+      promiseRef.current = queryInfo.observer
+        .preloadForInitialRender()
+        .catch((error: unknown) => {
+          rememberInitialRenderError(collection, client, error)
+          throw error
+        })
     }
     // React Suspense catches this promise and retries after preload settles.
     throw promiseRef.current
