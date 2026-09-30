@@ -152,20 +152,22 @@ export class BTreeIndex<
       orderedBucket.keys.size > 1 &&
       areSameValueZeroEqual(orderedBucket.representative, normalizedValue)
 
-    // Tree deletion compares first, so a comparator failure throws before
-    // the index changes.
-    if (orderedBucket.keys.size === 1 || replacesRepresentative)
+    // Tree writes compare first, so a comparator failure throws before the
+    // index changes. A comparator-equal `set` overwrites the entry's key.
+    if (orderedBucket.keys.size === 1) {
       this.orderedEntries.delete(normalizedValue)
+    } else if (replacesRepresentative) {
+      const representative = [...orderedBucket.exactValues].find(
+        (value) => !areSameValueZeroEqual(value, normalizedValue),
+      )
+      this.orderedEntries.set(representative, orderedBucket)
+      orderedBucket.representative = representative
+    }
     exact.keys.delete(key)
     orderedBucket.keys.delete(key)
     if (removedExactValue) {
       this.valueMap.delete(normalizedValue)
       orderedBucket.exactValues.delete(normalizedValue)
-    }
-    if (replacesRepresentative) {
-      const representative = orderedBucket.exactValues.values().next().value
-      orderedBucket.representative = representative
-      this.orderedEntries.set(representative, orderedBucket)
     }
   }
 

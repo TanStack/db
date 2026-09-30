@@ -477,6 +477,28 @@ describe.each(indexTypes)(
       expect(index.lookup(`eq`, `x`)).toEqual(new Set([`x`]))
     })
 
+    // `A` and `a` share one comparator position. Removing the representative
+    // `A` promotes `a`, whose comparison with `z` is the only invalid pair.
+    test(`a rejected representative replacement leaves the index unchanged`, () => {
+      const { index, step } = createRecordedIndex((left, right) => {
+        if ([left, right].includes(`a`) && [left, right].includes(`z`))
+          return NaN
+        const l = String(left).toLowerCase()
+        const r = String(right).toLowerCase()
+        return l === r ? 0 : l < r ? -1 : 1
+      })
+      expect(step(() => index.add(`upper`, { value: `A` }))).toBe(false)
+      expect(step(() => index.add(`lower`, { value: `a` }))).toBe(false)
+      expect(step(() => index.add(`zed`, { value: `z` }))).toBe(false)
+      // Equality lookups and key count read the index without comparing.
+      if (step(() => index.remove(`upper`, { value: `A` }))) {
+        expect(index.keyCount).toBe(3)
+        expect(index.lookup(`eq`, `A`)).toEqual(new Set([`upper`]))
+        expect(index.lookup(`eq`, `a`)).toEqual(new Set([`lower`]))
+        expect(index.lookup(`eq`, `z`)).toEqual(new Set([`zed`]))
+      }
+    })
+
     test(`keeps NaN keys after other values with the default comparator`, () => {
       const index = new IndexType(1, new PropRef([`value`]))
       index.add(`nan`, { value: NaN })
