@@ -54,11 +54,20 @@ import {
  * - Map and Set order sensitivity and ignored Map/Set properties are current
  *   behavior. No contract promises them.
  * - Getters and proxies are outside the grammar.
+ * - A RegExp with a `NaN` `lastIndex` is outside the grammar: equality
+ *   compares RegExp fields with `===`, but hashing normalizes `NaN`. One
+ *   pinned case holds the equality side.
+ * - Cycles run through arrays, Map values, Sets, and plain objects. Cycles
+ *   through other carriers, and pairs that differ only in a back-edge target,
+ *   would need a bisimulation model.
  */
 
 // ---------------------------------------------------------------------------
 // Value specs. A spec is plain data, so the model never reads production
-// objects.
+// objects. Kinds name contract rules, not production's marker/header/body
+// split. `ref` is production's reference leaf. Two kinds exist only in this
+// model: `twice` is one child that the driver shares or copies, and `back` is
+// a back edge to an ancestor container.
 
 type Spec =
   | { k: `num`; v: number }
