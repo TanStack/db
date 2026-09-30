@@ -198,13 +198,8 @@ class BNode<K, V> {
         // key < keys[mid]
         hi = mid
       else if (c === 0) return mid
-      else {
-        // c is NaN or otherwise invalid
-        if (key === key)
-          // at least the search key is not NaN
-          return keys.length
-        else throw new Error(`BTree: NaN was used as a key`)
-      }
+      else
+        throw new Error(`BTree: comparator returned NaN or an invalid result`)
       mid = (lo + hi) >> 1
     }
     return mid ^ failXor

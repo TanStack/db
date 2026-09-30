@@ -318,6 +318,58 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
   })
 })
 
+describe(`BTreeIndex invalid comparator results`, () => {
+  // A comparator must provide an order. AGENTS.md requires contradictory
+  // collaborator signals to throw before publishing a successful mutation.
+  // The model keeps only accepted rows; a rejected add leaves that Map intact.
+  // Enumerated prefixes cross leaf growth and root splits. This checks add,
+  // equality, ordered reads, and valid continuation, not atomic update/build.
+  test.each([1, 4, 5, 32, 33, 65])(
+    `rejects an unordered add without changing %s accepted rows`,
+    (size) => {
+      const index = new BTreeIndex<string>(
+        1,
+        new PropRef([`value`]),
+        undefined,
+        {
+          compareFn: (left: unknown, right: unknown) =>
+            typeof left === `number` && typeof right === `number`
+              ? left - right
+              : NaN,
+        },
+      )
+      const rows = new Map<string, number>()
+      for (let value = 0; value < size; value++) {
+        const key = String(value)
+        index.add(key, { value })
+        rows.set(key, value)
+      }
+
+      expect(() => index.add(`invalid`, { value: `ann` })).toThrow(
+        /comparator returned NaN/,
+      )
+      expect(index.lookup(`eq`, `ann`)).toEqual(new Set())
+      expectIndexMatchesModel(index, rows)
+
+      index.add(`next`, { value: size })
+      rows.set(`next`, size)
+      expectIndexMatchesModel(index, rows)
+      index.remove(`next`, { value: size })
+      rows.delete(`next`)
+      expectIndexMatchesModel(index, rows)
+    },
+  )
+
+  test(`keeps valid NaN keys with the default comparator`, () => {
+    const index = new BTreeIndex<string>(1, new PropRef([`value`]))
+    index.add(`one`, { value: 1 })
+    index.add(`nan`, { value: NaN })
+    expect(index.lookup(`eq`, NaN)).toEqual(new Set([`nan`]))
+    expect(index.keyCount).toBe(2)
+    expect(new Set(index.takeFromStart(3))).toEqual(new Set([`one`, `nan`]))
+  })
+})
+
 describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
   test(`rejects stale retired identity outputs without rejecting live reuse`, () => {
     const symbol = Symbol(`same group`)
