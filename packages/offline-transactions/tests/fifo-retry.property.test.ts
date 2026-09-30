@@ -14,12 +14,17 @@ import type { OfflineTransaction } from '../src/types'
  * transaction must not pass the first transaction when the first transaction
  * has a retry delay.
  *
- * The scheduler must set one timer for the first transaction. It must execute
- * nothing before that timer expires. At the deadline, it must execute all
+ * The executor must execute nothing before the head is eligible. Under the
+ * controlled virtual clock, advancing to that deadline must execute all
  * transactions in queue order and remove them from the outbox.
  *
- * The package's documented FIFO sequential-processing contract supplies the
- * order law. The retry deadline is the `nextAttemptAt` eligibility boundary.
+ * The package README's FIFO sequential-processing and automatic-retry
+ * contracts supply the order and eventual-retry laws. The established
+ * `KeyScheduler.property.test.ts` supplies the `nextAttemptAt` eligibility
+ * boundary.
+ * Advancing fake timers to that boundary is a bounded executor liveness check,
+ * not a user-facing wall-clock latency guarantee. Timer count and polling
+ * strategy are implementation details outside this oracle's judgment.
  * This oracle covers an online executor with successful mutation functions,
  * one delayed head, and ready tails. It does not judge failed mutation
  * functions, leadership changes, or real browser timer scheduling.
@@ -73,7 +78,7 @@ function expectState(actual: ExpectedState, expected: ExpectedState): void {
 }
 
 it.each(campaignSeeds)(
-  `wakes at the FIFO head deadline rather than polling ready tails (seed %s)`,
+  `waits for the FIFO head and executes eligible work at its deadline (seed %s)`,
   async (fixedSeed) => {
     const seed = fixedSeed ?? replaySeed
     await fc.assert(
@@ -81,14 +86,11 @@ it.each(campaignSeeds)(
         fc.integer({ min: 2, max: 5 }),
         fc.integer({ min: 2, max: 10000 }),
         async (count, delay) => {
-          let restoreTimerSpy: (() => void) | undefined
           let clearExecutor: (() => void) | undefined
           let primaryFailure: unknown
           let failed = false
           try {
             vi.useFakeTimers()
-            const timers = vi.spyOn(globalThis, `setTimeout`)
-            restoreTimerSpy = () => timers.mockRestore()
             const scheduler = new KeyScheduler()
             const outbox = new OutboxManager(new FakeStorageAdapter(), {})
             const calls: Array<string> = []
@@ -139,8 +141,8 @@ it.each(campaignSeeds)(
             }
             await executor.executeAll()
 
-            // The ready tail must wait for the delayed head. One timer must wake
-            // the executor at the head deadline. The executor must not poll.
+            // A ready tail waits for the delayed head. The virtual-clock cuts
+            // distinguish early execution from failure to wake when eligible.
             const beforeDeadline = expectedStateAt(0, delay, transactionIds)
             const observedBeforeDeadline = {
               calls: [...calls],
@@ -156,9 +158,6 @@ it.each(campaignSeeds)(
                 beforeDeadline,
               ),
             ).toThrow()
-            expect(timers).toHaveBeenCalledTimes(1)
-            expect(timers.mock.calls[0]![1]).toBe(delay)
-
             await vi.advanceTimersByTimeAsync(delay - 1)
             const nearDeadline = expectedStateAt(
               delay - 1,
@@ -169,14 +168,21 @@ it.each(campaignSeeds)(
               { calls: [...calls], outboxCount: await outbox.count() },
               nearDeadline,
             )
-            expect(timers).toHaveBeenCalledTimes(1)
-
             await vi.advanceTimersByTimeAsync(1)
             const atDeadline = expectedStateAt(delay, delay, transactionIds)
-            expectState(
-              { calls: [...calls], outboxCount: await outbox.count() },
-              atDeadline,
-            )
+            const observedAtDeadline = {
+              calls: [...calls],
+              outboxCount: await outbox.count(),
+            }
+            expectState(observedAtDeadline, atDeadline)
+            // A scheduler that never wakes at eligibility leaves the whole
+            // queue untouched at this controlled-clock checkpoint.
+            expect(() =>
+              expectState(
+                { calls: [], outboxCount: transactionIds.length },
+                atDeadline,
+              ),
+            ).toThrow()
           } catch (error) {
             primaryFailure = error
             failed = true
@@ -185,7 +191,6 @@ it.each(campaignSeeds)(
           const cleanupFailures: Array<Error> = []
           const cleanups: Array<[string, (() => void) | undefined]> = [
             [`executor.clear`, clearExecutor],
-            [`timer spy restore`, restoreTimerSpy],
             [`real timer restore`, () => vi.useRealTimers()],
           ]
           for (const [name, cleanup] of cleanups) {

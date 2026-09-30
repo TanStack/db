@@ -1,16 +1,24 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createDeferred } from '../../src/deferred.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
+import { PropRef } from '../../src/query/ir.js'
 import {
   createLiveQueryCollection,
   eq,
+  materialize as materializeChildRows,
   toArray,
 } from '../../src/query/index.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
+import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
  * # How should optimistic relationship writes affect a nested result?
@@ -55,10 +63,10 @@ import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.j
  * reparent/rekey checkpoint. A rule that always retains the optimistic route
  * after settlement fails the different-authoritative-route history.
  *
- * Known omissions: concurrent optimistic root-row changes during a held
- * ordered repair still need a public snapshot and event witness here. The
- * controlled source Collections establish core behavior under the supplied
- * sync writes; this oracle does not claim a real provider's event timing or
+ * The held ordered-repair witness below crosses an authoritative root-order
+ * change with an optimistic value change to that same root row. The controlled
+ * source Collections establish core behavior under the supplied sync writes;
+ * this oracle does not claim a real provider's event timing or
  * Collection-valued include facade behavior.
  */
 
@@ -656,6 +664,261 @@ function optimisticProperty(
 }
 
 describe(`optimistic relationship-transition oracle`, () => {
+  fcTest(
+    `keeps a same-root optimistic snapshot private until ordered repair publishes`,
+    async () => {
+      type OrderedRoot = { id: number; rank: number; value: string }
+      type Child = { id: number; parentId: number }
+      type PublishedRoot = {
+        id: number
+        value: string
+        children: Array<{ id: number }>
+      }
+      type Event = {
+        type: string
+        key: unknown
+        value: PublishedRoot
+        previousValue?: PublishedRoot
+      }
+
+      const sourceRows = new Map<number, OrderedRoot>([
+        [1, { id: 1, rank: 1, value: `A` }],
+        [2, { id: 2, rank: 2, value: `X` }],
+      ])
+      // The reference sorts current authoritative rows, then applies the
+      // one whole-row optimistic snapshot. It has no repair or D2 state.
+      const expectedRows = (optimisticValue?: string): Array<PublishedRoot> =>
+        [...sourceRows.values()]
+          .sort((left, right) => left.rank - right.rank)
+          .map(({ id, value }) => ({
+            id,
+            value: id === 1 ? (optimisticValue ?? value) : value,
+            children: id === 1 ? [{ id: 10 }] : [],
+          }))
+
+      let sync!: Parameters<SyncConfig<OrderedRoot, number>[`sync`]>[0]
+      let holdRepair = false
+      let requests = 0
+      const held: Array<() => void> = []
+      const heldRequests: Array<LoadSubsetOptions> = []
+      const mutation = createDeferred<void>()
+      const roots = createCollection<OrderedRoot, number>({
+        id: `held-optimistic-repair-roots`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        onUpdate: () => mutation.promise,
+        sync: {
+          sync: (operations) => {
+            sync = operations
+            operations.markReady()
+            return {
+              loadSubset: (options) => {
+                requests++
+                if (requests === 1) {
+                  sync.begin()
+                  for (const row of sourceRows.values())
+                    sync.write({ type: `insert`, value: { ...row } })
+                  expect(sync.commit()).toBe(true)
+                }
+                if (holdRepair) {
+                  heldRequests.push(options)
+                  return new Promise<void>((resolve) => held.push(resolve))
+                }
+                return true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const children = createControlledCollection<Child>(
+        `held-optimistic-repair-children`,
+        [{ id: 10, parentId: 1 }],
+      )
+      children.collection.createIndex((child) => child.parentId, {
+        indexType: BasicIndex,
+      })
+      const live = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ root: roots })
+            .orderBy(({ root }) => root.rank)
+            .limit(2)
+            .select(({ root }) => ({
+              id: root.id,
+              value: root.value,
+              children: materializeChildRows(
+                q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.parentId, root.id))
+                  .select(({ child }) => ({ id: child.id })),
+              ),
+            })),
+        getKey: (row) => row.id,
+      })
+      const published = (row: unknown) =>
+        stripVirtualProperties(row) as PublishedRoot
+      const snapshot = (): Array<PublishedRoot> =>
+        live.toArray.map((row) => published(row))
+      const callbacks: Array<{
+        rows: Array<PublishedRoot>
+        changes: Array<Event>
+      }> = []
+      let unsubscribe: (() => void) | undefined
+      let persistence: Promise<void> | undefined
+
+      await withHistoryCleanup(
+        async () => {
+          await live.preload()
+          const before = expectedRows()
+          expect(snapshot()).toEqual(before)
+          const subscription = live.subscribeChanges(
+            (changes) => {
+              callbacks.push({
+                rows: snapshot(),
+                changes: changes.map((change) => ({
+                  type: change.type,
+                  key: change.key,
+                  value: published(change.value),
+                  ...(change.type === `update`
+                    ? { previousValue: published(change.previousValue) }
+                    : {}),
+                })),
+              })
+            },
+            { includeInitialState: false },
+          )
+          unsubscribe = () => subscription.unsubscribe()
+
+          // The source-order change invalidates finite coverage and starts a
+          // bounded repair. Its new rank is private to the live query.
+          holdRepair = true
+          const moved = { ...sourceRows.get(1)!, rank: 2.5 }
+          sourceRows.set(1, moved)
+          sync.begin()
+          sync.write({ type: `update`, value: { ...moved } })
+          expect(sync.commit()).toBe(true)
+          expect(requests).toBeGreaterThan(1)
+          expect(held.length).toBeGreaterThan(0)
+          expect(heldRequests).toHaveLength(1)
+          expect(heldRequests[0]).toMatchObject({ limit: 2, refetch: true })
+          expect(
+            heldRequests[0]!.orderBy?.map(({ expression, compareOptions }) => ({
+              path: expression instanceof PropRef ? expression.path : undefined,
+              direction: compareOptions.direction,
+            })),
+          ).toEqual([{ path: [`rank`], direction: `asc` }])
+          expect(heldRequests[0]!.cursor).toBeUndefined()
+          expect(heldRequests[0]!.offset).toBeUndefined()
+          expect(snapshot()).toEqual(before)
+          expect(callbacks).toEqual([])
+
+          // This changes the same root row while its order repair is held.
+          // A leaked optimistic row or early retraction would be public here.
+          const transaction = roots.update(1, (draft) => {
+            draft.value = `B`
+          })
+          persistence = transaction.isPersisted.promise.then(
+            () => undefined,
+            () => undefined,
+          )
+          await flushPromises()
+          expect(roots.get(1)?.value).toBe(`B`)
+          const checkHeldCut = (
+            rows: Array<PublishedRoot>,
+            events: typeof callbacks,
+          ) => {
+            expect(rows).toEqual(before)
+            expect(events).toEqual([])
+          }
+          // Wrong-result controls reach this cut: early optimistic visibility
+          // and a premature root retraction both fail the same refinement.
+          expect(() => checkHeldCut(expectedRows(`B`), [])).toThrow()
+          expect(() => checkHeldCut(before.slice(1), [])).toThrow()
+          checkHeldCut(snapshot(), callbacks)
+
+          holdRepair = false
+          for (const release of held.splice(0)) release()
+          await flushPromises()
+          const after = expectedRows(`B`)
+          const withoutOverlay = expectedRows()
+          expect(after).not.toEqual(before)
+          expect(after).not.toEqual(withoutOverlay)
+          const expectedPublication: typeof callbacks = [
+            {
+              rows: after,
+              changes: [
+                {
+                  type: `update`,
+                  key: 1,
+                  value: after[1]!,
+                  previousValue: before[0]!,
+                },
+              ],
+            },
+          ]
+          const checkPublishedCut = (
+            rows: Array<PublishedRoot>,
+            events: typeof callbacks,
+          ) => {
+            expect(rows).toEqual(after)
+            expect(events).toEqual(expectedPublication)
+          }
+          // A repair that drops the optimistic snapshot or retracts the root
+          // cannot pass the publication comparison.
+          expect(() => checkPublishedCut(withoutOverlay, [])).toThrow()
+          expect(() => checkPublishedCut(after.slice(0, 1), [])).toThrow()
+          checkPublishedCut(snapshot(), callbacks)
+
+          // Rejection removes only the optimistic snapshot. The repaired
+          // authoritative rank and child route remain publicly coherent.
+          mutation.reject(new Error(`discard optimistic value`))
+          await persistence
+          await flushPromises()
+          expect(snapshot()).toEqual(withoutOverlay)
+          expect(callbacks).toEqual([
+            {
+              rows: after,
+              changes: [
+                {
+                  type: `update`,
+                  key: 1,
+                  value: after[1],
+                  previousValue: before[0],
+                },
+              ],
+            },
+            {
+              rows: withoutOverlay,
+              changes: [
+                {
+                  type: `update`,
+                  key: 1,
+                  value: withoutOverlay[1],
+                  previousValue: after[1],
+                },
+              ],
+            },
+          ])
+        },
+        () => [
+          () => {
+            holdRepair = false
+            for (const release of held.splice(0)) release()
+            mutation.reject(new Error(`cleanup optimistic value`))
+          },
+          () => persistence,
+          () => unsubscribe?.(),
+          () => live.cleanup(),
+          () => roots.cleanup(),
+          () => children.collection.cleanup(),
+        ],
+      )
+    },
+  )
+
   for (const pending of [false, true]) {
     fcTest(
       `observes queued sibling delivery with pending=${pending}`,

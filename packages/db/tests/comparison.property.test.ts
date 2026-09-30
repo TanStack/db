@@ -25,6 +25,15 @@ import type { CompareOptions } from '../src/query/builder/types'
  * cover the normalized value classes and changed-byte controls. Comparator
  * signs reject NaN and non-number results before reduction. Signed infinity
  * is a valid comparator result, including for custom string collation.
+ *
+ * Binary normalization has a narrower, established contract: equal byte
+ * contents produce one Map key, different contents remain distinct, and a
+ * user string cannot alias that key. This follows the binary-ID equality fix
+ * recorded in `packages/db/CHANGELOG.md` (#779). The bounded key-size and
+ * indexed-byte checks retain the regression contract introduced with #1797;
+ * they constrain this internal utility, not a public serialized format or a
+ * universal performance bound. The 32-character margin is the existing
+ * constant-overhead budget for the sampled 0..200-byte keys.
  */
 
 const defaultOpts: CompareOptions = {
@@ -59,6 +68,81 @@ const replaySeed = process.env.COMPARISON_ORACLE_SEED
 const replayPath = process.env.COMPARISON_ORACLE_PATH
 let nextPropertyId = 0
 
+type ComparisonFailure = { checkpoint: string; error: unknown }
+
+function failureCheckpoint(error: unknown): string {
+  if (error instanceof Error) {
+    // The first frame in this file locates the failed assertion or the call
+    // into a throwing comparator. Unlike a matcher message, it is unchanged
+    // when fast-check shrinks the input values.
+    const site = error.stack?.match(
+      /comparison\.property\.test\.ts:(\d+):(\d+)/,
+    )
+    if (site) return `comparison.property.test.ts:${site[1]}:${site[2]}`
+    return `${error.name}: ${error.message.split(`\n`)[0]}`
+  }
+  return `non-Error throw: ${String(error)}`
+}
+
+function checkWithOriginalFailure<T>(
+  arbitrary: fc.Arbitrary<T>,
+  check: (value: T) => void,
+  options: Parameters<typeof fc.check>[1],
+) {
+  let original: ComparisonFailure | undefined
+  let reduced: ComparisonFailure | undefined
+  const property = fc.property(arbitrary, (value) => {
+    try {
+      check(value)
+    } catch (error) {
+      const failure = { checkpoint: failureCheckpoint(error), error }
+      original ??= failure
+      // A different assertion can fail on a smaller input. It is not a
+      // reproduction of the original violation, so do not shrink into it.
+      if (failure.checkpoint !== original.checkpoint) return
+      reduced = failure
+      throw error
+    }
+  })
+  const result = fc.check(property, options)
+  return { result, original, reduced }
+}
+
+function assertComparisonProperty<T>(
+  label: string,
+  arbitrary: fc.Arbitrary<T>,
+  check: (value: T) => void,
+  options: Parameters<typeof fc.check>[1],
+): void {
+  const { result, original, reduced } = checkWithOriginalFailure(
+    arbitrary,
+    check,
+    options,
+  )
+  if (!result.failed) return
+  if (!original || !reduced || result.counterexamplePath === null) {
+    throw new Error(`${label}: failing run lost its primary comparison failure`)
+  }
+  const replay = checkWithOriginalFailure(arbitrary, check, {
+    seed: result.seed,
+    path: result.counterexamplePath,
+    numRuns: 1,
+    endOnFailure: true,
+    examples: options?.examples,
+  })
+  const reproduced =
+    replay.result.failed &&
+    replay.original?.checkpoint === original.checkpoint &&
+    replay.reduced?.checkpoint === original.checkpoint
+  throw new Error(
+    `${label}: ${original.checkpoint} failed at the function-return checkpoint; ` +
+      `reduction ${reduced.checkpoint === original.checkpoint ? `kept` : `changed`} the original violation; ` +
+      `seed ${result.seed}, path ${result.counterexamplePath}; ` +
+      `direct replay ${reproduced ? `reproduced` : `did not reproduce`} that violation.\n${result.error}`,
+    { cause: original.error },
+  )
+}
+
 function comparisonProperty<
   Ts extends [unknown, ...Array<unknown>],
 >(arbitraries: { [K in keyof Ts]: fc.Arbitrary<Ts[K]> }): (
@@ -68,9 +152,10 @@ function comparisonProperty<
   return (name: string, check: (...values: Ts) => void): void => {
     const id = String(++nextPropertyId)
     const label = `${id}: ${name}`
-    const property = fc.property(fc.tuple<Ts>(...arbitraries), (values) => {
+    const arbitrary = fc.tuple<Ts>(...arbitraries)
+    const checkValues = (values: Ts) => {
       check(...values)
-    })
+    }
 
     if (requestedProperty !== undefined) {
       if (requestedProperty !== id) {
@@ -85,16 +170,25 @@ function comparisonProperty<
         throw new Error(`comparison oracle replay seed must be an integer`)
       }
       it(`${label} replay`, () => {
-        fc.assert(property, { seed, path: replayPath, numRuns: campaignRuns })
+        assertComparisonProperty(label, arbitrary, checkValues, {
+          seed,
+          path: replayPath,
+          numRuns: campaignRuns,
+        })
       })
       return
     }
 
     it(`${label} fixed`, () => {
-      fc.assert(property, { seed: fixedSeed, numRuns: campaignRuns })
+      assertComparisonProperty(label, arbitrary, checkValues, {
+        seed: fixedSeed,
+        numRuns: campaignRuns,
+      })
     })
     it(`${label} random`, () => {
-      fc.assert(property, { numRuns: campaignRuns })
+      assertComparisonProperty(label, arbitrary, checkValues, {
+        numRuns: campaignRuns,
+      })
     })
   }
 }
@@ -222,6 +316,72 @@ function assertTransitive(ab: number, bc: number, ac: number): void {
 }
 
 describe(`comparison law controls`, () => {
+  fcTest(
+    `shrinking retains the first violated law and replays its checkpoint`,
+    () => {
+      let reachedOtherLaw = false
+      const arbitrary = fc.integer({ min: 0, max: 10 })
+      const check = (value: number) => {
+        if (value > 0) expect(value, `positive-value law`).toBe(0)
+        reachedOtherLaw = true
+        expect(value, `zero-value law`).toBe(1)
+      }
+      const originalRun = checkWithOriginalFailure(arbitrary, check, {
+        seed: 20260911,
+        numRuns: 1,
+        examples: [[5]],
+      })
+      expect(originalRun.result.failed).toBe(true)
+      expect(reachedOtherLaw).toBe(true)
+      expect(originalRun.result.counterexample).toEqual([1])
+      expect(originalRun.original?.checkpoint).toBe(
+        originalRun.reduced?.checkpoint,
+      )
+      if (originalRun.result.counterexamplePath === null) {
+        throw new Error(`stable failure did not produce a replay path`)
+      }
+      const replay = checkWithOriginalFailure(arbitrary, check, {
+        seed: originalRun.result.seed,
+        path: originalRun.result.counterexamplePath,
+        numRuns: 1,
+        endOnFailure: true,
+        examples: [[5]],
+      })
+      expect(replay.result.failed).toBe(true)
+      expect(replay.original?.checkpoint).toBe(originalRun.original?.checkpoint)
+      expect(replay.result.counterexample).toEqual(
+        originalRun.result.counterexample,
+      )
+
+      let reported: unknown
+      try {
+        assertComparisonProperty(
+          `synthetic two-law control`,
+          arbitrary,
+          check,
+          {
+            seed: 20260911,
+            numRuns: 1,
+            examples: [[5]],
+          },
+        )
+      } catch (error) {
+        reported = error
+      }
+      expect(reported).toBeInstanceOf(Error)
+      expect((reported as Error).message).toContain(
+        `direct replay reproduced that violation`,
+      )
+      expect((reported as Error).message).toContain(
+        originalRun.original?.checkpoint,
+      )
+      expect((reported as Error).cause).toBeInstanceOf(Error)
+      expect(failureCheckpoint((reported as Error).cause)).toBe(
+        originalRun.original?.checkpoint,
+      )
+    },
+  )
+
   fcTest(`rejects invalid results and accepts signed infinity`, () => {
     for (const invalid of [NaN, `invalid`, undefined]) {
       expect(() => checkAntisymmetry(invalid, 0)).toThrow(

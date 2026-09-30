@@ -7,7 +7,11 @@ import {
   oraclePropertyOptions,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
-import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
+import {
+  atCheckpoint,
+  withElectricCleanup,
+  withElectricSetup,
+} from './electric-oracle-lifecycle'
 import type { Message } from '@electric-sql/client'
 
 /**
@@ -224,45 +228,77 @@ const headers = (offset: number) => ({
 })
 let sequence = 0
 
-async function checkSnapshots(width: number, name: string, dropRows = false) {
+async function checkSnapshots(
+  width: number,
+  name: string,
+  dropRows = false,
+  cleanupFailure?: Error,
+  setupFault?: { primary: Error; cleanup?: Error },
+) {
   const http = controlledHttp()
   const batches: Array<Array<Message<Item>>> = []
   let delivery = deferred<void>()
   const subscribe = ShapeStream.prototype.subscribe
-  const spy = vi
-    .spyOn(ShapeStream.prototype, `subscribe`)
-    .mockImplementation(function (this: ShapeStream, callback, onError) {
-      return subscribe.call(
-        this,
-        (messages) => {
-          const snapshot = messages.some(
-            (message) => message.headers.control === `snapshot-end`,
-          )
-          batches.push(structuredClone(messages) as Array<Message<Item>>)
-          const result = callback(
-            dropRows && snapshot
-              ? messages.filter((message) => !(`value` in message))
-              : messages,
-          )
-          delivery.resolve()
-          return result
-        },
+  const spy = await withElectricSetup(
+    () =>
+      vi.spyOn(ShapeStream.prototype, `subscribe`).mockImplementation(function (
+        this: ShapeStream,
+        callback,
         onError,
-      )
-    })
-  const collection = createCollection(
-    electricCollectionOptions<Item>({
-      id: `sdk-snapshot-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/snapshot-${sequence}`,
-        params: { table: `rows` },
-        fetchClient: http.fetchClient,
+      ) {
+        return subscribe.call(
+          this,
+          (messages) => {
+            const snapshot = messages.some(
+              (message) => message.headers.control === `snapshot-end`,
+            )
+            batches.push(structuredClone(messages) as Array<Message<Item>>)
+            const result = callback(
+              dropRows && snapshot
+                ? messages.filter((message) => !(`value` in message))
+                : messages,
+            )
+            delivery.resolve()
+            return result
+          },
+          onError,
+        )
+      }),
+    [
+      {
+        label: `snapshot HTTP provider during spy setup`,
+        release: () => http.close(),
       },
-      syncMode: `on-demand`,
-      startSync: true,
-      getKey: (row) => row.id,
-    }),
+    ],
   )
+  const collection = await withElectricSetup(() => {
+    if (setupFault !== undefined) throw setupFault.primary
+    return createCollection(
+      electricCollectionOptions<Item>({
+        id: `sdk-snapshot-${++sequence}`,
+        shapeOptions: {
+          url: `http://test-url/snapshot-${sequence}`,
+          params: { table: `rows` },
+          fetchClient: http.fetchClient,
+        },
+        syncMode: `on-demand`,
+        startSync: true,
+        getKey: (row) => row.id,
+      }),
+    )
+  }, [
+    {
+      label: `snapshot HTTP provider during setup`,
+      release: () => {
+        http.close()
+        if (setupFault?.cleanup !== undefined) throw setupFault.cleanup
+      },
+    },
+    {
+      label: `snapshot subscription spy during setup`,
+      release: () => spy.mockRestore(),
+    },
+  ])
   const rows = () =>
     collection.toArray
       .map(({ id, name: value }) => ({ id, name: value }))
@@ -347,16 +383,26 @@ async function checkSnapshots(width: number, name: string, dropRows = false) {
     }
     await atCheckpoint(http.take(), `resumed live request`)
   }, [
-    () => collection.cleanup(),
-    () => {
-      expect(http.activeCount()).toBe(0)
+    { label: `snapshot collection`, release: () => collection.cleanup() },
+    {
+      label: `snapshot requests after collection cleanup`,
+      release: () => expect(http.activeCount()).toBe(0),
     },
-    () => http.close(),
-    () => {
-      spy.mockRestore()
-    },
-    () => {
-      expect(http.activeCount()).toBe(0)
+    ...(cleanupFailure === undefined
+      ? []
+      : [
+          {
+            label: `injected snapshot cleanup`,
+            release: () => {
+              throw cleanupFailure
+            },
+          },
+        ]),
+    { label: `snapshot HTTP provider`, release: () => http.close() },
+    { label: `snapshot subscription spy`, release: () => spy.mockRestore() },
+    {
+      label: `snapshot requests after provider closure`,
+      release: () => expect(http.activeCount()).toBe(0),
     },
   ])
 }
@@ -399,35 +445,119 @@ fixedCase(`detects dropped snapshot rows`, async () => {
   })
 })
 
+fixedCase(
+  `retains the snapshot law and checkpoint when cleanup also fails`,
+  async () => {
+    const cleanupFailure = new Error(`injected cleanup failure`)
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const subscribe = ShapeStream.prototype.subscribe
+    snapshotViolation.reset()
+    try {
+      let primary: unknown
+      try {
+        await snapshotViolation.check({ width: 2, name: `payload` }, () =>
+          checkSnapshots(2, `payload`, true, cleanupFailure),
+        )
+      } catch (error) {
+        primary = snapshotViolation.report(error)
+      }
+      expect(primary).toMatchObject({
+        name: `AssertionError`,
+        message: expect.stringContaining(`snapshot 0 applied rows`),
+      })
+      expect((primary as Error).message).toContain(
+        `Original violation: AssertionError:snapshot 0 applied rows`,
+      )
+      expect(warning.mock.calls).toEqual([
+        [
+          `Electric oracle cleanup failed after a primary error: injected snapshot cleanup`,
+          cleanupFailure,
+        ],
+      ])
+      expect(ShapeStream.prototype.subscribe).toBe(subscribe)
+    } finally {
+      warning.mockRestore()
+    }
+  },
+)
+
+fixedCase(
+  `restores the SDK setup resources after construction fails`,
+  async () => {
+    const primary = new Error(`collection construction failed`)
+    const secondary = new Error(`provider release failed`)
+    const subscribe = ShapeStream.prototype.subscribe
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    try {
+      await expect(
+        checkSnapshots(2, `payload`, false, undefined, {
+          primary,
+          cleanup: secondary,
+        }),
+      ).rejects.toBe(primary)
+      expect(warning.mock.calls).toEqual([
+        [
+          `Electric oracle cleanup failed after a primary error: snapshot HTTP provider during setup`,
+          secondary,
+        ],
+      ])
+      expect(ShapeStream.prototype.subscribe).toBe(subscribe)
+    } finally {
+      warning.mockRestore()
+    }
+  },
+)
+
 fixedCase(`lets requestSnapshot own the warm transport`, async () => {
   const http = controlledHttp()
   let delivery = deferred<void>()
   const subscribe = ShapeStream.prototype.subscribe
-  const spy = vi
-    .spyOn(ShapeStream.prototype, `subscribe`)
-    .mockImplementation(function (this: ShapeStream, callback, onError) {
-      return subscribe.call(
-        this,
-        (messages) => {
-          const result = callback(messages)
-          delivery.resolve()
-          return result
-        },
+  const spy = await withElectricSetup(
+    () =>
+      vi.spyOn(ShapeStream.prototype, `subscribe`).mockImplementation(function (
+        this: ShapeStream,
+        callback,
         onError,
-      )
-    })
-  const collection = createCollection(
-    electricCollectionOptions<Item>({
-      id: `sdk-warm-snapshot-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/warm-snapshot-${sequence}`,
-        params: { table: `rows` },
-        fetchClient: http.fetchClient,
+      ) {
+        return subscribe.call(
+          this,
+          (messages) => {
+            const result = callback(messages)
+            delivery.resolve()
+            return result
+          },
+          onError,
+        )
+      }),
+    [
+      {
+        label: `warm HTTP provider during spy setup`,
+        release: () => http.close(),
       },
-      syncMode: `on-demand`,
-      startSync: true,
-      getKey: (row) => row.id,
-    }),
+    ],
+  )
+  const collection = await withElectricSetup(
+    () =>
+      createCollection(
+        electricCollectionOptions<Item>({
+          id: `sdk-warm-snapshot-${++sequence}`,
+          shapeOptions: {
+            url: `http://test-url/warm-snapshot-${sequence}`,
+            params: { table: `rows` },
+            fetchClient: http.fetchClient,
+          },
+          syncMode: `on-demand`,
+          startSync: true,
+          getKey: (row) => row.id,
+        }),
+      ),
+    [
+      { label: `warm HTTP provider during setup`, release: () => http.close() },
+      {
+        label: `warm subscription spy during setup`,
+        release: () => spy.mockRestore(),
+      },
+    ],
   )
 
   return withElectricCleanup(async () => {
@@ -478,10 +608,13 @@ fixedCase(`lets requestSnapshot own the warm transport`, async () => {
     await atCheckpoint(delivery.promise, `warm snapshot delivery`)
     await atCheckpoint(Promise.resolve(loading), `warm snapshot completion`)
   }, [
-    () => collection.cleanup(),
-    () => http.close(),
-    () => spy.mockRestore(),
-    () => expect(http.activeCount()).toBe(0),
+    { label: `warm collection`, release: () => collection.cleanup() },
+    { label: `warm HTTP provider`, release: () => http.close() },
+    { label: `warm subscription spy`, release: () => spy.mockRestore() },
+    {
+      label: `warm requests after provider closure`,
+      release: () => expect(http.activeCount()).toBe(0),
+    },
   ])
 })
 
@@ -494,36 +627,60 @@ async function checkMembership(
   const http = controlledHttp()
   let delivery = deferred<void>()
   const subscribe = ShapeStream.prototype.subscribe
-  const spy = vi
-    .spyOn(ShapeStream.prototype, `subscribe`)
-    .mockImplementation(function (this: ShapeStream, callback, onError) {
-      return subscribe.call(
-        this,
-        (messages) => {
-          const result = callback(
-            dropMoveIn
-              ? messages.filter(
-                  (message) => message.headers.event !== `move-in`,
-                )
-              : messages,
-          )
-          delivery.resolve()
-          return result
-        },
+  const spy = await withElectricSetup(
+    () =>
+      vi.spyOn(ShapeStream.prototype, `subscribe`).mockImplementation(function (
+        this: ShapeStream,
+        callback,
         onError,
-      )
-    })
-  const collection = createCollection(
-    electricCollectionOptions<Item>({
-      id: `sdk-membership-${++sequence}`,
-      shapeOptions: {
-        url: `http://test-url/membership-${sequence}`,
-        params: { table: `rows` },
-        fetchClient: http.fetchClient,
+      ) {
+        return subscribe.call(
+          this,
+          (messages) => {
+            const result = callback(
+              dropMoveIn
+                ? messages.filter(
+                    (message) => message.headers.event !== `move-in`,
+                  )
+                : messages,
+            )
+            delivery.resolve()
+            return result
+          },
+          onError,
+        )
+      }),
+    [
+      {
+        label: `membership HTTP provider during spy setup`,
+        release: () => http.close(),
       },
-      startSync: true,
-      getKey: (row) => row.id,
-    }),
+    ],
+  )
+  const collection = await withElectricSetup(
+    () =>
+      createCollection(
+        electricCollectionOptions<Item>({
+          id: `sdk-membership-${++sequence}`,
+          shapeOptions: {
+            url: `http://test-url/membership-${sequence}`,
+            params: { table: `rows` },
+            fetchClient: http.fetchClient,
+          },
+          startSync: true,
+          getKey: (row) => row.id,
+        }),
+      ),
+    [
+      {
+        label: `membership HTTP provider during setup`,
+        release: () => http.close(),
+      },
+      {
+        label: `membership subscription spy during setup`,
+        release: () => spy.mockRestore(),
+      },
+    ],
   )
   // A fixed OR of two AND groups. The expected state is just a bit set,
   // independent of the adapter's tag indexes and mutable DNF arrays.
@@ -604,16 +761,16 @@ async function checkMembership(
     await move(`move-out`, leftWidth, `all disjuncts inactive`)
     await atCheckpoint(http.take(), `pending membership poll`)
   }, [
-    () => collection.cleanup(),
-    () => {
-      expect(http.activeCount()).toBe(0)
+    { label: `membership collection`, release: () => collection.cleanup() },
+    {
+      label: `membership requests after collection cleanup`,
+      release: () => expect(http.activeCount()).toBe(0),
     },
-    () => http.close(),
-    () => {
-      spy.mockRestore()
-    },
-    () => {
-      expect(http.activeCount()).toBe(0)
+    { label: `membership HTTP provider`, release: () => http.close() },
+    { label: `membership subscription spy`, release: () => spy.mockRestore() },
+    {
+      label: `membership requests after provider closure`,
+      release: () => expect(http.activeCount()).toBe(0),
     },
   ])
 }

@@ -73,7 +73,7 @@ type ChildRow = {
 type CrossFormulationAction =
   // `put` is model shorthand for a Collection insert when the id is absent
   // and a Collection update when it is present. Deletes of absent ids are
-  // model no-ops and issue no source change message.
+  // model no-ops; the driver does not send a source change for them.
   | { type: `putParent`; row: ParentRow }
   | { type: `deleteParent`; id: number }
   | { type: `putChild`; row: ChildRow }
@@ -286,7 +286,7 @@ function assertGroupedRouteCounts(
   observed: Array<{ id: number; summaries: Array<{ count: number }> }>,
   counts: ReadonlyArray<number>,
 ): void {
-  expect(captureGroupedRows(observed)).toEqual(
+  expect(captureGroupedRows(observed), `group-route checkpoint`).toEqual(
     counts.map((childCount, index) => ({
       id: index + 1,
       summaries: childCount === 0 ? [] : [{ count: childCount }],
@@ -416,6 +416,49 @@ function recomputeNestedModel(
       ),
     })),
   )
+}
+
+function recomputeWindowedModel(
+  parents: ReadonlyMap<number, ParentRow>,
+  children: ReadonlyMap<number, ChildRow>,
+  offset: number,
+  limit: number,
+): Array<NormalizedParent> {
+  return normalizeNested(
+    [...parents.values()].map((parent) => ({
+      ...parent,
+      children: [...children.values()]
+        .filter((child) => child.parentGroup === parent.group)
+        .sort(compareChildren)
+        .slice(offset, offset + limit),
+    })),
+  )
+}
+
+function assertFormulationResults(
+  expected: ReadonlyArray<NormalizedParent>,
+  observed: {
+    nested: ReadonlyArray<NormalizedParent>
+    flat: ReadonlyArray<NormalizedParent>
+    standalone: ReadonlyArray<NormalizedParent>
+    tlp: ReadonlyArray<NormalizedParent>
+  },
+  context: string,
+): void {
+  expect(observed, `cross-formulation checkpoint ${context}`).toEqual({
+    nested: expected,
+    flat: expected,
+    standalone: expected,
+    tlp: expected,
+  })
+}
+
+function assertWindowedResult(
+  expected: ReadonlyArray<NormalizedParent>,
+  observed: ReadonlyArray<NormalizedParent>,
+  context: string,
+): void {
+  expect(observed, `ordered-window checkpoint ${context}`).toEqual(expected)
 }
 
 // The next three builders are production formulations. They share source rows
@@ -553,9 +596,33 @@ async function queryChildren(
   )
 }
 
+function assertTlpPartitions(
+  results: ReadonlyArray<ReadonlyArray<ChildRow>>,
+  sourceRows: ReadonlyArray<ChildRow>,
+  pivot: number,
+  context: string,
+): void {
+  const partitions = [`predicate`, `complement`, `unknown`] as const
+  expect(results, `${context} partition count`).toHaveLength(partitions.length)
+  for (const [index, partition] of partitions.entries()) {
+    // This is a direct finite relation over source values, independent of the
+    // query evaluator. A union could be complete with rows in wrong branches.
+    const expected = sourceRows
+      .filter((child) => {
+        if (child.score === null) return partition === `unknown`
+        return partition === (child.score < pivot ? `predicate` : `complement`)
+      })
+      .sort(compareChildren)
+    expect(results[index], `${context} ${partition} partition`).toEqual(
+      expected,
+    )
+  }
+}
+
 async function queryPerParent(
   parents: ReadonlyArray<ParentRow>,
   children: Collection<ChildRow>,
+  modelChildren: ReadonlyMap<number, ChildRow>,
   pivot: number,
   useTlp: boolean,
   context: string,
@@ -563,20 +630,30 @@ async function queryPerParent(
   const rows = await Promise.all(
     parents.map(async (parent) => {
       const childRows = useTlp
-        ? (
-            await Promise.all(
-              ([`predicate`, `complement`, `unknown`] as const).map(
-                (partition) =>
-                  queryChildren(
-                    children,
-                    parent.group,
-                    pivot,
-                    partition,
-                    context,
-                  ),
+        ? await (async () => {
+            const partitions = [`predicate`, `complement`, `unknown`] as const
+            const results = await Promise.all(
+              partitions.map((partition) =>
+                queryChildren(
+                  children,
+                  parent.group,
+                  pivot,
+                  partition,
+                  context,
+                ),
               ),
             )
-          ).flat()
+            const sourceRows = [...modelChildren.values()].filter(
+              (child) => child.parentGroup === parent.group,
+            )
+            assertTlpPartitions(
+              results,
+              sourceRows,
+              pivot,
+              `${context} parent ${parent.id}`,
+            )
+            return results.flat()
+          })()
         : await queryChildren(children, parent.group, pivot, `all`, context)
 
       return { ...parent, children: childRows }
@@ -627,6 +704,9 @@ function applyAction(
 
 async function expectFormulationsEquivalent(
   scenario: CrossFormulationScenario,
+  alterNestedObservation?: (
+    rows: Array<NormalizedParent>,
+  ) => Array<NormalizedParent>,
 ): Promise<void> {
   const parentSource = createControlledCollection(
     `cross-form-parents`,
@@ -661,6 +741,7 @@ async function expectFormulationsEquivalent(
     const standaloneResult = await queryPerParent(
       parentRows,
       childSource.collection,
+      children,
       scenario.pivot,
       false,
       `${context} standalone`,
@@ -668,25 +749,22 @@ async function expectFormulationsEquivalent(
     const tlpResult = await queryPerParent(
       parentRows,
       childSource.collection,
+      children,
       scenario.pivot,
       true,
       `${context} TLP`,
     )
 
-    expect(
+    assertFormulationResults(
+      expected,
       {
-        nested: nestedResult,
+        nested: alterNestedObservation?.(nestedResult) ?? nestedResult,
         flat: flatResult,
         standalone: standaloneResult,
         tlp: tlpResult,
       },
       context,
-    ).toEqual({
-      nested: expected,
-      flat: expected,
-      standalone: expected,
-      tlp: expected,
-    })
+    )
   }
 
   await withCleanup(async () => {
@@ -709,6 +787,9 @@ async function expectWindowedIncludeMatches(
   scenario: CrossFormulationScenario,
   offset: number,
   limit: number,
+  alterNestedObservation?: (
+    rows: Array<NormalizedParent>,
+  ) => Array<NormalizedParent>,
 ): Promise<void> {
   const parentSource = createControlledCollection(
     `windowed-cross-form-parents`,
@@ -734,17 +815,12 @@ async function expectWindowedIncludeMatches(
       offset,
       limit,
     })
-    const expected = normalizeNested(
-      [...parents.values()].map((parent) => ({
-        ...parent,
-        children: [...children.values()]
-          .filter((child) => child.parentGroup === parent.group)
-          .sort(compareChildren)
-          .slice(offset, offset + limit),
-      })),
-    )
-    expect(captureOrderedNested(nested.toArray, context), context).toEqual(
+    const expected = recomputeWindowedModel(parents, children, offset, limit)
+    const nestedResult = captureOrderedNested(nested.toArray, context)
+    assertWindowedResult(
       expected,
+      alterNestedObservation?.(nestedResult) ?? nestedResult,
+      context,
     )
   }
 
@@ -797,16 +873,88 @@ const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
   }),
 )
 
-// This bounded grammar reconstructs the shared-route deletion witness below:
-// two group-0 parents, three group-0 children, and `deleteChild(10)`.
-// Parent and child group axes enable shared, split, moved, and unmatched routes;
-// position enables ties and reorder; nullable score plus pivot enables all
-// three TLP partitions; action kind and id enable overwrite and absent-id
-// no-ops. Removing any axis loses that distinction. The fixed seven-action
-// split/merge trace and offset-3 empty tail lie outside these sampled bounds;
-// they remain separate controls rather than claims about this grammar.
-// The tuple's distinct initial ids exclude an invalid duplicate-key state.
-// Put actions with existing ids are legal updates, not duplicate inserts.
+// The three pinned examples below reconstruct the named in-range witnesses
+// in both generated campaigns. Each coordinate has positive probability in
+// the finite record grammar; examples keep them stable if sampling changes.
+// Group controls shared vs split/moved/unmatched routes; position controls
+// ties vs reorder; nullable score and pivot control true/false/unknown TLP
+// partitions; action kind and id control overwrite and delete transitions.
+// Absent-id delete changes only model/driver dispatch, with no Collection write.
+// Ablating one loses its named distinction at a post-action
+// checkpoint. The fixed seven-action split/merge trace and offset-3 empty tail
+// lie outside the sampled 1..5-action and 0..2-offset bounds, so they remain
+// separate controls. Parent ids initially 0/1 and child ids 10/11/12 exclude
+// an invalid duplicate-key initial state. A put for an existing id is a legal
+// update; a delete of an absent id issues no source change message.
+// Other bounds: groups -1..1, positions -2..2, non-null scores and pivot
+// -2..2, action parent ids 0..2, child ids 10..14, and limit 0..3. Zero
+// limit, tied positions, nullable score, the last occupied offset, and the
+// maximum sampled offset are marginal cases. Longer histories, deeper include
+// trees, arbitrary row shapes, asynchronous failures, and provider races are
+// outside this grammar and belong to the named adjacent owners.
+const sharedRouteDeletionScenario: CrossFormulationScenario = {
+  parents: [
+    { id: 0, group: 0, position: 0 },
+    { id: 1, group: 0, position: 0 },
+  ],
+  children: [
+    { id: 10, parentGroup: 0, score: null, position: 0 },
+    { id: 11, parentGroup: 0, score: null, position: 0 },
+    { id: 12, parentGroup: 0, score: null, position: 0 },
+  ],
+  pivot: 0,
+  actions: [{ type: `deleteChild`, id: 10 }],
+}
+
+const partitionAndRouteScenario: CrossFormulationScenario = {
+  parents: [
+    { id: 0, group: 0, position: 1 },
+    { id: 1, group: 0, position: 0 },
+  ],
+  children: [
+    { id: 10, parentGroup: 0, score: null, position: 2 },
+    { id: 11, parentGroup: 0, score: -1, position: 1 },
+    { id: 12, parentGroup: 1, score: 1, position: 0 },
+  ],
+  pivot: 0,
+  actions: [
+    { type: `putParent`, row: { id: 0, group: 1, position: 1 } },
+    {
+      type: `putChild`,
+      row: { id: 12, parentGroup: 0, score: 1, position: 0 },
+    },
+    { type: `putParent`, row: { id: 0, group: 0, position: -1 } },
+  ],
+}
+
+const overwriteAndNoopScenario: CrossFormulationScenario = {
+  parents: [
+    { id: 0, group: -1, position: 0 },
+    { id: 1, group: 1, position: 0 },
+  ],
+  children: [
+    { id: 10, parentGroup: -1, score: -1, position: 0 },
+    { id: 11, parentGroup: 1, score: 1, position: 0 },
+    { id: 12, parentGroup: 0, score: null, position: 0 },
+  ],
+  pivot: 0,
+  actions: [
+    { type: `deleteChild`, id: 14 },
+    {
+      type: `putChild`,
+      row: { id: 10, parentGroup: 1, score: 0, position: 1 },
+    },
+    { type: `putParent`, row: { id: 2, group: 0, position: -1 } },
+    { type: `deleteParent`, id: 2 },
+  ],
+}
+
+const scenarioExamples: Array<[CrossFormulationScenario]> = [
+  [sharedRouteDeletionScenario],
+  [partitionAndRouteScenario],
+  [overwriteAndNoopScenario],
+]
+
 const scenarioArbitrary: fc.Arbitrary<CrossFormulationScenario> = fc.record({
   parents: fc.tuple(parentRowArbitrary(0), parentRowArbitrary(1)),
   children: fc.tuple(
@@ -824,6 +972,14 @@ const windowedScenarioArbitrary = fc.record({
   limit: fc.integer({ min: 0, max: 3 }),
 })
 
+const windowedExamples: Array<
+  [{ scenario: CrossFormulationScenario; offset: number; limit: number }]
+> = [
+  [{ scenario: partitionAndRouteScenario, offset: 0, limit: 0 }],
+  [{ scenario: partitionAndRouteScenario, offset: 1, limit: 2 }],
+  [{ scenario: partitionAndRouteScenario, offset: 2, limit: 3 }],
+]
+
 describe(`includes cross-formulation oracle`, () => {
   const replay = readOracleRunConfig()
   const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
@@ -831,6 +987,120 @@ describe(`includes cross-formulation oracle`, () => {
     replay.replayPath === undefined || replay.replayProperty === property
       ? fcTest
       : fcTest.skip
+  const calibrationTest = (property: string, fault: string) =>
+    replay.replayPath === undefined ||
+    (replay.replayProperty === property &&
+      process.env.TANSTACK_DB_ORACLE_CALIBRATION === fault)
+      ? test
+      : test.skip
+
+  test(`bounded grammar axes distinguish routes, order, partitions, and windows`, () => {
+    const parents = new Map(
+      partitionAndRouteScenario.parents.map((row) => [row.id, row]),
+    )
+    const children = new Map(
+      partitionAndRouteScenario.children.map((row) => [row.id, row]),
+    )
+    const ids = (rows: ReadonlyArray<NormalizedParent>) =>
+      rows.map((row) => ({
+        id: row.id,
+        children: row.children.map((c) => c.id),
+      }))
+
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 1, children: [11, 10] },
+      { id: 0, children: [11, 10] },
+    ])
+    parents.set(0, { id: 0, group: 1, position: 1 })
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 1, children: [11, 10] },
+      { id: 0, children: [12] },
+    ])
+    children.set(12, { ...children.get(12)!, parentGroup: 0 })
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 1, children: [12, 11, 10] },
+      { id: 0, children: [] },
+    ])
+    parents.set(0, { id: 0, group: 0, position: -1 })
+    expect(ids(recomputeNestedModel(parents, children))).toEqual([
+      { id: 0, children: [12, 11, 10] },
+      { id: 1, children: [12, 11, 10] },
+    ])
+    expect(
+      recomputeWindowedModel(parents, children, 0, 0).map(
+        (row) => row.children.length,
+      ),
+    ).toEqual([0, 0])
+    expect(ids(recomputeWindowedModel(parents, children, 1, 2))).toEqual([
+      { id: 0, children: [11, 10] },
+      { id: 1, children: [11, 10] },
+    ])
+    expect(ids(recomputeWindowedModel(parents, children, 2, 3))).toEqual([
+      { id: 0, children: [10] },
+      { id: 1, children: [10] },
+    ])
+
+    // The three child scores cover true, false, and unknown at pivot 0.
+    // Moving the pivot to -2 moves -1 into the complement; replacing null
+    // with a number removes the unknown partition. These are independent of
+    // the query evaluator used by the TLP production formulation.
+    const partition = (pivot: number) =>
+      [...children.values()].map((child) => ({
+        id: child.id,
+        branch:
+          child.score === null
+            ? `unknown`
+            : child.score < pivot
+              ? `predicate`
+              : `complement`,
+      }))
+    expect(partition(0)).toEqual([
+      { id: 10, branch: `unknown` },
+      { id: 11, branch: `predicate` },
+      { id: 12, branch: `complement` },
+    ])
+    expect(partition(-2)).toEqual([
+      { id: 10, branch: `unknown` },
+      { id: 11, branch: `complement` },
+      { id: 12, branch: `complement` },
+    ])
+    children.set(10, { ...children.get(10)!, score: 0 })
+    expect(partition(0).find((row) => row.id === 10)?.branch).toBe(`complement`)
+
+    const sharedChildren = new Map(
+      sharedRouteDeletionScenario.children.map((row) => [row.id, row]),
+    )
+    const sharedParents = new Map(
+      sharedRouteDeletionScenario.parents.map((row) => [row.id, row]),
+    )
+    expect(ids(recomputeNestedModel(sharedParents, sharedChildren))).toEqual([
+      { id: 0, children: [10, 11, 12] },
+      { id: 1, children: [10, 11, 12] },
+    ])
+    sharedChildren.delete(10)
+    expect(ids(recomputeNestedModel(sharedParents, sharedChildren))).toEqual([
+      { id: 0, children: [11, 12] },
+      { id: 1, children: [11, 12] },
+    ])
+  })
+
+  test(`TLP checker rejects a wrong branch even when the union is complete`, () => {
+    const rows: Array<ChildRow> = [
+      { id: 10, parentGroup: 0, score: null, position: 0 },
+      { id: 11, parentGroup: 0, score: -1, position: 1 },
+      { id: 12, parentGroup: 0, score: 1, position: 2 },
+    ]
+    const correct = [[rows[1]!], [rows[2]!], [rows[0]!]]
+    assertTlpPartitions(correct, rows, 0, `TLP calibration`)
+    const wrong = [[rows[0]!], [rows[2]!], [rows[1]!]]
+    expect(wrong.flat()).toHaveLength(rows.length)
+    expect(new Set(wrong.flat().map((row) => row.id))).toEqual(
+      new Set(rows.map((row) => row.id)),
+    )
+    expect(() =>
+      assertTlpPartitions(wrong, rows, 0, `TLP calibration`),
+    ).toThrow(`TLP calibration predicate partition`)
+  })
 
   test(`cold provider predicates preserve opaque reference membership`, () => {
     const first = { code: 0 }
@@ -1145,6 +1415,73 @@ describe(`includes cross-formulation oracle`, () => {
       [1, 2],
     )
   })
+
+  // These synthetic wrong answers calibrate the local comparisons (ORC-006).
+  // ORC-007 direct-command evidence belongs to the production drivers below.
+  test(`reference-identity checker rejects a wrong answer after shrinking`, () => {
+    const property = fc.property(fc.integer(), (code) => {
+      const first = { code }
+      const second = { code }
+      expect(first).not.toBe(second)
+      const merged = [
+        { id: 1, children: [10, 20] },
+        { id: 2, children: [10, 20] },
+      ]
+      expect(
+        captureReferenceRows(merged),
+        `reference route checkpoint`,
+      ).toEqual([
+        { id: 1, children: [10] },
+        { id: 2, children: [20] },
+      ])
+    })
+    const failure = fc.check(property, { seed: 1_658_002, numRuns: 4 })
+    expect(failure.failed).toBe(true)
+    expect(failure.numShrinks).toBeGreaterThan(0)
+    expect(failure.error).toContain(`reference route checkpoint`)
+    if (failure.counterexamplePath === null)
+      throw new Error(`reference-route mutant did not produce a replay path`)
+    const replayResult = fc.check(property, {
+      seed: failure.seed,
+      path: failure.counterexamplePath,
+      numRuns: 1,
+      endOnFailure: true,
+    })
+    expect(replayResult.failed).toBe(true)
+    expect(replayResult.error).toContain(`reference route checkpoint`)
+    expect(replayResult.counterexample).toEqual(failure.counterexample)
+  })
+
+  test(`symbol-group checker rejects a wrong answer after shrinking`, () => {
+    const property = fc.property(fc.integer(), (code) => {
+      const first = Symbol(`group-${code}`)
+      const second = Symbol(`group-${code}`)
+      expect(first).not.toBe(second)
+      assertGroupedRouteCounts(
+        [
+          { id: 1, summaries: [{ count: 2 }] },
+          { id: 2, summaries: [{ count: 2 }] },
+        ],
+        [1, 1],
+      )
+    })
+    const failure = fc.check(property, { seed: 1_658_003, numRuns: 4 })
+    expect(failure.failed).toBe(true)
+    expect(failure.numShrinks).toBeGreaterThan(0)
+    expect(failure.error).toContain(`group-route checkpoint`)
+    if (failure.counterexamplePath === null)
+      throw new Error(`symbol-group mutant did not produce a replay path`)
+    const replayResult = fc.check(property, {
+      seed: failure.seed,
+      path: failure.counterexamplePath,
+      numRuns: 1,
+      endOnFailure: true,
+    })
+    expect(replayResult.failed).toBe(true)
+    expect(replayResult.error).toContain(`group-route checkpoint`)
+    expect(replayResult.counterexample).toEqual(failure.counterexample)
+  })
+
   test.each([`root`, `child`] as const)(
     `retains wrong %s order that unordered normalization would erase`,
     (level) => {
@@ -1173,6 +1510,16 @@ describe(`includes cross-formulation oracle`, () => {
       ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
     },
   )
+
+  // The next three properties have fixed route-transition histories. Their
+  // generated integer is only a user token label: values span FastCheck's
+  // default integer domain, while zero is reconstructed by the cold fixed
+  // controls above. Ablating the label variation would leave the identity law
+  // intact but lose evidence that token text does not affect it. Equal-shaped
+  // distinct references and same-description distinct symbols are mandatory
+  // premises; identical reference identity is outside these three controls.
+  // The literal wrong-result and captured replay controls above distinguish
+  // merged reference routes and symbol groups at their public checkpoints.
 
   fixedCampaign.prop([fc.integer()], {
     numRuns: oracleRuns(4),
@@ -1735,19 +2082,7 @@ describe(`includes cross-formulation oracle`, () => {
   }
 
   fcTest(`shared-route child deletion agrees across formulations`, () =>
-    expectFormulationsEquivalent({
-      parents: [
-        { id: 0, group: 0, position: 0 },
-        { id: 1, group: 0, position: 0 },
-      ],
-      children: [
-        { id: 10, parentGroup: 0, score: null, position: 0 },
-        { id: 11, parentGroup: 0, score: null, position: 0 },
-        { id: 12, parentGroup: 0, score: null, position: 0 },
-      ],
-      pivot: 0,
-      actions: [{ type: `deleteChild`, id: 10 }],
-    }),
+    expectFormulationsEquivalent(sharedRouteDeletionScenario),
   )
 
   test(`split, merge and reactivated routes preserve all predicate partitions`, () =>
@@ -1825,20 +2160,148 @@ describe(`includes cross-formulation oracle`, () => {
       ),
   )
 
+  // Checked direct replay witness:
+  // TANSTACK_DB_ORACLE_SEED=1658004
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.equivalence
+  // TANSTACK_DB_ORACLE_CALIBRATION=missing-parent
+  // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
+  // tests/query/includes-cross-formulation-oracle.property.test.ts
+  // -t 'agrees across nested includes'
+  // Expected: one main-property failure at cross-formulation checkpoint 0.
+  calibrationTest(`includes-cross-formulation.equivalence`, `missing-parent`)(
+    `generated equivalence rejects a missing production parent and replays its checkpoint`,
+    async () => {
+      // The hostile observation is injected after the real nested query is
+      // captured. The same generated driver and refinement comparison execute
+      // during shrinking and direct seed/path replay.
+      const property = fc.asyncProperty(scenarioArbitrary, async (scenario) => {
+        await expectFormulationsEquivalent(scenario, (rows) => rows.slice(1))
+      })
+      const propertyId = `includes-cross-formulation.equivalence`
+      const directReplay = replay.replayPath !== undefined
+      const failure = await fc.check(
+        property,
+        directReplay
+          ? { ...oraclePropertyOptions(8, propertyId), endOnFailure: true }
+          : { seed: 1_658_004, numRuns: oracleRuns(8) },
+      )
+      expect(failure.failed).toBe(true)
+      expect(failure.error).toContain(`cross-formulation checkpoint`)
+      expect(failure.error).toContain(`checkpoint":0`)
+      if (directReplay) {
+        expect(failure.seed).toBe(replay.replaySeed)
+        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        return
+      }
+      expect(failure.numShrinks).toBeGreaterThan(0)
+      if (failure.counterexamplePath === null)
+        throw new Error(`missing-parent mutant did not produce a replay path`)
+      expect(failure.counterexamplePath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+      const replayResult = await fc.check(property, {
+        seed: failure.seed,
+        path: failure.counterexamplePath,
+        numRuns: 1,
+        endOnFailure: true,
+      })
+      expect(replayResult.failed).toBe(true)
+      expect(replayResult.error).toContain(`cross-formulation checkpoint`)
+      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(replayResult.counterexample).toEqual(failure.counterexample)
+    },
+  )
+
+  // Checked direct replay witness:
+  // TANSTACK_DB_ORACLE_SEED=1658005
+  // TANSTACK_DB_ORACLE_PATH=0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0
+  // TANSTACK_DB_ORACLE_PROPERTY=includes-cross-formulation.ordered-window
+  // TANSTACK_DB_ORACLE_CALIBRATION=extra-child
+  // pnpm --filter @tanstack/db exec vitest --run --coverage.enabled=false
+  // tests/query/includes-cross-formulation-oracle.property.test.ts
+  // -t 'matches recomputation for ordered offset and limit child windows for a random'
+  // Expected: one main-property failure at ordered-window checkpoint 0.
+  calibrationTest(`includes-cross-formulation.ordered-window`, `extra-child`)(
+    `generated window rejects an extra production child and replays its checkpoint`,
+    async () => {
+      const property = fc.asyncProperty(
+        windowedScenarioArbitrary,
+        async (sample) => {
+          const { scenario, offset, limit } = sample
+          await expectWindowedIncludeMatches(scenario, offset, limit, (rows) =>
+            rows.map((parent, index) =>
+              index === 0
+                ? {
+                    ...parent,
+                    children: [...parent.children, scenario.children[0]!],
+                  }
+                : parent,
+            ),
+          )
+        },
+      )
+      const propertyId = `includes-cross-formulation.ordered-window`
+      const directReplay = replay.replayPath !== undefined
+      const failure = await fc.check(
+        property,
+        directReplay
+          ? { ...oraclePropertyOptions(12, propertyId), endOnFailure: true }
+          : { seed: 1_658_005, numRuns: oracleRuns(12) },
+      )
+      expect(failure.failed).toBe(true)
+      expect(failure.error).toContain(`ordered-window checkpoint`)
+      expect(failure.error).toContain(`checkpoint":0`)
+      if (directReplay) {
+        expect(failure.seed).toBe(replay.replaySeed)
+        expect(replay.replayPath).toBe(`0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`)
+        return
+      }
+      expect(failure.numShrinks).toBeGreaterThan(0)
+      if (failure.counterexamplePath === null)
+        throw new Error(`extra-child mutant did not produce a replay path`)
+      expect(failure.counterexamplePath).toBe(
+        `0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0`,
+      )
+      const replayResult = await fc.check(property, {
+        seed: failure.seed,
+        path: failure.counterexamplePath,
+        numRuns: 1,
+        endOnFailure: true,
+      })
+      expect(replayResult.failed).toBe(true)
+      expect(replayResult.error).toContain(`ordered-window checkpoint`)
+      expect(replayResult.error).toContain(`checkpoint":0`)
+      expect(replayResult.counterexample).toEqual(failure.counterexample)
+    },
+  )
+
+  const checkEquivalenceScenario = (scenario: CrossFormulationScenario) =>
+    expectFormulationsEquivalent(
+      scenario,
+      replay.replayPath !== undefined &&
+        replay.replayProperty === `includes-cross-formulation.equivalence` &&
+        process.env.TANSTACK_DB_ORACLE_CALIBRATION === `missing-parent`
+        ? (rows) => rows.slice(1)
+        : undefined,
+    )
+
   fixedCampaign.prop([scenarioArbitrary], {
     numRuns: oracleRuns(8),
     seed: 1_658_004,
+    examples: scenarioExamples,
   })(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
-    expectFormulationsEquivalent,
+    checkEquivalenceScenario,
   )
 
   randomCampaign(`includes-cross-formulation.equivalence`).prop(
     [scenarioArbitrary],
-    oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
+    {
+      ...oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
+      examples: replay.replayPath === undefined ? scenarioExamples : [],
+    },
   )(
     `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a random or replayed seed`,
-    expectFormulationsEquivalent,
+    checkEquivalenceScenario,
   )
 
   const checkWindowedScenario = ({
@@ -1849,11 +2312,30 @@ describe(`includes cross-formulation oracle`, () => {
     scenario: CrossFormulationScenario
     offset: number
     limit: number
-  }) => expectWindowedIncludeMatches(scenario, offset, limit)
+  }) =>
+    expectWindowedIncludeMatches(
+      scenario,
+      offset,
+      limit,
+      replay.replayPath !== undefined &&
+        replay.replayProperty === `includes-cross-formulation.ordered-window` &&
+        process.env.TANSTACK_DB_ORACLE_CALIBRATION === `extra-child`
+        ? (rows) =>
+            rows.map((parent, index) =>
+              index === 0
+                ? {
+                    ...parent,
+                    children: [...parent.children, scenario.children[0]!],
+                  }
+                : parent,
+            )
+        : undefined,
+    )
 
   fixedCampaign.prop([windowedScenarioArbitrary], {
     numRuns: oracleRuns(12),
     seed: 1_658_005,
+    examples: windowedExamples,
   })(
     `matches recomputation for ordered offset and limit child windows for a fixed seed`,
     checkWindowedScenario,
@@ -1861,7 +2343,10 @@ describe(`includes cross-formulation oracle`, () => {
 
   randomCampaign(`includes-cross-formulation.ordered-window`).prop(
     [windowedScenarioArbitrary],
-    oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
+    {
+      ...oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
+      examples: replay.replayPath === undefined ? windowedExamples : [],
+    },
   )(
     `matches recomputation for ordered offset and limit child windows for a random or replayed seed`,
     checkWindowedScenario,

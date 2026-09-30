@@ -3,8 +3,9 @@
  *
  * Collection updates change only their authored fields. A newer disjoint
  * SQLite field must survive. Persistence waits for diff observation of each
- * Collection's effective writes. A direct transactor probe also covers a
- * synthetic trailing no-op and tracked metadata-only mutation;
+ * Collection's effective writes. A native SQLite and unmocked-watcher witness
+ * covers a tracked-metadata Collection.update. Direct transactor probes also
+ * cover a synthetic trailing no-op and tracked metadata-only mutation;
  * Collection.update does not create these zero-field mutations. Public rows
  * expose exactly the declared PowerSync view, and equality compares transformed
  * schema output rather than raw SQLite rows.
@@ -23,9 +24,11 @@
  * The pure tests calibrate comparisons and cleanup failure reporting. The
  * production tests reach native SQLite before comparing rows, patches,
  * metadata, logging, or cleanup.
- * Held callbacks test the adapter after controlled delivery; unmocked writes
- * exercise the native watcher. The suite skips when the native test database
- * implementation is unavailable.
+ * Held callbacks test the adapter after controlled delivery; ordinary and
+ * tracked-metadata Collection writes exercise the native watcher without
+ * invoking its callback from the test. Neither held delivery nor local CRUD
+ * queue inspection proves remote backend upload. The suite skips when the
+ * native test database implementation is unavailable.
  */
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -493,6 +496,88 @@ describePowerSync(`PowerSync correctness oracle`, () => {
     } finally {
       await cleanupAfterOracle(failure, [
         () => transaction.rollback(),
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
+    }
+  })
+
+  it(`persists a metadata-bearing Collection update through the native watcher`, async () => {
+    const schema = new Schema({
+      todos: new Table(
+        { title: column.text, done: column.integer },
+        { trackMetadata: true },
+      ),
+    })
+    const db = await createDatabase(schema)
+    await db.execute(
+      `INSERT INTO todos (id, title, done) VALUES ('t1', 'Write report', 0)`,
+    )
+    // Forward unchanged callbacks to the SDK while recording genuine delivery;
+    // this test never invokes the registered handler itself.
+    const originalOnChange = db.onChangeWithCallback.bind(db)
+    const watcherDeliveries: Array<ReadonlyArray<string>> = []
+    const watcherRegistration = vi
+      .spyOn(db, `onChangeWithCallback`)
+      .mockImplementation((handler, options) => {
+        if (!handler) throw new Error(`adapter did not register a watcher`)
+        return originalOnChange(
+          {
+            ...handler,
+            onChange: async (event) => {
+              watcherDeliveries.push([...event.changedTables])
+              await handler.onChange(event)
+            },
+          },
+          options,
+        )
+      })
+    const collection = createCollection(
+      powerSyncCollectionOptions({ database: db, table: schema.props.todos }),
+    )
+
+    let failure: { error: unknown } | undefined
+    try {
+      await collection.preload()
+      expect(watcherRegistration).toHaveBeenCalled()
+      watcherDeliveries.length = 0
+
+      const metadata = { source: `Collection.update` }
+      await collection.update(`t1`, { metadata }, (draft) => {
+        draft.done = 1
+      }).isPersisted.promise
+
+      expect(
+        watcherDeliveries.some((tables) =>
+          tables.includes(collection.utils.getMeta().trackedTableName),
+        ),
+      ).toBe(true)
+
+      expect(
+        await db.get<{ done: number }>(
+          `SELECT done FROM todos WHERE id = 't1'`,
+        ),
+      ).toEqual({ done: 1 })
+      expect(collection.get(`t1`)?.done).toBe(1)
+      const batch = await db.getCrudBatch(100)
+      expect(batch?.crud.at(-1)?.metadata).toBe(JSON.stringify(metadata))
+      const crud = await db.getAll<CrudRow>(
+        `SELECT data FROM ps_crud ORDER BY id`,
+      )
+      const patch = JSON.parse(crud.at(-1)!.data) as {
+        op: string
+        data: Record<string, unknown>
+      }
+      expect({ op: patch.op, data: patch.data }).toEqual({
+        op: `PATCH`,
+        data: { done: 1 },
+      })
+    } catch (error) {
+      failure = { error }
+      throw error
+    } finally {
+      await cleanupAfterOracle(failure, [
         () => collection.cleanup(),
         () => db.disconnectAndClear(),
         () => db.close(),

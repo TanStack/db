@@ -6,6 +6,7 @@ import {
   eq,
 } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
+import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
 import { queryCollectionOptions } from '../src/query'
 import type { Collection } from '@tanstack/db'
 
@@ -20,9 +21,12 @@ import type { Collection } from '@tanstack/db'
  *
  * The oracle checks both complete nested values and work bounds. Correct rows
  * alone would allow duplicate source delivery; low counters alone could hide
- * missing descendants. Every source row in this fixture is reachable, so this
- * oracle does not measure irrelevant-branch acquisition, internal scans,
- * facade allocations, or elapsed time.
+ * missing descendants. The eager matrix makes every source row reachable. A
+ * separate on-demand witness adds disconnected branches and checks acquisition
+ * attempts, Query provider calls, delivered rows, and the public tree at
+ * preload. Its controlled provider evaluates the requested predicate against
+ * its rows; the oracle does not measure provider scans, internal index
+ * traversal, facade allocations, or elapsed time.
  */
 
 let nextCollectionId = 0
@@ -64,6 +68,10 @@ type NestedTreeShape = {
   reachableTreeRows: number
   sourceRowsDeliveredAtPreload: TreeCounts
   sourceRowsDeliveredAfterTraversal: TreeCounts
+  providerCallsAtPreload: TreeCounts
+  providerCallsAfterTraversal: TreeCounts
+  acquisitionAttemptsAtPreload: TreeCounts
+  acquisitionAttemptsAfterTraversal: TreeCounts
   reachableChildCollections: Record<ChildLevel, number>
   reachableChildRows: Record<ChildLevel, number>
 }
@@ -72,7 +80,7 @@ const branchesPerRoot = 2
 const twigsPerBranch = 5
 const leavesPerTwig = 10
 
-function createNestedTreeRows(rootCount: number) {
+function createNestedTreeRows(rootCount: number, irrelevantBranchCount = 0) {
   const roots: Array<RootRow> = []
   const branches: Array<BranchRow> = []
   const twigs: Array<TwigRow> = []
@@ -98,6 +106,24 @@ function createNestedTreeRows(rootCount: number) {
     }
   }
 
+  // No root has this key. The extra branch and descendants cannot reach the
+  // selected public tree, but can expose unneeded source delivery or demand.
+  for (
+    let branchIndex = 0;
+    branchIndex < irrelevantBranchCount;
+    branchIndex++
+  ) {
+    const branchId = `irrelevant-branch-${branchIndex}`
+    const twigId = `irrelevant-twig-${branchIndex}`
+    branches.push({ id: branchId, parentId: `root-outside`, value: branchId })
+    twigs.push({ id: twigId, parentId: branchId, value: twigId })
+    leaves.push({
+      id: `irrelevant-leaf-${branchIndex}`,
+      parentId: twigId,
+      value: `irrelevant-leaf-${branchIndex}`,
+    })
+  }
+
   return { roots, branches, twigs, leaves }
 }
 
@@ -105,6 +131,8 @@ function createQuerySource<T extends { id: string }>(
   name: string,
   rows: Array<T>,
   queryClient: QueryClient,
+  onProviderCall: () => void = () => {},
+  onDemand = false,
 ) {
   const id = `${name}-${nextCollectionId++}`
   return createCollection(
@@ -114,7 +142,19 @@ function createQuerySource<T extends { id: string }>(
       autoIndex: `eager`,
       defaultIndexType: BasicIndex,
       queryKey: [id],
-      queryFn: () => Promise.resolve(rows),
+      syncMode: onDemand ? `on-demand` : `eager`,
+      startSync: true,
+      queryFn: (context) => {
+        onProviderCall()
+        if (!onDemand) return Promise.resolve(rows)
+        const where = context.meta?.loadSubsetOptions?.where
+        if (where === undefined) {
+          throw new Error(`On-demand tree source received no predicate`)
+        }
+        return Promise.resolve(
+          rows.filter((row) => evaluateReferenceExpression(where, row)),
+        )
+      },
       getKey: (row) => row.id,
     }),
   )
@@ -217,15 +257,19 @@ function expectedTreeEntries(rootCount: number): Array<TreeEntry> {
   ]
 }
 
-function expectTreeEntries(entries: Array<TreeEntry>, rootCount: number): void {
+function canonicalTreeEntries(entries: Array<TreeEntry>): Array<string> {
   // No orderBy is requested. Sort for comparison, retaining duplicate entries.
-  const canonical = (rows: Array<TreeEntry>) =>
-    rows
-      .map(({ level, parentId, id, value }) =>
-        JSON.stringify([level, parentId, id, value]),
-      )
-      .sort()
-  expect(canonical(entries)).toEqual(canonical(expectedTreeEntries(rootCount)))
+  return entries
+    .map(({ level, parentId, id, value }) =>
+      JSON.stringify([level, parentId, id, value]),
+    )
+    .sort()
+}
+
+function expectTreeEntries(entries: Array<TreeEntry>, rootCount: number): void {
+  expect(canonicalTreeEntries(entries)).toEqual(
+    canonicalTreeEntries(expectedTreeEntries(rootCount)),
+  )
 }
 
 function snapshotSourceRowsDelivered(
@@ -245,16 +289,46 @@ async function checkNestedTreeShape(
   transformRootRows: (
     rows: ReadonlyArray<NodeRow>,
   ) => ReadonlyArray<NodeRow> = (rows) => rows,
+  irrelevantBranchCount = 0,
+  onDemandChildren = false,
 ): Promise<void> {
-  const rows = createNestedTreeRows(rootCount)
+  const rows = createNestedTreeRows(rootCount, irrelevantBranchCount)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  const providerCalls = { roots: 0, branches: 0, twigs: 0, leaves: 0 }
+  const acquisitionAttempts = { roots: 0, branches: 0, twigs: 0, leaves: 0 }
   const sources = {
-    roots: createQuerySource(`tree-roots`, rows.roots, queryClient),
-    branches: createQuerySource(`tree-branches`, rows.branches, queryClient),
-    twigs: createQuerySource(`tree-twigs`, rows.twigs, queryClient),
-    leaves: createQuerySource(`tree-leaves`, rows.leaves, queryClient),
+    roots: createQuerySource(`tree-roots`, rows.roots, queryClient, () => {
+      providerCalls.roots++
+    }),
+    branches: createQuerySource(
+      `tree-branches`,
+      rows.branches,
+      queryClient,
+      () => {
+        providerCalls.branches++
+      },
+      onDemandChildren,
+    ),
+    twigs: createQuerySource(
+      `tree-twigs`,
+      rows.twigs,
+      queryClient,
+      () => {
+        providerCalls.twigs++
+      },
+      onDemandChildren,
+    ),
+    leaves: createQuerySource(
+      `tree-leaves`,
+      rows.leaves,
+      queryClient,
+      () => {
+        providerCalls.leaves++
+      },
+      onDemandChildren,
+    ),
   }
   let rootCollection: NodeCollection | undefined
   let primaryFailure: unknown
@@ -262,6 +336,16 @@ async function checkNestedTreeShape(
   const cleanupErrors: Array<unknown> = []
 
   try {
+    if (onDemandChildren) {
+      for (const level of [`branches`, `twigs`, `leaves`] as const) {
+        const source = sources[level]
+        const loadSubset = source._sync.loadSubset.bind(source._sync)
+        source._sync.loadSubset = (options) => {
+          acquisitionAttempts[level]++
+          return loadSubset(options)
+        }
+      }
+    }
     const sourceCounters = {
       roots: countDeliveredRows(sources.roots),
       branches: countDeliveredRows(sources.branches),
@@ -307,6 +391,8 @@ async function checkNestedTreeShape(
 
     const sourceRowsDeliveredAtPreload =
       snapshotSourceRowsDelivered(sourceCounters)
+    const providerCallsAtPreload = { ...providerCalls }
+    const acquisitionAttemptsAtPreload = { ...acquisitionAttempts }
     const shape = observeReachableTreeShape(
       roots,
       transformRootRows(roots.toArray),
@@ -317,6 +403,10 @@ async function checkNestedTreeShape(
       sourceRowsDeliveredAtPreload,
       sourceRowsDeliveredAfterTraversal:
         snapshotSourceRowsDelivered(sourceCounters),
+      providerCallsAtPreload,
+      providerCallsAfterTraversal: { ...providerCalls },
+      acquisitionAttemptsAtPreload,
+      acquisitionAttemptsAfterTraversal: { ...acquisitionAttempts },
     })
   } catch (error) {
     primaryFailure = error
@@ -359,6 +449,12 @@ function expectNestedTreeWork(
   expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
     observation.sourceRowsDeliveredAtPreload,
   )
+  expect(observation.providerCallsAfterTraversal).toEqual(
+    observation.providerCallsAtPreload,
+  )
+  expect(observation.acquisitionAttemptsAfterTraversal).toEqual(
+    observation.acquisitionAttemptsAtPreload,
+  )
   expect(observation.reachableChildCollections).toEqual({
     branches: expected.roots,
     twigs: expected.branches,
@@ -377,6 +473,26 @@ function expectNestedTreeShape(
 ): void {
   expectNestedTreeWork(observation, rootCount)
   expectTreeEntries(observation.entries, rootCount)
+}
+
+function expectIrrelevantBranchWork(
+  baseline: NestedTreeShape,
+  scaled: NestedTreeShape,
+): void {
+  // The root uses one eager Query fetch. Each child level uses one on-demand
+  // acquisition attempt and one Query provider call for its reachable set.
+  const expectedProviderCalls = { roots: 1, branches: 1, twigs: 1, leaves: 1 }
+  const expectedAttempts = { roots: 0, branches: 1, twigs: 1, leaves: 1 }
+  expect(baseline.providerCallsAtPreload).toEqual(expectedProviderCalls)
+  expect(scaled.providerCallsAtPreload).toEqual(expectedProviderCalls)
+  expect(baseline.acquisitionAttemptsAtPreload).toEqual(expectedAttempts)
+  expect(scaled.acquisitionAttemptsAtPreload).toEqual(expectedAttempts)
+  expect(scaled.sourceRowsDeliveredAtPreload).toEqual(
+    baseline.sourceRowsDeliveredAtPreload,
+  )
+  expect(canonicalTreeEntries(scaled.entries)).toEqual(
+    canonicalTreeEntries(baseline.entries),
+  )
 }
 
 describe(`nested includes reachable-shape oracle`, () => {
@@ -412,6 +528,49 @@ describe(`nested includes reachable-shape oracle`, () => {
       )
     })
   })
+
+  it.each([1, 3])(
+    `does not acquire or deliver %i disconnected branches at preload`,
+    async (irrelevantBranchCount) => {
+      const observations: Array<NestedTreeShape> = []
+      await checkNestedTreeShape(
+        2,
+        (observation) => {
+          expectNestedTreeShape(observation, 2)
+          observations.push(observation)
+        },
+        (rows) => rows,
+        0,
+        true,
+      )
+      await checkNestedTreeShape(
+        2,
+        (observation) => {
+          expectNestedTreeShape(observation, 2)
+          observations.push(observation)
+        },
+        (rows) => rows,
+        irrelevantBranchCount,
+        true,
+      )
+      const [baseline, scaled] = observations as [
+        NestedTreeShape,
+        NestedTreeShape,
+      ]
+      expectIrrelevantBranchWork(baseline, scaled)
+
+      // An extra acquisition for an unreachable branch could leave the public
+      // tree correct. It must still fail this comparison at preload.
+      const wrongWork: NestedTreeShape = {
+        ...scaled,
+        acquisitionAttemptsAtPreload: {
+          ...scaled.acquisitionAttemptsAtPreload,
+          branches: scaled.acquisitionAttemptsAtPreload.branches + 1,
+        },
+      }
+      expect(() => expectIrrelevantBranchWork(baseline, wrongWork)).toThrow()
+    },
+  )
 
   it(`rejects a repeated source row delivery after traversal`, async () => {
     await checkNestedTreeShape(2, (observation) => {

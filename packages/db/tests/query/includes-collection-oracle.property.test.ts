@@ -36,7 +36,7 @@ import type { SyncConfig } from '../../src/types.js'
  * Authority: `packages/db/src/query/live/ARCHITECTURE.md`, especially nested
  * materialization and coherent publication. This oracle checks the public
  * Collection facade and its callbacks at startup, after each source write,
- * and at the held truncate-replay publication cut.
+ * and at held truncate-replay and ordered-repair publication cuts.
  *
  * A bare child query materializes as a public Collection facade. That facade
  * has lifecycle and identity rules that inline arrays do not have:
@@ -81,8 +81,9 @@ import type { SyncConfig } from '../../src/types.js'
  * child rows; a delete of an absent child is excluded.
  *
  * Known omissions: the controlled source does not prove real-provider
- * cancellation or ordering. The held child truncate-replay witness does not
- * reach a finite ordered child repair. Arbitrary nested facade histories,
+ * cancellation or ordering. The ordered-repair witness runs a finite root
+ * request in a child live-query Collection and observes its parent include
+ * facade at a controlled acquisition boundary. Arbitrary nested facade histories,
  * concurrent optimistic writes during a hold, and cross-framework callback
  * scheduling remain outside this owner.
  */
@@ -2084,6 +2085,222 @@ describe(`Collection-valued includes oracle`, () => {
     )(
       `propagates order-only child swaps through every materialization with a random or replayed seed`,
       runLayoutSwap,
+    )
+  }
+
+  for (const { intermediate, final } of [
+    { intermediate: `A`, final: `A` },
+    { intermediate: `B`, final: `A` },
+    { intermediate: `B`, final: `C` },
+  ]) {
+    fcTest(
+      `a held ordered child repair publishes ${intermediate}-to-${final} through the facade`,
+      async () => {
+        type OrderedChild = {
+          id: number
+          parentGroup: number
+          rank: number
+          value: string
+        }
+        const sourceRows = new Map<number, OrderedChild>([
+          [10, { id: 10, parentGroup: 1, rank: 1, value: `A` }],
+          [20, { id: 20, parentGroup: 1, rank: 2, value: `X` }],
+        ])
+        // This source Map is the reference model. The selected facade rows
+        // omit rank, so final row equality alone cannot prove layout delivery.
+        const expectedRows = () =>
+          [...sourceRows.values()]
+            .sort((left, right) => left.rank - right.rank)
+            .map(({ id, value }) => ({ id, value }))
+
+        let sync!: Parameters<SyncConfig<OrderedChild, number>[`sync`]>[0]
+        let holdRepair = false
+        const held: Array<() => void> = []
+        const requests: Array<{ limit?: number; refetch?: boolean }> = []
+        const children = createCollection<OrderedChild, number>({
+          id: `held-child-facade-repair-${intermediate}-${final}`,
+          getKey: ({ id }) => id,
+          syncMode: `on-demand`,
+          autoIndex: `eager`,
+          defaultIndexType: BTreeIndex,
+          sync: {
+            sync: (operations) => {
+              sync = operations
+              operations.markReady()
+              return {
+                loadSubset: (options) => {
+                  requests.push({
+                    limit: options.limit,
+                    refetch: options.refetch,
+                  })
+                  if (requests.length === 1) {
+                    sync.begin()
+                    for (const row of sourceRows.values()) {
+                      sync.write({ type: `insert`, value: { ...row } })
+                    }
+                    expect(sync.commit()).toBe(true)
+                  }
+                  return holdRepair
+                    ? new Promise<void>((resolve) => held.push(resolve))
+                    : true
+                },
+                unloadSubset: () => {},
+              }
+            },
+          },
+        })
+        const parents = createControlledCollection(`held-child-repair-parent`, [
+          { id: 1, group: 1 },
+        ])
+        // The finite ordered source is itself a live-query Collection. The
+        // parent materializes it through a Collection-valued child include.
+        const orderedChildren = createLiveQueryCollection((q) =>
+          q
+            .from({ child: children })
+            .orderBy(({ child }) => child.rank)
+            .limit(2)
+            .select(({ child }) => ({
+              id: child.id,
+              parentGroup: child.parentGroup,
+              rank: child.rank,
+              value: child.value,
+            })),
+        )
+        orderedChildren.createIndex((child) => child.parentGroup, {
+          indexType: BTreeIndex,
+        })
+        const live = createLiveQueryCollection((q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            children: q
+              .from({ child: orderedChildren })
+              .where(({ child }) => eq(child.parentGroup, parent.group))
+              .orderBy(({ child }) => child.rank)
+              .select(({ child }) => ({ id: child.id, value: child.value })),
+          })),
+        )
+        const callbacks: Array<{
+          rows: Array<{ id: number; value: string }>
+          changes: Array<{
+            type: string
+            key: string | number
+            value?: { id: number; value: string }
+            previousValue?: { id: number; value: string }
+          }>
+        }> = []
+        const rootCallbacks: Array<unknown> = []
+        let unsubscribeFacade: (() => void) | undefined
+        let unsubscribeRoot: (() => void) | undefined
+
+        await withHistoryCleanup(
+          async () => {
+            await live.preload()
+            const facade = live.get(1)!.children
+            const before = expectedRows()
+            expect(
+              facade.toArray.map(({ id, value }) => ({ id, value })),
+            ).toEqual(before)
+            const facadeSubscription = facade.subscribeChanges(
+              (changes) => {
+                callbacks.push({
+                  rows: facade.toArray.map(({ id, value }) => ({ id, value })),
+                  changes: changes.map((change) =>
+                    change.type === `update`
+                      ? {
+                          type: change.type,
+                          key: change.key,
+                          value: {
+                            id: change.value.id,
+                            value: change.value.value,
+                          },
+                          previousValue: change.previousValue && {
+                            id: change.previousValue.id,
+                            value: change.previousValue.value,
+                          },
+                        }
+                      : { type: change.type, key: change.key },
+                  ),
+                })
+              },
+              { includeInitialState: false },
+            )
+            unsubscribeFacade = () => facadeSubscription.unsubscribe()
+            const rootSubscription = live.subscribeChanges(
+              (changes) => rootCallbacks.push(...changes),
+              { includeInitialState: false },
+            )
+            unsubscribeRoot = () => rootSubscription.unsubscribe()
+
+            holdRepair = true
+            const write = (value: string) => {
+              const row = { id: 10, parentGroup: 1, rank: 2.5, value }
+              sourceRows.set(row.id, row)
+              sync.begin()
+              sync.write({ type: `update`, value: { ...row } })
+              expect(sync.commit()).toBe(true)
+            }
+            write(`A`)
+            write(intermediate)
+            write(final)
+            await flushPromises()
+            expect(held.length, JSON.stringify(requests)).toBeGreaterThan(0)
+            expect(requests[0]?.limit).toBe(2)
+            expect(
+              requests
+                .slice(1)
+                .some(({ limit, refetch }) => limit === 2 && refetch === true),
+            ).toBe(true)
+            expect(
+              facade.toArray.map(({ id, value }) => ({ id, value })),
+            ).toEqual(before)
+            expect(callbacks).toEqual([])
+
+            holdRepair = false
+            for (const release of held.splice(0)) release()
+            await flushPromises()
+            const after = expectedRows()
+            expect(live.get(1)!.children).toBe(facade)
+            expect(
+              facade.toArray.map(({ id, value }) => ({ id, value })),
+            ).toEqual(after)
+            const expectedCallbacks = [
+              {
+                rows: after,
+                changes:
+                  final === `A`
+                    ? []
+                    : [
+                        {
+                          type: `update`,
+                          key: 10,
+                          value: { id: 10, value: final },
+                          previousValue: { id: 10, value: `A` },
+                        },
+                      ],
+              },
+            ]
+            expect(callbacks).toEqual(expectedCallbacks)
+            // A stale facade can have correct final rows yet omit this
+            // callback; the public subscription must reject that rule.
+            expect(() =>
+              expect(callbacks.slice(1)).toEqual(expectedCallbacks),
+            ).toThrow()
+            expect(rootCallbacks).toEqual([])
+          },
+          () => [
+            () => {
+              holdRepair = false
+              for (const release of held.splice(0)) release()
+            },
+            () => unsubscribeFacade?.(),
+            () => unsubscribeRoot?.(),
+            () => live.cleanup(),
+            () => orderedChildren.cleanup(),
+            () => parents.collection.cleanup(),
+            () => children.cleanup(),
+          ],
+        )
+      },
     )
   }
 

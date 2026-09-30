@@ -84,9 +84,9 @@ owners.
 
 The virtual-row-fields owner
 (`packages/db/tests/query/virtual-row-fields-oracle.test.ts`) checks presence
-of all four public virtual fields directly after query publication. Its fixed
-controlled-Collection cases do not establish every projection shape or
-framework receiving boundary.
+of all four public virtual fields directly after implicit, expression, and
+functional root publication. Its fixed controlled-Collection cases do not
+establish every nested projection shape or framework receiving boundary.
 
 Three type-only owners check compile-time boundaries:
 `packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.test-d.ts`
@@ -99,26 +99,39 @@ passing type assertions do not prove runtime parsing, I/O, or publication.
 
 The shared-driver fairness owner now distinguishes K=1 from K=2 at the second
 hydrate and checks full logical persist FIFO order in its Node seam. The
-Chromium OPFS receiving spec checks the K=1 hydrate bound and public rows, but
-does not yet compare the full persist completion order. Real OPFS FIFO across
-that history remains with the Browser OPFS fairness spec owner.
+[Chromium OPFS receiving spec](../../packages/browser-db-sqlite-persistence/e2e/shared-driver-fairness.opfs.spec.ts)
+checks a cold SQL read, the K=1 hydrate bound, public rows, the pending persist
+backlog at the second hydrate, and all five logical persist completion IDs in
+FIFO order during one held-BEGIN storm through the real worker. This closes the
+bounded real-OPFS handoff at logical adapter completion for that history. It
+does not establish durable write order after reopen, naturally occurring
+contention, a browser matrix, multi-context coordination, elapsed-time
+latency, or unbounded eventuality.
 
-The D2 source reconciliation owner checks its helper and a controlled indexed
-Effect consumer. Its generated histories do not establish graph restart or
-truncate behavior, scan routes, or external provider event delivery; those
-need separate live-query and provider witnesses before a cross-boundary claim.
+The D2 source reconciliation owner checks its helper and controlled Effect and
+live-query consumers. Fixed truncate/replay and cleanup→preload graph-restart
+cuts run on both eager-index and scan-fallback routes. Its generated histories
+still do not cover arbitrary graph shapes or real provider event delivery;
+the Electric real-provider E2E owner must supply that external premise before
+a cross-boundary claim.
 
-PowerSync's correctness owner reaches native local SQLite and unmocked watcher
-delivery for ordinary Collection writes. Its held watcher callbacks are a
-controlled delivery premise, and its trailing no-op and tracked metadata-only
+PowerSync's correctness owner reaches native local SQLite and records an
+SDK-delivered watcher callback after a metadata-bearing `Collection.update`;
+registration is wrapped for observation while delivery uses the SDK callback.
+The oracle checks the public and SQLite rows and the exact queued CRUD patch.
+Its held watcher callbacks are a controlled delivery premise, and its trailing
+no-op and tracked metadata-only
 cases enter through the public transactor with synthetic mutations rather than
 `Collection.update`. Neither path establishes remote backend upload or that
 Collection updates can construct those zero-field mutations.
 
-The Query DB nested-shape work owner uses an all-reachable finite tree. It
-checks reachable values and source Collection change delivery, not irrelevant
-branch acquisition or index traversal. An irrelevant-branch witness belongs
-with the DB includes-work owner or a future Query DB acquisition owner.
+The Query DB nested-shape work owner checks both an all-reachable finite tree
+and an on-demand irrelevant-branch variant. At preload, one or three
+disconnected branches leave the public tree and delivered rows unchanged and
+cause exactly one acquisition attempt and one Query provider call per child
+level. Provider scans, internal index traversal, facade allocations, and
+elapsed time remain outside this owner; DB includes-work counts source
+Collection reads and delivered changes, not internal index traversal.
 
 Three Ordered acquisition companions own distinct controlled cuts:
 `packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks
@@ -133,12 +146,18 @@ The core `load-subset-oracle.property.test.ts` now distinguishes each exact
 demand-key option through one-axis pairs; its derived-sync expected-failure
 guard and controlled-adapter scope remain explicit limits.
 
-The QueryRef owner now checks DISTINCT support through source deletions,
-last-support removal, reinsertion, and person enable/disable at public snapshot
-cuts. Aggregate source-update histories and joined `findOne()`/`singleResult`
-remain open with `packages/db/tests/query/subquery-user-value-oracle.test.ts`.
-The optimizer aggregate owner now has accepting and rejecting outer predicates;
-inner-join global-aggregate behavior remains a separate open path.
+The QueryRef owner checks DISTINCT support through source deletions,
+last-support removal, reinsertion, and person enable/disable. It also checks a
+nested aggregate through source updates and the later singleton, empty, and
+restored cuts of a joined `findOne()`. Two exact initial-publication product
+counterexamples remain with
+`packages/db/tests/query/subquery-user-value-oracle.test.ts`: a flat aggregate
+QueryRef inner join drops its matching row, and a joined `findOne()` QueryRef
+publishes both candidates. Other `singleResult` forms remain outside this
+owner. The optimizer aggregate owner has accepting and rejecting outer
+predicates and a public inner-join global-aggregate witness. Matching nested
+QueryRef inner joins still return an empty result at initial publication;
+the materialized-Collection control returns the expected aggregate row.
 
 The offline scheduler owner (`packages/offline-transactions/tests/KeyScheduler.property.test.ts`)
 checks FIFO eligibility and retry order at the scheduler boundary. It does not
@@ -152,8 +171,9 @@ The offline settlement owner has an unresolved authority conflict:
 `packages/offline-transactions/README.md` says successful settlement follows
 durable outbox removal, while
 `packages/offline-transactions/tests/transaction-settlement.property.test.ts`
-expects fulfillment after provider success even when acknowledgement deletion
-throws and the outbox row remains. The offline settlement contract owner must
+expects fulfillment after the configured `mutationFn` fulfills even when
+acknowledgement deletion throws and the fake-storage outbox row remains. The
+offline settlement contract owner must
 decide which law is promised before this cell can support a closure claim.
 
 ### Recent fix-wave authority inventory
@@ -199,11 +219,11 @@ comment and the current API/architecture contract before extending its model.
 | Lazy target path identity | `packages/db/tests/query/compiler/lazy-targets.test.ts` | A focused same-source `UnionFrom`/`coalesce` witness requires both [`a.b`] and [`a`, `b`] demand targets. Restoring dotted-string deduplication drops the second target at the compiler boundary. A public on-demand adapter and row-publication history still need a separate witness. |
 | Correlated include path identity | `packages/db/tests/query/includes-context-transport-oracle.test.ts` | A flat parent field and nested parent field reach one-level and nested `toArray` results independently; dotted ancestor aliases remain distinct through a grandchild route. Initial results and parent updates have exact public-value checks. A conditional projection gives [`a.b`] and [`a`, `b`] different include results and checks parent-key changes plus later child inserts. Removing the compiler's unique route-key allocator loses a public child result; restoring dotted-string deduplication at either builder site loses a distinct parent value. These fixed witnesses do not establish arbitrary path segments, every recursive source form, or every materialization form. |
 | Join equality and cold acquisition | `packages/db/tests/query/cold-join-reconciliation-oracle.test.ts` | Independent recomputation for cold acquisition plus direct join/predicate equivalence across established equality domains. Binary/string and nullish classes, replacement histories, raw on-demand values, and both scan/auto-index paths are explicit; compound join syntax is not claimed. |
-| Optimizer aggregate pushdown | `packages/db/tests/query/optimizer-semantics-oracle.test.ts`, [review record](oracle-reviews/2026-09-28-optimizer-aggregate-pushdown.md) | Independent sum recomputation and a materialized-Collection formulation check the first public snapshot of a nested aggregate under a left join. Direct, arithmetic-wrapped, and conditional aggregates distinguish safe from unsafe pushdown; a grouped-key control covers the grouped boundary. The owner does not cover every predicate, wrapper, join type, or incremental update. An inner join with a global aggregate returned no row even without a WHERE clause in the initial probe; that separate path still needs a public witness and owner before claiming optimizer coverage there. |
-| QueryRef operators and user-value boundaries | `packages/db/tests/query/subquery-user-value-oracle.test.ts`, `packages/db/tests/transactions.test.ts` | A finite array/Set model checks the compiled output bag for a joined DISTINCT subquery with an outer WHERE. Live-query drivers check selected containers, no-select, functional, and predicate-literal user objects with IR-like fields, top-level and aggregate-subquery proxy-shaped fields, arrays of selected references, outer virtual-field filters on joined DISTINCT and nested aggregate QueryRefs, and a renamed no-select source. The transaction suite documents the existing development-browser duplicate-load guard. The bounded cases run in `test:oracles` or the full DB suite; they do not establish `singleResult` subqueries, other join forms, source-update histories, or cross-copy value handling outside that guard. |
+| Optimizer aggregate pushdown | `packages/db/tests/query/optimizer-semantics-oracle.test.ts`, [review record](oracle-reviews/2026-09-28-optimizer-aggregate-pushdown.md) | Independent sum recomputation and a materialized-Collection formulation check the first public snapshot of a nested aggregate under a left join. Direct, arithmetic-wrapped, and conditional aggregates distinguish safe from unsafe pushdown; a grouped-key control covers the grouped boundary. The owner does not cover every predicate, wrapper, join type, or incremental update. A public inner-join/global-aggregate witness now pins an open product defect: matching nested QueryRef cases return `[]` instead of `[{ total: 30 }]` at the initial public snapshot, with and without an accepting outer predicate. Nonmatching and rejecting cases pass; a separately materialized aggregate joins correctly. These passing controls do not close the nested QueryRef law. |
+| QueryRef operators and user-value boundaries | `packages/db/tests/query/subquery-user-value-oracle.test.ts`, `packages/db/tests/transactions.test.ts` | A finite array/Set model checks the compiled output bag for a joined DISTINCT subquery with an outer WHERE. Live-query drivers check selected containers, no-select, functional, and predicate-literal user objects with IR-like fields, top-level and aggregate-subquery proxy-shaped fields, arrays of selected references, outer virtual-field filters on joined DISTINCT and nested aggregate QueryRefs, and a renamed no-select source. The transaction suite documents the existing development-browser duplicate-load guard. The bounded cases run in `test:oracles` or the full DB suite. Joined DISTINCT and nested aggregate source-update histories pass. A materialized joined `findOne()` and later singleton/empty/restored cuts of a joined QueryRef `findOne()` pass. At initial publication, a flat aggregate QueryRef inner join wrongly returns `[]` for one matching aggregate row, and a joined QueryRef `findOne()` wrongly returns both initial candidates; exact expected-failure guards preserve these open product defects. Other `singleResult` forms, join forms, and cross-copy value handling outside the duplicate-load guard remain unproved. |
 | Opaque backend pagination | [window oracle](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/cursor-pagination.oracle.test.ts), [cache histories](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/cursor-pagination.cache-oracle.test.ts), [cache publication](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/cursor-pagination.publication-oracle.test.ts), [browser acquisition boundaries](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/cursor-pagination.boundary-oracle.test.ts), [QueryCollection integration](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/cursor-pagination.integration.test.ts) | Full filter/sort/slice reference, opaque token transport, actual Query cache expiry/invalidation/GC, forced refresh during growth, protocol failure publication/recovery, bounded slice work, nested cancellation/replacement, reader abort, browser retry defaults, manual-write cache isolation, and production window publications. Stable backend sequences; not snapshot guarantees for changing endpoints. Peek-ahead remains enabled. |
 | Electric and TrailBase | [Electric histories](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/tests/electric-oracle.property.test.ts), [recovery histories](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/tests/electric-recovery-oracle.test.ts), [held resume snapshots](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/tests/electric-resume-snapshot-races.test.ts), [PostgreSQL semantics](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/e2e/sql-predicate-semantics.e2e.test.ts), [TrailBase contract](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/tests/ORACLE.md) | Installed SDK delivery/framing, independent predicates, exact subscription arguments, restart/reset lineage, held certification and durability races, source-order publication before durability, and late errors. The queued-presence property runs identical fixed/random generators plus isolated seed-and-path replay across insert, update, delete, and truncate callbacks. The recovery fixtures use a mocked ShapeStream; they do not establish live Electric-service framing or native persistence-host behavior. |
-| PowerSync | [tests](https://github.com/TanStack/db/tree/main/packages/powersync-db-collection/tests), `tests/correctness-oracle.test.ts` | Applied receipt positions crossed with held peers, native SQLite/SDK and cleanup evidence. Run the focused owner with the package's `test:oracles` command. A timeout mutant proves a progress failure, not every value assertion. |
+| PowerSync | [tests](https://github.com/TanStack/db/tree/main/packages/powersync-db-collection/tests), `tests/correctness-oracle.test.ts` | Applied receipt positions crossed with held peers, native SQLite/SDK and cleanup evidence. A metadata-bearing `Collection.update` passes through an observed SDK watcher callback to the public and SQLite rows and an exact queued CRUD patch. Held callback ordering and synthetic zero-field cases remain controlled-only, and remote upload has no receiving fixture here. Run the focused owner with the package's `test:oracles` command. A timeout mutant proves a progress failure, not every value assertion. |
 | SQLite persistence and native hosts | [persisted histories](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted.test.ts), [reset/resume histories](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sqlite-core-adapter.test.ts), [dual-adapter resume snapshots](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sqlite-resume-snapshot.test.ts), [Browser composed-owner histories](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/per-collection-coordinator-oracle.test.ts), [Browser coordinator RPC](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/browser-coordinator.test.ts), [shared-driver fairness](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/shared-driver-fairness-oracle.test.ts), [driver contracts](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract.ts), [Node shared-handle scheduling](https://github.com/TanStack/db/blob/main/packages/node-db-sqlite-persistence/tests/node-driver.test.ts), [OP-SQLite shared-handle scheduling](https://github.com/TanStack/db/blob/main/packages/react-native-db-sqlite-persistence/tests/op-sqlite-driver.test.ts), [browser OPFS lifecycle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-page-lifecycle-oracle.test.ts), [worker diagnostics](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/tests/opfs-worker-diagnostics-oracle.test.ts), [Electron IPC and composed owner](https://github.com/TanStack/db/blob/main/packages/electron-db-sqlite-persistence/tests/electron-ipc.test.ts), [113-law manifest](https://github.com/TanStack/db/blob/main/packages/db-collection-e2e/src/fixtures/persisted-conformance-manifest.ts) | Core cache/remote rejection/peer/reopen histories, atomic reset/resume lineage, key-set evidence, dual-adapter races, queued coordinator reload/gap notifications during startup, unscheduled startup/reset overlap, and exact driver results. The shared core-adapter contract checks custom local comparator dispatch for ascending, descending, and comparator-equal public-key ordering at `loadSubset` completion. Host packages register this contract, but the local sqlite3 CLI run does not prove native host execution. Browser composes public source commits with per-collection elected-owner routing and covers the complete committed-transaction wire partition through deterministic Node transport seams. Remote-subset histories distinguish logical demand, physical acquisitions, exact acquisition leases, and released replay tombstones. Electron composes source commits with a per-collection renderer owner, IPC adapter, real SQLite, and reopen checks. The shared-driver fairness owner checks K=1 complete-logical-hydrate scheduling with identical fixed, random, and seed-plus-path campaigns. It records public rows, raw dequeue reach, and a persist-first FIFO hostile control. Its Chromium OPFS fixture refines the provider boundary but does not establish a browser matrix, elapsed-time latency, unbounded eventuality, or multi-process coordination. Same-handle Node and OP-SQLite tests cover transaction admission. Controlled OPFS page/worker histories cover ownership and diagnostic-cause retention. The reset/resume owners use sqlite3 CLI and in-memory node:sqlite seams; they do not prove multi-process WAL, mobile/Tauri, or other native-device execution. Distinct database handles rely on SQLite lock admission rather than one in-process queue. React Native hosts without async-context propagation must use the transaction driver supplied to the callback for nested work. Fake workers and synthetic page events do not prove native handle release or real bfcache admission. The Browser composed seams are not real multi-context/OPFS-worker execution; the Electron harness is not an actual Electron process unless its explicit runtime-bridge mode runs. An ownerless elected node suppresses core routing, while a follower may route demand to the elected owner; host coordinators retry only classified transport or admission failures while demand remains retained. The manifest excludes progressive and move suites; registration and shim runs are not device execution. |
 | SQLite expression-index planning | [Node expression-index oracle](https://github.com/TanStack/db/blob/main/packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts) | RFC #1659 invariant 8 owns identical persisted-index and runtime-expression shapes. Independent expected keys are checked against direct captured SQL, adapter results, and named-index plans. Generated BigInts use SQLite's signed range; one fixed case checks legacy oversized-value reads. Other limits: bounded unqualified JSON paths/scalars, Node BetterSQLite, and no null, arbitrary raw SQL, or native-host planning. Run the package's `test:oracles` campaign. |
 | Offline execution | [scheduler](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/KeyScheduler.property.test.ts), [leadership](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/leadership-replay.property.test.ts), [settlement](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/transaction-settlement.property.test.ts), [serialization](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/transaction-serializer.property.test.ts), [web connectivity replay](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/connectivity-replay-oracle.test.ts), [review record](oracle-reviews/pr-1879-visible-replay.md) | Declarative FIFO eligibility, per-transaction outcomes, durable state and typed wire trees. The web connectivity owner checks a persisted write under a false browser online hint, then visible replay by event or explicit retry, at provider-call, outbox, and caller-settlement cuts. It uses controlled browser globals and fake storage; it does not prove actual browser network detection, genuine offline retry timing, multi-tab leadership transfer, or React Native behavior. Issued work may finish after ownership loss, but new work must not start. Exactly-once network execution is not promised. |
@@ -285,13 +305,16 @@ change that returns to the prior value, and a final value change. It compares
 root Collection reads and subscriber callbacks with an independent sorted
 source Map, and checks Effect callbacks against the last callback-visible row.
 The [DEC-02 review record](oracle-reviews/2026-09-28-retracted-value-retention.md)
-retains the RED and mutant evidence. This owner does not cover a held reorder
-inside a Collection-valued child facade. The receiving owner is
-`packages/db/tests/query/includes-collection-oracle.property.test.ts`; it
-needs a child-row A→B→A update during a held child repair and a facade
-subscriber observation. Concurrent optimistic changes to the same root row
-during a held repair also need a public snapshot and event witness in
-`packages/db/tests/query/includes-optimistic-oracle.property.test.ts`.
+retains the RED and mutant evidence. The receiving Collection-valued owner
+(`packages/db/tests/query/includes-collection-oracle.property.test.ts`) now
+checks a held finite ordered child repair request with A→A, A→B→A, and B→C histories,
+facade identity, silence during the hold, final child order, and subscriber
+delivery. The optimistic owner
+(`packages/db/tests/query/includes-optimistic-oracle.property.test.ts`) checks
+a same-root-row optimistic update during held ordered repair, comparing exact
+public snapshots and change events before release, after release, and after
+rollback. Both use controlled provider timing; real-provider ordering remains
+a separate receiving handoff.
 
 The SQLite resume-snapshot owner also checks a cold, unique-key, non-delete
 full replacement with 205 rows. It compares exact durable rows, row metadata,

@@ -18,9 +18,12 @@ it(`tries every Electric oracle resource and retains primary and secondary failu
       withElectricCleanup(() => {
         throw primary
       }, [
-        () => {
-          released.push(`stream`)
-          throw secondary
+        {
+          label: `stream`,
+          release: () => {
+            released.push(`stream`)
+            throw secondary
+          },
         },
         () => {
           released.push(`http`)
@@ -32,7 +35,7 @@ it(`tries every Electric oracle resource and retains primary and secondary failu
     ).rejects.toBe(primary)
     expect(released).toEqual([`stream`, `http`, `spy`])
     expect(warning).toHaveBeenCalledWith(
-      `Electric oracle cleanup failed after a primary error`,
+      `Electric oracle cleanup failed after a primary error: stream`,
       secondary,
     )
   } finally {

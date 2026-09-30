@@ -155,6 +155,7 @@ async function checkRoundtrip(
   boundary: `encoder` | `decoder` = `encoder`,
   legacy = false,
   versionTwo = false,
+  injectCleanupFailure = false,
 ) {
   const row = (index: number, revision: number, payload: Value): Row => ({
     id: `row:${index}`,
@@ -201,6 +202,7 @@ async function checkRoundtrip(
   })
   const rollback = transaction.isPersisted.promise.catch(() => undefined)
   let hasPrimaryFailure = false
+  let primaryFailure: unknown
   try {
     transaction.mutate(() => {
       edits.forEach((edit, index) => {
@@ -289,7 +291,9 @@ async function checkRoundtrip(
     }
     const serialized = serializer.serialize(offline)
     const encoded = boundary === `encoder` ? corrupt(serialized) : serialized
-    expect(JSON.parse(encoded)).toEqual(expectedWire)
+    expect(JSON.parse(encoded), `mutation wire checkpoint`).toEqual(
+      expectedWire,
+    )
     const fresh = new TransactionSerializer(registry(readers))
     // Also decode independently constructed wire data, so two matching wrong
     // halves cannot establish the format's compatibility by roundtrip alone.
@@ -326,8 +330,10 @@ async function checkRoundtrip(
     }
   } catch (error) {
     hasPrimaryFailure = true
-    throw error
-  } finally {
+    primaryFailure = error
+  }
+  let cleanupFailure: unknown
+  try {
     await cleanupOfflineOracle(
       [
         () => {
@@ -337,10 +343,31 @@ async function checkRoundtrip(
         ...[...writers, ...readers].map(
           (collection) => () => collection.cleanup(),
         ),
+        ...(injectCleanupFailure
+          ? [
+              () => {
+                throw new Error(`injected serializer cleanup failure`)
+              },
+            ]
+          : []),
       ],
-      hasPrimaryFailure,
+      false,
     )
+  } catch (error) {
+    cleanupFailure = error
   }
+  if (hasPrimaryFailure) {
+    if (cleanupFailure !== undefined)
+      throw new AggregateError(
+        cleanupFailure instanceof AggregateError
+          ? cleanupFailure.errors
+          : [cleanupFailure],
+        `Serializer oracle failed and cleanup also failed`,
+        { cause: primaryFailure },
+      )
+    throw primaryFailure
+  }
+  if (cleanupFailure !== undefined) throw cleanupFailure
 }
 
 const twin: Pair = {
@@ -1265,34 +1292,104 @@ const {
 const campaigns = (fixedSeed: number): Array<number | undefined> =>
   replaySeed === undefined ? [fixedSeed, undefined] : [undefined]
 
+const mutationEdits = fc.array(
+  fc.record({
+    kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
+    slot: fc.integer({ min: 0, max: 1 }),
+    before: tree(2),
+    after: tree(2),
+  }),
+  { maxLength: pinned.length },
+)
+const mutationTime = fc.integer({
+  min: -2000000000000,
+  max: 2000000000000,
+})
+const mutationMeaningProperty = (fault: Fault = `none`) =>
+  fc.asyncProperty(mutationEdits, mutationTime, (edits, time) =>
+    checkRoundtrip(edits, time, fault),
+  )
+
 it.each(campaigns(20260914))(
   `preserves mutation wire meaning across restart (seed %s)`,
   async (seed) => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(
-          fc.record({
-            kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
-            slot: fc.integer({ min: 0, max: 1 }),
-            before: tree(2),
-            after: tree(2),
-          }),
-          { maxLength: pinned.length },
-        ),
-        fc.integer({ min: -2000000000000, max: 2000000000000 }),
-        (edits, time) => checkRoundtrip(edits, time),
-      ),
-      {
-        numRuns,
-        seed: seed ?? replaySeed,
-        ...(seed === undefined && replayPath !== undefined
-          ? { path: replayPath }
-          : {}),
-        examples: [[pinned, 1704067200000]],
-      },
-    )
+    await fc.assert(mutationMeaningProperty(), {
+      numRuns,
+      seed: seed ?? replaySeed,
+      ...(seed === undefined && replayPath !== undefined
+        ? { path: replayPath }
+        : {}),
+      examples: [[pinned, 1704067200000]],
+    })
   },
 )
+
+it(`replays a shrunk mutation-wire failure at the same checkpoint`, async () => {
+  // The fault drops a mutation field after the real encoder runs. It leaves
+  // zero-edit histories green, so fast-check must find and shrink a generated
+  // history that reaches the wire assertion. The environment variables permit
+  // a command to run the recorded seed/path without repeating the capture.
+  // Captured replay: OFFLINE_ORACLE_SEED=20260914
+  // OFFLINE_ORACLE_PATH=0:1:0:0:0:1:1:1:1:1 pnpm exec vitest run
+  // tests/transaction-serializer.property.test.ts --configLoader runner
+  // -t 'replays a shrunk mutation-wire failure'
+  const property = mutationMeaningProperty(`omit-changes`)
+  const captured = await fc.check(property, {
+    seed: replaySeed ?? 20260914,
+    ...(replayPath === undefined ? {} : { path: replayPath }),
+    numRuns,
+  })
+  expect(captured.failed).toBe(true)
+  expect(captured.errorInstance).toMatchObject({ name: `AssertionError` })
+  expect(captured.error).toContain(`mutation wire checkpoint`)
+  if (replaySeed !== undefined) return
+
+  expect(captured.numShrinks).toBeGreaterThan(0)
+  expect(captured.counterexamplePath).toMatch(/^\d+(?::\d+)*$/)
+  const capturedPath = captured.counterexamplePath
+  if (capturedPath === null) throw new Error(`Missing captured shrink path`)
+  const original = await fc.check(property, {
+    seed: captured.seed,
+    numRuns,
+    endOnFailure: true,
+  })
+  expect(original.failed).toBe(true)
+  expect(original.errorInstance).toMatchObject({ name: `AssertionError` })
+  expect(original.error).toContain(`mutation wire checkpoint`)
+  const replayed = await fc.check(property, {
+    seed: captured.seed,
+    path: capturedPath,
+    numRuns,
+  })
+  expect(replayed.failed).toBe(true)
+  expect(replayed.counterexample).toEqual(captured.counterexample)
+  expect(replayed.errorInstance).toMatchObject({ name: `AssertionError` })
+  expect(replayed.error).toContain(`mutation wire checkpoint`)
+})
+
+it(`retains the wire mismatch when cleanup also fails`, async () => {
+  let failure: unknown
+  try {
+    await checkRoundtrip(
+      [pinned[0]!],
+      0,
+      `omit-changes`,
+      `encoder`,
+      false,
+      false,
+      true,
+    )
+  } catch (error) {
+    failure = error
+  }
+  expect(failure).toBeInstanceOf(AggregateError)
+  const aggregate = failure as AggregateError
+  expect(aggregate.cause).toMatchObject({ name: `AssertionError` })
+  expect(String(aggregate.cause)).toContain(`mutation wire checkpoint`)
+  expect(aggregate.errors).toEqual([
+    new Error(`injected serializer cleanup failure`),
+  ])
+})
 
 it.each(campaigns(20260915))(
   `reads unversioned Date-marker records across restart (seed %s)`,

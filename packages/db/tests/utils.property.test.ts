@@ -92,13 +92,8 @@ const arbitraryDate = fc.date().map((d) => new Date(d.getTime()))
 const arbitraryRegExp = fc
   .tuple(fc.string(), fc.constantFrom(``, `g`, `i`, `gi`, `m`, `gim`))
   .map(([source, flags]) => {
-    try {
-      // Escape special regex characters to avoid invalid patterns
-      const escapedSource = source.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
-      return new RegExp(escapedSource, flags)
-    } catch {
-      return /test/
-    }
+    const escapedSource = source.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
+    return new RegExp(escapedSource, flags)
   })
 
 const arbitraryUint8Array = fc.uint8Array({ minLength: 0, maxLength: 20 })
@@ -179,6 +174,32 @@ const arbitrarySingleValue = fc.oneof(
   fc.array(fc.integer(), { maxLength: 5 }),
   fc.dictionary(fc.string(), fc.integer(), { maxKeys: 5 }),
 )
+const arbitraryNonNullValue = arbitrarySingleValue.filter(
+  (value) => value !== null,
+)
+const arbitraryDefinedValue = arbitrarySingleValue.filter(
+  (value) => value !== undefined,
+)
+
+// The non-ring grammar is a bounded value grammar, not a grammar of arbitrary
+// JavaScript objects. Every arm of arbitrarySingleValue is reconstructed by
+// one of the fixed witnesses below: the six primitive arms, Date, RegExp,
+// Uint8Array, Float32Array, two Temporal classes, array, and record. The
+// same-type pair grammar has four primitive arms plus Date, RegExp, bytes,
+// two Temporal classes, array, and record. Each pair arm is a product of two
+// independently generated values, so both equal and unequal pairs are legal.
+// The fixed witnesses exercise those two outcomes; deleting either outcome
+// would leave an always-true or always-false comparator undetected. The
+// distinct-type grammar is deliberately restricted to Date/Temporal pairs;
+// it does not claim every cross-class combination. String lengths, integer
+// magnitude, and object keys are fast-check defaults; explicit array/record
+// bounds are 0–5 for equivalence and 0–10 for structural copies, bytes 0–50,
+// Float32Array 0–10, Temporal years 1–9999/months 1–12/days 1–28, and
+// durations 0–100 hours/0–59 minutes/0–59 seconds. Invalid Temporal dates,
+// arbitrary prototypes, nonenumerable properties, and different graph
+// topologies are excluded; dedicated fixed contract tests own some of them.
+// An object and array with the same enumerable index keys is a nearby invalid
+// same-type pair, and the edge-case law rejects it below.
 
 const arbitraryExtraProperty = fc
   .tuple(
@@ -234,6 +255,21 @@ function expectEqualityPair(
 ): void {
   expect(equal(a, b), `forward equality`).toBe(expected)
   expect(equal(b, a), `reverse equality`).toBe(expected)
+}
+
+function expectCopyAndChanged(
+  original: unknown,
+  copy: unknown,
+  changed: unknown,
+  equal: (a: unknown, b: unknown) => boolean = deepEquals,
+): void {
+  expectEqualityPair(original, copy, true, equal)
+  expectEqualityPair(original, changed, false, equal)
+}
+
+function adjacentDateTime(time: number): number {
+  if (Number.isNaN(time)) return 0
+  return time === 8_640_000_000_000_000 ? time - 1 : time + 1
 }
 
 function expectRingLaw(
@@ -307,6 +343,130 @@ function assertDistinctTypes(
 }
 
 describe(`deepEquals property-based tests`, () => {
+  describe(`non-ring grammar boundaries`, () => {
+    const cases: ReadonlyArray<{
+      name: string
+      values: () => readonly [unknown, unknown, unknown]
+    }> = [
+      { name: `null and undefined`, values: () => [null, null, undefined] },
+      {
+        name: `undefined and null`,
+        values: () => [undefined, undefined, null],
+      },
+      { name: `boolean`, values: () => [true, true, false] },
+      { name: `integer`, values: () => [0, 0, 1] },
+      { name: `string`, values: () => [`a`, `a`, `b`] },
+      { name: `double`, values: () => [0.5, 0.5, 1.5] },
+      { name: `NaN`, values: () => [NaN, NaN, 1] },
+      { name: `infinity`, values: () => [Infinity, Infinity, -Infinity] },
+      { name: `signed zero`, values: () => [-0, 0, 1] },
+      {
+        name: `Date time`,
+        values: () => [new Date(0), new Date(0), new Date(1)],
+      },
+      {
+        name: `RegExp flags`,
+        values: () => [/a/g, /a/g, /a/i],
+      },
+      {
+        name: `RegExp source`,
+        values: () => [/a/g, /a/g, /b/g],
+      },
+      {
+        name: `Uint8Array length`,
+        values: () => [new Uint8Array(), new Uint8Array(), new Uint8Array([1])],
+      },
+      {
+        name: `Uint8Array content`,
+        values: () => [
+          new Uint8Array([1]),
+          new Uint8Array([1]),
+          new Uint8Array([2]),
+        ],
+      },
+      {
+        name: `Float32Array content`,
+        values: () => [
+          new Float32Array([1.5]),
+          new Float32Array([1.5]),
+          new Float32Array([2.5]),
+        ],
+      },
+      {
+        name: `Temporal.PlainDate day`,
+        values: () => [
+          new Temporal.PlainDate(2024, 1, 1),
+          new Temporal.PlainDate(2024, 1, 1),
+          new Temporal.PlainDate(2024, 1, 2),
+        ],
+      },
+      {
+        name: `Temporal.Duration seconds`,
+        values: () => [
+          Temporal.Duration.from({ seconds: 1 }),
+          Temporal.Duration.from({ seconds: 1 }),
+          Temporal.Duration.from({ seconds: 2 }),
+        ],
+      },
+      { name: `array length`, values: () => [[], [], [1]] },
+      { name: `array content`, values: () => [[1], [1], [2]] },
+      { name: `record key`, values: () => [{}, {}, { a: 1 }] },
+      { name: `record value`, values: () => [{ a: 1 }, { a: 1 }, { a: 2 }] },
+      {
+        name: `Map entry`,
+        values: () => [
+          new Map([[`a`, 1]]),
+          new Map([[`a`, 1]]),
+          new Map([[`a`, 2]]),
+        ],
+      },
+      {
+        name: `Set membership`,
+        values: () => [new Set([1]), new Set([1]), new Set([2])],
+      },
+    ]
+
+    it.each(cases)(
+      `reconstructs equal and changed $name witnesses`,
+      ({ values }) => {
+        expectCopyAndChanged(...values())
+      },
+    )
+
+    it(`rejects reference-only and type-only comparisons at their named checkpoints`, () => {
+      const [date, dateCopy, changedDate] = cases
+        .find(({ name }) => name === `Date time`)!
+        .values()
+      // A reference-only comparison loses equality between separate Dates.
+      expect(() =>
+        expectCopyAndChanged(date, dateCopy, changedDate, Object.is),
+      ).toThrow(`forward equality`)
+      const [array, arrayCopy, changedArray] = cases
+        .find(({ name }) => name === `array content`)!
+        .values()
+      // A shallow type comparison accepts the wrong element at the same cut.
+      const typeOnly = (a: unknown, b: unknown) =>
+        Object.prototype.toString.call(a) === Object.prototype.toString.call(b)
+      expect(() =>
+        expectCopyAndChanged(array, arrayCopy, changedArray, typeOnly),
+      ).toThrow(`forward equality`)
+      expectCopyAndChanged(date, dateCopy, changedDate)
+      expectCopyAndChanged(array, arrayCopy, changedArray)
+    })
+
+    it(`keeps empty and nonempty containers distinct across the 0–1 margin`, () => {
+      expectCopyAndChanged([], [], [0])
+      expectCopyAndChanged({}, {}, { value: 0 })
+      expectCopyAndChanged(new Map(), new Map(), new Map([[0, 0]]))
+      expectCopyAndChanged(new Set(), new Set(), new Set([0]))
+      expectCopyAndChanged(
+        new Uint8Array(),
+        new Uint8Array(),
+        new Uint8Array([0]),
+      )
+    })
+  })
+
   describe(`bounded native graph relations`, () => {
     it.each(
       edgeCarriers.flatMap((first) =>
@@ -629,7 +789,7 @@ describe(`deepEquals property-based tests`, () => {
       `arrays with same elements are equal`,
       (arr) => {
         const copy = [...arr]
-        expect(deepEquals(arr, copy)).toBe(true)
+        expectCopyAndChanged(arr, copy, [...arr, 0])
       },
     )
 
@@ -637,7 +797,9 @@ describe(`deepEquals property-based tests`, () => {
       fc.dictionary(fc.string(), fc.integer(), { minKeys: 0, maxKeys: 10 }),
     ])(`objects with same properties are equal`, (obj) => {
       const copy = { ...obj }
-      expect(deepEquals(obj, copy)).toBe(true)
+      let freshKey = `extra`
+      while (freshKey in obj) freshKey += `_`
+      expectCopyAndChanged(obj, copy, { ...obj, [freshKey]: 0 })
     })
 
     utilsProperty([
@@ -648,7 +810,9 @@ describe(`deepEquals property-based tests`, () => {
     ])(`Maps with same entries are equal`, (entries) => {
       const map1 = new Map(entries)
       const map2 = new Map(entries)
-      expect(deepEquals(map1, map2)).toBe(true)
+      let freshKey = `extra`
+      while (map1.has(freshKey)) freshKey += `_`
+      expectCopyAndChanged(map1, map2, new Map([...map1, [freshKey, 0]]))
     })
 
     utilsProperty([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
@@ -656,7 +820,7 @@ describe(`deepEquals property-based tests`, () => {
       (arr) => {
         const set1 = new Set(arr)
         const set2 = new Set(arr)
-        expect(deepEquals(set1, set2)).toBe(true)
+        expectCopyAndChanged(set1, set2, new Set([...set1, `fresh`]))
       },
     )
 
@@ -664,20 +828,24 @@ describe(`deepEquals property-based tests`, () => {
       `Uint8Arrays with same content are equal`,
       (arr) => {
         const copy = new Uint8Array(arr)
-        expect(deepEquals(arr, copy)).toBe(true)
+        expectCopyAndChanged(arr, copy, new Uint8Array([...arr, 0]))
       },
     )
 
     utilsProperty([arbitraryDate])(`Dates with same time are equal`, (date) => {
       const copy = new Date(date.getTime())
-      expect(deepEquals(date, copy)).toBe(true)
+      expectCopyAndChanged(
+        date,
+        copy,
+        new Date(adjacentDateTime(date.getTime())),
+      )
     })
 
     utilsProperty([arbitraryTemporalPlainDate])(
       `Temporal.PlainDate with same values are equal`,
       (date) => {
         const copy = new Temporal.PlainDate(date.year, date.month, date.day)
-        expect(deepEquals(date, copy)).toBe(true)
+        expectCopyAndChanged(date, copy, date.add({ days: 1 }))
       },
     )
   })
@@ -731,31 +899,34 @@ describe(`deepEquals property-based tests`, () => {
     utilsProperty([fc.date(), fc.date()])(
       `dates with different times are not equal`,
       (date1, date2) => {
-        if (date1.getTime() !== date2.getTime()) {
-          expect(deepEquals(date1, date2)).toBe(false)
-        }
+        // Equal draws, including two invalid Dates, still exercise the
+        // different-time consequence instead of silently skipping it.
+        const changedTime = Object.is(date1.getTime(), date2.getTime())
+          ? adjacentDateTime(date1.getTime())
+          : date2.getTime()
+        expectCopyAndChanged(
+          date1,
+          new Date(date1.getTime()),
+          new Date(changedTime),
+        )
       },
     )
   })
 
   describe(`edge cases`, () => {
-    utilsProperty([arbitrarySingleValue])(
+    utilsProperty([arbitraryNonNullValue])(
       `null is never equal to a non-null value`,
       (a) => {
-        if (a !== null) {
-          expect(deepEquals(null, a)).toBe(false)
-          expect(deepEquals(a, null)).toBe(false)
-        }
+        expect(a).not.toBe(null)
+        expectEqualityPair(null, a, false)
       },
     )
 
-    utilsProperty([arbitrarySingleValue])(
+    utilsProperty([arbitraryDefinedValue])(
       `undefined is never equal to a non-undefined value`,
       (a) => {
-        if (a !== undefined) {
-          expect(deepEquals(undefined, a)).toBe(false)
-          expect(deepEquals(a, undefined)).toBe(false)
-        }
+        expect(a).not.toBe(undefined)
+        expectEqualityPair(undefined, a, false)
       },
     )
 
@@ -788,6 +959,53 @@ describe(`deepEquals property-based tests`, () => {
       )
       expect(deepEquals(nestedObj, clone)).toBe(true)
     })
+  })
+
+  // Keep newly added generated laws after the original registration order:
+  // UTILS_ORACLE_PROPERTY uses ordinal selectors for saved seed/path replays.
+  describe(`additional non-ring value boundaries`, () => {
+    utilsProperty([arbitraryRegExp])(
+      `RegExp source and flags determine equality`,
+      (regex) => {
+        const copy = new RegExp(regex.source, regex.flags)
+        const changedFlags = regex.flags.includes(`i`)
+          ? regex.flags.replace(`i`, ``)
+          : `${regex.flags}i`
+        expectCopyAndChanged(
+          regex,
+          copy,
+          new RegExp(regex.source, changedFlags),
+        )
+      },
+    )
+
+    utilsProperty([arbitraryFloat32Array])(
+      `Float32Array content and length determine equality`,
+      (array) => {
+        expectCopyAndChanged(
+          array,
+          new Float32Array(array),
+          new Float32Array([...array, 0]),
+        )
+      },
+    )
+
+    utilsProperty([arbitraryTemporalDuration])(
+      `Temporal.Duration with same fields is equal and changed seconds are unequal`,
+      (duration) => {
+        const copy = Temporal.Duration.from({
+          hours: duration.hours,
+          minutes: duration.minutes,
+          seconds: duration.seconds,
+        })
+        const changed = Temporal.Duration.from({
+          hours: duration.hours,
+          minutes: duration.minutes,
+          seconds: duration.seconds + 1,
+        })
+        expectCopyAndChanged(duration, copy, changed)
+      },
+    )
   })
 })
 
