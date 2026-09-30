@@ -820,6 +820,7 @@ Thrown when calling `commit()` on a sync transaction that's already committed.
 ```tsx
 import {
   createCollection,
+  createLiveQueryCollection,
   SchemaValidationError,
   DuplicateKeyError,
   UpdateKeyNotFoundError,
@@ -846,19 +847,22 @@ const todoCollection = createCollection({
     return response.json()
   },
   sync: {
-    sync: ({ begin, write, commit }) => {
+    sync: ({ begin, write, commit, markReady }) => {
       // Your sync implementation
       begin()
       // ... sync logic
       commit()
+      markReady()
     }
   }
 })
 
+const todosQuery = createLiveQueryCollection((query) =>
+  query.from({ todos: todoCollection })
+)
+
 const TodoApp = () => {
-  const { data, status, isError, isLoading } = useLiveQuery(
-    (query) => query.from({ todos: todoCollection })
-  )
+  const { data, isError, isLoading } = useLiveQuery(todosQuery)
 
   const handleAddTodo = async (text: string) => {
     try {
@@ -881,10 +885,21 @@ const TodoApp = () => {
     }
   }
 
+  const handleRestart = async () => {
+    try {
+      await todosQuery.cleanup()
+      await todoCollection.cleanup()
+      await todosQuery.preload()
+    } catch (error) {
+      alert(`Failed to restart todos: ${String(error)}`)
+    }
+  }
+
   if (isError) {
     return (
       <div>
-        Collection error - data may be stale
+        <div>Collection error - data may be stale</div>
+        <button onClick={handleRestart}>Restart Collections</button>
       </div>
     )
   }

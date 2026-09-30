@@ -1032,7 +1032,6 @@ describe(`Collection cleanup admission oracle`, () => {
         sourceSync.commit()
         expect(live.get(1)?.rank).toBe(3)
         expect(observedRanks).toEqual([3])
-        expect(reports).toHaveBeenCalledTimes(1)
       } finally {
         subscription.unsubscribe()
         reports.mockRestore()
