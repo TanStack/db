@@ -1,8 +1,9 @@
 # Code weight: one type dispatch for hashing and equality
 
-Reviewed executable revision: `6073cb13` (base `8283f2e8`, the fetched
+Reviewed executable revision: `3b8412f4` (base `0122da80`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
-commit.
+commit. Work started on `8283f2e8`. `f4c390a6` merges `0122da80`, which does
+not change `packages/db-ivm`.
 
 - `c0182397` adds the hash identity oracle and the work-cap tests on unchanged
   production code.
@@ -11,6 +12,11 @@ commit.
   grammar gaps.
 - `6073cb13` applies review fixes. It fixes one performance regression and
   one behavior change, and it closes three more grammar gaps.
+- `33603a2f` compares type markers by object identity, after an external
+  review found that equality used random numbers as type identity.
+- `3b8412f4` runs every oracle law in a module copy whose type markers all
+  collide, generates any value as a Map key, and aims half of the mutations
+  at container nodes.
 
 Each version of the new tests also passes on the base code. The documentation
 commit that follows also adds comments to the oracle file, with no executable
@@ -22,7 +28,9 @@ change.
 each had a six-way type dispatch: Date, binary, Temporal, RegExp, and the
 Map/Set/array/object shapes. Each branch had its own hasher or its own
 comparison. One `objectParts(input)` function now returns a
-`[marker, header, body?]` view that both use:
+`[marker, header, body?]` view that both use. Each marker is a private object
+that holds a random hash number. Hashing writes the number, and equality
+compares the objects by identity.
 
 | Type | Header | Body |
 | --- | --- | --- |
@@ -52,12 +60,12 @@ random for each process, and nothing persists them.
 
 | Entry | Revision | min | gzip | brotli |
 | --- | --- | ---: | ---: | ---: |
-| full `@tanstack/db` (db-ivm inlined) | `8283f2e8` | 374,186 | 105,541 | 89,418 |
-| | `6073cb13` | 373,197 | 105,282 | 89,193 |
-| | Δ | −989 | −259 | −225 |
-| standalone `@tanstack/db-ivm` | `8283f2e8` | 34,374 | 10,570 | 9,513 |
-| | `6073cb13` | 33,391 | 10,335 | 9,299 |
-| | Δ | −983 | −235 | −214 |
+| full `@tanstack/db` (db-ivm inlined) | `0122da80` | 378,307 | 106,762 | 90,361 |
+| | `3b8412f4` | 377,379 | 106,527 | 90,141 |
+| | Δ | −928 | −235 | −220 |
+| standalone `@tanstack/db-ivm` | `0122da80` | 34,374 | 10,570 | 9,513 |
+| | `3b8412f4` | 33,452 | 10,347 | 9,353 |
+| | Δ | −922 | −223 | −160 |
 
 All numbers come from an esbuild bundle of the public entry, minified.
 
@@ -88,6 +96,11 @@ behaviors below. This change keeps each one as the base code had it:
    rule, so a RegExp whose `lastIndex` is `NaN` equaled its copy. The base
    code compared RegExp fields with `!==`. Headers now compare with `===`, and
    the header of an invalid Date is `invalid`, so all invalid dates stay equal.
+5. **Type identity.** The base code told types apart with `instanceof`. The
+   first port compared the random marker numbers, so two types whose numbers
+   collided compared equal, for example an empty Map and an empty Set. Map and
+   array then also gave different results in each argument order. Markers are
+   now objects, compared by identity.
 
 ## Why a new owner
 
@@ -133,6 +146,12 @@ properties, `Buffer` or `Uint8Array`, extra Map/Set properties, `-0` for `0`,
 and sharing or copying of a repeated subtree. None of these changes the
 identity.
 
+Every law also runs in a second copy of the module, loaded with a
+`captureHashSession` tape whose initialization draws are all equal. Every
+random constant, including every type marker, then has the same number, in any
+declaration order. A pinned case checks that precondition. In that copy, only
+the sampled distinct-hash control is skipped.
+
 For each acyclic pair, the check asserts:
 
 - `equalHashValues` in both argument orders equals the model verdict.
@@ -176,28 +195,36 @@ Limits:
 
 ## Grammar controls and calibration
 
-Specs cover every kind in the contract, nested to a small depth. A pair is
-either the same spec (30%) or the spec with one near-miss mutation:
+Specs cover every kind in the contract, nested to a small depth. Map keys are
+any generated value. The model merges primitive keys and shared references
+that are equal under SameValueZero, as Map and Set do: the first position
+stays and the last value wins. A pair is either the same spec (30%) or the
+spec with one near-miss mutation. Half of the mutations target a container
+node, because leaves outnumber containers:
 
 | Mutation | Examples |
 | --- | --- |
 | header | a Date timestamp, one binary byte, an appended byte, a Temporal value, RegExp flags or `lastIndex` |
 | hole | an appended hole, a hole for a value, `undefined` for a hole |
 | order | reversed Map entries, Set values, or object keys (object order keeps the identity) |
-| property | a renamed object or Map key, a changed symbol key, an added RegExp or array property |
+| property | a renamed object or Map key, a repeated primitive Map key, a changed symbol key, an added RegExp or array property |
 | retype | A Date becomes its timestamp. Binary becomes an array of its bytes. A Map becomes a Set or an array of entry pairs. A Set becomes an array. An array becomes an object. |
 | replace | a different primitive or reference id |
 | split | a shared child becomes two copies, one of them changed |
 
-- **Reconstruction:** 17 pinned pairs hold one rule each. Four more pinned
-  cases hold the Temporal tag, the cross-realm length check, strict RegExp
-  field comparison, and a shared child against two different copies. One case
-  builds the same shared/copied spec with 39 seed pairs.
+- **Reconstruction:** 22 pinned pairs hold one rule each, in both module
+  copies. Six more pinned cases hold the Temporal tag, strict RegExp field
+  comparison, a shared child against two different copies, the cross-realm
+  length check, the colliding-marker precondition, and a `topKBatch`
+  Map-to-Set replacement with colliding markers. One case builds the same
+  shared/copied spec with 39 seed pairs.
 - **Ablation and exclusion:** the mutants below.
 - **Range:** the positive execution witness requires the fixed campaign
   (seed `2026930`, 300 pairs) to reach all 20 value kinds and all eight
   mutation classes, to give a `false` verdict for header, hole, retype,
   replace, and split mutations, and to give only `true` for unmutated pairs.
+  It also requires Map keys that are numbers, symbols, references, and
+  containers, and at least one merged Map key.
 
 Each run executes a fixed campaign and a random campaign of 300 pairs for
 acyclic values, and the same for cyclic values.
@@ -206,23 +233,23 @@ select a direct replay.
 
 ### Source mutants on unchanged production (`8283f2e8` sources)
 
-All rows use the tests at `6073cb13`. The columns count failures:
+All rows use the tests at `3b8412f4`. The columns count failures:
 
-- **Identity oracle:** `hash-identity-oracle.property.test.ts` (27 cases).
+- **Identity oracle:** `hash-identity-oracle.property.test.ts` (34 cases).
 - **Work-cap pins:** the seven boundary cases in `hash-work.test.ts`.
 - **Pre-existing:** every other db-ivm test, with `hash-work.test.ts` at its
   `origin/main` version (589 tests).
 
 | Mutant | Identity oracle | Work-cap pins | Pre-existing |
 | --- | --- | --- | --- |
-| W1: equality ignores RegExp `lastIndex` | assertion failure (4) | 0 | 3 |
+| W1: equality ignores RegExp `lastIndex` | assertion failure (3) | 0 | 3 |
 | W2: equality ignores array length | assertion failure (4) | 0 | 3 |
-| W3: equality ignores the container kind | assertion failure (5) | 0 | 3 |
+| W3: equality ignores the container kind | assertion failure (9) | 0 | 3 |
 | W4: binary equality compares only lengths | assertion failure (3) | 0 | 3 |
 | W5: Temporal equality compares only tags | assertion failure (2) | 0 | 0 |
 | W6: registered handles compare structurally | assertion failure (3) | 0 | 3 |
 | W7: equality ignores symbol keys | assertion failure (3) | 0 | 3 |
-| W8: a Set hashes with the array marker | assertion failure (3) | 0 | 0 |
+| W8: a Set hashes with the array marker | assertion failure (4) | 0 | 0 |
 | W9: hashing skips symbol keys | assertion failure (3) | 0 | 7 |
 | W10: hashing omits the array length | assertion failure (3) | 6 | 2 |
 | W11: invalid dates compare with `===` | assertion failure (3) | 0 | 0 |
@@ -232,18 +259,18 @@ A first mutant for W11, "Date equality accepts a non-Date", survived every
 test. It is equivalent in this domain: the earlier `typeof` guard rejects a
 Date compared with a primitive, and no generated object has `getTime`.
 
-### Source mutants on the refactor (`6073cb13`)
+### Source mutants on the refactor (`3b8412f4`)
 
 | Mutant | Identity oracle | Work-cap pins | Pre-existing |
 | --- | --- | --- | --- |
-| N1: a Set uses the Map marker | assertion failure (3) | 0 | 0 |
+| N1: a Set uses the Map marker | assertion failure (6) | 0 | 0 |
 | N2: equality skips header values | assertion failure (7) | 0 | 15 |
 | N3: the binary header holds only the length | assertion failure (3) | 0 | 3 |
 | N4: header-only types compare equal before their headers | assertion failure (5) | 0 | 6 |
 | N5: header values skip the work counter (the prototype) | 0 | assertion failure (6) | 0 |
 | N6: hashing drops symbol keys | assertion failure (3) | 0 | 7 |
 | N7: a RegExp has no body | assertion failure (2) | 1 | 0 |
-| N8: a Map body holds only values | assertion failure (3) | 0 | 7 |
+| N8: a Map body holds only values | assertion failure (7) | 0 | 7 |
 | N9: the Temporal header drops the tag | assertion failure (1) | 0 | 0 |
 | N10: registered handles compare structurally | assertion failure (3) | 0 | 3 |
 | N11: the cross-realm length check is removed | assertion failure (1) | 0 | 0 |
@@ -251,10 +278,13 @@ Date compared with a primitive, and no generated object has `getTime`.
 | N13: equality skips values under symbol keys | assertion failure (2) | 0 | 0 |
 | N14: headers compare with the `NaN` rule (the first port) | assertion failure (1) | 0 | 0 |
 | N15: the revisit lookup follows `objectParts` (the first port) | 0 | 0 | 0 |
-| N16: hashing counts non-enumerable string keys | assertion failure (3) | 6 | 0 |
+| N16: hashing counts non-enumerable string keys | assertion failure (4) | 6 | 0 |
+| N17: equality compares marker numbers (the first port) | assertion failure (9) | 0 | 0 |
 
 N15 changes only work, not identity. The entry-copy law in
-`hash-work.test.ts` rejects it with an assertion failure (1 case).
+`hash-work.test.ts` rejects it with an assertion failure (1 case). The
+production code before `33603a2f`, which compared marker numbers, fails the
+same 9 oracle cases as N17, including both generated pair campaigns.
 
 History of the grammar gaps:
 
@@ -264,9 +294,12 @@ History of the grammar gaps:
 - N12, N13, N14, and N15 came from review of `b7455952`. `6073cb13` adds the
   split mutation, mutations of values under symbol keys, the strict RegExp
   pin, and the entry-copy law.
+- N17 came from an external review of `f4c390a6`. `33603a2f` added a pinned
+  collision at fixed draw positions. `3b8412f4` replaces it with the
+  colliding module copy, which does not depend on declaration order.
 
-Eleven mutants pass every pre-existing db-ivm test: W5, W8, W11, N1, N5, N9,
-N11, N12, N13, N14, and N15.
+Fourteen mutants pass every pre-existing db-ivm test: W5, W8, W11, N1, N5, N7,
+N9, N11, N12, N13, N14, N15, N16, and N17.
 
 ## Performance
 
@@ -304,7 +337,9 @@ the base code. Its noise reached ±7% in this run and ±10% in earlier runs.
 - Equality over a shared Map is faster than the base, and it copies entries
   once for each distinct pair.
 
-The harness is not checked in.
+The harness is not checked in. These timings predate `33603a2f`, which adds one
+property read for each hashed object and compares marker objects instead of
+numbers. They were not rerun for that change.
 
 ## ORC-001 through ORC-012
 
@@ -325,19 +360,19 @@ The harness is not checked in.
 
 ## Verification
 
-On `6073cb13`, the following passed:
+On `3b8412f4`, the following passed:
 
-- `packages/db-ivm` Vitest: 42 files, 624 tests, no type errors.
+- `packages/db-ivm` Vitest: 42 files, 631 tests, no type errors.
 - `packages/db-ivm` `tsc --noEmit`: no errors.
-- `packages/db` Vitest, typecheck off: 193 files, 6,830 tests.
-- `pnpm test:oracles`: 49 `@tanstack/db` files with 2,838 tests, and 16
+- `packages/db` Vitest, typecheck off: 193 files, 7,162 tests.
+- `pnpm test:oracles`: 49 `@tanstack/db` files with 2,845 tests, and 16
   `@tanstack/query-db-collection` files with 454 tests and 1 todo.
 - `pnpm test:minified-db`: error names, index metadata, query rows, and live
   updates.
 
 The environment was Node `v24.19.0` and Vitest `3.2.4` on Darwin arm64.
 
-## External review follow-up at `33603a2f`
+## External review follow-up at `33603a2f` and `3b8412f4`
 
 The executable fix at `33603a2f` follows reviewed PR head `f4c390a6` and
 base `0122da80`. An external review found that the refactor used independent
@@ -345,32 +380,33 @@ base `0122da80`. An external review found that the refactor used independent
 collide even though the value types differ. With a fresh module and controlled
 `Math.random` draws, making only the Map and Set marker numbers equal made
 `equalHashValues(new Map(), new Set())` and its reverse return `true` on
-`f4c390a6`; both returned `false` on the base. Making the Map and array numbers
-equal made Map-to-array return `true` and array-to-Map return `false` on the PR;
-both directions returned `false` on the base. Each probe observed 19 draws.
+`f4c390a6`. Both returned `false` on the base. Making the Map and array numbers
+equal made Map-to-array return `true` and array-to-Map return `false` on the PR.
+Both directions returned `false` on the base. Each probe observed 19 draws.
 
 The new pinned oracle first failed on the unmodified PR at the Map/Set
 assertion (`expected true to be false`). Each type marker now carries its
 original random hash number in a distinct private object. Hashing writes that
-number; equality compares the marker objects by identity. This keeps the
+number. Equality compares the marker objects by identity. This keeps the
 shared type dispatch and its random hash values while separating equality
 from numeric marker collisions. The same controlled probes then returned
 `false` for both pairs in both argument orders. The oracle also checks that
 `topKBatch` retains one Map retraction and one Set addition for the same key.
-The full db-ivm suite passed 625 tests in 42 files; `tsc --noEmit -p
+The full db-ivm suite passed 625 tests in 42 files. `tsc --noEmit -p
 packages/db-ivm/tsconfig.json`, Prettier, and `git diff --check` passed.
 
 The test checks equality type separation for empty Map/Set and Map/array pairs
 under forced collisions, plus the corresponding `topKBatch` output. Distinct
-marker objects cover the other supported carrier types by the same invariant;
-the test does not prove hash collision freedom or all live-query histories.
-The generated Map grammar still uses only the string keys `a`, `b`, and `c`.
-Numeric, symbol, object, and reference keys need another grammar axis or a
-pinned witness before the oracle claims those legal cases.
+marker objects cover the other supported carrier types by the same invariant.
+The test does not prove hash collision freedom or all live-query histories.
+`3b8412f4` closes both gaps. The pinned draw-position test is replaced by the
+colliding module copy, which runs every generated and pinned law with all type
+markers equal. Generated Map keys now include numbers, symbols, references,
+and containers, with SameValueZero merging in the model.
 
 Three other external suggestions remain optional. The `if (body)` test in the
 header loop is invariant, but runs at most three times for a RegExp and once
-for an array. Distinct object comparisons allocate two parts tuples; a
+for an array. Distinct object comparisons allocate two parts tuples. A
 Map/Set mismatch copied one entries iterator on both the PR and base, while a
 binary/Date mismatch newly calls `String.fromCharCode` once. A direct type
 short-circuit would duplicate the shared dispatch without an established hot
@@ -378,4 +414,4 @@ path need. For a fresh 16-byte binary value, a deterministic counter observed
 56 `writeByte` calls on the PR and 40 on the base. The earlier review's 10%
 binary timing and 1.3–1.4× small-pair equality timing were not rerun for this
 fix. Reintroducing specialized binary hashing remains a conditional
-performance follow-up, not part of this correctness repair.
+performance follow-up, not part of this correctness fix.

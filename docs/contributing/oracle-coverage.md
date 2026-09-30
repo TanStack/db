@@ -132,13 +132,14 @@ comment and the current API/architecture contract before extending its model.
 | Boundary refinements | [cleanup/restart](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-cleanup-restart-oracle.test.ts), [issue #1891 async-cleanup review](oracle-reviews/issue-1891-async-cleanup.md), [issue #1891 cleanup-start follow-up](oracle-reviews/issue-1891-cleanup-start-followup.md), [metadata publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-oracle.test.ts), [D2 source reconciliation](https://github.com/TanStack/db/blob/main/packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/includes-work-counter-oracle.test.ts) | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them. |
 | Small structures and test mechanics | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue.property.test.ts), [live-query GC clock](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-clock.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts) | Map/full-sort and elapsed appointment-list models with executed target/seed/path checks. SortedMap also checks deferred bulk writes, array-movement work, scan reuse, live iterators, runtime `undefined` keys, and public single-transaction and queued-transaction Collection sync paths. It does not settle the contract for comparator-observed values mutated after publication or every legal iterator/mutation interleaving. Wall-clock steps do not move due times, and a focused public witness checks source subscription release. Callback-reentrant scheduling, OS suspend/resume, environments without `performance.now()`, and fake/real Performance clock replacement while GC is pending remain outside this coverage. Tests must drain or reset pending GC before switching timer providers. |
 
-The hash-identity owner also forces numeric type-marker collisions in a fresh
-module. It checks unequal Map/Set and Map/Array pairs in both argument orders,
-then checks that a `topKBatch` Map-to-Set replacement retains both changes.
-This closes the equality type-separation witness for those carriers; it does
-not prove hash collision freedom. Generated Map keys remain limited to the
-strings `a`, `b`, and `c`. Numeric, symbol, object, and reference keys need a
-separate grammar axis or pinned witness before claiming coverage for them.
+The hash-identity owner also runs every law in a second module copy whose
+initialization draws are all equal, so every type marker has the same hash
+number in any declaration order. There it checks equality verdicts, equal
+hashes for equal identities, cycle rejection, and a `topKBatch` Map-to-Set
+replacement; only the sampled distinct-hash control is skipped. This closes
+the equality type-separation witness for every generated carrier. It does not
+prove hash collision freedom. Generated Map keys include numbers, symbols,
+references, and containers, and the model merges keys under SameValueZero.
 
 The [NaN ranked-window review](oracle-reviews/2026-09-30-nan-ranked-window.md)
 records an eager direct-source refinement in the pagination owner. It covers
