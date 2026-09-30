@@ -64,7 +64,8 @@ A name is safe when all of these hold:
 1. Every property-name use of it in `packages/db/src` resolves, through the
    TypeScript checker, to a `private` class member declared in
    `packages/db/src`. The uses include property access, object literal keys,
-   class members, interface members, destructuring, and shorthand properties.
+   class members, constructor parameter properties, interface members,
+   destructuring, and shorthand properties.
    An unresolved use (an `any` receiver) or a use that resolves to another
    declaration (a lib type, db-ivm, an internal interface) makes the name
    unsafe.
@@ -97,6 +98,14 @@ and names the file and line.
 | C4: untyped read in `packages/react-db/src` | `used in packages/react-db/src/index.ts` |
 | C5: an identifier equal to the short name `l` in db src | `l is an identifier in src` |
 | C6: an interface member with the same name | `PropertySignature ... used at src/SortedMap.ts` |
+| C7: a `public`, `readonly`, or `protected` constructor parameter property | `Parameter in packages/db/src/SortedMap.ts` |
+| Control: a `private` constructor parameter property | passes (status 0) |
+
+CodeRabbit review of `3799ffa4` found that the first guard never visited
+constructor parameters. A non-private parameter property with a cached name
+passed the check in all three modifier forms. The guard now checks every
+parameter property as a property declaration. No current source had such a
+property, so the cache did not change.
 
 The minified lane keeps its three hostile controls. With the lane bundling
 `dist`, the `new.target.name` control first passed silently, because its mutant

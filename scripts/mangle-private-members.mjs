@@ -3,8 +3,9 @@
 // be a name that is only ever a TypeScript `private` class member.
 //
 // A name is safe when:
-// - every property-name use of it in packages/db/src resolves, through the
-//   type checker, to a `private` member declared in packages/db/src;
+// - every property-name use of it in packages/db/src, including constructor
+//   parameter properties, resolves through the type checker to a `private`
+//   member declared in packages/db/src;
 // - it never appears as a string literal in packages/db/src;
 // - no other package's src or tests reads `.name` or a quoted `'name'`.
 //
@@ -102,6 +103,13 @@ for (const file of dbFiles) {
         ts.isPropertySignature(node) ||
         ts.isMethodSignature(node)) &&
       node.name &&
+      ts.isIdentifier(node.name)
+    )
+      checkName(node.name)
+    // A constructor parameter with a modifier also declares a property.
+    else if (
+      ts.isParameter(node) &&
+      ts.isParameterPropertyDeclaration(node, node.parent) &&
       ts.isIdentifier(node.name)
     )
       checkName(node.name)
