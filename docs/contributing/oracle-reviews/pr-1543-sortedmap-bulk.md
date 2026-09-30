@@ -80,9 +80,8 @@ array and does not decide whether comparator-observed fields may change after
 publication. The SortedMap and collection-state-retention oracle owners must
 receive that law when the product contract is decided. Exact one-million-row
 timings and the discarded snapshot candidate remain evidence gaps in the
-external PR, not claims of this repair. CodeRabbit's finding was accurate but
-its review missed scan, memory, and runtime-key effects, so this artifact alone
-does not support a human reviewer hiring recommendation.
+external PR, not claims of this repair. The original review did not assess
+scan, memory, or runtime-key effects; this record covers them.
 
 Loss audit: nine raw items = one fixed now (quadratic bulk work), one refuted
 (broad compatibility of the BTree proposal), one already fixed (ordinary
