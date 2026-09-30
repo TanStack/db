@@ -4632,6 +4632,97 @@ describe(`query collection ownership lifecycle`, () => {
     }
   })
 
+  /**
+   * A completed failure remains visible until a later successful result
+   * applies. The model counts terminal failures, including reuse of the same
+   * Error object in one clock tick. The persisted scan holds the older success
+   * between fetch completion and application; the public checkpoint is after
+   * that scan is released. This does not exercise native SQLite persistence.
+   */
+  it.each([`clearError`, `reused-error`] as const)(
+    `does not let an older held revalidation clear a newer Query error after %s`,
+    async (retryMode) => {
+      const id = `held-revalidation-newer-error`
+      const queryHash = hashKey([id])
+      const previousError = new Error(`initial fetch failed`)
+      const newerError =
+        retryMode === `reused-error`
+          ? previousError
+          : new Error(`later fetch failed`)
+      const dateNow =
+        retryMode === `reused-error`
+          ? vi.spyOn(Date, `now`).mockReturnValue(1_000)
+          : undefined
+      const firstResult = createDeferred<Array<Item>>()
+      const laterResult = createDeferred<Array<Item>>()
+      const persistedScan =
+        createDeferred<
+          Array<{ key: string | number; value: Item; metadata?: unknown }>
+        >()
+      const scanPersistedRows = vi.fn(() => persistedScan.promise)
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const { collection, queryFn } = createOwnershipFixture({
+        id,
+        results: [firstResult.promise, [shared], laterResult.promise],
+        syncMode: `on-demand`,
+        scanPersistedRows,
+        setupMetadata: (metadata) => {
+          metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+            queryHash,
+            mode: `until-revalidated`,
+          })
+        },
+      })
+      cleanups.push(() => {
+        consoleError.mockRestore()
+        dateNow?.mockRestore()
+        return Promise.resolve()
+      })
+
+      try {
+        const initialLoad = collection._sync.loadSubset({})
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+        firstResult.reject(previousError)
+        await expect(
+          Promise.resolve(initialLoad === true ? undefined : initialLoad),
+        ).rejects.toBe(previousError)
+        expect(collection.utils.lastError).toBe(previousError)
+
+        const firstRetry = (
+          retryMode === `clearError`
+            ? collection.utils.clearError()
+            : collection.utils.refetch({ throwOnError: true })
+        ).then(
+          () => ({ outcome: `fulfilled` as const }),
+          (error: unknown) => ({ outcome: `rejected` as const, error }),
+        )
+        await vi.waitFor(() => {
+          expect(queryFn).toHaveBeenCalledTimes(2)
+          expect(scanPersistedRows).toHaveBeenCalledOnce()
+        })
+        expect(collection.utils.lastError).toBe(previousError)
+
+        const secondRetry = collection.utils.refetch({ throwOnError: true })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+        laterResult.reject(newerError)
+        await expect(secondRetry).rejects.toBe(newerError)
+        expect(collection.utils.lastError).toBe(newerError)
+        expect(collection.utils.errorCount).toBe(2)
+
+        persistedScan.resolve([])
+        expect(await firstRetry).toEqual({ outcome: `fulfilled` })
+        expect(collection.utils.lastError).toBe(newerError)
+        expect(collection.utils.errorCount).toBe(2)
+      } finally {
+        firstResult.resolve([])
+        laterResult.resolve([])
+        persistedScan.resolve([])
+      }
+    },
+  )
+
   it.each([`success`, `failure`] as const)(
     `does not recount the previous error during a Query retry attempt ending in %s`,
     async (outcome) => {
