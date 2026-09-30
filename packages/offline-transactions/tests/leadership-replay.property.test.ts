@@ -10,17 +10,21 @@ import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import { readOfflineOracleConfig } from './oracle-config'
 import type { OfflineTransaction, OnlineDetector } from '../src/types'
+import type { TestItem } from './harness'
 
 /**
- * # May leadership replay an offline transaction more than once?
+ * # May leadership replay an offline transaction more than once, or report
+ * success for an action that never reached durable admission?
  *
  * Contract and source: OfflineExecutor leadership, TransactionExecutor serial
  * scheduling, and OutboxManager durability define this boundary. Only the
- * current leader may admit stored work. Issued work may settle after leadership
- * loss, but loss or disposal fences startup, stale reads, retry hooks, and new
- * provider work. A durable row remains owned until its acknowledgement or
- * permanent rejection is durably removed, and an ID already pending, running,
- * completed, permanently rejected, or durably removed must not execute twice.
+ * current leader may admit stored work. An action cannot fulfill when neither
+ * its outbox record nor its provider mutation exists. Issued work may settle
+ * after leadership loss, but loss or disposal fences startup, stale reads,
+ * retry hooks, and new provider work. A durable row remains owned until its
+ * acknowledgement or permanent rejection is durably removed, and an ID already
+ * pending, running, completed, permanently rejected, or durably removed must
+ * not execute twice.
  *
  * Model: this file is a partial relational oracle, not a second executor. Each
  * history relates three independent projections: durable outbox IDs, scheduler
@@ -35,6 +39,8 @@ import type { OfflineTransaction, OnlineDetector } from '../src/types'
  * boundaries. Controlled storage may hold, reject, or finish individual reads,
  * writes, and deletes. Histories include concurrent scans, repeated leadership
  * reports, filtered replay snapshots, mixed deletion outcomes, and later work.
+ * Action histories also hold leadership, lose it before invocation, or lose it
+ * during or just after onMutate, after offline selection but before admission.
  *
  * Production driver and refinement check: the real OfflineExecutor,
  * TransactionExecutor, KeyScheduler, OutboxManager, and transaction path run
@@ -45,7 +51,8 @@ import type { OfflineTransaction, OnlineDetector } from '../src/types'
  * Reach and controls: pinned histories force each lifecycle boundary and both
  * mixed-deletion positions. Fixed and random campaigns cover legal adjacent
  * histories and support seed/path replay. Delayed-read, stale-admission, and
- * mixed-removal witnesses reject the recorded pre-fix behaviors.
+ * mixed-removal witnesses reject the recorded pre-fix behaviors. The action
+ * admission witness exercises the selection-to-admission gap from issue #1939.
  *
  * Limits: the fake storage adapter proves ordering and ownership, not a native
  * storage engine. Exactly-once network execution across independent leaders is
@@ -116,6 +123,187 @@ const leadershipReportOracle = readOfflineOracleConfig({
 const delayedReadOracle = readOfflineOracleConfig({
   prefix: `OFFLINE_ORACLE`,
   defaultRuns: 30,
+})
+
+// The model is a safety relation over public settlement and external effects:
+// fulfillment requires an admitted outbox record or a provider call. The
+// before-call history selects the online-only path; the onMutate history has
+// already selected the offline path. Loss before admission rejects and rolls
+// back that selected offline transaction.
+it.each([
+  { history: `retains leadership`, loss: `never`, providerCalls: 1 },
+  {
+    history: `loses leadership before invocation`,
+    loss: `before-call`,
+    providerCalls: 1,
+  },
+  {
+    history: `loses leadership during onMutate`,
+    loss: `on-mutate`,
+    providerCalls: 0,
+  },
+  {
+    history: `loses leadership just after onMutate`,
+    loss: `after-on-mutate`,
+    providerCalls: 0,
+  },
+] as const)(
+  `never fulfills an unadmitted action when it $history`,
+  async ({ loss, providerCalls }) => {
+    const admitted = gate()
+    class Storage extends FakeStorageAdapter {
+      override async set(key: string, value: string) {
+        await super.set(key, value)
+        if (key.startsWith(`tx:`)) admitted.resolve()
+      }
+    }
+    const env = createTestOfflineEnvironment({ storage: new Storage() })
+    const row: TestItem = {
+      id: `admission-row`,
+      value: `Buy milk`,
+      completed: false,
+      updatedAt: new Date(1700000000000),
+    }
+    const outcome: {
+      status: `pending` | `fulfilled` | `rejected`
+      error?: unknown
+    } = {
+      status: `pending`,
+    }
+    let observed: Promise<void> | undefined
+    let transactionId: string | undefined
+    let hasPrimaryFailure = false
+    try {
+      await env.waitForLeader()
+      const action = env.executor.createOfflineAction({
+        mutationFnName: env.mutationFnName,
+        onMutate: (item: TestItem) => {
+          env.collection.insert(item)
+          if (loss === `on-mutate`) env.leader.setLeader(false)
+          if (loss === `after-on-mutate`)
+            queueMicrotask(() => env.leader.setLeader(false))
+        },
+      })
+      if (loss === `before-call`) env.leader.setLeader(false)
+      const transaction = action(row)
+      transactionId = transaction.id
+      const settled = transaction.isPersisted.promise.then(
+        () => {
+          outcome.status = `fulfilled`
+        },
+        (error: unknown) => {
+          outcome.status = `rejected`
+          outcome.error = error
+        },
+      )
+      observed = settled
+
+      // Both exits from this admission attempt are observable: public
+      // settlement or a completed durable write. A silent pending action with
+      // no outbox record times out here.
+      await atOracleCheckpoint(
+        Promise.race([settled, admitted.promise]),
+        `action settled or durably admitted`,
+      )
+      const durable = await env.executor.peekOutbox()
+      expect(env.mutationCalls).toHaveLength(providerCalls)
+      // Fulfillment without either effect violates the admission law.
+      expect([
+        outcome.status,
+        durable.length,
+        env.mutationCalls.length,
+      ]).not.toEqual([`fulfilled`, 0, 0])
+      if (loss === `on-mutate` || loss === `after-on-mutate`) {
+        expect(env.executor.isOfflineEnabled).toBe(false)
+        expect(outcome.status).toBe(`rejected`)
+        expect(outcome.error).toBeInstanceOf(NonRetriableError)
+        expect(durable).toEqual([])
+        expect(env.collection.get(row.id)).toBeUndefined()
+      } else {
+        await atOracleCheckpoint(observed, `admitted action settled`)
+        expect(outcome.status).toBe(`fulfilled`)
+        expect(env.collection.get(row.id)).toMatchObject(row)
+      }
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      if (outcome.status === `pending` && transactionId) {
+        env.executor.rejectTransaction(
+          transactionId,
+          new NonRetriableError(`oracle cleanup`),
+        )
+      }
+      await cleanupOfflineOracle(
+        [
+          () => observed,
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+it(`rejects a selected manual offline transaction that loses leadership before admission`, async () => {
+  const env = createTestOfflineEnvironment()
+  const row: TestItem = {
+    id: `manual-admission-row`,
+    value: `Buy milk`,
+    completed: false,
+    updatedAt: new Date(1700000000000),
+  }
+  let transactionId: string | undefined
+  let commitObserved: Promise<unknown> | undefined
+  let persistedObserved: Promise<unknown> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const offline = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    const transaction = offline.mutate(() => env.collection.insert(row))
+    transactionId = transaction.id
+    persistedObserved = transaction.isPersisted.promise.then(
+      () => `fulfilled`,
+      (error: unknown) => error,
+    )
+
+    env.leader.setLeader(false)
+    commitObserved = offline.commit().then(
+      () => `fulfilled`,
+      (error: unknown) => error,
+    )
+    const [commitResult, persistedResult] = await atOracleCheckpoint(
+      Promise.all([commitObserved, persistedObserved]),
+      `manual action rejected before admission`,
+    )
+    expect(commitResult).toBeInstanceOf(NonRetriableError)
+    expect(persistedResult).toBe(commitResult)
+    expect(env.collection.get(row.id)).toBeUndefined()
+    expect(await env.executor.peekOutbox()).toEqual([])
+    expect(env.mutationCalls).toEqual([])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    if (transactionId)
+      env.executor.rejectTransaction(
+        transactionId,
+        new NonRetriableError(`oracle cleanup`),
+      )
+    await cleanupOfflineOracle(
+      [
+        () => commitObserved,
+        () => persistedObserved,
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
 })
 
 it(`revokes only replay work excluded by the retry hook`, async () => {

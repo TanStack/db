@@ -560,8 +560,19 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
 - **A10 R7/R13:** provider succeeds, outbox deletion fails, then restart can replay
   the retained work. IndexedDB transaction-completion settlement is fixed here;
   LocalStorage's failure/read policy and post-success acknowledgment remain open.
-- **A10 R4/R5/R9:** loss before durable admission, terminal waiter/removal/clear
-  and restored optimistic lifetimes, and retry-hook failures.
+- **A10 R4:** [Issue #1939](https://github.com/TanStack/db/issues/1939)
+  is owned by the leadership replay oracle. The action grammar crosses retained
+  leadership, loss before invocation, and loss during or just after `onMutate`
+  after offline selection; a manual transaction loses leadership after its optimistic
+  mutation and before `commit()`. The original action path fulfilled with no
+  outbox record or provider call. The repaired paths reject and roll back;
+  retained-leader and before-invocation controls still fulfill. Later leadership
+  changes and a held outbox write crossed with loss or regain remain for this
+  leadership oracle, using controlled write settlement and caller checkpoints.
+  Native storage needs a host-adapter witness. These paths are outside this
+  bounded repair.
+- **A10 R5/R9:** terminal waiter/removal/clear and restored optimistic
+  lifetimes, and retry-hook failures.
 - **A10 R11/R12 and earlier R8:** metadata/native-value domain, old readers of
   new wire records, and unreadable/unknown-version outbox recovery. New readers
   accepting old records does not prove reverse compatibility. Do not delete
