@@ -250,6 +250,8 @@ For more details on framework integration, see the [React](../framework/react/ov
 
 For React applications, you can use the `useLiveSuspenseQuery` hook to integrate with React Suspense boundaries. This hook suspends rendering while data loads initially, then streams updates without re-suspending.
 
+For eager SQLite persisted Collections, you can opt into a network-first initial render on every query source. A completed restore can release React or Solid Suspense after a network deadline or source failure. React also handles a failed client query stream this way. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for setup and limits.
+
 ```tsx
 import { useLiveSuspenseQuery } from '@tanstack/react-db'
 import { Suspense } from 'react'

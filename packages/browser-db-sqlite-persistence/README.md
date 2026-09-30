@@ -2,6 +2,8 @@
 
 Browser SQLite persistence for TanStack DB using `wa-sqlite` + OPFS.
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+
 Supports both single-tab (default) and multi-tab usage. Multi-tab coordination
 is opt-in by passing a `BrowserCollectionCoordinator`.
 
