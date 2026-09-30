@@ -172,13 +172,15 @@ remove or detach ownership before invoking adapter unload. These are bounded
 equivalence arguments, not permission to delete the guards without a separate
 review. The companion does not establish arbitrary provider callback behavior.
 
-A query over one Collection without joins, grouping, DISTINCT, ordering,
-includes, or a parent route keeps its compiled pipeline: it skips row
-canonicalization and the bucket facade adapter, as the live-query architecture
-requires. Removing DISTINCT from that gate fails the functional projection
-oracle. Removing any other condition passes the current `@tanstack/db` suite,
-so canonicalization for those shapes is either redundant or unwitnessed. The
-includes owners need a witness for each condition before the gate can shrink.
+Row canonicalization before the result boundary now runs only for DISTINCT,
+which tracks visibility by selected value; removing it fails the functional
+projection oracle. Ordering already consolidates each key's batch before top-K
+state changes, and materialized relations reduce by public key. Removing the
+former parent-route, non-Collection source, join, grouping, ordering, and
+includes conditions passed the whole `@tanstack/db` suite and a
+`TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=10` oracle campaign. Without the keyed
+reduction, `live-query-result-multiplicity.test.ts` witnesses the output
+boundary rejecting a flush that changes one key by more than one row.
 
 The Collection lifecycle publication owner checks 32 bounded histories in which
 cleanup interrupts nested publication deferrals and a restarted sync run later

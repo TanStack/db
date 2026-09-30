@@ -1019,6 +1019,13 @@ export class CollectionConfigBuilder<
   ) {
     const { write, collection } = config
     const { deletes, inserts, value, orderByIndex } = changes
+    // A key has at most one result row, so one flush can add or remove at
+    // most one. Anything else means an upstream operator broke multiplicity.
+    if (Math.abs(inserts - deletes) > 1) {
+      throw new Error(
+        `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`,
+      )
+    }
 
     // Store the key of the result so that we can retrieve it in the
     // getKey function

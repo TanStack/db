@@ -1083,22 +1083,14 @@ export function compileQuery(
     }
   }
 
-  // Normalize every logical row before DISTINCT and ordering. Those operators
-  // track visibility by row key, so an insert-before-delete replacement with
-  // the same key would otherwise keep the old value and hide route or order
-  // changes. Joined contributors may differ in unselected namespaces; only
-  // the public value and its route/order inputs must be congruent. A query
-  // over one Collection with none of these operators has one contribution per
-  // key, so it keeps its original pipeline.
-  const needsCanonicalRows =
-    parentKeyStream !== undefined ||
-    query.from.type !== `collectionRef` ||
-    (query.join?.length ?? 0) > 0 ||
-    query.groupBy !== undefined ||
-    query.distinct === true ||
-    (query.orderBy?.length ?? 0) > 0 ||
-    includesResults.length > 0
-  if (!selectHasAggregates && needsCanonicalRows) {
+  // DISTINCT tracks visibility by selected value, so an insert-before-delete
+  // replacement with the same key must be normalized first; joined
+  // contributors may differ in unselected namespaces, and only the public
+  // value and its route/order inputs must be congruent. Ordering already
+  // batches each key's retractions before its insertions (topKBatch), and
+  // materialized relations reduce by public key, so other queries keep their
+  // compiled rows.
+  if (!selectHasAggregates && query.distinct) {
     pipeline = canonicalizeSelectedRows(
       pipeline,
       query,
