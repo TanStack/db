@@ -75,48 +75,56 @@ function setup(id: string) {
     await query.cleanup()
     await source.cleanup()
   }
-  return { query, client, hash, tree, cleanup }
+  return { query, client, hash, preload, tree, cleanup }
 }
 
-describe(`useLiveSuspenseQuery client preload recovery`, () => {
-  it(`joins a replacement client query after an ErrorBoundary retry`, async () => {
-    const fixture = setup(`review-retry`)
-    let rejectFirst!: (error: unknown) => void
-    const first = new Promise<{ rows: Array<never> }>((_, reject) => {
-      rejectFirst = reject
-    })
-    void fixture.client._registerLiveQuery(fixture.hash, first).catch(() => {})
-    const view = render(fixture.tree(0))
-    try {
-      expect(view.getByText(`Loading`)).toBeTruthy()
-      await act(async () => {
-        rejectFirst(new Error(`first stream failed`))
-        await first.catch(() => {})
-      })
-      await waitFor(() =>
-        expect(
-          view.getByText(/Failed: Error: first stream failed/),
-        ).toBeTruthy(),
-      )
-      expect(fixture.client._getLiveQuery(fixture.hash)?.status).toBe(`error`)
-
-      let resolveSecond!: (value: { rows: Array<never> }) => void
-      const second = new Promise<{ rows: Array<never> }>((resolve) => {
-        resolveSecond = resolve
+describe(`useLiveSuspenseQuery preload recovery`, () => {
+  it.each([
+    { name: `Error`, failure: new Error(`first stream failed`) },
+    { name: `undefined`, failure: undefined },
+  ])(
+    `joins a replacement client query after a $name rejection`,
+    async ({ name, failure }) => {
+      const fixture = setup(`review-retry-${name}`)
+      let rejectFirst!: (error: unknown) => void
+      const first = new Promise<{ rows: Array<never> }>((_, reject) => {
+        rejectFirst = reject
       })
       void fixture.client
-        ._registerLiveQuery(fixture.hash, second)
+        ._registerLiveQuery(fixture.hash, first)
         .catch(() => {})
-      expect(fixture.client._getLiveQuery(fixture.hash)?.status).toBe(`pending`)
-      view.rerender(fixture.tree(1))
-      expect(view.getByText(`Loading`)).toBeTruthy()
-      await act(() => resolveSecond({ rows: [] }))
-      await waitFor(() => expect(view.getByText(`Ready`)).toBeTruthy())
-    } finally {
-      view.unmount()
-      await fixture.cleanup()
-    }
-  })
+      const view = render(fixture.tree(0))
+      try {
+        expect(view.getByText(`Loading`)).toBeTruthy()
+        await act(async () => {
+          rejectFirst(failure)
+          await first.catch(() => {})
+        })
+        await waitFor(() =>
+          expect(view.getByText(`Failed: ${String(failure)}`)).toBeTruthy(),
+        )
+        expect(fixture.client._getLiveQuery(fixture.hash)?.status).toBe(`error`)
+
+        let resolveSecond!: (value: { rows: Array<never> }) => void
+        const second = new Promise<{ rows: Array<never> }>((resolve) => {
+          resolveSecond = resolve
+        })
+        void fixture.client
+          ._registerLiveQuery(fixture.hash, second)
+          .catch(() => {})
+        expect(fixture.client._getLiveQuery(fixture.hash)?.status).toBe(
+          `pending`,
+        )
+        view.rerender(fixture.tree(1))
+        expect(view.getByText(`Loading`)).toBeTruthy()
+        await act(() => resolveSecond({ rows: [] }))
+        await waitFor(() => expect(view.getByText(`Ready`)).toBeTruthy())
+      } finally {
+        view.unmount()
+        await fixture.cleanup()
+      }
+    },
+  )
 
   it(`does not replace a newer client error with an old rejection`, async () => {
     const fixture = setup(`newer-client-error`)
@@ -184,6 +192,40 @@ describe(`useLiveSuspenseQuery client preload recovery`, () => {
       expect(fixture.client._getLiveQuery(fixture.hash)?.status).toBe(`success`)
       const secondView = render(fixture.tree(1))
       try {
+        await waitFor(() => expect(secondView.getByText(`Ready`)).toBeTruthy())
+      } finally {
+        secondView.unmount()
+      }
+    } finally {
+      firstView.unmount()
+      await fixture.cleanup()
+    }
+  })
+
+  it(`ignores an old preload rejection after Collection cleanup and restart`, async () => {
+    const fixture = setup(`review-stale-preload`)
+    let rejectOld!: (error: unknown) => void
+    const old = new Promise<void>((_, reject) => {
+      rejectOld = reject
+    })
+    fixture.preload.mockReturnValueOnce(old)
+    const firstView = render(fixture.tree(0))
+    try {
+      expect(firstView.getByText(`Loading`)).toBeTruthy()
+      firstView.unmount()
+      await fixture.query.cleanup()
+      fixture.query.startSyncImmediate()
+      expect(fixture.query.status).toBe(`loading`)
+
+      fixture.preload.mockResolvedValue(undefined)
+      await act(() => rejectOld(new Error(`obsolete preload failed`)))
+      const secondView = render(fixture.tree(1))
+      try {
+        expect(secondView.getByText(`Loading`)).toBeTruthy()
+        await fixture.client._registerLiveQuery(
+          fixture.hash,
+          Promise.resolve({ rows: [] }),
+        )
         await waitFor(() => expect(secondView.getByText(`Ready`)).toBeTruthy())
       } finally {
         secondView.unmount()
