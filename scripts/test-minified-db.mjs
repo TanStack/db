@@ -9,10 +9,11 @@
 // does not replace the generated oracles or framework adapter conformance.
 // The --calibrate modes are hostile controls for this check, not CI jobs.
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { assertDbDistFresh } from '../packages/db/scripts/assert-dist-fresh.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const mode = process.argv[2]
@@ -34,33 +35,7 @@ assert.ok(
   'Install workspace dependencies before running test:minified-db',
 )
 
-// The built entry must be at least as new as every source file, the mangle
-// cache, and the package's build configuration, or this check would judge
-// output from an older build pipeline.
-const builtEntry = path.join(root, 'packages/db/dist/esm/index.js')
-const builtInfo = await stat(builtEntry).catch((error) => {
-  if (error.code !== 'ENOENT') throw error
-  return null
-})
-assert.ok(builtInfo, 'Build @tanstack/db before running test:minified-db')
-const inputs = [
-  ...[
-    'mangle-cache.json',
-    'vite.config.ts',
-    'package.json',
-    'tsconfig.json',
-  ].map((file) => path.join(root, 'packages/db', file)),
-  ...(await readdir(path.join(root, 'packages/db/src'), { recursive: true }))
-    .filter((file) => file.endsWith('.ts'))
-    .map((file) => path.join(root, 'packages/db/src', file)),
-]
-for (const input of inputs) {
-  const { mtimeMs } = await stat(input)
-  assert.ok(
-    mtimeMs <= builtInfo.mtimeMs,
-    `packages/db/dist is older than ${path.relative(root, input)}; rebuild @tanstack/db`,
-  )
-}
+const builtEntry = await assertDbDistFresh(root)
 const bundleDirectory = await mkdtemp(path.join(dbNodeModules, '.minified-db-'))
 const bundlePath = path.join(bundleDirectory, 'index.mjs')
 
