@@ -33,6 +33,7 @@ import type {
   DbClient,
   InferResultType,
   InitialQueryBuilder,
+  LiveQueryPersistedStatus,
   LiveQueryWindowController,
   NonSingleResult,
   QueryBuilder,
@@ -81,6 +82,9 @@ export type UseLiveInfiniteQueryReturnWithCollection<
   status: CollectionStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -355,6 +359,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,
+    persistedStatus: snapshot.persistedStatus,
+    isPersistedReady: snapshot.isPersistedReady,
+    persistedError: snapshot.persistedError,
     isIdle: snapshot.isIdle,
     isError: snapshot.isError,
     isCleanedUp: snapshot.isCleanedUp,

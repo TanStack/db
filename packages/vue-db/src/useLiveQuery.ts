@@ -23,6 +23,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   LiveQueryObserver,
+  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
@@ -48,6 +49,9 @@ export interface UseLiveQueryReturn<TContext extends Context> {
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
@@ -82,6 +86,9 @@ export interface UseLiveQueryReturnWithCollection<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
@@ -98,6 +105,9 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
@@ -373,6 +383,8 @@ export function useLiveQuery(
   const status = ref(
     collection.value ? collection.value.status : (`disabled` as const),
   )
+  const persistedStatus = ref<LiveQueryPersistedStatus>(`unavailable`)
+  const persistedError = ref<unknown>(undefined)
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -390,7 +402,10 @@ export function useLiveQuery(
     observer: LiveQueryObserver<any, any>,
     currentCollection: Collection<any, any, any>,
   ) => {
-    status.value = observer.getSnapshot().status as CollectionStatus
+    const snapshot = observer.getSnapshot()
+    status.value = snapshot.status as CollectionStatus
+    persistedStatus.value = snapshot.persistedStatus
+    persistedError.value = snapshot.persistedError
     syncDataFromCollection(currentCollection)
   }
 
@@ -405,6 +420,8 @@ export function useLiveQuery(
     // Handle null collection (disabled query)
     if (!currentCollection) {
       status.value = `disabled` as const
+      persistedStatus.value = `unavailable`
+      persistedError.value = undefined
       state.clear()
       internalData.length = 0
       return
@@ -467,6 +484,9 @@ export function useLiveQuery(
     isReady: computed(
       () => status.value === `ready` || status.value === `disabled`,
     ),
+    persistedStatus: computed(() => persistedStatus.value),
+    isPersistedReady: computed(() => persistedStatus.value === `ready`),
+    persistedError: computed(() => persistedError.value),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),

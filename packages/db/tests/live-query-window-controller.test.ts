@@ -85,6 +85,47 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 const ids = (snap: { data: ReadonlyArray<any> }) => snap.data.map((r) => r.id)
 
 describe(`createLiveQueryWindowController`, () => {
+  it(`projects persisted readiness independently of the window status`, async () => {
+    const source = makeSource()
+    let persistedStatus: `loading` | `ready` = `loading`
+    const listeners = new Set<() => void>()
+    Object.defineProperty(
+      source.config,
+      Symbol.for(`@tanstack/db.persistedReadiness`),
+      {
+        value: {
+          networkTimeoutMs: 0,
+          getOrStartNetworkDeadline: () => Date.now(),
+          getSnapshot: () => ({ status: persistedStatus }),
+          subscribe: (listener: () => void) => {
+            listeners.add(listener)
+            return () => listeners.delete(listener)
+          },
+        },
+      },
+    )
+    const query = makeOrderedLiveQuery(source, 2)
+    const controller = createLiveQueryWindowController(query, { pageSize: 2 })
+    const unsubscribe = controller.subscribe(() => {})
+    try {
+      expect(controller.getSnapshot()).toMatchObject({
+        persistedStatus: `loading`,
+        isPersistedReady: false,
+      })
+      persistedStatus = `ready`
+      for (const listener of listeners) listener()
+      expect(controller.getSnapshot()).toMatchObject({
+        persistedStatus: `ready`,
+        isPersistedReady: true,
+      })
+    } finally {
+      unsubscribe()
+      controller.dispose()
+      await query.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it.each(
     [0, 2, 5].flatMap((rowCount) =>
       [`fetch`, `reset`, `dispose`].flatMap((action) =>

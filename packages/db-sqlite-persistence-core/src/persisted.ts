@@ -1,6 +1,7 @@
 import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
+  PERSISTED_READINESS,
   SYNC_PERSISTENCE_PROTOCOL,
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
@@ -44,6 +45,8 @@ import type {
   LoadSubsetFn,
   LoadSubsetOptions,
   PendingMutation,
+  PersistedReadinessSnapshot,
+  PersistedReadinessSource,
   SyncAppliedReceipt,
   SyncConfig,
   SyncConfigRes,
@@ -583,6 +586,74 @@ export interface PersistedCollectionUtils extends UtilsRecord {
   forceReloadSubset?: (options: LoadSubsetOptions) => Promise<void> | void
 }
 
+class PersistedReadinessTracker implements PersistedReadinessSource {
+  private snapshot: PersistedReadinessSnapshot = { status: `loading` }
+  private networkDeadlineAt: number | undefined
+  private readonly listeners = new Set<() => void>()
+
+  constructor(readonly networkTimeoutMs: number) {}
+
+  getSnapshot = (): PersistedReadinessSnapshot => this.snapshot
+
+  getOrStartNetworkDeadline = (): number => {
+    return (this.networkDeadlineAt ??= Date.now() + this.networkTimeoutMs)
+  }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  set(snapshot: PersistedReadinessSnapshot): void {
+    const deadlineRestarted =
+      snapshot.status === `loading` && this.networkDeadlineAt !== undefined
+    if (deadlineRestarted) {
+      this.networkDeadlineAt = Date.now() + this.networkTimeoutMs
+    }
+    if (
+      this.snapshot.status === snapshot.status &&
+      this.snapshot.error === snapshot.error &&
+      !deadlineRestarted
+    ) {
+      return
+    }
+    this.snapshot = snapshot
+    for (const listener of this.listeners) listener()
+  }
+}
+
+export type PersistedInitialRenderOptions = {
+  strategy: `network-first`
+  /** Time to prefer network before restored rows may render; defaults to 3s. */
+  networkTimeoutMs?: number
+}
+
+const DEFAULT_NETWORK_TIMEOUT_MS = 3_000
+const MAX_TIMER_TIMEOUT_MS = 2_147_483_647
+
+function getNetworkTimeoutMs(
+  initialRender: PersistedInitialRenderOptions | undefined,
+): number | undefined {
+  if (initialRender === undefined) return undefined
+  const strategy = (initialRender as { strategy: unknown }).strategy
+  if (strategy !== `network-first`) {
+    throw new InvalidPersistedCollectionConfigError(
+      `initialRender.strategy must be "network-first"`,
+    )
+  }
+  const timeoutMs = initialRender.networkTimeoutMs ?? DEFAULT_NETWORK_TIMEOUT_MS
+  if (
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs < 0 ||
+    timeoutMs > MAX_TIMER_TIMEOUT_MS
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
+      `initialRender.networkTimeoutMs must be between 0 and ${MAX_TIMER_TIMEOUT_MS}`,
+    )
+  }
+  return timeoutMs
+}
+
 export type PersistedSyncWrappedOptions<
   T extends object,
   TKey extends string | number,
@@ -592,6 +663,8 @@ export type PersistedSyncWrappedOptions<
   sync: SyncConfig<T, TKey>
   persistence: PersistedCollectionPersistence
   schemaVersion?: number
+  /** Opt into network-first rendering with a persisted fallback. */
+  initialRender?: PersistedInitialRenderOptions
 }
 
 export type PersistedLocalOnlyOptions<
@@ -602,6 +675,8 @@ export type PersistedLocalOnlyOptions<
 > = Omit<CollectionConfig<T, TKey, TSchema, TUtils>, `sync`> & {
   persistence: PersistedCollectionPersistence
   schemaVersion?: number
+  /** Opt into network-first rendering with a persisted fallback. */
+  initialRender?: PersistedInitialRenderOptions
 }
 
 type PersistedSyncOptionsResult<
@@ -1282,6 +1357,7 @@ class PersistedCollectionRuntime<
     private readonly persistence: PersistedResolvedPersistence,
     private readonly syncMode: `eager` | `on-demand`,
     private readonly dbName: string,
+    private readonly persistedReadiness?: PersistedReadinessTracker,
   ) {}
 
   setSyncControls(syncControls: SyncControlFns<T, TKey>): void {
@@ -1400,6 +1476,7 @@ class PersistedCollectionRuntime<
     }
 
     this.terminalFailure = { lifecycleGeneration, error }
+    this.persistedReadiness?.set({ status: `error`, error })
     this.pendingRemoteSubsetEnsures.clear()
     this.queuedTxCommitted.length = 0
     if (this.remoteEnsureRetryTimer !== null) {
@@ -1551,6 +1628,7 @@ class PersistedCollectionRuntime<
       }
       if (lifecycleGeneration === this.lifecycleGeneration) {
         this.startupSettled = true
+        this.persistedReadiness?.set({ status: `ready` })
       }
       resolveStartupMetadata()
     })().catch((error) => {
@@ -2184,6 +2262,7 @@ class PersistedCollectionRuntime<
 
   private advanceLifecycle(): void {
     this.lifecycleGeneration++
+    this.persistedReadiness?.set({ status: `loading` })
     this.startupSettled = false
     this.hydratedDemands.clear()
     this.startupMetadataPromise = null
@@ -3784,6 +3863,7 @@ function createWrappedSyncConfig<
 >(
   sourceSyncConfig: SyncConfig<T, TKey>,
   runtime: PersistedCollectionRuntime<T, TKey>,
+  persistedReadiness?: PersistedReadinessTracker,
 ): SyncConfig<T, TKey> {
   return {
     ...sourceSyncConfig,
@@ -3952,6 +4032,22 @@ function createWrappedSyncConfig<
         })
       }
       const getTerminalFailure = () => runtime.getCurrentTerminalFailure()
+      const reportUpstreamError = (error: unknown) => {
+        if (persistedReadiness?.getSnapshot().status !== `loading`) {
+          runtime.reportSyncError(error)
+          return
+        }
+        // An early network error must not stop the live-query graph before
+        // the persisted baseline has published its rows.
+        void (fullStartPromise ?? runtime.ensureStarted()).then(
+          () => {
+            if (!isCleanedUp() && !getTerminalFailure()) {
+              runtime.reportSyncError(error)
+            }
+          },
+          () => undefined,
+        )
+      }
       const createHandledRejection = (error: unknown): Promise<never> => {
         const rejected = Promise.reject(error)
         void rejected.catch(() => undefined)
@@ -4078,6 +4174,7 @@ function createWrappedSyncConfig<
 
       const wrappedParams = {
         ...params,
+        markError: reportUpstreamError,
         markReady: () => {
           if (startupState.cleanedUp || getTerminalFailure()) return
           void (fullStartPromise ?? runtime.ensureStarted())
@@ -4087,7 +4184,7 @@ function createWrappedSyncConfig<
               try {
                 await sourceResultPromise
               } catch (error) {
-                runtime.reportSyncError(error)
+                reportUpstreamError(error)
                 return
               }
               if (isCleanedUp() || getTerminalFailure()) return
@@ -4542,7 +4639,7 @@ function createWrappedSyncConfig<
                 sourceResult.unloadSubset?.(
                   options as unknown as LoadSubsetOptions,
                 ),
-              onError: (error: unknown) => runtime.reportSyncError(error),
+              onError: reportUpstreamError,
             }),
           )
         }
@@ -4551,7 +4648,7 @@ function createWrappedSyncConfig<
       })()
       resolveSourceResultAssigned()
       void sourceResultPromise.catch((error) => {
-        runtime.reportSyncError(error)
+        reportUpstreamError(error)
       })
 
       return {
@@ -4816,6 +4913,17 @@ export function persistedCollectionOptions<
     )
   }
 
+  const networkTimeoutMs = getNetworkTimeoutMs(options.initialRender)
+  if (networkTimeoutMs !== undefined && options.syncMode === `on-demand`) {
+    throw new InvalidPersistedCollectionConfigError(
+      `network-first initial rendering requires eager persistence syncMode`,
+    )
+  }
+  const persistedReadinessTracker =
+    networkTimeoutMs !== undefined
+      ? new PersistedReadinessTracker(networkTimeoutMs)
+      : undefined
+
   if (hasOwnSyncKey(options)) {
     if (!isValidSyncConfig(options.sync)) {
       throw new InvalidSyncConfigError(
@@ -4823,7 +4931,11 @@ export function persistedCollectionOptions<
       )
     }
 
-    const { schemaVersion, ...syncOptions } = options
+    const {
+      schemaVersion,
+      initialRender: _initialRender,
+      ...syncOptions
+    } = options
     const collectionId =
       syncOptions.id ?? `persisted-collection:${safeRandomUUID()}`
     const persistence = resolvePersistenceForCollection(
@@ -4841,13 +4953,21 @@ export function persistedCollectionOptions<
       persistence,
       syncOptions.syncMode ?? `eager`,
       collectionId,
+      persistedReadinessTracker,
     )
 
     const result = {
       ...syncOptions,
       id: collectionId,
-      sync: createWrappedSyncConfig<T, TKey>(syncOptions.sync, runtime),
+      sync: createWrappedSyncConfig<T, TKey>(
+        syncOptions.sync,
+        runtime,
+        persistedReadinessTracker,
+      ),
       persistence,
+      ...(persistedReadinessTracker
+        ? { [PERSISTED_READINESS]: persistedReadinessTracker }
+        : {}),
     }
 
     return withCollectionConfigFactory(
@@ -4860,7 +4980,11 @@ export function persistedCollectionOptions<
     )
   }
 
-  const { schemaVersion, ...localOnlyOptions } = options
+  const {
+    schemaVersion,
+    initialRender: _initialRender,
+    ...localOnlyOptions
+  } = options
   const collectionId =
     localOnlyOptions.id ?? `persisted-collection:${safeRandomUUID()}`
   const persistence = resolvePersistenceForCollection(
@@ -4877,6 +5001,7 @@ export function persistedCollectionOptions<
     persistence,
     localOnlyOptions.syncMode ?? `eager`,
     localOnlyOptions.id ?? DEFAULT_DB_NAME,
+    persistedReadinessTracker,
   )
 
   const wrappedOnInsert = async (
@@ -4955,6 +5080,9 @@ export function persistedCollectionOptions<
     ...localOnlyOptions,
     id: collectionId,
     persistence,
+    ...(persistedReadinessTracker
+      ? { [PERSISTED_READINESS]: persistedReadinessTracker }
+      : {}),
     sync: createLoopbackSyncConfig(runtime),
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,

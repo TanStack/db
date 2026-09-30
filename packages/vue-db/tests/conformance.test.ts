@@ -136,6 +136,9 @@ function makeHandle(result: any, scope: ReturnType<typeof effectScope>) {
         state: result.state?.value,
         status: result.status?.value,
         isReady: result.isReady?.value,
+        persistedStatus: result.persistedStatus?.value,
+        isPersistedReady: result.isPersistedReady?.value,
+        persistedError: result.persistedError?.value,
         isError: result.isError?.value,
         // vue-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: result.status?.value !== `disabled`,
