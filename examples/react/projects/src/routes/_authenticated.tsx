@@ -38,7 +38,6 @@ function AuthenticatedLayout() {
         owner_id: session.user.id,
         shared_user_ids: [],
         created_at: new Date(),
-        updated_at: new Date(),
       })
       setNewProjectName(``)
       setShowNewProjectForm(false)

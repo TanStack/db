@@ -29,7 +29,6 @@ export const Route = createFileRoute(`/_authenticated/`)({
         owner_id: res.data.user.id,
         shared_user_ids: [],
         created_at: new Date(),
-        updated_at: new Date(),
       })
       await tx.isPersisted.promise
       const serverProjectId = projectCollection.toArray[0].id

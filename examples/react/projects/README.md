@@ -195,7 +195,6 @@ export const todoCollection = createCollection(
       return todos.map((todo) => ({
         ...todo,
         created_at: new Date(todo.created_at),
-        updated_at: new Date(todo.updated_at),
       }))
     },
     queryClient,

@@ -21,8 +21,8 @@ export const usersCollection = createCollection(
       const users = await trpc.users.getAll.query()
       return users.map((user) => ({
         ...user,
-        created_at: new Date(user.created_at),
-        updated_at: new Date(user.updated_at),
+        createdAt: new Date(user.createdAt),
+        updatedAt: new Date(user.updatedAt),
       }))
     },
     queryClient,
@@ -41,7 +41,6 @@ export const projectCollection = createCollection(
       return projects.map((project) => ({
         ...project,
         created_at: new Date(project.created_at),
-        updated_at: new Date(project.updated_at),
       }))
     },
     queryClient,
@@ -87,7 +86,6 @@ export const todoCollection = createCollection(
       return todos.map((todo) => ({
         ...todo,
         created_at: new Date(todo.created_at),
-        updated_at: new Date(todo.updated_at),
       }))
     },
     queryClient,
