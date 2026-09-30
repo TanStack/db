@@ -1,8 +1,9 @@
 # Code weight: rename private members in the `@tanstack/db` build
 
-Reviewed executable revision: `6dbf3982` (base `9125dab6`, the fetched
+Reviewed executable revision: `9c422842` (base `c0d123b8`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
-commit.
+commit. The rename landed in `6dbf3982` on base `9125dab6`. Later commits fix
+two review findings, merge `origin/main`, and add the dist smoke lane.
 
 ## Change
 
@@ -119,8 +120,8 @@ assertions:
 | `--calibrate-error-name` | assertion failure: `CollectionConfigurationError.name` |
 | `--calibrate-public-member` | assertion failure: `public index metadata method` |
 | `--calibrate-output-shape` | assertion failure: query rows differ |
-| a source file newer than `dist` | assertion failure: `packages/db/dist is older than packages/db/src/SortedMap.ts` |
-| `vite.config.ts`, `package.json`, `tsconfig.json`, or the cache newer than `dist` | assertion failure naming that file |
+| a source file newer than `dist` | error: `packages/db/dist is older than packages/db/src/SortedMap.ts` |
+| `vite.config.ts`, `package.json`, `tsconfig.json`, or the cache newer than `dist` | error naming that file |
 
 An external review of `a1d2b85b` found that the freshness check did not
 include the build configuration. With only `vite.config.ts` touched after a
@@ -153,7 +154,44 @@ renamed output. On `6dbf3982`, with the 368-name cache:
 These 2,580 tests pass. `test:minified-db` also passes against the renamed
 `dist`. The run used the working tree just before `6dbf3982`. That commit
 changes only formatting and one lint fix in `vite.config.ts`, and its built
-`dist` is byte-identical to the verified build.
+`dist` is byte-identical to the verified build. After the merge of
+`origin/main` at `7b8142fc`, CI's Test job ran every consumer suite against
+the rebuilt, renamed `dist` and passed.
+
+### db tests against the renamed dist
+
+The consumer suites reach db only through other packages. `pnpm --filter
+@tanstack/db test:dist` also runs five of db's own test files against the
+built `dist`. `packages/db/vitest.dist.config.ts` maps each `src` import to the
+matching built module, which exists because the build emits one module per
+source module. Modules without runtime code (re-export barrels and type-only
+files) are not emitted, so those load from `src`, and their imports then
+resolve to `dist`. Any other unbuilt module throws. A planted `throw` in the
+built `collection/index.js` showed that the lane loads `dist`.
+
+The five files were chosen for coverage of the 14 modules that hold about 90%
+of the renamed members. Coverage is measured on the built modules and mapped
+back to source. Files that read renamed members directly were excluded,
+because they would test the rename map instead of behavior.
+
+| File | New key-module statements | Cumulative |
+| --- | ---: | ---: |
+| `query/ordered-source-loader-state.test.ts` | 1,951 | 37.4% |
+| `live-query-observer.test.ts` | 641 | 49.8% |
+| `query/includes-publication-oracle.test.ts` | 479 | 58.9% |
+| `query/bucket-facade-adapter.test.ts` | 178 | 62.4% |
+| `collection-subscription.test.ts` | 179 | 65.8% |
+
+The five files run 254 tests in about 3 seconds. All 14 measured candidates
+together reached only 72.6%. `live-query-window-controller` has no coverage
+from db tests that avoid its internals. The framework adapters' infinite-query
+suites exercise it, and they run against `dist` in CI's Test job.
+
+Calibration: in the built `ordered-source-loader.js`, the first of 26 `.l`
+accesses was restored to `.authoritativeRequestState`, which is an inconsistent
+rename. The lane then failed 48 of 254 tests in 2 of 5 files. With the file
+restored, all 254 tests pass. A source file newer than `dist` makes the lane
+throw the freshness error before any test runs.
 
 ## Costs
 
@@ -180,14 +218,16 @@ changes only formatting and one lint fix in `vite.config.ts`, and its built
 
 ## Verification
 
-On `6dbf3982`:
+On `9c422842`:
 
 - `pnpm check:mangle`: 368 names.
+- `pnpm --filter @tanstack/db test:dist`: 5 files, 254 tests.
 - `pnpm test:minified-db` against the built `dist`: error names, index
   metadata, query rows, and live updates.
 - `packages/db` Vitest, typecheck off: 193 files, 7,164 tests.
 - `pnpm test:oracles`: 49 `@tanstack/db` files with 2,847 tests, and 16
   `@tanstack/query-db-collection` files with 454 tests and 1 todo.
-- The consumer suites in the table above.
+- The consumer suites in the table above ran on `6dbf3982`. On `7b8142fc`,
+  CI's Test job ran them again against the merged, renamed `dist`.
 
 The environment was Node `v24.19.0` and Vitest `3.2.4` on Darwin arm64.
