@@ -1385,6 +1385,11 @@ export class CollectionStateManager<
       // Application is now the point of no return. Event listeners run before
       // the receipts resolve, so a signal aborted from one of those listeners
       // must not cancel writes that are already becoming visible.
+      const deferOrder =
+        committedSyncedTransactions.reduce(
+          (count, transaction) => count + transaction.operations.length,
+          0,
+        ) >= 512
       for (const transaction of committedSyncedTransactions) {
         transaction.applicationStarted = true
       }
@@ -1574,7 +1579,7 @@ export class CollectionStateManager<
           // Update synced data
           switch (operation.type) {
             case `insert`:
-              this.syncedData.set(key, operation.value)
+              this.syncedData.set(key, operation.value, deferOrder)
               this.rowOrigins.set(key, origin)
               // Clear pending local changes now that sync has confirmed
               this.pendingLocalChanges.delete(key)
@@ -1591,9 +1596,9 @@ export class CollectionStateManager<
                   this.syncedData.get(key),
                   operation.value,
                 )
-                this.syncedData.set(key, updatedValue)
+                this.syncedData.set(key, updatedValue, deferOrder)
               } else {
-                this.syncedData.set(key, operation.value)
+                this.syncedData.set(key, operation.value, deferOrder)
               }
               this.rowOrigins.set(key, origin)
               // Clear pending local changes now that sync has confirmed
@@ -1606,7 +1611,7 @@ export class CollectionStateManager<
               break
             }
             case `delete`:
-              this.syncedData.delete(key)
+              this.syncedData.delete(key, deferOrder)
               this.syncedMetadata.delete(key)
               // Clean up origin and pending tracking for deleted rows
               this.rowOrigins.delete(key)
@@ -1646,6 +1651,7 @@ export class CollectionStateManager<
           this.syncedCollectionMetadata.set(key, metadataWrite.value)
         }
       }
+      this.syncedData.restoreOrder()
 
       // The retained base now includes every removed committed transaction.
       // Rebuild only the projection for still-open transactions.
