@@ -1,3 +1,4 @@
+import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it, vi } from 'vitest'
 import { hash, registerOpaqueHash } from '../src/hashing/hash'
 
@@ -122,5 +123,33 @@ describe(`hash traversal work`, () => {
       expect(reads).toBe(attempt)
     }
     expect(hash({ value: 1 })).toBe(hash({ value: 1 }))
+  })
+
+  // Each visited value costs one unit of work. Each header value of an array
+  // (its length) or a regular expression (source, flags, and lastIndex) also
+  // costs one unit. Date, binary, and Temporal header values cost nothing.
+  // Each case names the largest input that fits under the cap.
+  const zeros = (n: number) => Array.from({ length: n }, () => 0)
+  it.each<[string, (n: number) => unknown, number]>([
+    [`a flat array`, zeros, 999_999],
+    [`an object`, (n) => ({ ...zeros(n) }), 1_000_000],
+    [`nested one-element arrays`, (n) => zeros(n).map(() => [0]), 333_333],
+    [`an array with a regular expression`, (n) => [/x/g, ...zeros(n)], 999_995],
+    [`an array with a date`, (n) => [new Date(0), ...zeros(n)], 999_998],
+    [
+      `an array with binary data`,
+      (n) => [new Uint8Array(100), ...zeros(n)],
+      999_998,
+    ],
+    [
+      `an array with a Temporal value`,
+      (n) => [Temporal.PlainDate.from(`2024-01-15`), ...zeros(n)],
+      999_998,
+    ],
+  ])(`counts the structural work of %s exactly`, (_name, build, largest) => {
+    expect(() => hash(build(largest))).not.toThrow()
+    expect(() => hash(build(largest + 1))).toThrow(
+      `Value is too complex to hash safely: structural work`,
+    )
   })
 })
