@@ -1012,7 +1012,12 @@ export class CollectionSubscription
       void initialResult.promise.then(finish, finish)
       return { demand, result: initialResult.promise, started: false }
     }
-    const acquisition = this.createSubsetAcquisitionRecord(demand)
+    // Eager sync never passes subset options to an adapter, so an abortable
+    // acquisition would only allocate a controller and an AbortError.
+    const acquisition =
+      this.collection.config.syncMode === `on-demand`
+        ? this.createSubsetAcquisitionRecord(demand)
+        : demand.acquisition
     demand.acquisition = acquisition
     const replayState = this.truncateReplayState
     const replayAttempt = replayState?.currentAttempt
