@@ -39,6 +39,14 @@
           "to": "guides/mutations"
         },
         {
+          "label": "SQLite Persistence",
+          "to": "guides/sqlite-persistence"
+        },
+        {
+          "label": "Offline Transactions",
+          "to": "guides/offline-transactions"
+        },
+        {
           "label": "Schemas",
           "to": "guides/schemas"
         },

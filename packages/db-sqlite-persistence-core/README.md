@@ -1,8 +1,7 @@
 # @tanstack/db-sqlite-persistence-core
 
-Shared SQLite persistence primitives for TanStack DB. Runtime-specific wrappers
-(Node, Electron, React Native, Cloudflare Durable Objects) build on top of this
-package.
+Shared SQLite persistence primitives for TanStack DB. Runtime packages provide
+the database drivers. Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) if you are adding persistence to an application.
 
 ## What this package provides
 
@@ -132,6 +131,12 @@ source keeps the existing network-readiness gate. A query failure that did not
 come from a source is still an error, not a network fallback. Ordinary
 `useLiveQuery` row updates and Collection `status`, `isReady`, and `preload()` are unchanged;
 `status` is a Collection lifecycle signal, not a pure network-health signal.
+
+In React, a client query stream failure before the first render also allows a
+completed persisted restore to release Suspense. React waits if the stream
+fails before restore completes, including when it failed before the component
+mounted. The derived query result can be empty. A derived-query failure still
+reaches the Error Boundary.
 
 Persisted readiness does not prove current authorization. A source error can
 permit restored rows to render even when that error reports an authorization
@@ -333,6 +338,9 @@ In most applications, use a runtime package directly:
 - `@tanstack/browser-db-sqlite-persistence`
 - `@tanstack/electron-db-sqlite-persistence`
 - `@tanstack/react-native-db-sqlite-persistence`
+- `@tanstack/expo-db-sqlite-persistence`
+- `@tanstack/capacitor-db-sqlite-persistence`
+- `@tanstack/tauri-db-sqlite-persistence`
 - `@tanstack/cloudflare-durable-objects-db-sqlite-persistence`
 
 Those packages provide concrete drivers and runtime wiring.
