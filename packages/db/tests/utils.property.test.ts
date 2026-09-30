@@ -20,7 +20,7 @@ import { deepEquals } from '../src/utils'
 const arbitraryPrimitive = fc.oneof(
   fc.string(),
   fc.integer(),
-  fc.double({ noNaN: true }),
+  fc.double(),
   fc.boolean(),
   fc.constant(null),
   fc.constant(undefined),
@@ -69,7 +69,7 @@ const arbitraryTemporalDuration = fc
 const arbitrarySameTypePrimitive = fc.oneof(
   fc.tuple(fc.string(), fc.string()),
   fc.tuple(fc.integer(), fc.integer()),
-  fc.tuple(fc.double({ noNaN: true }), fc.double({ noNaN: true })),
+  fc.tuple(fc.double(), fc.double()),
   fc.tuple(fc.boolean(), fc.boolean()),
 )
 
