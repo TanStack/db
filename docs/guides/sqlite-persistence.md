@@ -163,11 +163,17 @@ const syncedTodos = createCollection(
     }),
     persistence: syncedPersistence,
     schemaVersion: 1,
+    initialRender: {
+      strategy: 'network-first',
+      networkTimeoutMs: 3_000,
+    },
   }),
 )
 ```
 
 Install `@tanstack/query-core` and `@tanstack/query-db-collection` to use this example. Change the URL to your server. You can wrap another Collection sync adapter in the same way.
+
+The `initialRender` option is optional. It lets live queries report when SQLite restore completes. It also lets React and Solid Suspense use restored rows for the first render while the Collection is not ready.
 
 Keep `syncedDatabase` open while `syncedTodos` runs. During normal shutdown, await `syncedTodos.cleanup()` and then `syncedDatabase.close?.()`.
 
@@ -179,6 +185,72 @@ The `sync` option determines which mode the wrapper uses:
 | `sync` absent | Load and save local rows through a loopback sync adapter. The Collection has no remote source. |
 
 The wrapper also supports `syncMode: 'on-demand'`. In that mode, it loads rows for active query demand rather than loading every stored row into the Collection.
+
+## Render after SQLite restore
+
+`initialRender` requires an eager persisted Collection. It does not support `syncMode: 'on-demand'`, which has no complete startup snapshot. Set it on every source Collection in a live query. If one source does not opt in, the query cannot report persisted readiness or use the restored snapshot as its initial-render fallback.
+
+Install the React binding to use the following components:
+
+```sh
+npm install @tanstack/react-db
+```
+
+A regular React live query exposes both readiness signals:
+
+```tsx
+import { useLiveQuery } from '@tanstack/react-db'
+
+function TodosView() {
+  const result = useLiveQuery((q) => q.from({ syncedTodos }))
+  const readiness = result.isReady
+    ? 'Collection ready'
+    : result.isPersistedReady
+      ? 'SQLite restore complete. Collection readiness pending'
+      : 'Waiting for Collection or SQLite restore'
+
+  return (
+    <>
+      <p>{readiness}</p>
+      <ul>{result.data.map((todo) => <li key={todo.id}>{todo.title}</li>)}</ul>
+    </>
+  )
+}
+```
+
+`isReady` reports Collection readiness. `isPersistedReady` reports that every opted-in source finished its current eager restore, even when SQLite had no rows. These flags do not identify where each visible row came from. A regular `useLiveQuery` does not wait for the network-first deadline before it renders rows.
+
+The hooks also expose `persistedStatus` and `persistedError`. The status is `unavailable` if a source did not opt in, `loading` during restore, `ready` after every restore completes, or `error` if a restore fails. `persistedError` keeps the restore error. An SSR seed does not count as a SQLite restore.
+
+React, Solid, and Svelte read these values as properties. Angular reads signals such as `result.isPersistedReady()`. Vue reads refs such as `result.isPersistedReady.value`.
+
+React and Solid Suspense can use the same option for network-first initial rendering. This React component uses the `syncedTodos` Collection configured above:
+
+```tsx
+import { Suspense } from 'react'
+import { useLiveSuspenseQuery } from '@tanstack/react-db'
+
+function TodosList() {
+  const { data } = useLiveSuspenseQuery((q) => q.from({ syncedTodos }))
+  return <ul>{data.map((todo) => <li key={todo.id}>{todo.title}</li>)}</ul>
+}
+
+function TodosScreen() {
+  return (
+    <Suspense fallback={<p>Loading todos...</p>}>
+      <TodosList />
+    </Suspense>
+  )
+}
+```
+
+Place `TodosScreen` inside an [Error Boundary](./error-handling.md#using-suspense-and-error-boundaries-react) to handle initial failures.
+
+Suspense prefers Collection readiness. If it remains pending after `networkTimeoutMs`, a completed SQLite restore can release the first render. The default is 3 seconds. Set `networkTimeoutMs: 0` to allow fallback as soon as restore completes. For a query with multiple sources, the longest configured deadline applies. The deadline does not stop network sync.
+
+A source failure can allow fallback before the deadline. React also waits for restore if its client query stream fails before the first render, including when that failure occurs before the component mounts. Once restore completes, React renders the derived query result, even if it is empty. A derived-query failure still reaches the React Error Boundary. If restore fails or a source did not opt in, React sends the initial error to the Error Boundary.
+
+Persisted readiness does not prove current authorization. Isolate SQLite data by user or tenant. If an authorization failure must hide cached rows, block the view separately. The fallback does not classify source errors.
 
 ## Browser tabs and Electron renderers
 

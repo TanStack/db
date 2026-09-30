@@ -132,6 +132,12 @@ come from a source is still an error, not a network fallback. Ordinary
 `useLiveQuery` row updates and Collection `status`, `isReady`, and `preload()` are unchanged;
 `status` is a Collection lifecycle signal, not a pure network-health signal.
 
+In React, a client query stream failure before the first render also allows a
+completed persisted restore to release Suspense. React waits if the stream
+fails before restore completes, including when it failed before the component
+mounted. The derived query result can be empty. A derived-query failure still
+reaches the Error Boundary.
+
 Persisted readiness does not prove current authorization. A source error can
 permit restored rows to render even when that error reports an authorization
 failure. Applications with user- or tenant-specific data must isolate persisted
