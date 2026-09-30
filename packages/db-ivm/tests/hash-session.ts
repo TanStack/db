@@ -7,7 +7,10 @@ import { fc } from '@fast-check/vitest'
 import vitestPackage from 'vitest/package.json'
 import type * as HashModuleExports from '../src/hashing/hash'
 
-type HashModule = Pick<typeof HashModuleExports, `hash` | `registerOpaqueHash`>
+type HashModule = Pick<
+  typeof HashModuleExports,
+  `hash` | `registerOpaqueHash` | `equalHashValues`
+>
 
 const sourceDirectory = resolve(
   dirname(fileURLToPath(import.meta.url)),

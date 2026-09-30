@@ -1,6 +1,6 @@
 import { runInNewContext } from 'node:vm'
 import { Temporal } from 'temporal-polyfill'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { MultiSet } from '../src/multiset.js'
 import {
@@ -8,6 +8,7 @@ import {
   hash,
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
+import { captureHashSession } from './hash-session'
 
 /**
  * # Which values do structural hashing and structural equality identify?
@@ -44,6 +45,10 @@ import {
  *   hashes; this is a sampled control, because a 32-bit hash can collide.
  * - For cyclic values, `equalHashValues` follows the same rules and `hash`
  *   throws a `TypeError`.
+ * - Type identity does not depend on random hash values. Every law above also
+ *   runs in a second copy of the module whose initialization draws are all
+ *   equal, so every type marker has the same hash number. There, only the
+ *   sampled distinct-hash control is skipped.
  *
  * Authority: the method comments in `src/hashing/hash.ts`, and the behavior at
  * `8283f2e8`, which this file pins before the hash dispatch refactor.
@@ -85,7 +90,7 @@ type Spec =
   | { k: `regex`; source: string; flags: string; lastIndex: number; p?: Spec }
   | { k: `array`; items: Array<Spec | null>; p?: Spec }
   | { k: `twice`; child: Spec }
-  | { k: `map`; entries: Array<[string, Spec]> }
+  | { k: `map`; entries: Array<[Spec, Spec]> }
   | { k: `set`; items: Array<Spec> }
   | { k: `obj`; entries: Array<[string, Spec]>; syms: Array<[number, Spec]> }
   | { k: `back`; up: number }
@@ -117,6 +122,7 @@ function refObject(kind: RefKind, id: number): object {
     else {
       value = { state: 1 }
       registerOpaqueHash(value)
+      colliding.registerOpaqueHash(value)
     }
     refs.set(name, value)
   }
@@ -128,6 +134,49 @@ function refObject(kind: RefKind, id: number): object {
 
 function identity(spec: Spec): string {
   return JSON.stringify(canon(spec))
+}
+
+// Maps and Sets merge primitive keys and shared references that are equal
+// under SameValueZero: the first position stays and the last value wins.
+// Every other generated key is a fresh object and never merges.
+const MERGING_KINDS = new Set<Spec[`k`]>([
+  `num`,
+  `str`,
+  `bool`,
+  `null`,
+  `undef`,
+  `big`,
+  `sym`,
+  `ref`,
+])
+const CONTAINER_KINDS = new Set<Spec[`k`]>([
+  `array`,
+  `twice`,
+  `map`,
+  `set`,
+  `obj`,
+  `regex`,
+])
+function mapEntries(
+  entries: Array<[Spec, Spec | undefined]>,
+): Array<[unknown, unknown]> {
+  const out: Array<[unknown, unknown]> = []
+  const positions = new Map<string, number>()
+  for (const [key, value] of entries) {
+    const encoded = canon(key)
+    const valueCode = value === undefined ? null : canon(value)
+    if (MERGING_KINDS.has(key.k)) {
+      const id = JSON.stringify(encoded)
+      const at = positions.get(id)
+      if (at !== undefined) {
+        out[at]![1] = valueCode
+        continue
+      }
+      positions.set(id, out.length)
+    }
+    out.push([encoded, valueCode])
+  }
+  return out
 }
 
 function canon(spec: Spec): unknown {
@@ -170,9 +219,17 @@ function canon(spec: Spec): unknown {
       // A shared child and a copied child have the same identity.
       return [`array`, 2, [0, 1].map((index) => [index, inner(spec.child)]), []]
     case `map`:
-      return [`map`, spec.entries.map(([key, value]) => [key, inner(value)])]
+      return [
+        `map`,
+        mapEntries(spec.entries.map(([key, value]) => [key, value])),
+      ]
     case `set`:
-      return [`set`, spec.items.map(inner)]
+      return [
+        `set`,
+        mapEntries(spec.items.map((item) => [item, undefined])).map(
+          ([item]) => item,
+        ),
+      ]
     case `obj`:
       return [
         `obj`,
@@ -238,9 +295,14 @@ const specArb = fc.letrec<{ spec: Spec }>((tie) => ({
     fc.record({ k: fc.constant(`twice` as const), child: tie(`spec`) }),
     fc.record({
       k: fc.constant(`map` as const),
+      // Keys are any generated value, unique by identity; mutations may still
+      // merge two keys, and the model merges them the same way.
       entries: fc.uniqueArray(
-        fc.tuple(fc.constantFrom(`a`, `b`, `c`), tie(`spec`)),
-        { maxLength: 3, selector: ([key]) => key },
+        fc.tuple(
+          fc.oneof({ weight: 2, arbitrary: primitiveArb }, tie(`spec`)),
+          tie(`spec`),
+        ),
+        { maxLength: 3, selector: ([key]) => identity(key) },
       ),
     }),
     fc.record({
@@ -287,7 +349,22 @@ function nodes(
     )
   else if (spec.k === `twice`)
     child(spec.child, (next) => ({ ...spec, child: next }))
-  else if (spec.k === `map` || spec.k === `obj`)
+  else if (spec.k === `map`)
+    spec.entries.forEach(([key, value], index) => {
+      child(key, (next) => ({
+        ...spec,
+        entries: spec.entries.map((old, i) =>
+          i === index ? ([next, value] as [Spec, Spec]) : old,
+        ),
+      }))
+      child(value, (next) => ({
+        ...spec,
+        entries: spec.entries.map((old, i) =>
+          i === index ? ([key, next] as [Spec, Spec]) : old,
+        ),
+      }))
+    })
+  else if (spec.k === `obj`)
     spec.entries.forEach(([key, value], index) =>
       child(value, (next) => ({
         ...spec,
@@ -398,9 +475,21 @@ function nearMiss(spec: Spec, choice: number): [Mutation, Spec] {
       const pairs = spec.entries.map(
         ([key, value]): Spec => ({
           k: `array`,
-          items: [{ k: `str`, v: key }, value],
+          items: [key, value],
         }),
       )
+      const [first, second] = spec.entries
+      // Repeating a primitive key makes the Map merge the two entries.
+      if (choice % 2 === 0 && first && second && MERGING_KINDS.has(first[0].k))
+        return [
+          `property`,
+          {
+            ...spec,
+            entries: spec.entries.map(([key, value], i) =>
+              i === 1 ? ([first[0], value] as [Spec, Spec]) : [key, value],
+            ),
+          },
+        ]
       return choice % 4 === 0 && spec.entries.length > 1
         ? [`order`, { ...spec, entries: [...spec.entries].reverse() }]
         : choice % 4 === 1 && spec.entries.length > 0
@@ -409,7 +498,9 @@ function nearMiss(spec: Spec, choice: number): [Mutation, Spec] {
               {
                 ...spec,
                 entries: spec.entries.map(([key, value], i) =>
-                  i === 0 ? ([`z`, value] as [string, Spec]) : [key, value],
+                  i === 0
+                    ? ([{ k: `str`, v: `\u0000key` }, value] as [Spec, Spec])
+                    : [key, value],
                 ),
               },
             ]
@@ -457,8 +548,12 @@ type Pair = { left: Spec; right: Spec; mutation: Mutation }
 const pairArb: fc.Arbitrary<Pair> = specArb.chain((left) =>
   fc.tuple(fc.nat(), fc.nat(), fc.nat(9)).map(([at, choice, mode]): Pair => {
     if (mode < 3) return { left, right: left, mutation: `none` }
+    // Leaves outnumber containers, so half of the mutations target a
+    // container node when the spec has one.
     const all = nodes(left)
-    const [node, replace] = all[at % all.length]!
+    const containers = all.filter(([node]) => CONTAINER_KINDS.has(node.k))
+    const pool = mode % 2 && containers.length > 0 ? containers : all
+    const [node, replace] = pool[at % pool.length]!
     const [mutation, next] = nearMiss(node, choice)
     return { left, right: replace(next), mutation }
   }),
@@ -527,9 +622,10 @@ function realize(spec: Spec, seed: number): unknown {
         return [first, coin() ? first : build(node.child)]
       }
       case `map`: {
-        const value = new Map<string, unknown>()
+        const value = new Map<unknown, unknown>()
         return container(value, () => {
-          for (const [key, child] of node.entries) value.set(key, build(child))
+          for (const [key, child] of node.entries)
+            value.set(build(key), build(child))
           if (coin()) Object.assign(value, { extra: 1 })
         })
       }
@@ -594,7 +690,10 @@ const cyclicArb: fc.Arbitrary<CyclicPair> = fc
         : kind === `map`
           ? {
               k: `map`,
-              entries: inner.map((child, i) => [`k${i}`, child]),
+              entries: inner.map((child, i) => [
+                { k: `str`, v: `k${i}` },
+                child,
+              ]),
             }
           : kind === `set`
             ? { k: `set`, items: inner }
@@ -624,28 +723,71 @@ const cyclicArb: fc.Arbitrary<CyclicPair> = fc
 // ---------------------------------------------------------------------------
 // Production driver and refinement checks.
 
+// A second module copy whose initialization draws are all equal. Every
+// random constant, including every type marker, gets the same number, so a
+// design that tells types apart by marker number fails here.
+const nativeTape = (await captureHashSession()).tape
+const colliding = await captureHashSession(nativeTape.map(() => 0.5))
+// Loaded right after the colliding module, so it binds to that copy.
+const { topKBatch: collidingTopKBatch } = await import(
+  `../src/operators/topKState.js`
+)
+
+type Module = {
+  name: string
+  hash: (value: unknown) => number
+  equalHashValues: (left: unknown, right: unknown) => boolean
+  sampledDistinct: boolean
+}
+const MODULES: ReadonlyArray<Module> = [
+  { name: `native`, hash, equalHashValues, sampledDistinct: true },
+  {
+    name: `colliding markers`,
+    hash: colliding.hash,
+    equalHashValues: colliding.equalHashValues,
+    sampledDistinct: false,
+  },
+]
+
 function expectPair(pair: Pair, seeds: [number, number]): void {
   const expected = identity(pair.left) === identity(pair.right)
   const left = realize(pair.left, seeds[0])
   const right = realize(pair.right, seeds[1])
-  const context = `${pair.mutation}: ${identity(pair.left)} vs ${identity(pair.right)}`
-  expect(equalHashValues(left, right), `equality, ${context}`).toBe(expected)
-  expect(equalHashValues(right, left), `symmetry, ${context}`).toBe(expected)
-  if (expected) expect(hash(left), `hash, ${context}`).toBe(hash(right))
-  // Sampled: a 32-bit collision is not a defect, but this small campaign
-  // should not meet one.
-  else expect(hash(left), `sampled hash, ${context}`).not.toBe(hash(right))
+  for (const module of MODULES) {
+    const context = `${module.name}, ${pair.mutation}: ${identity(pair.left)} vs ${identity(pair.right)}`
+    expect(module.equalHashValues(left, right), `equality, ${context}`).toBe(
+      expected,
+    )
+    expect(module.equalHashValues(right, left), `symmetry, ${context}`).toBe(
+      expected,
+    )
+    if (expected)
+      expect(module.hash(left), `hash, ${context}`).toBe(module.hash(right))
+    // Sampled: a 32-bit collision is not a defect, but this small campaign
+    // should not meet one with native markers.
+    else if (module.sampledDistinct)
+      expect(module.hash(left), `sampled hash, ${context}`).not.toBe(
+        module.hash(right),
+      )
+  }
 }
 
 function expectCyclicPair({ spec, changed, seeds }: CyclicPair): void {
   const left = realize(spec, seeds[0])
   const same = realize(spec, seeds[1])
   const other = realize(changed, seeds[1])
-  expect(equalHashValues(left, same), `cyclic equality`).toBe(true)
-  expect(equalHashValues(left, other), `cyclic inequality`).toBe(false)
-  expect(() => hash(left)).toThrow(
-    new TypeError(`Cannot hash cyclic structural values`),
-  )
+  for (const module of MODULES) {
+    expect(module.equalHashValues(left, same), `${module.name} equality`).toBe(
+      true,
+    )
+    expect(
+      module.equalHashValues(left, other),
+      `${module.name} inequality`,
+    ).toBe(false)
+    expect(() => module.hash(left)).toThrow(
+      new TypeError(`Cannot hash cyclic structural values`),
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -753,6 +895,23 @@ describe(`hash identity oracle`, () => {
     for (const mutation of [`header`, `hole`, `retype`, `replace`, `split`])
       expect(verdicts.get(mutation), mutation).toContain(false)
     expect(verdicts.get(`none`)).toEqual(new Set([true]))
+
+    // Map keys reach non-string primitives, containers, and merged keys.
+    const keyKinds = new Set<string>()
+    let merged = 0
+    for (const { left, right } of sample)
+      for (const spec of [left, right])
+        for (const [node] of nodes(spec))
+          if (node.k === `map`) {
+            for (const [key] of node.entries) keyKinds.add(key.k)
+            const encoded = canon(node) as [string, Array<unknown>]
+            if (encoded[1].length < node.entries.length) merged++
+          }
+    expect(
+      keyKinds.has(`num`) && keyKinds.has(`sym`) && keyKinds.has(`ref`),
+    ).toBe(true)
+    expect(keyKinds.has(`obj`) || keyKinds.has(`array`)).toBe(true)
+    expect(merged).toBeGreaterThan(0)
   })
 
   // Pinned witnesses for rules that a wrong design would plausibly break.
@@ -777,21 +936,21 @@ describe(`hash identity oracle`, () => {
       {
         k: `map`,
         entries: [
-          [`a`, num(1)],
-          [`b`, num(2)],
+          [{ k: `str`, v: `a` }, num(1)],
+          [{ k: `str`, v: `b` }, num(2)],
         ],
       },
       {
         k: `map`,
         entries: [
-          [`b`, num(2)],
-          [`a`, num(1)],
+          [{ k: `str`, v: `b` }, num(2)],
+          [{ k: `str`, v: `a` }, num(1)],
         ],
       },
     ],
     [
       `a Map differs from an array of its entries`,
-      { k: `map`, entries: [[`a`, num(1)]] },
+      { k: `map`, entries: [[{ k: `str`, v: `a` }, num(1)]] },
       {
         k: `array`,
         items: [{ k: `array`, items: [{ k: `str`, v: `a` }, num(1)] }],
@@ -803,17 +962,48 @@ describe(`hash identity oracle`, () => {
       { k: `array`, items: [num(1), num(2)] },
     ],
     [
+      `an empty Map differs from an empty Set`,
+      { k: `map`, entries: [] },
+      { k: `set`, items: [] },
+    ],
+    [
+      `an empty Map differs from an empty array and an empty object`,
+      { k: `map`, entries: [] },
+      { k: `array`, items: [] },
+    ],
+    [
+      `an empty Set differs from an empty object`,
+      { k: `set`, items: [] },
+      { k: `obj`, entries: [], syms: [] },
+    ],
+    [
       `a Set differs from a Map with the same entry pairs`,
       {
         k: `set`,
         items: [{ k: `array`, items: [{ k: `str`, v: `a` }, num(1)] }],
       },
-      { k: `map`, entries: [[`a`, num(1)]] },
+      { k: `map`, entries: [[{ k: `str`, v: `a` }, num(1)]] },
+    ],
+    [
+      `an object Map key compares by structure`,
+      {
+        k: `map`,
+        entries: [[{ k: `obj`, entries: [[`a`, num(1)]], syms: [] }, num(1)]],
+      },
+      {
+        k: `map`,
+        entries: [[{ k: `obj`, entries: [[`a`, num(2)]], syms: [] }, num(1)]],
+      },
+    ],
+    [
+      `a number Map key differs from its text`,
+      { k: `map`, entries: [[num(1), num(1)]] },
+      { k: `map`, entries: [[{ k: `str`, v: `1` }, num(1)]] },
     ],
     [
       `a Map key counts`,
-      { k: `map`, entries: [[`a`, num(1)]] },
-      { k: `map`, entries: [[`b`, num(1)]] },
+      { k: `map`, entries: [[{ k: `str`, v: `a` }, num(1)]] },
+      { k: `map`, entries: [[{ k: `str`, v: `b` }, num(1)]] },
     ],
     [
       `binary values differ from arrays of their bytes`,
@@ -915,38 +1105,30 @@ describe(`hash identity oracle`, () => {
     ).toBe(true)
   })
 
-  it(`keeps distinct carriers unequal when hash markers collide`, async () => {
-    const loadWithCollision = async (target: number, replacement: number) => {
-      vi.resetModules()
-      let draws = 0
-      const random = vi.spyOn(Math, `random`).mockImplementation(() => {
-        draws++
-        return (draws === target ? replacement : draws) / 100
-      })
-      try {
-        const { equalHashValues: compare } = await import(
-          `../src/hashing/hash.js`
-        )
-        expect(draws).toBe(19)
-        return compare
-      } finally {
-        random.mockRestore()
-      }
-    }
+  // The colliding copy is only a useful control if its markers collide.
+  it(`gives every type marker the same hash number in the colliding module`, () => {
+    const empty = [
+      new Map(),
+      new Set(),
+      {},
+      Object.assign(new RegExp(``), { lastIndex: 0 }),
+    ]
+    const hashes = new Set(empty.map((value) => colliding.hash(value)))
+    expect(hashes.size).toBe(2) // A RegExp still hashes its header fields.
+    expect(colliding.hash(new Map())).toBe(colliding.hash(new Set()))
+    expect(colliding.hash(new Map())).toBe(colliding.hash({}))
+    expect(hash(new Map())).not.toBe(hash(new Set()))
+  })
 
-    // The module's 16th and 17th draws allocate the Map and Set markers.
-    const mapSetEqual = await loadWithCollision(17, 16)
-    expect(mapSetEqual(new Map(), new Set())).toBe(false)
-    expect(mapSetEqual(new Set(), new Map())).toBe(false)
-    const { topKBatch } = await import(`../src/operators/topKState.js`)
-    const messages = [
+  it(`keeps a Map-to-Set replacement in topKBatch when markers collide`, () => {
+    const batch = collidingTopKBatch([
       new MultiSet<[number, unknown]>([
         [[1, new Map()], -1],
         [[1, new Set()], 1],
       ]),
-    ]
+    ])
     expect(
-      [...topKBatch(messages)].map(([[, value], weight]) => [
+      [...batch].map(([[, value], weight]) => [
         value instanceof Map ? `map` : value instanceof Set ? `set` : `other`,
         weight,
       ]),
@@ -954,11 +1136,6 @@ describe(`hash identity oracle`, () => {
       [`map`, -1],
       [`set`, 1],
     ])
-
-    // A Map/Array collision also used to make comparison order matter.
-    const mapArrayEqual = await loadWithCollision(16, 15)
-    expect(mapArrayEqual(new Map(), [])).toBe(false)
-    expect(mapArrayEqual([], new Map())).toBe(false)
   })
 
   it(`treats shared and copied subtrees, prototypes, and hidden properties as equal`, () => {
