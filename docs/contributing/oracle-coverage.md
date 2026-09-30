@@ -532,13 +532,20 @@ and empty restore while upstream remains pending, all-source conjunction,
 mixed opt-out, nested live-query sources, exact failure, SSR seed handoff,
 stale cleanup/restart work, an already-restored source, a network-first deadline,
 early network success and failure, network failure before nonempty restore,
-joined-source deadline composition, and a query-only error that must not be
-mistaken for network failure. It checks a
+client query stream failure before or after empty and nonempty restore or before
+observer construction,
+joined-source deadline composition, and a derived-query error alone or alongside
+a failed client stream that must not be mistaken for network failure. It checks a
 separate initial-render wait that leaves network `preload()` unchanged. The
 framework conformance suite checks the projected signals in React, Vue,
 Svelte, Solid, and Angular, including exact identity for a plain-object restore
 error after notification. The window-controller test checks infinite-query
-projection, and focused React and Solid tests check Suspense gating.
+projection, and focused React and Solid tests check Suspense gating. The React
+tests check client-stream failure before and after completed empty and nonempty
+restore, including a failed record already present before mount. They also
+check error-boundary handling for derived-query failures with and without a
+failed client stream. A replacement client record arriving during an
+initial-render wait has no persisted-fallback witness yet.
 This owner uses a controlled persistence adapter, not native SQLite or a real
 network provider; it does not prove browser scheduling or arbitrary histories.
 The framework identity scenario does not cover every possible rejection value
