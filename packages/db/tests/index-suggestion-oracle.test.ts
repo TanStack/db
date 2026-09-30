@@ -16,14 +16,13 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import {
-  
   configureIndexDevMode,
-  getIndexDevModeConfig
+  getIndexDevModeConfig,
 } from '../src/indexes/index-registry.js'
 import { eq } from '../src/query/builder/functions.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions } from './utils.js'
-import type {IndexSuggestion} from '../src/indexes/index-registry.js';
+import type { IndexSuggestion } from '../src/indexes/index-registry.js'
 
 type Row = { id: number; url: string }
 const originalConfig = getIndexDevModeConfig()
