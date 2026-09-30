@@ -1602,6 +1602,12 @@ type RemoteLeaseHistoryTrace = {
   secondAfterFinalRelease: ReturnType<RemoteLeaseOwnerLedger[`snapshot`]>
 }
 
+// Grammar bounds: one to three sibling demands, zero to two prefix releases,
+// and both values of each identity, duplicate-release, and final-order switch.
+// The surviving-demand law keeps at least one acquisition through takeover:
+// the marginal plans are one sibling with no prefix release and three siblings
+// with two prefix releases. Zero siblings, release before acquisition, and a
+// prefix that retires every demand are outside this generated history.
 const remoteLeaseHistoryArbitrary = fc.record({
   siblingCount: fc.integer({ min: 1, max: 3 }),
   releasePrefix: fc.integer({ min: 0, max: 2 }),
@@ -2812,6 +2818,10 @@ function routingHistoryFromAxes({
   }
 }
 
+// Grammar bounds: alpha schema version 1..50 and positive delta 1..50 give
+// distinct versions from (1, 2) through (50, 100). Every order axis uses both
+// two-collection permutations. A missing/duplicate registration, equal schema
+// versions, or delivery before registration is excluded by construction.
 const routingHistoryArbitrary: fc.Arbitrary<RoutingHistory> = fc
   .record({
     alphaVersion: fc.integer({ min: 1, max: 50 }),
@@ -3404,6 +3414,7 @@ describe(`generated collection-route histories`, () => {
           const initialCollection = plan.initialCollection
           let leader: BrowserCollectionCoordinator | undefined
           let follower: BrowserCollectionCoordinator | undefined
+          let requester: BrowserCollectionCoordinator | undefined
           const observed: Array<RoutedApply> = []
           const expected: Array<RoutedApply> = []
           let semanticFailure: unknown | typeof NO_PRIMARY_FAILURE =
@@ -3486,15 +3497,15 @@ describe(`generated collection-route histories`, () => {
             )
 
             checkpoint = `post-takeover routed applies`
-            // The new leader's direct calls still exercise the same production
-            // handler and must look up adapters per collection.
-            for (const collectionId of plan.secondDeliveryOrder) {
-              const response = await follower.requestApplyLocalMutations(
-                collectionId,
-                mutation(collectionId, `after-takeover`),
-              )
-              expect(response.ok).toBe(true)
-            }
+            requester = createCoordinator(
+              dbName,
+              createRecordingAdapter({ id: `history-requester` }),
+            )
+            await requestBothCollections(
+              requester,
+              `after-takeover`,
+              plan.secondDeliveryOrder,
+            )
             observed.push(
               ...applyObservation(`after-takeover`, [
                 ...followerAdapters.alpha.calls,
@@ -3547,6 +3558,13 @@ describe(`generated collection-route histories`, () => {
             `follower coordinator`,
             async () => {
               await disposeCoordinator(follower)
+            },
+          )
+          await captureCleanup(
+            historyCleanupDiagnostics,
+            `requester coordinator`,
+            async () => {
+              await disposeCoordinator(requester)
             },
           )
           await captureCleanup(

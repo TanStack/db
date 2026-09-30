@@ -54,6 +54,27 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * `AcquisitionPath` is a model projection over production request kinds. A
  * `page` is an indexed ordered request. A `prefix` is an unindexed ordered
  * request. `boundary` and `full-source` retain the production names.
+ *
+ * Grammar controls: the 192-cell product reconstructs each path with an
+ * applied-before-settlement and a deferred-write witness, a retained and a
+ * restarted sync run, and an initial and a truncate-replay barrier. Removing
+ * path loses a distinct provider request; removing delivery loses the held
+ * applied-receipt cut; removing window loses the pending move; removing outcome
+ * loses success, ordinary rejection, or AbortError identity; removing sync run
+ * loses obsolete settlement; removing barrier loses replay publication. The
+ * nonnullable rank offset [-1000, 1000] and positive step [1, 10] vary numeric
+ * values without changing those request shapes. Removing either value axis
+ * loses translated or scaled domains. The nullable matrix uses
+ * offset [-20, 20], step [1, 5], both null placements, and independent
+ * directions; removing a null or direction axis loses a distinct tie order.
+ * Zero step and unbounded values are outside these finite
+ * grammars. A null-first prefix already retired cannot be the target of a
+ * later replay repair, so that nearby invalid scenario is excluded.
+ *
+ * Known omissions: multiple pending joined plans during a window move and a
+ * public-query failed-retry overlap remain with the ordered-acquisition owner
+ * in the coverage map. These fixtures use a controlled finite source; they do
+ * not establish a real provider's ordering or cancellation behavior.
  */
 
 type Row = {
@@ -118,6 +139,35 @@ function compareNullable(
   if (typeof left !== `number` || typeof right !== `number`)
     throw new Error(`numeric/null palette only`)
   return (left < right ? -1 : 1) * (term.direction === `asc` ? 1 : -1)
+}
+
+// This fixed nine-row palette is a second formulation of the nullable order.
+// Primary groups are null, -2, +2; each group has secondary null, +2, -2.
+// The table states the expected group order without calling compareNullable.
+// Each unique ID occurs once. This checks the full ID order; the warm zero-window
+// witness and lifecycle result checks own emptiness and row payloads.
+function expectedNullablePaletteIds(
+  primary: OrderTerm,
+  secondary: OrderTerm,
+): Array<number> {
+  const primaryGroups = {
+    'first/asc': [0, 1, 2],
+    'first/desc': [0, 2, 1],
+    'last/asc': [1, 2, 0],
+    'last/desc': [2, 1, 0],
+  } as const
+  const secondaryPositions = {
+    'first/asc': [0, 2, 1],
+    'first/desc': [0, 1, 2],
+    'last/asc': [2, 1, 0],
+    'last/desc': [1, 2, 0],
+  } as const
+  return primaryGroups[`${primary.nulls}/${primary.direction}`].flatMap(
+    (group) =>
+      secondaryPositions[`${secondary.nulls}/${secondary.direction}`].map(
+        (position) => 3 * group + position + 1,
+      ),
+  )
 }
 
 const acquisitionPaths: ReadonlyArray<AcquisitionPath> = [
@@ -629,6 +679,23 @@ async function observeHistory(
   } catch (error) {
     primaryFailure = { error }
   }
+  if (mismatches.length > 0) {
+    let mismatchError: unknown
+    try {
+      expect(mismatches).toEqual([])
+    } catch (error) {
+      mismatchError = error
+    }
+    primaryFailure = {
+      error: primaryFailure
+        ? new AggregateError(
+            [mismatchError, primaryFailure.error],
+            `Ordered lifecycle mismatch preceded a driver failure`,
+            { cause: mismatchError },
+          )
+        : mismatchError,
+    }
+  }
   allowTarget = false
   await finishOracleCleanup(
     primaryFailure,
@@ -827,8 +894,15 @@ async function observeInitialSettlement(
   try {
     const preload = live.preload()
     const immediate = observeCurrent()
+    assertInitialSettlementObservation(immediate, settlement)
     await preload
-    observation = { immediate, settled: observeCurrent(), requests, releases }
+    const settled = observeCurrent()
+    expect(settled).toEqual({ rows: [1, 2], status: `ready` })
+    expect(observeInitialAcquisitionPath(requests)).toBe(
+      autoIndex === `eager` ? `page` : `prefix`,
+    )
+    assertInitialBoundaryContinuation(requests)
+    observation = { immediate, settled, requests, releases }
   } catch (error) {
     primaryFailure = { error }
   }
@@ -1303,6 +1377,37 @@ describe(`warm ordered readiness oracle`, () => {
 })
 
 describe(`nullable multi-term lifecycle product`, () => {
+  it(`anchors the nullable reference and controlled provider to an independent order palette`, () => {
+    const rows = Array.from({ length: 9 }, (_, index) => ({
+      id: index + 1,
+      primary: [null, -2, 2][Math.floor(index / 3)]!,
+      secondary: [null, 2, -2][index % 3]!,
+    }))
+    for (const primaryNulls of [`first`, `last`] as const)
+      for (const primaryDirection of [`asc`, `desc`] as const)
+        for (const secondaryNulls of [`first`, `last`] as const)
+          for (const secondaryDirection of [`asc`, `desc`] as const) {
+            const primary = {
+              nulls: primaryNulls,
+              direction: primaryDirection,
+            }
+            const secondary = {
+              nulls: secondaryNulls,
+              direction: secondaryDirection,
+            }
+            const actual = [...rows]
+              .sort(
+                (a, b) =>
+                  compareNullable(a.primary, b.primary, primary) ||
+                  compareNullable(a.secondary, b.secondary, secondary) ||
+                  a.id - b.id,
+              )
+              .map(({ id }) => id)
+            expect(actual).toEqual(
+              expectedNullablePaletteIds(primary, secondary),
+            )
+          }
+  })
   const cells: Array<Scenario> = ([`first`, `last`] as const)
     .flatMap((primaryNulls) =>
       ([`first`, `last`] as const).flatMap((secondaryNulls) =>
@@ -1349,6 +1454,14 @@ describe(`nullable multi-term lifecycle product`, () => {
   it(`enumerates every nullable lifecycle and direction-overlay cell exactly once`, () => {
     expect(cells).toHaveLength(22)
     expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(22)
+    expect(
+      cells.some(
+        (scenario) =>
+          scenario.nullable?.primary.nulls === `first` &&
+          scenario.acquisitionPath === `prefix` &&
+          scenario.repair,
+      ),
+    ).toBe(false)
     expect(directionCells).toHaveLength(4)
     expect(
       new Set(directionCells.map((cell) => JSON.stringify(cell))).size,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { HashReplayError, captureHashSession } from './hash-session'
+import type { Arbitrary } from 'fast-check'
 import type { HashSession } from './hash-session'
 
 const nativeSession = await captureHashSession()
@@ -127,6 +128,51 @@ const typeMarkerValues = fc.uniqueArray(fc.integer(), {
   maxLength: 5,
 })
 
+// The reusable value laws run with identical generators and checks in a
+// stable campaign and a fresh campaign. Select a single test name with Vitest
+// when replaying, for example:
+// TANSTACK_DB_IVM_HASH_SEED=123 TANSTACK_DB_IVM_HASH_PATH=0:1 \
+//   pnpm exec vitest --run tests/hash.property.test.ts -t 'cloned arrays have same hash'
+const valueReplaySeedText = process.env.TANSTACK_DB_IVM_HASH_SEED
+const valueReplayPath = process.env.TANSTACK_DB_IVM_HASH_PATH
+const valueReplaySeed =
+  valueReplaySeedText === undefined ? undefined : Number(valueReplaySeedText)
+const valueCampaigns =
+  valueReplaySeedText === undefined && valueReplayPath === undefined
+    ? [
+        { name: `fixed`, seed: 1657021 },
+        { name: `random`, seed: undefined },
+      ]
+    : [{ name: `replay`, seed: valueReplaySeed }]
+
+function hashProp<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
+  [K in keyof Ts]: Arbitrary<Ts[K]>
+}) {
+  return (name: string, check: (...values: Ts) => void): void => {
+    const property = fc.property(...arbitraries, check)
+    for (const { name: campaign, seed } of valueCampaigns) {
+      it(`${name} (${campaign})`, () => {
+        if (valueReplayPath !== undefined && valueReplaySeedText === undefined)
+          throw new Error(`TANSTACK_DB_IVM_HASH_PATH requires a seed`)
+        if (
+          valueReplaySeedText !== undefined &&
+          (valueReplaySeedText.trim() === `` ||
+            typeof seed !== `number` ||
+            !Number.isSafeInteger(seed) ||
+            seed < -2147483648 ||
+            seed > 2147483647)
+        )
+          throw new Error(`TANSTACK_DB_IVM_HASH_SEED must be a 32-bit integer`)
+        fc.assert(property, {
+          numRuns: 100,
+          ...(seed === undefined ? {} : { seed }),
+          ...(valueReplayPath === undefined ? {} : { path: valueReplayPath }),
+        })
+      })
+    }
+  }
+}
+
 const typeMarkerReplaySeed = process.env.TANSTACK_DB_IVM_HASH_TYPE_SEED
 const typeMarkerReplayPath = process.env.TANSTACK_DB_IVM_HASH_TYPE_PATH
 const typeMarkerCampaigns =
@@ -147,7 +193,7 @@ const typeMarkerCampaigns =
 
 describe(`hash property-based tests`, () => {
   describe(`determinism`, () => {
-    fcTest.prop([arbitraryPrimitive])(
+    hashProp([arbitraryPrimitive])(
       `hash is deterministic for primitives`,
       (value) => {
         const first = hash(value)
@@ -156,7 +202,7 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitrarySimpleObject])(
+    hashProp([arbitrarySimpleObject])(
       `hash is deterministic for objects`,
       (obj) => {
         const first = hash(obj)
@@ -165,7 +211,7 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitrarySimpleArray])(
+    hashProp([arbitrarySimpleArray])(
       `hash is deterministic for arrays`,
       (arr) => {
         const first = hash(arr)
@@ -174,13 +220,13 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitraryDate])(`hash is deterministic for dates`, (date) => {
+    hashProp([arbitraryDate])(`hash is deterministic for dates`, (date) => {
       const first = hash(date)
       const second = hash(date)
       expect(first).toBe(second)
     })
 
-    fcTest.prop([arbitraryUint8Array])(
+    hashProp([arbitraryUint8Array])(
       `hash is deterministic for Uint8Arrays`,
       (arr) => {
         const first = hash(arr)
@@ -191,7 +237,7 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`structural equality`, () => {
-    fcTest.prop([arbitrarySimpleObject])(
+    hashProp([arbitrarySimpleObject])(
       `cloned objects have same hash`,
       (obj) => {
         const clone = { ...obj }
@@ -199,23 +245,17 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitrarySimpleArray])(
-      `cloned arrays have same hash`,
-      (arr) => {
-        const clone = [...arr]
-        expect(hash(clone)).toBe(hash(arr))
-      },
-    )
+    hashProp([arbitrarySimpleArray])(`cloned arrays have same hash`, (arr) => {
+      const clone = [...arr]
+      expect(hash(clone)).toBe(hash(arr))
+    })
 
-    fcTest.prop([arbitraryDate])(
-      `dates with same time have same hash`,
-      (date) => {
-        const clone = new Date(date.getTime())
-        expect(hash(clone)).toBe(hash(date))
-      },
-    )
+    hashProp([arbitraryDate])(`dates with same time have same hash`, (date) => {
+      const clone = new Date(date.getTime())
+      expect(hash(clone)).toBe(hash(date))
+    })
 
-    fcTest.prop([arbitraryUint8Array])(
+    hashProp([arbitraryUint8Array])(
       `Uint8Arrays with same content have same hash`,
       (arr) => {
         const clone = new Uint8Array(arr)
@@ -223,15 +263,16 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([
-      fc.array(fc.tuple(fc.string(), fc.integer()), { maxLength: 5 }),
-    ])(`Maps with same entries have same hash`, (entries) => {
-      const map1 = new Map(entries)
-      const map2 = new Map(entries)
-      expect(hash(map1)).toBe(hash(map2))
-    })
+    hashProp([fc.array(fc.tuple(fc.string(), fc.integer()), { maxLength: 5 })])(
+      `Maps with same entries have same hash`,
+      (entries) => {
+        const map1 = new Map(entries)
+        const map2 = new Map(entries)
+        expect(hash(map1)).toBe(hash(map2))
+      },
+    )
 
-    fcTest.prop([fc.array(fc.integer(), { maxLength: 10 })])(
+    hashProp([fc.array(fc.integer(), { maxLength: 10 })])(
       `Sets with same values have same hash`,
       (arr) => {
         const set1 = new Set(arr)
@@ -242,7 +283,7 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`property order independence`, () => {
-    fcTest.prop([
+    hashProp([
       fc.uniqueArray(
         fc.string().filter((s) => s !== `` && s !== `__proto__`),
         { minLength: 2, maxLength: 2 },
@@ -259,7 +300,7 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([
+    hashProp([
       fc.dictionary(
         fc.string().filter((s) => s !== `__proto__`),
         fc.integer(),
@@ -278,34 +319,30 @@ describe(`hash property-based tests`, () => {
       expect(hash(reversed)).toBe(hash(obj))
     })
 
-    for (const seed of [1657021, undefined]) {
-      it(`preserves hashes after an observed non-index key permutation (${seed ?? `random`})`, () => {
-        fc.assert(
-          fc.property(arbitraryNonIndexEntries, (entries) => {
-            expectPermutedHashes(entries)
-          }),
-          { numRuns: 100, ...(seed === undefined ? {} : { seed }) },
-        )
-      })
-    }
+    hashProp([arbitraryNonIndexEntries])(
+      `preserves hashes after an observed non-index key permutation`,
+      (entries) => {
+        expectPermutedHashes(entries)
+      },
+    )
   })
 
   describe(`number normalization`, () => {
-    fcTest.prop([fc.constant(0)])(`0 and -0 have the same hash`, () => {
+    hashProp([fc.constant(0)])(`0 and -0 have the same hash`, () => {
       expect(hash(0)).toBe(hash(-0))
     })
 
-    fcTest.prop([fc.constant(NaN)])(`NaN has consistent hash`, () => {
+    hashProp([fc.constant(NaN)])(`NaN has consistent hash`, () => {
       const first = hash(NaN)
       const second = hash(NaN)
       expect(first).toBe(second)
     })
 
-    fcTest.prop([fc.integer()])(`integers hash consistently`, (n) => {
+    hashProp([fc.integer()])(`integers hash consistently`, (n) => {
       expect(hash(n)).toBe(hash(n))
     })
 
-    fcTest.prop([fc.double({ noNaN: true, noDefaultInfinity: true })])(
+    hashProp([fc.double({ noNaN: true, noDefaultInfinity: true })])(
       `doubles hash consistently`,
       (n) => {
         expect(hash(n)).toBe(hash(n))
@@ -316,28 +353,28 @@ describe(`hash property-based tests`, () => {
   // These are sampled discrimination controls, not universal injectivity laws.
   // A finite hash can collide; a collision needs diagnosis, not a stronger API claim.
   describe(`sampled type distinction controls`, () => {
-    fcTest.prop([fc.array(fc.integer(), { minLength: 1, maxLength: 5 })])(
+    hashProp([fc.array(fc.integer(), { minLength: 1, maxLength: 5 })])(
       `array and object with same indices have different hashes`,
       (arr) => {
         expectArrayObjectDistinct(arr)
       },
     )
 
-    fcTest.prop([fc.integer()])(
+    hashProp([fc.integer()])(
       `number and string representation have different hashes`,
       (n) => {
         expectDistinctHashes(`number-string`, n, n, String(n))
       },
     )
 
-    fcTest.prop([fc.boolean()])(
+    hashProp([fc.boolean()])(
       `boolean and its string representation have different hashes`,
       (b) => {
         expectDistinctHashes(`boolean-string`, b, b, String(b))
       },
     )
 
-    fcTest.prop([fc.date({ noInvalidDate: true })])(
+    hashProp([fc.date({ noInvalidDate: true })])(
       `date and its timestamp have different hashes`,
       (date) => {
         expectDistinctHashes(
@@ -349,7 +386,7 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.array(fc.integer(), { minLength: 1, maxLength: 5 })])(
+    hashProp([fc.array(fc.integer(), { minLength: 1, maxLength: 5 })])(
       `array and Set with same values have different hashes`,
       (arr) => {
         const set = new Set(arr)
@@ -408,14 +445,14 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`nested structures`, () => {
-    fcTest.prop([
+    hashProp([
       fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),
     ])(`nested arrays hash consistently`, (nested) => {
       const clone = nested.map((inner) => [...inner])
       expect(hash(clone)).toBe(hash(nested))
     })
 
-    fcTest.prop([
+    hashProp([
       fc.dictionary(
         fc.string(),
         fc.dictionary(fc.string(), fc.integer(), { maxKeys: 3 }),
@@ -430,7 +467,7 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`hash produces numbers`, () => {
-    fcTest.prop([arbitraryPrimitive])(
+    hashProp([arbitraryPrimitive])(
       `hash returns a number for primitives`,
       (value) => {
         expect(typeof hash(value)).toBe(`number`)
@@ -438,7 +475,7 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitrarySimpleObject])(
+    hashProp([arbitrarySimpleObject])(
       `hash returns a number for objects`,
       (obj) => {
         expect(typeof hash(obj)).toBe(`number`)
@@ -446,7 +483,7 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitrarySimpleArray])(
+    hashProp([arbitrarySimpleArray])(
       `hash returns a number for arrays`,
       (arr) => {
         expect(typeof hash(arr)).toBe(`number`)
@@ -456,7 +493,7 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`reconstructed primitive equality`, () => {
-    fcTest.prop([fc.integer()])(
+    hashProp([fc.integer()])(
       `integer decimal round trips preserve hashes`,
       (value) => {
         const equivalent = Number(String(value))
@@ -465,7 +502,7 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.string()])(
+    hashProp([fc.string()])(
       `reconstructed strings preserve hashes`,
       (value) => {
         const equivalent = value.split(``).join(``)
@@ -476,7 +513,7 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`sampled extension distinction controls`, () => {
-    fcTest.prop([
+    hashProp([
       fc.array(fc.integer(), { minLength: 1, maxLength: 10 }),
       fc.integer(),
     ])(`arrays with extra element have different hashes`, (arr, extra) => {
@@ -484,7 +521,7 @@ describe(`hash property-based tests`, () => {
       expectDistinctHashes(`array-extension`, { arr, extra }, arr, extended)
     })
 
-    fcTest.prop([
+    hashProp([
       fc.dictionary(fc.string(), fc.integer(), { minKeys: 1, maxKeys: 5 }),
       fc.string(),
       fc.integer(),

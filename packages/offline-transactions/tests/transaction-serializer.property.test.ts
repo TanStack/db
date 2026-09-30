@@ -47,7 +47,9 @@ import type { PendingMutation } from '@tanstack/db'
  * cross-realm boxed values are outside current evidence. Cycles must fail
  * visibly while repeated non-cyclic references retain their values. This
  * oracle does not claim byte stability for object key order beyond JSON's
- * established rules.
+ * established rules. Temporal witnesses install controlled constructors;
+ * they do not establish behavior with a native or polyfill Temporal runtime.
+ * Retained-storage checks use FakeStorageAdapter, not browser storage.
  */
 
 type Value =
@@ -1238,6 +1240,16 @@ const pinned: Array<Edit> = [
     }
   }),
 ]
+// Grammar controls: the pinned history is a legal ten-edit reconstruction of
+// every edit kind, both registry slots, Date/string twins, marker escapes, and
+// an own __proto__ key. Dropping one of those axes loses a distinct wire or
+// restart observation. Generated trees add empty and nested arrays/objects,
+// with depth two and at most three children or keys; current records admit
+// zero edits, while compatibility records start at one. Cycles and malformed
+// markers are outside this valid-tree grammar and have rejection witnesses
+// above. The generated edit bound includes the complete pinned history. A
+// never-escape rule fails its marker-shaped user object; an always-escape rule
+// fails its ordinary object with an own __proto__ key at the wire checkpoint.
 // This package's test root is separate from core's named replay portfolio.
 // Keep a local replay entry point rather than importing files outside rootDir.
 const {
@@ -1248,7 +1260,12 @@ const {
   prefix: `OFFLINE_ORACLE`,
   defaultRuns: 100,
 })
-it.each([20260914, undefined])(
+// An explicit seed selects direct replay. Normal runs keep both the fixed and
+// unseeded campaigns with the same generator, budget, and assertions.
+const campaigns = (fixedSeed: number): Array<number | undefined> =>
+  replaySeed === undefined ? [fixedSeed, undefined] : [undefined]
+
+it.each(campaigns(20260914))(
   `preserves mutation wire meaning across restart (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -1260,7 +1277,7 @@ it.each([20260914, undefined])(
             before: tree(2),
             after: tree(2),
           }),
-          { maxLength: 6 },
+          { maxLength: pinned.length },
         ),
         fc.integer({ min: -2000000000000, max: 2000000000000 }),
         (edits, time) => checkRoundtrip(edits, time),
@@ -1277,7 +1294,7 @@ it.each([20260914, undefined])(
   },
 )
 
-it.each([20260915, undefined])(
+it.each(campaigns(20260915))(
   `reads unversioned Date-marker records across restart (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -1289,7 +1306,7 @@ it.each([20260915, undefined])(
             before: leaf,
             after: leaf,
           }),
-          { minLength: 1, maxLength: 6 },
+          { minLength: 1, maxLength: pinned.length },
         ),
         async (edits) => {
           // Old records had no object escape. Use only unambiguous legacy trees,
@@ -1325,7 +1342,7 @@ it.each([20260915, undefined])(
   },
 )
 
-it.each([20260916, undefined])(
+it.each(campaigns(20260916))(
   `reads version-two escaped values across restart (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -1337,7 +1354,7 @@ it.each([20260916, undefined])(
             before: tree(2),
             after: tree(2),
           }),
-          { minLength: 1, maxLength: 6 },
+          { minLength: 1, maxLength: pinned.length },
         ),
         async (edits) =>
           checkRoundtrip(edits, 0, `none`, `encoder`, false, true),

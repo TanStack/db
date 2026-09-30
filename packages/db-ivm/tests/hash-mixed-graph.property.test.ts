@@ -3,13 +3,32 @@ import { fc } from '@fast-check/vitest'
 import { hash } from '../src/hashing/hash'
 
 /**
- * Mixed-carrier graphs extend the graph law across every recursive container.
+ * Mixed-carrier graphs extend the established structural-hash graph law across
+ * every recursive container (see hash-graph.property.test.ts and the structural
+ * values row in docs/contributing/oracle-coverage.md).
  *
- * The abstract graph stores only labels, targets, and edge-carrier names.
- * Separate construction turns each edge into an object field, array slot, Map
- * key/value, Set member, or symbol-keyed field. Reachability and acyclicity are
- * still judged on the abstract graph. Thus a carrier bug cannot be copied into
- * the oracle's cycle decision, and equal unfolded DAGs remain the value model.
+ * Law: a reachable structural cycle rejects each hash attempt; unfolding
+ * sharing in an acyclic value graph preserves its hash. The model's abstract
+ * graph stores only labels, targets, and carrier names. These are model-only
+ * terms: an edge becomes an object field, array slot, Map key/value, Set
+ * member, or symbol-keyed field in the production input. Reachability and
+ * acyclicity are judged before constructing those values, so a carrier bug
+ * cannot be copied into the cycle decision.
+ *
+ * The grammar has 1-6 nodes, 0-3 ordered outgoing edges per node, labels 0-2,
+ * six carriers, and only in-range targets. The root is node 0; disconnected
+ * nodes are allowed. Target choice controls self-cycles, longer cycles, and
+ * sharing; removing it loses those laws. Carrier choice makes an edge traverse
+ * each recursive container; removing one loses that boundary. Labels keep
+ * equal and unequal payloads possible. Zero edges permits the isolated root;
+ * two edges permit sharing; three edges and six nodes bound fan-out and path
+ * length. One node is the lower size margin.
+ * A negative or out-of-range target is outside this grammar. Named witnesses
+ * reconstruct equal distinct nodes, sharing, a mixed back edge, and its
+ * disconnected acyclic neighbor. This oracle does not claim collision freedom,
+ * ordering invariance, opaque references, deep/work-limit behavior, or retry
+ * atomicity. The public observation is the hash result or thrown error when
+ * the real hash entry point returns, compared below with the graph model.
  */
 
 type Carrier = `object` | `array` | `map-key` | `map-value` | `set` | `symbol`
@@ -52,6 +71,26 @@ const graphArbitrary = fc
         }),
       ),
   )
+
+const replaySeedText = process.env.TANSTACK_DB_IVM_MIXED_GRAPH_SEED
+const replayPath = process.env.TANSTACK_DB_IVM_MIXED_GRAPH_PATH
+const replayFault = process.env.TANSTACK_DB_IVM_MIXED_GRAPH_FAULT
+if (replayPath !== undefined && replaySeedText === undefined)
+  throw new Error(`Mixed graph replay path requires a seed`)
+if (replayFault !== undefined && replayFault !== `accept-cycles`)
+  throw new Error(`Unknown mixed graph replay fault`)
+const replaySeed =
+  replaySeedText === undefined ? undefined : Number(replaySeedText)
+if (replaySeed !== undefined && !Number.isSafeInteger(replaySeed))
+  throw new Error(`Mixed graph replay seed must be an integer`)
+
+const campaigns =
+  replaySeed === undefined
+    ? [
+        { name: `fixed seed 205203`, seed: 205203, path: undefined },
+        { name: `random`, seed: undefined, path: undefined },
+      ]
+    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
 
 // Reachable indegrees are a topology authority, not the hasher's recursion
 // stack. Payloads and carrier allocation never enter this decision.
@@ -123,7 +162,40 @@ function expectMixedGraph(
   expect(hashValue(nodes[0])).toBe(hashValue(unfold(0)))
 }
 
+function mixedGraphProperty(
+  hashValue: (value: unknown) => number = hash,
+  recordCheck: () => void = () => {},
+) {
+  let firstFailureLaw: `reachable cycle` | `acyclic unfolding` | undefined
+  let firstFailureGraph: Graph | undefined
+  return fc.property(graphArbitrary, (graph) => {
+    recordCheck()
+    const law = isAcyclic(graph) ? `acyclic unfolding` : `reachable cycle`
+    try {
+      expectMixedGraph(graph, hashValue)
+    } catch (cause) {
+      if (firstFailureLaw === undefined) {
+        firstFailureLaw = law
+        firstFailureGraph = graph
+      }
+      // A shrink in the other topology class is not the original failure.
+      if (law !== firstFailureLaw) return
+      throw new Error(
+        `Mixed graph ${law} failed at the hash call; original graph ${JSON.stringify(firstFailureGraph)}; candidate graph ${JSON.stringify(graph)}`,
+        { cause },
+      )
+    }
+  })
+}
+
 describe(`mixed-carrier structural graph laws`, () => {
+  it.each(carriers)(`rejects a reachable cycle through %s`, (carrier) => {
+    const graph: Graph = [{ label: 0, edges: [{ target: 0, carrier }] }]
+    expect(isAcyclic(graph)).toBe(false)
+    expectMixedGraph(graph)
+    expect(() => expectMixedGraph(graph, () => 0)).toThrow()
+  })
+
   it.each(carriers)(
     `preserves distinct equal nodes and sharing through %s`,
     (carrier) => {
@@ -169,14 +241,65 @@ describe(`mixed-carrier structural graph laws`, () => {
     expectMixedGraph(disconnected, () => 0)
   })
 
-  for (const seed of [205203, fc.sample(fc.integer(), 1)[0]!]) {
-    it(`matches independent labels and mixed-carrier topology (${seed})`, () => {
-      fc.assert(
-        fc.property(graphArbitrary, (graph) => expectMixedGraph(graph)),
-        { numRuns: 150, seed },
-      )
+  it(`preserves a shared mixed-carrier DAG when unfolded`, () => {
+    const diamond: Graph = [
+      {
+        label: 0,
+        edges: [
+          { carrier: `object`, target: 1 },
+          { carrier: `array`, target: 2 },
+        ],
+      },
+      { label: 1, edges: [{ carrier: `map-value`, target: 3 }] },
+      { label: 2, edges: [{ carrier: `set`, target: 3 }] },
+      { label: 2, edges: [] },
+    ]
+    expect(isAcyclic(diamond)).toBe(true)
+    expectMixedGraph(diamond)
+    const rejectsAll = (): number => {
+      throw new TypeError(`Cannot hash cyclic structural values`)
+    }
+    expect(() => expectMixedGraph(diamond, rejectsAll)).toThrow()
+  })
+
+  for (const campaign of campaigns) {
+    it(`matches independent labels and mixed-carrier topology (${campaign.name})`, () => {
+      let checked = 0
+      // The fault option is a test-only wrong-result control for CLI replay.
+      const hashValue = replayFault === `accept-cycles` ? () => 0 : hash
+      const property = mixedGraphProperty(hashValue, () => checked++)
+      fc.assert(property, {
+        numRuns: 150,
+        ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+        ...(campaign.path === undefined ? {} : { path: campaign.path }),
+      })
+      // A green normal campaign must reach the graph check for every run.
+      if (campaign.path === undefined) expect(checked).toBe(150)
+      else expect(checked).toBeGreaterThan(0)
     })
   }
+
+  it(`replays a generated cycle-acceptance mismatch at the same law`, () => {
+    const acceptsCycles = (): number => 0
+    const failed = fc.check(mixedGraphProperty(acceptsCycles), {
+      seed: 205203,
+      numRuns: 150,
+    })
+    expect(failed.failed).toBe(true)
+    expect(failed.counterexamplePath).not.toBeNull()
+    expect(failed.error).toContain(`reachable cycle`)
+    if (failed.counterexamplePath === null)
+      throw new Error(`Missing mixed graph replay path`)
+    const replay = fc.check(mixedGraphProperty(acceptsCycles), {
+      seed: failed.seed,
+      path: failed.counterexamplePath,
+      numRuns: 150,
+      endOnFailure: true,
+    })
+    expect(replay.failed).toBe(true)
+    expect(replay.counterexample).toEqual(failed.counterexample)
+    expect(replay.error).toContain(`reachable cycle`)
+  })
 
   it(`rejects unequal DAG and unfolding output and preserves the witness on replay`, () => {
     const property = fc.property(fc.integer({ min: 0, max: 2 }), (label) => {

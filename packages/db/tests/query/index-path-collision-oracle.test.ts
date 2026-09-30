@@ -26,6 +26,10 @@
  * The cross product contains rows that a merged range omits or adds; unchanged
  * scan results make index addition an explicit metamorphic control. The
  * nested index's lookup spy proves the indexed path ran after installation.
+ * A wrong rule that joins path segments with `.` treats [`a.b`] and [`a`, `b`]
+ * as the same field. In the first predicate case, it can add `0-10` or omit
+ * `25-0`; the exact-key checks reject either result at the scan and indexed
+ * checkpoints. The controlled source fixture makes no external-provider claim.
  *
  * Known omissions: This bounded owner does not claim arbitrary path segments,
  * nullish values, custom collation, or incremental publication histories.

@@ -31,6 +31,16 @@ import type { TraceDriver, TraceProjection } from '../trace-runner.js'
  * Fresh random campaigns vary their value domains. Pinned examples cover route
  * movement and repeated retirement because those laws need ordered histories,
  * not more random scalar values.
+ *
+ * Authority: the contribution-conservation, route-relation, and
+ * total-materialization laws in ARCHITECTURE.md. The model predicts complete
+ * public rows, not callback timing, demand, or facade identity. The grammar
+ * is bounded: one parent with 1–5 child contributors; one joined
+ * production/order with equal or distinct correlation keys; and one post
+ * with null, unmatched, or existing author keys. Missing child IDs and
+ * updates to absent orders are invalid driver actions. Each real live-query
+ * Collection is compared after preload and after every source write by
+ * runTrace, which preserves the first divergent checkpoint.
  */
 
 function rowsById<T extends { id: number }>(rows: Array<T>): Map<number, T> {
@@ -63,8 +73,22 @@ async function cleanupQuery(
   live: Cleanable,
   sources: Array<{ collection: Cleanable }>,
 ): Promise<void> {
-  await live.cleanup()
-  await Promise.all(sources.map(({ collection }) => collection.cleanup()))
+  const failures: Array<unknown> = []
+  try {
+    await live.cleanup()
+  } catch (error) {
+    failures.push(error)
+  }
+  const results = await Promise.allSettled(
+    sources.map(({ collection }) => collection.cleanup()),
+  )
+  for (const result of results) {
+    if (result.status === `rejected`) failures.push(result.reason)
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(failures, `Query cleanup failed`)
+  }
 }
 
 type ParentRow = { id: number }
@@ -400,6 +424,12 @@ const nullableProjection: TraceProjection<
 }
 
 function campaigns(fixedSeed: number, property: string) {
+  // Grammar controls: the pinned 1-child case reconstructs final retirement,
+  // while counts 2–5 keep a surviving contributor. Equal route keys are the
+  // control; distinct order and part IDs expose the wrong-alias result.
+  // Removing null or route updates loses empty-value or reactivation behavior.
+  // IDs vary only within positive integer equality domains; no numeric
+  // threshold is claimed. Drivers reject absent-child and absent-order actions.
   return [
     {
       name: `fixed`,
@@ -413,6 +443,40 @@ function campaigns(fixedSeed: number, property: string) {
 }
 
 describe(`includes query-shape recompute oracle`, () => {
+  fcTest(`releases every source and retains cleanup errors`, async () => {
+    const liveError = new Error(`live cleanup`)
+    const sourceError = new Error(`source cleanup`)
+    const released: Array<string> = []
+    await expect(
+      cleanupQuery(
+        {
+          cleanup: async () => {
+            released.push(`live`)
+            throw liveError
+          },
+        },
+        [
+          {
+            collection: {
+              cleanup: async () => {
+                released.push(`first source`)
+                throw sourceError
+              },
+            },
+          },
+          {
+            collection: {
+              cleanup: async () => {
+                released.push(`second source`)
+              },
+            },
+          },
+        ],
+      ),
+    ).rejects.toMatchObject({ errors: [liveError, sourceError] })
+    expect(released).toEqual([`live`, `first source`, `second source`])
+  })
+
   for (const campaign of campaigns(1703, `includes-query-shape.multiplicity`)) {
     fcTest.prop([fc.integer({ min: 2, max: 5 })], campaign.options)(
       `deleting one joined contributor preserves remaining multiplicity (${campaign.name})`,
@@ -436,6 +500,25 @@ describe(`includes query-shape recompute oracle`, () => {
       }),
   )
 
+  fcTest(
+    `rejects a premature parent removal after one contributor leaves`,
+    async () => {
+      await expect(
+        runTrace({
+          steps: [1],
+          driver: createMultiplicityDriver(2),
+          projection: {
+            ...multiplicityProjection,
+            observe: (context) =>
+              context.children.size === 1
+                ? []
+                : multiplicityProjection.observe(context),
+          },
+        }),
+      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 1 })
+    },
+  )
+
   for (const campaign of campaigns(1704, `includes-query-shape.correlation`)) {
     fcTest.prop(
       [
@@ -454,6 +537,7 @@ describe(`includes query-shape recompute oracle`, () => {
             `joined`,
             correlationId,
             productionId,
+            correlationId + 200,
           ),
           projection: correlationProjection,
         })

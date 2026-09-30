@@ -19,12 +19,15 @@
  * driver calls `createLiveQueryCollection`, `preload`, `toArray`, and
  * `materialize`. The checkpoint is `live.toArray` after `preload` resolves.
  *
- * `hasVirtualProps` observes all four virtual fields. Exact `$key`, selected
- * shapes, and nonempty child results prove the intended paths ran. This oracle
+ * The refinement check observes each field directly as well as through
+ * `hasVirtualProps`, so a missing field cannot hide behind the production
+ * classifier. Exact `$key`, selected shapes, and nonempty child results prove
+ * the intended paths ran. This oracle
  * does not cover matched join shapes, ordering, updates, callback boundaries,
  * or sync-state transitions. Prior hostile controls made projected-value
  * enrichment and a missing whole-row classification fail at these
- * observations.
+ * observations. `checkWithCleanup` retains the primary mismatch as the cause
+ * when Collection cleanup also fails and attempts every cleanup.
  */
 import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
@@ -67,7 +70,70 @@ function expectsVirtualFields(subject: VirtualFieldSubject): boolean {
   return subject === `row-root` || subject === `whole-row-child`
 }
 
+async function checkWithCleanup(
+  check: () => Promise<void>,
+  cleanups: ReadonlyArray<() => Promise<void>>,
+): Promise<void> {
+  let primaryFailure: unknown
+  let checkFailed = false
+  try {
+    await check()
+  } catch (error) {
+    primaryFailure = error
+    checkFailed = true
+  }
+
+  const cleanupFailures: Array<unknown> = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      cleanupFailures,
+      `Virtual row oracle check and cleanup failed`,
+      {
+        cause: primaryFailure,
+      },
+    )
+  }
+  if (checkFailed) throw primaryFailure
+}
+
 describe(`virtual row field runtime boundary`, () => {
+  test(`keeps the primary mismatch and attempts every cleanup`, async () => {
+    const mismatch = new Error(`published row mismatch`)
+    const firstCleanupError = new Error(`first cleanup failed`)
+    const lastCleanupError = new Error(`last cleanup failed`)
+    const attempted: Array<string> = []
+
+    await expect(
+      checkWithCleanup(async () => {
+        throw mismatch
+      }, [
+        async () => {
+          attempted.push(`first`)
+          throw firstCleanupError
+        },
+        async () => {
+          attempted.push(`middle`)
+        },
+        async () => {
+          attempted.push(`last`)
+          throw lastCleanupError
+        },
+      ]),
+    ).rejects.toMatchObject({
+      cause: mismatch,
+      errors: [firstCleanupError, lastCleanupError],
+    })
+    expect(attempted).toEqual([`first`, `middle`, `last`])
+  })
+
   test(`matches the row and value classification after publication`, async () => {
     const createdAt = new Date(`2026-09-20T12:34:56.000Z`)
     const rows = createCollection(
@@ -157,7 +223,7 @@ describe(`virtual row field runtime boundary`, () => {
       })),
     )
 
-    try {
+    await checkWithCleanup(async () => {
       await live.preload()
 
       const result = live.toArray[0]!
@@ -229,13 +295,11 @@ describe(`virtual row field runtime boundary`, () => {
         expect(hasVirtualProps(observation.value), observation.name).toBe(
           expectsFields,
         )
-        if (!expectsFields) {
-          for (const field of virtualFieldNames) {
-            expect(
-              field in Object(observation.value),
-              `${observation.name} must not expose ${field}`,
-            ).toBe(false)
-          }
+        for (const field of virtualFieldNames) {
+          expect(
+            field in Object(observation.value),
+            `${observation.name} ${expectsFields ? `must expose` : `must not expose`} ${field}`,
+          ).toBe(expectsFields)
         }
       }
 
@@ -259,10 +323,10 @@ describe(`virtual row field runtime boundary`, () => {
       expect(result.nestedObjects).toEqual([{ nested: { label: `nested` } }])
       expect(result.arrays).toEqual([[`one`, `two`]])
       expect(result.firstObject).toEqual({ label: `nested` })
-    } finally {
-      await live.cleanup()
-      await missingRows.cleanup()
-      await rows.cleanup()
-    }
+    }, [
+      () => live.cleanup(),
+      () => missingRows.cleanup(),
+      () => rows.cleanup(),
+    ])
   })
 })

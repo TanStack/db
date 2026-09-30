@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
@@ -34,22 +34,35 @@ import type {
   LifecycleUnloadEvent,
 } from './collection-subscription-lifecycle-grammar.js'
 
+const { multiplier, ...replay } = readOracleRunConfig()
+const it = replay.replayPath === undefined ? vitestIt : vitestIt.skip
+const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
+const randomCampaign = (property: string) =>
+  replay.replayPath === undefined || replay.replayProperty === property
+    ? fcTest
+    : fcTest.skip
+
 /**
  * # Does the runtime follow the subscription lifecycle grammar?
  *
+ * The Collection subscription API and the sync adapter lifecycle in
+ * `docs/guides/collection-options-creator.md` establish the ownership law.
  * The shared grammar models logical owners, acquisition attempts, sync runs,
  * and the publication barrier. This driver gives the same command history to a
  * real on-demand Collection and compares the exact lifecycle trace: loads,
  * unloads, returned results, readiness, and reported errors.
  *
  * Returned promises need their own observation rule. They belong to the
- * transport attempt that created them, while a caller waiting for publication
+ * acquisition attempt that created them, while a caller waiting for publication
  * belongs to a cancellable logical owner. A retired attempt may still settle;
  * it must not revive its old owner or replace a newer result.
  *
- * Row contents are checked by the publication oracle. Keeping them out of this
- * driver makes ownership faults visible instead of masking them behind final
- * state equality.
+ * Generated commands cover the state after each command. The fixed retired
+ * delivery cases separately settle an acquisition attempt after unsubscribe; the
+ * generated grammar cannot select that obsolete attempt after unsubscribe.
+ *
+ * Row contents and real-provider behavior are outside this controlled adapter
+ * driver. The publication oracle checks row contents separately.
  */
 
 type RuntimeAttempt = {
@@ -87,7 +100,7 @@ type ExpectedCaller = {
     | { status: `normalized-rejection`; source: unknown }
 }
 
-// A physical Promise belongs to its original transport even after retirement.
+// An adapter Promise belongs to its original acquisition attempt after retirement.
 // A caller waiting for a loader instead owns a cancellable publication wait.
 // These expectations come from the caller contract, not subscription status.
 function updateCallerOutcomes(
@@ -122,7 +135,7 @@ function updateCallerOutcomes(
     }
     if (owner.attemptId === undefined) continue
     // Even this caller's successful acquisition cannot bypass an unfinished
-    // peer or overlapping replay transport.
+    // peer or overlapping replay acquisition attempt.
     if (
       model.attempts.some(
         ({ inReplacement, gating }) => inReplacement && gating,
@@ -136,7 +149,7 @@ function updateCallerOutcomes(
     if (failure !== undefined) {
       const error = failedAttempts.get(failure)
       // Replay exposes one normalized Error. Some hosts' DOMException is not
-      // an Error instance; a physical Promise still preserves that raw reason.
+      // an Error instance; the acquisition Promise preserves that raw reason.
       caller.outcome =
         error instanceof Error
           ? { status: `rejected`, error }
@@ -155,6 +168,7 @@ async function runHistory(
     continueAfterMismatch?: boolean
     retiredDelivery?: `resolve` | `reject`
     callerFault?: CallerFault
+    cleanupFault?: () => void
     onResultCheckpoint?: (
       command: LifecycleCommand,
       results: ReadonlyArray<ReturnedResult>,
@@ -218,7 +232,7 @@ async function runHistory(
   > = []
   const returnedResults: Array<ReturnedResult> = []
   const expectedCallers: Array<ExpectedCaller> = []
-  // A later abort cannot change an already rejected transport's reason.
+  // A later abort cannot change an acquisition attempt's rejection reason.
   const failedAttempts = new Map<number, unknown>()
   const normalizedRejections = new Map<unknown, unknown>()
   const terminalReach = new Set<string>()
@@ -412,6 +426,20 @@ async function runHistory(
         attempt.current === (command.scope === `current`),
     )
     return command.age === `oldest` ? candidates[0] : candidates.at(-1)
+  }
+
+  let primaryFailure: unknown
+  let primaryFailed = false
+  const cleanupFailures: Array<Error> = []
+  const cleanup = async (
+    boundary: string,
+    action: () => void | Promise<unknown>,
+  ): Promise<void> => {
+    try {
+      await action()
+    } catch (error) {
+      cleanupFailures.push(new Error(`${boundary} failed`, { cause: error }))
+    }
   }
 
   try {
@@ -639,19 +667,40 @@ async function runHistory(
         check(outcome.error).toBe(attempt.failure)
       }
       terminalReach.add(
-        `retired-physical-delivery:${runOptions.retiredDelivery}`,
+        `retired-attempt-delivery:${runOptions.retiredDelivery}`,
       )
     }
+  } catch (error) {
+    primaryFailure = error
+    primaryFailed = true
   } finally {
-    for (const { deferred } of runtimeAttempts.values()) deferred?.resolve()
-    await flushPromises()
-    subscription.unsubscribe()
-    await collection.cleanup()
+    if (runOptions.cleanupFault) {
+      await cleanup(`injected cleanup`, runOptions.cleanupFault)
+    }
+    for (const { id, deferred } of runtimeAttempts.values()) {
+      await cleanup(`attempt ${id} settlement`, () => deferred?.resolve())
+    }
+    await cleanup(`pending callback drain`, flushPromises)
+    await cleanup(`subscription unsubscribe`, () => subscription.unsubscribe())
+    await cleanup(`Collection cleanup`, () => collection.cleanup())
   }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      cleanupFailures,
+      primaryFailed
+        ? `lifecycle refinement and cleanup failed`
+        : `lifecycle cleanup failed`,
+      { cause: primaryFailed ? primaryFailure : undefined },
+    )
+  }
+  if (primaryFailed) throw primaryFailure
   return new Set([...model.reach, ...terminalReach])
 }
 
-if (process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`) {
+if (
+  replay.replayPath === undefined &&
+  process.env.TANSTACK_DB_ORACLE_STATISTICS === `1`
+) {
   fc.statistics(
     greenLifecycleHistoryArbitrary,
     (history) => {
@@ -773,13 +822,39 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     )
   })
 
+  it(`retains the caller mismatch and a separate cleanup failure`, async () => {
+    const cleanupFailure = new Error(`cleanup sentinel`)
+    let reported: unknown
+    try {
+      await runHistory(
+        [
+          { type: `request`, demand: `a` },
+          settle(`a`, `current`, `oldest`, `resolve`),
+        ],
+        {
+          callerFault: `wrong-value`,
+          cleanupFault: () => {
+            throw cleanupFailure
+          },
+        },
+      )
+    } catch (error) {
+      reported = error
+    }
+    expect(reported).toBeInstanceOf(AggregateError)
+    const combined = reported as AggregateError
+    expect((combined.cause as Error).message).toContain(`caller outcome`)
+    expect(combined.errors).toHaveLength(1)
+    expect((combined.errors[0] as Error).cause).toBe(cleanupFailure)
+  })
+
   for (const outcome of [`resolve`, `reject`] as const) {
-    it(`keeps terminal observations unchanged after a retired physical ${outcome}`, async () => {
+    it(`keeps terminal observations unchanged when a retired acquisition attempt ${outcome}s`, async () => {
       const reach = await runHistory(
         [{ type: `request`, demand: `a` }, { type: `unsubscribe` }],
         { retiredDelivery: outcome },
       )
-      expect(reach).toContain(`retired-physical-delivery:${outcome}`)
+      expect(reach).toContain(`retired-attempt-delivery:${outcome}`)
     })
   }
 
@@ -1060,7 +1135,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     },
   )
 
-  it(`preserves physical ownership across queued synchronous replay`, async () => {
+  it(`preserves acquisition lease ownership across queued synchronous replay`, async () => {
     await runHistory(syncLifecycleHistory, {
       acquisitionMode: `sync-success`,
       continueAfterMismatch: true,
@@ -1198,14 +1273,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     )
   })
 
-  const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 80 * multiplier
   const cancellationArbitrary = fc.constantFrom(
     `manual` as const,
     `reject` as const,
   )
 
-  fcTest.prop([greenLifecycleHistoryArbitrary, cancellationArbitrary], {
+  fixedCampaign.prop([greenLifecycleHistoryArbitrary, cancellationArbitrary], {
     numRuns: runs,
     seed: 1_657_003,
   })(
@@ -1215,7 +1289,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     },
     120_000,
   )
-  fcTest.prop(
+  randomCampaign(`subscription-lifecycle.async-history`).prop(
     [greenLifecycleHistoryArbitrary, cancellationArbitrary],
     oracleRandomParameters(
       runs,
@@ -1229,7 +1303,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     },
     120_000,
   )
-  fcTest.prop([syncLifecycleHistoryArbitrary], {
+  fixedCampaign.prop([syncLifecycleHistoryArbitrary], {
     numRuns: runs,
     seed: 1_657_004,
   })(
@@ -1239,7 +1313,7 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
     },
     120_000,
   )
-  fcTest.prop(
+  randomCampaign(`subscription-lifecycle.sync-history`).prop(
     [syncLifecycleHistoryArbitrary],
     oracleRandomParameters(runs, replay, `subscription-lifecycle.sync-history`),
   )(

@@ -8,10 +8,11 @@
  * keeps inline `toArray` and `materialize` selections in their selected shape.
  *
  * The local type relations classify row roots and unprojected whole-row
- * children as rows. Projected children, nested refs, nested values, and opaque
- * values are values. Discriminated row unions must survive virtual-field
- * removal. A directly selected unmatched nullable row is an empty object, so
- * its known row fields must remain available as optional values.
+ * children as rows. These subject labels are model-only categories, not
+ * production types or states. Projected children, nested refs, nested values,
+ * and opaque values are values. Discriminated row unions must survive
+ * virtual-field removal. A directly selected unmatched nullable row is an
+ * empty object, so its known row fields must remain available as optional values.
  *
  * Legal forms include required, optional, and nullable nested `Ref` and
  * `SingleRowRefProxy` helpers; virtual-field-specific root helpers; and inline
@@ -24,8 +25,9 @@
  * `collection.toArray` type. Structural equality checks positive facts;
  * `@ts-expect-error` checks reject virtual fields on values.
  *
- * This oracle does not cover joins, runtime metadata values, publication
- * timing, or mutations. The paired runtime oracle checks published values.
+ * This oracle does not cover runtime join behavior, runtime metadata values,
+ * publication timing, or mutations. The paired runtime oracle checks
+ * published values.
  * Reach is visible through both production callbacks and every selected output.
  * Hostile controls proved that virtual-field-bearing defaults break six
  * nested-helper cells and `GetRawResult` enrichment breaks eleven
@@ -43,10 +45,7 @@ import { mockSyncCollectionOptions } from '../utils.js'
 import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { SingleRowRefProxy } from '../../src/query/builder/ref-proxy.js'
 import type { Ref } from '../../src/query/index.js'
-import type {
-  WithVirtualProps,
-  WithoutVirtualProps,
-} from '../../src/virtual-props.js'
+import type { WithoutVirtualProps } from '../../src/virtual-props.js'
 
 type Variant =
   | { kind: `person`; name: string }
@@ -60,12 +59,18 @@ type VirtualFieldSubject =
   | `nested-value`
   | `opaque-value`
 
-// Only row roots and unprojected whole-row children carry virtual row fields.
+// This expected shape comes from the public row contract, independently of
+// production's WithVirtualProps helper.
 type PublishedValueFor<
   T extends object,
   TSubject extends VirtualFieldSubject,
 > = TSubject extends `row-root` | `whole-row-child`
-  ? WithVirtualProps<T, string | number>
+  ? T & {
+      readonly $synced: boolean
+      readonly $origin: `local` | `remote`
+      readonly $key: string | number
+      readonly $collectionId: string
+    }
   : T
 
 type QueryRefFor<
@@ -114,6 +119,8 @@ describe(`virtual row field type boundary`, () => {
       q.from({ row: rows }).select(({ row }) => {
         expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
         expectTypeOf(row.$synced).toEqualTypeOf<RefLeaf<boolean>>()
+        expectTypeOf(row.$origin).toEqualTypeOf<RefLeaf<`local` | `remote`>>()
+        expectTypeOf(row.$collectionId).toEqualTypeOf<RefLeaf<string>>()
         profileLabelIs(row.profile)
         if (row.optionalProfile) profileLabelIs(row.optionalProfile)
         if (row.nullableProfile) profileLabelIs(row.nullableProfile)
@@ -133,6 +140,9 @@ describe(`virtual row field type boundary`, () => {
     const result = collection.toArray[0]!
     expectTypeOf(result.profile).toEqualTypeOf<Profile>()
     expectTypeOf(result.$key).toEqualTypeOf<string | number>()
+    expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
+    expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
+    expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
     // @ts-expect-error A selected nested user object remains a value, not a row.
     result.profile.$key
   })
@@ -145,6 +155,8 @@ describe(`virtual row field type boundary`, () => {
     rows.createIndex((row) => {
       expectTypeOf(row.$collectionId).toEqualTypeOf<RefLeaf<string>>()
       expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
+      expectTypeOf(row.$synced).toEqualTypeOf<RefLeaf<boolean>>()
+      expectTypeOf(row.$origin).toEqualTypeOf<RefLeaf<`local` | `remote`>>()
       profileLabelIs(row.profile)
       if (row.optionalProfile) profileLabelIs(row.optionalProfile)
       if (row.nullableProfile) profileLabelIs(row.nullableProfile)
@@ -204,7 +216,7 @@ describe(`virtual row field type boundary`, () => {
             .where(({ child }) => eq(child.id, row.id))
             .select(({ child }) => {
               expectTypeOf(child).toEqualTypeOf<
-                Ref<WithVirtualProps<Row, string | number>, false, true>
+                Ref<PublishedValueFor<Row, `row-root`>, false, true>
               >()
               return child
             }),
@@ -269,6 +281,15 @@ describe(`virtual row field type boundary`, () => {
     >()
     expectTypeOf(result.unmatchedRows[0]!.$key).toEqualTypeOf<
       string | number | undefined
+    >()
+    expectTypeOf(result.unmatchedRows[0]!.$synced).toEqualTypeOf<
+      boolean | undefined
+    >()
+    expectTypeOf(result.unmatchedRows[0]!.$origin).toEqualTypeOf<
+      `local` | `remote` | undefined
+    >()
+    expectTypeOf(result.unmatchedRows[0]!.$collectionId).toEqualTypeOf<
+      string | undefined
     >()
     expectTypeOf(result.objects[0]!).toEqualTypeOf<
       PublishedValueFor<{ label: string }, `projected-child`>

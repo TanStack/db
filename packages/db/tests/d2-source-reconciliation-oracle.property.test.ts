@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { expect, it as vitestIt } from 'vitest'
 import {
   createCollection,
   createLiveQueryCollection,
@@ -8,13 +8,26 @@ import {
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createEffect } from '../src/query/effect.js'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
+const { replayPath, replayProperty } = readOracleRunConfig()
+const it = replayPath === undefined ? vitestIt : vitestIt.skip
+const fixedCampaign = replayPath === undefined ? fcTest : fcTest.skip
+const randomCampaign = (property: string) =>
+  replayPath === undefined || replayProperty === property ? fcTest : fcTest.skip
+
 /**
  * D2 source reconciliation turns source-key snapshots into exact signed row
- * changes across graph lifetimes.
+ * changes across graph lifetimes. The contribution-conservation and
+ * publication laws in `src/query/live/ARCHITECTURE.md` authorize the graph
+ * result; the `reconcileChangesForD2` boundary owns the exact sent-row value
+ * used for each retraction.
  *
  * The model has three separate nodes: authoritative source rows, production's
  * sent-row memory, and an independently integrated weighted relation. Generated
@@ -22,10 +35,14 @@ import type { ChangeMessage, SyncConfig } from '../src/types.js'
  * types, replay rows, delete, truncate, tear down, and restart. The reference
  * derives truth from the source-key map, never from reported previous values.
  *
- * After each cut the raw reconciled messages must integrate to the source
- * relation, and a real live query must publish the same rows through both scan
- * and index routes. This catches locally balanced messages that still leave the
- * downstream graph wrong.
+ * After each helper cut the raw reconciled messages must integrate to the
+ * source relation. Ordered Effect and live-query Collection tests check exact
+ * retractions at the indexed consumer boundary. The generated model exercises
+ * the reconciliation helper, not real graph teardown/restart wiring. The
+ * controlled ordered source tests inject stale change messages; they do not
+ * establish that an external provider emits those messages, that a scan route
+ * behaves the same way, or that every graph shape has the same publication
+ * schedule.
  */
 
 type SourceRow = {
@@ -66,6 +83,7 @@ type ReconciliationModel = {
   sourceRows: Map<SourceKey, SourceRow>
   sentRows: Map<SourceKey, SourceRow>
   relation: Map<string, number>
+  // Model-only switch for helper invocation, not a production graph state.
   graphActive: boolean
 }
 
@@ -125,6 +143,24 @@ const reconciliationHistoryArbitrary = fc.array(reconciliationStepArbitrary, {
   minLength: 1,
   maxLength: 30,
 })
+
+// Grammar controls: the pinned numeric/string key, unknown update/delete,
+// stale previous-value, and changed-source restart histories below are all
+// reconstructible here. Upsert establishes or replaces authoritative source
+// rows; rawUpdate exercises an update without a prior sent row; replay checks
+// repeat delivery; delete tests exact retraction or an unknown key. Truncate
+// preserves the sent row for a later source batch, while teardown and restart
+// distinguish source ownership from graph memory. The helper simulator makes
+// truncate an explicit no-op; its effect is observable only in the ordered
+// consumer tests below. Removing another operation rule loses its named
+// transition; removing key type or revision/value variation loses a distinct
+// source contribution. Batches of 1..5 operations expose
+// within-batch transitions; histories of 1..30 expose later source replay.
+// Row fields and keys use the bounded domains above. Out-of-range row numbers
+// use the same equality law; object keys and malformed messages are excluded
+// by the SourceKey/SourceOperation grammar. Repeated teardown/restart and a
+// truncate without a later batch are harmless simulator signals, not claims
+// about public Collection lifecycle legality or real truncate replay.
 
 function sourceOperationForKeyArbitrary(
   key: SourceKey,
@@ -446,10 +482,72 @@ function createOrderedSourceHarness(id: string) {
   }
 }
 
-it(`ignores unknown deletes and inserts unknown updates at the D2 boundary`, () => {
+async function runWithCleanup(
+  check: () => Promise<void>,
+  cleanups: ReadonlyArray<() => void | Promise<void>>,
+): Promise<void> {
+  let failed = false
+  let primaryFailure: unknown
+  try {
+    await check()
+  } catch (error) {
+    failed = true
+    primaryFailure = error
+  }
+
+  const cleanupFailures: Array<unknown> = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+
+  if (failed && cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `D2 oracle cleanup failed`, {
+      cause: primaryFailure,
+    })
+  }
+  if (failed) throw primaryFailure
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `D2 oracle cleanup failed`)
+  }
+}
+
+it(`retains a D2 mismatch and later cleanup diagnostics while releasing every resource`, async () => {
+  const mismatch = new Error(`wrong D2 row`)
+  const cleanupFailure = new Error(`first release failed`)
+  const released: Array<string> = []
+  let report: unknown
+  try {
+    await runWithCleanup(async () => {
+      throw mismatch
+    }, [
+      () => {
+        released.push(`first`)
+        throw cleanupFailure
+      },
+      () => {
+        released.push(`second`)
+      },
+    ])
+  } catch (error) {
+    report = error
+  }
+
+  expect(report).toBeInstanceOf(AggregateError)
+  if (!(report instanceof AggregateError)) return
+  expect(report.cause).toBe(mismatch)
+  expect(report.errors).toEqual([cleanupFailure])
+  expect(released).toEqual([`first`, `second`])
+})
+
+it(`uses sent-row membership and values at the D2 change boundary`, () => {
   const sentRows = new Map<SourceKey, SourceRow>()
   const stale = { id: 1, revision: 1, value: 1 }
   const current = { id: 2, revision: 2, value: 2 }
+  const replacement = { id: 2, revision: 3, value: 3 }
 
   expect(
     reconcileChangesForD2(
@@ -471,6 +569,37 @@ it(`ignores unknown deletes and inserts unknown updates at the D2 boundary`, () 
     ),
   ).toEqual([{ type: `insert`, key: `row`, value: current }])
   expect(sentRows).toEqual(new Map([[`row`, current]]))
+
+  // A known-key update and delete retract the row sent to D2, even when the
+  // source reports a different previous value. These adjacent cells reject
+  // both "always insert updates" and "trust the reported value" rules.
+  expect(
+    reconcileChangesForD2(
+      [
+        {
+          type: `update`,
+          key: `row`,
+          previousValue: stale,
+          value: replacement,
+        },
+      ],
+      sentRows,
+    ),
+  ).toEqual([
+    {
+      type: `update`,
+      key: `row`,
+      previousValue: current,
+      value: replacement,
+    },
+  ])
+  expect(
+    reconcileChangesForD2(
+      [{ type: `delete`, key: `row`, value: stale }],
+      sentRows,
+    ),
+  ).toEqual([{ type: `delete`, key: `row`, value: replacement }])
+  expect(sentRows).toEqual(new Map())
 })
 
 it(`retracts the exact Effect source row after an ordered truncate`, async () => {
@@ -493,7 +622,7 @@ it(`retracts the exact Effect source row after an ordered truncate`, async () =>
       events.push(...batch)
     },
   })
-  try {
+  await runWithCleanup(async () => {
     await flushPromises()
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({
@@ -517,10 +646,7 @@ it(`retracts the exact Effect source row after an ordered truncate`, async () =>
       { type: `enter`, key: 1, value: publishedValue },
       { type: `exit`, key: 1, value: publishedValue },
     ])
-  } finally {
-    await effect.dispose()
-    await source.cleanup()
-  }
+  }, [() => effect.dispose(), () => source.cleanup()])
 })
 
 it(`retracts the exact live-query source row after ordered replay settles`, async () => {
@@ -539,7 +665,7 @@ it(`retracts the exact live-query source row after ordered replay settles`, asyn
     startSync: true,
   })
 
-  try {
+  await runWithCleanup(async () => {
     await live.preload()
     expect(live.get(contributed.id)).toMatchObject(contributed)
 
@@ -554,10 +680,7 @@ it(`retracts the exact live-query source row after ordered replay settles`, asyn
 
     await harness.resolveReplay()
     expect(live.get(contributed.id)).toBeUndefined()
-  } finally {
-    await live.cleanup()
-    await source.cleanup()
-  }
+  }, [() => live.cleanup(), () => source.cleanup()])
 })
 
 it(`replaces the retained Effect source row after an ordered truncate`, async () => {
@@ -581,7 +704,7 @@ it(`replaces the retained Effect source row after an ordered truncate`, async ()
     },
   })
 
-  try {
+  await runWithCleanup(async () => {
     await flushPromises()
     expect(batches).toHaveLength(1)
     expect(batches[0]).toHaveLength(1)
@@ -617,10 +740,7 @@ it(`replaces the retained Effect source row after an ordered truncate`, async ()
       value: replacement,
     })
     expect(batches[1]![0]!.previousValue).toBe(publishedValue)
-  } finally {
-    await effect.dispose()
-    await source.cleanup()
-  }
+  }, [() => effect.dispose(), () => source.cleanup()])
 })
 
 it(`replaces the retained live-query source row after ordered replay settles`, async () => {
@@ -638,8 +758,9 @@ it(`replaces the retained live-query source row after ordered replay settles`, a
     startSync: true,
   })
   const batches: Array<Array<ChangeMessage<SourceRow, SourceKey>>> = []
+  let unsubscribe: (() => void) | undefined
 
-  try {
+  await runWithCleanup(async () => {
     await live.preload()
     expect(live.get(contributed.id)).toMatchObject(contributed)
     const publishedValue = live.get(contributed.id)
@@ -647,6 +768,7 @@ it(`replaces the retained live-query source row after ordered replay settles`, a
       (changes) => batches.push(changes),
       { includeInitialState: false },
     )
+    unsubscribe = () => subscription.unsubscribe()
 
     harness.suppressSourceChanges()
     harness.truncate()
@@ -676,11 +798,7 @@ it(`replaces the retained live-query source row after ordered replay settles`, a
     })
     expect(batches[0]![0]!.previousValue).toEqual(publishedValue)
     expect(live.get(replacement.id)).toMatchObject(replacement)
-    subscription.unsubscribe()
-  } finally {
-    await live.cleanup()
-    await source.cleanup()
-  }
+  }, [() => unsubscribe?.(), () => live.cleanup(), () => source.cleanup()])
 })
 
 it(`keeps revision and value in weighted row identity`, () => {
@@ -850,19 +968,32 @@ it(`does not count absent replay or an unfinished downtime as replay coverage`, 
   ).toBe(0)
 })
 
-fcTest.prop([sourceRowArbitrary, sourceKeyArbitrary], { numRuns: 100 })(
-  `forces a changed source payload through every generated helper restart`,
-  (row, key) => {
-    const replacement = { ...row, revision: row.revision + 1 }
-    expect(
-      executedReplayReach([
-        upsert(key, row),
-        { type: `teardown` },
-        upsert(key, replacement, row),
-        { type: `restart` },
-      ]),
-    ).toBe(1)
-  },
+const assertChangedSourceReplay = (row: SourceRow, key: SourceKey) => {
+  const replacement = { ...row, revision: row.revision + 1 }
+  expect(
+    executedReplayReach([
+      upsert(key, row),
+      { type: `teardown` },
+      upsert(key, replacement, row),
+      { type: `restart` },
+    ]),
+  ).toBe(1)
+}
+
+fixedCampaign.prop([sourceRowArbitrary, sourceKeyArbitrary], {
+  numRuns: oracleRuns(100),
+  seed: 1782,
+})(
+  `forces a changed source payload through every generated helper restart for a fixed seed`,
+  assertChangedSourceReplay,
+)
+
+randomCampaign(`d2-source.changed-restart`).prop(
+  [sourceRowArbitrary, sourceKeyArbitrary],
+  oraclePropertyOptions(100, `d2-source.changed-restart`),
+)(
+  `forces a changed source payload through every generated helper restart for a random or replayed seed`,
+  assertChangedSourceReplay,
 )
 
 it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
@@ -910,17 +1041,29 @@ it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
   },
 )
 
-fcTest.prop(
+const assertExactSourceContributions = (
+  steps: ReadonlyArray<ReconciliationStep>,
+) => {
+  const model = createReconciliationModel()
+  for (const step of steps) {
+    applyReconciliationStep(model, step)
+  }
+}
+
+fixedCampaign.prop([reconciliationHistoryArbitrary], {
+  numRuns: oracleRuns(200),
+  seed: 1780,
+})(
+  `keeps one exact D2 contribution per source key for a fixed seed`,
+  assertExactSourceContributions,
+)
+
+randomCampaign(`d2-source.exact-retractions`).prop(
   [reconciliationHistoryArbitrary],
   oraclePropertyOptions(200, `d2-source.exact-retractions`),
 )(
-  `keeps one exact D2 contribution per source key across batched histories`,
-  (steps) => {
-    const model = createReconciliationModel()
-    for (const step of steps) {
-      applyReconciliationStep(model, step)
-    }
-  },
+  `keeps one exact D2 contribution per source key for a random or replayed seed`,
+  assertExactSourceContributions,
 )
 
 const assertDisjointHistoriesCommute = ([left, right]: [
@@ -938,7 +1081,7 @@ const assertDisjointHistoriesCommute = ([left, right]: [
   expect(snapshotModel(rightThenLeft)).toEqual(snapshotModel(leftThenRight))
 }
 
-fcTest.prop([disjointHistoriesArbitrary], {
+fixedCampaign.prop([disjointHistoriesArbitrary], {
   numRuns: oracleRuns(100),
   seed: 1781,
 })(
@@ -946,7 +1089,7 @@ fcTest.prop([disjointHistoriesArbitrary], {
   assertDisjointHistoriesCommute,
 )
 
-fcTest.prop(
+randomCampaign(`d2-source.disjoint-commutation`).prop(
   [disjointHistoriesArbitrary],
   oraclePropertyOptions(100, `d2-source.disjoint-commutation`),
 )(

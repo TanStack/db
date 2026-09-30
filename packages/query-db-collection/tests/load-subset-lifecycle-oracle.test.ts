@@ -30,6 +30,15 @@ import type { LoadSubsetOptions, SyncMetadataApi } from '@tanstack/db'
  * signals, metadata, source and dependent status, exact errors, and cleanup.
  * Fault cases prove correct call counts cannot hide wrong returned values or a
  * stale replacement snapshot.
+ *
+ * The exact demand-identity API in docs/reference/functions/getLoadSubsetDemandKey.md
+ * and the Collection sync-adapter contract in docs/guides/collection-options-creator.md
+ * authorize the identity, request-scoped release, and applied-settlement laws.
+ * Each direct load below represents one acquisition lease; the small reference
+ * history keeps a shared Query transport active while any lease remains. The
+ * held provider checks the abort signal at each release checkpoint. These
+ * controlled histories do not establish real network cancellation, arbitrary
+ * Query scheduling, or native persistence behavior.
  */
 
 type Row = {
@@ -1048,6 +1057,88 @@ async function expectFinalOwnerCleanupAbortsQuery(): Promise<void> {
   }
 }
 
+type SharedQueryCancellationSnapshot = {
+  remainingAcquisitionLeases: 2 | 1 | 0
+  queryCalls: number
+  aborted: boolean
+}
+
+async function observeSharedInFlightQueryCancellation(): Promise<
+  Array<SharedQueryCancellationSnapshot>
+> {
+  const queryClient = createQueryClient()
+  const id = `load-subset-shared-cancellation-${collectionSequence++}`
+  const started = createDeferred<void>()
+  const providerResult = createDeferred<Array<Row>>()
+  let signal: AbortSignal | undefined
+  const queryFn = vi.fn((context: QueryFunctionContext) => {
+    signal = context.signal
+    signal.addEventListener(
+      `abort`,
+      () => providerResult.reject(new DOMException(`released`, `AbortError`)),
+      { once: true },
+    )
+    started.resolve()
+    return providerResult.promise
+  })
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id,
+      queryClient,
+      queryKey: [id],
+      queryFn,
+      getKey: (row) => row.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      retry: false,
+    }),
+  )
+  const request: LoadSubsetOptions = {}
+  const first = Promise.resolve(collection._sync.loadSubset(request))
+  const second = Promise.resolve(collection._sync.loadSubset(request))
+  // Observe rejections before the test releases either acquisition lease.
+  void first.catch(() => undefined)
+  void second.catch(() => undefined)
+  const snapshots: Array<SharedQueryCancellationSnapshot> = []
+  const capture = (remainingAcquisitionLeases: 2 | 1 | 0): void => {
+    snapshots.push({
+      remainingAcquisitionLeases,
+      queryCalls: queryFn.mock.calls.length,
+      aborted: signal?.aborted === true,
+    })
+  }
+
+  try {
+    await started.promise
+    capture(2)
+    collection._sync.unloadSubset(request)
+    // Let Query process the first release while the provider remains held.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    capture(1)
+    collection._sync.unloadSubset(request)
+    capture(0)
+    return snapshots
+  } finally {
+    providerResult.resolve([])
+    try {
+      await collection.cleanup()
+    } finally {
+      queryClient.clear()
+      await Promise.allSettled([first, second])
+    }
+  }
+}
+
+function expectSharedInFlightQueryCancellation(
+  snapshots: Array<SharedQueryCancellationSnapshot>,
+): void {
+  expect(snapshots).toEqual([
+    { remainingAcquisitionLeases: 2, queryCalls: 1, aborted: false },
+    { remainingAcquisitionLeases: 1, queryCalls: 1, aborted: false },
+    { remainingAcquisitionLeases: 0, queryCalls: 1, aborted: true },
+  ])
+}
+
 async function expectRemountAfterAbortStartsFreshQuery(): Promise<void> {
   const queryClient = createQueryClient()
   const id = `load-subset-remount-after-abort-${collectionSequence++}`
@@ -1416,6 +1507,21 @@ describe(`loadSubset lifecycle oracle`, () => {
 
   it(`aborts an in-flight query when its final live-query owner cleans up`, async () => {
     await expectFinalOwnerCleanupAbortsQuery()
+  })
+
+  it(`keeps a shared in-flight query until its final acquisition is released`, async () => {
+    const snapshots = await observeSharedInFlightQueryCancellation()
+    expectSharedInFlightQueryCancellation(snapshots)
+    // A premature abort after the first release is a nearby wrong boundary.
+    expect(() =>
+      expectSharedInFlightQueryCancellation(
+        snapshots.map((snapshot) =>
+          snapshot.remainingAcquisitionLeases === 1
+            ? { ...snapshot, aborted: true }
+            : snapshot,
+        ),
+      ),
+    ).toThrow()
   })
 
   it(`starts a fresh query after an aborted owner immediately remounts`, async () => {

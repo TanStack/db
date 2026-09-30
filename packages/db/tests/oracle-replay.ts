@@ -32,6 +32,12 @@ if (entry?.status !== `assertion`) {
 
 const directory = mkdtempSync(join(tmpdir(), `tanstack-oracle-replay-`))
 const channel = join(directory, `witness.jsonl`)
+let primaryFailure: unknown
+let hasPrimaryFailure = false
+let caughtError: unknown
+let caught = false
+let cleanupFailure: unknown
+let cleanupFailed = false
 try {
   const require = createRequire(import.meta.url)
   const vitest = join(
@@ -74,14 +80,54 @@ try {
   )
   if (reached.length === 0) {
     console.error(`oracle replay target never executed: ${property}`)
+    primaryFailure = new Error(
+      `oracle replay target never executed: ${property}`,
+    )
+    hasPrimaryFailure = true
   }
   const failed = reached.some((witness) => witness.failed)
-  if (failed) console.error(`oracle replay property failed: ${property}`)
+  if (failed) {
+    console.error(`oracle replay property failed: ${property}`)
+    primaryFailure = new Error(`oracle replay property failed: ${property}`)
+    hasPrimaryFailure = true
+  }
+  if (result.status !== 0 && primaryFailure === undefined) {
+    primaryFailure = new Error(`oracle replay child exited: ${result.status}`)
+    hasPrimaryFailure = true
+  }
   // A reached property never turns a failed test, hook, or worker into success.
   process.exitCode =
     result.status === 0 && reached.length > 0 && !failed
       ? 0
       : result.status || 1
+} catch (error) {
+  primaryFailure = error
+  hasPrimaryFailure = true
+  caughtError = error
+  caught = true
 } finally {
-  rmSync(directory, { recursive: true, force: true })
+  try {
+    rmSync(directory, { recursive: true, force: true })
+  } catch (error) {
+    cleanupFailure = error
+    cleanupFailed = true
+  }
+  if (
+    !cleanupFailed &&
+    process.env.TANSTACK_DB_ORACLE_REPLAY_TEST_CLEANUP_FAILURE === `1`
+  ) {
+    cleanupFailure = new Error(`replay cleanup sentinel`)
+    cleanupFailed = true
+  }
 }
+if (cleanupFailed) {
+  if (hasPrimaryFailure) {
+    throw new AggregateError(
+      [cleanupFailure],
+      `oracle replay failed and cleanup also failed`,
+      { cause: primaryFailure },
+    )
+  }
+  throw cleanupFailure
+}
+if (caught) throw caughtError

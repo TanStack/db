@@ -1,25 +1,35 @@
 import { describe, expect, expectTypeOf, test, vi } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { compareKeys } from '@tanstack/db-ivm'
+import { fc } from '@fast-check/vitest'
 import { createCollection } from '../src/collection/index.js'
 import { CollectionInErrorStateError } from '../src/errors.js'
 import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { PropRef } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
-import { makeComparator } from '../src/utils/comparison.js'
 import { indexedKeysSet, orderedEntriesArray, valueMapData } from './utils'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config'
 import type { BaseIndex, IndexInterface } from '../src/indexes/base-index.js'
 import type { CompareOptions } from '../src/query/builder/types.js'
 
 /**
  * An index is a derived multimap from indexed value to source keys.
  *
+ * Authority: docs/reference/interfaces/IndexInterface.md and the Collection
+ * ordered-read/createIndex contract in docs/reference/interfaces/Collection.md.
+ * This owner checks BasicIndex and BTreeIndex on bounded scalar histories and selected
+ * comparator groups. It does not establish comparator transitivity, all
+ * JavaScript values, arbitrary collation locales, or long Collection histories.
+ *
  * A native Map is the sole ownership model. After put, delete, or full build,
  * the oracle groups that Map by value and freshly sorts the groups. BasicIndex
  * and BTreeIndex must agree on key count, key membership, equality/range lookup,
  * ordered entries, and rebuild behavior. Small duplicate values and signed zero
  * force collisions in the value groups without copying either index structure.
+ * The comparison runs after every direct index action, after fresh build, and
+ * after each named Collection read. Collection rows and their order are public;
+ * direct index observations are the documented IndexInterface boundary.
+ * The Map retains each key's value because a later same-key put or delete can
+ * distinguish states with the same value multiplicities but different owners.
  */
 
 type IndexValue = number
@@ -44,10 +54,10 @@ const indexTypes: Array<[string, IndexConstructor]> = [
   [`BTreeIndex`, BTreeIndex as IndexConstructor],
 ]
 
-const arbitraryValue: fc.Arbitrary<IndexValue> = fc.integer({
-  min: -3,
-  max: 3,
-})
+const arbitraryValue: fc.Arbitrary<IndexValue> = fc.oneof(
+  fc.integer({ min: -3, max: 3 }),
+  fc.constant(-0),
+)
 
 const arbitraryAction: fc.Arbitrary<IndexAction> = fc.oneof(
   fc.record({
@@ -67,6 +77,24 @@ const arbitraryAction: fc.Arbitrary<IndexAction> = fc.oneof(
     ),
   }),
 )
+
+/**
+ * History grammar: 1..100 source actions after a fixed replacement/continuation
+ * prefix; keys 0..7, values -3..3 plus -0, and builds of 0..8 entries. Put
+ * maps to index add/update depending on Map ownership; delete of an absent
+ * source key is a source no-op. Build replaces the whole source Map. These are
+ * model actions, not names for additional production index methods.
+ *
+ * Reconstruction: the fixed prefix reaches nonempty replacement, update,
+ * delete, empty replacement, and continuation; the pinned tail reaches a new
+ * key after replacement. Generated put supplies duplicate values and same-key
+ * updates, delete supplies retirement, and build supplies arbitrary replacement
+ * sets. Removing any one action loses that transition. Removing the narrow
+ * key/value overlap loses collisions; removing -0 loses signed-zero equality.
+ * Range probes straddle -2, 0, and 2, including their exact boundaries.
+ * Duplicate keys passed directly to build are excluded: the source Map first
+ * resolves them, since duplicate raw build entries have no contract here.
+ */
 
 const probeValues: Array<IndexValue> = [-3, -2, -1, -0, 0, 1, 2, 3, 99]
 const rangeBoundaries: Array<IndexValue> = [-2, 0, 2]
@@ -95,9 +123,14 @@ function expectIndexMatchesModel(
   expect(index.keyCount).toBe(rows.size)
   expect(indexedKeysSet(index)).toEqual(new Set(rows.keys()))
   expect(valueMapData(index)).toEqual(groups)
-  expect(orderedEntriesArray(index)).toEqual(
-    [...groups].sort(([left], [right]) => left - right),
-  )
+  // The index may retain either zero sign as a bucket representative. Its
+  // comparator and the source Map place both signs in the same value group.
+  expect(
+    orderedEntriesArray(index).map(([value, keys]) => [
+      value === 0 ? 0 : value,
+      keys,
+    ]),
+  ).toEqual([...groups].sort(([left], [right]) => left - right))
 
   for (const value of probeValues) {
     expect(index.lookup(`eq`, value)).toEqual(groups.get(value) ?? new Set())
@@ -121,6 +154,8 @@ function expectIndexMatchesModel(
 
 type GroupRow<T> = Readonly<{ key: string; value: T; groupId: number }>
 
+// groupId is a model-only label for values equal under the comparator. The
+// production index receives value objects and a comparator, not this label.
 // Handles preserve exact identity; expected memberships come only from live
 // descriptors. Keep retired handles so a stale bucket cannot leave the query set.
 function expectExactIdentities<T>(
@@ -165,70 +200,86 @@ function expectCustomGroups(
 }
 
 describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
-  fcTest.prop(
-    [
-      fc.array(arbitraryAction, {
-        minLength: 1,
-        maxLength: 100,
-      }),
-    ],
-    {
-      examples: [
-        [
-          [
-            { type: `put`, key: `0`, value: 1 },
-            { type: `build`, entries: [[`1`, -1]] },
-            { type: `put`, key: `1`, value: 2 },
+  test.each([20260930, undefined])(
+    `matches a reference model across valid operation sequences (seed %s)`,
+    async (seed) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(arbitraryAction, { minLength: 1, maxLength: 100 }),
+          async (actions) => {
+            const index = new IndexType(1, new PropRef([`value`]))
+            const rows = new Map<string, IndexValue>()
+
+            expectIndexMatchesModel(index, rows)
+            // Required replacement/continuation cuts precede the shrinkable tail.
+            const required: Array<IndexAction> = [
+              { type: `put`, key: `old`, value: -3 },
+              { type: `build`, entries: [[`new`, 1]] },
+              { type: `put`, key: `new`, value: 2 },
+              { type: `delete`, key: `new` },
+              { type: `put`, key: `old`, value: 3 },
+              { type: `build`, entries: [] },
+              { type: `put`, key: `old`, value: -2 },
+            ]
+            for (const action of [...required, ...actions]) {
+              if (action.type === `put`) {
+                if (rows.has(action.key)) {
+                  index.update(
+                    action.key,
+                    { value: rows.get(action.key) },
+                    { value: action.value },
+                  )
+                } else {
+                  index.add(action.key, { value: action.value })
+                }
+                rows.set(action.key, action.value)
+              } else if (action.type === `build`) {
+                // Duplicate generated keys are resolved in the input world, not by
+                // assuming any policy for invalid duplicate build entries.
+                const replacement = new Map(action.entries)
+                index.build(
+                  [...replacement].map(([key, value]) => [key, { value }]),
+                )
+                rows.clear()
+                for (const [key, value] of replacement) rows.set(key, value)
+              } else if (rows.has(action.key)) {
+                index.remove(action.key, { value: rows.get(action.key) })
+                rows.delete(action.key)
+              }
+
+              expectIndexMatchesModel(index, rows)
+            }
+
+            const rebuilt = new IndexType(2, new PropRef([`value`]))
+            rebuilt.build(
+              [...rows].map(([key, value]) => [key, { value }] as const),
+            )
+            expectIndexMatchesModel(rebuilt, rows)
+          },
+        ),
+        {
+          ...(seed === undefined
+            ? oraclePropertyOptions(100, `index-update.reference-model`)
+            : { seed, numRuns: oracleRuns(100) }),
+          examples: [
+            [
+              [
+                { type: `put`, key: `0`, value: 1 },
+                { type: `build`, entries: [[`1`, -1]] },
+                { type: `put`, key: `1`, value: 2 },
+              ],
+            ],
+            [
+              [
+                { type: `put`, key: `0`, value: 0 },
+                { type: `put`, key: `1`, value: -0 },
+              ],
+            ],
           ],
-        ],
-      ],
+        },
+      )
     },
-  )(`matches a reference model across valid operation sequences`, (actions) => {
-    const index = new IndexType(1, new PropRef([`value`]))
-    const rows = new Map<string, IndexValue>()
-
-    expectIndexMatchesModel(index, rows)
-    // Required replacement/continuation cuts precede the shrinkable tail.
-    const required: Array<IndexAction> = [
-      { type: `put`, key: `old`, value: -3 },
-      { type: `build`, entries: [[`new`, 1]] },
-      { type: `put`, key: `new`, value: 2 },
-      { type: `delete`, key: `new` },
-      { type: `put`, key: `old`, value: 3 },
-      { type: `build`, entries: [] },
-      { type: `put`, key: `old`, value: -2 },
-    ]
-    for (const action of [...required, ...actions]) {
-      if (action.type === `put`) {
-        if (rows.has(action.key)) {
-          index.update(
-            action.key,
-            { value: rows.get(action.key) },
-            { value: action.value },
-          )
-        } else {
-          index.add(action.key, { value: action.value })
-        }
-        rows.set(action.key, action.value)
-      } else if (action.type === `build`) {
-        // Duplicate generated keys are resolved in the input world, not by
-        // assuming any policy for invalid duplicate build entries.
-        const replacement = new Map(action.entries)
-        index.build([...replacement].map(([key, value]) => [key, { value }]))
-        rows.clear()
-        for (const [key, value] of replacement) rows.set(key, value)
-      } else if (rows.has(action.key)) {
-        index.remove(action.key, { value: rows.get(action.key) })
-        rows.delete(action.key)
-      }
-
-      expectIndexMatchesModel(index, rows)
-    }
-
-    const rebuilt = new IndexType(2, new PropRef([`value`]))
-    rebuilt.build([...rows].map(([key, value]) => [key, { value }] as const))
-    expectIndexMatchesModel(rebuilt, rows)
-  })
+  )
 
   test(`tracks range-domain safety through updates, rebuilds, and clear`, () => {
     const index = new IndexType(1, new PropRef([`value`]))
@@ -256,6 +307,24 @@ describe.each(indexTypes)(`%s update properties`, (_indexName, IndexType) => {
       [`other`, { value: [20] }],
     ])
     expect(index.canOptimizeRangeFor(100)).toBe(false)
+  })
+
+  test(`inclusive lower bound rejects an exclusive-boundary result`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    index.add(`boundary`, { value: -2 })
+    const rangeQuery = index.rangeQuery.bind(index)
+    const wrongOutput = vi
+      .spyOn(index, `rangeQuery`)
+      .mockImplementation((options) =>
+        options.from === -2 ? new Set() : rangeQuery(options),
+      )
+    try {
+      expect(() =>
+        expectIndexMatchesModel(index, new Map([[`boundary`, -2]])),
+      ).toThrowError(/expected/)
+    } finally {
+      wrongOutput.mockRestore()
+    }
   })
 
   test(`accepts indexed values rather than row keys through the index interface`, () => {
@@ -527,6 +596,53 @@ describe.each(indexTypes)(
  * string names with a subtracting comparator. The first row compares nothing;
  * the second is the first invalid comparison.
  */
+async function withCollectionCleanup(
+  collection: { cleanup: () => Promise<void> },
+  check: () => void | Promise<void>,
+): Promise<void> {
+  let primaryFailure: unknown
+  let failed = false
+  try {
+    await check()
+  } catch (error) {
+    primaryFailure = error
+    failed = true
+  }
+  try {
+    await collection.cleanup()
+  } catch (cleanupError) {
+    if (failed)
+      throw new AggregateError([cleanupError], `Index oracle cleanup failed`, {
+        cause: primaryFailure,
+      })
+    throw cleanupError
+  }
+  if (failed) throw primaryFailure
+}
+
+test(`preserves the index mismatch when Collection cleanup also fails`, async () => {
+  const mismatch = new Error(`ordered index result differs`)
+  const cleanupFailure = new Error(`adapter cleanup failed`)
+  let caught: unknown
+  try {
+    await withCollectionCleanup(
+      {
+        cleanup: async () => {
+          throw cleanupFailure
+        },
+      },
+      () => {
+        throw mismatch
+      },
+    )
+  } catch (error) {
+    caught = error
+  }
+  expect(caught).toBeInstanceOf(AggregateError)
+  expect((caught as AggregateError).cause).toBe(mismatch)
+  expect((caught as AggregateError).errors).toEqual([cleanupFailure])
+})
+
 describe.each([
   [`BasicIndex`, BasicIndex],
   [`BTreeIndex`, BTreeIndex],
@@ -585,26 +701,28 @@ describe.each([
 
     test.each(writePaths)(
       `$name crashes the collection instead of publishing partial success`,
-      ({ write }) => {
+      async ({ write }) => {
         const { collection, sync } = createNamedCollection()
-        const published = new Set<number>()
-        collection.subscribeChanges((changes) => {
-          for (const change of changes)
-            if (change.type === `delete`) published.delete(change.key)
-            else published.add(change.key)
+        await withCollectionCleanup(collection, () => {
+          const published = new Set<number>()
+          collection.subscribeChanges((changes) => {
+            for (const change of changes)
+              if (change.type === `delete`) published.delete(change.key)
+              else published.add(change.key)
+          })
+
+          write(collection, sync, { id: 1, name: `ann` })
+          expect(collection.status).toBe(`ready`)
+          expect(published).toEqual(new Set(collection.keys()))
+
+          expect(() => write(collection, sync, { id: 2, name: `bob` })).toThrow(
+            TypeError,
+          )
+          expect(collection.status).toBe(`error`)
+          expect(() => collection.insert({ id: 3, name: `cy` })).toThrow(
+            CollectionInErrorStateError,
+          )
         })
-
-        write(collection, sync, { id: 1, name: `ann` })
-        expect(collection.status).toBe(`ready`)
-        expect(published).toEqual(new Set(collection.keys()))
-
-        expect(() => write(collection, sync, { id: 2, name: `bob` })).toThrow(
-          TypeError,
-        )
-        expect(collection.status).toBe(`error`)
-        expect(() => collection.insert({ id: 3, name: `cy` })).toThrow(
-          CollectionInErrorStateError,
-        )
       },
     )
   },
@@ -701,222 +819,263 @@ describe.each(indexTypes)(`%s comparator groups`, (_indexName, IndexType) => {
     expectCustomGroups(index, rows, identities)
   })
 
-  fcTest.prop(
-    [
-      fc.array(fc.integer({ min: 0, max: 4 }), {
-        minLength: 2,
-        maxLength: 20,
-      }),
-    ],
-    { examples: [[[0, 1]]] },
-  )(
-    `preserves exact equality while ordered traversal retains every row`,
-    (groupIds) => {
-      const symbols = new Map<number, symbol>()
-      // The first representative must retire while its group survives. Group
-      // 5 is distinct from every generated group even after shrinking.
-      const rows = [groupIds[0]!, groupIds[0]!, 5, ...groupIds.slice(1)].map(
-        (groupId, position) => {
-          const symbol = symbols.get(groupId) ?? Symbol(String(groupId))
-          symbols.set(groupId, symbol)
-          return {
-            key: String(position),
-            value: [symbol],
-            groupId,
-          }
+  // Group grammar: 2..20 generated IDs in 0..4, with a forced duplicate first
+  // group and a distinct group 5. The same bounded input is run in both index
+  // types. The exact-identity lane gives every row a fresh array, then retires
+  // and reuses handles. The custom-comparator lane additionally reverses
+  // insertion. Without the duplicate, representative retirement is absent;
+  // without the distinct group, group order is unobservable; without reversed
+  // insertion, insertion order can masquerade as lexical key order. The pinned
+  // [0, 1] case reconstructs all three distinctions. Invalid comparator
+  // results and inconsistent comparator order are outside these two grammars.
+  test.each([20260930, undefined])(
+    `preserves exact equality while ordered traversal retains every row (seed %s)`,
+    async (seed) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(fc.integer({ min: 0, max: 4 }), {
+            minLength: 2,
+            maxLength: 20,
+          }),
+          async (groupIds) => {
+            // The first representative must retire while its group survives. Group
+            // 5 is distinct from every generated group even after shrinking. Fresh
+            // arrays distinguish exact identity from comparator-equal numeric values.
+            const rows = [
+              groupIds[0]!,
+              groupIds[0]!,
+              5,
+              ...groupIds.slice(1),
+            ].map((groupId, position) => ({
+              key: String(position),
+              value: [groupId],
+              groupId,
+            }))
+            const identities = rows.map((row) => row.value)
+            const index = new IndexType(1, new PropRef([`value`]))
+
+            const expectMatchesModel = (
+              subject: BaseIndex<string>,
+              currentRows: typeof rows,
+            ) => {
+              const groups = new Map<number, typeof rows>()
+              for (const row of currentRows) {
+                const group = groups.get(row.groupId) ?? []
+                group.push(row)
+                groups.set(row.groupId, group)
+              }
+              const orderedGroups = [...groups.values()].sort(
+                (left, right) => left[0]!.groupId - right[0]!.groupId,
+              )
+              const forward = orderedGroups.flatMap((group) =>
+                group.map((row) => row.key).sort(),
+              )
+              const reversed = [...orderedGroups].reverse().flatMap((group) =>
+                group
+                  .map((row) => row.key)
+                  .sort()
+                  .reverse(),
+              )
+
+              expect(subject.keyCount).toBe(currentRows.length)
+              expectExactIdentities(subject, currentRows, identities)
+              expect(subject.takeFromStart(currentRows.length + 1)).toEqual(
+                forward,
+              )
+              expect(
+                subject.takeReversedFromEnd(currentRows.length + 1),
+              ).toEqual(reversed)
+              for (const [representative, keys] of orderedEntriesArray(
+                subject,
+              )) {
+                expect(
+                  currentRows.some(
+                    (row) => row.value === representative && keys.has(row.key),
+                  ),
+                ).toBe(true)
+              }
+              for (const row of currentRows) {
+                expect(subject.equalityLookup(row.value)).toEqual(
+                  new Set([row.key]),
+                )
+                expect(
+                  subject.rangeQuery({ from: row.value, to: row.value }),
+                ).toEqual(
+                  new Set(
+                    currentRows
+                      .filter((candidate) => candidate.groupId === row.groupId)
+                      .map((candidate) => candidate.key),
+                  ),
+                )
+              }
+            }
+
+            expectMatchesModel(index, [])
+            for (const row of rows) index.add(row.key, { value: row.value })
+            expectMatchesModel(index, rows)
+
+            const removed = rows.shift()!
+            expect(rows.some((row) => row.groupId === removed.groupId)).toBe(
+              true,
+            )
+            index.remove(removed.key, removed)
+            expectMatchesModel(index, rows)
+
+            const changed = rows[0]!
+            const previous = { ...changed }
+            changed.groupId = 99
+            changed.value = [99]
+            identities.push(changed.value)
+            index.update(changed.key, previous, changed)
+            expectMatchesModel(index, rows)
+
+            // Reuse both a removed identity and an identity retired by update.
+            for (const retired of [removed, previous]) {
+              const reused = { ...retired, key: `reused-${retired.key}` }
+              index.add(reused.key, { value: reused.value })
+              rows.push(reused)
+              expectMatchesModel(index, rows)
+            }
+
+            const rebuilt = new IndexType(2, new PropRef([`value`]))
+            rebuilt.build(rows.map((row) => [row.key, row]))
+            expectMatchesModel(rebuilt, rows)
+
+            const replacement = {
+              key: `replacement`,
+              groupId: 100,
+              value: [100],
+            }
+            identities.push(replacement.value)
+            index.build([[replacement.key, { value: replacement.value }]])
+            expectMatchesModel(index, [replacement])
+            index.update(replacement.key, replacement, removed)
+            const resumed = { ...removed, key: replacement.key }
+            expectMatchesModel(index, [resumed])
+            index.remove(resumed.key, resumed)
+            expectMatchesModel(index, [])
+            index.add(removed.key, removed)
+            expectMatchesModel(index, [removed])
+            index.build([])
+            expectMatchesModel(index, [])
+            index.add(previous.key, previous)
+            expectMatchesModel(index, [previous])
+          },
+        ),
+        {
+          ...(seed === undefined
+            ? oraclePropertyOptions(100, `index-update.exact-identity`)
+            : { seed, numRuns: oracleRuns(100) }),
+          examples: [[[0, 1]]],
         },
       )
-      const identities = rows.map((row) => row.value)
-      const index = new IndexType(1, new PropRef([`value`]))
-
-      const expectMatchesModel = (
-        subject: BaseIndex<string>,
-        currentRows: typeof rows,
-      ) => {
-        const groups = new Map<number, typeof rows>()
-        for (const row of currentRows) {
-          const group = groups.get(row.groupId) ?? []
-          group.push(row)
-          groups.set(row.groupId, group)
-        }
-        const compare = makeComparator(DEFAULT_COMPARE_OPTIONS)
-        const orderedGroups = [...groups.values()].sort((left, right) =>
-          compare(left[0]!.value, right[0]!.value),
-        )
-        const forward = orderedGroups.flatMap((group) =>
-          group.map((row) => row.key).sort(compareKeys),
-        )
-        const reversed = [...orderedGroups].reverse().flatMap((group) =>
-          group
-            .map((row) => row.key)
-            .sort(compareKeys)
-            .reverse(),
-        )
-
-        expect(subject.keyCount).toBe(currentRows.length)
-        expectExactIdentities(subject, currentRows, identities)
-        expect(subject.takeFromStart(currentRows.length + 1)).toEqual(forward)
-        expect(subject.takeReversedFromEnd(currentRows.length + 1)).toEqual(
-          reversed,
-        )
-        for (const [representative, keys] of orderedEntriesArray(subject)) {
-          expect(
-            currentRows.some(
-              (row) => row.value === representative && keys.has(row.key),
-            ),
-          ).toBe(true)
-        }
-        for (const row of currentRows) {
-          expect(subject.equalityLookup(row.value)).toEqual(new Set([row.key]))
-          expect(
-            subject.rangeQuery({ from: row.value, to: row.value }),
-          ).toEqual(
-            new Set(
-              currentRows
-                .filter((candidate) => candidate.groupId === row.groupId)
-                .map((candidate) => candidate.key),
-            ),
-          )
-        }
-      }
-
-      expectMatchesModel(index, [])
-      for (const row of rows) index.add(row.key, { value: row.value })
-      expectMatchesModel(index, rows)
-
-      const removed = rows.shift()!
-      expect(rows.some((row) => row.groupId === removed.groupId)).toBe(true)
-      index.remove(removed.key, removed)
-      expectMatchesModel(index, rows)
-
-      const changed = rows[0]!
-      const previous = { ...changed }
-      changed.groupId = 99
-      changed.value = [Symbol(`updated`)]
-      identities.push(changed.value)
-      index.update(changed.key, previous, changed)
-      expectMatchesModel(index, rows)
-
-      // Reuse both a removed identity and an identity retired by update.
-      for (const retired of [removed, previous]) {
-        const reused = { ...retired, key: `reused-${retired.key}` }
-        index.add(reused.key, { value: reused.value })
-        rows.push(reused)
-        expectMatchesModel(index, rows)
-      }
-
-      const rebuilt = new IndexType(2, new PropRef([`value`]))
-      rebuilt.build(rows.map((row) => [row.key, row]))
-      expectMatchesModel(rebuilt, rows)
-
-      const replacement = {
-        key: `replacement`,
-        groupId: 100,
-        value: [Symbol(`replacement`)],
-      }
-      identities.push(replacement.value)
-      index.build([[replacement.key, { value: replacement.value }]])
-      expectMatchesModel(index, [replacement])
-      index.update(replacement.key, replacement, removed)
-      const resumed = { ...removed, key: replacement.key }
-      expectMatchesModel(index, [resumed])
-      index.remove(resumed.key, resumed)
-      expectMatchesModel(index, [])
-      index.add(removed.key, removed)
-      expectMatchesModel(index, [removed])
-      index.build([])
-      expectMatchesModel(index, [])
-      index.add(previous.key, previous)
-      expectMatchesModel(index, [previous])
     },
   )
 
-  fcTest.prop(
-    [
-      fc.array(fc.integer({ min: 0, max: 4 }), {
-        minLength: 2,
-        maxLength: 20,
-      }),
-    ],
-    { examples: [[[0, 1]]] },
-  )(`matches an independent custom-comparator model`, (generatedGroups) => {
-    for (const reverseInsertion of [false, true]) {
-      const groupIds = [
-        generatedGroups[0]!,
-        generatedGroups[0]!,
-        5,
-        ...generatedGroups.slice(1),
-      ]
-      const rows = groupIds.map((groupId, position) =>
-        Object.freeze({
-          key: String(position).padStart(2, `0`),
-          value: { groupId, position },
-          groupId,
-        }),
+  test.each([20260930, undefined])(
+    `matches an independent custom-comparator model (seed %s)`,
+    async (seed) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(fc.integer({ min: 0, max: 4 }), {
+            minLength: 2,
+            maxLength: 20,
+          }),
+          async (generatedGroups) => {
+            for (const reverseInsertion of [false, true]) {
+              const groupIds = [
+                generatedGroups[0]!,
+                generatedGroups[0]!,
+                5,
+                ...generatedGroups.slice(1),
+              ]
+              const rows = groupIds.map((groupId, position) =>
+                Object.freeze({
+                  key: String(position).padStart(2, `0`),
+                  value: { groupId, position },
+                  groupId,
+                }),
+              )
+              const identities = rows.map((row) => row.value)
+              const index = new IndexType(
+                1,
+                new PropRef([`value`]),
+                undefined,
+                {
+                  compareFn: (left, right) =>
+                    (left as { groupId: number }).groupId -
+                    (right as { groupId: number }).groupId,
+                },
+              )
+
+              expectCustomGroups(index, [], identities)
+              // Preserve forward insertion and challenge it with a real permutation:
+              // key 01 precedes 00 in the reverse run, but expected order stays lexical.
+              for (const row of reverseInsertion ? [...rows].reverse() : rows)
+                index.add(row.key, { value: row.value })
+              expectCustomGroups(index, rows, identities)
+
+              const removed = rows.shift()!
+              expect(rows.some((row) => row.groupId === removed.groupId)).toBe(
+                true,
+              )
+              index.remove(removed.key, { value: removed.value })
+              expectCustomGroups(index, rows, identities)
+
+              const previous = rows[0]!
+              const changed = Object.freeze({
+                key: previous.key,
+                groupId: 99,
+                value: { groupId: 99, position: previous.value.position },
+              })
+              identities.push(changed.value)
+              index.update(
+                previous.key,
+                { value: previous.value },
+                { value: changed.value },
+              )
+              rows[0] = changed
+              expectCustomGroups(index, rows, identities)
+
+              for (const retired of [removed, previous]) {
+                const reused = Object.freeze({
+                  ...retired,
+                  key: `reused-${retired.key}`,
+                })
+                index.add(reused.key, { value: reused.value })
+                rows.push(reused)
+                expectCustomGroups(index, rows, identities)
+              }
+
+              index.build([[changed.key, { value: changed.value }]])
+              expectCustomGroups(index, [changed], identities)
+              index.update(
+                changed.key,
+                { value: changed.value },
+                { value: removed.value },
+              )
+              const resumed = Object.freeze({ ...removed, key: changed.key })
+              expectCustomGroups(index, [resumed], identities)
+              index.remove(resumed.key, { value: resumed.value })
+              expectCustomGroups(index, [], identities)
+              index.add(removed.key, { value: removed.value })
+              expectCustomGroups(index, [removed], identities)
+              index.build([])
+              expectCustomGroups(index, [], identities)
+              index.add(previous.key, { value: previous.value })
+              expectCustomGroups(index, [previous], identities)
+            }
+          },
+        ),
+        {
+          ...(seed === undefined
+            ? oraclePropertyOptions(100, `index-update.custom-comparator`)
+            : { seed, numRuns: oracleRuns(100) }),
+          examples: [[[0, 1]]],
+        },
       )
-      const identities = rows.map((row) => row.value)
-      const index = new IndexType(1, new PropRef([`value`]), undefined, {
-        compareFn: (left, right) =>
-          (left as { groupId: number }).groupId -
-          (right as { groupId: number }).groupId,
-      })
-
-      expectCustomGroups(index, [], identities)
-      // Preserve forward insertion and challenge it with a real permutation:
-      // key 01 precedes 00 in the reverse run, but expected order stays lexical.
-      for (const row of reverseInsertion ? [...rows].reverse() : rows)
-        index.add(row.key, { value: row.value })
-      expectCustomGroups(index, rows, identities)
-
-      const removed = rows.shift()!
-      expect(rows.some((row) => row.groupId === removed.groupId)).toBe(true)
-      index.remove(removed.key, { value: removed.value })
-      expectCustomGroups(index, rows, identities)
-
-      const previous = rows[0]!
-      const changed = Object.freeze({
-        key: previous.key,
-        groupId: 99,
-        value: { groupId: 99, position: previous.value.position },
-      })
-      identities.push(changed.value)
-      index.update(
-        previous.key,
-        { value: previous.value },
-        { value: changed.value },
-      )
-      rows[0] = changed
-      expectCustomGroups(index, rows, identities)
-
-      for (const retired of [removed, previous]) {
-        const reused = Object.freeze({
-          ...retired,
-          key: `reused-${retired.key}`,
-        })
-        index.add(reused.key, { value: reused.value })
-        rows.push(reused)
-        expectCustomGroups(index, rows, identities)
-      }
-
-      index.build([[changed.key, { value: changed.value }]])
-      expectCustomGroups(index, [changed], identities)
-      index.update(
-        changed.key,
-        { value: changed.value },
-        { value: removed.value },
-      )
-      const resumed = Object.freeze({ ...removed, key: changed.key })
-      expectCustomGroups(index, [resumed], identities)
-      index.remove(resumed.key, { value: resumed.value })
-      expectCustomGroups(index, [], identities)
-      index.add(removed.key, { value: removed.value })
-      expectCustomGroups(index, [removed], identities)
-      index.build([])
-      expectCustomGroups(index, [], identities)
-      index.add(previous.key, { value: previous.value })
-      expectCustomGroups(index, [previous], identities)
-    }
-  })
+    },
+  )
 })
 
 test(`retired-identity calibration shrinks and replays the same semantic failure`, () => {
@@ -1029,30 +1188,31 @@ describe.each([
       )
       const createIndex = vi.spyOn(collection, `createIndex`)
 
-      try {
-        await collection.stateWhenReady()
-        expect(collection.indexes.size).toBe(0)
-        const read = () =>
-          collection
-            .currentStateAsChanges({
-              orderBy: [
-                {
-                  expression: new PropRef([`label`]),
-                  compareOptions: clause,
-                },
-              ],
-              optimizedOnly: true,
-            })
-            ?.map(({ value }) => value.label)
+      await withCollectionCleanup(collection, async () => {
+        try {
+          await collection.stateWhenReady()
+          expect(collection.indexes.size).toBe(0)
+          const read = () =>
+            collection
+              .currentStateAsChanges({
+                orderBy: [
+                  {
+                    expression: new PropRef([`label`]),
+                    compareOptions: clause,
+                  },
+                ],
+                optimizedOnly: true,
+              })
+              ?.map(({ value }) => value.label)
 
-        expect.soft(read(), `first indexed read`).toEqual(expected)
-        expect.soft(read(), `second indexed read`).toEqual(expected)
-        expect(createIndex, `one index construction`).toHaveBeenCalledTimes(1)
-        expect(collection.indexes.size, `one index per field`).toBe(1)
-      } finally {
-        createIndex.mockRestore()
-        await collection.cleanup()
-      }
+          expect.soft(read(), `first indexed read`).toEqual(expected)
+          expect.soft(read(), `second indexed read`).toEqual(expected)
+          expect(createIndex, `one index construction`).toHaveBeenCalledTimes(1)
+          expect(collection.indexes.size, `one index per field`).toBe(1)
+        } finally {
+          createIndex.mockRestore()
+        }
+      })
     },
   )
 })
@@ -1062,7 +1222,7 @@ test.each(collationCases)(
   async ({ collation, clause, expected }) => {
     const collection = createCollationCollection(collation, `off`)
 
-    try {
+    await withCollectionCleanup(collection, async () => {
       await collection.stateWhenReady()
       const rows = collection.currentStateAsChanges({
         orderBy: [
@@ -1074,9 +1234,7 @@ test.each(collationCases)(
       })
       expect(rows?.map(({ value }) => value.label)).toEqual(expected)
       expect(collection.indexes.size, `scan path reached`).toBe(0)
-    } finally {
-      await collection.cleanup()
-    }
+    })
   },
 )
 
@@ -1088,7 +1246,7 @@ test(`ordered scan resolves inherited collation outside each comparison`, async 
     [`f`, `e`, `d`, `c`, `b`, `a`],
   )
 
-  try {
+  await withCollectionCleanup(collection, async () => {
     await collection.stateWhenReady()
     const optionReads = vi.spyOn(collection, `compareOptions`, `get`)
     const rows = collection.currentStateAsChanges({
@@ -1111,7 +1269,5 @@ test(`ordered scan resolves inherited collation outside each comparison`, async 
     // One resolution can check the index path; the scan needs only one more.
     expect(optionReads.mock.calls.length).toBeLessThanOrEqual(2)
     expect(collection.indexes.size).toBe(0)
-  } finally {
-    await collection.cleanup()
-  }
+  })
 })

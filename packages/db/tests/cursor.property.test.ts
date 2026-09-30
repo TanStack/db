@@ -1,13 +1,22 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it as vitestIt } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { PropRef, Value } from '../src/query/ir.js'
 import { buildCursor } from '../src/utils/cursor.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from './oracle-config.js'
+import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import { evaluateReferenceExpression } from './reference-expression.js'
 import type { OrderBy } from '../src/query/ir.js'
 
 /**
- * A cursor denotes the strict suffix after one ordered boundary.
+ * A cursor denotes the strict suffix after one ordered boundary. The
+ * `CursorExpressions.whereFrom` API contract and the ordered-continuation
+ * section of `query/live/ARCHITECTURE.md` authorize the leading-column
+ * boundary and rejection of composite cursor values.
  *
  * The reference compares candidate and boundary tuples directly, with explicit
  * direction and null placement. Production builds an expression; the driver
@@ -15,7 +24,21 @@ import type { OrderBy } from '../src/query/ir.js'
  * Boolean answer. Unsupported composite cursor construction must reject rather
  * than silently approximate it. A retained local-snapshot path still checks
  * multi-term nullable ordering without claiming composite cursor support.
+ * The grammar covers finite integers, null, undefined, one to four order
+ * terms, and two public Collection rows at the settled local-snapshot cut.
+ * It does not establish provider ordering, other value types, or a whole
+ * paginated query's acquisition and publication behavior.
  */
+
+const replay = readOracleRunConfig()
+const it = replay.replayPath === undefined ? vitestIt : vitestIt.skip
+const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
+const randomCampaign = (property: string) =>
+  replay.replayPath === undefined || replay.replayProperty === property
+    ? fcTest
+    : fcTest.skip
+
+const fixedSeed = 20260930
 
 type Term = {
   direction: `asc` | `desc`
@@ -101,6 +124,7 @@ async function expectLocalTupleOrder(
   terms: ReadonlyArray<Term>,
   boundary: ReadonlyArray<unknown>,
   candidate: ReadonlyArray<unknown>,
+  fault?: `reverse-observed-order`,
 ): Promise<void> {
   const collection = createCollection<{ id: string; [key: string]: unknown }>({
     getKey: (value) => value.id,
@@ -115,15 +139,15 @@ async function expectLocalTupleOrder(
       },
     },
   })
-  try {
-    await collection.preload()
-    const expected =
-      compareTuple(candidate, boundary, terms) >= 0
-        ? [`boundary`, `candidate`]
-        : [`candidate`, `boundary`]
-    for (const limit of [1, 2]) {
-      expect(
-        collection
+  return withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      const expected =
+        compareTuple(candidate, boundary, terms) >= 0
+          ? [`boundary`, `candidate`]
+          : [`candidate`, `boundary`]
+      for (const limit of [1, 2]) {
+        const actual = collection
           .currentStateAsChanges({
             orderBy: [
               ...orderBy(terms),
@@ -138,12 +162,16 @@ async function expectLocalTupleOrder(
             ],
             limit,
           })
-          ?.map(({ key }) => key),
-      ).toEqual(expected.slice(0, limit))
-    }
-  } finally {
-    await collection.cleanup()
-  }
+          ?.map(({ key }) => key)
+        expect(
+          fault === `reverse-observed-order` && limit === 2
+            ? actual?.slice().reverse()
+            : actual,
+        ).toEqual(expected.slice(0, limit))
+      }
+    },
+    () => [() => collection.cleanup()],
+  )
 }
 
 const exactCursorArbitrary = fc
@@ -164,6 +192,58 @@ const partialCursorArbitrary = fc
   )
   .filter(([terms, boundary]) => terms.length !== boundary.length)
 
+const scalarCursorArbitrary = fc.tuple(
+  termArbitrary,
+  broadScalarValue,
+  broadScalarValue,
+)
+
+type CursorCase = [
+  Array<Term>,
+  Array<number | null | undefined>,
+  Array<number | null | undefined>,
+]
+
+const assertScalarCursor = ([term, boundary, candidate]: [
+  Term,
+  number | null | undefined,
+  number | null | undefined,
+]) => expectCursorDenotation([term], [boundary], [candidate])
+
+const assertCursorWidth = ([terms, boundary, candidate]: CursorCase) => {
+  expectCursorDenotation(terms, boundary, candidate)
+}
+
+const assertLocalTupleOrder = ([terms, boundary, candidate]: CursorCase) =>
+  expectLocalTupleOrder(terms, boundary, candidate)
+
+const assertRepeatedCursor = (
+  [terms, boundary]: CursorCase,
+  build: typeof buildCursor = buildCursor,
+) => {
+  if (terms.length !== 1) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(() => build(orderBy(terms), [...boundary])).toThrow(
+        `Only leading-column cursors are supported`,
+      )
+    }
+    return
+  }
+  expect(build(orderBy(terms), [...boundary])).toEqual(
+    build(orderBy(terms), [...boundary]),
+  )
+}
+
+// Boundary width distinguishes one-value continuation from rejected composite
+// values; one value remains legal with several order terms. Direction reverses
+// numeric order, null placement reverses null-versus-number order, and equal
+// values distinguish a strict suffix from an inclusive one. A leading tie lets
+// trailing terms determine local order. Null and undefined share a comparator
+// position but remain distinct driver inputs. Fixed matrices reconstruct every
+// option cell and small scalar pair; random campaigns extend the integer range.
+// Width zero is pinned below as the no-cursor result, outside this generator.
+// A boundary with no order is the nearby invalid state.
+
 describe(`buildCursor properties`, () => {
   it.each(scalarTerms)(
     `checks every small scalar/null boundary for $direction / nulls $nulls`,
@@ -178,14 +258,21 @@ describe(`buildCursor properties`, () => {
     },
   )
 
-  for (const term of scalarTerms) {
-    fcTest.prop([broadScalarValue, broadScalarValue], { numRuns: 100 })(
-      `scalar continuation agrees with order: ${term.direction} / nulls ${term.nulls}`,
-      (boundary, candidate) => {
-        expectCursorDenotation([term], [boundary], [candidate])
-      },
-    )
-  }
+  fixedCampaign.prop([scalarCursorArbitrary], {
+    numRuns: oracleRuns(400),
+    seed: fixedSeed,
+  })(
+    `scalar continuation agrees with order for a fixed seed`,
+    assertScalarCursor,
+  )
+
+  randomCampaign(`cursor.scalar-continuation`).prop(
+    [scalarCursorArbitrary],
+    oraclePropertyOptions(400, `cursor.scalar-continuation`),
+  )(
+    `scalar continuation agrees with order for a random or replayed seed`,
+    assertScalarCursor,
+  )
 
   it.each([2, 3, 4])(
     `rejects composite width %i in every option cell`,
@@ -199,6 +286,50 @@ describe(`buildCursor properties`, () => {
       }
     },
   )
+
+  it.each([2, 3, 4])(
+    `accepts one leading boundary value for %i ordered terms`,
+    (width) => {
+      const terms = Array.from({ length: width }, () => ({
+        direction: `asc` as const,
+        nulls: `last` as const,
+      }))
+      expectCursorDenotation(terms, [0], Array(width).fill(1))
+      expectCursorDenotation(terms, [0], Array(width).fill(-1))
+    },
+  )
+
+  it(`rejects a builder that accepts two boundary values`, () => {
+    const term: Term = { direction: `asc`, nulls: `last` }
+    expect(() =>
+      expectCursorDenotation(
+        [term, term],
+        [0, 0],
+        [1, 1],
+        () => new Value(true),
+      ),
+    ).toThrow()
+    expectCursorDenotation([term, term], [0, 0], [1, 1])
+  })
+
+  it(`orders a leading tie by a nullable trailing term at the local snapshot`, async () => {
+    const terms: Array<Term> = [
+      { direction: `asc`, nulls: `last` },
+      { direction: `desc`, nulls: `first` },
+    ]
+    const boundary = [0, 1]
+    const candidate = [0, null]
+    await expectLocalTupleOrder(terms, boundary, candidate)
+    // A leading-only order would place boundary first by the id tie-breaker.
+    await expect(
+      expectLocalTupleOrder(
+        terms,
+        boundary,
+        candidate,
+        `reverse-observed-order`,
+      ),
+    ).rejects.toThrow()
+  })
 
   it.each(scalarTerms)(
     `rejects constant cursor predicates for $direction / nulls $nulls`,
@@ -220,6 +351,16 @@ describe(`buildCursor properties`, () => {
     },
   )
 
+  it(`rejects an unstable cursor expression on repeated construction`, () => {
+    let calls = 0
+    expect(() =>
+      assertRepeatedCursor(
+        [[{ direction: `asc`, nulls: `first` }], [0], [0]],
+        () => new Value(++calls === 1),
+      ),
+    ).toThrow()
+  })
+
   it(`returns no cursor without boundary values and rejects a boundary without an order`, () => {
     expect(() => buildCursor([], [1])).toThrow(
       `Only leading-column cursors are supported`,
@@ -230,36 +371,80 @@ describe(`buildCursor properties`, () => {
     ).toBeUndefined()
   })
 
-  fcTest.prop([exactCursorArbitrary], { numRuns: 300 })(
-    `preserves nullable mixed-direction ordering while restricting cursor width`,
-    async ([terms, boundary, candidate]) => {
-      expectCursorDenotation(terms, boundary, candidate)
-      await expectLocalTupleOrder(terms, boundary, candidate)
-    },
+  fixedCampaign.prop([exactCursorArbitrary], {
+    numRuns: oracleRuns(300),
+    seed: fixedSeed,
+  })(`restricts exact cursor width for a fixed seed`, assertCursorWidth)
+
+  randomCampaign(`cursor.exact-width`).prop(
+    [exactCursorArbitrary],
+    oraclePropertyOptions(300, `cursor.exact-width`),
+  )(
+    `restricts exact cursor width for a random or replayed seed`,
+    assertCursorWidth,
   )
 
-  fcTest.prop([partialCursorArbitrary], { numRuns: 200 })(
-    `uses one leading boundary value and rejects other mismatched widths`,
-    async ([terms, boundary, candidate]) => {
-      expectCursorDenotation(terms, boundary, candidate)
-      await expectLocalTupleOrder(terms, boundary, candidate)
-    },
+  fixedCampaign.prop([exactCursorArbitrary], {
+    numRuns: oracleRuns(300),
+    seed: fixedSeed,
+  })(
+    `preserves exact-width nullable local tuple order for a fixed seed`,
+    assertLocalTupleOrder,
   )
 
-  fcTest.prop([exactCursorArbitrary], { numRuns: 100 })(
-    `repeats the same cursor or unsupported-width error`,
-    ([terms, boundary]) => {
-      if (terms.length !== 1) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          expect(() => buildCursor(orderBy(terms), [...boundary])).toThrow(
-            `Only leading-column cursors are supported`,
-          )
-        }
-        return
-      }
-      expect(buildCursor(orderBy(terms), [...boundary])).toEqual(
-        buildCursor(orderBy(terms), [...boundary]),
-      )
-    },
+  randomCampaign(`cursor.exact-local-order`).prop(
+    [exactCursorArbitrary],
+    oraclePropertyOptions(300, `cursor.exact-local-order`),
+  )(
+    `preserves exact-width nullable local tuple order for a random or replayed seed`,
+    assertLocalTupleOrder,
+  )
+
+  fixedCampaign.prop([partialCursorArbitrary], {
+    numRuns: oracleRuns(200),
+    seed: fixedSeed,
+  })(
+    `uses one leading boundary value and rejects other mismatched widths for a fixed seed`,
+    assertCursorWidth,
+  )
+
+  randomCampaign(`cursor.partial-width`).prop(
+    [partialCursorArbitrary],
+    oraclePropertyOptions(200, `cursor.partial-width`),
+  )(
+    `uses one leading boundary value and rejects other mismatched widths for a random or replayed seed`,
+    assertCursorWidth,
+  )
+
+  fixedCampaign.prop([partialCursorArbitrary], {
+    numRuns: oracleRuns(200),
+    seed: fixedSeed,
+  })(
+    `preserves partial-width nullable local tuple order for a fixed seed`,
+    assertLocalTupleOrder,
+  )
+
+  randomCampaign(`cursor.partial-local-order`).prop(
+    [partialCursorArbitrary],
+    oraclePropertyOptions(200, `cursor.partial-local-order`),
+  )(
+    `preserves partial-width nullable local tuple order for a random or replayed seed`,
+    assertLocalTupleOrder,
+  )
+
+  fixedCampaign.prop([exactCursorArbitrary], {
+    numRuns: oracleRuns(100),
+    seed: fixedSeed,
+  })(
+    `repeats the same cursor or unsupported-width error for a fixed seed`,
+    assertRepeatedCursor,
+  )
+
+  randomCampaign(`cursor.repeat-construction`).prop(
+    [exactCursorArbitrary],
+    oraclePropertyOptions(100, `cursor.repeat-construction`),
+  )(
+    `repeats the same cursor or unsupported-width error for a random or replayed seed`,
+    assertRepeatedCursor,
   )
 })

@@ -41,6 +41,31 @@ import type { SyncConfig } from '../../src/types.js'
  * Q1 and Q2 can notify at different moments. Coherence applies within each
  * callback and its own layer. The test does not require Q2 to advance while a
  * Q1 callback is still running.
+ *
+ * Authority: ARCHITECTURE.md, "Coherent publication", "Atomic window
+ * publication", and normative laws 8–9. The model combines source Collection
+ * rows into the two queries' public rows; it does not model graph relations,
+ * scheduling, or callback order. The joined shape has fixed metadata, and Q2
+ * has one parent row, so its orderBy cell checks publication through that
+ * operator rather than multi-row sort semantics. Controlled source writes do
+ * not establish any real provider's event schedule. Held repair below covers
+ * one two-row root reorder, not Collection-valued child facades, cleanup, or
+ * concurrent optimistic changes during repair; the coverage map owns those
+ * neighboring limits.
+ *
+ * Grammar: one existing parent, two child rows per child source, and fixed
+ * joined metadata. Each action updates an existing key; missing-key updates
+ * are excluded. The fixed plain-action list reaches the two-write path;
+ * a fixed cell and generated properties reach optimistic confirmation, while
+ * a generated property reaches rollback. Removing an action kind loses its
+ * publication path; removing a Q1/Q2 shape loses that graph path. Rollback
+ * runs in the direct pass-through shape. The other plain actions cross all
+ * shapes in the fixed list. Generated scalar values exclude initial values.
+ * Their domain spans -100..100, with -100, -1, 1, and 100 as margins; child
+ * values add 0 and 2.
+ * Route targets cover occupied group 20 and empty group 30. Atomic
+ * replacement also covers unchanged group 10. These are bounded one-action
+ * value campaigns, not arbitrary interleaved histories.
  */
 
 type ParentRow = {
@@ -201,6 +226,7 @@ type PublicationObservation = {
 
 type CallbackObservation = {
   layer: `q1` | `q2`
+  previousDeliveredRows: Array<PublishedRow>
   rows: Array<PublishedRow>
   expected: Array<PublishedRow>
   changes: Array<{
@@ -221,6 +247,9 @@ type PublicationContext = {
   queries: ReturnType<typeof createLayeredQuery>
   callbacks: Array<CallbackObservation>
   unsubscribe: Array<() => void>
+  // Model-only subscriber ledger: equal current Collection rows can produce
+  // insert or update on the next delivery depending on prior callback reach.
+  lastDeliveredRows: Record<CallbackObservation[`layer`], Array<PublishedRow>>
   model: {
     parents: Map<number, ParentRow>
     children: Map<number, ChildRow>
@@ -272,14 +301,25 @@ const publicationProjection: TraceProjection<
     // Q2 has already advanced while Q1's earlier callback is running.
     for (const callback of observed.callbacks) {
       expect(callback.rows).toEqual(callback.expected)
-      for (const change of callback.changes) {
-        expect(change.key).toBe(change.value.item.id)
-        if (change.type !== `delete`) {
-          expect(change.value).toEqual(
-            callback.expected.find((row) => row.item.id === change.key),
-          )
-        }
-      }
+      // This grammar retains one parent key. A subscription's first delivery
+      // inserts it; later callbacks update it from that layer's last delivery.
+      // The stream starts empty even when the Collection already has a row.
+      const previous = callback.previousDeliveredRows[0]
+      expect(
+        callback.changes.map(({ type, key, value, previousValue }) => ({
+          type,
+          key,
+          value,
+          previousValue,
+        })),
+      ).toEqual([
+        {
+          type: previous ? `update` : `insert`,
+          key: initialParent.id,
+          value: callback.expected[0],
+          previousValue: previous,
+        },
+      ])
     }
     return undefined
   },
@@ -339,6 +379,7 @@ function createPublicationDriver(
         ),
         callbacks: [],
         unsubscribe: [],
+        lastDeliveredRows: { q1: [], q2: [] },
         model: {
           parents: new Map([[initialParent.id, { ...initialParent }]]),
           children: new Map(
@@ -356,16 +397,19 @@ function createPublicationDriver(
       await queries.q2.preload()
       for (const layer of [`q1`, `q2`] as const) {
         const subscription = queries[layer].subscribeChanges((changes) => {
+          const rows = stripVirtualProperties(
+            queries[layer].toArray,
+          ) as Array<PublishedRow>
           context.callbacks.push({
             layer,
-            rows: stripVirtualProperties(
-              queries[layer].toArray,
-            ) as Array<PublishedRow>,
+            previousDeliveredRows: context.lastDeliveredRows[layer],
+            rows,
             expected: recomputeRows(context),
             changes: stripVirtualProperties(
               changes,
             ) as CallbackObservation[`changes`],
           })
+          context.lastDeliveredRows[layer] = structuredClone(rows)
         })
         context.unsubscribe.push(() => subscription.unsubscribe())
       }
@@ -464,15 +508,18 @@ function createPublicationDriver(
       checkpoint()
     },
     cleanup: async ({ queries, sources, unsubscribe }) => {
-      for (const stop of unsubscribe) stop()
-      await queries.q2.cleanup()
-      await queries.q1.cleanup()
-      await Promise.all([
-        sources.parents.collection.cleanup(),
-        sources.children.collection.cleanup(),
-        sources.otherChildren.collection.cleanup(),
-        sources.metadata.collection.cleanup(),
-      ])
+      await withHistoryCleanup(
+        async () => undefined,
+        () => [
+          ...unsubscribe,
+          () => queries.q2.cleanup(),
+          () => queries.q1.cleanup(),
+          () => sources.parents.collection.cleanup(),
+          () => sources.children.collection.cleanup(),
+          () => sources.otherChildren.collection.cleanup(),
+          () => sources.metadata.collection.cleanup(),
+        ],
+      )
     },
   }
 }
@@ -492,6 +539,21 @@ async function expectPublicationMatches(
 
 const q2Shapes = [`passThrough`, `where`, `orderBy`, `select`] as const
 const q1Shapes = [`direct`, `joined`] as const
+
+// Both ordinary campaigns use the same arbitrary, driver, comparison, and
+// budget. A seed/path request runs only its directly replayed campaign.
+const fixedPublicationSeed = 1813
+function publicationCampaigns(baseRuns: number, property: string) {
+  const options = oraclePropertyOptions(baseRuns, property)
+  if (options.seed !== undefined) return [{ name: `replay`, options }]
+  return [
+    {
+      name: `fixed seed ${fixedPublicationSeed}`,
+      options: { ...options, seed: fixedPublicationSeed },
+    },
+    { name: `random seed`, options },
+  ]
+}
 
 describe(`layered-query publication oracle`, () => {
   // Completed-promise histories can starve worker RPC replies at high run counts.
@@ -613,6 +675,16 @@ describe(`layered-query publication oracle`, () => {
           expect(() =>
             publicationProjection.assertEqual(observed, expected),
           ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+          // Repair the row capture, then remove the whole change batch. The
+          // same callback-time comparison must reject a missing public event.
+          callback!.rows = structuredClone(callback!.expected)
+          callback!.changes = []
+          expect(() =>
+            publicationProjection.assertEqual(
+              publicationProjection.observe(context),
+              expected,
+            ),
+          ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
           expect(reached).toBe(1)
         } finally {
           await driver.cleanup(context)
@@ -661,103 +733,120 @@ describe(`layered-query publication oracle`, () => {
         }
       })
 
-      fcTest.prop(
-        [changedValueArbitrary],
-        oraclePropertyOptions(
-          12,
-          `includes-publication.parent-scalar.${q1Shape}.${q2Shape}`,
-        ),
-      )(
-        `publishes parent scalar updates through a ${q1Shape} Q1 and ${q2Shape} Q2`,
-        async (value) => {
-          await expectPublicationMatches(
-            { type: `parentScalar`, value },
-            false,
-            q1Shape,
-            q2Shape,
-          )
-        },
-      )
+      for (const campaign of publicationCampaigns(
+        12,
+        `includes-publication.parent-scalar.${q1Shape}.${q2Shape}`,
+      )) {
+        fcTest.prop([changedValueArbitrary], campaign.options)(
+          `publishes parent scalar updates through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
+          async (value) => {
+            await expectPublicationMatches(
+              { type: `parentScalar`, value },
+              false,
+              q1Shape,
+              q2Shape,
+            )
+          },
+        )
+      }
 
-      fcTest.prop(
-        [changedValueArbitrary, changedChildValueArbitrary],
-        oraclePropertyOptions(
-          12,
-          `includes-publication.parent-then-child.${q1Shape}.${q2Shape}`,
-        ),
-      )(
-        `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update`,
-        async (parentValue, childValue) => {
-          await expectPublicationMatches(
-            { type: `parentThenChild`, parentValue, childValue },
-            false,
-            q1Shape,
-            q2Shape,
-          )
-        },
-      )
+      for (const campaign of publicationCampaigns(
+        12,
+        `includes-publication.parent-then-child.${q1Shape}.${q2Shape}`,
+      )) {
+        fcTest.prop(
+          [changedValueArbitrary, changedChildValueArbitrary],
+          campaign.options,
+        )(
+          `recovers a ${q1Shape} Q1 and ${q2Shape} Q2 after a child update (${campaign.name})`,
+          async (parentValue, childValue) => {
+            await expectPublicationMatches(
+              { type: `parentThenChild`, parentValue, childValue },
+              false,
+              q1Shape,
+              q2Shape,
+            )
+          },
+        )
+      }
 
-      fcTest.prop(
-        [changedValueArbitrary],
-        oraclePropertyOptions(
-          16,
-          `includes-publication.optimistic-before-confirm.${q1Shape}.${q2Shape}`,
-        ),
-      )(
-        `publishes optimistic state before and after confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2`,
-        async (value) => {
-          await expectPublicationMatches(
-            { type: `optimisticConfirm`, value },
-            true,
-            q1Shape,
-            q2Shape,
-          )
-        },
-      )
+      for (const campaign of publicationCampaigns(
+        16,
+        `includes-publication.optimistic-before-confirm.${q1Shape}.${q2Shape}`,
+      )) {
+        fcTest.prop([changedValueArbitrary], campaign.options)(
+          `publishes optimistic state before and after confirmation through a ${q1Shape} Q1 and ${q2Shape} Q2 (${campaign.name})`,
+          async (value) => {
+            await expectPublicationMatches(
+              { type: `optimisticConfirm`, value },
+              true,
+              q1Shape,
+              q2Shape,
+            )
+          },
+        )
+      }
     }
   }
 
-  fcTest.prop(
-    [changedChildValueArbitrary],
-    oraclePropertyOptions(100, `includes-publication.child-scalar`),
-  )(
-    `publishes child-only scalar updates through both layers`,
-    async (value) => {
-      await expectPublicationMatches({ type: `childScalar`, value })
-    },
-  )
+  for (const campaign of publicationCampaigns(
+    100,
+    `includes-publication.child-scalar`,
+  )) {
+    fcTest.prop([changedChildValueArbitrary], campaign.options)(
+      `publishes child-only scalar updates through both layers (${campaign.name})`,
+      async (value) => {
+        await expectPublicationMatches({ type: `childScalar`, value })
+      },
+    )
+  }
 
-  fcTest.prop(
-    [fc.constantFrom(20, 30)],
-    oraclePropertyOptions(100, `includes-publication.parent-route`),
-  )(`compares route transitions at both query layers`, async (group) => {
-    await expectPublicationMatches({ type: `parentRoute`, group })
-  })
+  for (const campaign of publicationCampaigns(
+    100,
+    `includes-publication.parent-route`,
+  )) {
+    fcTest.prop([fc.constantFrom(20, 30)], campaign.options)(
+      `compares route transitions at both query layers (${campaign.name})`,
+      async (group) => {
+        await expectPublicationMatches({ type: `parentRoute`, group })
+      },
+    )
+  }
 
-  fcTest.prop(
-    [
-      fc.record({
-        group: fc.constantFrom(10, 20, 30),
-        value: changedValueArbitrary,
-      }),
-    ],
-    oraclePropertyOptions(
-      100,
-      `includes-publication.atomic-parent-replacement`,
-    ),
-  )(`compares atomic parent replacements at both query layers`, async (row) => {
-    await expectPublicationMatches({ type: `atomicReplace`, ...row })
-  })
+  for (const campaign of publicationCampaigns(
+    100,
+    `includes-publication.atomic-parent-replacement`,
+  )) {
+    fcTest.prop(
+      [
+        fc.record({
+          group: fc.constantFrom(10, 20, 30),
+          value: changedValueArbitrary,
+        }),
+      ],
+      campaign.options,
+    )(
+      `compares atomic parent replacements at both query layers (${campaign.name})`,
+      async (row) => {
+        await expectPublicationMatches({ type: `atomicReplace`, ...row })
+      },
+    )
+  }
 
-  fcTest.prop(
-    [changedValueArbitrary],
-    oraclePropertyOptions(100, `includes-publication.optimistic-rollback`),
-  )(`publishes restored state after optimistic rollback`, async (value) => {
-    await expectPublicationMatches({
-      type: `optimisticRollback`,
-      value,
-    })
-  })
+  for (const campaign of publicationCampaigns(
+    100,
+    `includes-publication.optimistic-rollback`,
+  )) {
+    fcTest.prop([changedValueArbitrary], campaign.options)(
+      `publishes restored state after optimistic rollback (${campaign.name})`,
+      async (value) => {
+        await expectPublicationMatches({
+          type: `optimisticRollback`,
+          value,
+        })
+      },
+    )
+  }
 })
 
 /**
@@ -765,7 +854,9 @@ describe(`layered-query publication oracle`, () => {
  * publication. Row 1 moves behind row 2 while its payload changes A→B→A.
  * The expected public snapshot comes from sorting source rows, not from
  * intermediate retractions. Subscribers receive one layout notification
- * with no value-change message. A final-value C cell checks a value update.
+ * with no value-change message. The A→B→A cell rejects the wrong rule that an
+ * unchanged final value needs no layout notification. A final-value C cell
+ * checks a value update.
  */
 describe(`held include publication`, () => {
   it.each([

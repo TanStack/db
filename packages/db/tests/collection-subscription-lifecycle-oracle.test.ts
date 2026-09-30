@@ -950,6 +950,8 @@ async function runAsyncRestartScenario(
  * physical acquisition and its lease exist only if the callback returns.
  */
 describe(`CollectionSubscription demand lifecycle oracle`, () => {
+  const { multiplier, ...replay } = readOracleRunConfig()
+
   it(`executes every required async restart regime`, async () => {
     const reach = new Set<string>()
     for (const scenario of asyncRestartCoverageScenarios) {
@@ -1021,6 +1023,8 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
   })
 
   afterAll(() => {
+    // A direct property replay may select only that test by name.
+    if (replay.replayPath !== undefined) return
     expect(observedAcquisitionCells).toEqual(legalAcquisitionCells)
     expect(observedPhysicalInteractions).toEqual(requiredPhysicalInteractions)
     expect(observedSyncRunBoundaries).toEqual(requiredSyncRunBoundaries)
@@ -4342,9 +4346,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     },
   )
 
-  const { multiplier, ...replay } = readOracleRunConfig()
+  const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
 
-  fcTest.prop([asyncRestartScenarioArbitrary], {
+  fixedCampaign.prop([asyncRestartScenarioArbitrary], {
     numRuns: 30 * multiplier,
     seed: 1_657_002,
   })(

@@ -24,6 +24,91 @@ import type {
 } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils, ElectricSyncMode } from '../src/electric'
 
+// Replays one generated law directly with
+// TANSTACK_DB_ELECTRIC_HISTORY_PROPERTY=<property>
+// TANSTACK_DB_ELECTRIC_HISTORY_SEED=<reported seed>
+// TANSTACK_DB_ELECTRIC_HISTORY_PATH=<reported path>
+// pnpm exec vitest run tests/electric-oracle.property.test.ts -t '<law name> \(replay\)'
+const historyReplayProperty = process.env.TANSTACK_DB_ELECTRIC_HISTORY_PROPERTY
+const historyReplaySeed = process.env.TANSTACK_DB_ELECTRIC_HISTORY_SEED
+const historyReplayPath = process.env.TANSTACK_DB_ELECTRIC_HISTORY_PATH
+const registeredHistoryProperties = new Set<string>()
+const historyPropertyIds = new Set([
+  `electric.initial-tagged-move-outs`,
+  `electric.process-grammar`,
+  `electric.design-convergence`,
+  `electric.synthetic-batch-partition`,
+  `electric.valid-batch-partition`,
+  `electric.invalid-resume-partition`,
+  `electric.subset-request-row-validity`,
+  `electric.resume-metadata-merge`,
+  `electric.metadata-merge-complete-state`,
+])
+
+if (
+  historyReplayProperty === undefined &&
+  (historyReplaySeed !== undefined || historyReplayPath !== undefined)
+) {
+  throw new Error(`Electric history replay requires a property`)
+}
+if (
+  historyReplayProperty !== undefined &&
+  (historyReplaySeed === undefined || historyReplayPath === undefined)
+) {
+  throw new Error(`Electric history replay requires both seed and path`)
+}
+if (
+  historyReplayProperty !== undefined &&
+  !historyPropertyIds.has(historyReplayProperty)
+) {
+  throw new Error(`unknown Electric history property: ${historyReplayProperty}`)
+}
+
+function electricHistoryProperty<T>(
+  property: string,
+  name: string,
+  arbitrary: fc.Arbitrary<T>,
+  baseRuns: number,
+  fixedSeed: number,
+  check: (value: T) => void | Promise<void>,
+  timeout?: number,
+  examples?: Array<[T]>,
+): void {
+  if (registeredHistoryProperties.has(property)) {
+    throw new Error(`duplicate Electric history property: ${property}`)
+  }
+  registeredHistoryProperties.add(property)
+  const numRuns = oracleRuns(baseRuns)
+  if (historyReplayProperty === undefined) {
+    fcTest.prop([arbitrary], { numRuns, seed: fixedSeed, examples })(
+      `${name} (fixed)`,
+      check,
+      timeout,
+    )
+    fcTest.prop([arbitrary], { numRuns, examples })(
+      `${name} (random)`,
+      check,
+      timeout,
+    )
+    return
+  }
+  if (historyReplayProperty !== property) return
+  const seed = Number(historyReplaySeed)
+  if (!Number.isSafeInteger(seed)) {
+    throw new Error(`Electric history replay seed must be an integer`)
+  }
+  if (!/^\d+(?::\d+)*$/.test(historyReplayPath!)) {
+    throw new Error(
+      `Electric history replay path must contain colon-separated nonnegative integers`,
+    )
+  }
+  fcTest.prop([arbitrary], { numRuns, seed, path: historyReplayPath })(
+    `${name} (replay)`,
+    check,
+    timeout,
+  )
+}
+
 /**
  * # Does the Electric adapter preserve one coherent replica lifecycle?
  *
@@ -275,11 +360,13 @@ function foldSourceLedgerThrough(
   throw new Error(`resume offset ${resumeOffset} is absent from source ledger`)
 }
 
-function durablePrefixPropertyOptions(): {
+function durablePrefixPropertyOptions(mode: `fixed` | `random`): {
   numRuns: number
-  seed: number
+  seed?: number
   path?: string
 } {
+  const numRuns = oracleRuns(10)
+  if (mode === `fixed`) return { numRuns, seed: 20260921 }
   const seedValue = process.env.TANSTACK_DB_ELECTRIC_DURABILITY_SEED
   const path = process.env.TANSTACK_DB_ELECTRIC_DURABILITY_PATH
   if (path !== undefined && seedValue === undefined) {
@@ -287,22 +374,25 @@ function durablePrefixPropertyOptions(): {
       `TANSTACK_DB_ELECTRIC_DURABILITY_PATH requires TANSTACK_DB_ELECTRIC_DURABILITY_SEED`,
     )
   }
-  const seed = seedValue === undefined ? 20260921 : Number(seedValue)
+  if (seedValue === undefined) return { numRuns }
+  const seed = Number(seedValue)
   if (!Number.isSafeInteger(seed)) {
     throw new Error(`TANSTACK_DB_ELECTRIC_DURABILITY_SEED must be an integer`)
   }
   return {
-    numRuns: path === undefined ? 10 : 1,
+    numRuns,
     seed,
     ...(path === undefined ? {} : { path }),
   }
 }
 
-function persistencePolicyPropertyOptions(): {
+function persistencePolicyPropertyOptions(mode: `fixed` | `random`): {
   numRuns: number
-  seed: number
+  seed?: number
   path?: string
 } {
+  const numRuns = oracleRuns(8)
+  if (mode === `fixed`) return { numRuns, seed: 20260923 }
   const seedValue = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED
   const path = process.env.TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH
   if (path !== undefined && seedValue === undefined) {
@@ -310,14 +400,15 @@ function persistencePolicyPropertyOptions(): {
       `TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH requires TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED`,
     )
   }
-  const seed = seedValue === undefined ? 20260923 : Number(seedValue)
+  if (seedValue === undefined) return { numRuns }
+  const seed = Number(seedValue)
   if (!Number.isSafeInteger(seed)) {
     throw new Error(
       `TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED must be an integer`,
     )
   }
   return {
-    numRuns: path === undefined ? 8 : 1,
+    numRuns,
     seed,
     ...(path === undefined ? {} : { path }),
   }
@@ -326,13 +417,14 @@ function persistencePolicyPropertyOptions(): {
 async function runRejectedDurablePrefixWitness(
   id: string,
   names: readonly [string, string],
+  acceptedPrefix = false,
 ): Promise<void> {
   let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
   mockSubscribe.mockImplementationOnce((callback) => {
     subscriber = callback
     return vi.fn()
   })
-  const firstAttempt = createDeferred<void>()
+  const rejectedAttempt = createDeferred<void>()
   const persistedMetadata = new Map<string, unknown>()
   const persistedRows = new Map<string | number, OracleRow>()
   const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
@@ -356,8 +448,8 @@ async function runRejectedDurablePrefixWitness(
       }),
     })
     attempt++
-    if (attempt === 1) {
-      firstAttempt.resolve()
+    if (attempt === (acceptedPrefix ? 2 : 1)) {
+      rejectedAttempt.resolve()
       throw persistenceError
     }
     await applyCommittedTx(...args)
@@ -395,12 +487,31 @@ async function runRejectedDurablePrefixWitness(
       name: names[0],
       stable: `stable-1`,
     }
+    const sourcePrefix: Array<SourceLedgerEvent> = [
+      {
+        type: `source-commit`,
+        offset: `21_0`,
+        mutations: [{ type: `set`, row: firstRow }],
+      },
+    ]
+    const acceptedRows = acceptedPrefix
+      ? foldSourceLedgerThrough(sourcePrefix, `21_0`)
+      : new Map<string | number, OracleRow>()
     mockStream.lastOffset = `21_0`
     const firstMessage = change(`insert`, firstRow.id, firstRow.name)
     firstMessage.headers.txids = [701]
     subscriber!([firstMessage, upToDate])
-    await atCheckpoint(firstAttempt.promise, `first durability rejection`)
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    if (acceptedPrefix) {
+      await vi.waitFor(() => {
+        expect(rowsFromMap(persistedRows)).toEqual(rowsFromMap(acceptedRows))
+        expect(
+          observableResume(persistedMetadata.get(`electric:resume`)),
+        ).toEqual(expect.objectContaining({ kind: `resume`, offset: `21_0` }))
+      })
+    } else {
+      await atCheckpoint(rejectedAttempt.promise, `first durability rejection`)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
 
     const secondRow: OracleRow = {
       id: 2,
@@ -411,7 +522,15 @@ async function runRejectedDurablePrefixWitness(
     const secondMessage = change(`insert`, secondRow.id, secondRow.name)
     secondMessage.headers.txids = [702]
     subscriber!([secondMessage, upToDate])
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    if (acceptedPrefix) {
+      await atCheckpoint(rejectedAttempt.promise, `second durability rejection`)
+      await vi.waitFor(() => expect(collection.status).toBe(`error`))
+      // A later source callback may arrive after the failed durability turn.
+      // It cannot become part of the accepted prefix or start another write.
+      subscriber!([change(`insert`, 3, `retired`), upToDate])
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
     const statusAtTerminalCut = collection.status
     await atCheckpoint(collection.cleanup(), `durable-prefix terminal cleanup`)
 
@@ -424,14 +543,19 @@ async function runRejectedDurablePrefixWitness(
       `offset` in durableResume
         ? durableResume.offset
         : undefined
-    expect(durableAttempts).toHaveLength(1)
+    expect(durableAttempts).toHaveLength(acceptedPrefix ? 2 : 1)
     expect(durableAttempts[0]?.keys).toContain(1)
     expect(durableAttempts[0]?.sourceTxids).toEqual([701])
+    if (acceptedPrefix) {
+      expect(durableAttempts[1]?.keys).toContain(2)
+      expect(durableAttempts[1]?.sourceTxids).toEqual([702])
+    }
     // A rejected durability boundary is terminal: it cannot retry, admit the
     // later source commit, or publish a resume claim for an undurable prefix.
+    // Clearing the accepted prefix on a later rejection is also a wrong rule.
     expect(statusAtTerminalCut).toBe(`error`)
-    expect(durableOffset).toBeUndefined()
-    expect(rowsFromMap(persistedRows)).toEqual([])
+    expect(durableOffset).toBe(acceptedPrefix ? `21_0` : undefined)
+    expect(rowsFromMap(persistedRows)).toEqual(rowsFromMap(acceptedRows))
   }, [() => collection.cleanup()])
 }
 
@@ -2728,26 +2852,29 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       checkInitialMoveOut(syncMode, removals, 1, `updated`),
   )
 
-  fcTest.prop(
-    [
+  electricHistoryProperty(
+    `electric.initial-tagged-move-outs`,
+    `generated initial tagged move-outs preserve later live updates`,
+    fc.tuple(
       fc.integer({ min: 1, max: 20 }),
       fc.string({ maxLength: 8 }),
       fc.integer({ min: 0, max: 2 }),
-    ],
-    { numRuns: 20 },
-  )(
-    `generated initial tagged move-outs preserve later live updates`,
-    async (id, updated, removals) => {
+    ),
+    20,
+    42_715,
+    async ([id, updated, removals]) => {
       for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
         await checkInitialMoveOut(syncMode, removals, id, updated)
       }
     },
   )
 
-  fcTest.prop([fc.array(processCommandArb, { maxLength: 20 })], {
-    numRuns: 20,
-  })(
+  electricHistoryProperty(
+    `electric.process-grammar`,
     `generated process grammar preserves lifecycle and concurrent-collection isolation`,
+    fc.array(processCommandArb, { maxLength: 20 }),
+    20,
+    42_716,
     async (commands) => {
       processGrammarRun++
       await runProcessGrammar(`process-grammar-${processGrammarRun}`, commands)
@@ -3133,22 +3260,32 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     runQueuedPresenceCampaign,
   )
 
+  const publicationPolicyArbitraries: [
+    fc.Arbitrary<number>,
+    fc.Arbitrary<string>,
+  ] = [fc.integer({ min: 1, max: 20 }), fc.string({ maxLength: 12 })]
+  const checkPublicationPolicy = async (id: number, name: string) => {
+    persistencePolicyRun++
+    await runPublicationBeforePersistenceWitness(
+      `publication-before-persistence-generated-${persistencePolicyRun}`,
+      { id, name, stable: `stable-${id}` },
+      800 + id,
+    )
+  }
   fcTest.prop(
-    [fc.integer({ min: 1, max: 20 }), fc.string({ maxLength: 12 })],
-    // Replay one generated publication schedule directly with:
-    // TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_SEED=20260923
-    // TANSTACK_DB_ELECTRIC_PERSISTENCE_POLICY_PATH=<reported path>
-    persistencePolicyPropertyOptions(),
+    publicationPolicyArbitraries,
+    persistencePolicyPropertyOptions(`fixed`),
   )(
-    `generated Electric commits publish before adapter persistence settles`,
-    async (id, name) => {
-      persistencePolicyRun++
-      await runPublicationBeforePersistenceWitness(
-        `publication-before-persistence-generated-${persistencePolicyRun}`,
-        { id, name, stable: `stable-${id}` },
-        800 + id,
-      )
-    },
+    `generated Electric commits publish before adapter persistence settles (fixed)`,
+    checkPublicationPolicy,
+  )
+  // Replay the random lane with the legacy seed/path variables and -t 'random'.
+  fcTest.prop(
+    publicationPolicyArbitraries,
+    persistencePolicyPropertyOptions(`random`),
+  )(
+    `generated Electric commits publish before adapter persistence settles (random)`,
+    checkPublicationPolicy,
   )
 
   it(`turns adapter rejection into a named terminal Electric persistence error`, async () => {
@@ -3159,30 +3296,46 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     )
   })
 
+  const failurePolicyArbitraries: [
+    fc.Arbitrary<number>,
+    fc.Arbitrary<[string, string]>,
+  ] = [
+    fc.integer({ min: 1, max: 20 }),
+    fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
+  ]
+  const checkFailurePolicy = async (id: number, names: [string, string]) => {
+    persistencePolicyRun++
+    await runPersistenceFailureCrashOnlyWitness(
+      `terminal-persistence-error-generated-${persistencePolicyRun}`,
+      { id, name: names[0], stable: `stable-${id}` },
+      { id: id + 100, name: names[1], stable: `stable-${id + 100}` },
+    )
+  }
   fcTest.prop(
-    [
-      fc.integer({ min: 1, max: 20 }),
-      fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 })),
-    ],
-    persistencePolicyPropertyOptions(),
+    failurePolicyArbitraries,
+    persistencePolicyPropertyOptions(`fixed`),
   )(
-    `generated adapter failures reject publicly and admit no later Electric work`,
-    async (id, names) => {
-      persistencePolicyRun++
-      await runPersistenceFailureCrashOnlyWitness(
-        `terminal-persistence-error-generated-${persistencePolicyRun}`,
-        { id, name: names[0], stable: `stable-${id}` },
-        { id: id + 100, name: names[1], stable: `stable-${id + 100}` },
-      )
-    },
+    `generated adapter failures reject publicly and admit no later Electric work (fixed)`,
+    checkFailurePolicy,
+  )
+  fcTest.prop(
+    failurePolicyArbitraries,
+    persistencePolicyPropertyOptions(`random`),
+  )(
+    `generated adapter failures reject publicly and admit no later Electric work (random)`,
+    checkFailurePolicy,
   )
 
-  fcTest.prop(
-    [fc.array(designTokenArb, { minLength: 1, maxLength: 7 }), fc.nat()],
-    { numRuns: 24 },
-  )(
+  electricHistoryProperty(
+    `electric.design-convergence`,
     `operational and denotational reference designs agree before checking production`,
-    async (tokens, partitionSeed) => {
+    fc.tuple(
+      fc.array(designTokenArb, { minLength: 1, maxLength: 7 }),
+      fc.nat(),
+    ),
+    24,
+    42_717,
+    async ([tokens, partitionSeed]) => {
       const prefix = [[upToDate]]
       const messages = [...tokens.map(designMessage), upToDate]
       const partitions = everyContiguousPartition(messages)
@@ -3352,18 +3505,17 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     expect(sawAcknowledgementBeforeDurability).toBe(true)
   }, 30_000)
 
-  fcTest.prop(
-    [
-      fc.tuple(
-        fc.string({ maxLength: 8 }),
-        fc.string({ maxLength: 8 }),
-        fc.string({ maxLength: 8 }),
-        fc.string({ maxLength: 8 }),
-      ),
-    ],
-    { numRuns: 10 },
-  )(
+  electricHistoryProperty(
+    `electric.synthetic-batch-partition`,
     `synthetic batch partition is invariant across Electric modes and phases`,
+    fc.tuple(
+      fc.string({ maxLength: 8 }),
+      fc.string({ maxLength: 8 }),
+      fc.string({ maxLength: 8 }),
+      fc.string({ maxLength: 8 }),
+    ),
+    10,
+    42_718,
     async (names) => {
       const [first, second, updated, reinserted] = names
       const readyPrefix = [
@@ -3523,24 +3675,23 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     30_000,
   )
 
-  fcTest.prop(
-    [
-      fc.array(
-        fc.record({
-          operation: fc.constantFrom<HistoryToken[`operation`]>(
-            `insert`,
-            `update`,
-            `delete`,
-          ),
-          id: fc.integer({ min: 1, max: 3 }),
-          name: fc.string({ maxLength: 8 }),
-        }),
-        { minLength: 1, maxLength: 5 },
-      ),
-    ],
-    { numRuns: 20 },
-  )(
+  electricHistoryProperty(
+    `electric.valid-batch-partition`,
     `generated valid histories are invariant under every batch partition`,
+    fc.array(
+      fc.record({
+        operation: fc.constantFrom<HistoryToken[`operation`]>(
+          `insert`,
+          `update`,
+          `delete`,
+        ),
+        id: fc.integer({ min: 1, max: 3 }),
+        name: fc.string({ maxLength: 8 }),
+      }),
+      { minLength: 1, maxLength: 5 },
+    ),
+    20,
+    42_719,
     async (tokens) => {
       const history = buildValidHistory(tokens)
       for (const syncMode of [`eager`, `on-demand`, `progressive`] as const) {
@@ -3929,16 +4080,17 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }
   })
 
-  fcTest.prop(
-    [
+  electricHistoryProperty(
+    `electric.invalid-resume-partition`,
+    `generated invalid resume transitions fail under every batch partition`,
+    fc.tuple(
       fc.integer({ min: 1, max: 20 }),
       fc.string({ maxLength: 8 }),
       fc.string({ maxLength: 8 }),
-    ],
-    { numRuns: 20 },
-  )(
-    `generated invalid resume transitions fail under every batch partition`,
-    async (id, completeName, partialName) => {
+    ),
+    20,
+    42_720,
+    async ([id, completeName, partialName]) => {
       const messages = [
         change(`delete`, id, completeName),
         change(`update`, id, partialName),
@@ -4762,7 +4914,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }
   }
 
-  fcTest.prop([reentryHistory], { seed: 42713, numRuns: oracleRuns(6) })(
+  fcTest.prop([reentryHistory], { seed: 42713, numRuns: oracleRuns(10) })(
     `replacement sync runs reject evidence from callback reentry histories (fixed)`,
     runReentryHistory,
   )
@@ -5110,20 +5262,32 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     ])
   })
 
-  fcTest.prop(
-    [fc.tuple(fc.string({ maxLength: 12 }), fc.string({ maxLength: 12 }))],
-    // Replay the retained shrink directly with:
-    // TANSTACK_DB_ELECTRIC_DURABILITY_SEED=20260921
-    // TANSTACK_DB_ELECTRIC_DURABILITY_PATH=0:0:0
-    durablePrefixPropertyOptions(),
-  )(
-    `durable Electric resume metadata covers every generated source prefix after a rejected commit`,
-    async (names) => {
-      await runRejectedDurablePrefixWitness(
-        `durable-prefix-generated-${JSON.stringify(names)}`,
-        names,
-      )
-    },
+  it(`retains an accepted Electric source prefix when the next row commit rejects`, async () => {
+    await runRejectedDurablePrefixWitness(
+      `durable-prefix-after-success`,
+      [`accepted`, `rejected`],
+      true,
+    )
+  })
+
+  const durablePrefixArbitrary = fc.tuple(
+    fc.string({ maxLength: 12 }),
+    fc.string({ maxLength: 12 }),
+  )
+  const checkDurablePrefix = async (names: [string, string]) => {
+    await runRejectedDurablePrefixWitness(
+      `durable-prefix-generated-${JSON.stringify(names)}`,
+      names,
+    )
+  }
+  fcTest.prop([durablePrefixArbitrary], durablePrefixPropertyOptions(`fixed`))(
+    `a rejected initial Electric row commit creates no durable source prefix (fixed)`,
+    checkDurablePrefix,
+  )
+  // Replay the random lane with the legacy seed/path variables and -t 'random'.
+  fcTest.prop([durablePrefixArbitrary], durablePrefixPropertyOptions(`random`))(
+    `a rejected initial Electric row commit creates no durable source prefix (random)`,
+    checkDurablePrefix,
   )
 
   fcTest.prop(
@@ -5381,31 +5545,21 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  fcTest.prop(
-    [
-      fc.array(
-        fc.record({
-          operation: fc.constantFrom<
-            HistoryToken[`operation`] | `reset` | `acquire` | `commit`
-          >(`insert`, `update`, `delete`, `reset`, `acquire`, `commit`),
-          id: fc.integer({ min: 1, max: 3 }),
-          name: fc.string({ maxLength: 8 }),
-        }),
-        { minLength: 1, maxLength: 40 },
-      ),
-    ],
-    {
-      numRuns: 40,
-      examples: [
-        [
-          ([`insert`, `commit`, `reset`, `acquire`, `update`] as const).map(
-            (operation) => ({ operation, id: 1, name: `` }),
-          ),
-        ],
-      ],
-    },
-  )(
+  electricHistoryProperty(
+    `electric.subset-request-row-validity`,
     `subset request invocation preserves row validity through generated stream histories without response delivery`,
+    fc.array(
+      fc.record({
+        operation: fc.constantFrom<
+          HistoryToken[`operation`] | `reset` | `acquire` | `commit`
+        >(`insert`, `update`, `delete`, `reset`, `acquire`, `commit`),
+        id: fc.integer({ min: 1, max: 3 }),
+        name: fc.string({ maxLength: 8 }),
+      }),
+      { minLength: 1, maxLength: 40 },
+    ),
+    40,
+    42_721,
     async (commands) => {
       const trace = createOracleCollection(
         `acquisition-history`,
@@ -5459,6 +5613,14 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         await trace.collection.cleanup()
       }
     },
+    undefined,
+    [
+      [
+        ([`insert`, `commit`, `reset`, `acquire`, `update`] as const).map(
+          (operation) => ({ operation, id: 1, name: `` }),
+        ),
+      ],
+    ],
   )
 
   it(`applies on-demand catch-up updates to hydrated persisted rows`, async () => {
@@ -5639,8 +5801,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     await collection.cleanup()
   })
 
-  fcTest.prop(
-    [
+  electricHistoryProperty(
+    `electric.resume-metadata-merge`,
+    `resume metadata merge is commutative and reset-safe on timestamp ties`,
+    fc.tuple(
       fc.integer({ min: 0, max: 3 }),
       fc.integer({ min: 0, max: 3 }),
       fc.integer({ min: 0, max: 3 }),
@@ -5648,11 +5812,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       fc.string({ minLength: 1, maxLength: 8 }),
       fc.string({ minLength: 1, maxLength: 8 }),
       fc.boolean(),
-    ],
-    { numRuns: 50 },
-  )(
-    `resume metadata merge is commutative and reset-safe on timestamp ties`,
-    (
+    ),
+    50,
+    42_722,
+    ([
       leftTimestamp,
       rightTimestamp,
       thirdTimestamp,
@@ -5660,7 +5823,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       rightHandle,
       thirdHandle,
       thirdIsReset,
-    ) => {
+    ]) => {
       const options = electricCollectionOptions<OracleRow>({
         shapeOptions: {
           url: `http://test-url`,
@@ -5728,24 +5891,16 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
-  fcTest.prop(
-    [
-      fc.array(fc.integer({ min: 1, max: 8 }), { minLength: 1, maxLength: 12 }),
-      fc.array(fc.integer({ min: 1, max: 8 }), { minLength: 1, maxLength: 12 }),
-    ],
-    {
-      numRuns: 30,
-      examples: [
-        [
-          [1, 2, 1],
-          [2, 3, 2],
-        ],
-        [[8], [1]],
-      ],
-    },
-  )(
+  electricHistoryProperty(
+    `electric.metadata-merge-complete-state`,
     `metadata merge preserves complete selected state and nonempty transaction evidence`,
-    (leftTxids, rightTxids) => {
+    fc.tuple(
+      fc.array(fc.integer({ min: 1, max: 8 }), { minLength: 1, maxLength: 12 }),
+      fc.array(fc.integer({ min: 1, max: 8 }), { minLength: 1, maxLength: 12 }),
+    ),
+    30,
+    42_723,
+    ([leftTxids, rightTxids]: [Array<number>, Array<number>]) => {
       const merge = electricCollectionOptions<OracleRow>({
         shapeOptions: {
           url: `http://test-url`,
@@ -5871,6 +6026,16 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         }
       }
     },
+    undefined,
+    [
+      [
+        [
+          [1, 2, 1],
+          [2, 3, 2],
+        ],
+      ],
+      [[[8], [1]]],
+    ],
   )
 
   it(`retains the selected tag requirement when timestamps establish an order`, () => {

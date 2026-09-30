@@ -27,6 +27,8 @@ import type {
  * options, offset, limit, and cursor boundary. Equal demands share one physical
  * acquisition; distinct demands do not. Rejection reaches every waiter, then
  * leaves the demand retryable.
+ * `refetch` starts fresh work for the same request data. Requests with separate
+ * abort signals cannot share in-flight work.
  *
  * A separate application law says acquisition settlement is not enough. Loaded
  * rows must cross the Collection publication boundary before readiness settles.
@@ -37,6 +39,13 @@ import type {
  * expression evaluator. The application driver uses real transactions, sync
  * receipts, optimistic work, and live queries. Keeping these nodes separate
  * prevents a correct key function from hiding a broken settlement boundary.
+ *
+ * Authority: the exact-request and applied-settlement contracts in
+ * `packages/db/src/query/live/ARCHITECTURE.md` (Demand grouping and ownership,
+ * Source cancellation and applied settlement). The plain-record fingerprint
+ * models equality of request data, not source coverage or row ownership.
+ * The identity driver uses a controlled adapter; its result does not establish
+ * that an external provider honors an abort or returns complete ordered rows.
  */
 
 type PersistedLoadRow = {
@@ -118,10 +127,37 @@ const exactDemandTraceArbitrary = fc
   )
 
 const concurrentExactScenarioArbitrary: fc.Arbitrary<ConcurrentExactScenario> =
-  exactDemandTraceArbitrary.map((trace) => ({
-    trace,
-    settlementOrder: trace.length % 2 === 0 ? `forward` : `reverse`,
-  }))
+  fc.record({
+    trace: exactDemandTraceArbitrary,
+    settlementOrder: fc.constantFrom(`forward` as const, `reverse` as const),
+  })
+
+// Each pair differs in only one request-data axis. A deduper that drops that
+// axis would wrongly reuse the first acquisition at the second request.
+const exactDemandAxisPairs: ReadonlyArray<
+  readonly [axis: string, first: ExactDemand, second: ExactDemand]
+> = (() => {
+  const first: ExactDemand = {
+    values: [1, 2],
+    orderField: `rank`,
+    direction: `asc`,
+    nulls: `last`,
+    stringSort: `lexical`,
+    offset: 0,
+    limit: 2,
+    cursorBoundary: undefined,
+  }
+  return [
+    [`predicate values`, first, { ...first, values: [1, 3] }],
+    [`order field`, first, { ...first, orderField: `score` }],
+    [`direction`, first, { ...first, direction: `desc` }],
+    [`null placement`, first, { ...first, nulls: `first` }],
+    [`string sort`, first, { ...first, stringSort: `locale` }],
+    [`offset`, first, { ...first, offset: 1 }],
+    [`limit`, first, { ...first, limit: undefined }],
+    [`cursor boundary`, first, { ...first, cursorBoundary: 1 }],
+  ]
+})()
 
 function toLoadSubsetOptions(demand: ExactDemand): LoadSubsetOptions {
   const orderRef = demand.orderField === `rank` ? rankRef : scoreRef
@@ -1144,6 +1180,62 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
 }
 
 describe(`exact loadSubset demand oracle`, () => {
+  it.each(exactDemandAxisPairs)(
+    `distinguishes a change to %s in completed and concurrent demands`,
+    async (_axis, first, second) => {
+      assertCompletedExactDemandTrace([first, second, first])
+      await assertConcurrentExactDemandTrace({
+        trace: [first, second, first],
+        settlementOrder: `reverse`,
+      })
+    },
+  )
+
+  it(`refetch starts fresh work for the same exact demand`, () => {
+    let starts = 0
+    const dedupe = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        starts++
+        return true
+      },
+    })
+    const options = toLoadSubsetOptions(exactDemandAxisPairs[0]![1])
+
+    expect(dedupe.loadSubset(options)).toBe(true)
+    expect(dedupe.loadSubset(options)).toBe(true)
+    expect(starts).toBe(1)
+
+    expect(dedupe.loadSubset({ ...options, refetch: true })).toBe(true)
+    expect(starts).toBe(2)
+    expect(dedupe.loadSubset(options)).toBe(true)
+    expect(starts).toBe(2)
+  })
+
+  it(`starts separate acquisitions for independently cancelable exact demands`, async () => {
+    const acquisitions: Array<ReturnType<typeof createDeferred<void>>> = []
+    const dedupe = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        const acquisition = createDeferred<void>()
+        acquisitions.push(acquisition)
+        return acquisition.promise
+      },
+    })
+    const options = toLoadSubsetOptions(exactDemandAxisPairs[0]![1])
+    const first = dedupe.loadSubset({
+      ...options,
+      signal: new AbortController().signal,
+    })
+    const second = dedupe.loadSubset({
+      ...options,
+      signal: new AbortController().signal,
+    })
+
+    expect(acquisitions).toHaveLength(2)
+    expect(first).not.toBe(second)
+    for (const acquisition of acquisitions) acquisition.resolve()
+    await Promise.all([first, second])
+  })
+
   it(`uses SQL unknown for nullish comparisons in the independent model`, () => {
     const missing = new PropRef<number | null>([`missing`])
 

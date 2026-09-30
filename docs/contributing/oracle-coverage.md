@@ -73,6 +73,89 @@ that test identifiers must copy production's private data structures.
 | Boundary refinements | Complete | Cleanup/restart admission, metadata publication, retained state, acquisition cells, D2 source reconciliation, top-K support windows, and nested Query work bounds are literate. |
 | Small structures and test mechanics | Complete | SortedMap, cleanup appointments, and guarded replay are literate. |
 
+### Guide-audit boundary handoffs
+
+The includes-space owner (`packages/db/tests/query/includes-space-oracle.test.ts`)
+now varies leaves per twig across 0, 1, and 10. Public leaf rows change from
+0 to 10 to 100 while 13 Collection facades remain. This protects facade
+ownership for the fixture's fixed root/branch/twig topology; route churn, D2
+demand retention, and a heap bound need separate witnesses in the includes
+owners.
+
+The virtual-row-fields owner
+(`packages/db/tests/query/virtual-row-fields-oracle.test.ts`) checks presence
+of all four public virtual fields directly after query publication. Its fixed
+controlled-Collection cases do not establish every projection shape or
+framework receiving boundary.
+
+Three type-only owners check compile-time boundaries:
+`packages/db-sqlite-persistence-core/tests/persisted-options-type-oracle.test-d.ts`
+checks local and synced persisted option input/output and key types;
+`packages/db/tests/mutation-handler-type-oracle.test-d.ts` checks sibling
+Collection/key/utilities in mutation handlers; and
+`packages/db/tests/query/virtual-row-fields-oracle.test-d.ts` checks all four
+published virtual fields against an independently written public shape. Their
+passing type assertions do not prove runtime parsing, I/O, or publication.
+
+The shared-driver fairness owner now distinguishes K=1 from K=2 at the second
+hydrate and checks full logical persist FIFO order in its Node seam. The
+Chromium OPFS receiving spec checks the K=1 hydrate bound and public rows, but
+does not yet compare the full persist completion order. Real OPFS FIFO across
+that history remains with the Browser OPFS fairness spec owner.
+
+The D2 source reconciliation owner checks its helper and a controlled indexed
+Effect consumer. Its generated histories do not establish graph restart or
+truncate behavior, scan routes, or external provider event delivery; those
+need separate live-query and provider witnesses before a cross-boundary claim.
+
+PowerSync's correctness owner reaches native local SQLite and unmocked watcher
+delivery for ordinary Collection writes. Its held watcher callbacks are a
+controlled delivery premise, and its trailing no-op and tracked metadata-only
+cases enter through the public transactor with synthetic mutations rather than
+`Collection.update`. Neither path establishes remote backend upload or that
+Collection updates can construct those zero-field mutations.
+
+The Query DB nested-shape work owner uses an all-reachable finite tree. It
+checks reachable values and source Collection change delivery, not irrelevant
+branch acquisition or index traversal. An irrelevant-branch witness belongs
+with the DB includes-work owner or a future Query DB acquisition owner.
+
+Three Ordered acquisition companions own distinct controlled cuts:
+`packages/db/tests/query/load-subset-replay-refinement-oracle.test.ts` checks
+held replay authority and public snapshots;
+`packages/db/tests/query/load-subset-source-readiness-refinement-oracle.test.ts`
+checks source-generation readiness, progressive old-child retention, and
+retired-route publication; and
+`packages/db/tests/query/load-subset-transaction-refinement-oracle.test.ts`
+checks before, during, and after-commit abort boundaries with applied receipts.
+These fixtures do not establish real-provider cancellation or framework timing.
+The core `load-subset-oracle.property.test.ts` now distinguishes each exact
+demand-key option through one-axis pairs; its derived-sync expected-failure
+guard and controlled-adapter scope remain explicit limits.
+
+The QueryRef owner now checks DISTINCT support through source deletions,
+last-support removal, reinsertion, and person enable/disable at public snapshot
+cuts. Aggregate source-update histories and joined `findOne()`/`singleResult`
+remain open with `packages/db/tests/query/subquery-user-value-oracle.test.ts`.
+The optimizer aggregate owner now has accepting and rejecting outer predicates;
+inner-join global-aggregate behavior remains a separate open path.
+
+The offline scheduler owner (`packages/offline-transactions/tests/KeyScheduler.property.test.ts`)
+checks FIFO eligibility and retry order at the scheduler boundary. It does not
+observe the executor's awaited outbox update between `updateTransaction` and
+`markFailed`, or public caller settlement. Those receiving cuts belong with
+`packages/offline-transactions/tests/transaction-settlement.property.test.ts`.
+The transaction serializer owner uses controlled Temporal constructors and fake
+storage; a claim about native Temporal or browser storage needs a receiving
+witness in those runtimes.
+The offline settlement owner has an unresolved authority conflict:
+`packages/offline-transactions/README.md` says successful settlement follows
+durable outbox removal, while
+`packages/offline-transactions/tests/transaction-settlement.property.test.ts`
+expects fulfillment after provider success even when acknowledgement deletion
+throws and the outbox row remains. The offline settlement contract owner must
+decide which law is promised before this cell can support a closure claim.
+
 ### Recent fix-wave authority inventory
 
 This inventory records the permanent authority for the September 17 fix wave. It

@@ -32,8 +32,11 @@ import type { Weighted } from './incrementalization-law.js'
  *
  * D2 operators keep state and emit only changes. A wrong delta can leave the
  * final rows looking right after a later batch, so final-state examples are not
- * enough. This suite compares every emitted delta and retained result with a
- * direct recomputation from the complete logical input.
+ * enough. The package README defines MultiSet data as signed changes. The DBSP
+ * accumulation/difference law in docs/contributing/oracle-tests.md authorizes
+ * comparison of the net emitted delta and retained relation with a direct
+ * recomputation after each logical batch. It does not specify message order,
+ * client publication, or readiness.
  *
  * The plain evaluators below define the expected relations for reductions,
  * joins, groups, and ordered windows. They use arrays and Maps, not D2
@@ -45,6 +48,26 @@ import type { Weighted } from './incrementalization-law.js'
  * presence changes, falsey group extrema, boundary ties, and a zero-width
  * window. Fault controls prove that the checker rejects missing, sign-flipped,
  * wrong-member, and truthiness-filtered aggregate output.
+ *
+ * Grammar calibration: a world is a complete logical input relation in this
+ * model. A transition is its signed difference delivered to the production D2
+ * input stream. Weighted worlds contain 0-8 records, keys 0-3, values -3..3,
+ * and positive weights 1-2; histories contain 2-7 worlds. Repeated records
+ * give multiplicity, while the fixed cancellation pair adds a net-zero
+ * batch even when adjacent worlds match. Binary worlds vary independently so
+ * matching and unmatched keys can coexist. Ordered worlds contain 0-8 unique
+ * keys 0-7 and distinct ranks -20..20; that constraint makes each split prefix
+ * a legal unique-row relation. The named witnesses below reconstruct empty,
+ * repeated, replacement, presence-flip, falsey-extrema, and window-boundary
+ * cases even if a fixed/random campaign misses them. Removing multiplicity
+ * loses duplicate-weight cases; removing independent binary sides loses
+ * presence flips; removing split delivery loses replacement-prefix checks;
+ * removing the named tie case loses the equal-rank boundary. Negative retained
+ * input weights and two occupied values for one unique row key are rejected
+ * below. Weight 3 or rank 21 would only widen a numeric range. Arbitrary rank
+ * ties would change the distinct-rank rule; non-JSON identities need another
+ * value policy. Neither arbitrary ties nor intermediate message order is a
+ * generated claim here.
  *
  * Before this repair the groupBy branch observed only sums. Truthiness defects
  * in `min` and `max` were therefore outside both its model and its assertions.
@@ -678,9 +701,77 @@ describe(`DBSP incrementalization laws`, () => {
       build: (input) => input.pipe(orderBy((rank) => rank, { limit: 0 })),
       evaluate: () => [],
     })
+
+    // The adjacent width-one case admits exactly the first ranked value.
+    assertUnaryIncrementalization({
+      name: `one-width order window`,
+      initial: [
+        [[0, 0], 1],
+        [[1, 1], 1],
+      ],
+      batches: [],
+      inputPolicy: keyedPolicy,
+      outputPolicy: keyedPolicy,
+      splitDomain: uniqueRowSplitDomain,
+      build: (input) => input.pipe(orderBy((rank) => rank, { limit: 1 })),
+      evaluate: (input) => firstThree(input).slice(0, 1),
+    })
+
+    // At two same-key values, limit 2 retains both. The third value crosses
+    // the boundary; a wrong limit of 3 would leak it at checkpoint 1. Removing
+    // the first value then requires the third to enter the retained relation.
+    const topKBoundary = assertUnaryIncrementalization({
+      name: `top-K boundary and promotion`,
+      initial: [
+        [[0, 1], 1],
+        [[0, 2], 1],
+      ],
+      batches: [[[[0, 3], 1]], [[[0, 1], -1]]],
+      inputPolicy: keyedPolicy,
+      outputPolicy: keyedPolicy,
+      build: (input) =>
+        input.pipe(topK((left, right) => left - right, { limit: 2 })),
+      evaluate: topTwo,
+    })
+    expect(topKBoundary).toEqual({
+      atomicCheckpoints: 3,
+      atomicDeliveries: 3,
+      splitCheckpoints: 3,
+      splitDeliveries: 4,
+    })
   })
 
-  it(`rejects omitted, sign-flipped, wrong-member, wrong-window, and truthiness-filtered output`, () => {
+  it(`rejects invalid negative and duplicate-key input states`, () => {
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `negative input state excluded`,
+        initial: [[[0, 1], -1]],
+        batches: [],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) => input.pipe(consolidate()),
+        evaluate: keyedIdentity,
+      }),
+    ).toThrow(/illegal negative input state/)
+
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `duplicate unique row key excluded`,
+        initial: [
+          [[0, 1], 1],
+          [[0, 2], 1],
+        ],
+        batches: [],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        splitDomain: uniqueRowSplitDomain,
+        build: (input) => input.pipe(consolidate()),
+        evaluate: keyedIdentity,
+      }),
+    ).toThrow(/no unit ordering with legal split-delivery prefixes/)
+  })
+
+  it(`rejects omitted, sign-flipped, wrong-member, wrong-window, wrong-limit, and truthiness-filtered output`, () => {
     expect(() =>
       assertUnaryIncrementalization({
         name: `omitted output fault`,
@@ -737,6 +828,22 @@ describe(`DBSP incrementalization laws`, () => {
         evaluate: firstThree,
       }),
     ).toThrow(/output delta diverged/)
+    expect(() =>
+      assertUnaryIncrementalization({
+        name: `wrong top-K limit fault`,
+        initial: [
+          [[0, 1], 1],
+          [[0, 2], 1],
+          [[0, 3], 1],
+        ],
+        batches: [],
+        inputPolicy: keyedPolicy,
+        outputPolicy: keyedPolicy,
+        build: (input) =>
+          input.pipe(topK((left, right) => left - right, { limit: 3 })),
+        evaluate: topTwo,
+      }),
+    ).toThrow(/output delta diverged at checkpoint 0/)
 
     const truthinessMinimum = {
       preMap: ([, value]: Keyed): number | undefined => value,

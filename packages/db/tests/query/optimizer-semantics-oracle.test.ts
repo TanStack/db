@@ -9,9 +9,12 @@
  * queries are observed at the first public snapshot after synchronous sync.
  *
  * Grammar: direct, arithmetic-wrapped, conditional-branch, and
- * conditional-default global aggregates, plus a grouped control. The model's
- * missing `k` field represents the current global
- * aggregate projection, which omits fields that are not group keys.
+ * conditional-default global aggregates. The nested query crosses each shape
+ * with an accepting and rejecting outer predicate; a grouped query is the
+ * control. The model's missing `k` field represents the current global
+ * aggregate projection, which omits fields that are not group keys. The
+ * rejecting predicate distinguishes filtering after aggregation from dropping
+ * the predicate altogether.
  */
 import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
@@ -87,28 +90,34 @@ describe('optimizer aggregate semantics', () => {
       })
       expect(materialized.toArray.map(stripVirtualProps)).toEqual(expected)
 
-      const nested = createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const summary = q.from({ b: source }).select(({ b }) => ({
-            k: b.k,
-            total:
-              shape === `direct`
-                ? sum(b.v)
-                : shape === `wrapped`
-                  ? add(sum(b.v), 0)
-                  : shape === `caseWhenCondition`
-                    ? caseWhen(eq(sum(b.v), modelTotal), 1, 0)
-                    : caseWhen(eq(1, 2), 0, sum(b.v)),
-          }))
-          return q
-            .from({ s: summary })
-            .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-            .where(({ s }) => isUndefined(s.k))
-            .select(({ s }) => ({ total: s.total }))
-        },
-      })
-      expect(nested.toArray.map(stripVirtualProps)).toEqual(expected)
+      for (const outerPredicate of [`accept`, `reject`] as const) {
+        const nested = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const summary = q.from({ b: source }).select(({ b }) => ({
+              k: b.k,
+              total:
+                shape === `direct`
+                  ? sum(b.v)
+                  : shape === `wrapped`
+                    ? add(sum(b.v), 0)
+                    : shape === `caseWhenCondition`
+                      ? caseWhen(eq(sum(b.v), modelTotal), 1, 0)
+                      : caseWhen(eq(1, 2), 0, sum(b.v)),
+            }))
+            return q
+              .from({ s: summary })
+              .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
+              .where(({ s }) =>
+                outerPredicate === `accept` ? isUndefined(s.k) : eq(s.k, 1),
+              )
+              .select(({ s }) => ({ total: s.total }))
+          },
+        })
+        expect(nested.toArray.map(stripVirtualProps)).toEqual(
+          outerPredicate === `accept` ? expected : [],
+        )
+      }
     })
   }
 

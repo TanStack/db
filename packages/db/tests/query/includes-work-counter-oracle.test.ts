@@ -26,12 +26,21 @@ import type { Collection } from '../../src/collection/index.js'
  * The reference is relational. It compares each scaled fixture with the same
  * query on a minimal baseline. Exact baseline counts prove that the intended
  * source path ran. The scaled relation, not elapsed time, states the work law.
- * Counters observe both delivered changes and collection reads so filtering
- * cannot hide a scan.
+ * Counters observe both delivered changes and Collection reads so filtering
+ * cannot hide a scan through those read methods.
+ *
+ * The input grammar varies an integer filler count from 1 through 24. Zero is
+ * the ablated baseline; negative and fractional counts are invalid fixture
+ * sizes. Joined queries vary unrelated links and join targets separately.
+ * The join-free query grows every source together. Counts 1, 2, and 3 pin the
+ * smallest valid boundary, 24 pins the upper bound, and fixed and random
+ * campaigns sample the range.
  *
  * The boundary conditions matter. Collections preload before they receive
- * B-tree indexes. Filler rows never match a selected route. This suite does not
- * promise a general runtime bound or cover providers that ignore local indexes.
+ * B-tree indexes. Filler rows never match a selected route. This suite checks
+ * source delivery and Collection reads at the preload checkpoint; it does not
+ * promise a general runtime bound, count internal index traversal, or cover
+ * providers that ignore local indexes.
  */
 
 let nextCollectionId = 0
@@ -92,14 +101,25 @@ type WorkObservation = {
 
 async function runCleanups(
   cleanups: ReadonlyArray<() => void | Promise<void>>,
+  primary?: { error: unknown },
 ): Promise<void> {
   const results = await Promise.allSettled(
     cleanups.map(async (cleanup) => cleanup()),
   )
-  const firstRejection = results.find(
-    (result): result is PromiseRejectedResult => result.status === `rejected`,
+  const failures = results.flatMap((result) =>
+    result.status === `rejected` ? [result.reason as unknown] : [],
   )
-  if (firstRejection !== undefined) throw firstRejection.reason
+  if (failures.length > 0 && primary) {
+    throw new AggregateError(
+      [primary.error, ...failures],
+      `Oracle and cleanup failed`,
+      { cause: primary.error },
+    )
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(failures, `Oracle cleanup failed`)
+  }
 }
 
 const noFillers: FillerCounts = {
@@ -243,6 +263,7 @@ async function observeWork({
     links: createSourceCollection(`work-links`, rows.links),
   }
   let cleanupLive: (() => Promise<void>) | undefined
+  let primary: { error: unknown } | undefined
 
   try {
     await Promise.all(Object.values(sources).map((source) => source.preload()))
@@ -329,11 +350,17 @@ async function observeWork({
         links: counters.links(),
       },
     }
+  } catch (error) {
+    primary = { error }
+    throw error
   } finally {
-    await runCleanups([
-      async () => cleanupLive?.(),
-      ...Object.values(sources).map((source) => async () => source.cleanup()),
-    ])
+    await runCleanups(
+      [
+        async () => cleanupLive?.(),
+        ...Object.values(sources).map((source) => async () => source.cleanup()),
+      ],
+      primary,
+    )
   }
 }
 
@@ -408,6 +435,42 @@ async function expectCorrelatedJoinWorkBound(
   expect(scaled.sourceWork).toEqual(baseline.sourceWork)
 }
 
+async function expectJoinTargetWorkBound(fillerCount: number): Promise<void> {
+  const baseline = joinedBaselineObservation
+  const scaled = await observeWork({
+    filler: {
+      terms: fillerCount,
+      meanings: 0,
+      groups: 0,
+      links: 0,
+    },
+    joinTargets: true,
+  })
+
+  expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
+  expect(scaled.result).toEqual(baseline.result)
+  expect(baseline.sourceWork).toEqual(joinedBaselineWork)
+  expect(scaled.sourceWork).toEqual(baseline.sourceWork)
+}
+
+async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
+  const baseline = joinFreeBaselineObservation
+  const scaled = await observeWork({
+    filler: {
+      terms: fillerCount,
+      meanings: fillerCount,
+      groups: fillerCount,
+      links: fillerCount,
+    },
+    joinTargets: false,
+  })
+
+  expect(baseline.result).toEqual(expectedResult({ joinTargets: false }))
+  expect(scaled.result).toEqual(baseline.result)
+  expect(baseline.sourceWork).toEqual(joinFreeBaselineWork)
+  expect(scaled.sourceWork).toEqual(baseline.sourceWork)
+}
+
 function campaigns(fixedSeed: number, property: string) {
   return [
     {
@@ -422,6 +485,33 @@ function campaigns(fixedSeed: number, property: string) {
 }
 
 describe(`includes deterministic work-counter oracle`, () => {
+  it(`preserves the primary failure and every cleanup failure`, async () => {
+    const primary = new Error(`source preload failed`)
+    const firstCleanup = new Error(`live query cleanup failed`)
+    const secondCleanup = new Error(`source cleanup failed`)
+    const attempted: Array<string> = []
+
+    await expect(
+      runCleanups(
+        [
+          () => {
+            attempted.push(`live`)
+            throw firstCleanup
+          },
+          () => {
+            attempted.push(`source`)
+            throw secondCleanup
+          },
+        ],
+        { error: primary },
+      ),
+    ).rejects.toMatchObject({
+      cause: primary,
+      errors: [primary, firstCleanup, secondCleanup],
+    })
+    expect(attempted).toEqual([`live`, `source`])
+  })
+
   it.each([true, false])(
     `retains and rejects extra roots with joinTargets=%s`,
     (joinTargets) => {
@@ -448,9 +538,33 @@ describe(`includes deterministic work-counter oracle`, () => {
     joinFreeBaselineObservation = joinFreeBaseline
   })
 
+  it(`rejects extra source reads at the preload checkpoint`, () => {
+    const baseline = joinedBaselineObservation
+    const faultyWork: SourceWork = {
+      ...baseline.sourceWork,
+      links: {
+        ...baseline.sourceWork.links,
+        examined: baseline.sourceWork.links.examined + 1,
+      },
+    }
+
+    expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
+    expect(() => expect(faultyWork).toEqual(joinedBaselineWork)).toThrow()
+  })
+
   it.each([1, 2, 3])(
     `pins the work bound at the small filler boundary (%i)`,
     expectCorrelatedJoinWorkBound,
+  )
+  it(`pins the joined-link filler range endpoint`, () =>
+    expectCorrelatedJoinWorkBound(24))
+  it.each([1, 24])(
+    `pins join-target growth at filler count %i`,
+    expectJoinTargetWorkBound,
+  )
+  it.each([1, 24])(
+    `pins join-free growth at filler count %i`,
+    expectJoinFreeWorkBound,
   )
 
   for (const campaign of campaigns(1709, `includes-work.correlated-links`)) {
@@ -463,46 +577,14 @@ describe(`includes deterministic work-counter oracle`, () => {
   for (const campaign of campaigns(170_900, `includes-work.join-targets`)) {
     fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
       `indexed join-target growth keeps source work flat (${campaign.name})`,
-      async (fillerCount) => {
-        const baseline = joinedBaselineObservation
-        const scaled = await observeWork({
-          filler: {
-            terms: fillerCount,
-            meanings: 0,
-            groups: 0,
-            links: 0,
-          },
-          joinTargets: true,
-        })
-
-        expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-        expect(scaled.result).toEqual(baseline.result)
-        expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-        expect(scaled.sourceWork).toEqual(baseline.sourceWork)
-      },
+      expectJoinTargetWorkBound,
     )
   }
 
   for (const campaign of campaigns(17_090, `includes-work.join-free`)) {
     fcTest.prop([fc.integer({ min: 1, max: 24 })], campaign.options)(
       `join-free correlated includes keep source work flat (${campaign.name})`,
-      async (fillerCount) => {
-        const baseline = joinFreeBaselineObservation
-        const scaled = await observeWork({
-          filler: {
-            terms: fillerCount,
-            meanings: fillerCount,
-            groups: fillerCount,
-            links: fillerCount,
-          },
-          joinTargets: false,
-        })
-
-        expect(baseline.result).toEqual(expectedResult({ joinTargets: false }))
-        expect(scaled.result).toEqual(baseline.result)
-        expect(baseline.sourceWork).toEqual(joinFreeBaselineWork)
-        expect(scaled.sourceWork).toEqual(baseline.sourceWork)
-      },
+      expectJoinFreeWorkBound,
     )
   }
 })

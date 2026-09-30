@@ -1,5 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import {
   add,
   caseWhen,
@@ -15,15 +17,26 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions } from '../oracle-config.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
+import type { SyncConfig } from '../../src/types.js'
 
 /**
  * # What does a Collection-valued include promise?
+ *
+ * Authority: `packages/db/src/query/live/ARCHITECTURE.md`, especially nested
+ * materialization and coherent publication. This oracle checks the public
+ * Collection facade and its callbacks at startup, after each source write,
+ * and at the held truncate-replay publication cut.
  *
  * A bare child query materializes as a public Collection facade. That facade
  * has lifecycle and identity rules that inline arrays do not have:
@@ -47,12 +60,39 @@ import type { ControlledCollection } from './includes-oracle-helpers.js'
  * also varies optimistic confirmation and rollback. A bounded exhaustive lane covers every
  * two-step history in the smallest relationship domain. Random histories add
  * longer combinations and shrink failures.
+ *
+ * The Map model stores current source Collection rows. It combines all D2
+ * relation, route, and bucket state into the public result recomputation; it
+ * does not model acquisition ownership or publication scheduling. Callback
+ * snapshots and change messages are separate public observations.
+ *
+ * Grammar controls: the fixed route-retirement, dormant-bucket, shared-route,
+ * and child-order witnesses reconstruct the key relationship histories. The
+ * generated action lane needs both parent and child writes: removing either
+ * loses route transitions or child-only facade changes. Its IDs (parents 0–3,
+ * children 10–14), groups (-3–3), values (-5–5), and 1–16 actions are bounded;
+ * the exhaustive lane includes empty initial relations and zero actions. A
+ * repeated key becomes an update, so the grammar rejects a duplicate insert.
+ * The public-key lane crosses one-digit and two-digit IDs to expose lexical
+ * sorting; allowing equal IDs would collapse the two-row premise. The order
+ * lane uses adjacent swaps among 2–8 rows; a one-row case cannot move. The
+ * optimistic lane uses group/value -10–10 and disjoint IDs 10–100/101–200.
+ * Its rollback and confirmation steps distinguish temporary from retained
+ * child rows; a delete of an absent child is excluded.
+ *
+ * Known omissions: the controlled source does not prove real-provider
+ * cancellation or ordering. The held child truncate-replay witness does not
+ * reach a finite ordered child repair. Arbitrary nested facade histories,
+ * concurrent optimistic writes during a hold, and cross-framework callback
+ * scheduling remain outside this owner.
  */
 
 type ParentRow = {
   id: number
   group: number
 }
+
+type SampleOf<T> = T extends fc.Arbitrary<infer TValue> ? TValue : never
 
 type ChildRow = {
   id: number
@@ -596,6 +636,18 @@ const orderSwapArbitrary = fc.integer({ min: 2, max: 8 }).chain((length) =>
   })),
 )
 
+const publicKeyOrderArbitrary = fc.record({
+  smallId: fc.integer({ min: 2, max: 9 }),
+  wideId: fc.integer({ min: 10, max: 19 }),
+})
+
+const optimisticChildArbitrary = fc.record({
+  group: fc.integer({ min: -10, max: 10 }),
+  insertedId: fc.integer({ min: 10, max: 100 }),
+  confirmedId: fc.integer({ min: 101, max: 200 }),
+  value: fc.integer({ min: -10, max: 10 }),
+})
+
 // Enumeration proves the small finite domain. The generated lane explores
 // longer histories over a wider value domain. Neither replaces the other.
 function enumerateActionSequences(
@@ -621,6 +673,12 @@ const exhaustiveActions: ReadonlyArray<CollectionAction> = [
   { type: `putChild`, row: { id: 10, parentGroup: 1, value: 1 } },
   { type: `deleteChild`, id: 10 },
 ]
+
+const requestedReplayProperty = readOracleRunConfig().replayProperty
+const relationshipProperty = `includes-collection.relationship-history`
+const publicKeyOrderProperty = `includes-collection.public-key-order`
+const layoutSwapProperty = `includes-collection.layout-swap`
+const optimisticChildProperty = `includes-collection.optimistic-child-history`
 
 describe(`Collection-valued includes oracle`, () => {
   fcTest(
@@ -749,21 +807,41 @@ describe(`Collection-valued includes oracle`, () => {
     }
   }
 
-  fcTest.prop(
-    [collectionScenarioArbitrary],
-    oraclePropertyOptions(30, `includes-collection.relationship-history`),
-  )(
-    `keeps Collection, toArray, and materialize equivalent across generated relationship histories`,
-    ({ parentGroup, childValue, actions }) =>
-      runTrace({
-        steps: actions,
-        driver: createCollectionDriver(
-          [{ id: 0, group: parentGroup }],
-          [{ id: 10, parentGroup, value: childValue }],
-        ),
-        projection: collectionProjection,
-      }),
-  )
+  const runRelationshipHistory = ({
+    parentGroup,
+    childValue,
+    actions,
+  }: SampleOf<typeof collectionScenarioArbitrary>) =>
+    runTrace({
+      steps: actions,
+      driver: createCollectionDriver(
+        [{ id: 0, group: parentGroup }],
+        [{ id: 10, parentGroup, value: childValue }],
+      ),
+      projection: collectionProjection,
+    })
+
+  if (requestedReplayProperty === undefined) {
+    fcTest.prop([collectionScenarioArbitrary], {
+      numRuns: oracleRuns(30),
+      seed: 1_658_101,
+    })(
+      `keeps Collection, toArray, and materialize equivalent across fixed relationship histories`,
+      runRelationshipHistory,
+    )
+  }
+  if (
+    requestedReplayProperty === undefined ||
+    requestedReplayProperty === relationshipProperty
+  ) {
+    fcTest.prop(
+      [collectionScenarioArbitrary],
+      oraclePropertyOptions(30, relationshipProperty),
+    )(
+      `keeps Collection, toArray, and materialize equivalent across random or replayed relationship histories`,
+      runRelationshipHistory,
+    )
+  }
 
   fcTest(
     `exhaustively matches every two-step history in the smallest relationship domain`,
@@ -1788,51 +1866,45 @@ describe(`Collection-valued includes oracle`, () => {
     }
   })
 
-  fcTest.prop(
-    [
-      fc.record({
-        smallId: fc.integer({ min: 2, max: 9 }),
-        wideId: fc.integer({ min: 10, max: 19 }),
-      }),
-    ],
-    oraclePropertyOptions(20, `includes-collection.public-key-order`),
-  )(
-    `uses one raw public-key order across Collection and inline materializations`,
-    async ({ smallId, wideId }) => {
-      const parents = createControlledCollection(`ordering-oracle-parents`, [
-        { id: 1, group: 1 },
-      ])
-      const children = createControlledCollection(`ordering-oracle-children`, [
-        { id: smallId, parentGroup: 1, value: smallId },
-        { id: wideId, parentGroup: 1, value: wideId },
-      ])
-      const live = createLiveQueryCollection((q) => {
-        return q.from({ parent: parents.collection }).select(({ parent }) => {
-          const childRows = () =>
-            q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentGroup, parent.group))
-              .select(({ child }) => ({ id: child.id, value: child.value }))
+  const runPublicKeyOrder = async ({
+    smallId,
+    wideId,
+  }: SampleOf<typeof publicKeyOrderArbitrary>) => {
+    const parents = createControlledCollection(`ordering-oracle-parents`, [
+      { id: 1, group: 1 },
+    ])
+    const children = createControlledCollection(`ordering-oracle-children`, [
+      { id: smallId, parentGroup: 1, value: smallId },
+      { id: wideId, parentGroup: 1, value: wideId },
+    ])
+    const live = createLiveQueryCollection((q) => {
+      return q.from({ parent: parents.collection }).select(({ parent }) => {
+        const childRows = () =>
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .select(({ child }) => ({ id: child.id, value: child.value }))
 
-          return {
-            id: parent.id,
-            facade: childRows(),
-            array: toArray(childRows()),
-            materialized: materialize(childRows()),
-            first: materialize(childRows().findOne()),
-            joined: concat(
-              toArray(
-                q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.parentGroup, parent.group))
-                  .select(({ child }) => child.value),
-              ),
+        return {
+          id: parent.id,
+          facade: childRows(),
+          array: toArray(childRows()),
+          materialized: materialize(childRows()),
+          first: materialize(childRows().findOne()),
+          joined: concat(
+            toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .select(({ child }) => child.value),
             ),
-          }
-        })
+          ),
+        }
       })
+    })
 
-      try {
+    await withHistoryCleanup(
+      async () => {
         await live.preload()
         const result = live.get(1)!
         const expectedIds = [smallId, wideId]
@@ -1845,86 +1917,110 @@ describe(`Collection-valued includes oracle`, () => {
         )
         expect(result.first?.id).toBe(smallId)
         expect(result.joined).toBe(`${smallId}${wideId}`)
-      } finally {
-        await Promise.all([
-          live.cleanup(),
-          parents.collection.cleanup(),
-          children.collection.cleanup(),
-        ])
-      }
-    },
-  )
+        // The public-key assertion rejects a plausible lexical reversal.
+        expect(() =>
+          expect([...facadeIds].reverse()).toEqual(expectedIds),
+        ).toThrow()
+      },
+      () => [
+        () => live.cleanup(),
+        () => parents.collection.cleanup(),
+        () => children.collection.cleanup(),
+      ],
+    )
+  }
 
-  fcTest.prop(
-    [orderSwapArbitrary],
-    oraclePropertyOptions(20, `includes-collection.layout-swap`),
-  )(
-    `propagates generated order-only child swaps through every materialization`,
-    async ({ length, swapIndex }) => {
-      type OrderedChild = ChildRow & { position: number; label: string }
-      const parents = createControlledCollection(`order-move-parents`, [
-        { id: 1, group: 1 },
-      ])
-      const initialRows: Array<OrderedChild> = Array.from(
-        { length },
-        (_, index) => ({
-          id: index + 1,
-          parentGroup: 1,
-          value: index + 1,
-          position: index,
-          label: String(index + 1),
-        }),
-      )
-      const children = createControlledCollection<OrderedChild>(
-        `order-move-children`,
-        initialRows,
-      )
-      const live = createLiveQueryCollection((q) =>
-        q.from({ parent: parents.collection }).select(({ parent }) => {
-          const childRows = () =>
-            q
-              .from({ child: children.collection })
-              .where(({ child }) => eq(child.parentGroup, parent.group))
-              .orderBy(({ child }) => child.position)
-              .orderBy(({ child }) => child.id)
-              .select(({ child }) => ({
-                id: child.id,
-                position: child.position,
-                label: child.label,
-              }))
+  if (requestedReplayProperty === undefined) {
+    fcTest.prop([publicKeyOrderArbitrary], {
+      numRuns: oracleRuns(20),
+      seed: 1_658_102,
+    })(
+      `uses one raw public-key order across Collection and inline materializations with a fixed seed`,
+      runPublicKeyOrder,
+    )
+  }
+  if (
+    requestedReplayProperty === undefined ||
+    requestedReplayProperty === publicKeyOrderProperty
+  ) {
+    fcTest.prop(
+      [publicKeyOrderArbitrary],
+      oraclePropertyOptions(20, publicKeyOrderProperty),
+    )(
+      `uses one raw public-key order across Collection and inline materializations with a random or replayed seed`,
+      runPublicKeyOrder,
+    )
+  }
 
-          return {
-            id: parent.id,
-            facade: childRows(),
-            array: toArray(childRows()),
-            materialized: materialize(childRows()),
-            first: materialize(childRows().findOne()),
-            joined: concat(
-              toArray(
-                q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.parentGroup, parent.group))
-                  .orderBy(({ child }) => child.position)
-                  .orderBy(({ child }) => child.id)
-                  .select(({ child }) => child.label),
-              ),
-            ),
-          }
-        }),
-      )
+  const runLayoutSwap = async ({
+    length,
+    swapIndex,
+  }: SampleOf<typeof orderSwapArbitrary>) => {
+    type OrderedChild = ChildRow & { position: number; label: string }
+    const parents = createControlledCollection(`order-move-parents`, [
+      { id: 1, group: 1 },
+    ])
+    const initialRows: Array<OrderedChild> = Array.from(
+      { length },
+      (_, index) => ({
+        id: index + 1,
+        parentGroup: 1,
+        value: index + 1,
+        position: index,
+        label: String(index + 1),
+      }),
+    )
+    const children = createControlledCollection<OrderedChild>(
+      `order-move-children`,
+      initialRows,
+    )
+    const live = createLiveQueryCollection((q) =>
+      q.from({ parent: parents.collection }).select(({ parent }) => {
+        const childRows = () =>
+          q
+            .from({ child: children.collection })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .orderBy(({ child }) => child.position)
+            .orderBy(({ child }) => child.id)
+            .select(({ child }) => ({
+              id: child.id,
+              position: child.position,
+              label: child.label,
+            }))
 
-      const project = () => {
-        const row = live.get(1)!
         return {
-          facade: row.facade.toArray.map(({ id }) => id),
-          array: row.array.map(({ id }) => id),
-          materialized: row.materialized.map(({ id }) => id),
-          first: row.first?.id,
-          joined: row.joined,
+          id: parent.id,
+          facade: childRows(),
+          array: toArray(childRows()),
+          materialized: materialize(childRows()),
+          first: materialize(childRows().findOne()),
+          joined: concat(
+            toArray(
+              q
+                .from({ child: children.collection })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .orderBy(({ child }) => child.position)
+                .orderBy(({ child }) => child.id)
+                .select(({ child }) => child.label),
+            ),
+          ),
         }
-      }
+      }),
+    )
 
-      try {
+    const project = () => {
+      const row = live.get(1)!
+      return {
+        facade: row.facade.toArray.map(({ id }) => id),
+        array: row.array.map(({ id }) => id),
+        materialized: row.materialized.map(({ id }) => id),
+        first: row.first?.id,
+        joined: row.joined,
+      }
+    }
+
+    await withHistoryCleanup(
+      async () => {
         await live.preload()
         const facade = live.get(1)!.facade
         const initialIds = initialRows.map(({ id }) => id)
@@ -1952,13 +2048,237 @@ describe(`Collection-valued includes oracle`, () => {
           first: expectedIds[0],
           joined: expectedIds.join(``),
         })
-      } finally {
-        await Promise.all([
-          live.cleanup(),
-          parents.collection.cleanup(),
-          children.collection.cleanup(),
-        ])
+        // The same result check rejects a facade that kept its prior layout.
+        expect(() =>
+          expect(project()).toEqual({
+            ...expectedMaterializations(initialIds),
+            first: initialIds[0],
+            joined: initialRows.map(({ label }) => label).join(``),
+          }),
+        ).toThrow()
+      },
+      () => [
+        () => live.cleanup(),
+        () => parents.collection.cleanup(),
+        () => children.collection.cleanup(),
+      ],
+    )
+  }
+
+  if (requestedReplayProperty === undefined) {
+    fcTest.prop([orderSwapArbitrary], {
+      numRuns: oracleRuns(20),
+      seed: 1_658_103,
+    })(
+      `propagates order-only child swaps through every materialization with a fixed seed`,
+      runLayoutSwap,
+    )
+  }
+  if (
+    requestedReplayProperty === undefined ||
+    requestedReplayProperty === layoutSwapProperty
+  ) {
+    fcTest.prop(
+      [orderSwapArbitrary],
+      oraclePropertyOptions(20, layoutSwapProperty),
+    )(
+      `propagates order-only child swaps through every materialization with a random or replayed seed`,
+      runLayoutSwap,
+    )
+  }
+
+  fcTest(
+    `a held child truncate replay publishes an A-to-B-to-A reorder through the facade`,
+    async () => {
+      type OrderedChild = {
+        id: number
+        parentGroup: number
+        rank: number
+        value: string
       }
+      const sourceRows = new Map<number, OrderedChild>([
+        [10, { id: 10, parentGroup: 1, rank: 1, value: `A` }],
+        [20, { id: 20, parentGroup: 1, rank: 2, value: `X` }],
+      ])
+      // Rank is absent from the facade row but retained in this source model:
+      // two otherwise equal rows with different ranks yield different layouts.
+      // The provider receives copies, so it cannot mutate the expected rows.
+      const expectedRows = () =>
+        [...sourceRows.values()]
+          .sort((left, right) => left.rank - right.rank)
+          .map(({ id, value }) => ({ id, value }))
+
+      let sync!: Parameters<SyncConfig<OrderedChild, number>[`sync`]>[0]
+      let holdReplay = false
+      const held: Array<() => void> = []
+      let requests = 0
+      const children = createCollection<OrderedChild, number>({
+        id: `held-child-facade-replay`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        sync: {
+          sync: (operations) => {
+            sync = operations
+            operations.markReady()
+            return {
+              loadSubset: () => {
+                requests++
+                if (requests <= 2) {
+                  sync.begin()
+                  for (const row of sourceRows.values()) {
+                    sync.write({ type: `insert`, value: { ...row } })
+                  }
+                  expect(sync.commit()).toBe(true)
+                }
+                return holdReplay
+                  ? new Promise<void>((resolve) => held.push(resolve))
+                  : true
+              },
+              unloadSubset: () => {},
+            }
+          },
+        },
+      })
+      const parents = createControlledCollection(`held-child-facade-parent`, [
+        { id: 1, group: 1 },
+      ])
+      const live = createLiveQueryCollection((q) =>
+        q.from({ parent: parents.collection }).select(({ parent }) => ({
+          id: parent.id,
+          children: q
+            .from({ child: children })
+            .where(({ child }) => eq(child.parentGroup, parent.group))
+            .orderBy(({ child }) => child.rank)
+            .limit(2)
+            .select(({ child }) => ({ id: child.id, value: child.value })),
+        })),
+      )
+      const callbacks: Array<{
+        rows: Array<{ id: number; value: string }>
+        changes: Array<{ type: string; key: string | number }>
+      }> = []
+      const rootCallbacks: Array<unknown> = []
+      let unsubscribeFacade: (() => void) | undefined
+      let unsubscribeRoot: (() => void) | undefined
+
+      await withHistoryCleanup(
+        async () => {
+          await live.preload()
+          const facade = live.get(1)!.children
+          const before = expectedRows()
+          expect(
+            facade.toArray.map(({ id, value }) => ({ id, value })),
+          ).toEqual(before)
+          const facadeSubscription = facade.subscribeChanges(
+            (changes) => {
+              callbacks.push({
+                rows: facade.toArray.map(({ id, value }) => ({ id, value })),
+                changes: changes.map(({ type, key }) => ({ type, key })),
+              })
+            },
+            { includeInitialState: false },
+          )
+          unsubscribeFacade = () => facadeSubscription.unsubscribe()
+          const rootSubscription = live.subscribeChanges(
+            (changes) => rootCallbacks.push(...changes),
+            { includeInitialState: false },
+          )
+          unsubscribeRoot = () => rootSubscription.unsubscribe()
+
+          holdReplay = true
+          sync.begin()
+          sync.truncate()
+          expect(sync.commit()).toBe(true)
+          await flushPromises()
+          expect(requests).toBe(2)
+          expect(held.length).toBeGreaterThan(0)
+          const write = (row: OrderedChild) => {
+            sourceRows.set(row.id, { ...row })
+            sync.begin()
+            sync.write({ type: `update`, value: { ...row } })
+            expect(sync.commit()).toBe(true)
+          }
+          write({ id: 10, parentGroup: 1, rank: 2.5, value: `A` })
+          write({ id: 10, parentGroup: 1, rank: 2.5, value: `B` })
+          write({ id: 10, parentGroup: 1, rank: 2.5, value: `A` })
+          await flushPromises()
+          expect(held.length).toBeGreaterThan(0)
+          expect(
+            facade.toArray.map(({ id, value }) => ({ id, value })),
+          ).toEqual(before)
+          expect(callbacks).toEqual([])
+
+          holdReplay = false
+          for (const release of held.splice(0)) release()
+          await flushPromises()
+          const after = expectedRows()
+          expect(live.get(1)!.children).toBe(facade)
+          expect(
+            facade.toArray.map(({ id, value }) => ({ id, value })),
+          ).toEqual(after)
+          const expectedCallbacks = [{ rows: after, changes: [] }]
+          expect(callbacks).toEqual(expectedCallbacks)
+          // A facade that omits its layout callback would pass the final read.
+          expect(() =>
+            expect(callbacks.slice(1)).toEqual(expectedCallbacks),
+          ).toThrow()
+          expect(rootCallbacks).toEqual([])
+        },
+        () => [
+          () => {
+            holdReplay = false
+            for (const release of held.splice(0)) release()
+          },
+          () => unsubscribeFacade?.(),
+          () => unsubscribeRoot?.(),
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.cleanup(),
+        ],
+      )
+    },
+  )
+
+  fcTest(
+    `held-facade cleanup retains the primary and both cleanup failures`,
+    async () => {
+      const primary = new Error(`facade publication mismatch`)
+      const firstCleanup = new Error(`facade unsubscribe failed`)
+      const secondCleanup = new Error(`source cleanup failed`)
+      const released: Array<string> = []
+      let failure: unknown
+      try {
+        await withHistoryCleanup(
+          async () => {
+            throw primary
+          },
+          () => [
+            () => {
+              released.push(`facade`)
+              throw firstCleanup
+            },
+            () => {
+              released.push(`source`)
+              throw secondCleanup
+            },
+            () => {
+              released.push(`parent`)
+            },
+          ],
+        )
+      } catch (error) {
+        failure = error
+      }
+      expect(released).toEqual([`facade`, `source`, `parent`])
+      expect(failure).toBeInstanceOf(AggregateError)
+      expect((failure as AggregateError).cause).toBe(primary)
+      expect((failure as AggregateError).errors).toEqual([
+        primary,
+        firstCleanup,
+        secondCleanup,
+      ])
     },
   )
 
@@ -2230,6 +2550,13 @@ describe(`Collection-valued includes oracle`, () => {
           { id: 2, ...expectedMaterializations([]) },
         ])
 
+        // The count equals this threshold, so `gt` must still exclude it.
+        parents.write(`update`, { id: 2, group: 1, threshold: 2 })
+        expect(project()).toEqual([
+          { id: 1, ...expectedMaterializations([2]) },
+          { id: 2, ...expectedMaterializations([]) },
+        ])
+
         parents.write(`update`, { id: 2, group: 1, threshold: 1 })
         expect(project()).toEqual([
           { id: 1, ...expectedMaterializations([2]) },
@@ -2290,6 +2617,13 @@ describe(`Collection-valued includes oracle`, () => {
 
     try {
       await live.preload()
+      expect(project()).toEqual(expectedMaterializations([10]))
+
+      // Both equality boundaries distinguish `<` from an inclusive filter.
+      parents.write(`update`, { id: 1, group: 1, threshold: 1 })
+      expect(project()).toEqual(expectedMaterializations([]))
+
+      parents.write(`update`, { id: 1, group: 1, threshold: 3 })
       expect(project()).toEqual(expectedMaterializations([10]))
 
       parents.write(`update`, { id: 1, group: 1, threshold: 4 })
@@ -2462,41 +2796,83 @@ describe(`Collection-valued includes oracle`, () => {
     }
   })
 
-  fcTest.prop(
-    [
-      fc.record({
-        group: fc.integer({ min: -10, max: 10 }),
-        insertedId: fc.integer({ min: 10, max: 100 }),
-        confirmedId: fc.integer({ min: 101, max: 200 }),
-        value: fc.integer({ min: -10, max: 10 }),
-      }),
-    ],
-    oraclePropertyOptions(20, `includes-collection.optimistic-child-history`),
-  )(
-    `matches recomputation through optimistic child insert and delete confirmation and rollback`,
-    async ({ group, insertedId, confirmedId, value }) => {
-      const { driver } = createOptimisticCollectionDriver(group)
-      const rolledBack = {
-        id: insertedId,
-        parentGroup: group,
-        value,
-      }
-      const confirmed = {
-        id: confirmedId,
-        parentGroup: group,
-        value: value + 1,
-      }
+  const runOptimisticChildHistory = async ({
+    group,
+    insertedId,
+    confirmedId,
+    value,
+  }: SampleOf<typeof optimisticChildArbitrary>) => {
+    const { driver } = createOptimisticCollectionDriver(group)
+    const rolledBack = {
+      id: insertedId,
+      parentGroup: group,
+      value,
+    }
+    const confirmed = {
+      id: confirmedId,
+      parentGroup: group,
+      value: value + 1,
+    }
 
-      await runTrace({
-        steps: [
-          { type: `insert`, row: rolledBack, settlement: `rollback` },
-          { type: `insert`, row: confirmed, settlement: `confirm` },
-          { type: `delete`, id: confirmedId, settlement: `rollback` },
-          { type: `delete`, id: confirmedId, settlement: `confirm` },
-        ],
-        driver,
-        projection: collectionProjection,
-      })
+    await runTrace({
+      steps: [
+        { type: `insert`, row: rolledBack, settlement: `rollback` },
+        { type: `insert`, row: confirmed, settlement: `confirm` },
+        { type: `delete`, id: confirmedId, settlement: `rollback` },
+        { type: `delete`, id: confirmedId, settlement: `confirm` },
+      ],
+      driver,
+      projection: collectionProjection,
+    })
+  }
+
+  fcTest(
+    `optimistic rollback comparison rejects a retained child row`,
+    async () => {
+      const row = { id: 10, parentGroup: 1, value: 2 }
+      const { driver } = createOptimisticCollectionDriver(1)
+      const context = await driver.setup()
+      await withHistoryCleanup(
+        async () => {
+          await driver.start?.(context)
+          await driver.apply(
+            { type: `insert`, row, settlement: `rollback` },
+            context,
+            () => undefined,
+          )
+          const observed = collectionProjection.observe(context)
+          const expected = collectionProjection.recompute(context)
+          collectionProjection.assertEqual(observed, expected)
+          const retained = structuredClone(observed)
+          retained.rows[0]!.children.push(row)
+          expect(() =>
+            collectionProjection.assertEqual(retained, expected),
+          ).toThrow()
+        },
+        () => [() => driver.cleanup(context)],
+      )
     },
   )
+
+  if (requestedReplayProperty === undefined) {
+    fcTest.prop([optimisticChildArbitrary], {
+      numRuns: oracleRuns(20),
+      seed: 1_658_104,
+    })(
+      `matches optimistic child settlement histories with a fixed seed`,
+      runOptimisticChildHistory,
+    )
+  }
+  if (
+    requestedReplayProperty === undefined ||
+    requestedReplayProperty === optimisticChildProperty
+  ) {
+    fcTest.prop(
+      [optimisticChildArbitrary],
+      oraclePropertyOptions(20, optimisticChildProperty),
+    )(
+      `matches optimistic child settlement histories with a random or replayed seed`,
+      runOptimisticChildHistory,
+    )
+  }
 })

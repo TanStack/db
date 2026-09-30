@@ -22,6 +22,16 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `mixed-transaction same-key`,
   ],
   [
+    `db/tests/index-update.property.test.ts`,
+    `index-update`,
+    `reference-model exact-identity custom-comparator`,
+  ],
+  [
+    `db/tests/cursor.property.test.ts`,
+    `cursor`,
+    `scalar-continuation exact-width exact-local-order partial-width partial-local-order repeat-construction`,
+  ],
+  [
     `db/tests/optimistic-history-outcomes.test.ts`,
     `collection-state`,
     `optimistic-outcomes`,
@@ -64,7 +74,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
-    `retention optimistic-history`,
+    `retention optimistic-history accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
   ],
   [
     `db/tests/change-event-history-oracle.test.ts`,
@@ -99,7 +109,12 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/d2-source-reconciliation-oracle.property.test.ts`,
     `d2-source`,
-    `exact-retractions disjoint-commutation`,
+    `exact-retractions changed-restart disjoint-commutation`,
+  ],
+  [
+    `db/tests/query/cold-join-reconciliation-oracle.test.ts`,
+    `cold-join`,
+    `reconciliation`,
   ],
   [
     `db/tests/live-query-observer-history.property.test.ts`,
@@ -207,6 +222,21 @@ for (const law of [
         `packages/db/tests/query/includes-publication-oracle.test.ts`,
       )
     }
+  }
+}
+
+for (const property of registeredOracleProperties) {
+  if (property.startsWith(`includes.matrix.`)) {
+    owners.set(
+      property,
+      `packages/db/tests/query/includes-oracle.property.test.ts`,
+    )
+  }
+  if (property.startsWith(`pagination.matrix.`)) {
+    owners.set(
+      property,
+      `packages/db/tests/query/pagination-oracle.property.test.ts`,
+    )
   }
 }
 

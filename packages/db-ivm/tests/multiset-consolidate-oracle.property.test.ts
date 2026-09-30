@@ -246,11 +246,13 @@ function buildRecords(history: History): MultiSetArray<Data> {
 // ---------------------------------------------------------------------------
 // Production driver and refinement check.
 
-// A tagged encoding of every record's contents. Objects become ids in
-// first-seen order, so a changed shared reference also shows. The tags keep
-// `-0`, `NaN`, and `undefined` distinct.
-function contentsOf(records: MultiSetArray<Data>): string {
-  const ids = new Map<object, number>()
+// A tagged encoding of every record's contents. Reusing the object ids across
+// snapshots exposes replacement by a distinct reference with equal contents.
+// The tags keep `-0`, `NaN`, and `undefined` distinct.
+function contentsOf(
+  records: MultiSetArray<Data>,
+  ids: Map<object, number>,
+): string {
   const encode = (value: Data): Data => {
     if (value === null || typeof value !== `object`)
       return [typeof value, Object.is(value, -0) ? `-0` : String(value)]
@@ -266,7 +268,8 @@ function contentsOf(records: MultiSetArray<Data>): string {
 function expectConsolidation(history: History): void {
   const records = buildRecords(history)
   const inputSnapshot = records.map(([data, m]) => [data, m] as const)
-  const inputContents = contentsOf(records)
+  const inputIds = new Map<object, number>()
+  const inputContents = contentsOf(records, inputIds)
   const { groups: expected, identity } = expectedConsolidation(records)
 
   const actual = new MultiSet(records).consolidate().getInner()
@@ -277,7 +280,9 @@ function expectConsolidation(history: History): void {
     expect(data).toBe(inputSnapshot[index]![0])
     expect(m).toBe(inputSnapshot[index]![1])
   })
-  expect(contentsOf(records), `input record contents`).toBe(inputContents)
+  expect(contentsOf(records, inputIds), `input record contents`).toBe(
+    inputContents,
+  )
 
   // Record every output entry. A duplicate identity or a zero multiplicity
   // stays visible.
@@ -318,6 +323,14 @@ const campaigns =
       ]
 
 describe(`MultiSet consolidation oracle`, () => {
+  it(`detects replacement of an input value with equal contents`, () => {
+    const records: MultiSetArray<Data> = [[[0, { v: 1 }], 1]]
+    const ids = new Map<object, number>()
+    const inputContents = contentsOf(records, ids)
+    ;(records[0]![0] as [number, Data])[1] = { v: 1 }
+    expect(contentsOf(records, ids)).not.toBe(inputContents)
+  })
+
   for (const { name, seed } of campaigns) {
     it(`matches the identity model across generated multisets (${name})`, () => {
       if (replayPath !== undefined && replaySeed === undefined)

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { BTree } from '../src/utils/btree.js'
 
 /**
@@ -26,7 +26,8 @@ import { BTree } from '../src/utils/btree.js'
  *
  * Generated histories vary puts, overwrites, deletes, reads, and clears. Small
  * node sizes force structural changes. A fixed long campaign gives stable
- * depth, while the fast-check lane supplies new and shrinkable histories.
+ * depth, while matched fixed-seed and random fast-check campaigns supply
+ * shrinkable histories.
  */
 
 // The tree trusts its comparator to return a valid order; BTreeIndex rejects
@@ -93,6 +94,49 @@ const arbitraryAction: fc.Arbitrary<Action> = fc.oneof(
     key: fc.integer({ min: 0, max: 199 }),
   }),
 )
+
+// Replay a reported fast-check seed and shrink path directly with
+// BTREE_MAP_ORACLE_SEED=<seed> BTREE_MAP_ORACLE_PATH=<path> pnpm exec vitest run
+// packages/db/tests/btree-map-oracle.test.ts. Ordinary runs execute both lanes.
+const replaySeedText = process.env.BTREE_MAP_ORACLE_SEED
+const replayPath = process.env.BTREE_MAP_ORACLE_PATH
+if ((replaySeedText === undefined) !== (replayPath === undefined)) {
+  throw new Error(`BTree Map oracle replay requires both seed and path`)
+}
+const replaySeed =
+  replaySeedText === undefined ? undefined : Number(replaySeedText)
+if (
+  replaySeedText !== undefined &&
+  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
+) {
+  throw new Error(`BTREE_MAP_ORACLE_SEED must be an integer`)
+}
+if (replayPath !== undefined && !/^\d+(?::\d+)*$/.test(replayPath)) {
+  throw new Error(`BTREE_MAP_ORACLE_PATH must be a fast-check shrink path`)
+}
+
+const mapHistoryProperty = fc.property(
+  fc.integer({ min: 4, max: 8 }),
+  fc.array(arbitraryAction, { minLength: 1, maxLength: 64 }),
+  (nodeSize, actions) => {
+    const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
+    const model: ReferenceModel = new Map()
+    expectRefinement(tree, model, 0)
+    for (const action of actions) {
+      applyAction(tree, model, action)
+      expectRefinement(tree, model, action.key)
+    }
+  },
+)
+
+const mapHistoryCampaigns: Array<{
+  name: string
+  seed?: number
+  path?: string
+}> =
+  replayPath === undefined
+    ? [{ name: `fixed`, seed: 20260930 }, { name: `random` }]
+    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
 
 // The model uses only Map operations and the declared numeric order. It does
 // not use the tree's nodes, search helpers, or traversal code.
@@ -291,21 +335,44 @@ describe(`BTree Map oracle`, () => {
     },
   )
 
-  fcTest.prop([
-    fc.integer({ min: 4, max: 8 }),
-    fc.array(arbitraryAction, { minLength: 1, maxLength: 64 }),
-  ])(
-    `matches complete Map cuts across shrinkable histories`,
-    (nodeSize, actions) => {
-      const tree = new BTree<number, Payload>((a, b) => a - b, nodeSize)
-      const model: ReferenceModel = new Map()
-      expectRefinement(tree, model, 0)
-      for (const action of actions) {
-        applyAction(tree, model, action)
-        expectRefinement(tree, model, action.key)
-      }
+  it.each(mapHistoryCampaigns)(
+    `matches complete Map cuts across shrinkable histories ($name)`,
+    ({ seed, path }) => {
+      fc.assert(mapHistoryProperty, {
+        numRuns: path === undefined ? 100 : 1,
+        seed,
+        path,
+      })
     },
   )
+
+  it(`replays a shrunk Map mismatch with the reported seed and path`, () => {
+    // A scanner that drops every row keeps the initial empty cut green. The
+    // first retained put fails at the public scan checkpoint.
+    const wrongScan = vi
+      .spyOn(BTree.prototype, `forRange`)
+      .mockImplementation(() => {})
+    try {
+      const failed = fc.check(mapHistoryProperty, {
+        seed: 20260930,
+        numRuns: 100,
+      })
+      expect(failed.failed).toBe(true)
+      expect(failed.error).toMatch(/expected/)
+      if (failed.counterexamplePath === null)
+        throw new Error(`Missing Map mismatch replay path`)
+      const replay = fc.check(mapHistoryProperty, {
+        seed: failed.seed,
+        path: failed.counterexamplePath,
+        numRuns: 1,
+      })
+      expect(replay.failed).toBe(true)
+      expect(replay.error).toMatch(/expected/)
+      expect(replay.counterexample).toEqual(failed.counterexample)
+    } finally {
+      wrongScan.mockRestore()
+    }
+  })
 
   it.each([4, 5, 6, 7, 8])(
     `preserves every cut through dense growth, retirement and reuse with node size %s`,

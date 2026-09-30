@@ -15,7 +15,11 @@ import {
   queryOnce,
   toArray,
 } from '../../src/query/index.js'
-import { oraclePropertyOptions } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import type { Collection } from '../../src/collection/index.js'
@@ -67,6 +71,9 @@ type ChildRow = {
 }
 
 type CrossFormulationAction =
+  // `put` is model shorthand for a Collection insert when the id is absent
+  // and a Collection update when it is present. Deletes of absent ids are
+  // model no-ops and issue no source change message.
   | { type: `putParent`; row: ParentRow }
   | { type: `deleteParent`; id: number }
   | { type: `putChild`; row: ChildRow }
@@ -790,8 +797,16 @@ const actionArbitrary: fc.Arbitrary<CrossFormulationAction> = fc.oneof(
   }),
 )
 
-// The grammar keeps the state space small enough to shrink. It still permits
-// shared routes, absent ids, overwrites, route movement, ties, and null scores.
+// This bounded grammar reconstructs the shared-route deletion witness below:
+// two group-0 parents, three group-0 children, and `deleteChild(10)`.
+// Parent and child group axes enable shared, split, moved, and unmatched routes;
+// position enables ties and reorder; nullable score plus pivot enables all
+// three TLP partitions; action kind and id enable overwrite and absent-id
+// no-ops. Removing any axis loses that distinction. The fixed seven-action
+// split/merge trace and offset-3 empty tail lie outside these sampled bounds;
+// they remain separate controls rather than claims about this grammar.
+// The tuple's distinct initial ids exclude an invalid duplicate-key state.
+// Put actions with existing ids are legal updates, not duplicate inserts.
 const scenarioArbitrary: fc.Arbitrary<CrossFormulationScenario> = fc.record({
   parents: fc.tuple(parentRowArbitrary(0), parentRowArbitrary(1)),
   children: fc.tuple(
@@ -810,6 +825,13 @@ const windowedScenarioArbitrary = fc.record({
 })
 
 describe(`includes cross-formulation oracle`, () => {
+  const replay = readOracleRunConfig()
+  const fixedCampaign = replay.replayPath === undefined ? fcTest : fcTest.skip
+  const randomCampaign = (property: string) =>
+    replay.replayPath === undefined || replay.replayProperty === property
+      ? fcTest
+      : fcTest.skip
+
   test(`cold provider predicates preserve opaque reference membership`, () => {
     const first = { code: 0 }
     const second = { code: 0 }
@@ -1152,154 +1174,166 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
-  fcTest.prop(
+  fixedCampaign.prop([fc.integer()], {
+    numRuns: oracleRuns(4),
+    seed: 1_658_001,
+  })(
+    `parent-context routing preserves reference-sensitive predicate values across transitions for a fixed seed`,
+    async (code) => {
+      await checkReferenceContextRouting(code)
+    },
+  )
+
+  randomCampaign(`includes-cross-formulation.reference-context`).prop(
     [fc.integer()],
     oraclePropertyOptions(4, `includes-cross-formulation.reference-context`),
   )(
-    `parent-context routing preserves reference-sensitive predicate values across transitions`,
-    async (code) => {
-      const firstToken = { code }
-      const secondToken = { code }
-      const parentRows: Array<ReferenceContextParent> = [
-        { id: 1, group: 1, expected: firstToken },
-        { id: 2, group: 1, expected: secondToken },
-      ]
-      const childRows: Array<ReferenceContextChild> = [
-        { id: 10, group: 1, token: firstToken },
-        { id: 20, group: 1, token: secondToken },
-      ]
-      const parents = createControlledCollection(
-        `reference-context-parents`,
-        parentRows,
-      )
-      const fullyLoadedChildren = createControlledCollection(
-        `reference-context-full-children`,
-        childRows,
-      )
-      const loadedChildIds = new Set<number>()
-      const lazyChildren = createCollection<ReferenceContextChild>({
-        id: `reference-context-lazy-children`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => ({
-            loadSubset: (options: LoadSubsetOptions) => {
-              const matches = options.where
-                ? createFilterFunctionFromExpression<ReferenceContextChild>(
-                    options.where,
-                  )
-                : () => true
-              begin()
-              for (const row of childRows) {
-                if (!loadedChildIds.has(row.id) && matches(row)) {
-                  loadedChildIds.add(row.id)
-                  write({ type: `insert`, value: row })
-                }
-              }
-              commit()
-              markReady()
-              return Promise.resolve()
-            },
-          }),
-        },
-      })
-      const createReferenceContextQuery = (
-        children: Collection<ReferenceContextChild>,
-      ) =>
-        createLiveQueryCollection({
-          getKey: (row) => row.id,
-          query: (q) =>
-            q.from({ parent: parents.collection }).select(({ parent }) => ({
-              id: parent.id,
-              children: toArray(
-                q
-                  .from({ child: children })
-                  .where(({ child }) =>
-                    and(
-                      eq(child.group, parent.group),
-                      eq(child.token, parent.expected),
-                    ),
-                  )
-                  .select(({ child }) => child.id),
-              ),
-            })),
-        })
-      const fullyLoaded = createReferenceContextQuery(
-        fullyLoadedChildren.collection,
-      )
-      const lazy = createReferenceContextQuery(lazyChildren)
-
-      await withCleanup(async () => {
-        await Promise.all([fullyLoaded.preload(), lazy.preload()])
-        expect(captureReferenceRows(lazy.toArray)).toEqual([
-          { id: 1, children: [10] },
-          { id: 2, children: [20] },
-        ])
-        expect(captureReferenceRows(lazy.toArray)).toEqual(
-          captureReferenceRows(fullyLoaded.toArray),
-        )
-
-        parents.write(`delete`, parentRows[0]!)
-        await flushPromises()
-        expect(captureReferenceRows(lazy.toArray)).toEqual([
-          { id: 2, children: [20] },
-        ])
-        expect(captureReferenceRows(lazy.toArray)).toEqual(
-          captureReferenceRows(fullyLoaded.toArray),
-        )
-
-        parents.write(`insert`, parentRows[0]!)
-        await flushPromises()
-        expect(captureReferenceRows(lazy.toArray)).toEqual([
-          { id: 1, children: [10] },
-          { id: 2, children: [20] },
-        ])
-        // A changed scalar establishes source publication. Pure equal-shaped
-        // reference replacement is a source no-op and need not reach the graph.
-        const publications: Array<ReferenceContextParent> = []
-        const subscription = parents.collection.subscribeChanges((events) => {
-          publications.push(...events.map((event) => ({ ...event.value })))
-        })
-        try {
-          for (const { row, childIds } of [
-            {
-              row: { ...parentRows[0]!, expected: secondToken, revision: 1 },
-              childIds: [20, 20],
-            },
-            {
-              row: { ...parentRows[1]!, expected: firstToken, revision: 1 },
-              childIds: [20, 10],
-            },
-            { row: { ...parentRows[0]!, revision: 2 }, childIds: [10, 10] },
-            { row: { ...parentRows[1]!, revision: 2 }, childIds: [10, 20] },
-          ]) {
-            const priorPublications = publications.length
-            parents.write(`update`, row)
-            expect(publications.length).toBeGreaterThan(priorPublications)
-            expect(publications.at(-1)?.expected).toBe(row.expected)
-            expect(publications.at(-1)?.revision).toBe(row.revision)
-            await flushPromises()
-            const expectedRows = [
-              { id: 1, children: [childIds[0]] },
-              { id: 2, children: [childIds[1]] },
-            ]
-            expect(captureReferenceRows(lazy.toArray)).toEqual(expectedRows)
-            expect(captureReferenceRows(fullyLoaded.toArray)).toEqual(
-              expectedRows,
-            )
-          }
-        } finally {
-          subscription.unsubscribe()
-        }
-      }, [
-        () => fullyLoaded.cleanup(),
-        () => lazy.cleanup(),
-        () => parents.collection.cleanup(),
-        () => fullyLoadedChildren.collection.cleanup(),
-        () => lazyChildren.cleanup(),
-      ])
-    },
+    `parent-context routing preserves reference-sensitive predicate values across transitions for a random or replayed seed`,
+    checkReferenceContextRouting,
   )
+
+  async function checkReferenceContextRouting(code: number): Promise<void> {
+    const firstToken = { code }
+    const secondToken = { code }
+    const parentRows: Array<ReferenceContextParent> = [
+      { id: 1, group: 1, expected: firstToken },
+      { id: 2, group: 1, expected: secondToken },
+    ]
+    const childRows: Array<ReferenceContextChild> = [
+      { id: 10, group: 1, token: firstToken },
+      { id: 20, group: 1, token: secondToken },
+    ]
+    const parents = createControlledCollection(
+      `reference-context-parents`,
+      parentRows,
+    )
+    const fullyLoadedChildren = createControlledCollection(
+      `reference-context-full-children`,
+      childRows,
+    )
+    const loadedChildIds = new Set<number>()
+    const lazyChildren = createCollection<ReferenceContextChild>({
+      id: `reference-context-lazy-children`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => ({
+          loadSubset: (options: LoadSubsetOptions) => {
+            const matches = options.where
+              ? createFilterFunctionFromExpression<ReferenceContextChild>(
+                  options.where,
+                )
+              : () => true
+            begin()
+            for (const row of childRows) {
+              if (!loadedChildIds.has(row.id) && matches(row)) {
+                loadedChildIds.add(row.id)
+                write({ type: `insert`, value: row })
+              }
+            }
+            commit()
+            markReady()
+            return Promise.resolve()
+          },
+        }),
+      },
+    })
+    const createReferenceContextQuery = (
+      children: Collection<ReferenceContextChild>,
+    ) =>
+      createLiveQueryCollection({
+        getKey: (row) => row.id,
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            children: toArray(
+              q
+                .from({ child: children })
+                .where(({ child }) =>
+                  and(
+                    eq(child.group, parent.group),
+                    eq(child.token, parent.expected),
+                  ),
+                )
+                .select(({ child }) => child.id),
+            ),
+          })),
+      })
+    const fullyLoaded = createReferenceContextQuery(
+      fullyLoadedChildren.collection,
+    )
+    const lazy = createReferenceContextQuery(lazyChildren)
+
+    await withCleanup(async () => {
+      await Promise.all([fullyLoaded.preload(), lazy.preload()])
+      expect(captureReferenceRows(lazy.toArray)).toEqual([
+        { id: 1, children: [10] },
+        { id: 2, children: [20] },
+      ])
+      expect(captureReferenceRows(lazy.toArray)).toEqual(
+        captureReferenceRows(fullyLoaded.toArray),
+      )
+
+      parents.write(`delete`, parentRows[0]!)
+      await flushPromises()
+      expect(captureReferenceRows(lazy.toArray)).toEqual([
+        { id: 2, children: [20] },
+      ])
+      expect(captureReferenceRows(lazy.toArray)).toEqual(
+        captureReferenceRows(fullyLoaded.toArray),
+      )
+
+      parents.write(`insert`, parentRows[0]!)
+      await flushPromises()
+      expect(captureReferenceRows(lazy.toArray)).toEqual([
+        { id: 1, children: [10] },
+        { id: 2, children: [20] },
+      ])
+      // A changed scalar establishes source publication. Pure equal-shaped
+      // reference replacement is a source no-op and need not reach the graph.
+      const publications: Array<ReferenceContextParent> = []
+      const subscription = parents.collection.subscribeChanges((events) => {
+        publications.push(...events.map((event) => ({ ...event.value })))
+      })
+      try {
+        for (const { row, childIds } of [
+          {
+            row: { ...parentRows[0]!, expected: secondToken, revision: 1 },
+            childIds: [20, 20],
+          },
+          {
+            row: { ...parentRows[1]!, expected: firstToken, revision: 1 },
+            childIds: [20, 10],
+          },
+          { row: { ...parentRows[0]!, revision: 2 }, childIds: [10, 10] },
+          { row: { ...parentRows[1]!, revision: 2 }, childIds: [10, 20] },
+        ]) {
+          const priorPublications = publications.length
+          parents.write(`update`, row)
+          expect(publications.length).toBeGreaterThan(priorPublications)
+          expect(publications.at(-1)?.expected).toBe(row.expected)
+          expect(publications.at(-1)?.revision).toBe(row.revision)
+          await flushPromises()
+          const expectedRows = [
+            { id: 1, children: [childIds[0]] },
+            { id: 2, children: [childIds[1]] },
+          ]
+          expect(captureReferenceRows(lazy.toArray)).toEqual(expectedRows)
+          expect(captureReferenceRows(fullyLoaded.toArray)).toEqual(
+            expectedRows,
+          )
+        }
+      } finally {
+        subscription.unsubscribe()
+      }
+    }, [
+      () => fullyLoaded.cleanup(),
+      () => lazy.cleanup(),
+      () => parents.collection.cleanup(),
+      () => fullyLoadedChildren.collection.cleanup(),
+      () => lazyChildren.cleanup(),
+    ])
+  }
 
   test.each([
     [`Date and number`, () => [new Date(0), 0, new Date(1)] as const],
@@ -1445,244 +1479,260 @@ describe(`includes cross-formulation oracle`, () => {
     },
   )
 
-  fcTest.prop(
+  fixedCampaign.prop([fc.integer()], {
+    numRuns: oracleRuns(4),
+    seed: 1_658_002,
+  })(
+    `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a fixed seed`,
+    checkReferenceKeyRouting,
+  )
+
+  randomCampaign(`includes-cross-formulation.reference-key`).prop(
     [fc.integer()],
     oraclePropertyOptions(4, `includes-cross-formulation.reference-key`),
   )(
-    `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys`,
-    async (code) => {
-      const firstKey = { code }
-      const secondKey = { code }
-      const parentRows: Array<ReferenceParent> = [
-        { id: 1, group: firstKey },
-        { id: 2, group: secondKey },
-      ]
-      const childRows: Array<ReferenceChild> = [
-        { id: 10, parentGroup: firstKey },
-        { id: 20, parentGroup: secondKey },
-      ]
-      const parents = createControlledCollection(
-        `reference-key-parents`,
-        parentRows,
-      )
-      const fullyLoadedChildren = createControlledCollection(
-        `reference-key-full-children`,
-        childRows,
-      )
-      const loadedChildIds = new Set<number>()
-      const lazyChildren = createCollection<ReferenceChild>({
-        id: `reference-key-lazy-children`,
-        getKey: (row) => row.id,
-        syncMode: `on-demand`,
-        sync: {
-          sync: ({ begin, write, commit, markReady }) => ({
-            loadSubset: (options: LoadSubsetOptions) => {
-              const matches = options.where
-                ? createFilterFunctionFromExpression<ReferenceChild>(
-                    options.where,
-                  )
-                : () => true
-              begin()
-              for (const row of childRows) {
-                if (!loadedChildIds.has(row.id) && matches(row)) {
-                  loadedChildIds.add(row.id)
-                  write({ type: `insert`, value: row })
-                }
-              }
-              commit()
-              markReady()
-              return Promise.resolve()
-            },
-          }),
-        },
-      })
-
-      const createReferenceQuery = (children: Collection<ReferenceChild>) =>
-        createLiveQueryCollection({
-          getKey: (row) => row.id,
-          query: (q) =>
-            q.from({ parent: parents.collection }).select(({ parent }) => ({
-              id: parent.id,
-              children: toArray(
-                q
-                  .from({ child: children })
-                  .where(({ child }) => eq(child.parentGroup, parent.group))
-                  .select(({ child }) => child.id),
-              ),
-            })),
-        })
-
-      const createGroupedReferenceQuery = (
-        children: Collection<ReferenceChild>,
-      ) =>
-        createLiveQueryCollection({
-          getKey: (row) => row.id,
-          query: (q) =>
-            q.from({ parent: parents.collection }).select(({ parent }) => ({
-              id: parent.id,
-              summaries: toArray(
-                q
-                  .from({ child: children })
-                  .where(({ child }) => eq(child.parentGroup, parent.group))
-                  .groupBy(({ child }) => child.parentGroup)
-                  .select(({ child }) => ({ count: count(child.id) })),
-              ),
-            })),
-        })
-
-      const fullyLoaded = createReferenceQuery(fullyLoadedChildren.collection)
-      const lazy = createReferenceQuery(lazyChildren)
-      const fullyLoadedGrouped = createGroupedReferenceQuery(
-        fullyLoadedChildren.collection,
-      )
-      const lazyGrouped = createGroupedReferenceQuery(lazyChildren)
-      const groupedRows = (
-        query: typeof fullyLoadedGrouped,
-      ): Array<{ id: number; summaries: Array<{ count: number }> }> =>
-        captureGroupedRows(query.toArray)
-
-      await withCleanup(async () => {
-        await Promise.all([
-          fullyLoaded.preload(),
-          lazy.preload(),
-          fullyLoadedGrouped.preload(),
-          lazyGrouped.preload(),
-        ])
-        const fullyLoadedRows = captureReferenceRows(fullyLoaded.toArray)
-        const lazyRows = captureReferenceRows(lazy.toArray)
-        expect(lazyRows).toEqual(fullyLoadedRows)
-        expect(lazyRows).toEqual([
-          { id: 1, children: [10] },
-          { id: 2, children: [20] },
-        ])
-        expect(groupedRows(lazyGrouped)).toEqual(
-          groupedRows(fullyLoadedGrouped),
-        )
-        expect(groupedRows(lazyGrouped)).toEqual([
-          { id: 1, summaries: [{ count: 1 }] },
-          { id: 2, summaries: [{ count: 1 }] },
-        ])
-
-        parents.write(`delete`, parentRows[0]!)
-        await flushPromises()
-        expect(captureReferenceRows(lazy.toArray)).toEqual([
-          { id: 2, children: [20] },
-        ])
-        expect(captureReferenceRows(lazy.toArray)).toEqual(
-          captureReferenceRows(fullyLoaded.toArray),
-        )
-        expect(groupedRows(lazyGrouped)).toEqual([
-          { id: 2, summaries: [{ count: 1 }] },
-        ])
-        expect(groupedRows(lazyGrouped)).toEqual(
-          groupedRows(fullyLoadedGrouped),
-        )
-
-        parents.write(`insert`, parentRows[0]!)
-        await flushPromises()
-        expect(captureReferenceRows(lazy.toArray)).toEqual([
-          { id: 1, children: [10] },
-          { id: 2, children: [20] },
-        ])
-        expect(groupedRows(lazyGrouped)).toEqual([
-          { id: 1, summaries: [{ count: 1 }] },
-          { id: 2, summaries: [{ count: 1 }] },
-        ])
-      }, [
-        () => fullyLoaded.cleanup(),
-        () => lazy.cleanup(),
-        () => fullyLoadedGrouped.cleanup(),
-        () => lazyGrouped.cleanup(),
-        () => parents.collection.cleanup(),
-        () => fullyLoadedChildren.collection.cleanup(),
-        () => lazyChildren.cleanup(),
-      ])
-    },
+    `lazy materialization matches fully loaded materialization for reference-sensitive correlation keys for a random or replayed seed`,
+    checkReferenceKeyRouting,
   )
 
-  fcTest.prop(
+  async function checkReferenceKeyRouting(code: number): Promise<void> {
+    const firstKey = { code }
+    const secondKey = { code }
+    const parentRows: Array<ReferenceParent> = [
+      { id: 1, group: firstKey },
+      { id: 2, group: secondKey },
+    ]
+    const childRows: Array<ReferenceChild> = [
+      { id: 10, parentGroup: firstKey },
+      { id: 20, parentGroup: secondKey },
+    ]
+    const parents = createControlledCollection(
+      `reference-key-parents`,
+      parentRows,
+    )
+    const fullyLoadedChildren = createControlledCollection(
+      `reference-key-full-children`,
+      childRows,
+    )
+    const loadedChildIds = new Set<number>()
+    const lazyChildren = createCollection<ReferenceChild>({
+      id: `reference-key-lazy-children`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => ({
+          loadSubset: (options: LoadSubsetOptions) => {
+            const matches = options.where
+              ? createFilterFunctionFromExpression<ReferenceChild>(
+                  options.where,
+                )
+              : () => true
+            begin()
+            for (const row of childRows) {
+              if (!loadedChildIds.has(row.id) && matches(row)) {
+                loadedChildIds.add(row.id)
+                write({ type: `insert`, value: row })
+              }
+            }
+            commit()
+            markReady()
+            return Promise.resolve()
+          },
+        }),
+      },
+    })
+
+    const createReferenceQuery = (children: Collection<ReferenceChild>) =>
+      createLiveQueryCollection({
+        getKey: (row) => row.id,
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            children: toArray(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .select(({ child }) => child.id),
+            ),
+          })),
+      })
+
+    const createGroupedReferenceQuery = (
+      children: Collection<ReferenceChild>,
+    ) =>
+      createLiveQueryCollection({
+        getKey: (row) => row.id,
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
+              q
+                .from({ child: children })
+                .where(({ child }) => eq(child.parentGroup, parent.group))
+                .groupBy(({ child }) => child.parentGroup)
+                .select(({ child }) => ({ count: count(child.id) })),
+            ),
+          })),
+      })
+
+    const fullyLoaded = createReferenceQuery(fullyLoadedChildren.collection)
+    const lazy = createReferenceQuery(lazyChildren)
+    const fullyLoadedGrouped = createGroupedReferenceQuery(
+      fullyLoadedChildren.collection,
+    )
+    const lazyGrouped = createGroupedReferenceQuery(lazyChildren)
+    const groupedRows = (
+      query: typeof fullyLoadedGrouped,
+    ): Array<{ id: number; summaries: Array<{ count: number }> }> =>
+      captureGroupedRows(query.toArray)
+
+    await withCleanup(async () => {
+      await Promise.all([
+        fullyLoaded.preload(),
+        lazy.preload(),
+        fullyLoadedGrouped.preload(),
+        lazyGrouped.preload(),
+      ])
+      const fullyLoadedRows = captureReferenceRows(fullyLoaded.toArray)
+      const lazyRows = captureReferenceRows(lazy.toArray)
+      expect(lazyRows).toEqual(fullyLoadedRows)
+      expect(lazyRows).toEqual([
+        { id: 1, children: [10] },
+        { id: 2, children: [20] },
+      ])
+      expect(groupedRows(lazyGrouped)).toEqual(groupedRows(fullyLoadedGrouped))
+      expect(groupedRows(lazyGrouped)).toEqual([
+        { id: 1, summaries: [{ count: 1 }] },
+        { id: 2, summaries: [{ count: 1 }] },
+      ])
+
+      parents.write(`delete`, parentRows[0]!)
+      await flushPromises()
+      expect(captureReferenceRows(lazy.toArray)).toEqual([
+        { id: 2, children: [20] },
+      ])
+      expect(captureReferenceRows(lazy.toArray)).toEqual(
+        captureReferenceRows(fullyLoaded.toArray),
+      )
+      expect(groupedRows(lazyGrouped)).toEqual([
+        { id: 2, summaries: [{ count: 1 }] },
+      ])
+      expect(groupedRows(lazyGrouped)).toEqual(groupedRows(fullyLoadedGrouped))
+
+      parents.write(`insert`, parentRows[0]!)
+      await flushPromises()
+      expect(captureReferenceRows(lazy.toArray)).toEqual([
+        { id: 1, children: [10] },
+        { id: 2, children: [20] },
+      ])
+      expect(groupedRows(lazyGrouped)).toEqual([
+        { id: 1, summaries: [{ count: 1 }] },
+        { id: 2, summaries: [{ count: 1 }] },
+      ])
+    }, [
+      () => fullyLoaded.cleanup(),
+      () => lazy.cleanup(),
+      () => fullyLoadedGrouped.cleanup(),
+      () => lazyGrouped.cleanup(),
+      () => parents.collection.cleanup(),
+      () => fullyLoadedChildren.collection.cleanup(),
+      () => lazyChildren.cleanup(),
+    ])
+  }
+
+  fixedCampaign.prop([fc.integer()], {
+    numRuns: oracleRuns(4),
+    seed: 1_658_003,
+  })(
+    `grouped includes agree with standalone groups for symbol routes for a fixed seed`,
+    checkSymbolGroupRouting,
+  )
+
+  randomCampaign(`includes-cross-formulation.symbol-group-route`).prop(
     [fc.integer()],
     oraclePropertyOptions(4, `includes-cross-formulation.symbol-group-route`),
   )(
-    `grouped includes agree with standalone groups for symbol routes`,
-    async (code) => {
-      for (const sameDescription of [false, true]) {
-        const firstGroup = Symbol(`first-${code}`)
-        const secondGroup = Symbol(
-          sameDescription ? `first-${code}` : `second-${code}`,
-        )
-        const parents = createControlledCollection(`symbol-route-parents`, [
-          { id: 1, group: firstGroup },
-          { id: 2, group: secondGroup },
-        ])
-        const children = createControlledCollection(`symbol-route-children`, [
-          { id: 10, parentGroup: firstGroup },
-          { id: 11, parentGroup: firstGroup },
-          { id: 20, parentGroup: secondGroup },
-        ])
+    `grouped includes agree with standalone groups for symbol routes for a random or replayed seed`,
+    checkSymbolGroupRouting,
+  )
 
-        const nested = createLiveQueryCollection({
-          getKey: (row) => row.id,
-          query: (q) =>
-            q.from({ parent: parents.collection }).select(({ parent }) => ({
-              id: parent.id,
-              summaries: toArray(
-                q
-                  .from({ child: children.collection })
-                  .where(({ child }) => eq(child.parentGroup, parent.group))
-                  .groupBy(({ child }) => child.parentGroup)
-                  .select(({ child }) => ({ count: count(child.id) })),
-              ),
-            })),
-        })
-        const standalone = [firstGroup, secondGroup].map((group) =>
-          createLiveQueryCollection({
-            query: (q) =>
+  async function checkSymbolGroupRouting(code: number): Promise<void> {
+    for (const sameDescription of [false, true]) {
+      const firstGroup = Symbol(`first-${code}`)
+      const secondGroup = Symbol(
+        sameDescription ? `first-${code}` : `second-${code}`,
+      )
+      const parents = createControlledCollection(`symbol-route-parents`, [
+        { id: 1, group: firstGroup },
+        { id: 2, group: secondGroup },
+      ])
+      const children = createControlledCollection(`symbol-route-children`, [
+        { id: 10, parentGroup: firstGroup },
+        { id: 11, parentGroup: firstGroup },
+        { id: 20, parentGroup: secondGroup },
+      ])
+
+      const nested = createLiveQueryCollection({
+        getKey: (row) => row.id,
+        query: (q) =>
+          q.from({ parent: parents.collection }).select(({ parent }) => ({
+            id: parent.id,
+            summaries: toArray(
               q
                 .from({ child: children.collection })
-                .where(({ child }) => eq(child.parentGroup, group))
+                .where(({ child }) => eq(child.parentGroup, parent.group))
                 .groupBy(({ child }) => child.parentGroup)
                 .select(({ child }) => ({ count: count(child.id) })),
-          }),
-        )
+            ),
+          })),
+      })
+      const standalone = [firstGroup, secondGroup].map((group) =>
+        createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ child: children.collection })
+              .where(({ child }) => eq(child.parentGroup, group))
+              .groupBy(({ child }) => child.parentGroup)
+              .select(({ child }) => ({ count: count(child.id) })),
+        }),
+      )
 
-        const assertCounts = (counts: ReadonlyArray<number>) => {
-          const nestedRows = captureGroupedRows(nested.toArray)
-          expect(nestedRows).toEqual(
-            standalone.map((query, index) => ({
-              id: index + 1,
-              summaries: captureCounts(query.toArray),
-            })),
-          )
-          assertGroupedRouteCounts(nestedRows, counts)
-        }
-        await withCleanup(async () => {
-          await Promise.all([
-            nested.preload(),
-            ...standalone.map((query) => query.preload()),
-          ])
-          assertCounts([2, 1])
-          children.write(`update`, { id: 11, parentGroup: secondGroup })
-          await flushPromises()
-          assertCounts([1, 2])
-          children.write(`delete`, { id: 10, parentGroup: firstGroup })
-          await flushPromises()
-          assertCounts([0, 2])
-          children.write(`insert`, { id: 10, parentGroup: firstGroup })
-          await flushPromises()
-          assertCounts([1, 2])
-          children.write(`update`, { id: 11, parentGroup: firstGroup })
-          await flushPromises()
-          assertCounts([2, 1])
-        }, [
-          () => nested.cleanup(),
-          ...standalone.map((query) => () => query.cleanup()),
-          () => parents.collection.cleanup(),
-          () => children.collection.cleanup(),
-        ])
+      const assertCounts = (counts: ReadonlyArray<number>) => {
+        const nestedRows = captureGroupedRows(nested.toArray)
+        expect(nestedRows).toEqual(
+          standalone.map((query, index) => ({
+            id: index + 1,
+            summaries: captureCounts(query.toArray),
+          })),
+        )
+        assertGroupedRouteCounts(nestedRows, counts)
       }
-    },
-  )
+      await withCleanup(async () => {
+        await Promise.all([
+          nested.preload(),
+          ...standalone.map((query) => query.preload()),
+        ])
+        assertCounts([2, 1])
+        children.write(`update`, { id: 11, parentGroup: secondGroup })
+        await flushPromises()
+        assertCounts([1, 2])
+        children.write(`delete`, { id: 10, parentGroup: firstGroup })
+        await flushPromises()
+        assertCounts([0, 2])
+        children.write(`insert`, { id: 10, parentGroup: firstGroup })
+        await flushPromises()
+        assertCounts([1, 2])
+        children.write(`update`, { id: 11, parentGroup: firstGroup })
+        await flushPromises()
+        assertCounts([2, 1])
+      }, [
+        () => nested.cleanup(),
+        ...standalone.map((query) => () => query.cleanup()),
+        () => parents.collection.cleanup(),
+        () => children.collection.cleanup(),
+      ])
+    }
+  }
 
   fcTest(`shared-route child deletion agrees across formulations`, () =>
     expectFormulationsEquivalent({
@@ -1734,6 +1784,9 @@ describe(`includes cross-formulation oracle`, () => {
     { name: `zero limit`, offset: 0, limit: 0 },
     { name: `first tied page`, offset: 0, limit: 2 },
     { name: `offset through tie`, offset: 1, limit: 2 },
+    // One child remains at this boundary. Treating the final occupied offset
+    // as an empty tail would violate the ordered-window contract.
+    { name: `last occupied offset`, offset: 2, limit: 2 },
     { name: `empty tail`, offset: 3, limit: 2 },
   ])(
     `preserves ordered window $name through root and child moves`,
@@ -1772,20 +1825,45 @@ describe(`includes cross-formulation oracle`, () => {
       ),
   )
 
-  fcTest.prop(
-    [scenarioArbitrary],
-    oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
-  )(
-    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions`,
+  fixedCampaign.prop([scenarioArbitrary], {
+    numRuns: oracleRuns(8),
+    seed: 1_658_004,
+  })(
+    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a fixed seed`,
     expectFormulationsEquivalent,
   )
 
-  fcTest.prop(
+  randomCampaign(`includes-cross-formulation.equivalence`).prop(
+    [scenarioArbitrary],
+    oraclePropertyOptions(8, `includes-cross-formulation.equivalence`),
+  )(
+    `agrees across nested includes, flat joins, per-parent queries, and TLP partitions for a random or replayed seed`,
+    expectFormulationsEquivalent,
+  )
+
+  const checkWindowedScenario = ({
+    scenario,
+    offset,
+    limit,
+  }: {
+    scenario: CrossFormulationScenario
+    offset: number
+    limit: number
+  }) => expectWindowedIncludeMatches(scenario, offset, limit)
+
+  fixedCampaign.prop([windowedScenarioArbitrary], {
+    numRuns: oracleRuns(12),
+    seed: 1_658_005,
+  })(
+    `matches recomputation for ordered offset and limit child windows for a fixed seed`,
+    checkWindowedScenario,
+  )
+
+  randomCampaign(`includes-cross-formulation.ordered-window`).prop(
     [windowedScenarioArbitrary],
     oraclePropertyOptions(12, `includes-cross-formulation.ordered-window`),
   )(
-    `matches recomputation for ordered offset and limit child windows`,
-    ({ scenario, offset, limit }) =>
-      expectWindowedIncludeMatches(scenario, offset, limit),
+    `matches recomputation for ordered offset and limit child windows for a random or replayed seed`,
+    checkWindowedScenario,
   )
 })

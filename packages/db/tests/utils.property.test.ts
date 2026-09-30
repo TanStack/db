@@ -4,8 +4,10 @@ import { Temporal } from 'temporal-polyfill'
 import { deepEquals } from '../src/utils'
 
 /**
- * `deepEquals` defines a bounded structural equivalence relation, not a general
- * graph isomorphism.
+ * The `deepEquals` API contract in `../src/utils.ts`, reinforced by the
+ * established examples in `utils.test.ts`, promises structural equality for
+ * its supported value classes. This oracle checks bounded equality and
+ * inequality laws for those classes, not general graph isomorphism.
  *
  * Independent value constructors exercise reflexivity, symmetry, copied
  * structure, and changed-leaf inequality for primitives, arrays, records,
@@ -17,6 +19,65 @@ import { deepEquals } from '../src/utils'
  * exclusion matters: more random examples cannot establish semantics the
  * reference relation does not define.
  */
+// Every generated law below uses the same property in a fixed and a fresh
+// campaign. Set UTILS_ORACLE_PROPERTY to the numbered test label and provide
+// UTILS_ORACLE_SEED and UTILS_ORACLE_PATH to replay its fast-check shrink
+// directly, for example with `vitest run tests/utils.property.test.ts`.
+const fixedSeed = 20260911
+const campaignRuns = 100
+const requestedProperty = process.env.UTILS_ORACLE_PROPERTY
+const replaySeed = process.env.UTILS_ORACLE_SEED
+const replayPath = process.env.UTILS_ORACLE_PATH
+let nextPropertyId = 0
+
+if (
+  requestedProperty === undefined &&
+  (replaySeed !== undefined || replayPath !== undefined)
+) {
+  throw new Error(`utils oracle replay needs a property number`)
+}
+
+function utilsProperty<Ts extends [unknown, ...Array<unknown>]>(arbitraries: {
+  [K in keyof Ts]: fc.Arbitrary<Ts[K]>
+}) {
+  return (name: string, check: (...values: Ts) => void): void => {
+    const id = String(++nextPropertyId)
+    const label = `${id}: ${name}`
+    // fast-check's variadic tuple overload widens a generic tuple to any[].
+    // The mapped arbitraries preserve each position's Ts member.
+    const argumentsArbitrary = fc.tuple(...arbitraries) as fc.Arbitrary<Ts>
+
+    if (requestedProperty !== undefined) {
+      if (requestedProperty !== id) {
+        it.skip(`${label} skipped for oracle replay`, () => {})
+        return
+      }
+      if (replaySeed === undefined || replayPath === undefined) {
+        throw new Error(`utils oracle replay needs a seed and shrink path`)
+      }
+      const seed = Number(replaySeed)
+      if (!Number.isSafeInteger(seed)) {
+        throw new Error(`utils oracle replay seed must be an integer`)
+      }
+      fcTest.prop([argumentsArbitrary], {
+        seed,
+        path: replayPath,
+        numRuns: campaignRuns,
+      })(`${label} replay`, (values) => check(...values))
+      return
+    }
+
+    fcTest.prop([argumentsArbitrary], {
+      seed: fixedSeed,
+      numRuns: campaignRuns,
+    })(`${label} fixed`, (values) => check(...values))
+    fcTest.prop([argumentsArbitrary], { numRuns: campaignRuns })(
+      `${label} random`,
+      (values) => check(...values),
+    )
+  }
+}
+
 const arbitraryPrimitive = fc.oneof(
   fc.string(),
   fc.integer(),
@@ -198,6 +259,10 @@ function expectRingLaw(
   }
 }
 
+// Legal rings have 1–5 reachable nodes, integer payloads, and one of four
+// native edge carriers at each node. A zero-node ring has no root and is
+// excluded. The fixed pair enumeration below reconstructs every ordered
+// two-carrier overlap; the length cases pin the lower and upper bounds.
 const ringArbitrary = fc.array(
   fc.record({
     value: fc.integer(),
@@ -256,7 +321,16 @@ describe(`deepEquals property-based tests`, () => {
         ]),
     )
 
-    fcTest.prop([ringArbitrary], { numRuns: 100 })(
+    it.each([1, 4, 5])(`compares equal and changed %i-node rings`, (length) => {
+      expectRingLaw(
+        Array.from({ length }, (_, index) => ({
+          value: index,
+          carrier: edgeCarriers[index % edgeCarriers.length]!,
+        })),
+      )
+    })
+
+    utilsProperty([ringArbitrary])(
       `compares separately allocated mixed rings and every changed payload`,
       (cells) => expectRingLaw(cells),
     )
@@ -281,7 +355,7 @@ describe(`deepEquals property-based tests`, () => {
       expectRingLaw(cells)
     })
 
-    fcTest.prop([fc.integer(), fc.string()])(
+    utilsProperty([fc.integer(), fc.string()])(
       `preserves structural equality across acyclic sharing and unfolding`,
       (value, key) => {
         const leaf = { value }
@@ -303,7 +377,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.integer(), fc.string()])(
+    utilsProperty([fc.integer(), fc.string()])(
       `distinguishes symbol identity from description in keys and values`,
       (value, description) => {
         const key = Symbol(description)
@@ -321,7 +395,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.integer()])(
+    utilsProperty([fc.integer()])(
       `keeps Map key identity while comparing nested values structurally`,
       (value) => {
         const key = { value }
@@ -401,7 +475,9 @@ describe(`deepEquals property-based tests`, () => {
       expectRingLaw(failure.counterexample[0])
     })
 
-    fcTest.prop([fc.uniqueArray(fc.integer(), { minLength: 1, maxLength: 8 })])(
+    utilsProperty([
+      fc.uniqueArray(fc.integer(), { minLength: 1, maxLength: 8 }),
+    ])(
       `compares primitive Set membership independent of insertion order`,
       (values) => {
         const original = new Set(values)
@@ -425,46 +501,47 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`equivalence relation properties`, () => {
-    fcTest.prop([arbitrarySingleValue])(
+    utilsProperty([arbitrarySingleValue])(
       `reflexivity: deepEquals(a, a) is always true`,
       (a) => {
         expect(deepEquals(a, a)).toBe(true)
       },
     )
 
-    fcTest.prop([arbitrarySameTypePair])(
+    utilsProperty([arbitrarySameTypePair])(
       `symmetry: deepEquals(a, b) === deepEquals(b, a) for same-type values`,
       ([a, b]) => {
         expect(deepEquals(a, b)).toBe(deepEquals(b, a))
       },
     )
 
-    fcTest.prop([fc.array(fc.integer(), { maxLength: 5 })])(
-      `transitivity: if deepEquals(a, b) && deepEquals(b, c) then deepEquals(a, c)`,
+    utilsProperty([fc.array(fc.integer(), { maxLength: 5 })])(
+      `separately allocated equal arrays satisfy both premises and transitivity`,
       (arr) => {
-        // Create three copies to test transitivity
         const a = [...arr]
         const b = [...arr]
         const c = [...arr]
-        if (deepEquals(a, b) && deepEquals(b, c)) {
-          expect(deepEquals(a, c)).toBe(true)
-        }
+        expect(a).not.toBe(b)
+        expect(b).not.toBe(c)
+        expect(deepEquals(a, b)).toBe(true)
+        expect(deepEquals(b, c)).toBe(true)
+        expect(deepEquals(a, c)).toBe(true)
       },
     )
   })
 
   describe(`cross-type comparisons`, () => {
-    fcTest.prop([arbitraryDate, arbitraryTemporalDuration])(
+    utilsProperty([arbitraryDate, arbitraryTemporalDuration])(
       `generated Date and Temporal.Duration are unequal in both directions`,
       (date, duration) => assertDistinctTypes(date, duration, deepEquals),
     )
 
-    fcTest.prop([arbitraryDate, arbitraryTemporalPlainDate])(
+    utilsProperty([arbitraryDate, arbitraryTemporalPlainDate])(
       `generated Date and Temporal.PlainDate are unequal in both directions`,
       (date, plainDate) => assertDistinctTypes(date, plainDate, deepEquals),
     )
 
-    fcTest.prop([arbitraryTemporalPlainDate, arbitraryTemporalDuration])(
+    utilsProperty([arbitraryTemporalPlainDate, arbitraryTemporalDuration])(
       `generated different Temporal types are unequal in both directions`,
       (plainDate, duration) =>
         assertDistinctTypes(plainDate, duration, deepEquals),
@@ -548,7 +625,7 @@ describe(`deepEquals property-based tests`, () => {
       expect(deepEquals({ rank: NaN }, { rank: 10 })).toBe(false)
     })
 
-    fcTest.prop([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
+    utilsProperty([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
       `arrays with same elements are equal`,
       (arr) => {
         const copy = [...arr]
@@ -556,14 +633,14 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([
+    utilsProperty([
       fc.dictionary(fc.string(), fc.integer(), { minKeys: 0, maxKeys: 10 }),
     ])(`objects with same properties are equal`, (obj) => {
       const copy = { ...obj }
       expect(deepEquals(obj, copy)).toBe(true)
     })
 
-    fcTest.prop([
+    utilsProperty([
       fc.array(fc.tuple(fc.string(), fc.integer()), {
         minLength: 0,
         maxLength: 5,
@@ -574,7 +651,7 @@ describe(`deepEquals property-based tests`, () => {
       expect(deepEquals(map1, map2)).toBe(true)
     })
 
-    fcTest.prop([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
+    utilsProperty([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
       `Sets with same primitive values are equal`,
       (arr) => {
         const set1 = new Set(arr)
@@ -583,7 +660,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 50 })])(
+    utilsProperty([fc.uint8Array({ minLength: 0, maxLength: 50 })])(
       `Uint8Arrays with same content are equal`,
       (arr) => {
         const copy = new Uint8Array(arr)
@@ -591,12 +668,12 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitraryDate])(`Dates with same time are equal`, (date) => {
+    utilsProperty([arbitraryDate])(`Dates with same time are equal`, (date) => {
       const copy = new Date(date.getTime())
       expect(deepEquals(date, copy)).toBe(true)
     })
 
-    fcTest.prop([arbitraryTemporalPlainDate])(
+    utilsProperty([arbitraryTemporalPlainDate])(
       `Temporal.PlainDate with same values are equal`,
       (date) => {
         const copy = new Temporal.PlainDate(date.year, date.month, date.day)
@@ -606,7 +683,7 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`inequality properties`, () => {
-    fcTest.prop([
+    utilsProperty([
       fc.array(fc.integer(), { minLength: 1, maxLength: 10 }),
       fc.integer(),
     ])(`arrays with different elements are not equal`, (arr, extraElement) => {
@@ -614,7 +691,7 @@ describe(`deepEquals property-based tests`, () => {
       expect(deepEquals(arr, modified)).toBe(false)
     })
 
-    fcTest.prop([arbitraryExtraProperty])(
+    utilsProperty([arbitraryExtraProperty])(
       `objects with extra property are not equal`,
       (sample) => {
         assertExtraProperty(sample, deepEquals)
@@ -644,14 +721,14 @@ describe(`deepEquals property-based tests`, () => {
       expect(result).toMatchObject({ failed: false, numRuns: 100, numSkips: 0 })
     })
 
-    fcTest.prop([fc.integer(), fc.string()])(
+    utilsProperty([fc.integer(), fc.string()])(
       `different types are not equal`,
       (num, str) => {
         expect(deepEquals(num, str)).toBe(false)
       },
     )
 
-    fcTest.prop([fc.date(), fc.date()])(
+    utilsProperty([fc.date(), fc.date()])(
       `dates with different times are not equal`,
       (date1, date2) => {
         if (date1.getTime() !== date2.getTime()) {
@@ -662,7 +739,7 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`edge cases`, () => {
-    fcTest.prop([arbitrarySingleValue])(
+    utilsProperty([arbitrarySingleValue])(
       `null is never equal to a non-null value`,
       (a) => {
         if (a !== null) {
@@ -672,7 +749,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitrarySingleValue])(
+    utilsProperty([arbitrarySingleValue])(
       `undefined is never equal to a non-undefined value`,
       (a) => {
         if (a !== undefined) {
@@ -682,7 +759,7 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.array(fc.integer(), { minLength: 0, maxLength: 5 })])(
+    utilsProperty([fc.array(fc.integer(), { minLength: 0, maxLength: 5 })])(
       `array is never equal to object with same values`,
       (arr) => {
         const obj = { ...arr }
@@ -692,14 +769,14 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`nested structure consistency`, () => {
-    fcTest.prop([
+    utilsProperty([
       fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),
     ])(`nested arrays maintain equality through cloning`, (nestedArr) => {
       const clone = nestedArr.map((inner) => [...inner])
       expect(deepEquals(nestedArr, clone)).toBe(true)
     })
 
-    fcTest.prop([
+    utilsProperty([
       fc.dictionary(
         fc.string(),
         fc.dictionary(fc.string(), fc.integer(), { maxKeys: 3 }),
@@ -713,3 +790,13 @@ describe(`deepEquals property-based tests`, () => {
     })
   })
 })
+
+if (requestedProperty !== undefined) {
+  it(`selects a known utils oracle property`, () => {
+    const id = Number(requestedProperty)
+    expect(
+      Number.isSafeInteger(id) && id >= 1 && id <= nextPropertyId,
+      `unknown utils oracle property: ${requestedProperty}`,
+    ).toBe(true)
+  })
+}

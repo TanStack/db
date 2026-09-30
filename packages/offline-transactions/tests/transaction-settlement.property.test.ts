@@ -5,23 +5,74 @@ import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import { readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
 
 /**
  * # Does each offline transaction settle only from its own durable history?
  *
- * Transactions enter a global FIFO, but commit and wait promises belong to one
+ * The README's FIFO, durable-outbox, and NonRetriableError contracts, together
+ * with waitForTransactionCompletion's per-ID API, authorize this law:
+ * transactions enter a global FIFO, but commit and wait promises belong to one
  * transaction ID. Success applies its server rows and fulfills both promises.
  * Permanent failure rejects those promises with the same error and rolls back
  * only its local overlay. A peer's provider, retry-record, or durable-admission
  * failure cannot settle or erase independently admitted work.
  *
- * Generated histories vary shared keys, transaction width, and success/failure
- * sequences. Gates expose each provider boundary. The driver compares exact
- * calls, IDs, promise outcomes, durable outbox state, server state, local rows,
- * pending counts, and later progress after every settlement. The simple expected
- * Maps do not copy executor or scheduler internals.
+ * The model is a prefix of completed transaction outcomes and an independently
+ * folded map of provider-applied rows. Its pending local rows represent the
+ * optimistic overlay, not durable outbox entries. Generated histories use 2–5
+ * transactions, 1–3 rows each, shared or disjoint keys, and success or permanent
+ * failure at each position. Pinned examples reconstruct all-success, middle
+ * failure, all-failure, and alternating outcomes. Shared keys distinguish
+ * sibling rollback from disjoint-key survival; width distinguishes whole-row
+ * snapshots from partial multirow application; outcome order distinguishes
+ * per-ID settlement from a global failure. Two transactions and one row are
+ * the marginal peer and width cases. Fresh production IDs exclude duplicate-ID
+ * histories; an outcome-less provider call is not a completed history here.
+ *
+ * Gates expose each provider boundary. The real executor, Collection, and
+ * outbox are the driver. At each held-provider checkpoint, the refinement
+ * check compares exact calls, IDs, promise outcomes, durable outbox state,
+ * provider-applied rows, and public local rows. A wrong global-settlement rule
+ * would fulfill a held sibling after the first transaction; the checkpoint
+ * compares that sibling with pending, and a wrong-result control verifies the
+ * comparison rejects early fulfillment. The simple expected Maps do not copy
+ * executor or scheduler internals.
+ *
+ * The controlled provider and fake storage establish this executor boundary,
+ * not real server acknowledgement timing, native storage completion, or
+ * multiple-owner leadership. A normal run pairs fixed and seedless campaigns.
+ * To replay one shrink directly, set OFFLINE_ORACLE_SEED and
+ * OFFLINE_ORACLE_PATH, then select this file and the failing test name.
  */
+
+const settlementOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 40,
+})
+const retryRecordOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 20,
+})
+const admissionOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 10,
+})
+
+type OracleConfig = ReturnType<typeof readOfflineOracleConfig>
+
+function oracleSeeds(fixedSeed: number, config: OracleConfig) {
+  return config.seed === undefined ? [fixedSeed, undefined] : [config.seed]
+}
+
+function oracleOptions(config: OracleConfig, seed: number | undefined) {
+  return {
+    numRuns: config.runs,
+    ...(seed === undefined ? {} : { seed }),
+    ...(config.path === undefined ? {} : { path: config.path }),
+  }
+}
 
 function gate() {
   let resolve!: () => void
@@ -50,7 +101,7 @@ function expectLocalRows(
   expect(localRows(actual)).toEqual(localRows(expected))
 }
 
-it.each([20260913, undefined])(
+it.each(oracleSeeds(20260913, settlementOracle))(
   `settles each transaction independently while preserving FIFO (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -120,29 +171,36 @@ it.each([20260913, undefined])(
                 .slice(0, Math.min(completed + 1, ids.length))
                 .map((id, index) => ({ id, rows: expectedRows[index] })),
             )
-            expect(
-              Object.fromEntries(
-                Object.entries(statuses).map(([name, status]) => [
-                  name,
-                  status instanceof Error ? status.message : status,
-                ]),
-              ),
-            ).toEqual(
-              Object.fromEntries(
-                ids.flatMap((_id, index) => {
-                  const status =
-                    index < completed
-                      ? succeeds[index]
-                        ? `fulfilled`
-                        : failures[index]!.message
-                      : `pending`
-                  return [
-                    [`commit-${index}`, status],
-                    [`wait-${index}`, status],
-                  ]
-                }),
-              ),
+            const actualStatuses = Object.fromEntries(
+              Object.entries(statuses).map(([name, status]) => [
+                name,
+                status instanceof Error ? status.message : status,
+              ]),
             )
+            const expectedStatuses = Object.fromEntries(
+              ids.flatMap((_id, index) => {
+                const status =
+                  index < completed
+                    ? succeeds[index]
+                      ? `fulfilled`
+                      : failures[index]!.message
+                    : `pending`
+                return [
+                  [`commit-${index}`, status],
+                  [`wait-${index}`, status],
+                ]
+              }),
+            )
+            expect(actualStatuses).toEqual(expectedStatuses)
+            if (completed === 1) {
+              expect(() =>
+                expect({ ...actualStatuses, 'wait-1': `fulfilled` }).toEqual(
+                  expectedStatuses,
+                ),
+              ).toThrowError(
+                expect.objectContaining({ name: `AssertionError` }),
+              )
+            }
             for (let index = 0; index < completed; index++) {
               if (!succeeds[index]) {
                 expect(statuses[`commit-${index}`]).toBe(failures[index])
@@ -238,8 +296,7 @@ it.each([20260913, undefined])(
         },
       ),
       {
-        seed,
-        numRuns: 40,
+        ...oracleOptions(settlementOracle, seed),
         examples: [
           [{ sharedKeys: true, width: 1, outcomes: [true, true] }],
           [{ sharedKeys: false, width: 2, outcomes: [true, false, true] }],
@@ -420,7 +477,12 @@ it.each([
   },
 )
 
-it(`keeps admitted transactions pending when a peer's retry record cannot be updated`, async () => {
+// A first-provider retry-record write fails after 2–5 transactions have been
+// admitted. Two is the marginal held-head/peer history; five checks that every
+// later peer survives. Removing the peer removes the independence question.
+// The fixture does not generate a duplicate ID or a successful retry-record
+// write, because neither has this failure premise.
+async function checkRetryRecordFailure(seed: number | undefined) {
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 2, max: 5 }), async (count) => {
       const storageError = new Error(`retry record unavailable`)
@@ -493,6 +555,11 @@ it(`keeps admitted transactions pending when a peer's retry record cannot be upd
         await turn()
         expect(calls).toEqual([ids[0]])
         expect(statuses).toEqual(ids.map(() => `pending`))
+        expect(() =>
+          expect([`fulfilled`, ...statuses.slice(1)]).toEqual(
+            ids.map(() => `pending`),
+          ),
+        ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
         expect(warning).toHaveBeenCalledWith(
           `Failed to execute transactions:`,
           storageError,
@@ -530,11 +597,23 @@ it(`keeps admitted transactions pending when a peer's retry record cannot be upd
         )
       }
     }),
-    { seed: 20260916, numRuns: 20 },
+    {
+      ...oracleOptions(retryRecordOracle, seed),
+      examples: [[2], [5]],
+    },
   )
-})
+}
 
-it(`rejects only the transaction whose durable admission fails`, async () => {
+it.each(oracleSeeds(20260916, retryRecordOracle))(
+  `keeps admitted transactions pending when a peer's retry record cannot be updated (seed %s)`,
+  checkRetryRecordFailure,
+)
+
+// The failed durable write can be first, middle, or last among three distinct
+// IDs. All positions are pinned, so the conditional failure premise is reached
+// at each boundary. Removing the two admitted peers would hide accidental
+// global rejection. A duplicate ID is outside this legal admission grammar.
+async function checkDurableAdmissionFailure(seed: number | undefined) {
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 0, max: 2 }), async (failedIndex) => {
       const storageError = new Error(`admission unavailable`)
@@ -604,6 +683,12 @@ it(`rejects only the transaction whose durable admission fails`, async () => {
           )
           expect(env.collection.has(`row-${index}`)).toBe(index !== failedIndex)
         }
+        const expectedStatuses = ids.map((_id, index) =>
+          index === failedIndex ? storageError : `fulfilled`,
+        )
+        expect(() =>
+          expect(statuses.map(() => storageError)).toEqual(expectedStatuses),
+        ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
         expect(await env.executor.peekOutbox()).toEqual([])
       } catch (error) {
         hasPrimaryFailure = true
@@ -620,9 +705,17 @@ it(`rejects only the transaction whose durable admission fails`, async () => {
         )
       }
     }),
-    { seed: 20260916, numRuns: 10 },
+    {
+      ...oracleOptions(admissionOracle, seed),
+      examples: [[0], [1], [2]],
+    },
   )
-})
+}
+
+it.each(oracleSeeds(20260916, admissionOracle))(
+  `rejects only the transaction whose durable admission fails (seed %s)`,
+  checkDurableAdmissionFailure,
+)
 
 it(`fulfills successful provider work when durable acknowledgement cleanup fails`, async () => {
   const deletionAttempted = gate()

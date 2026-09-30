@@ -7,27 +7,30 @@ import { createNestedCollectionFixture } from './includes-space-oracle-fixture.j
 /**
  * # Does nested Collection materialization retain only reachable facades?
  *
- * Collection-valued includes need one facade for each reachable relationship
- * bucket. They must not create a facade per leaf, retain a retired bucket at
- * startup, or leak partially built sources when setup fails.
+ * The nested-materialization contract in ARCHITECTURE.md gives one Collection
+ * facade to each active bucket and releases retired buckets. Its space law
+ * bounds retained facades by reachable relationships. A facade must not be
+ * created per leaf or retained for a retired bucket at initial publication.
  *
- * The fixture has two branches per root, five twigs per branch, and ten leaves
- * per twig. Facades exist for the root-to-branch, branch-to-twig, and
+ * The default fixture has two branches per root, five twigs per branch, and
+ * ten leaves per twig. Facades exist for the root-to-branch, branch-to-twig, and
  * twig-to-leaf buckets. The expected count is therefore `roots + branches +
- * twigs`. Leaf count changes row volume but not facade count.
+ * twigs`. Changing leaf count from zero to one to ten changes public row
+ * volume while keeping those relationship buckets and their facade count.
  *
  * This oracle also checks setup ownership. All four source preloads must settle
- * before cleanup starts. Any synchronous or asynchronous setup failure cleans
- * every source, restores test instrumentation, preserves the first failure,
- * and reports cleanup failures separately.
+ * before cleanup starts. A preload or index-creation failure cleans every
+ * source, restores test instrumentation, preserves the first failure, and
+ * reports cleanup failures separately.
  *
  * Facade-map inspection is a test diagnostic, not a runtime API. The count is a
  * bounded space invariant for this fixed topology, not a general heap measure.
+ * It does not measure retained D2 rows, demand, or route churn.
  */
 
 // Inspect retained adapter state only in tests; diagnostics need no runtime API.
 type AdapterState = {
-  getEntry: (...args: Array<unknown>) => object
+  getEntry: (...args: Array<unknown>) => { collection: object }
   entries: Map<string, Map<string, unknown>>
   retiredEntries: Map<string, Map<string, unknown>>
 }
@@ -52,6 +55,7 @@ async function withSpaceFixture(
     fixture: Awaited<ReturnType<typeof createNestedCollectionFixture>>,
     entries: ReturnType<typeof spyFacadeEntries>,
   ) => Promise<void>,
+  leafCount = 10,
 ) {
   const entries = spyFacadeEntries()
   let fixture:
@@ -59,7 +63,7 @@ async function withSpaceFixture(
     | undefined
   return withHistoryCleanup(
     async () => {
-      fixture = await createNestedCollectionFixture(rootCount)
+      fixture = await createNestedCollectionFixture(rootCount, leafCount)
       await inspect(fixture, entries)
     },
     () => [() => fixture?.cleanup(), () => entries.mockRestore()],
@@ -141,6 +145,9 @@ describe(`nested Collection materialization space oracle`, () => {
         )
         expect(created.size).toBe(fixture.expectedFacadeCount)
         expect(
+          new Set([...created].map((entry) => entry.collection)).size,
+        ).toBe(fixture.expectedFacadeCount)
+        expect(
           [...adapters].reduce(
             (n, adapter) => n + countEntries(adapter.entries),
             0,
@@ -156,13 +163,59 @@ describe(`nested Collection materialization space oracle`, () => {
     },
   )
 
-  for (const phase of [
-    `preload`,
-    `preload-rejection`,
-    `createIndex`,
+  // A leaf-based facade rule predicts 0 or 100 for the endpoints, not 13.
+  // Read the leaf rows too, so a fixture that ignores leafCount cannot pass.
+  it.each([0, 1, 10])(
+    `keeps facade count at thirteen when each twig has %i leaves`,
+    async (leafCount) => {
+      await withSpaceFixture(
+        1,
+        async (fixture, entries) => {
+          await fixture.live.preload()
+          const twigs = fixture.live.toArray.flatMap((root) =>
+            root.branches.toArray.flatMap((branch) => branch.twigs.toArray),
+          )
+          expect(twigs).toHaveLength(10)
+          expect(
+            twigs.reduce(
+              (total, twig) => total + twig.leaves.toArray.length,
+              0,
+            ),
+          ).toBe(10 * leafCount)
+          // A facade-per-leaf result must fail the same count comparison.
+          expect(() => expect(10 * leafCount).toBe(13)).toThrow()
+
+          const adapters = new Set(entries.mock.contexts as Array<AdapterState>)
+          const created = new Set(
+            entries.mock.results
+              .filter((result) => result.type === `return`)
+              .map((result) => result.value),
+          )
+          expect(created.size).toBe(13)
+          expect(
+            new Set([...created].map((entry) => entry.collection)).size,
+          ).toBe(13)
+          expect(
+            [...adapters].reduce(
+              (total, adapter) => total + countEntries(adapter.entries),
+              0,
+            ),
+          ).toBe(13)
+        },
+        leafCount,
+      )
+    },
+  )
+
+  for (const { phase, index } of [
+    { phase: `preload`, index: 0 },
+    { phase: `preload-rejection`, index: 0 },
+    { phase: `createIndex`, index: 0 },
+    { phase: `createIndex`, index: 1 },
+    { phase: `createIndex`, index: 2 },
   ] as const) {
     it.each([false, true])(
-      `cleans every source and restores its spy after ${phase} fails (cleanup failure=%s)`,
+      `cleans every source and restores its spy after ${phase} ${index} fails (cleanup failure=%s)`,
       async (failCleanup) => {
         const primary = new Error(`space setup failure`)
         const secondary = new Error(`space cleanup failure`)
@@ -181,11 +234,21 @@ describe(`nested Collection materialization space oracle`, () => {
             ? vi
                 .spyOn(CollectionImpl.prototype, `preload`)
                 .mockRejectedValueOnce(primary)
-            : vi
-                .spyOn(CollectionImpl.prototype, phase)
-                .mockImplementationOnce(() => {
-                  throw primary
-                })
+            : phase === `createIndex`
+              ? (() => {
+                  const originalIndex = CollectionImpl.prototype.createIndex
+                  const spy = vi.spyOn(CollectionImpl.prototype, `createIndex`)
+                  for (let prior = 0; prior < index; prior++)
+                    spy.mockImplementationOnce(originalIndex)
+                  return spy.mockImplementationOnce(() => {
+                    throw primary
+                  })
+                })()
+              : vi
+                  .spyOn(CollectionImpl.prototype, phase)
+                  .mockImplementationOnce(() => {
+                    throw primary
+                  })
         await withHistoryCleanup(
           async () => {
             const result = withSpaceFixture(1, () =>

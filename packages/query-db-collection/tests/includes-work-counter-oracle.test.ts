@@ -1,4 +1,3 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
 import { QueryClient } from '@tanstack/query-core'
 import {
   BasicIndex,
@@ -11,18 +10,19 @@ import { queryCollectionOptions } from '../src/query'
 import type { Collection } from '@tanstack/db'
 
 /**
- * Nested Query-backed includes should acquire work proportional to reachable
- * demand, not to the cartesian size of the backing tree.
+ * The live-query architecture's nested propagation and initial-demand laws
+ * require a preloaded Query-backed tree to expose every reachable descendant.
  *
  * A deterministic four-level tree supplies the value model: traverse parent
  * links from the selected roots to compute reachable rows and child collection
- * counts. Independent loadSubset counters record physical rows delivered before
- * and after public traversal. Generated root counts vary scale while fixed
- * branching exposes accidental full-tree acquisition.
+ * counts. Source Collection change counters record rows delivered before and
+ * after public traversal. A bounded root-count matrix varies scale.
  *
  * The oracle checks both complete nested values and work bounds. Correct rows
- * alone would allow an implementation that scans every branch; low counters
- * alone could hide missing descendants or leaked child collections.
+ * alone would allow duplicate source delivery; low counters alone could hide
+ * missing descendants. Every source row in this fixture is reachable, so this
+ * oracle does not measure irrelevant-branch acquisition, internal scans,
+ * facade allocations, or elapsed time.
  */
 
 let nextCollectionId = 0
@@ -239,31 +239,13 @@ function snapshotSourceRowsDelivered(
   }
 }
 
-async function runCleanups(
-  cleanups: ReadonlyArray<() => void | Promise<void>>,
-): Promise<void> {
-  const results = await Promise.allSettled(
-    cleanups.map(async (cleanup) => cleanup()),
-  )
-  const firstRejection = results.find(
-    (result): result is PromiseRejectedResult => result.status === `rejected`,
-  )
-  if (firstRejection !== undefined) throw firstRejection.reason
-}
-
-function rethrowFirstCleanupError(
-  results: ReadonlyArray<{ rejected: boolean; error: unknown }>,
-): void {
-  const firstRejection = results.find((result) => result.rejected)
-  if (firstRejection !== undefined) throw firstRejection.error
-}
-
-async function observeNestedTreeShape(
+async function checkNestedTreeShape(
   rootCount: number,
+  verify: (observation: NestedTreeShape) => void,
   transformRootRows: (
     rows: ReadonlyArray<NodeRow>,
   ) => ReadonlyArray<NodeRow> = (rows) => rows,
-): Promise<NestedTreeShape> {
+): Promise<void> {
   const rows = createNestedTreeRows(rootCount)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -275,6 +257,9 @@ async function observeNestedTreeShape(
     leaves: createQuerySource(`tree-leaves`, rows.leaves, queryClient),
   }
   let rootCollection: NodeCollection | undefined
+  let primaryFailure: unknown
+  let failed = false
+  const cleanupErrors: Array<unknown> = []
 
   try {
     const sourceCounters = {
@@ -327,39 +312,39 @@ async function observeNestedTreeShape(
       transformRootRows(roots.toArray),
     )
 
-    return {
+    verify({
       ...shape,
       sourceRowsDeliveredAtPreload,
       sourceRowsDeliveredAfterTraversal:
         snapshotSourceRowsDelivered(sourceCounters),
-    }
+    })
+  } catch (error) {
+    primaryFailure = error
+    failed = true
   } finally {
-    let cleanupRejected = false
-    let cleanupError: unknown
-    try {
-      await runCleanups([
+    const results = await Promise.allSettled(
+      [
         async () => rootCollection?.cleanup(),
         ...Object.values(sources).map((source) => async () => source.cleanup()),
-      ])
-    } catch (error) {
-      cleanupRejected = true
-      cleanupError = error
-    }
-
-    let clearRejected = false
-    let clearError: unknown
+      ].map(async (cleanup) => cleanup()),
+    )
+    cleanupErrors.push(
+      ...results.flatMap((result) =>
+        result.status === `rejected` ? [result.reason] : [],
+      ),
+    )
     try {
       queryClient.clear()
     } catch (error) {
-      clearRejected = true
-      clearError = error
+      cleanupErrors.push(error)
     }
-
-    rethrowFirstCleanupError([
-      { rejected: cleanupRejected, error: cleanupError },
-      { rejected: clearRejected, error: clearError },
-    ])
   }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, `Nested-tree cleanup failed`, {
+      cause: failed ? primaryFailure : cleanupErrors[0],
+    })
+  }
+  if (failed) throw primaryFailure
 }
 
 function expectNestedTreeWork(
@@ -395,53 +380,78 @@ function expectNestedTreeShape(
 }
 
 describe(`nested includes reachable-shape oracle`, () => {
-  // Fixed structural campaign; shared random/seed/multiplier options do not
-  // apply to this property. The empty and reported-size witnesses stay explicit.
-  fcTest.prop([fc.integer({ min: 0, max: 20 })], {
-    numRuns: 6,
-    seed: 1634,
-  })(
-    `preserves the complete reachable nested tree shape (#1634)`,
+  // Keep every value from the former fixed-seed sample (2, 3, 4, 13, 17),
+  // plus nearby sizes. The empty and reported-size endpoints stay explicit.
+  it.each([1, 2, 3, 4, 5, 10, 13, 17])(
+    `preserves the complete reachable nested tree shape for %i roots`,
     async (rootCount) => {
-      expectNestedTreeShape(await observeNestedTreeShape(rootCount), rootCount)
+      await checkNestedTreeShape(rootCount, (observation) =>
+        expectNestedTreeShape(observation, rootCount),
+      )
     },
   )
 
   it(`exposes no nested collections for an empty root query`, async () => {
-    expectNestedTreeShape(await observeNestedTreeShape(0), 0)
+    await checkNestedTreeShape(0, (observation) =>
+      expectNestedTreeShape(observation, 0),
+    )
   })
 
-  it(`pins #1634's reported 20-by-2-by-5-by-10 tree`, async () => {
+  it(`pins the reported 20-by-2-by-5-by-10 tree`, async () => {
     // These semantic counters do not claim to measure elapsed time or internal
     // allocations. They pin source delivery at preload and reachable shape.
-    expectNestedTreeShape(await observeNestedTreeShape(20), 20)
+    await checkNestedTreeShape(20, (observation) =>
+      expectNestedTreeShape(observation, 20),
+    )
   })
 
   it(`does not deliver more source rows while traversing the result`, async () => {
-    const observation = await observeNestedTreeShape(20)
-    expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
-      observation.sourceRowsDeliveredAtPreload,
-    )
+    await checkNestedTreeShape(20, (observation) => {
+      expect(observation.sourceRowsDeliveredAfterTraversal).toEqual(
+        observation.sourceRowsDeliveredAtPreload,
+      )
+    })
+  })
+
+  it(`rejects a repeated source row delivery after traversal`, async () => {
+    await checkNestedTreeShape(2, (observation) => {
+      expectNestedTreeShape(observation, 2)
+      const repeatedDelivery: NestedTreeShape = {
+        ...observation,
+        sourceRowsDeliveredAfterTraversal: {
+          ...observation.sourceRowsDeliveredAfterTraversal,
+          branches: observation.sourceRowsDeliveredAfterTraversal.branches + 1,
+        },
+      }
+      expect(() => expectNestedTreeWork(repeatedDelivery, 2)).toThrow()
+    })
   })
 
   it.each([`subtree swap`, `value corruption`] as const)(
     `rejects %s even when reachable cardinality and source work agree`,
     async (fault) => {
-      expectNestedTreeShape(await observeNestedTreeShape(2), 2)
-      const observation = await observeNestedTreeShape(2, (roots) => {
-        expect(roots).toHaveLength(2)
-        const [first, second] = roots as [NodeRow, NodeRow]
-        // Corrupt copied public rows before capture, not expected records or
-        // production state. Both branches still use real child Collections.
-        return fault === `subtree swap`
-          ? [
-              { ...first, children: second.children },
-              { ...second, children: first.children },
-            ]
-          : [{ ...first, value: `wrong root value` }, second]
-      })
-      expectNestedTreeWork(observation, 2)
-      expect(() => expectTreeEntries(observation.entries, 2)).toThrow()
+      await checkNestedTreeShape(2, (observation) =>
+        expectNestedTreeShape(observation, 2),
+      )
+      await checkNestedTreeShape(
+        2,
+        (observation) => {
+          expectNestedTreeWork(observation, 2)
+          expect(() => expectTreeEntries(observation.entries, 2)).toThrow()
+        },
+        (roots) => {
+          expect(roots).toHaveLength(2)
+          const [first, second] = roots as [NodeRow, NodeRow]
+          // Corrupt copied public rows before capture, not expected records or
+          // production state. Both branches still use real child Collections.
+          return fault === `subtree swap`
+            ? [
+                { ...first, children: second.children },
+                { ...second, children: first.children },
+              ]
+            : [{ ...first, value: `wrong root value` }, second]
+        },
+      )
     },
   )
 })

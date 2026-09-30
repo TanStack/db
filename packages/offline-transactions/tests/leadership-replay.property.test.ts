@@ -46,6 +46,11 @@ import type { OfflineTransaction, OnlineDetector } from '../src/types'
  * mixed-deletion positions. Fixed and random campaigns cover legal adjacent
  * histories and support seed/path replay. Delayed-read, stale-admission, and
  * mixed-removal witnesses reject the recorded pre-fix behaviors.
+ * A wrong-result control that expected a captured stale read to return its
+ * removed ID failed at `stale replay delivered`: seed 20260923, path 0:0,
+ * `{ count: 2, removedPrefix: 1 }`. Direct replay reproduced the same row-ID
+ * assertion; the restored comparison passed. This calibrates the stale-read
+ * refinement check, not every leadership boundary.
  *
  * Limits: the fake storage adapter proves ordering and ownership, not a native
  * storage engine. Exactly-once network execution across independent leaders is
@@ -105,6 +110,29 @@ function foldReplayLedger(events: ReadonlyArray<ReplayLedgerEvent>): {
 
 // These campaigns share the package replay variables. Target this file and one
 // test name when replaying a shrink path, because paths are property-specific.
+// For example, from the repository root:
+// OFFLINE_ORACLE_SEED=20260923 OFFLINE_ORACLE_PATH=0:0 \
+// pnpm --dir packages/offline-transactions exec vitest run \
+// tests/leadership-replay.property.test.ts -t 'filters every durably removed transaction'
+//
+// Grammar controls: each fixed lane enumerates the named causal boundary, and
+// the seedless lane samples adjacent values with the same property/checkpoint.
+// Startup count 1–4 distinguishes empty peer work from multiple retained IDs;
+// the four disposal cuts distinguish construction, election, read, and hook.
+// Serial count 2–5 supplies an issued call plus peers; loss/disposal and
+// provider/acknowledgment/retry select different legal ownership cuts, while
+// the payload checks that a surviving row is replayed unchanged. Repeated
+// reports range 0–5 before and after settlement; separate turns and a false
+// then true report distinguish coalescing from leadership reacquisition. The
+// pinned one-report example reconstructs that overlap. Stale reads remove
+// 1–5 of 2–6 stored IDs (clamped to leave a peer); the pinned 3/1 example
+// reconstructs durable removal after capture. Delayed reads vary 1–4 peers,
+// 1–3 scans, and removal before/after acknowledgment; both one-scan cuts are
+// pinned. Storage failure varies keys/get and 1–3 retained records. Removing
+// any of these axes loses the stated cut, multiplicity, or preservation check.
+// Delivery before capture and acknowledgment before provider completion are
+// causally invalid histories, so neither is generated. Zero stored work and
+// all-removed stale reads lie outside these stored-work/retained-peer claims.
 const serialWorkOracle = readOfflineOracleConfig({
   prefix: `OFFLINE_ORACLE`,
   defaultRuns: 20,
@@ -117,6 +145,40 @@ const delayedReadOracle = readOfflineOracleConfig({
   prefix: `OFFLINE_ORACLE`,
   defaultRuns: 30,
 })
+const startupOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 10,
+})
+const staleReadOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 20,
+})
+const storageFailureOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 10,
+})
+
+type OracleConfig = ReturnType<typeof readOfflineOracleConfig>
+
+// A normal run has paired fixed and seedless campaigns. A requested seed/path
+// selects one direct replay; the caller targets its test name as well.
+function oracleSeeds(
+  fixedSeed: number,
+  config: OracleConfig,
+): Array<number | undefined> {
+  return config.seed === undefined ? [fixedSeed, undefined] : [config.seed]
+}
+
+function oracleOptions(
+  config: OracleConfig,
+  seed: number | undefined,
+): { numRuns: number; seed?: number; path?: string } {
+  return {
+    numRuns: config.runs,
+    ...(seed === undefined ? {} : { seed }),
+    ...(config.path === undefined ? {} : { path: config.path }),
+  }
+}
 
 it(`revokes only replay work excluded by the retry hook`, async () => {
   // The hook classifies one captured replay snapshot. Reconciliation may
@@ -833,9 +895,14 @@ it(`keeps permanently failed work owned until durable deletion settles`, async (
   }
 })
 
-it.each([`construction`, `leadership`, `outbox read`, `retry hook`] as const)(
-  `does not revive a disposed executor after %s`,
-  async (boundary) => {
+it.each(
+  [`construction`, `leadership`, `outbox read`, `retry hook`].flatMap(
+    (boundary) =>
+      oracleSeeds(20260918, startupOracle).map((seed) => ({ boundary, seed })),
+  ),
+)(
+  `does not revive a disposed executor after $boundary (seed $seed)`,
+  async ({ boundary, seed }) => {
     await fc.assert(
       fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (count) => {
         const pending = gate()
@@ -941,7 +1008,7 @@ it.each([`construction`, `leadership`, `outbox read`, `retry hook`] as const)(
           )
         }
       }),
-      { seed: 20260918, numRuns: 10 },
+      oracleOptions(startupOracle, seed),
     )
   },
 )
@@ -949,7 +1016,11 @@ it.each([`construction`, `leadership`, `outbox read`, `retry hook`] as const)(
 it.each(
   [`loss`, `dispose`].flatMap((stop) =>
     [`provider`, `acknowledgment`, `retry`].flatMap((boundary) =>
-      [20260917, undefined].map((seed) => ({ stop, boundary, seed })),
+      oracleSeeds(20260917, serialWorkOracle).map((seed) => ({
+        stop,
+        boundary,
+        seed,
+      })),
     ),
   ),
 )(
@@ -1133,15 +1204,7 @@ it.each(
           }
         },
       ),
-      {
-        numRuns: serialWorkOracle.runs,
-        ...((seed ?? serialWorkOracle.seed) === undefined
-          ? {}
-          : { seed: seed ?? serialWorkOracle.seed }),
-        ...(seed === undefined && serialWorkOracle.path !== undefined
-          ? { path: serialWorkOracle.path }
-          : {}),
-      },
+      oracleOptions(serialWorkOracle, seed),
     )
   },
 )
@@ -1151,7 +1214,10 @@ it.each(
 // zero-execution trace falsely satisfy an at-most-once assertion.
 it.each(
   [`provider`, `acknowledgment`].flatMap((boundary) =>
-    [20260912, undefined].map((seed) => ({ boundary, seed })),
+    oracleSeeds(20260912, leadershipReportOracle).map((seed) => ({
+      boundary,
+      seed,
+    })),
   ),
 )(
   `preserves replay under repeated reports and leadership regain at $boundary (seed $seed)`,
@@ -1322,13 +1388,7 @@ it.each(
         },
       ),
       {
-        numRuns: leadershipReportOracle.runs,
-        ...((seed ?? leadershipReportOracle.seed) === undefined
-          ? {}
-          : { seed: seed ?? leadershipReportOracle.seed }),
-        ...(seed === undefined && leadershipReportOracle.path !== undefined
-          ? { path: leadershipReportOracle.path }
-          : {}),
+        ...oracleOptions(leadershipReportOracle, seed),
         examples: [
           [
             {
@@ -1412,7 +1472,7 @@ it(`does not readmit a permanently rejected row from a stale outbox read`, async
   }
 })
 
-it.each([20260923, undefined])(
+it.each(oracleSeeds(20260923, staleReadOracle))(
   `filters every durably removed transaction from a generated stale replay read (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -1489,8 +1549,7 @@ it.each([20260923, undefined])(
         },
       ),
       {
-        seed,
-        numRuns: 20,
+        ...oracleOptions(staleReadOracle, seed),
         examples: [[{ count: 3, removedPrefix: 1 }]],
       },
     )
@@ -1630,7 +1689,7 @@ it.each([1, 4])(
 // A replay scan can capture A, then block on another storage read until A's
 // successful deletion. Pending-only dedupe no longer remembers A at admission.
 // Peers admitted only through this scan must still execute exactly once.
-it.each([20260919, undefined])(
+it.each(oracleSeeds(20260919, delayedReadOracle))(
   `admits only unfinished work from delayed replay reads (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -1779,13 +1838,7 @@ it.each([20260919, undefined])(
         },
       ),
       {
-        numRuns: delayedReadOracle.runs,
-        ...((seed ?? delayedReadOracle.seed) === undefined
-          ? {}
-          : { seed: seed ?? delayedReadOracle.seed }),
-        ...(seed === undefined && delayedReadOracle.path !== undefined
-          ? { path: delayedReadOracle.path }
-          : {}),
+        ...oracleOptions(delayedReadOracle, seed),
         examples: [
           [
             {
@@ -1809,9 +1862,16 @@ it.each([20260919, undefined])(
   },
 )
 
-it.each([`keys`, `get`] as const)(
-  `rejects initialization when storage %s fails without losing records`,
-  async (operation) => {
+it.each(
+  [`keys`, `get`].flatMap((operation) =>
+    oracleSeeds(20260916, storageFailureOracle).map((seed) => ({
+      operation,
+      seed,
+    })),
+  ),
+)(
+  `rejects initialization when storage $operation fails without losing records (seed $seed)`,
+  async ({ operation, seed }) => {
     await fc.assert(
       fc.asyncProperty(fc.integer({ min: 1, max: 3 }), async (count) => {
         const error = new Error(`stored work unavailable`)
@@ -1861,7 +1921,7 @@ it.each([`keys`, `get`] as const)(
           )
         }
       }),
-      { seed: 20260916, numRuns: 10 },
+      oracleOptions(storageFailureOracle, seed),
     )
   },
 )

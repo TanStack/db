@@ -4,6 +4,7 @@ import { buildQuery } from '../../src/query/builder/index.js'
 import { compileQuery } from '../../src/query/compiler/index.js'
 import { collectCollectionSources } from '../../src/query/ir.js'
 import { count, createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { stripVirtualProps } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 
@@ -23,7 +24,10 @@ import { createControlledCollection } from './includes-oracle-helpers.js'
  * Collections and check public rows at preload or query construction. An
  * excluded outer row makes WHERE observable in the first history. Fixed joined
  * filters expose pushdown across DISTINCT and nested aggregate boundaries.
- * This suite does not claim coverage of source updates or every join type.
+ * A second driver removes duplicate support one row at a time, restores it,
+ * then flips the outer predicate. It compares the complete public snapshot
+ * when each synchronous source write returns. This suite does not claim
+ * coverage of joined findOne() results or every join type.
  */
 
 type Person = { id: number; groupId: number; enabled: boolean }
@@ -43,6 +47,19 @@ const tags: Array<Tag> = [
   { id: 6, groupId: 2 },
   { id: 7, groupId: 2 },
 ]
+
+// DISTINCT forms the set of child group IDs before the outer join and WHERE.
+// This model deliberately ignores compiler weights and public-key reduction.
+function expectedDistinctRows(
+  personRows: Iterable<Person>,
+  tagRows: Iterable<Tag>,
+): Array<{ personId: number; groupId: number }> {
+  const groups = new Set(Array.from(tagRows, (tag) => tag.groupId))
+  return Array.from(personRows)
+    .filter((person) => person.enabled && groups.has(person.groupId))
+    .map((person) => ({ personId: person.id, groupId: person.groupId }))
+    .sort((left, right) => left.personId - right.personId)
+}
 
 describe('subquery boundaries preserve operators and user rows', () => {
   it('joins the distinct subquery result before applying the outer WHERE', async () => {
@@ -117,17 +134,99 @@ describe('subquery boundaries preserve operators and user rows', () => {
       )
       graph.run()
 
-      const distinctGroupIds = new Set(tags.map((tag) => tag.groupId))
-      const expected = people
-        .filter(
-          (person) => person.enabled && distinctGroupIds.has(person.groupId),
+      const expected = expectedDistinctRows(people, tags)
+      // Omitting DISTINCT gives person 1 three contributors. The bag
+      // comparison below must reject that plausible wrong result.
+      const withoutDistinct = people
+        .filter((person) => person.enabled)
+        .flatMap((person) =>
+          tags
+            .filter((tag) => tag.groupId === person.groupId)
+            .map((tag) => ({ personId: person.id, groupId: tag.groupId })),
         )
-        .map((person) => ({ personId: person.id, groupId: person.groupId }))
+      expect(withoutDistinct).not.toEqual(expected)
       expect(actual.sort((a, b) => a.personId - b.personId)).toEqual(expected)
     } finally {
       await persons.collection.cleanup()
       await tagRows.collection.cleanup()
     }
+  })
+
+  it('recomputes a joined DISTINCT result after source writes', async () => {
+    const persons = createControlledCollection<Person>(
+      'distinct-history-persons',
+      people,
+    )
+    const tagRows = createControlledCollection<Tag>(
+      'distinct-history-tags',
+      tags,
+    )
+    const live = createLiveQueryCollection({
+      query: (q) => {
+        const distinctGroups = q
+          .from({ tag: tagRows.collection })
+          .select(({ tag }) => ({ groupId: tag.groupId }))
+          .distinct()
+        return q
+          .from({ person: persons.collection })
+          .innerJoin({ group: distinctGroups }, ({ person, group }) =>
+            eq(person.groupId, group.groupId),
+          )
+          .where(({ person }) => eq(person.enabled, true))
+          .select(({ person, group }) => ({
+            personId: person.id,
+            groupId: group.groupId,
+          }))
+      },
+      getKey: (row) => row.personId,
+    })
+    // These Maps model source Collection rows by ID, not D2 relation state.
+    // Tag identity makes a later delete legal or illegal even when another
+    // tag still supports the same group.
+    const modelPeople = new Map(people.map((person) => [person.id, person]))
+    const modelTags = new Map(tags.map((tag) => [tag.id, tag]))
+    const checkPublicSnapshot = (checkpoint: string) => {
+      expect(
+        live.toArray
+          .map(stripVirtualProps)
+          .sort((left, right) => left.personId - right.personId),
+        checkpoint,
+      ).toEqual(expectedDistinctRows(modelPeople.values(), modelTags.values()))
+    }
+
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        checkPublicSnapshot('after initial preload')
+
+        // Removing one duplicate must leave its group in the DISTINCT result.
+        for (const tag of tags.slice(0, 3)) {
+          tagRows.write('delete', tag)
+          modelTags.delete(tag.id)
+          checkPublicSnapshot(`after deleting tag ${tag.id}`)
+        }
+
+        const replacement = { id: 8, groupId: 1 }
+        tagRows.write('insert', replacement)
+        modelTags.set(replacement.id, replacement)
+        checkPublicSnapshot('after restoring group 1')
+
+        const enabled = { ...people[2]!, enabled: true }
+        persons.write('update', enabled)
+        modelPeople.set(enabled.id, enabled)
+        checkPublicSnapshot('after enabling person 3')
+
+        const disabled = { ...people[0]!, enabled: false }
+        persons.write('update', disabled)
+        modelPeople.set(disabled.id, disabled)
+        checkPublicSnapshot('after disabling person 1')
+      },
+      () => [
+        () => live.cleanup(),
+        () => persons.collection.cleanup(),
+        () => tagRows.collection.cleanup(),
+      ],
+    )
   })
 
   it('keeps a no-select user row shaped like a Value expression intact', async () => {

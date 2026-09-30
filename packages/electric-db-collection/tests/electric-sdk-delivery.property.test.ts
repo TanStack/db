@@ -3,23 +3,119 @@ import { expect, it, vi } from 'vitest'
 import { IR, createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { electricCollectionOptions } from '../src/electric'
-import { oraclePropertyOptions } from '../../db/tests/oracle-config'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config'
 import { atCheckpoint, withElectricCleanup } from './electric-oracle-lifecycle'
 import type { Message } from '@electric-sql/client'
 
 /**
  * # Does the installed Electric SDK deliver the adapter's assumed protocol?
  *
- * The main adapter oracle controls callbacks below the SDK. This driver moves
- * the boundary outward: a finite HTTP provider sends real Electric responses,
- * and the installed ShapeStream owns framing, pause, snapshot, abort, and
- * silent-move behavior. The adapter must reconstruct the same overlapping
- * source relation and DNF visibility as the independent model.
+ * The Collection subset contract and the Electric adapter's tagged-row
+ * contract are owned by electric-oracle.property.test.ts. The installed SDK's
+ * reset framing is checked by electric-sdk-framing.test.ts. This driver
+ * moves the boundary outward: a finite HTTP provider sends authored Electric
+ * responses, and the installed ShapeStream owns framing, pause, snapshot,
+ * abort, and silent-move delivery. The adapter must publish the union of
+ * overlapping source snapshots and the tagged row's DNF visibility.
  *
- * Response gates expose ordering without replacing the SDK. Dropping response
- * rows or silent reactivation deliberately breaks the driver and proves its
- * boundary assertions are live.
+ * The source Map models the union and payload replacement, while a bit set
+ * models active tag conditions. Each bit represents one tag condition; each
+ * group represents a disjunctive tag on the row. Neither model uses the
+ * adapter's tag index or the SDK's framing logic. The history grammar has
+ * three ordered subset responses or one tagged insert followed by move cycles.
+ * The production driver invokes loadSubset and receives ShapeStream callbacks
+ * through controlled HTTP.
+ * The refinement checks compare exact public Collection rows after each SDK
+ * delivery; they do not assert public order or intermediate callback cuts.
+ *
+ * These finite HTTP fixtures do not prove that a live Electric service emits
+ * the authored snapshot or move frames, nor do they cover multiple row keys,
+ * network retries, native persistence hosts, or arbitrary provider schedules.
+ * Dropped rows and reactivation controls prove the named comparisons are live.
  */
+
+// Replay only the selected generated law with TANSTACK_DB_ORACLE_SEED,
+// TANSTACK_DB_ORACLE_PATH, and TANSTACK_DB_ORACLE_PROPERTY. For example:
+// TANSTACK_DB_ORACLE_SEED=20260917 TANSTACK_DB_ORACLE_PATH=0 \
+// TANSTACK_DB_ORACLE_PROPERTY=electric.sdk-snapshot-delivery \
+// pnpm --dir packages/electric-db-collection exec vitest run tests/electric-sdk-delivery.property.test.ts -t 'replay'
+const { replayPath, replayProperty } = readOracleRunConfig()
+const fixedCase = replayPath === undefined ? it : it.skip
+const replayFault = process.env.TANSTACK_DB_ELECTRIC_SDK_DELIVERY_FAULT
+if (
+  replayFault !== undefined &&
+  replayFault !== `snapshot-rows` &&
+  replayFault !== `move-in`
+) {
+  throw new Error(`Unknown Electric SDK delivery oracle fault`)
+}
+
+function sdkCampaigns(
+  propertyId: string,
+  name: string,
+  fixedSeed: number,
+  violation: { reset: () => void; report: (error: unknown) => unknown },
+  run: (seed?: number) => Promise<void>,
+): void {
+  const runCampaign = async (seed?: number) => {
+    violation.reset()
+    try {
+      await run(seed)
+    } catch (error) {
+      throw violation.report(error)
+    }
+  }
+  if (replayPath !== undefined) {
+    if (replayProperty === propertyId)
+      it(`${name} (replay)`, () => runCampaign())
+    return
+  }
+  it(`${name} (fixed)`, () => runCampaign(fixedSeed))
+  it(`${name} (random)`, () => runCampaign())
+}
+
+function violationCheckpoint(error: unknown): string {
+  if (!(error instanceof Error)) return `${typeof error}:${String(error)}`
+  const message = error.message.split(`\n`)[0] ?? ``
+  const checkpoint = /Electric oracle checkpoint timed out: (.+)/.exec(
+    message,
+  )?.[1]
+  const assertion = /^(.+?): expected(?: |$)/.exec(message)?.[1]
+  const sourceLine = error.stack?.match(
+    /electric-sdk-delivery\.property\.test\.ts:(\d+):/,
+  )?.[1]
+  return `${error.name}:${checkpoint ?? assertion ?? sourceLine ?? message}`
+}
+
+// A shrink candidate at another checkpoint cannot replace the first mismatch.
+// The generated parameters reconstruct the finite HTTP history for its report.
+function sameViolation() {
+  let original: { checkpoint: string; history: string } | undefined
+  return {
+    reset: () => {
+      original = undefined
+    },
+    check: async (history: unknown, run: () => Promise<void>) => {
+      try {
+        await run()
+      } catch (error) {
+        const checkpoint = violationCheckpoint(error)
+        original ??= { checkpoint, history: JSON.stringify(history) }
+        if (checkpoint !== original.checkpoint) return
+        throw error
+      }
+    },
+    report: (error: unknown): unknown => {
+      if (original !== undefined && error instanceof Error) {
+        error.message += `\nOriginal violation: ${original.checkpoint}; history: ${original.history}`
+      }
+      return error
+    },
+  }
+}
 
 type Item = { id: number; name: string }
 
@@ -202,8 +298,11 @@ async function checkSnapshots(width: number, name: string, dropRows = false) {
         (error: unknown) => ({ ok: false as const, error }),
       )
       const request = await atCheckpoint(http.take(true), `snapshot request`)
-      expect(request.url.searchParams.get(`subset__where`)).toContain(`id`)
-      expect(rows()).toEqual(before)
+      expect(
+        request.url.searchParams.get(`subset__where`),
+        `snapshot ${index} request predicate`,
+      ).toContain(`id`)
+      expect(rows(), `snapshot ${index} held rows`).toEqual(before)
       const data = responseRows.map((item) => ({
         key: String(item.id),
         value: { ...item, id: String(item.id) },
@@ -228,12 +327,14 @@ async function checkSnapshots(width: number, name: string, dropRows = false) {
       // not an assumption that loadSubset's Promise means rows were applied.
       await atCheckpoint(delivery.promise, `snapshot delivery`)
       const batch = batches.at(-1)!
-      expect(batch.slice(-2).map((message) => message.headers.control)).toEqual(
-        [`snapshot-end`, `subset-end`],
-      )
-      expect(batch.filter((message) => `value` in message)).toHaveLength(
-        responseRows.length,
-      )
+      expect(
+        batch.slice(-2).map((message) => message.headers.control),
+        `snapshot ${index} SDK boundaries`,
+      ).toEqual([`snapshot-end`, `subset-end`])
+      expect(
+        batch.filter((message) => `value` in message),
+        `snapshot ${index} SDK row count`,
+      ).toHaveLength(responseRows.length)
       for (const item of responseRows) expected.set(item.id, item)
       expect(rows(), `snapshot ${index} applied rows`).toEqual(
         [...expected.values()].sort((a, b) => a.id - b.id),
@@ -260,28 +361,45 @@ async function checkSnapshots(width: number, name: string, dropRows = false) {
   ])
 }
 
-it(`applies installed-SDK snapshot deliveries against an independent overlapping source`, async () => {
-  await fc.assert(
-    fc.asyncProperty(
-      fc.integer({ min: 2, max: 4 }),
-      fc.string({ maxLength: 10 }),
-      (width, name) => checkSnapshots(width, name),
+// Grammar: width 2..4, a 0..10-character payload stem, and three ordered
+// predicates id>=1, id>=2, id>=width+1. Width 2 reconstructs the smallest
+// overlapping replacement plus empty final response; width 4 makes the
+// overlap tail longer. Removing width loses that marginal case. Removing
+// the stem loses payload variation while retaining membership. The second
+// response changes every overlapping payload; removing that transition would
+// miss update-through-snapshot behavior. A response containing a row below its
+// requested lower bound is excluded by construction. This bounded grammar
+// does not claim arbitrary predicate orders or provider snapshots. The row at
+// id=2 distinguishes id>=2 from a misplaced exclusive boundary at snapshot 1.
+const snapshotViolation = sameViolation()
+const snapshotProperty = fc.asyncProperty(
+  fc.integer({ min: 2, max: 4 }),
+  fc.string({ maxLength: 10 }),
+  (width, name) =>
+    snapshotViolation.check({ width, name }, () =>
+      checkSnapshots(width, name, replayFault === `snapshot-rows`),
     ),
-    {
-      seed: 20260917,
+)
+sdkCampaigns(
+  `electric.sdk-snapshot-delivery`,
+  `applies installed-SDK snapshot deliveries against an independent overlapping source`,
+  20260917,
+  snapshotViolation,
+  (seed) =>
+    fc.assert(snapshotProperty, {
       ...oraclePropertyOptions(12, `electric.sdk-snapshot-delivery`),
-    },
-  )
-})
+      ...(seed === undefined ? {} : { seed }),
+    }),
+)
 
-it(`rejects a snapshot driver that delivers boundaries but drops response rows`, async () => {
+fixedCase(`detects dropped snapshot rows`, async () => {
   await expect(checkSnapshots(2, `payload`, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`snapshot 0 applied rows`),
   })
 })
 
-it(`lets requestSnapshot own the warm-stream transport transition`, async () => {
+fixedCase(`lets requestSnapshot own the warm transport`, async () => {
   const http = controlledHttp()
   let delivery = deferred<void>()
   const subscribe = ShapeStream.prototype.subscribe
@@ -473,10 +591,14 @@ async function checkMembership(
     // disjuncts retain at least one live alternative until the final deletion;
     // no move-in is used to resurrect a row whose tag index was removed.
     for (let cycle = 0; cycle < cycles; cycle++) {
-      await move(`move-out`, 0, `left inactive`)
-      await move(`move-in`, 0, `silent left reactivation`)
-      await move(`move-out`, leftWidth, `after silent move-in`)
-      await move(`move-in`, leftWidth, `silent right reactivation`)
+      await move(`move-out`, 0, `cycle ${cycle} left inactive`)
+      await move(`move-in`, 0, `cycle ${cycle} silent left reactivation`)
+      await move(`move-out`, leftWidth, `cycle ${cycle} after silent move-in`)
+      await move(
+        `move-in`,
+        leftWidth,
+        `cycle ${cycle} silent right reactivation`,
+      )
     }
     await move(`move-out`, 0, `one disjunct remains`)
     await move(`move-out`, leftWidth, `all disjuncts inactive`)
@@ -496,22 +618,40 @@ async function checkMembership(
   ])
 }
 
-it(`preserves DNF visibility through installed-SDK silent move-in cycles`, async () => {
-  await fc.assert(
-    fc.asyncProperty(
-      fc.integer({ min: 1, max: 2 }),
-      fc.integer({ min: 1, max: 2 }),
-      fc.integer({ min: 1, max: 3 }),
-      (left, right, cycles) => checkMembership(left, right, cycles),
+// Grammar: two disjoint AND groups of 1..2 conditions, with 1..3 complete
+// move-out/in cycles and a final two-group deactivation. The 1/1/1 witness
+// reconstructs a dropped move-in at its visibility checkpoint. A width of 2
+// distinguishes one condition from a conjunction. Removing either width axis
+// loses that group's marginal case. Removing cycle count loses repeated
+// reactivation.
+// Each move-in has a preceding move-out, so the grammar excludes an unmatched
+// move-in and a move for a tag absent from the inserted row. It does not claim
+// row resurrection after the tag index has been removed. The first left
+// move-out leaves the right group active; it distinguishes OR from a wrong
+// rule that requires both groups to remain active.
+const membershipViolation = sameViolation()
+const membershipProperty = fc.asyncProperty(
+  fc.integer({ min: 1, max: 2 }),
+  fc.integer({ min: 1, max: 2 }),
+  fc.integer({ min: 1, max: 3 }),
+  (left, right, cycles) =>
+    membershipViolation.check({ left, right, cycles }, () =>
+      checkMembership(left, right, cycles, replayFault === `move-in`),
     ),
-    {
-      seed: 20260918,
+)
+sdkCampaigns(
+  `electric.sdk-dnf-membership`,
+  `preserves DNF visibility through installed-SDK silent move-in cycles`,
+  20260918,
+  membershipViolation,
+  (seed) =>
+    fc.assert(membershipProperty, {
       ...oraclePropertyOptions(12, `electric.sdk-dnf-membership`),
-    },
-  )
-})
+      ...(seed === undefined ? {} : { seed }),
+    }),
+)
 
-it(`detects dropped silent reactivation on the later move-out`, async () => {
+fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
   await expect(checkMembership(1, 1, 1, true)).rejects.toMatchObject({
     name: `AssertionError`,
     message: expect.stringContaining(`after silent move-in`),

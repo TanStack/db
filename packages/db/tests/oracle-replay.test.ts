@@ -38,6 +38,7 @@ function runReplay(
   args: Array<string> = [fixture],
   fault?: string,
   property = `oracle-replay.calibration`,
+  cleanupFailure = false,
 ): { status: number | null; output: string } {
   const result = spawnSync(
     process.execPath,
@@ -58,6 +59,9 @@ function runReplay(
         TANSTACK_DB_ORACLE_PATH: `0`,
         TANSTACK_DB_ORACLE_PROPERTY: property,
         TANSTACK_DB_ORACLE_REPLAY_CALIBRATION: fault,
+        TANSTACK_DB_ORACLE_REPLAY_TEST_CLEANUP_FAILURE: cleanupFailure
+          ? `1`
+          : undefined,
       },
       encoding: `utf8`,
       timeout: 30_000,
@@ -184,6 +188,17 @@ describe(`guarded oracle replay`, () => {
     40_000,
   )
 
+  it(`reports the original failed replay and a later cleanup failure separately`, () => {
+    const result = runReplay([fixture], `property`, undefined, true)
+    expect(result.status, result.output).toBe(1)
+    expect(result.output).toContain(`replay property sentinel`)
+    expect(result.output).toContain(`oracle replay property failed`)
+    expect(result.output).toContain(
+      `oracle replay failed and cleanup also failed`,
+    )
+    expect(result.output).toContain(`replay cleanup sentinel`)
+  }, 40_000)
+
   it.each([
     [`coverage-registry.claim-churn`, `no-named-owner`],
     [`includes.scenario-statistics`, `statistics-only`],
@@ -294,6 +309,52 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(`${prefix}.${law}.\${q1Shape}.\${q2Shape}`)
         expect(source).toContain(`\`${q1}\``)
         expect(source).toContain(`\`${q2}\``)
+      } else if (entry.property.startsWith(`includes.matrix.`)) {
+        const computedFamilies = [
+          [`independent-`, `includes.matrix.independent-\${shape}`],
+          [`destination-`, `includes.matrix.destination-\${history}`],
+          [
+            `retired-route-`,
+            `includes.matrix.retired-route-\${depth}-\${sourceBranch}`,
+          ],
+          [
+            `intra-batch-route-`,
+            `includes.matrix.intra-batch-route-\${depth}-\${sourceBranch}`,
+          ],
+          [
+            `moved-child-`,
+            `includes.matrix.moved-child-\${depth}-\${targetLevel}-\${sourceBranch}`,
+          ],
+          [
+            `batch-`,
+            `includes.matrix.batch-\${publicId}-\${route}-\${ancestorUpdate}`,
+          ],
+          [`full-row-`, `includes.matrix.full-row-\${depth}`],
+          [
+            `visible-`,
+            `includes.matrix.visible-\${depth}-\${transition}-\${targetLevel}`,
+          ],
+          [
+            `transition-`,
+            `includes.matrix.transition-\${depth}-\${firstTransition}-\${secondTransition}-\${sourceBranch}`,
+          ],
+        ] as const
+        const family = computedFamilies.find(([prefix]) =>
+          entry.property.startsWith(`includes.matrix.${prefix}`),
+        )
+        if (family === undefined) {
+          expect(entry.property).toBe(`includes.matrix.flat-materialization`)
+        }
+        expect(source).toContain(
+          family?.[1] ?? `includes.matrix.flat-materialization`,
+        )
+      } else if (entry.property.startsWith(`pagination.matrix.`)) {
+        const [, , familyCell] = entry.property.split(`.`)
+        const [family, cell] = familyCell!.split(`-`)
+        expect([`window`, `state`]).toContain(family)
+        expect(Number(cell)).toBeGreaterThanOrEqual(0)
+        expect(Number(cell)).toBeLessThan(8)
+        expect(source).toContain(`\`pagination.matrix.${family}-\${index}\``)
       } else {
         expect(source).toContain(`\`${entry.property}\``)
       }
