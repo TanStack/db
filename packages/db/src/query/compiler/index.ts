@@ -43,12 +43,12 @@ import {
   PropRef,
   Value as ValClass,
   collectCollectionSources,
-  createSourceRecord,
   getFromSources,
   getWhereExpression,
   isExpressionLike,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { createSourceRecord } from '../../utils/source-record.js'
 import { deepEquals } from '../../utils.js'
 import { normalizeValue } from '../../utils/comparison.js'
 import {

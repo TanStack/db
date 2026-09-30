@@ -268,10 +268,16 @@ export class CollectionChangesManager<
       const callbacks: Array<() => void> = []
       for (const subscription of subscriptions) {
         const own = routed?.get(subscription)
-        // A routed subscription with no candidate change cannot publish.
-        if (own?.length === 0) continue
-        const changes = own ?? enrichedEvents
-        callbacks.push(() => subscription.emitEvents(changes))
+        callbacks.push(() => {
+          // An earlier callback in this publication can end routing for this
+          // subscription, for example by leaving stale rows to reconcile.
+          if (own === undefined || !subscription.changeRoute) {
+            subscription.emitEvents(enrichedEvents)
+          } else if (own.length > 0) {
+            // A routed subscription with no candidate change cannot publish.
+            subscription.emitEvents(own)
+          }
+        })
       }
       if (rawEvents.length === 0) {
         callbacks.unshift(...layoutListeners)
@@ -447,9 +453,8 @@ function routeChanges<T extends object, TKey extends string | number>(
   changes: Array<ChangeMessage<T, TKey>>,
   subscriptions: Array<CollectionSubscription>,
 ): Map<CollectionSubscription, Array<ChangeMessage<T, TKey>>> | undefined {
-  if (subscriptions.every((subscription) => !subscription.changeRoute)) {
-    return undefined
-  }
+  const routes = subscriptions.map((subscription) => subscription.changeRoute)
+  if (routes.every((route) => route === undefined)) return undefined
   const routed = new Map<
     CollectionSubscription,
     Array<ChangeMessage<T, TKey>>
@@ -461,15 +466,14 @@ function routeChanges<T extends object, TKey extends string | number>(
       byLiteral: Map<unknown, Array<CollectionSubscription>>
     }
   >()
-  for (const subscription of subscriptions) {
-    const route = subscription.changeRoute
+  for (const [index, subscription] of subscriptions.entries()) {
+    const route = routes[index]
     if (!route) continue
     routed.set(subscription, [])
-    const pathKey = JSON.stringify(route.path)
-    let group = groups.get(pathKey)
+    let group = groups.get(route.pathKey)
     if (!group) {
       group = { path: route.path, byLiteral: new Map() }
-      groups.set(pathKey, group)
+      groups.set(route.pathKey, group)
     }
     const peers = group.byLiteral.get(route.expected)
     if (peers) peers.push(subscription)

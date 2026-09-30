@@ -76,9 +76,7 @@ export function currentStateAsChanges<
     // Reject rows by one stored field before copying them to add virtual
     // properties. Survivors still pass through the full predicate.
     const prefilter =
-      filterFn && options.where && scanStoredRows
-        ? compileEqualityPrefilter(options.where, { storedRows: true })
-        : undefined
+      scanStoredRows && options.where && compileEqualityPrefilter(options.where)
     if (filterFn && scanStoredRows && prefilter) {
       for (const [key, value] of scanStoredRows(prefilter)) {
         if (filterFn(value)) result.push({ type: `insert`, key, value })
@@ -224,6 +222,8 @@ export function createFilterFunctionFromExpression<T extends object>(
 /** A field and the string or boolean literal a top-level `eq` requires. */
 export type EqualityRoute = {
   path: Array<string>
+  /** Stable identity of `path`, for grouping routes by field. */
+  pathKey: string
   expected: string | boolean
 }
 
@@ -274,7 +274,7 @@ export function findEqualityRoute(
       continue
     }
     if (best === undefined || typeof best.expected === `boolean`) {
-      best = { path, expected }
+      best = { path, pathKey: JSON.stringify(path), expected }
     }
     if (typeof expected === `string`) break
   }
@@ -306,17 +306,15 @@ export function readRouteValue(
  * Compiles the route of `expression` as a row test that is false only when
  * the full predicate must be false.
  *
- * With `storedRows`, the test reads a stored row instead of its enriched copy.
- * The copy holds each enumerable own root property of the stored row and
- * lacks the others, so its field is either the stored value or `undefined`,
+ * The test reads a stored row instead of its enriched copy. The copy holds
+ * each enumerable own root property of the stored row and lacks the others, so its field is either the stored value or `undefined`,
  * which never equals the literal. A read that throws passes the row to the
  * full predicate.
  */
 export function compileEqualityPrefilter(
   expression: BasicExpression<boolean>,
-  { storedRows = false }: { storedRows?: boolean } = {},
 ): ((row: object) => boolean) | undefined {
-  const route = findEqualityRoute(expression, { storedRows })
+  const route = findEqualityRoute(expression, { storedRows: true })
   if (route === undefined) return undefined
   const { path, expected } = route
   // Most routes name one top-level field; read it without walking a path.

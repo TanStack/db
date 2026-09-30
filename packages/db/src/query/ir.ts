@@ -86,16 +86,6 @@ abstract class BaseExpression<T = any> {
   declare readonly __returnType: T
 }
 
-/**
- * Creates a record keyed by source ids. Each source id is unique, so a plain
- * object would receive a new hidden class for every compiled query. A record
- * without a prototype avoids those shape transitions and cannot confuse an
- * alias such as `constructor` with an inherited member.
- */
-export function createSourceRecord<T>(): Record<string, T> {
-  return Object.create(null)
-}
-
 export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   /** Opaque runtime identity; aliases are lexical names only. */

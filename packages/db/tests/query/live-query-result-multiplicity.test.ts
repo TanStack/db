@@ -13,7 +13,7 @@ import { mockSyncCollectionOptions } from '../utils.js'
 
 type Row = { id: string }
 
-it(`rejects a flush that publishes two rows for one key`, async () => {
+it(`rejects a flush that publishes two rows for one key before writing any row`, async () => {
   const source = createCollection(
     mockSyncCollectionOptions<Row>({
       id: `result-multiplicity-source`,
@@ -31,6 +31,7 @@ it(`rejects a flush that publishes two rows for one key`, async () => {
     }
     input.sendData(
       new MultiSet([
+        [[`c`, { id: `c` }], 1],
         [[`b`, { id: `b` }], 1],
         [[`b`, { id: `b` }], 1],
       ]),
@@ -39,6 +40,10 @@ it(`rejects a flush that publishes two rows for one key`, async () => {
     expect(() => syncState.flushPendingChanges!()).toThrow(
       `a key has at most one result row`,
     )
+    // The check runs before any write: the valid key in the same flush is not
+    // published, and no sync transaction is left open.
+    expect([...live.keys()]).toEqual([`a`])
+    expect(live._state.pendingSyncedTransactions).toEqual([])
   } finally {
     await live.cleanup()
     await source.cleanup()

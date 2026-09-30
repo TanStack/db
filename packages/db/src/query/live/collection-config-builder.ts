@@ -11,7 +11,7 @@ import { createDeferred } from '../../deferred.js'
 import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
-import { createSourceRecord } from '../ir.js'
+import { createSourceRecord } from '../../utils/source-record.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -929,6 +929,17 @@ export class CollectionConfigBuilder<
         return
       }
 
+      // A key has at most one result row, so one flush can add or remove at
+      // most one. Check before any state changes: anything else means an
+      // upstream operator broke multiplicity.
+      for (const [key, { inserts, deletes }] of pendingChanges) {
+        if (Math.abs(inserts - deletes) > 1) {
+          throw new Error(
+            `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`,
+          )
+        }
+      }
+
       let facadePublication:
         | ReturnType<BucketFacadeAdapter[`flush`]>
         | undefined
@@ -1019,14 +1030,6 @@ export class CollectionConfigBuilder<
   ) {
     const { write, collection } = config
     const { deletes, inserts, value, orderByIndex } = changes
-    // A key has at most one result row, so one flush can add or remove at
-    // most one. Anything else means an upstream operator broke multiplicity.
-    if (Math.abs(inserts - deletes) > 1) {
-      throw new Error(
-        `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`,
-      )
-    }
-
     // Store the key of the result so that we can retrieve it in the
     // getKey function
     this.resultKeys.set(value, key)
