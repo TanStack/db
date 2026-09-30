@@ -11,6 +11,7 @@ import { createDeferred } from '../../deferred.js'
 import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
+import { createSourceRecord } from '../ir.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -143,9 +144,9 @@ export class CollectionConfigBuilder<
     | undefined
 
   // Map of opaque source ID to subscription
-  readonly subscriptions: Record<string, CollectionSubscription> = {}
+  readonly subscriptions = createSourceRecord<CollectionSubscription>()
   // Map of opaque source ID to demand callbacks for that lazy source
-  lazySourcesCallbacks: Record<string, LazyCollectionCallbacks> = {}
+  lazySourcesCallbacks = createSourceRecord<LazyCollectionCallbacks>()
   // Set of opaque source IDs that are lazy (don't load initial state)
   readonly lazySources = new Set<string>()
   private readonly activeDemands = new Map<
@@ -164,7 +165,7 @@ export class CollectionConfigBuilder<
   private syncRunGeneration = 0
   private windowOperationGeneration = 0
   // Map of lexical source IDs to optimizable ORDER BY state
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
+  optimizableOrderByCollections = createSourceRecord<OrderByOptimizationInfo>()
 
   constructor(
     private readonly config: LiveQueryCollectionConfig<TContext, TResult>,
@@ -795,8 +796,8 @@ export class CollectionConfigBuilder<
     this.pendingOrderedLoads.clear()
     this.orderedLoadFailed = false
     this.windowFailed = false
-    this.optimizableOrderByCollections = {}
-    this.lazySourcesCallbacks = {}
+    this.optimizableOrderByCollections = createSourceRecord()
+    this.lazySourcesCallbacks = createSourceRecord()
 
     // Clear subscription references to prevent memory leaks
     // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
@@ -810,12 +811,11 @@ export class CollectionConfigBuilder<
    */
   private compileBasePipeline() {
     this.graphCache = new D2()
-    this.inputsCache = Object.fromEntries(
-      this.collectionSources.map((source) => [
-        source.sourceId,
-        this.graphCache!.newInput<any>(),
-      ]),
-    )
+    const inputs = createSourceRecord<RootStreamBuilder<unknown>>()
+    for (const source of this.collectionSources) {
+      inputs[source.sourceId] = this.graphCache.newInput<any>()
+    }
+    this.inputsCache = inputs
 
     const compilation = compileQuery(
       this.query,

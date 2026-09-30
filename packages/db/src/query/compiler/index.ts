@@ -43,6 +43,7 @@ import {
   PropRef,
   Value as ValClass,
   collectCollectionSources,
+  createSourceRecord,
   getFromSources,
   getWhereExpression,
   isExpressionLike,
@@ -401,7 +402,7 @@ export function compileQuery(
   mapNestedQueries(query, rawQuery, queryMapping)
 
   // Create a copy of the inputs map to avoid modifying the original
-  const allInputs = { ...inputs }
+  const allInputs = Object.assign(createSourceRecord<KeyedStream>(), inputs)
   const rawSources = collectCollectionSources(rawQuery)
   bindSourceInputs(rawSources, allInputs)
 
