@@ -1087,8 +1087,18 @@ export function compileQuery(
   // track visibility by row key, so an insert-before-delete replacement with
   // the same key would otherwise keep the old value and hide route or order
   // changes. Joined contributors may differ in unselected namespaces; only
-  // the public value and its route/order inputs must be congruent.
-  if (!selectHasAggregates) {
+  // the public value and its route/order inputs must be congruent. A query
+  // over one Collection with none of these operators has one contribution per
+  // key, so it keeps its original pipeline.
+  const needsCanonicalRows =
+    parentKeyStream !== undefined ||
+    query.from.type !== `collectionRef` ||
+    (query.join?.length ?? 0) > 0 ||
+    query.groupBy !== undefined ||
+    query.distinct === true ||
+    (query.orderBy?.length ?? 0) > 0 ||
+    includesResults.length > 0
+  if (!selectHasAggregates && needsCanonicalRows) {
     pipeline = canonicalizeSelectedRows(
       pipeline,
       query,

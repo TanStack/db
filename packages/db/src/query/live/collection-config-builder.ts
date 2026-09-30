@@ -843,7 +843,9 @@ export class CollectionConfigBuilder<
     )
     this.pipelineCache = materialized.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
-    this.bucketFacadesCache = materialized.facades
+    this.bucketFacadesCache = materialized.resolvesPublicValues
+      ? materialized.facades
+      : undefined
 
     const missingSources = this.collectionSources
       .map((source) => source.sourceId)
@@ -888,20 +890,23 @@ export class CollectionConfigBuilder<
       }),
     )
 
-    const bucketFacades = new BucketFacadeAdapter(
-      this.id,
-      this.bucketFacadesCache ?? [],
-      (count) => {
-        syncState.messagesCount += count
-      },
-    )
-    syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
+    // A query whose pipeline was not materialized publishes its rows directly
+    // and pays for no facade state.
+    const facadeCompilations = this.bucketFacadesCache
+    const bucketFacades = facadeCompilations
+      ? new BucketFacadeAdapter(this.id, facadeCompilations, (count) => {
+          syncState.messagesCount += count
+        })
+      : undefined
+    if (bucketFacades) {
+      syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
+    }
 
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
       const hasParentChanges = pendingChanges.size > 0
-      const hasChildChanges = bucketFacades.hasPendingChanges()
+      const hasChildChanges = bucketFacades?.hasPendingChanges() ?? false
 
       if (!hasParentChanges && !hasChildChanges) {
         return
@@ -928,28 +933,30 @@ export class CollectionConfigBuilder<
         | ReturnType<Collection[`_deferPublication`]>
         | undefined
       try {
-        facadePublication = bucketFacades.flush()
+        facadePublication = bucketFacades?.flush()
         rootPublication = hasParentChanges
           ? config.collection._deferPublication()
           : undefined
-        const changesToApply: Map<unknown, Changes<TResult>> = new Map(
-          [...pendingChanges].map(([key, changes]) => {
-            const resolved: Changes<TResult> = {
-              ...changes,
-              value: bucketFacades.resolve(changes.value),
-            }
-            if (changes.previousValue !== undefined) {
-              resolved.previousValue = bucketFacades.resolve(
-                changes.previousValue,
-              )
-            }
-            return [key, resolved]
-          }),
-        )
+        const changesToApply: Map<unknown, Changes<TResult>> = bucketFacades
+          ? new Map(
+              [...pendingChanges].map(([key, changes]) => {
+                const resolved: Changes<TResult> = {
+                  ...changes,
+                  value: bucketFacades.resolve(changes.value),
+                }
+                if (changes.previousValue !== undefined) {
+                  resolved.previousValue = bucketFacades.resolve(
+                    changes.previousValue,
+                  )
+                }
+                return [key, resolved]
+              }),
+            )
+          : pendingChanges
         // New facades are not reachable until their root row is installed, so
         // make them ready first. A facade failure then leaves the root intact,
         // and the root commit is the final state change before publication.
-        facadePublication.prepare()
+        facadePublication?.prepare()
         if (hasParentChanges) {
           begin()
           let lookup: ((key: string | number) => boolean) | undefined
@@ -975,7 +982,7 @@ export class CollectionConfigBuilder<
       let publicationError: unknown
       for (const publish of [
         rootPublication?.publish,
-        facadePublication.publish,
+        facadePublication?.publish,
       ]) {
         if (!publish) continue
         try {
