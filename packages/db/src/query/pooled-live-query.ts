@@ -40,8 +40,6 @@ interface PartitionGroup {
   listeners: Set<Listener>
   revision: number
   layoutRevision: number
-  // Rows as entries, rebuilt after a change.
-  entries: Array<[string | number, Row]> | undefined
 }
 
 // Matches the Collection lifecycle's floor for a never-subscribed Collection.
@@ -119,14 +117,12 @@ class Partition {
         listeners: new Set(),
         revision: 0,
         layoutRevision: 0,
-        entries: undefined,
       }
       this.groups.set(key, group)
     }
     return group
   }
 
-  /** Start the shared source subscription; release it when unused. */
   /**
    * Keep the shared source subscription open. Each view brings its query's
    * `gcTime`; the partition keeps the longest, so it never releases before
@@ -159,11 +155,6 @@ class Partition {
     this.scheduleRelease()
   }
 
-  listen(group: PartitionGroup, listener: Listener): () => void {
-    this.addListener(group, listener)
-    return () => this.removeListener(group, listener)
-  }
-
   addListener(group: PartitionGroup, listener: Listener): void {
     this.retain()
     this.hadListener = true
@@ -179,14 +170,18 @@ class Partition {
 
   private terminate(): void {
     this.terminated = true
-    if (this.releaseTimer !== undefined) clearTimeout(this.releaseTimer)
+    clearTimeout(this.releaseTimer)
+    this.release()
+  }
+
+  private release(): void {
     this.subscription?.unsubscribe()
     this.subscription = undefined
     this.onEmpty()
   }
 
   private scheduleRelease(): void {
-    if (this.releaseTimer !== undefined) clearTimeout(this.releaseTimer)
+    clearTimeout(this.releaseTimer)
     this.releaseTimer = undefined
     if (this.listenerCount > 0 || !Number.isFinite(this.gcTime)) return
     // Like a Collection that synced before anything subscribed, a view built
@@ -197,8 +192,6 @@ class Partition {
     this.releaseTimer = setTimeout(() => {
       this.releaseTimer = undefined
       if (this.listenerCount > 0) return
-      this.subscription?.unsubscribe()
-      this.subscription = undefined
       this.stopStatusEvents?.()
       this.stopStatusEvents = undefined
       // Views outlive a release and may subscribe again, so they keep their
@@ -207,9 +200,8 @@ class Partition {
         group.rows.clear()
         group.revision++
         group.layoutRevision++
-        group.entries = undefined
       }
-      this.onEmpty()
+      this.release()
     }, delay)
   }
 
@@ -263,7 +255,6 @@ class Partition {
     }
     for (const [group, groupChanges] of touched) {
       group.revision++
-      group.entries = undefined
       for (const listener of [...group.listeners]) listener(groupChanges)
     }
   }
@@ -398,15 +389,15 @@ class PooledLiveQuery {
     return this.group.rows
   }
 
-  entries(): Array<[string | number, Row]> {
-    return (this.group.entries ??= [...this.group.rows.entries()])
+  entries(): IterableIterator<[string | number, Row]> {
+    return this.group.rows.entries()
   }
 
   subscribeChanges(
     callback: Listener,
     options: { includeInitialState?: boolean } = {},
   ): { unsubscribe: () => void } {
-    const unsubscribe = this.partition.listen(this.group, callback)
+    this.partition.addListener(this.group, callback)
     if (options.includeInitialState) {
       callback(
         [...this.group.rows].map(([key, value]) => ({
@@ -416,7 +407,9 @@ class PooledLiveQuery {
         })),
       )
     }
-    return { unsubscribe }
+    return {
+      unsubscribe: () => this.partition.removeListener(this.group, callback),
+    }
   }
 
   on(...args: Parameters<CollectionImpl[`on`]>): () => void {
@@ -591,7 +584,7 @@ class PooledWholesaleObserver implements LiveQueryObserver<
 
   dehydrate(): DehydratedLiveQueryResult<Row, string | number> {
     return {
-      rows: this.view.entries().map(([key, value]) => ({ key, value })),
+      rows: Array.from(this.view.entries(), ([key, value]) => ({ key, value })),
     }
   }
 
